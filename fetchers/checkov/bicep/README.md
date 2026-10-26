@@ -53,7 +53,15 @@ not exist with `bad_config`.
 See `fetcher.yaml`.
 Skip lists merge with `../_shared/skip-*.default.txt`; set `use_default_skip_checks: false`
 to drop the shipped check defaults. The effective lists are recorded in
-`metadata.skip_checks` and `metadata.skip_resources`.
+`metadata.skip_checks` and `metadata.skip_resources`. A `checks` allowlist is
+recorded in `metadata.checks`, which is empty when the scan was not restricted.
+
+`skip_paths` entries are Python regular expressions, not globs. checkov searches
+each file's path for every entry, so `legacy` skips any path containing `legacy`;
+escape `.`, `*`, `?`, `+`, `(`, `)`, `[` and `]` with a backslash to match them
+literally (`legacy \(old\)`). An entry that is not a valid regular expression,
+such as `*.json` (write `\.json$`), fails the run with `bad_config` before
+anything is fetched. The check runs `python3`.
 
 `skip_resources` entries are globs over the whole resource name, e.g.
 `Microsoft.Storage/storageAccounts.dev*`. A failed check on a matching resource is

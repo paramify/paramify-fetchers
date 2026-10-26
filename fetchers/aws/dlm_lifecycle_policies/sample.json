@@ -1,0 +1,145 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_dlm_lifecycle_policies",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 1,
+      "fields": {
+        "PolicyId": 1,
+        "State": 1,
+        "PolicyType": 1,
+        "Description": 1,
+        "Tags": 1,
+        "TargetTags": 1,
+        "ResourceTypes": 1,
+        "Schedules": 1,
+        "PolicyDetails": 1
+      }
+    },
+    {
+      "path": "results[].TargetTags[]",
+      "records": 1,
+      "fields": {
+        "Key": 1,
+        "Value": 1
+      }
+    },
+    {
+      "path": "results[].Schedules[]",
+      "records": 1,
+      "fields": {
+        "Name": 1,
+        "CopyTags": 1,
+        "CreateRule": 1,
+        "RetainRule": 1
+      }
+    },
+    {
+      "path": "results[].PolicyDetails.TargetTags[]",
+      "records": 1,
+      "fields": {
+        "Key": 1,
+        "Value": 1
+      }
+    },
+    {
+      "path": "results[].PolicyDetails.Schedules[]",
+      "records": 1,
+      "fields": {
+        "Name": 1,
+        "CopyTags": 1,
+        "CreateRule": 1,
+        "RetainRule": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:38Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "PolicyId": "policy-09e8830392f052f58",
+        "State": "ENABLED",
+        "PolicyType": "EBS_SNAPSHOT_MANAGEMENT",
+        "Description": "pft daily EBS snapshots",
+        "Tags": {
+          "Project": "example-example-profile",
+          "ManagedBy": "terraform"
+        },
+        "TargetTags": [
+          {
+            "Key": "Backup",
+            "Value": "dlm"
+          }
+        ],
+        "ResourceTypes": [
+          "VOLUME"
+        ],
+        "Schedules": [
+          {
+            "Name": "daily",
+            "CopyTags": true,
+            "CreateRule": {
+              "Location": "CLOUD",
+              "Interval": 24,
+              "IntervalUnit": "HOURS",
+              "Times": [
+                "09:00"
+              ],
+              "Scripts": []
+            },
+            "RetainRule": {
+              "Count": 1,
+              "Interval": 0
+            }
+          }
+        ],
+        "PolicyDetails": {
+          "PolicyType": "EBS_SNAPSHOT_MANAGEMENT",
+          "ResourceTypes": [
+            "VOLUME"
+          ],
+          "ResourceLocations": [
+            "CLOUD"
+          ],
+          "TargetTags": [
+            {
+              "Key": "Backup",
+              "Value": "dlm"
+            }
+          ],
+          "Schedules": [
+            {
+              "Name": "daily",
+              "CopyTags": true,
+              "CreateRule": {
+                "Location": "CLOUD",
+                "Interval": 24,
+                "IntervalUnit": "HOURS",
+                "Times": [
+                  "09:00"
+                ],
+                "Scripts": []
+              },
+              "RetainRule": {
+                "Count": 1,
+                "Interval": 0
+              }
+            }
+          ],
+          "PolicyLanguage": "STANDARD"
+        }
+      }
+    ]
+  }
+}

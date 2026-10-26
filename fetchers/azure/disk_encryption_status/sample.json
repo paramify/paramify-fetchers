@@ -1,0 +1,96 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_disk_encryption_status",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.disks[]",
+      "records": 3,
+      "fields": {
+        "attached": 3,
+        "azure_disk_encryption_enabled": 3,
+        "customer_managed_key": 3,
+        "disk_encryption_set_id": 1,
+        "disk_size_gb": 3,
+        "disk_state": 3,
+        "double_encryption": 3,
+        "encryption_settings": 0,
+        "encryption_settings_version": 0,
+        "encryption_type": 3,
+        "id": 3,
+        "location": 3,
+        "name": 3,
+        "network_access_policy": 3,
+        "network_access_restricted": 3,
+        "os_type": 1,
+        "public_network_access": 3,
+        "resource_group": 3,
+        "sku_name": 3,
+        "vms_attached": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:09:29Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "disks": [
+        {
+          "attached": true,
+          "azure_disk_encryption_enabled": false,
+          "customer_managed_key": false,
+          "disk_encryption_set_id": null,
+          "disk_size_gb": 30,
+          "disk_state": "Attached",
+          "double_encryption": false,
+          "encryption_settings": [],
+          "encryption_settings_version": null,
+          "encryption_type": "EncryptionAtRestWithPlatformKey",
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/RG-example-example-profile/providers/Microsoft.Compute/disks/vm-pf-test_OsDisk_1_c6a6482d3e8d4546be93525dafa96079",
+          "location": "centralus",
+          "name": "vm-pf-test_OsDisk_1_c6a6482d3e8d4546be93525dafa96079",
+          "network_access_policy": "AllowAll",
+          "network_access_restricted": false,
+          "os_type": "Linux",
+          "public_network_access": "Enabled",
+          "resource_group": "RG-example-example-profile",
+          "sku_name": "Standard_LRS",
+          "vms_attached": [
+            "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Compute/virtualMachines/vm-pf-test"
+          ]
+        }
+      ],
+      "provider_registration_status": "registered"
+    },
+    "summary": {
+      "attached_cmk_percentage": 0,
+      "attached_customer_managed_key_disks": 0,
+      "attached_platform_managed_key_disks": 1,
+      "attached_total_disks": 1,
+      "azure_disk_encryption_disks": 0,
+      "cmk_percentage": 33,
+      "customer_managed_key_disks": 1,
+      "data_disks": 2,
+      "disk_encryption_set_disks": 1,
+      "double_encryption_disks": 0,
+      "network_access_restricted_disks": 0,
+      "os_disks": 1,
+      "platform_managed_key_disks": 2,
+      "provider_registration_status": "registered",
+      "total_disks": 3,
+      "unattached_cmk_percentage": 50,
+      "unattached_customer_managed_key_disks": 1,
+      "unattached_platform_managed_key_disks": 1,
+      "unattached_total_disks": 2
+    }
+  }
+}

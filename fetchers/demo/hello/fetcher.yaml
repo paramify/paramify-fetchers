@@ -20,5 +20,5 @@ evidence_set:
   reference_id: EVD-DEMO-HELLO
   name: Demo — Synthetic MFA Policy
   instructions: >
-    Script: fetcher.py. Generates a fixed synthetic payload; requires no
+    Script: demo/hello/fetcher.py. Generates a fixed synthetic payload; requires no
     credentials or network access. For trying the pipeline only.

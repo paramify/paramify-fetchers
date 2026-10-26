@@ -53,7 +53,7 @@ evidence_set:
   reference_id: EVD-AZURE-RBAC-ASSIGNMENTS
   name: Azure RBAC Role Assignments
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-authorization
+    Script: azure/rbac_role_assignments/fetcher.py. Azure SDK calls (azure-mgmt-authorization
     AuthorizationManagementClient):
     role_definitions.list(scope="/subscriptions/{id}"),
     role_assignments.list_for_subscription(filter="atScope()") for the

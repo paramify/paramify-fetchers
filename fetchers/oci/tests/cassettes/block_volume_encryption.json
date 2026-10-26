@@ -1,0 +1,428 @@
+{
+ "interactions": [
+  {
+   "key": "GET identity/20160918/compartments?accessLevel=ACCESSIBLE&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy&compartmentIdInSubtree=true&lifecycleState=ACTIVE",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"name\": \"fetcher-test\", \"description\": \"Scratch compartment for Paramify fetcher verification\", \"timeCreated\": \"2026-09-10T19:08:22.162Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-10T19:08:22.039Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"name\": \"fetcher-test-apps\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:42.963Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:42.895Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua\", \"name\": \"fetcher-test-web\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:54.020Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:53.946Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a\", \"name\": \"fetcher-test-zone\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-15T20:08:18.463Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:18.390Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}]"
+  },
+  {
+   "key": "GET identity/20160918/availabilityDomains?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.availabilitydomain.oc1..aaaaaaaaupx7ga46w4xbb3fnkoh7rtyumacyb3ek6bw7bt3qff3mgt3mbrlq\", \"name\": \"qQyy:PHX-AD-1\"}, {\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.availabilitydomain.oc1..aaaaaaaac7uydq54rcymamzauv5pd23qk2g2vqlrfu5jd3y6i6qxpvvzkf7a\", \"name\": \"qQyy:PHX-AD-2\"}, {\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.availabilitydomain.oc1..aaaaaaaakemzo4ywaynz573sk4jpvwuqi7vmcuxajxfv4jjj2pthez3j2hbq\", \"name\": \"qQyy:PHX-AD-3\"}]"
+  },
+  {
+   "key": "GET iaas/20160918/volumeAttachments?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumeBackups?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeBackups?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumes?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumeAttachments?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"attachmentType\": \"paravirtualized\", \"availabilityDomain\": \"qQyy:PHX-AD-1\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"device\": null, \"displayName\": \"fetcher-test-att-apps\", \"id\": \"ocid1.volumeattachment.oc1.phx.anyhqljtjt3ioqqczys3bvcqtdyktv6yfgoj62tiam6pxvymynl56rzqdxnq\", \"instanceId\": \"ocid1.instance.oc1.phx.anyhqljtjt3ioqqcnrsduljztftmb7j6qi5bxhqb7n6jgrmr7pnpgqurx7mq\", \"isReadOnly\": false, \"isShareable\": false, \"lifecycleState\": \"ATTACHED\", \"timeCreated\": \"2026-09-22T16:44:21.762Z\", \"volumeId\": \"ocid1.volume.oc1.phx.abyhqljthstajodxh43txvz5weeg2yn4cptvnvpr4yimmwwz7sm55hgi5o4a\", \"isPvEncryptionInTransitEnabled\": false, \"isEncryptionInTransitEnabled\": null, \"isMultipath\": null, \"iscsiLoginState\": null, \"isVolumeCreatedDuringLaunch\": false}]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"availabilityDomain\": \"qQyy:PHX-AD-1\", \"bootVolumeId\": \"ocid1.bootvolume.oc1.phx.abyhqljttyell3xsat3zf7l2snhcsmjwijzlnv2tc6wje5jqs2pmz2mwukeq\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"displayName\": \"Remote boot attachment for instance\", \"id\": \"ocid1.instance.oc1.phx.anyhqljtjt3ioqqcnrsduljztftmb7j6qi5bxhqb7n6jgrmr7pnpgqurx7mq\", \"instanceId\": \"ocid1.instance.oc1.phx.anyhqljtjt3ioqqcnrsduljztftmb7j6qi5bxhqb7n6jgrmr7pnpgqurx7mq\", \"lifecycleState\": \"ATTACHED\", \"timeCreated\": \"2026-09-15T20:14:27.646Z\", \"timeUpdated\": \"2026-09-15T20:14:51.070Z\", \"attachmentType\": \"PARAVIRTUALIZED\", \"isPvEncryptionInTransitEnabled\": false, \"isEncryptionInTransitEnabled\": null, \"encryptionInTransitType\": \"NONE\"}]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumeBackups?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeBackups?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumes?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"availabilityDomain\": \"qQyy:PHX-AD-1\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:06:03.942Z\"}}, \"displayName\": \"fetcher-test-vol-oracle-key\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"systemTags\": {\"orcl-cloud\": {\"free-tier-retained\": \"true\"}}, \"id\": \"ocid1.volume.oc1.phx.abyhqljtxz5wc66srkkxycihbh4oraazpr2vhohz62kbwbt4zoxrt5bsazmq\", \"isHydrated\": true, \"kmsKeyId\": null, \"kmsKeyVersionId\": null, \"lifecycleState\": \"AVAILABLE\", \"vpusPerGB\": 10, \"ioAlignmentSizeInBytes\": null, \"clusterPlacementGroupId\": null, \"sizeInGBs\": 50, \"sizeInMBs\": 51200, \"sourceDetails\": null, \"timeCreated\": \"2026-09-15T20:06:03.946Z\", \"volumeGroupId\": null, \"isAutoTuneEnabled\": false, \"autoTunedVpusPerGB\": null, \"blockVolumeReplicas\": null, \"volumeType\": \"FULL\", \"autotunePolicies\": [], \"isReservationsEnabled\": false, \"timeLastBackup\": null, \"parentResourceDetails\": null}, {\"availabilityDomain\": \"qQyy:PHX-AD-1\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:13:31.909Z\"}}, \"displayName\": \"fetcher-test-vol-cmk\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"systemTags\": {\"orcl-cloud\": {\"free-tier-retained\": \"true\"}}, \"id\": \"ocid1.volume.oc1.phx.abyhqljtj3vhus24bqq7qa6gxbpgs2jzl75oexhbimumtwp4dp7a4lvpzwxa\", \"isHydrated\": true, \"kmsKeyId\": \"ocid1.key.oc1.phx.efvktjccaac6k.abyhqljs3v6vwdzufhqatt7yhuyqtdfcc7q4brxydgkql7evvxbsofgpl3ba\", \"kmsKeyVersionId\": null, \"lifecycleState\": \"AVAILABLE\", \"vpusPerGB\": 10, \"ioAlignmentSizeInBytes\": null, \"clusterPlacementGroupId\": null, \"sizeInGBs\": 50, \"sizeInMBs\": 51200, \"sourceDetails\": null, \"timeCreated\": \"2026-09-15T20:13:32.001Z\", \"volumeGroupId\": null, \"isAutoTuneEnabled\": false, \"autoTunedVpusPerGB\": null, \"blockVolumeReplicas\": null, \"volumeType\": \"FULL\", \"autotunePolicies\": [], \"isReservationsEnabled\": false, \"timeLastBackup\": null, \"parentResourceDetails\": null}]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"availabilityDomain\": \"qQyy:PHX-AD-1\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:14:23.783Z\"}}, \"systemTags\": {\"orcl-cloud\": {\"free-tier-retained\": \"true\"}}, \"displayName\": \"fetcher-test-instance (Boot Volume)\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"id\": \"ocid1.bootvolume.oc1.phx.abyhqljttyell3xsat3zf7l2snhcsmjwijzlnv2tc6wje5jqs2pmz2mwukeq\", \"imageId\": \"ocid1.image.oc1.phx.aaaaaaaadiyqtesnxnwzlh2eyzqbpya6erem5i66vupxv52s4pvvkgl3bryq\", \"isHydrated\": true, \"clusterPlacementGroupId\": null, \"vpusPerGB\": 10, \"lifecycleState\": \"AVAILABLE\", \"sizeInGBs\": 47, \"sizeInMBs\": 47719, \"sourceDetails\": null, \"timeCreated\": \"2026-09-15T20:14:27.525Z\", \"volumeGroupId\": null, \"kmsKeyId\": null, \"kmsKeyVersionId\": null, \"isAutoTuneEnabled\": false, \"autoTunedVpusPerGB\": null, \"bootVolumeReplicas\": null, \"autotunePolicies\": [], \"volumeType\": \"FULL\", \"timeLastBackup\": null, \"parentResourceDetails\": null}]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumeAttachments?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumeBackups?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeBackups?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumes?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"availabilityDomain\": \"qQyy:PHX-AD-1\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-22T16:44:04.512Z\"}}, \"displayName\": \"fetcher-test-vol-apps\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"systemTags\": {\"orcl-cloud\": {\"free-tier-retained\": \"true\"}}, \"id\": \"ocid1.volume.oc1.phx.abyhqljthstajodxh43txvz5weeg2yn4cptvnvpr4yimmwwz7sm55hgi5o4a\", \"isHydrated\": true, \"kmsKeyId\": null, \"kmsKeyVersionId\": null, \"lifecycleState\": \"AVAILABLE\", \"vpusPerGB\": 10, \"ioAlignmentSizeInBytes\": null, \"clusterPlacementGroupId\": null, \"sizeInGBs\": 50, \"sizeInMBs\": 51200, \"sourceDetails\": null, \"timeCreated\": \"2026-09-22T16:44:04.517Z\", \"volumeGroupId\": null, \"isAutoTuneEnabled\": false, \"autoTunedVpusPerGB\": null, \"blockVolumeReplicas\": null, \"volumeType\": \"FULL\", \"autotunePolicies\": [], \"isReservationsEnabled\": false, \"timeLastBackup\": null, \"parentResourceDetails\": null}]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumeAttachments?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumeBackups?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeBackups?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumes?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumeAttachments?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeAttachments?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumeBackups?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumeBackups?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/volumes?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET iaas/20160918/bootVolumes?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET identity/20160918/tenancies/ocid1.tenancy.oc1..aaaaaaaatenancy/regionSubscriptions",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"regionKey\": \"PHX\", \"regionName\": \"us-phoenix-1\", \"status\": \"READY\", \"isHomeRegion\": true}]"
+  }
+ ]
+}

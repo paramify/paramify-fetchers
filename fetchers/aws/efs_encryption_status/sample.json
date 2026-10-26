@@ -1,0 +1,42 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_efs_encryption_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.file_systems[]",
+      "records": 2,
+      "fields": {
+        "file_system_id": 2,
+        "encrypted": 2,
+        "kms_key_id": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:53Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "file_systems": [
+        {
+          "file_system_id": "fs-0a3f090d638eabc5d",
+          "encrypted": true,
+          "kms_key_id": "arn:aws:kms:us-east-2:111111111111:key/00000000-0000-4000-8000-222222222222"
+        }
+      ],
+      "summary": {
+        "total_file_systems": 2,
+        "encrypted_file_systems": 1,
+        "encryption_percentage": 50
+      }
+    }
+  }
+}

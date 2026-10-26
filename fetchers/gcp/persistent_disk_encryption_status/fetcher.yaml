@@ -47,5 +47,5 @@ evidence_set:
   reference_id: EVD-GCP-PD-ENC
   name: Persistent Disk Encryption
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls: compute
+    Script: gcp/persistent_disk_encryption_status/fetcher.py. Google Cloud client library calls: compute
     disks.aggregatedList(), snapshots.list(). One evidence file per project.

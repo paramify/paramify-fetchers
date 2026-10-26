@@ -27,4 +27,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-LOG-INDEXES
   name: Datadog Log Indexes
-  instructions: 'Calls GET /api/v1/logs/config/indexes. Extracts index name, retention days, and filter query. Writes JSON index config list.'
+  instructions: 'Script: datadog/log_indexes/fetcher.py. Calls GET /api/v1/logs/config/indexes. Extracts index name, retention days, and filter query. Writes JSON index config list.'

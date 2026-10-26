@@ -1,0 +1,69 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_apigateway_tls_enforcement",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.rest_apis[]",
+      "records": 1,
+      "fields": {
+        "id": 1,
+        "name": 1,
+        "endpoint_types": 1,
+        "public_endpoint": 1,
+        "disable_execute_api_endpoint": 1,
+        "stages": 1
+      }
+    },
+    {
+      "path": "results.rest_apis[].stages[]",
+      "records": 1,
+      "fields": {
+        "name": 1,
+        "client_certificate": 1,
+        "waf_acl_arn": 0,
+        "tracing_enabled": 1,
+        "cache_enabled": 1,
+        "logging_enabled": 1,
+        "cache_data_encrypted": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:10:49Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "rest_apis": [
+        {
+          "id": "72449usxm5",
+          "name": "pft-api",
+          "endpoint_types": [
+            "REGIONAL"
+          ],
+          "public_endpoint": true,
+          "disable_execute_api_endpoint": false,
+          "stages": [
+            {
+              "name": "test",
+              "client_certificate": false,
+              "waf_acl_arn": null,
+              "tracing_enabled": false,
+              "cache_enabled": false,
+              "logging_enabled": false,
+              "cache_data_encrypted": false
+            }
+          ]
+        }
+      ],
+      "custom_domain_names": []
+    }
+  }
+}
