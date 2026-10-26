@@ -1,0 +1,25 @@
+key: entra_access_reviews_cycles_current
+name: Entra Access Reviews Completed Within 35 Days
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every active recurring Entra ID access review series has completed at least one cycle, and none last
+  completed one more than 35 days ago (a monthly series plus a few days' slack), so the reviews are
+  current; every series and run was read. Substantiates that access reviews are current (KSI-IAM-ELP,
+  KSI-IAM-AAM, KSI-MLA-ALA). 35 days is a placeholder for the organization's review frequency. Fails
+  when no recurring series has completed a cycle. Does NOT prove one-time reviews, how many reviewers
+  answered, or that the cycle reviewed the right groups.
+
+# Threshold in the regex: max_days_since_last_completed_cycle 0-35; null (nothing completed) does not match.
+regex: '"partial_failure":\s*false[\s\S]*?"active_recurring_definitions_without_completed_cycle":\s*(?<active_recurring_definitions_without_completed_cycle>\[[^\]]*\]|null)[\s\S]*?"collection_complete":\s*true[\s\S]*?"max_days_since_last_completed_cycle":\s*(?<max_days_since_last_completed_cycle>[12]?\d|3[0-5])(?!\d)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS []
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # active_recurring_definitions_without_completed_cycle
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "[]" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-ACCESS-REVIEWS

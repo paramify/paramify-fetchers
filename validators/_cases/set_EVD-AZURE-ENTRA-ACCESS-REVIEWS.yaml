@@ -1,0 +1,10 @@
+# Set-level: every validator on the set, with azure_collection_succeeded.
+evidence_set: EVD-AZURE-ENTRA-ACCESS-REVIEWS
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ENTRA-ACCESS-REVIEWS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"access_reviews_available":true,"review_definitions":[{"active":true,"days_since_last_completed_cycle":12,"display_name":"App group monthly review","last_cycle":{"decisions":40,"denied_decisions_applied":5,"denied_decisions_not_applied":0},"monthly_auto_removal":true,"scope_type":"group_membership"}]},"summary":{"access_reviews_available":true,"active_definitions_auto_applying":2,"active_definitions_by_scope_type":{"access_package":0,"application":0,"entra_role":1,"group_membership":1,"other":0},"active_definitions_default_deny":2,"active_definitions_monthly_auto_removal":2,"active_definitions_recurring_at_least_monthly":2,"active_definitions_without_monthly_auto_removal":[],"active_recurring_definitions_without_completed_cycle":[],"active_review_definitions":2,"active_self_review_definitions":[],"all_active_definitions_monthly_auto_removal":true,"collection_complete":true,"last_cycle_decisions":40,"last_cycle_decisions_by_result":{"Approve":35,"Deny":5,"DontKnow":0,"NotReviewed":0},"last_cycle_denied_decisions_applied":5,"last_cycle_denied_decisions_not_applied":0,"max_days_since_last_completed_cycle":12,"monthly_auto_removal_percentage":100,"review_definitions":3}},"schema_version":"1.0"}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ENTRA-ACCESS-REVIEWS"},"exit_code":1,"status":"failed"},"payload":{"metadata":{"api_failures":[],"partial_failure":true},"results":{"access_reviews_available":null,"review_definitions":null},"summary":{"access_reviews_available":null,"collection_complete":false}},"schema_version":"1.0"}'

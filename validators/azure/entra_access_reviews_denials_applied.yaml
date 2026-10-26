@@ -1,0 +1,27 @@
+key: entra_access_reviews_denials_applied
+name: Entra Access Review Denials Applied
+type: AUTOMATED
+role: configuration
+statement: >-
+  In the latest completed cycle of every active Entra ID access review series, every Deny decision (a
+  reviewer's, or the default for an unanswered review) was applied, so the access was removed (or was
+  already gone), and every series, run and decision was read. Substantiates that access-review removal
+  decisions are applied and recorded (KSI-IAM-AAM, KSI-IAM-ELP, KSI-MLA-ALA). A cycle that has just
+  ended and is still applying fails until it finishes. With no Deny decision in the latest cycle it
+  passes; entra_access_reviews_monthly_auto_removal fails the set when no series is active. Does NOT
+  prove earlier cycles' denials, decisions of series that have ended, or that Approve decisions were
+  justified.
+
+# last_cycle_decisions must be numeric, which proves the decisions were read; the summary gives no figures unless every read succeeded.
+regex: '"partial_failure":\s*false[\s\S]*?"collection_complete":\s*true[\s\S]*?"last_cycle_decisions":\s*(?<last_cycle_decisions>\d+)[\s\S]*?"last_cycle_denied_decisions_not_applied":\s*(?<last_cycle_denied_decisions_not_applied>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # last_cycle_denied_decisions_not_applied
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-ACCESS-REVIEWS
