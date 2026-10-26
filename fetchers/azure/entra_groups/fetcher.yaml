@@ -48,9 +48,10 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 # Microsoft Graph permissions (application permission, admin consent):
 #   GroupMember.Read.All   — /groups with members and owners.
-#   User.Read.All          — the members' and owners' sign-in names, account state and
-#                            guest status; without it Graph returns users as an id
-#                            only and the guest and disabled-user figures read null.
+#   User.Read.All          — optional; the members' and owners' sign-in names, account
+#                            state and guest status. Without it Graph returns users as an
+#                            id only, and the guest, disabled-user and disabled-owner
+#                            figures read null; the run still exits 0.
 #   Member.Read.Hidden     — optional; members of groups with hidden membership. Without
 #                            it Graph returns them as an empty list, so they read unknown.
 #   Application.Read.All   — optional; the account state of owners that are apps or managed
@@ -69,7 +70,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_groups/fetcher.py
 
-    Access: Microsoft Graph GroupMember.Read.All and User.Read.All, or Directory.Read.All (the Directory Readers role covers it). Optional: Member.Read.Hidden; without it, the members of groups with hidden membership read unknown. Optional: Application.Read.All; without it, groups_with_only_disabled_owners reads null when any owner is an app or managed identity. Optional: Organization.Read.All; without it, no tenant name or domain is recorded.
+    Access: Microsoft Graph GroupMember.Read.All, or Directory.Read.All (the Directory Readers role covers it), which also covers every optional permission here but Member.Read.Hidden. Optional: User.Read.All; without it, users come back as an id only, so member_details_readable and owner_details_readable read false and the guest, disabled-user and disabled-owner figures read null. Optional: Member.Read.Hidden; without it, the members of groups with hidden membership read unknown. Optional: Application.Read.All; without it, groups_with_only_disabled_owners reads null when any owner is an app or managed identity. Optional: Organization.Read.All; without it, no tenant name or domain is recorded.
 
     Commands Executed:
     - Microsoft Graph GET /organization — the tenant's name and domain
