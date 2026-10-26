@@ -86,6 +86,7 @@ tenant-scoped.
 | `Application.Read.All` | `azure_entra_app_registrations`, `azure_entra_service_principals` |
 | `Policy.Read.All` | `azure_entra_conditional_access_policies`, `azure_entra_authentication_policy` |
 | `Directory.Read.All` | `azure_entra_authentication_policy` (group settings, subscribed SKUs), `azure_entra_mfa_status` (users, role members), `azure_entra_privileged_roles`, `azure_residual_resources` (principal lookup) |
+| `RoleManagement.Read.Directory` | `azure_entra_pim_assignments` (role definitions, eligible and active assignments, role management policies). The tenant needs Entra ID P2 or ID Governance; without it `pim_available` reads false and the run succeeds |
 | `AuditLog.Read.All` | `azure_entra_mfa_status` (sign-in activity and the registration report) |
 | `GroupMember.Read.All` | `azure_entra_groups` (groups, members and owners). `Directory.Read.All` covers it and the fetcher's optional permissions below, except `Member.Read.Hidden` |
 | `Directory.Read.All` (optional) | `azure_log_analytics_deletion_rights`: principal names; without it the grants are listed by id |
@@ -187,6 +188,7 @@ Identity and access:
 | `azure_entra_conditional_access_policies` | Conditional Access policies: state (on, report-only, off), included and excluded users, groups, roles and apps, conditions, grant and session controls |
 | `azure_entra_mfa_status` | Each user's enabled state, last sign-in and MFA capability, with coverage for admins, members and guests |
 | `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted and tenant-wide admin roles flagged |
+| `azure_entra_pim_assignments` | PIM for directory roles: who is eligible for each role, active assignments marked permanent, time-bound or activated, and each privileged role's activation rules (MFA or authentication context, justification, approval and approvers, maximum hours), with roles that allow permanent assignments flagged |
 | `azure_entra_groups` | Groups with their members and owners: kind, whether they can hold directory roles, and dynamic (paused flagged), assigned or synced membership, with groups that have no owner, only disabled owners, guests or disabled users flagged |
 | `azure_rbac_role_assignments` | Role assignments at the subscription and above, and separately below it, with Owner, Contributor, User Access Administrator and RBAC Administrator flagged |
 | `azure_rbac_custom_roles` | Custom role definitions with their full permission sets, flagged for wildcards and for permissions that allow privilege escalation |
