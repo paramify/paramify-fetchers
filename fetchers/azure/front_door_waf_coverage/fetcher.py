@@ -36,15 +36,20 @@ from frontdoor import (  # noqa: E402
     custom_domains,
     endpoints_with_routes,
     front_door_profiles,
+    in_scope_totals,
+    profile_scope,
     project_reference,
     route_hosts,
     route_serving,
     waf_policy_record,
     wire,
 )
+from scope_exclusions import ScopeExclusions, excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_front_door_waf_coverage")
 
+SCOPE_EXCLUSIONS_ENV = "AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS"
+EXCLUDED_KINDS = ("custom_domain", "endpoint", "route", "host_route")
 SCOPES = ("route", "domain", "profile")
 WAF_LOG_CATEGORY = "FrontDoorWebApplicationFirewallLog"
 ACCESS_LOG_CATEGORY = "FrontDoorAccessLog"
@@ -228,25 +233,47 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
     }
 
 
-def coverage_for_profile(collected: dict, waf_by_key: dict) -> dict:
+def coverage_for_profile(collected: dict, waf_by_key: dict, exclusions: ScopeExclusions | None = None) -> dict:
     profile, sps = collected["profile"], collected["security_policies"]
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions())
+    excluded_hosts, excluded_routes = scope["hosts"], scope["routes"]
     domains_by_key = {arm_key(d["id"]): d for d in collected["custom_domains"]}
-    host_routes, endpoints_without_routes, routed = [], [], set()
+    host_routes, endpoints_without_routes, routed, excluded = [], [], set(), list(scope["excluded"])
     for endpoint in collected["endpoints"]:
-        if not endpoint["routes"]:
+        if not endpoint["routes"] and arm_key(endpoint["id"]) not in excluded_hosts:
             endpoints_without_routes.append(
                 {"profile": profile["name"], "endpoint": endpoint["name"], "host_name": endpoint["host_name"]}
             )
         for route in endpoint["routes"]:
             routed |= {arm_key(d["id"]) for d in route["custom_domains"]}
             for host in route_hosts(endpoint, route, domains_by_key):
-                host_routes.append(host_route_record(profile, endpoint, route, host, sps, waf_by_key))
+                context = {"profile": profile["name"], "endpoint": endpoint["name"], "route": route["name"],
+                           "host_kind": host["kind"]}
+                pattern = excluded_hosts.get(arm_key(host["id"]))
+                if pattern:
+                    excluded.append(excluded_item("host_route", host["host_name"], pattern, **context))
+                elif arm_key(route["id"]) in excluded_routes:
+                    excluded.append(excluded_item("host_route", host["host_name"], None, reason="route_excluded", **context))
+                else:
+                    host_routes.append(host_route_record(profile, endpoint, route, host, sps, waf_by_key))
+    domains = [d for d in collected["custom_domains"] if arm_key(d["id"]) not in excluded_hosts]
     unrouted = [
         {"profile": profile["name"], "custom_domain": d["name"], "host_name": d["host_name"]}
-        for d in collected["custom_domains"]
+        for d in domains
         if arm_key(d["id"]) not in routed
     ]
-    return {"host_routes": host_routes, "endpoints_without_routes": endpoints_without_routes, "unrouted_custom_domains": unrouted}
+    return {
+        "host_routes": host_routes,
+        "endpoints_without_routes": endpoints_without_routes,
+        "unrouted_custom_domains": unrouted,
+        "excluded": excluded,
+        # An endpoint whose own host name is out of scope still counts while it carries an in-scope route.
+        "endpoint_count": sum(1 for e in collected["endpoints"] if arm_key(e["id"]) not in excluded_hosts
+                              or any(arm_key(r["id"]) not in excluded_routes for r in e["routes"])),
+        "route_count": sum(1 for e in collected["endpoints"] for r in e["routes"] if arm_key(r["id"]) not in excluded_routes),
+        "custom_domain_count": len(domains),
+        "in_scope": scope["in_scope"],
+    }
 
 
 def summarize(profiles, skipped_by_sku, host_routes, endpoints_without_routes, unrouted, security_policies) -> dict:
@@ -366,20 +393,24 @@ def main() -> int:
             ),
         )
 
-    profiles, host_routes, no_routes, unrouted, security_policies = [], [], [], [], []
+    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV, kinds=("route",))
+    exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
+    profiles, host_routes, no_routes, unrouted, security_policies, excluded, scopes = [], [], [], [], [], [], []
     for c in collected:
-        cov = coverage_for_profile(c, waf_by_key)
+        cov = coverage_for_profile(c, waf_by_key, exclusions)
+        scopes.append(cov["in_scope"])
         host_routes += cov["host_routes"]
         no_routes += cov["endpoints_without_routes"]
         unrouted += cov["unrouted_custom_domains"]
+        excluded += cov["excluded"]
         security_policies += [{**sp, "profile": c["profile"]["name"]} for sp in c["security_policies"]]
         profiles.append({
             **c["profile"],
             **profile_log_export(c["log_categories"], c["log_settings"]),
             "waf_in_use": any(h["serving"] and h["effective_scope"] != "none" for h in cov["host_routes"]),
-            "endpoint_count": len(c["endpoints"]),
-            "route_count": sum(len(e["routes"]) for e in c["endpoints"]),
-            "custom_domain_count": len(c["custom_domains"]),
+            "endpoint_count": cov["endpoint_count"],
+            "route_count": cov["route_count"],
+            "custom_domain_count": cov["custom_domain_count"],
             "security_policy_count": len(c["security_policies"]),
         })
 
@@ -394,12 +425,15 @@ def main() -> int:
             "security_policies": security_policies,
             "profiles": profiles,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(profiles, skipped_by_sku, host_routes, no_routes, unrouted, security_policies),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, EXCLUDED_KINDS, {**in_scope_totals(scopes), "host_routes": len(host_routes)}),
         },
     )
+    exclusions.warn_unmatched(logger)
     filename = f"azure_front_door_waf_coverage_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)
 

@@ -1,0 +1,144 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_vpc_network_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.networks[]",
+      "records": 2,
+      "fields": {
+        "auto_mode": 2,
+        "creation_timestamp": 2,
+        "custom_mode": 2,
+        "description": 1,
+        "firewall_policy_enforcement_order": 2,
+        "id": 2,
+        "is_default_network": 2,
+        "legacy": 2,
+        "legacy_ipv4_range": 0,
+        "mtu": 0,
+        "name": 2,
+        "peering_count": 2,
+        "peerings": 0,
+        "routing_mode": 2,
+        "subnet_count": 2,
+        "subnet_mode": 2,
+        "subnet_names": 2
+      }
+    },
+    {
+      "path": "results.subnets[]",
+      "records": 44,
+      "fields": {
+        "creation_timestamp": 44,
+        "flow_log_aggregation_interval": 1,
+        "flow_log_filter": 0,
+        "flow_log_filtered": 44,
+        "flow_log_metadata": 1,
+        "flow_log_metadata_field_count": 44,
+        "flow_log_sampling": 1,
+        "flow_logs_enabled": 44,
+        "id": 44,
+        "ip_cidr_range": 44,
+        "name": 44,
+        "network": 44,
+        "private_google_access": 44,
+        "purpose": 44,
+        "region": 44,
+        "role": 0,
+        "secondary_range_count": 44,
+        "stack_type": 44,
+        "state": 0
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:55:51Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "networks": [
+        {
+          "auto_mode": true,
+          "creation_timestamp": "2026-08-17T07:16:18.928-07:00",
+          "custom_mode": false,
+          "description": "Default network for the project",
+          "firewall_policy_enforcement_order": "AFTER_CLASSIC_FIREWALL",
+          "id": "0000000000000000009",
+          "is_default_network": true,
+          "legacy": false,
+          "legacy_ipv4_range": null,
+          "mtu": null,
+          "name": "default",
+          "peering_count": 0,
+          "peerings": [],
+          "routing_mode": "REGIONAL",
+          "subnet_count": 42,
+          "subnet_mode": "auto",
+          "subnet_names": [
+            "default",
+            "default",
+            "default"
+          ]
+        }
+      ],
+      "subnets": [
+        {
+          "creation_timestamp": "2026-08-17T07:18:51.877-07:00",
+          "flow_log_aggregation_interval": "INTERVAL_5_SEC",
+          "flow_log_filter": null,
+          "flow_log_filtered": false,
+          "flow_log_metadata": "INCLUDE_ALL_METADATA",
+          "flow_log_metadata_field_count": 0,
+          "flow_log_sampling": 0.5,
+          "flow_logs_enabled": true,
+          "id": "0000000000000000010",
+          "ip_cidr_range": "10.0.0.1/24",
+          "name": "example-subnet",
+          "network": "example-vpc",
+          "private_google_access": true,
+          "purpose": "PRIVATE",
+          "region": "us-central1",
+          "role": null,
+          "secondary_range_count": 1,
+          "stack_type": "IPV4_ONLY",
+          "state": null
+        }
+      ]
+    },
+    "summary": {
+      "auto_mode_networks": 1,
+      "compute_api_readable": true,
+      "custom_mode_networks": 1,
+      "custom_mode_percentage": 50,
+      "default_network_present": true,
+      "flow_log_aggregation_intervals": [
+        "INTERVAL_5_SEC"
+      ],
+      "flow_log_percentage": 2,
+      "legacy_networks": 0,
+      "lowest_flow_log_sampling": 0.5,
+      "networks_without_subnets": [],
+      "peered_networks": 0,
+      "private_google_access_percentage": 2,
+      "regions_with_subnets": [
+        "africa-south1",
+        "asia-east1",
+        "asia-east2"
+      ],
+      "subnets_with_filtered_flow_logs": 0,
+      "subnets_with_flow_logs": 1,
+      "subnets_with_private_google_access": 1,
+      "total_networks": 2,
+      "total_subnets": 44
+    }
+  }
+}

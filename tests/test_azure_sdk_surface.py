@@ -240,6 +240,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list_by_subscription_id"],
         "azure/activity_log_alerts",
     ),
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
+        "metrics",
+        ["list"],
+        "azure/front_door_origins — hourly origin health and request counts",
+    ),
     # --- network: PR #57 widens this to <33 ---------------------------------
     (
         "azure.mgmt.network",
@@ -584,6 +591,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure/dns_configuration",
     ),
     (
+        "azure.mgmt.dns",
+        "DnsManagementClient",
+        "record_sets",
+        ["list_all_by_dns_zone"],
+        "azure/dns_configuration — every public record set with its targets and alias",
+    ),
+    (
         "azure.mgmt.privatedns",
         "PrivateDnsManagementClient",
         None,
@@ -673,7 +687,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "NetworkManagementClient",
         "private_dns_zone_groups",
         ["list"],
-        "azure/private_endpoint_configuration — which private DNS zones publish each endpoint",
+        "azure/private_endpoint_configuration — which private DNS zones publish each endpoint; "
+        "azure/private_dns_zone_configuration — the zone-group proof that backs a record",
     ),
     # --- private DNS ---------------------------------------------------------
     (
@@ -1141,6 +1156,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
     (
         "azure.mgmt.web",
         "WebSiteManagementClient",
+        "web_apps",
+        ["get_configuration", "get_configuration_slot"],
+        "azure/front_door_origins — access restrictions on each App Service origin, slots included",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
         "app_service_plans",
         ["list"],
         "azure/app_service_plans",
@@ -1212,8 +1234,9 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure.mgmt.cdn",
         "CdnManagementClient",
         "profiles",
-        ["list"],
-        "azure/front_door_waf_coverage",
+        ["list", "get"],
+        "azure/front_door_waf_coverage, azure/front_door_origins — get reads the frontDoorId each App Service "
+        "origin's X-Azure-FDID rule must name",
     ),
     (
         "azure.mgmt.cdn",
@@ -1234,7 +1257,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "CdnManagementClient",
         "afd_custom_domains",
         ["list_by_profile"],
-        "azure/front_door_waf_coverage",
+        "azure/front_door_waf_coverage, azure/front_door_tls, azure/front_door_origins (scope exclusions)",
     ),
     (
         "azure.mgmt.cdn",
@@ -1707,6 +1730,79 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/dns_configuration",
     ),
     (
+        "azure.mgmt.dns.models",
+        "RecordSet",
+        ["ttl", "fqdn", "target_resource", "a_records", "aaaa_records", "cname_record", "mx_records",
+         "ns_records", "ptr_records", "srv_records", "txt_records", "caa_records", "soa_record"],
+        "azure/dns_configuration — a renamed record list reads that type's records as empty",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "SubResource",
+        ["id"],
+        "azure/dns_configuration — an alias record's target",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "ARecord",
+        ["ipv4_address"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "AaaaRecord",
+        ["ipv6_address"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "CnameRecord",
+        ["cname"],
+        "azure/dns_configuration — a renamed cname reads every CNAME as empty and its failover method is lost",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "MxRecord",
+        ["preference", "exchange"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "NsRecord",
+        ["nsdname"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "PtrRecord",
+        ["ptrdname"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "TxtRecord",
+        ["value"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "SrvRecord",
+        ["priority", "weight", "port", "target"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "CaaRecord",
+        ["flags", "tag", "value"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "SoaRecord",
+        ["host", "email"],
+        "azure/dns_configuration",
+    ),
+    (
         "azure.mgmt.privatedns.models",
         "VirtualNetworkLinkProperties",
         ["virtual_network", "registration_enabled", "resolution_policy"],
@@ -1788,6 +1884,20 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "IpSecurityRestriction",
         ["ip_address", "action", "priority", "vnet_subnet_resource_id", "headers"],
         "azure/app_service_configuration — access-restriction rule evaluation",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
+        ["public_network_access", "ip_security_restrictions", "ip_security_restrictions_default_action",
+         "scm_ip_security_restrictions", "scm_ip_security_restrictions_default_action",
+         "scm_ip_security_restrictions_use_main"],
+        "azure/front_door_origins — a renamed field reads as 'no rules', so a locked origin reads as open",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "IpSecurityRestriction",
+        ["name", "tag", "ip_address", "headers"],
+        "azure/front_door_origins — the AzureFrontDoor.Backend service tag and its X-Azure-FDID header",
     ),
     (
         "azure.mgmt.web.models",
@@ -2391,6 +2501,30 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     ),
     (
         "azure.mgmt.monitor.models",
+        "Response",
+        ["value"],
+        "azure/front_door_origins — origin health and traffic metrics",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "TimeSeriesElement",
+        ["metadatavalues", "data"],
+        "azure/front_door_origins — a renamed field reads as no metric data, so every origin looks idle",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "MetadataValue",
+        ["name", "value"],
+        "azure/front_door_origins — the Origin and OriginGroup dimensions that tie a series to an origin",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "MetricValue",
+        ["time_stamp", "average", "minimum", "total"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.monitor.models",
         "DiagnosticSettingsResource",
         ["storage_account_id", "workspace_id", "event_hub_authorization_rule_id", "event_hub_name", "logs"],
         "azure/key_vault_configuration, azure/diagnostic_settings, "
@@ -2485,6 +2619,12 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "Profile",
         ["properties", "sku"],
         "azure/front_door_waf_coverage — sku separates Front Door from classic CDN",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ProfileProperties",
+        ["front_door_id"],
+        "azure/front_door_origins — without it no App Service origin can be proven locked to its profile",
     ),
     (
         "azure.mgmt.cdn.models",
@@ -2852,7 +2992,14 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure.mgmt.network.models",
         "PrivateDnsZonePropertiesFormat",
         ["private_dns_zone_id", "record_sets"],
-        "azure/private_endpoint_configuration",
+        "azure/private_endpoint_configuration, azure/private_dns_zone_configuration",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RecordSet",
+        ["fqdn", "ip_addresses", "record_type"],
+        "azure/private_dns_zone_configuration — a rename leaves every zone-group proof false, "
+        "so zone-group-backed records drop to the network match",
     ),
     # --- private DNS ---------------------------------------------------------
     (

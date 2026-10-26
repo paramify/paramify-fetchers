@@ -23,6 +23,125 @@ schemas and the `paramify` CLI — not the internal code.
   (`EVD-SERVICENOW-CASES`, `EVD-SERVICENOW-CHANGES`). Before, `paramify upload`
   skipped their evidence and counted it as an error.
 
+- **Evidence samples for 84 fetchers.** Each one is a `sample.json` beside the
+  fetcher's `fetcher.yaml`. A sample shows one sanitized record from a live run
+  in a test account, for AWS, Azure, GCP and the demo fetchers. Use
+  `paramify samples show <fetcher>` to read one. No sample is reviewed yet, and
+  12 come from an earlier fetcher version. `paramify samples status` marks both.
+  See [`docs/evidence_samples.md`](docs/evidence_samples.md).
+- **Shell tab completion.** `paramify --install-completion` installs completion
+  for commands and options. `paramify samples show <Tab>` completes the names of
+  the fetchers that have a sample. See
+  [`docs/cli_guide.md`](docs/cli_guide.md#tab-completion).
+- **Scope exclusions for Azure fetchers.** A shared helper,
+  `fetchers/azure/_shared/scope_exclusions.py`, takes case-insensitive glob
+  patterns (comma- or space-separated) and answers whether a name is excluded and
+  by which pattern. A fetcher that adopts it reads them from its
+  `scope_exclusions` config field, and its evidence keeps every excluded item in
+  `results.excluded` with the pattern that matched (or the reason it followed),
+  echoes the patterns, lists the ones that matched nothing, counts each excluded
+  kind, and counts what stayed in scope (`in_scope_hosts` and the like), so a
+  check can require more than 0 and catch a pattern such as `*` that takes out
+  everything. Every verdict, count and percentage covers only what remains in
+  scope. With no patterns set the output is unchanged apart from those empty,
+  zero or total fields. Adopted by:
+  - `azure_front_door_origins` 0.5.0: custom-domain and endpoint host names, and
+    route names through a `route:` prefix (`route:qa-*`, or `route: qa-*`); a
+    bare pattern never matches a route's name, and any other prefix fails the
+    run. A route is out of scope when a `route:` pattern
+    matches it or every host it serves is out, an origin group when every route
+    reaching it is, and a production app when only out-of-scope groups reach it,
+    so multi-region redundancy is judged on the core domains. Access restrictions
+    are read only for apps an in-scope group reaches.
+  - `azure_front_door_tls` 0.3.0 and `azure_front_door_waf_coverage` 0.3.0:
+    the same matching. TLS also leaves out certificate secrets that only
+    out-of-scope domains use, and WAF coverage the host-routes of an out-of-scope
+    route. Both fetcher.yaml texts move to the new description format.
+  - `azure_dns_configuration` 0.4.0: public record-set names, relative (in every
+    zone) or FQDN. A prefixed pattern fails the run.
+- **A string config field can be a `${env:VAR}` reference.** The runner
+  resolves it the way it resolves a secret. An unset or empty variable gives way
+  to the next value down (platform config, then the default; an error for a
+  required field with neither) and leaves one run note per entry naming every
+  unset variable; a malformed reference is an error. String config fields only,
+  not targets: the runner refuses a reference on an integer or boolean field,
+  and `manifest set-config`, `set-platform-config`, `add-target` and
+  `set-target` refuse one on a typed config field or any target field (a
+  target's secrets still take references), as does `validate` for a hand-edited
+  one. Only the fetcher's own fields and the issue-report keys are resolved; a key
+  only a sibling fetcher declares passes through untouched. A reference must be
+  the whole value, and it can't read a variable whose name looks like a
+  credential's (`_TOKEN`, `_SECRET`, `_API_KEY`, `_PAT` and the like) or one that
+  holds a secret: any fetcher's or category's declared secret, or any variable a
+  `secrets:` reference in the manifest reads. The runner and `validate` refuse
+  all of these without resolving them, naming the variable; the `manifest`
+  commands refuse a partial reference or a credential-like name, and the
+  `validate` they run after saving reports the rest. The value an allowed
+  reference reads is masked out of the fetcher's captured output and the run
+  metadata like a secret. `effective_config`, and so the TUI, shows a reference
+  as written, never its value, with whether it is set; the TUI and shared config
+  checks compare what it reads, and `validate` names an issue-report reference
+  unset in its shell.
+
+### Changed
+
+- **`azure_front_door_origins` 0.5.0: Kudu and silent regions.** An app whose
+  Kudu (scm) site has its own access restrictions
+  (`scmIpSecurityRestrictionsUseMain` off) that let every public caller in is no
+  longer `locked_to_front_door`: the gap is `scm_public_access_unrestricted`,
+  counted in `serving_app_service_origins_scm_public_access_unrestricted`, and
+  each record lists the Kudu rules. `all_regions_healthy_last_hour` is null when
+  a region with an enabled origin has no value for the last hour (false still
+  wins when a region is known to be unhealthy), so a region that went silent no
+  longer reads as healthy. Custom domains are now always read, for
+  `in_scope_hosts`.
+- **`azure_front_door_origins` 0.3.0: live origin health and traffic per region.**
+  Hourly Azure Monitor metrics for each profile over `metrics_lookback_days`
+  (default 7, at most 30): `OriginHealthPercentage` (average and minimum) by origin
+  and group, and `OriginRequestCount` by origin, matched to origins by host name or
+  origin host header. `origin_health` rolls them up per group and region: health,
+  healthy hours (measured against the share of probes the group's load-balancing
+  settings require), requests and request share, whether every region was healthy
+  in the profile's newest hour with health data and serving in its newest hour
+  with requests (taken separately, since ingestion lags per profile and per
+  metric; a group silent that hour reads as not serving, and an hour older than
+  the window's last 3 leaves both unknown), and `traffic_shifts`, each hour the
+  set of serving regions changed. Adds KSI-RPL-TRC. `production_tag` moves from `config_schema`
+  to `target_schema`, so each subscription target sets its own tag (same
+  `AZURE_PRODUCTION_APP_TAG` variable). Existing fields are unchanged.
+- **`azure_front_door_origins` 0.2.0: App Service origin lockdown and regional
+  twins.** Each origin that is an App Service app or slot (by its azureOrigin, its
+  private-link target, or the app whose host name it uses) is listed in
+  `app_service_origins` with the app's access restrictions, its
+  `publicNetworkAccess`, its plan's capacity and zone redundancy, and
+  `locked_to_front_door`: public access is off, or the only public allow rules are
+  `AzureFrontDoor.Backend` rules whose `X-Azure-FDID` value is the profile's own
+  `frontDoorId` (read with `profiles.get`), or that of another profile in the
+  subscription that also serves the app (listed in `fronting_front_door_ids`).
+  `lockdown_gaps` names what fails; the id of a profile that doesn't serve the app
+  is `other_front_door_id_allowed` (listed in `other_front_door_ids_allowed`),
+  since that profile may not have the serving profile's WAF. Resource Graph lookups page
+  in a stable order and fail on a truncated result or a repeated skip token. Every app in the subscription (narrowed by the
+  new optional `production_tag`) is listed in `production_apps`, flagged when no
+  serving origin group reaches it, when no enabled origin in another region of its
+  group is its twin, or when the twin's plan has fewer instances. Existing fields
+  are unchanged; `profiles` gain `front_door_id`.
+- **`azure_dns_configuration` 0.2.0: public record sets.** Each public zone now
+  lists `record_sets` (`record_sets.list_all_by_dns_zone`): name, FQDN, type, TTL,
+  `targets` (the A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, CAA or SOA values) and
+  the alias target resource with its type. Each A, AAAA or CNAME record gets a
+  `failover_method`: `front_door` or `traffic_manager` (an alias to one, or a CNAME
+  to its `azurefd.net` / `trafficmanager.net` / `usgovtrafficmanager.net` host),
+  `cdn`, or `record_update` (a fixed target, so failing over means changing the
+  record within its TTL). A record that points at another record set in the zone
+  (an alias, or a CNAME to a name in the zone) takes that record set's method, one
+  link deep, and names it in `same_zone_target` when the zone holds a record set
+  of that name and type (a name in a delegated child zone isn't a link). Dangling
+  aliases and CNAMEs to deleted hosts aren't detected. New summary fields count record sets by type,
+  aliases, empty endpoint records and endpoints by failover method; zones whose
+  record sets can't be read are null and fail the run. Adds KSI-CNA-MAT,
+  KSI-RPL-ABO and KSI-RPL-TRC. Existing fields and keys are unchanged.
+
 ### Fixed
 
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
@@ -36,6 +155,149 @@ schemas and the `paramify` CLI — not the internal code.
   fails the run with `bad_config`. A URL that is not `https://` is refused,
   because basic auth sends the password with each request. HTTP 429 and 5xx
   responses are retried.
+
+- **`azure_private_dns_zone_configuration` matches a record's IP only in the
+  networks its zone resolves for** (0.1.0 → 0.2.0). An IP was matched against
+  every private endpoint, NIC and load balancer in the tenant, so a stale record
+  at a common address such as 10.0.0.4 read as backed, `ip_mismatch` or
+  `platform_managed` when an unrelated VNet used the same address. Each IP is
+  now matched only within the zone's linked VNets and the VNets peered with
+  them, so an endpoint in a spoke peered with the hub the zone is linked to
+  still backs it. A peering counts from either side, so this holds even when
+  the credential cannot read the hub: the readable spokes whose own peering
+  points at it are found with a separate query. A zone with no links reads as
+  `unverified`, not backed. A linked VNet the credential cannot read stays in
+  scope: a visible endpoint NIC in it still backs the record, but an IP nothing
+  visible holds there is `unverified`. An IP the network match reads `stale`,
+  `unverified` or `unknown` is also backed when an Approved endpoint whose NIC
+  holds the record's IPs registers it through the endpoint's own private DNS
+  zone group: this exact zone, this FQDN, exactly these IPs. That proof never
+  overrules an `ip_mismatch`, `endpoint_not_approved` or `platform_managed`
+  found in the zone's own VNets. The zone groups are read per endpoint with
+  `private_dns_zone_groups.list` (Reader covers it); a failed read is recorded,
+  leaves only that proof unknown (`zone_group_backed: null`) and never backs a
+  record or reads it stale. The new `backed_by` names the proof (`network`,
+  `zone_group` or both). Only one peering hop is followed, so in these layouts
+  only hand-made records (no zone group) move from backed to `unverified`:
+  Virtual WAN (spokes two hops apart through the hub), spoke to spoke through a
+  hub, and Azure Virtual Network Manager mesh (no peering objects). Where
+  address spaces overlap, the verdict no longer depends on which VNet sorts
+  first: an IP that falls in more than one of the zone's VNets with different
+  verdicts is `unverified`. The new per-record `ip_address_networks` names the
+  VNets each IP was matched in, `[]` when none, `null` when a lookup it depends
+  on failed. VNets are read by id (linked, then peered) instead of every VNet in
+  the tenant, and a failed lookup chunk leaves only its own VNets unknown (the
+  links to them and the records of zones that resolve for them), not the whole
+  run. Key Vault records in Azure Government and Azure China
+  (`privatelink.vaultcore.usgovcloudapi.net`, `privatelink.vaultcore.azure.cn`)
+  now match their endpoints' `vault.usgovcloudapi.net` and `vault.azure.cn`
+  names instead of reading `ip_mismatch`. Status counts move, so **re-check any
+  validator or query that asserts on `private_endpoint_status`,
+  `ip_address_statuses`, `backed_by` or the `privatelink_records_*` summary
+  counts.**
+- **The private DNS zone and private endpoint fetchers' expanding queries
+  parse.** Four Resource Graph queries put `mv-expand`'s row limit before the
+  expanded column (`mv-expand limit 2000 x = ...`), which Resource Graph
+  rejects with `ParserFailure`. The private endpoint, other NIC and load
+  balancer IP lookups in `azure_private_dns_zone_configuration` therefore always
+  failed, every privatelink A record read `unknown` and the run exited 1. The
+  subnet lookup in `azure_private_endpoint_configuration` also always failed,
+  so every endpoint's subnet read `unknown`. The limit now follows the column
+  (`mv-expand x = ... limit 2000`).
+- **`azure_private_endpoint_configuration` reports unread IPs as unknown**
+  (0.1.0 → 0.1.1). When an endpoint's network interface was not read,
+  `private_ip_addresses` was `[]`, reading as "no IPs". It is now `null`. A
+  failed lookup is also recorded in `metadata.api_failures`; a NIC that Resource
+  Graph simply did not return (indexing lag, or a scope the credential cannot
+  read) gives `null` with no failure entry. **Re-check any validator or query
+  that expects `private_ip_addresses` to be a list.**
+
+### Changed
+
+- **`azure_sentinel_incidents` 0.2.0: response timeline, monthly metrics, rules
+  and entities.** Besides the latest SecurityIncident row per incident, which
+  still gives close times and now tasks, the fetcher reads every update row in
+  the lookback. Each incident gains:
+  - `acknowledged_time_utc` and `hours_to_acknowledge`: the first update by a
+    person that moves it to Active or Closed or gives it an owner or a different
+    one (by object id when both updates have one, so a renamed owner isn't a
+    different one), up to its first close, so a reopen never counts and removing an owner
+    doesn't either; a person creating it already Active or owned acknowledges
+    it at creation. Updates with no modifier, and those by automation rules,
+    playbooks, alert grouping, Fusion, incident creation or the Defender XDR
+    sync, don't count. Microsoft doesn't document what a person's update writes
+    as the modifier, so any other modifier counts as a person, an unlisted
+    system included. Known only when the creation row was read; a later row
+    missing doesn't undo one already found.
+  - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
+    who made it), and `tasks` with status and completion time. Owners compare
+    by object id when both updates have one, so a rename isn't an owner change,
+    and an owner known only by object id is named by it. Times are each
+    update's LastModifiedTime, and rows written at the same instant always sort
+    alike.
+  - `hours_to_detect` (first activity to creation), `comments_count`,
+    `classification_comment` and `related_analytic_rule_ids`.
+  - the `entities` on its alerts, as kind and identifier, from SecurityAlert
+    joined on the incident's alert ids: up to 25 of each kind, processes as image
+    name and process id, URLs as scheme and host only. Entities read
+    as `null` when the alerts can't be read.
+  - `provider_incident_id` and `provider_incident_url`: for an incident synced
+    from Defender XDR, its id and link there; Microsoft Graph alerts give the same
+    id as `incidentId`.
+  - `owner_object_id` and `owner_email`, beside the existing owner names. An
+    owner known only by email or object id is still an owner, in
+    `history_complete`, `open_new_unowned_history_incomplete` and the backlog
+    by owner.
+  - `history_complete`: whether every update was read: the incident was created
+    inside the history read, which starts at the lookback or SecurityIncident's
+    retention, whichever is later; its creation row was read; and a row tied for
+    the latest time read matches its current status, severity and owner (by
+    object id when both sides have one, else by name) and, if its
+    `lastModifiedTimeUtc` is within the last hour, is that recent. One already
+    acknowledged before its oldest update read has no acknowledgement time rather
+    than a late one. `updates_read` counts the update rows read for it.
+
+  Each workspace gains `monthly`: per calendar month of the lookback, MTTD by
+  month created, MTTA by month acknowledged and MTTR by month closed over the
+  in-scope incidents, and the open backlog at month end by severity and owner
+  over every incident, which is `null` for month ends older than
+  SecurityIncident's retention; its `updates_retained` is true when the whole
+  month is inside the history read. An older incident closed in the lookback leaves
+  the backlog without counting in that month's MTTR, so monthly MTTR may read
+  low. It also gains `recurring_titles`, `recurrence_by_title` and
+  `recurrence_by_rule` (two or more incidents created in the lookback),
+  `open_unacknowledged` (open, every update read, and no person has acknowledged
+  it), `open_new_unowned_history_incomplete` (open, still New with no owner, and
+  not every update read, so never counted in `open_unacknowledged`), and
+  `mttd_hours`, `mtta_hours` and `mttr_hours`. When the update history can't be
+  read, the timeline fields, `monthly`, `acknowledged_incidents` and
+  `open_unacknowledged` are `null` rather than empty. When close times can't be
+  read, `close_time_status` is `unknown` and the close-time counts are `null`,
+  rather than every closed incident counting as missing. A SecurityIncident
+  table the query can't find, in a workspace that lists an incident over an hour
+  old, is hidden by table-level access: the run records an access failure and
+  exits 1, and close times and history are unknown. In a workspace that lists
+  none, or only incidents under an hour old that may not be ingested yet, it
+  reads as empty, with a note. SecurityAlert is treated the same way when an
+  incident over an hour old has alerts. SecurityAlert is cut to the incidents'
+  alert ids before it is aggregated and joined, and a query whose result is too
+  large for one response (over 64 MB or 500,000 rows) is read again in halves
+  of the incidents, down to 64 shares, rather than failing the run.
+  The summary's counts, existing ones included, are `null` when any workspace's
+  incident list failed, the workspace list or a check for Sentinel failed, or a
+  workspace named in `SENTINEL_WORKSPACES` wasn't found, and the counts that
+  can be unknown are `null` when any workspace's value is; with no Sentinel
+  workspace found they are 0.
+  Each workspace also gains `limitations`: in a workspace connected to Defender
+  XDR, analysts usually work incidents in the Defender portal and
+  SecurityIncident shows mostly the XDR sync's updates, so those incidents read
+  as not acknowledged and an open one can count in `open_unacknowledged`; their
+  acknowledgement times would need Defender XDR's incident activity history,
+  which neither SecurityIncident nor Graph's `security/incidents` (its current
+  state and comments, but not when an incident was first activated or assigned)
+  provides.
+  Other existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
+  evidenceable.
 
 ## [0.6.0-beta] - 2026-10-23
 
@@ -209,6 +471,34 @@ schemas and the `paramify` CLI — not the internal code.
   old client passed through to `requests`, is now refused as `bad_config`.
 
 ### Added
+
+- **`cornerstone` category** with four KSI-CED-RAT fetchers over Cornerstone's
+  Reporting API (read-only OData views, OAuth 2.0 client credentials):
+  `cornerstone_security_awareness_training`, `cornerstone_role_based_training`,
+  `cornerstone_secure_development_training` and
+  `cornerstone_incident_response_training`. Each resolves the configured courses
+  in `vw_rpt_training`, reads every registration from `vw_rpt_transcript`, and
+  reports per user (numeric Cornerstone id only) the latest status, last
+  completion and whether it is inside the retraining interval, plus each
+  course's version and last content change. The awareness fetcher can take a
+  `vw_rpt_user` population filter so never-assigned users count as
+  `not_assigned`. Every view read is counted first and checked for
+  completeness; an unresolved course name reports null metrics and exits 0.
+  The portal URL must be one label under `csod.com`, redirects are refused, and
+  nextLinks are followed only on the same host under the views root. Covered
+  offline by `tests/test_cornerstone_fetchers.py`; not yet run against a live
+  portal. Review (PR #175): the user population filter is shared by all four
+  fetchers with a per-fetcher override and, without one, the completion rate is
+  null and the run is `partial_or_empty`; failed attempts (`user_lo_pass` false)
+  and configured withdrawn/failed status ids never count as completed;
+  exemptions age like completions; an overdue assignment overrides an older
+  completion; `A|B` names alternatives for one course; GUIDs compare
+  case-insensitively and rows read but unattributed fail the run; a URL the
+  client refuses is a recorded failure, not a crash; paging and throttle
+  settings are declared on the category; rows with no user id are excluded and
+  counted; all course names resolve in one chunked catalog query; a token
+  refresh after a 401 no longer consumes a retry attempt.
+
 
 - **CI runs the tests on Python 3.15.** The test matrix is now 3.11 to 3.15.
   The 3.10 row is gone.
