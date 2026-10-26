@@ -139,7 +139,32 @@ def test_other_geo_stats_failure_fails_the_run(monkeypatch):
 
 def test_geo_account_with_no_stats_returned(monkeypatch):
     (r,), _ = collect(monkeypatch, account(sku="Standard_GRS"), stats=None)
-    assert r["geo_replication_stats"]["stats_status"] == "not_applicable"
+    assert r["geo_replication_stats"]["stats_status"] == "not_returned"
+
+
+def test_sync_lag_is_measured_when_the_stats_arrive():
+    stats = ns(status="Live", last_sync_time=datetime.now(timezone.utc) - timedelta(minutes=5), can_failover=True,
+               can_planned_failover=None, post_failover_redundancy=None, post_planned_failover_redundancy=None)
+    g = st._geo_replication_stats(FakeClient([], stats=stats), collector(), "rg", "sa1", None)
+    assert g["sync_lag_minutes"] == 5
+
+
+def test_sync_after_the_measuring_clock_reads_zero_lag():
+    g = st.geo_replication_stats_record({"last_sync_time": NOW + timedelta(seconds=30)}, "collected", NOW)
+    assert g["sync_lag_minutes"] == 0
+
+
+def test_max_sync_lag_is_unknown_while_any_geo_account_lag_is():
+    live = record(account("a", sku="Standard_GRS"))
+    live["geo_replication_stats"] = st.geo_replication_stats_record(
+        {"status": "Live", "last_sync_time": NOW - timedelta(minutes=7)}, "collected", NOW)
+    unavailable = record(account("b", sku="Standard_RAGRS"))
+    unavailable["geo_replication_stats"] = st.geo_replication_stats_record(None, "unavailable", NOW, "x")
+    local = record(account("c"))
+    assert st.summarize([live, local])["geo_replication_max_sync_lag_minutes"] == 7
+    summary = st.summarize([live, unavailable, local])
+    assert (summary["geo_replication_max_sync_lag_minutes"], summary["geo_replication_stats_collected_accounts"]) == (
+        None, 1)
 
 
 # --- access-key age ---
@@ -171,9 +196,30 @@ def test_within_expiration_period(key1, key2, within):
     assert record(account(key1=key1, key2=key2, policy_days=90))["access_keys_within_expiration_period"] is within
 
 
-def test_unknown_key_creation_time_counts_as_unknown_age():
+def test_unknown_key_creation_time_reads_unknown_not_zero():
     summary = st.summarize([record(account(key1=None, key2=None)), record(account(key1=NOW, key2=NOW))])
-    assert (summary["access_key_age_known_accounts"], summary["access_key_max_age_days"]) == (1, 0)
+    assert (summary["access_key_age_known_accounts"], summary["access_key_max_age_days"],
+            summary["accounts_with_access_key_older_than_90_days"]) == (1, None, None)
+
+
+@pytest.mark.parametrize("key1_days, older", [(3, None), (120, 1)])
+def test_one_unknown_key_leaves_the_account_max_unknown(key1_days, older):
+    r = record(account(key1=NOW - timedelta(days=key1_days), key2=None))
+    assert r["access_key_max_age_days"] is None
+    # A known key past 90 days settles the account; a young one can't, while the other key is unknown.
+    assert st.summarize([r])["accounts_with_access_key_older_than_90_days"] == older
+
+
+def test_expiry_policy_with_an_unknown_key_age_reads_unknown():
+    with_policy = record(account(key1=NOW - timedelta(days=5), key2=None, policy_days=90))
+    without_policy = record(account(key1=None, key2=None))
+    assert st.summarize([without_policy])["accounts_with_access_key_beyond_expiration_period"] == 0
+    assert st.summarize([with_policy, without_policy])["accounts_with_access_key_beyond_expiration_period"] is None
+
+
+def test_expiry_is_judged_to_the_moment_not_the_day():
+    r = record(account(key1=NOW - timedelta(days=90, hours=1), key2=NOW, policy_days=90))
+    assert (r["access_keys"][0]["age_days"], r["access_keys"][0]["exceeds_expiration_period"]) == (90, True)
 
 
 def test_collection_never_calls_list_keys(monkeypatch):
@@ -211,6 +257,12 @@ def test_public_container_level_is_not_effective_when_the_account_forbids_it(mon
         "Container", False)
 
 
+def test_public_container_is_effective_when_the_account_setting_was_never_set(monkeypatch):
+    (r,), _ = collect(monkeypatch, account(allow_public=None), containers=[container("c", public="Blob")])
+    assert r["containers"][0]["anonymous_access_effective"] is True
+    assert st.summarize([r])["anonymously_accessible_containers"] == 1
+
+
 def test_account_without_blob_service_is_not_supported(monkeypatch):
     error = StorageError("(FeatureNotSupportedForAccount) Blob is not supported for the account.")
     (r,), c = collect(monkeypatch, account(), containers_error=error)
@@ -236,6 +288,11 @@ def test_configured_tag_keys_replace_the_defaults(monkeypatch):
     monkeypatch.setenv(st.CLASSIFICATION_TAG_KEYS_ENV, "Exposure")
     (r,), _ = collect(monkeypatch, account(tags={"Application": "app", "Owner": "ignored", "exposure": "internal"}))
     assert (r["owner_tag"], r["classification_tag"]) == ("app", "internal")
+
+
+def test_tags_that_differ_only_in_case_pick_the_same_value_every_run():
+    assert record(account(tags={"owner": "b", "Owner": "a"}))["owner_tag"] == "a"
+    assert record(account(tags={"Owner": "", "owner": "x"}))["owner_tag"] == "x"
 
 
 def test_empty_tag_value_does_not_count():

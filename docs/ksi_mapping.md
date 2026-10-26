@@ -152,7 +152,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `sc-23`, `si-7.1`
 
-*2 fetchers:* [`azure_app_gateway_backend_tls`](../fetchers/azure/app_gateway_backend_tls), [`azure_front_door_origins`](../fetchers/azure/front_door_origins)
+*3 fetchers:* [`azure_app_gateway_backend_tls`](../fetchers/azure/app_gateway_backend_tls), [`azure_front_door_origins`](../fetchers/azure/front_door_origins), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status)
 
 #### `KSI-SVC-VRI` — Validating Resource Integrity
 
@@ -576,7 +576,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration) | `KSI-CNA-MAT`, `KSI-IAM-APM`, `KSI-MLA-LET`, `KSI-SVC-SIN` |
 | [`azure_sql_managed_instance_encryption`](../fetchers/azure/sql_managed_instance_encryption) | `KSI-SVC-SIN` |
 | [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-IAM-APM`, `KSI-MLA-LET`, `KSI-SVC-EIS`, `KSI-SVC-SIN` |
-| [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-PIY-GIV`, `KSI-RPL-ABO`, `KSI-SVC-ASM`, `KSI-SVC-SIN` |
+| [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-PIY-GIV`, `KSI-RPL-ABO`, `KSI-SVC-ASM`, `KSI-SVC-SIN`, `KSI-SVC-VCM` |
 | [`azure_virtual_wan_configuration`](../fetchers/azure/virtual_wan_configuration) | `KSI-CNA-RNT`, `KSI-CNA-ULN`, `KSI-SVC-SIN` |
 | [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status) | `KSI-CNA-MAT`, `KSI-IAM-APM`, `KSI-SVC-SIN`, `KSI-SVC-VRI` |
 | [`azure_vnet_egress_routing`](../fetchers/azure/vnet_egress_routing) | `KSI-CNA-DFP`, `KSI-CNA-RNT`, `KSI-CNA-ULN` |

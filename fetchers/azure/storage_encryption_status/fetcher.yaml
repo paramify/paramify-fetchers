@@ -59,6 +59,7 @@ ksis:
   - KSI-CNA-OFA   # secondary region, replication health and failover readiness
   - KSI-RPL-ABO   # geo-replicated copy and its last sync time
   - KSI-PIY-GIV   # containers with owner and classification tags
+  - KSI-SVC-VCM   # shared-key vs Entra authorization and private endpoints
 
 evidence_set:
   reference_id: EVD-AZURE-STORAGE-ENC
@@ -102,16 +103,16 @@ evidence_set:
     - shared_key_access_accounts — Number of storage accounts that accept access-key (shared key) authorization; an account that omits the setting allows it
     - key_expiration_policy_accounts — Number of storage accounts with an access-key expiry policy (a maximum key age in days)
     - access_key_age_known_accounts — Number of storage accounts whose two access keys both have a known creation time
-    - access_key_max_age_days — Days since the oldest access key in the subscription was created or last rotated; null when no key's creation time is known
-    - accounts_with_access_key_older_than_90_days — Number of storage accounts with an access key created or last rotated more than 90 days ago
-    - accounts_with_access_key_beyond_expiration_period — Number of storage accounts with an access key older than the account's own key expiry policy; accounts with no policy are never counted
+    - access_key_max_age_days — Days since the oldest access key in the subscription was created or last rotated; null when there are no storage accounts or any key's creation time is unknown (older accounts whose keys have not been rotated since Azure began recording it)
+    - accounts_with_access_key_older_than_90_days — Number of storage accounts with an access key created or last rotated more than 90 days ago; null when a key whose creation time is unknown leaves an account undecided
+    - accounts_with_access_key_beyond_expiration_period — Number of storage accounts with an access key older than the account's own key expiry policy; accounts with no policy are never counted; null when an account with a policy has a key whose creation time is unknown
 
     Is data replicated to a healthy second region?
     - geo_redundant_accounts — Number of storage accounts that replicate to a second region (GRS, RA-GRS, GZRS or RA-GZRS)
     - read_access_geo_redundant_accounts — Number of storage accounts whose second-region copy can be read (RA-GRS or RA-GZRS)
     - geo_replication_stats_collected_accounts — Number of geo-redundant storage accounts whose replication status was read
     - geo_replication_live_accounts — Number of geo-redundant storage accounts whose replication status is Live (replicating normally)
-    - geo_replication_max_sync_lag_minutes — Longest time, in minutes, since a second-region copy last synced with its primary, measured when the fetcher ran; null when no replication status was read
+    - geo_replication_max_sync_lag_minutes — Minutes since the second-region copy furthest behind last synced with its primary, measured when its replication status was read; null when there is no geo-redundant account or any one's last sync time is unknown
     - geo_failover_ready_accounts — Number of geo-redundant storage accounts that Azure reports can fail over to the second region now
     - secondary_unavailable_accounts — Number of geo-redundant storage accounts whose second region is reported unavailable
     - geo_failed_over_accounts — Number of storage accounts that have failed over to their second region at least once
@@ -126,7 +127,7 @@ evidence_set:
     Which containers can be read anonymously?
     - total_containers — Number of blob containers across all storage accounts whose containers were listed
     - containers_with_public_access_level — Number of blob containers set to the Blob or Container public access level
-    - anonymously_accessible_containers — Number of blob containers anyone can read without signing in: the container has a public access level and its account allows public blob access
+    - anonymously_accessible_containers — Number of blob containers anyone can read without signing in: the container has a public access level and its account does not forbid public blob access (Azure allows it when the setting is on or was never set)
     - accounts_with_containers_not_collected — Number of storage accounts whose container list failed; their containers are missing from the counts
 
     Is each account owned and classified?

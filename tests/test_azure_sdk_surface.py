@@ -1296,7 +1296,8 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
         "azure.mgmt.storage.models",
         "GeoReplicationStats",
-        ["status", "last_sync_time", "can_failover", "can_planned_failover"],
+        ["status", "last_sync_time", "can_failover", "can_planned_failover",
+         "post_failover_redundancy", "post_planned_failover_redundancy"],
         "azure/storage_encryption_status — geo-replication health",
     ),
     (
