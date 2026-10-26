@@ -1,0 +1,100 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_efs_high_availability",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 2,
+      "fields": {
+        "Type": 2,
+        "EFSInfo": 2,
+        "MountTargets": 1
+      }
+    },
+    {
+      "path": "results[].EFSInfo.Tags[]",
+      "records": 6,
+      "fields": {
+        "Key": 6,
+        "Value": 6
+      }
+    },
+    {
+      "path": "results[].MountTargets[]",
+      "records": 2,
+      "fields": {
+        "OwnerId": 2,
+        "MountTargetId": 2,
+        "FileSystemId": 2,
+        "SubnetId": 2,
+        "LifeCycleState": 2,
+        "IpAddress": 2,
+        "NetworkInterfaceId": 2,
+        "AvailabilityZoneId": 2,
+        "AvailabilityZoneName": 2,
+        "VpcId": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:54Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "Type": "EFS_FileSystem",
+        "EFSInfo": {
+          "OwnerId": "111111111111",
+          "CreationToken": "<redacted>",
+          "FileSystemId": "fs-0a3f090d638eabc5d",
+          "FileSystemArn": "arn:aws:elasticfilesystem:us-east-2:111111111111:file-system/fs-0a3f090d638eabc5d",
+          "CreationTime": "2026-09-28T11:03:55-06:00",
+          "LifeCycleState": "available",
+          "Name": "pft-encrypted",
+          "NumberOfMountTargets": 2,
+          "SizeInBytes": {
+            "Value": 6144,
+            "ValueInIA": 0,
+            "ValueInStandard": 6144,
+            "ValueInArchive": 0
+          },
+          "PerformanceMode": "generalPurpose",
+          "Encrypted": true,
+          "KmsKeyId": "arn:aws:kms:us-east-2:111111111111:key/00000000-0000-4000-8000-222222222222",
+          "ThroughputMode": "bursting",
+          "Tags": [
+            {
+              "Key": "ManagedBy",
+              "Value": "terraform"
+            }
+          ],
+          "FileSystemProtection": {
+            "ReplicationOverwriteProtection": "ENABLED"
+          }
+        },
+        "MountTargets": [
+          {
+            "OwnerId": "111111111111",
+            "MountTargetId": "fsmt-03adf49980f5e0739",
+            "FileSystemId": "fs-0a3f090d638eabc5d",
+            "SubnetId": "subnet-0ac42ef667a21d880",
+            "LifeCycleState": "available",
+            "IpAddress": "10.0.0.1",
+            "NetworkInterfaceId": "eni-09230be715644ba65",
+            "AvailabilityZoneId": "use2-az1",
+            "AvailabilityZoneName": "us-east-2a",
+            "VpcId": "vpc-0effedbf104e8ed6f"
+          }
+        ]
+      }
+    ]
+  }
+}

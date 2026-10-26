@@ -1,0 +1,147 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_iam_service_accounts",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.project_role_bindings[]",
+      "records": 13,
+      "fields": {
+        "impersonation_role": 13,
+        "member_count": 13,
+        "other_member_count": 13,
+        "over_broad_role": 13,
+        "primitive_role": 13,
+        "role": 13,
+        "service_account_members": 12
+      }
+    },
+    {
+      "path": "results.service_accounts[]",
+      "records": 3,
+      "fields": {
+        "description": 0,
+        "disabled": 3,
+        "display_name": 3,
+        "email": 3,
+        "has_over_broad_project_role": 3,
+        "iam_policy_bindings": 0,
+        "impersonable": 3,
+        "impersonation_members": 0,
+        "keys": 3,
+        "oldest_user_managed_key_age_days": 1,
+        "over_broad_project_roles": 1,
+        "primitive_project_roles": 2,
+        "project_roles": 2,
+        "system_managed_key_count": 3,
+        "unique_id": 3,
+        "user_managed_key_count": 3,
+        "user_managed_keys_past_rotation_age": 3
+      }
+    },
+    {
+      "path": "results.service_accounts[].keys[]",
+      "records": 7,
+      "fields": {
+        "age_days": 7,
+        "disabled": 7,
+        "expires_in_days": 7,
+        "id": 7,
+        "key_algorithm": 7,
+        "key_origin": 7,
+        "key_type": 7,
+        "never_expires": 7,
+        "user_managed": 7,
+        "valid_after_time": 7,
+        "valid_before_time": 7
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:53Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "project_role_bindings": [
+        {
+          "impersonation_role": false,
+          "member_count": 1,
+          "other_member_count": 0,
+          "over_broad_role": false,
+          "primitive_role": false,
+          "role": "roles/cloudaicompanion.serviceAgent",
+          "service_account_members": [
+            "serviceAccount:service-111111111111@gcp-sa-cloudaicompanion.iam.gserviceaccount.com"
+          ]
+        }
+      ],
+      "service_accounts": [
+        {
+          "description": null,
+          "disabled": false,
+          "display_name": "Person1",
+          "email": "example-stale-key@example-project.iam.gserviceaccount.com",
+          "has_over_broad_project_role": false,
+          "iam_policy_bindings": [],
+          "impersonable": false,
+          "impersonation_members": [],
+          "keys": [
+            {
+              "age_days": 0,
+              "disabled": false,
+              "expires_in_days": 737,
+              "id": "0000000000000000000000000000000000000001",
+              "key_algorithm": "KEY_ALG_RSA_2048",
+              "key_origin": "GOOGLE_PROVIDED",
+              "key_type": "SYSTEM_MANAGED",
+              "never_expires": false,
+              "user_managed": false,
+              "valid_after_time": "2026-08-17T14:19:36Z",
+              "valid_before_time": "2028-08-24T02:15:28Z"
+            }
+          ],
+          "oldest_user_managed_key_age_days": 0,
+          "over_broad_project_roles": [],
+          "primitive_project_roles": [
+            "roles/viewer"
+          ],
+          "project_roles": [
+            "roles/viewer"
+          ],
+          "system_managed_key_count": 2,
+          "unique_id": "000000000000000000006",
+          "user_managed_key_count": 1,
+          "user_managed_keys_past_rotation_age": 0
+        }
+      ]
+    },
+    "summary": {
+      "disabled_service_accounts": 0,
+      "disabled_user_managed_keys": 0,
+      "impersonable_service_accounts": 0,
+      "never_expiring_user_managed_keys": 1,
+      "no_user_managed_key_percentage": 66,
+      "oldest_user_managed_key_age_days": 0,
+      "over_broad_project_role_bindings": 2,
+      "project_wide_impersonation_bindings": 0,
+      "rotation_age_days": 90,
+      "service_accounts_with_over_broad_roles": 1,
+      "service_accounts_with_primitive_roles": 2,
+      "service_accounts_with_user_managed_keys": 1,
+      "service_accounts_without_user_managed_keys": 2,
+      "system_managed_key_count": 6,
+      "total_project_role_bindings": 13,
+      "total_service_accounts": 3,
+      "user_managed_key_count": 1,
+      "user_managed_keys_past_rotation_age": 0
+    }
+  }
+}

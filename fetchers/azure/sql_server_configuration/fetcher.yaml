@@ -55,7 +55,7 @@ evidence_set:
   reference_id: EVD-AZURE-SQL-CONFIG
   name: Azure SQL Server Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient):
+    Script: azure/sql_server_configuration/fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient):
     servers.list(), firewall_rules.list_by_server(),
     server_blob_auditing_policies.list_by_server(),
     server_security_alert_policies.get(), server_vulnerability_assessments.get().

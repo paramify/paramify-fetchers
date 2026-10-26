@@ -1,0 +1,47 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_ecr_image_scanning",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.repositories[]",
+      "records": 2,
+      "fields": {
+        "name": 2,
+        "arn": 2,
+        "registry_id": 2,
+        "scan_on_push": 2,
+        "immutability": 2,
+        "latest_image_scan": 0
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:51Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "registry_scanning": {
+        "scan_type": "BASIC",
+        "rules": []
+      },
+      "repositories": [
+        {
+          "name": "pft-unscanned",
+          "arn": "arn:aws:ecr:us-east-2:111111111111:repository/pft-unscanned",
+          "registry_id": "111111111111",
+          "scan_on_push": false,
+          "immutability": "MUTABLE",
+          "latest_image_scan": null
+        }
+      ]
+    }
+  }
+}

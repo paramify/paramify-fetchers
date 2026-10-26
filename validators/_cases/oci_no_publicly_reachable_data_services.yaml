@@ -1,0 +1,13 @@
+validator: oci_no_publicly_reachable_data_services
+cases:
+  - name: oci_no_publicly_reachable_data_services_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"data_services_readable": true, "publicly_reachable_resources": 0}}'
+
+  - name: oci_no_publicly_reachable_data_services_fails
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"data_services_readable": true, "publicly_reachable_resources": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"data_services_readable": true, "publicly-reachable-resources": 0}}'

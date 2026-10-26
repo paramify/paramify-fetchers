@@ -1,0 +1,59 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_component_ssl_enforcement_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.s3[]",
+      "records": 6,
+      "fields": {
+        "bucket": 6,
+        "ssl_enforced": 6,
+        "policy_snippet": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:24Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "s3": [
+        {
+          "bucket": "pft-111111111111-e25deb-kms",
+          "ssl_enforced": true,
+          "policy_snippet": {
+            "Sid": "DenyInsecureTransport",
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": "s3:*",
+            "Resource": [
+              "arn:aws:s3:::pft-111111111111-e25deb-kms",
+              "arn:aws:s3:::pft-111111111111-e25deb-kms/*"
+            ],
+            "Condition": {
+              "Bool": {
+                "aws:SecureTransport": "false"
+              }
+            }
+          }
+        }
+      ],
+      "rds": []
+    },
+    "summary": {
+      "s3_total": 6,
+      "s3_ssl_enforced": 2,
+      "rds_total": 0,
+      "rds_ssl_enforced": 0,
+      "formatted_summary": "S3 Buckets: 6, SSL Enforced: 2\nRDS Instances: 0, SSL Enforced: 0\n"
+    }
+  }
+}

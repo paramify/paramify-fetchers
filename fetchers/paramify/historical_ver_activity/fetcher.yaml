@@ -62,7 +62,7 @@ evidence_set:
   reference_id: EVD-PARAMIFY-VER-TFR-MRH
   name: Paramify Historical VER Activity (VER-TFR-MRH)
   instructions: >-
-    Script: fetcher.py. Reads all project issues for PARAMIFY_PROJECT_ID from the
+    Script: paramify/historical_ver_activity/fetcher.py. Reads all project issues for PARAMIFY_PROJECT_ID from the
     Paramify REST API (GET /issues) once, partitions into active (non-accepted)
     and accepted vulnerabilities using the shared accepted definition, and writes
     the FedRAMP Historical VER Activity snapshot JSON. Per VER-TFR-MRH, Class C
