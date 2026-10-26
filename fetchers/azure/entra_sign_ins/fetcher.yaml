@@ -9,6 +9,7 @@ supports_targets: true
 runtime:
   type: python
   entry: fetcher.py
+  timeout: 1800          # up to 200 pages of 1000 sign-ins, with throttling retries; 600 is too tight
 
 output:
   type: json
@@ -64,7 +65,8 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 #                            is still read.
 #   Organization.Read.All  — optional; the tenant name/domain recorded as provenance.
 # Risk levels need Entra ID P2; without it Graph reports them as hidden.
-# A denied read is recorded as an API failure and the run exits non-zero.
+# A denied read is recorded as an API failure and the run exits non-zero. A tenant
+# without P1/P2 is a state, not a failure: sign_in_logs reads not_licensed.
 
 ksis:
   - KSI-IAM-APM
@@ -76,7 +78,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_sign_ins/fetcher.py
 
-    Access: Microsoft Graph AuditLog.Read.All and an Entra ID P1 or P2 licence. Optional: Policy.Read.ConditionalAccess (or Policy.Read.All); without it, Graph leaves out which Conditional Access policies applied to each sign-in and they read null. Optional: Organization.Read.All; without it, no tenant name or domain is recorded. Risk levels need Entra ID P2; without it they read hidden.
+    Access: Microsoft Graph AuditLog.Read.All and an Entra ID P1 or P2 licence. Optional: Policy.Read.ConditionalAccess (or Policy.Read.All); without it, Graph leaves out which Conditional Access policies applied to each sign-in and they read null. Optional: Organization.Read.All; without it, no tenant name or domain is recorded. Risk levels need Entra ID P2; without it the risky sign-in figures read null.
 
     Commands Executed:
     - Microsoft Graph GET /organization — the tenant's name and domain
@@ -87,7 +89,7 @@ evidence_set:
     Summary fields:
 
     What was checked?
-    - sign_in_logs — Whether the sign-in logs were read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused or failed before any sign-in was read)
+    - sign_in_logs — Whether the sign-in logs were read: read, not_licensed (the tenant has no Entra ID P1 or P2, so there are no logs to read; the run still succeeds) or not_read (refused or failed before any sign-in was read)
     - lookback_days — Days of sign-ins read, ending at the run (7 unless ENTRA_SIGN_IN_LOOKBACK_DAYS sets it, at most 30)
     - window_start — Time of the lookback's start, in UTC
     - window_end — Time of the lookback's end (the run), in UTC
@@ -96,7 +98,7 @@ evidence_set:
     - total_sign_ins — Number of interactive sign-ins in the lookback: a user signing in themselves. Non-interactive sign-ins (a client refreshing a token for a user), service principal and managed identity sign-ins aren't read; null if the logs weren't read
     - successful_sign_ins — Number of sign-ins that succeeded (error code 0); null if the logs weren't read
     - failed_sign_ins — Number of sign-ins with a non-zero error code. That includes interrupted steps that are a normal part of a successful sign-in, such as the MFA prompt (50074) or keep me signed in (50140), so it isn't a count of failed attempts; null if the logs weren't read
-    - users_signing_in — Number of distinct users with at least one sign-in; null if the logs weren't read
+    - users_signing_in — Number of distinct users with at least one sign-in. A sign-in with no user id, such as an attempt at a name that doesn't exist, counts in the totals but not here; null if the logs weren't read
     - apps_signed_in_to — Number of distinct apps signed in to; null if the logs weren't read
 
     Did each sign-in require and pass MFA?
@@ -119,10 +121,10 @@ evidence_set:
 
     Which sign-ins did Entra rate risky?
     - risk_levels_available — True if Entra ID Protection rated the sign-ins (the tenant has Entra ID P2); false if every risk level read hidden; null if the logs weren't read or there were no sign-ins
-    - risky_sign_ins — Number of risky sign-ins: rated low, medium or high risk, or with a risk state of at risk or confirmed compromised; null if the logs weren't read
-    - risky_sign_ins_by_level — Number of risky sign-ins at each risk level (low, medium, high, or none for one flagged only by its risk state); null if the logs weren't read
-    - risky_sign_ins_by_state — Number of risky sign-ins in each risk state (for example atRisk, remediated, dismissed); null if the logs weren't read
-    - users_with_risky_sign_ins — Number of users with at least one risky sign-in; null if the logs weren't read
+    - risky_sign_ins — Number of risky sign-ins: rated low, medium or high risk, or with a risk state of at risk or confirmed compromised; null if the logs weren't read or risk_levels_available is false (no Entra ID P2, so risk is unknown, not none)
+    - risky_sign_ins_by_level — Number of risky sign-ins at each risk level (low, medium, high, or none for one flagged only by its risk state); null if the logs weren't read or risk_levels_available is false
+    - risky_sign_ins_by_state — Number of risky sign-ins in each risk state (for example atRisk, remediated, dismissed); null if the logs weren't read or risk_levels_available is false
+    - users_with_risky_sign_ins — Number of users with at least one risky sign-in; null if the logs weren't read or risk_levels_available is false
 
     Which sign-ins are listed one by one?
     - exception_sign_ins — Number of exceptions: successful single-factor sign-ins, successful sign-ins no Conditional Access policy applied to, and risky sign-ins; null if the logs weren't read

@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 73 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 76 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -86,9 +86,10 @@ tenant-scoped.
 | `Application.Read.All` | `azure_entra_app_registrations`, `azure_entra_service_principals` |
 | `Policy.Read.All` | `azure_entra_conditional_access_policies`, `azure_entra_authentication_policy` |
 | `Directory.Read.All` | `azure_entra_authentication_policy` (group settings, subscribed SKUs), `azure_entra_mfa_status` (users, role members), `azure_entra_privileged_roles`, `azure_residual_resources` (principal lookup) |
-| `AuditLog.Read.All` | `azure_entra_mfa_status` (sign-in activity and the registration report) |
+| `AuditLog.Read.All` | `azure_entra_mfa_status` (sign-in activity and the registration report), `azure_entra_sign_ins` (sign-in logs; the tenant also needs Entra ID P1 or P2, and without it `sign_in_logs` reads `not_licensed` and the run succeeds) |
 | `Directory.Read.All` (optional) | `azure_log_analytics_deletion_rights`: principal names; without it the grants are listed by id |
 | `Application.Read.All` (optional) | `azure_managed_identity_configuration`: each identity's Graph app permissions; without it `graph_access` reads `not_authorized` and the run succeeds |
+| `Policy.Read.ConditionalAccess` or `Policy.Read.All` (optional) | `azure_entra_sign_ins`: the Conditional Access policies applied to each listed sign-in; without it they read null and the run succeeds |
 | `Organization.Read.All` (optional) | Every `azure_entra_*` fetcher: tenant name and domain; without it the tenant id comes from `AZURE_TENANT_ID`, and the run fails only if that is unset too |
 
 For the Entra fetchers, narrower permissions can stand in for `Directory.Read.All`;
@@ -184,6 +185,7 @@ Identity and access:
 | `azure_entra_conditional_access_policies` | Conditional Access policies: state (on, report-only, off), included and excluded users, groups, roles and apps, conditions, grant and session controls |
 | `azure_entra_mfa_status` | Each user's enabled state, last sign-in and MFA capability, with coverage for admins, members and guests |
 | `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted and tenant-wide admin roles flagged |
+| `azure_entra_sign_ins` | Interactive sign-ins over a lookback: MFA required and passed, methods used (phishing-resistant counted), legacy clients, Conditional Access applied, and risky sign-ins (risk levels need Entra ID P2) |
 | `azure_rbac_role_assignments` | Role assignments at the subscription and above, and separately below it, with Owner, Contributor, User Access Administrator and RBAC Administrator flagged |
 | `azure_rbac_custom_roles` | Custom role definitions with their full permission sets, flagged for wildcards and for permissions that allow privilege escalation |
 | `azure_managed_identity_configuration` | Managed identities: attached resources, federated credentials, Azure roles judged by their permissions, and Microsoft Graph app permissions |

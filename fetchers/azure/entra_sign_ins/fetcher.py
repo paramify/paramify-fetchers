@@ -100,7 +100,8 @@ def sign_in_record(s: Dict[str, Any]) -> Dict[str, Any]:
         "user_principal_name": s.get("userPrincipalName"),
         "app_id": s.get("appId"),
         "app_display_name": s.get("appDisplayName"),
-        "ip_address": s.get("ipAddress"),
+        # Kept only where a risky sign-in needs tracing; no figure uses it.
+        "ip_address": s.get("ipAddress") if "risky" in reasons else None,
         "client_app_used": s.get("clientAppUsed"),
         "succeeded": succeeded,
         "error_code": status.get("errorCode"),
@@ -159,16 +160,19 @@ class Tally:
         if r["risk_level_during_sign_in"] == HIDDEN:
             self.risk_hidden += 1
         if flags["risky"]:
-            self.levels[r["risk_level_during_sign_in"] or "none"] += 1
+            level = r["risk_level_during_sign_in"]
+            self.levels[level if level in RISK_LEVELS else "none"] += 1
             self.states[r["risk_state"] or "none"] += 1
-        user = self.users.setdefault(r["user_id"] or "", {
-            "user_id": r["user_id"], "user_principal_name": r["user_principal_name"],
-            "counts": Counter(), "methods": Counter(),
-        })
-        user["counts"].update(k for k, v in flags.items() if v)
-        user["counts"]["sign_ins"] += 1
-        if ok:
-            user["methods"].update(r["methods"])
+        # No user id (an attempt at a name that doesn't exist): tenant totals only, never a user row.
+        if r["user_id"]:
+            user = self.users.setdefault(r["user_id"], {
+                "user_id": r["user_id"], "user_principal_name": r["user_principal_name"],
+                "counts": Counter(), "methods": Counter(),
+            })
+            user["counts"].update(k for k, v in flags.items() if v)
+            user["counts"]["sign_ins"] += 1
+            if ok:
+                user["methods"].update(r["methods"])
         app = self.apps.setdefault(r["app_id"] or "", {
             "app_id": r["app_id"], "app_display_name": r["app_display_name"], "counts": Counter(),
         })
@@ -187,23 +191,29 @@ COUNT_KEYS = (
 )
 
 
-def _row(entry: dict, keys) -> dict:
+def _row(entry: dict, keys, risk_known: bool) -> dict:
     counts = entry["counts"]
     return {**{k: v for k, v in entry.items() if k not in ("counts", "methods")},
-            **{k: counts.get(k, 0) for k in keys},
+            **{k: counts.get(k, 0) if risk_known or k != "risky" else None for k in keys},
             **({"methods": sorted_counts(entry["methods"])} if "methods" in entry else {})}
 
 
 def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, complete: bool, truncated: bool):
-    users = sorted((_row(u, COUNT_KEYS) for u in tally.users.values()),
+    risk_levels_available = None if tally.total == 0 else tally.risk_hidden < tally.total
+    # Without P2 every level reads hidden, so "no risky sign-ins" is unknown, not 0.
+    risk_known = risk_levels_available is not False
+    users = sorted((_row(u, COUNT_KEYS, risk_known) for u in tally.users.values()),
                    key=lambda u: ((u["user_principal_name"] or "").lower(), u["user_id"] or ""))
-    apps = sorted((_row(a, COUNT_KEYS) for a in tally.apps.values()),
+    apps = sorted((_row(a, COUNT_KEYS, risk_known) for a in tally.apps.values()),
                   key=lambda a: ((a["app_display_name"] or "").lower(), a["app_id"] or ""))
     c = tally.counts
     readable = status == "read"
 
     def when(value):
         return value if readable else None
+
+    def risk(value):
+        return when(value) if risk_known else None
 
     summary = {
         # --- what was checked ---
@@ -240,11 +250,11 @@ def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, compl
         ),
         "conditional_access_failures": when(c["conditional_access_failures"]),
         # --- which sign-ins Entra rated risky ---
-        "risk_levels_available": when(None if tally.total == 0 else tally.risk_hidden < tally.total),
-        "risky_sign_ins": when(c["risky"]),
-        "risky_sign_ins_by_level": when(sorted_counts(tally.levels)),
-        "risky_sign_ins_by_state": when(sorted_counts(tally.states)),
-        "users_with_risky_sign_ins": when(sum(1 for u in users if u["risky"])),
+        "risk_levels_available": when(risk_levels_available),
+        "risky_sign_ins": risk(c["risky"]),
+        "risky_sign_ins_by_level": risk(sorted_counts(tally.levels)),
+        "risky_sign_ins_by_state": risk(sorted_counts(tally.states)),
+        "users_with_risky_sign_ins": risk(sum(1 for u in users if u["risky"])),
         # --- the sign-ins listed one by one ---
         "exception_sign_ins": when(tally.exceptions_total),
         "exception_sign_ins_listed": when(len(tally.exceptions)),
@@ -291,7 +301,7 @@ def collect(client: AzureRestClient, collector: Collector, window: Dict[str, Any
     start = window["start"]
     # beta: v1.0 has no authenticationRequirement or authenticationDetails. Interactive sign-ins only.
     path = f"/auditLogs/signIns?$filter=createdDateTime ge {start}&$top=1000"
-    tally, complete, truncated = Tally(), True, False
+    tally, complete, truncated, status = Tally(), True, False, "read"
     try:
         for page in client.graph_pages(path, "beta"):
             for s in page:
@@ -300,15 +310,15 @@ def collect(client: AzureRestClient, collector: Collector, window: Dict[str, Any
                 truncated = True
                 break
     except Exception as exc:  # noqa: BLE001 — boundary: record, keep the pages read
-        collector.record("graph.auditLogs.signIns.get(beta)", exc)
         complete = False
-    status = "read"
-    if not complete:
-        message = (collector.failures[-1].get("message") or "").lower()
-        if NOT_LICENSED_MARKER in message:
+        # No P1/P2 is the tenant's state, not a failed read: the figures stay null and the run succeeds.
+        if NOT_LICENSED_MARKER in str(exc).lower():
+            logger.warning("Sign-in logs need Entra ID P1 or P2: %s", exc)
             status = "not_licensed"
-        elif tally.total == 0:
-            status = "not_read"
+        else:
+            collector.record("graph.auditLogs.signIns.get(beta)", exc)
+            if tally.total == 0:
+                status = "not_read"
     if truncated:
         collector.record("graph.auditLogs.signIns.get(beta)", RuntimeError(
             f"stopped after {SIGN_IN_LIMIT} sign-ins; shorten {LOOKBACK_ENV}"))

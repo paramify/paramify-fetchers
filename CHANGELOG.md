@@ -20,9 +20,11 @@ schemas and the `paramify` CLI — not the internal code.
   the tenant, per user and per app; only the exceptions (successful single-factor,
   no Conditional Access, risky) are listed one by one, at most 1000. Reads the beta
   `/auditLogs/signIns`, since v1.0 has no `authenticationRequirement` or
-  `authenticationDetails`. Refused or unlicensed logs leave every count null. A
-  certificate counts as phishing-resistant only when it alone satisfied MFA, and
-  any client but a browser or modern app counts as legacy authentication.
+  `authenticationDetails`. Refused or unlicensed logs leave every count null; a
+  tenant without Entra ID P1 or P2 reads `not_licensed` and isn't a failed run.
+  Without P2 the risky sign-in figures read null, not 0. A certificate counts as
+  phishing-resistant only when it alone satisfied MFA, and any client but a
+  browser or modern app counts as legacy authentication.
   `_shared/azure_rest.py` gains `graph_pages` and `graph_list` for paged Graph
   reads on v1.0 or beta.
 - **Oracle Cloud Infrastructure category** (`fetchers/oci/`, fifteen

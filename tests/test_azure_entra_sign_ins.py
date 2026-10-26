@@ -10,6 +10,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER = REPO_ROOT / "fetchers" / "azure" / "entra_sign_ins" / "fetcher.py"
@@ -174,12 +175,13 @@ def test_denied_sign_in_logs_read_not_read_with_null_figures(monkeypatch):
         assert s[key] is None, key
 
 
-def test_unlicensed_tenant_reads_not_licensed(monkeypatch):
+def test_unlicensed_tenant_reads_not_licensed_and_is_not_a_failure(monkeypatch):
     collector = _collector()
     _, s = sign_ins.collect(FakeClient([SIGN_INS], error=NOT_LICENSED), collector, _window(monkeypatch))
     assert s["sign_in_logs"] == "not_licensed"
-    assert s["total_sign_ins"] is None
-    assert not collector.ok
+    assert s["sign_ins_complete"] is False
+    assert s["total_sign_ins"] is None and s["risky_sign_ins"] is None
+    assert collector.ok
 
 
 def test_a_failed_later_page_keeps_the_read_pages_and_fails_the_run(monkeypatch):
@@ -198,11 +200,39 @@ def test_exceptions_are_capped(monkeypatch):
     assert s["exception_sign_ins_listed"] == 2
 
 
-def test_hidden_risk_levels_mean_no_p2(monkeypatch):
+def test_hidden_risk_levels_leave_the_risk_figures_unknown(monkeypatch):
     hidden = [_sign_in(f"h{i}", "u-1", level="hidden", steps=[_step("Password"), _step("SMS")]) for i in range(3)]
-    _, s = sign_ins.collect(FakeClient([hidden]), _collector(), _window(monkeypatch))
+    hidden.append(_sign_in("h3", "u-2", level="hidden", state="atRisk", steps=[_step("Password"), _step("SMS")]))
+    results, s = sign_ins.collect(FakeClient([hidden]), _collector(), _window(monkeypatch))
     assert s["risk_levels_available"] is False
-    assert s["risky_sign_ins"] == 0
+    for key in ("risky_sign_ins", "risky_sign_ins_by_level", "risky_sign_ins_by_state", "users_with_risky_sign_ins"):
+        assert s[key] is None, key
+    assert {u["user_id"]: u["risky"] for u in results["users"]} == {"u-1": None, "u-2": None}
+    assert s["total_sign_ins"] == 4
+
+
+def test_a_hidden_level_flagged_by_its_state_counts_as_level_none(monkeypatch):
+    rated = [_sign_in("p1", "u-1", steps=[_step("Password"), _step("SMS")]),
+             _sign_in("p2", "u-1", level="hidden", state="atRisk", steps=[_step("Password"), _step("SMS")])]
+    _, s = sign_ins.collect(FakeClient([rated]), _collector(), _window(monkeypatch))
+    assert s["risk_levels_available"] is True
+    assert s["risky_sign_ins_by_level"] == {"none": 1}
+
+
+def test_ip_address_is_kept_only_on_risky_sign_ins():
+    assert sign_ins.sign_in_record(_sign_in("r", "u", level="high"))["ip_address"] == "203.0.113.10"
+    single = _sign_in("s", "u", requirement="singleFactorAuthentication", steps=[_step("Password")])
+    assert sign_ins.sign_in_record(single)["ip_address"] is None
+
+
+def test_a_sign_in_with_no_user_id_counts_in_totals_only(monkeypatch):
+    unknown = _sign_in("x1", "nobody", error=50034, requirement="singleFactorAuthentication",
+                       steps=[_step("Password", ok=False)])
+    unknown["userId"] = ""
+    results, s = sign_ins.collect(FakeClient([SIGN_INS[:2] + [unknown]]), _collector(), _window(monkeypatch))
+    assert s["total_sign_ins"] == 3 and s["failed_sign_ins"] == 1
+    assert s["users_signing_in"] == 1
+    assert [u["user_id"] for u in results["users"]] == ["u-1"]
 
 
 def test_an_empty_lookback_leaves_ratios_and_risk_unknown(monkeypatch):
@@ -250,6 +280,29 @@ def test_reading_stops_at_the_limit_and_fails_the_run(monkeypatch, tmp_path):
     s = evidence["summary"]
     assert s["sign_ins_truncated"] is True and s["sign_ins_complete"] is False
     assert s["total_sign_ins"] == 4  # the first page, newest first
+
+
+def test_an_unlicensed_tenant_succeeds_with_null_figures(monkeypatch, tmp_path):
+    code, evidence, status = _main(monkeypatch, tmp_path, FakeClient([SIGN_INS], error=NOT_LICENSED))
+    assert code == 0 and status is None
+    assert evidence["summary"]["sign_in_logs"] == "not_licensed"
+    assert evidence["summary"]["total_sign_ins"] is None
+
+
+def test_graph_pages_follow_next_links_on_the_requested_version(monkeypatch):
+    monkeypatch.delenv("AZURE_AUTHORITY_HOST", raising=False)
+    base = "https://graph.microsoft.com"
+    pages = {f"{base}/beta/things?$top=2": {"value": [1, 2], "@odata.nextLink": f"{base}/beta/things?page=2"},
+             f"{base}/beta/things?page=2": {"value": [3]}}
+
+    class Session:
+        def get(self, url, headers=None, params=None, timeout=None):
+            return SimpleNamespace(status_code=200, json=lambda: pages[url])
+
+    token = SimpleNamespace(token="t", expires_on=9_999_999_999)
+    client = sign_ins.AzureRestClient(SimpleNamespace(get_token=lambda scope: token), Session())
+    assert list(client.graph_pages("/things?$top=2", "beta")) == [[1, 2], [3]]
+    assert client.graph_list("/things?$top=2", "beta") == [1, 2, 3]
 
 
 def test_no_credential_writes_evidence_and_fails(monkeypatch, tmp_path):
