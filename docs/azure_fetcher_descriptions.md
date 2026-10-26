@@ -139,7 +139,7 @@ Summary fields:
 - `active_self_review_definitions` — List of active review series names where users review their own access (no reviewers named on the series; for a multi-stage series, none named on any of its stages, since Graph then ignores the series' own list)
 
 **Are the reviews running on schedule?**
-- `active_recurring_definitions_without_completed_cycle` — List of active recurring review series names with no completed run yet (a run is completed when its status is Completed, AutoReviewed, Applying or Applied)
+- `active_recurring_definitions_without_completed_cycle` — List of active recurring review series names with no completed cycle yet (a cycle is completed when every run that started that day has ended: status Completed, AutoReviewed, Applying or Applied, with an end time)
 - `max_days_since_last_completed_cycle` — Days: the longest time since any active recurring review series' latest completed cycle ended; null if none has completed a cycle
 
 **What did the last cycle decide, and was it applied?**
@@ -361,13 +361,14 @@ Short Description: Shows every Entra ID group's members and owners, which groups
 
 Script: fetchers/azure/entra_groups/fetcher.py (uses the shared Graph helpers fetchers/azure/_shared/entra_graph.py)
 
-Access: Microsoft Graph GroupMember.Read.All and User.Read.All, or Directory.Read.All (the Directory Readers role covers it). Optional: Member.Read.Hidden; without it, the members of groups with hidden membership read unknown. Optional: Application.Read.All; without it, groups_with_only_disabled_owners reads null when any owner is an app or managed identity. Optional: Organization.Read.All; without it, no tenant name or domain is recorded.
+Access: Microsoft Graph GroupMember.Read.All, or Directory.Read.All (the Directory Readers role covers it), which also covers every optional permission here but Member.Read.Hidden. Optional: User.Read.All; without it, users come back as an id only, so `member_details_readable` and `owner_details_readable` read false and the guest, disabled-user and disabled-owner figures read null. Optional: Member.Read.Hidden; without it, the members of groups with hidden membership read unknown. Optional: Application.Read.All; without it, `groups_with_only_disabled_owners` reads null when any owner is an app or managed identity. Optional: Organization.Read.All; without it, no tenant name or domain is recorded.
 
 Commands Executed:
 - Microsoft Graph `GET /organization` — the tenant's name and domain
 - Microsoft Graph `GET /groups`, expanding members — every group, how its membership is managed, and its members
-- Microsoft Graph `GET /groups`, expanding owners — who owns each group
-- Microsoft Graph `GET /groups/{id}/members` and `GET /groups/{id}/owners` on the beta endpoint (only when an expansion returned 20, its limit) — the whole list; beta because v1.0 leaves out service principals
+- Microsoft Graph `GET /groups`, expanding owners — who owns each group (Graph allows one expansion per request)
+- Microsoft Graph `GET /groups/{id}/members` — a group's whole member list when the expansion stopped at its limit of 20 (beta, since v1.0 leaves out service principals)
+- Microsoft Graph `GET /groups/{id}/owners` — a group's whole owner list when the expansion stopped at its limit of 20 (beta, as for members)
 
 Output: `azure_entra_groups_<tenant>.json` — each group with its kind, whether it can hold directory roles, how its membership is managed, and its members and owners.
 
@@ -377,7 +378,7 @@ Summary fields:
 - `total_groups` — Number of groups in the tenant; a group that is neither security- nor mail-enabled (rare) is in none of the four kind counts, so the four may not add up to the total
 - `groups_readable` — True if the whole group list was read; false if any page failed, and every count reads null, since a partial list would pass for the whole tenant
 - `members_readable` — True if every group's members were read, apart from `hidden_membership_groups_unread`; false if any member read failed, and the member fields read null
-- `member_details_readable` — True if every user member came back with a sign-in name, account state and guest status; false if members couldn't be read or any one user came back without them (Graph returns users as an id only when User.Read.All isn't granted), and the guest and disabled-user fields then read null for the whole tenant
+- `member_details_readable` — True if every user member came back with its guest status and account state; false if members couldn't be read or any one user came back without its guest status or account state (Graph returns users as an id only when User.Read.All isn't granted, and older accounts can have no guest status). A missing guest status nulls the guest fields for the whole tenant, and a missing account state nulls the disabled-user field
 - `owners_readable` — True if every group's owners (the users or service principals who can manage the group) were read; false if any owner read failed, and the owner fields read null
 - `owner_details_readable` — True if owners were read and every owner came back with its account state (enabled or disabled); false if not (User.Read.All or Application.Read.All isn't granted), and `groups_with_only_disabled_owners` reads null
 
@@ -390,7 +391,7 @@ Summary fields:
 **Which groups can hold directory roles?**
 - `role_assignable_groups` — Number of groups that can be assigned an Entra directory role (only Privileged Role Administrators and Global Administrators can change their membership)
 - `role_assignable_groups_without_owner` — Number of role-assignable groups with no owner; null if owners couldn't be read
-- `role_assignable_groups_with_guest_members` — Number of role-assignable groups with at least one guest user as a member; null if member details couldn't be read
+- `role_assignable_groups_with_guest_members` — Number of role-assignable groups with at least one guest user as a member; null if any user member's guest status couldn't be read
 - `users_in_role_assignable_groups` — Number of distinct users who are direct members of a role-assignable group; null if members couldn't be read
 
 **How is membership managed?**
@@ -411,8 +412,8 @@ Summary fields:
 **Who is in them?**
 - `total_direct_memberships` — Number of direct member entries across all groups (a user in three groups counts three times); null if members couldn't be read
 - `empty_groups` — Number of groups with no members; null if members couldn't be read
-- `groups_with_guest_members` — Number of groups with at least one guest user as a member; null if member details couldn't be read
-- `groups_with_disabled_user_members` — Number of groups with at least one disabled user as a member; null if member details couldn't be read
+- `groups_with_guest_members` — Number of groups with at least one guest user as a member; null if any user member's guest status couldn't be read
+- `groups_with_disabled_user_members` — Number of groups with at least one disabled user as a member; null if any user member's account state couldn't be read
 - `groups_with_nested_groups` — Number of groups with another group as a direct member; null if members couldn't be read
 - `groups_with_service_principal_members` — Number of groups with an app or managed identity as a direct member; null if members couldn't be read
 
@@ -505,24 +506,24 @@ Summary fields:
 **Who holds a privileged role right now, and for how long?**
 - `active_assignments` — Number of active assignments (a role held now) across all directory roles, including activations of an eligible assignment
 - `active_privileged_assignments` — Number of active assignments to privileged roles
-- `active_privileged_by_standing` — Number of active privileged-role assignments of each kind:
-  - permanent (assigned with no end date: standing access; a group whose membership PIM for Groups manages also reads permanent when its role has no end date)
+- `active_privileged_by_standing` — Number of active privileged-role assignments for each kind:
+  - permanent (assigned with no end date, so standing access; a group whose membership PIM for Groups manages also reads permanent when its role has no end date)
   - pim_activated (an eligible holder activated it, so it ends after the activation time)
   - time_bound (assigned directly with an end date)
 - `permanent_active_privileged_assignments` — Number of active privileged-role assignments with no end date that were not activated through PIM
-- `permanent_active_privileged_user_assignments` — Number of permanent active privileged-role assignments held by users (not groups or apps)
+- `permanent_active_privileged_user_assignments` — Number of permanent active privileged-role assignments held by users (not groups or apps); null if a holder's type wasn't returned
 - `principals_with_permanent_privileged_access` — Number of distinct users, groups and apps holding a privileged role permanently
 - `privileged_roles_with_permanent_active_holders` — List of privileged role names held permanently by at least one user, group or app
 - `global_administrator_permanent_active` — Number of permanent active Global Administrator assignments
 - `privileged_assignments_scoped_below_tenant` — Number of eligible and active assignments of privileged roles scoped to an administrative unit or a single object, which the privileged counts leave out
 
 **Does activating a privileged role require MFA, a reason, approval and a time limit?**
-- `privileged_roles_activation_without_mfa_or_auth_context` — List of privileged role names whose activation needs neither MFA nor a Conditional Access authentication context
-- `privileged_roles_activation_without_justification` — List of privileged role names whose activation doesn't ask for a reason
-- `privileged_roles_activation_without_approval` — List of privileged role names whose activation doesn't need someone's approval
-- `max_privileged_activation_hours` — Hours: the longest maximum activation time set on any privileged role; null if no privileged role sets one
-- `privileged_roles_allowing_permanent_active_assignment` — List of privileged role names whose policy lets an admin assign the role permanently as active, with no end date
-- `privileged_roles_allowing_permanent_eligible_assignment` — List of privileged role names whose policy lets an admin make someone permanently eligible, with no end date
+- `privileged_roles_activation_without_mfa_or_auth_context` — List of privileged role names whose activation needs neither MFA nor a Conditional Access authentication context; null if a privileged role's policy sets no authentication context and didn't say whether activation needs MFA
+- `privileged_roles_activation_without_justification` — List of privileged role names whose activation doesn't ask for a reason; null if a privileged role's policy didn't say whether activation needs one
+- `privileged_roles_activation_without_approval` — List of privileged role names whose activation doesn't need someone's approval; null if a privileged role's policy didn't say whether activation needs approval
+- `max_privileged_activation_hours` — Hours: the longest maximum activation time set on any privileged role; null if a privileged role's policy didn't give a maximum activation time, or no privileged role's policy was read
+- `privileged_roles_allowing_permanent_active_assignment` — List of privileged role names whose policy lets an admin assign the role permanently as active, with no end date; null if a privileged role's policy didn't say whether an active assignment needs an end date
+- `privileged_roles_allowing_permanent_eligible_assignment` — List of privileged role names whose policy lets an admin make someone permanently eligible, with no end date; null if a privileged role's policy didn't say whether an eligible assignment needs an end date
 
 
 ### azure_entra_privileged_roles
@@ -614,7 +615,7 @@ Short Description: Shows how each non-user account in Entra ID signs in, whether
 
 Script: fetchers/azure/entra_service_principals/fetcher.py (uses the shared Graph helpers fetchers/azure/_shared/entra_graph.py)
 
-Access: Microsoft Graph Application.Read.All, or the Directory Readers role. Optional: DelegatedPermissionGrant.Read.All (or Directory.Read.All; the Directory Readers role covers both); without it, the delegated grant fields read null. Optional: User.Read.All (or Directory.Read.All; the Directory Readers role covers it); without it, user owners come back as an id only, so their names and account state read null and service_principals_with_only_disabled_owners reads null.
+Access: Microsoft Graph Application.Read.All, or the Directory Readers role. Optional: DelegatedPermissionGrant.Read.All (or Directory.Read.All; the Directory Readers role covers both); without it, the delegated grant fields read null. Optional: User.Read.All (or Directory.Read.All; the Directory Readers role covers it); without it, user owners come back as an id only, so their names and account state read null and `service_principals_with_only_disabled_owners` reads null. Optional: Organization.Read.All; without it, the tenant's name and domain read null.
 
 Commands Executed:
 - Microsoft Graph `GET /organization` — the tenant's name and domain
@@ -634,7 +635,7 @@ Summary fields:
 - `total_service_principals` — Number of service principals (apps, managed identities and other non-user accounts) in the tenant
 - `disabled_service_principals` — Number of service principals that are disabled
 - `owners_readable` — True if the owners (the users or service principals listed as able to manage an app registration or service principal) of every app registration and service principal were read; false if any owner read failed, and every count that needs owners reads null
-- `owner_details_readable` — True if owners were read and every owner of a service principal that can have one (any service principal except Microsoft's own apps and managed identities), or of an app registration with no service principal, came back with its account state (enabled or disabled); false if not, and `service_principals_with_only_disabled_owners` reads null
+- `owner_details_readable` — True if owners were read and every service principal that can have one (any service principal except Microsoft's own apps and managed identities), and every app registration with no service principal, either has an owner known to be enabled or has every owner's account state (enabled or disabled); false if not, and `service_principals_with_only_disabled_owners` reads null
 - `application_permissions_readable` — True if every service principal's application permissions (app roles on an API, used with no user signed in) and their names were read; false if any read failed, and the application permission fields read null
 - `delegated_grants_readable` — True if the delegated grants (permissions to call an API on behalf of a signed-in user) were read; false if they couldn't be (usually DelegatedPermissionGrant.Read.All isn't granted), and the delegated grant fields read null
 
@@ -686,10 +687,10 @@ Summary fields:
 - `service_principals_with_only_disabled_owners` — Number of service principals that can have an owner, have at least one, and whose every owner (on the service principal or its app registration) is a disabled account; null if owners or their account state couldn't be read
 
 **What API permissions do non-Microsoft accounts hold?**
-- `service_principals_with_application_permissions` — Number of service principals, other than Microsoft's own apps, holding at least one application permission; null if application permissions couldn't be read
-- `application_permission_assignments` — Number of application permissions held by service principals other than Microsoft's own apps; null if application permissions couldn't be read
-- `unnamed_graph_application_permissions` — Number of Microsoft Graph application permissions (or ones whose API is unknown), held by service principals other than Microsoft's own apps, whose name couldn't be found in the API's app roles, so whether each is privileged is unknown; null if application permissions couldn't be read
-- `unnamed_other_application_permissions` — Number of application permissions on APIs other than Microsoft Graph, held by service principals other than Microsoft's own apps and other than default access (no named role), whose name couldn't be found in the API's app roles; an unnamed permission on another API never counts as privileged; null if application permissions couldn't be read
+- `service_principals_with_application_permissions` — Number of service principals, other than Microsoft's own apps, holding at least one application permission or default-access assignment (access to an API with no named app role); null if application permissions couldn't be read
+- `application_permission_assignments` — Number of application permissions and default-access assignments held by service principals other than Microsoft's own apps; null if application permissions couldn't be read
+- `unnamed_graph_application_permissions` — Number of Microsoft Graph application permissions (or ones whose API is unknown), held by service principals other than Microsoft's own apps, whose name couldn't be found in the API's app roles, so whether each is privileged (on the list in `privileged_application_graph_permissions_checked`) is unknown; null if application permissions couldn't be read
+- `unnamed_other_application_permissions` — Number of application permissions on APIs other than Microsoft Graph, held by service principals other than Microsoft's own apps and other than default-access assignments, whose name couldn't be found in the API's app roles; an unnamed permission on another API never counts as privileged; null if application permissions couldn't be read
 - `service_principals_with_delegated_grants` — Number of service principals, other than Microsoft's own apps, holding at least one delegated grant; null if delegated grants couldn't be read
 - `delegated_permission_grants` — Number of delegated grants held by service principals other than Microsoft's own apps; null if delegated grants couldn't be read
 - `admin_consented_delegated_grants` — Number of delegated grants, held by service principals other than Microsoft's own apps, that an admin consented to for every user; null if delegated grants couldn't be read
@@ -708,7 +709,7 @@ Short Description: Shows how users actually sign in: whether each sign-in requir
 
 Script: fetchers/azure/entra_sign_ins/fetcher.py (uses the shared REST client fetchers/azure/_shared/azure_rest.py)
 
-Access: Microsoft Graph AuditLog.Read.All and an Entra ID P1 or P2 licence. Optional: Policy.Read.ConditionalAccess (or Policy.Read.All); without it, Graph leaves out which Conditional Access policies applied to each sign-in and they read null. Optional: Organization.Read.All; without it, no tenant name or domain is recorded. Risk levels need Entra ID P2; without it they read hidden.
+Access: Microsoft Graph AuditLog.Read.All and an Entra ID P1 or P2 licence. Optional: Policy.Read.ConditionalAccess (or Policy.Read.All); without it, Graph leaves out which Conditional Access policies applied to each sign-in and they read null. Optional: Organization.Read.All; without it, no tenant name or domain is recorded. Risk levels need Entra ID P2; without it the risky sign-in figures read null.
 
 Commands Executed:
 - Microsoft Graph `GET /organization` — the tenant's name and domain
@@ -719,7 +720,7 @@ Output: `azure_entra_sign_ins_<tenant>.json` — sign-in counts per user and per
 Summary fields:
 
 **What was checked?**
-- `sign_in_logs` — Whether the sign-in logs were read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused or failed before any sign-in was read)
+- `sign_in_logs` — Whether the sign-in logs were read: read, not_licensed (the tenant has no Entra ID P1 or P2, so there are no logs to read; the run still succeeds) or not_read (refused or failed before any sign-in was read)
 - `lookback_days` — Days of sign-ins read, ending at the run (7 unless `ENTRA_SIGN_IN_LOOKBACK_DAYS` sets it, at most 30)
 - `window_start` — Time of the lookback's start, in UTC
 - `window_end` — Time of the lookback's end (the run), in UTC
@@ -728,11 +729,11 @@ Summary fields:
 - `total_sign_ins` — Number of interactive sign-ins in the lookback: a user signing in themselves. Non-interactive sign-ins (a client refreshing a token for a user), service principal and managed identity sign-ins aren't read; null if the logs weren't read
 - `successful_sign_ins` — Number of sign-ins that succeeded (error code 0); null if the logs weren't read
 - `failed_sign_ins` — Number of sign-ins with a non-zero error code. That includes interrupted steps that are a normal part of a successful sign-in, such as the MFA prompt (50074) or keep me signed in (50140), so it isn't a count of failed attempts; null if the logs weren't read
-- `users_signing_in` — Number of distinct users with at least one sign-in; null if the logs weren't read
+- `users_signing_in` — Number of distinct users with at least one sign-in. A sign-in with no user id, such as an attempt at a name that doesn't exist, counts in the totals but not here; null if the logs weren't read
 - `apps_signed_in_to` — Number of distinct apps signed in to; null if the logs weren't read
 
 **Did each sign-in require and pass MFA?**
-- `successful_single_factor_sign_ins` — Number of successful sign-ins that required only one factor (a password alone, for example); null if the logs weren't read
+- `successful_single_factor_sign_ins` — Number of successful sign-ins that required only one factor (a password alone, for example). This and `multi_factor_percentage` follow what Entra required for the sign-in (authenticationRequirement), not the method the user presented, so a passwordless sign-in that no policy required MFA for counts as single-factor; null if the logs weren't read
 - `successful_multi_factor_sign_ins` — Number of successful sign-ins that required and passed MFA; null if the logs weren't read
 - `multi_factor_percentage` — Percentage of successful sign-ins that passed MFA = `successful_multi_factor_sign_ins` / `successful_sign_ins` × 100 (a whole number, 0–100); null when `successful_sign_ins` is 0 or the logs weren't read
 - `users_with_single_factor_sign_ins` — Number of users with at least one successful single-factor sign-in; null if the logs weren't read
@@ -751,10 +752,10 @@ Summary fields:
 
 **Which sign-ins did Entra rate risky?**
 - `risk_levels_available` — True if Entra ID Protection rated the sign-ins (the tenant has Entra ID P2); false if every risk level read hidden; null if the logs weren't read or there were no sign-ins
-- `risky_sign_ins` — Number of risky sign-ins: rated low, medium or high risk, or with a risk state of at risk or confirmed compromised; null if the logs weren't read
-- `risky_sign_ins_by_level` — Number of risky sign-ins at each risk level (low, medium, high, or none for one flagged only by its risk state); null if the logs weren't read
-- `risky_sign_ins_by_state` — Number of risky sign-ins in each risk state (for example atRisk, remediated, dismissed); null if the logs weren't read
-- `users_with_risky_sign_ins` — Number of users with at least one risky sign-in; null if the logs weren't read
+- `risky_sign_ins` — Number of risky sign-ins: rated low, medium or high risk, or with a risk state of at risk or confirmed compromised; null if the logs weren't read or `risk_levels_available` is false (no Entra ID P2, so risk is unknown, not none)
+- `risky_sign_ins_by_level` — Number of risky sign-ins at each risk level (low, medium, high, or none for one flagged only by its risk state); null if the logs weren't read or `risk_levels_available` is false
+- `risky_sign_ins_by_state` — Number of risky sign-ins in each risk state (for example atRisk, remediated, dismissed); null if the logs weren't read or `risk_levels_available` is false
+- `users_with_risky_sign_ins` — Number of users with at least one risky sign-in; null if the logs weren't read or `risk_levels_available` is false
 
 **Which sign-ins are listed one by one?**
 - `exception_sign_ins` — Number of exceptions: successful single-factor sign-ins, successful sign-ins no Conditional Access policy applied to, and risky sign-ins; null if the logs weren't read
@@ -894,7 +895,7 @@ Summary fields:
 - `total_role_assignments` — Number of role assignments at subscription scope or above (made on the subscription, or inherited from a management group or the tenant root)
 - `distinct_principals` — Number of distinct users, groups and apps with a role assignment at subscription scope or above
 - `unresolved_role_definitions` — Number of role assignments at subscription scope or above whose role name couldn't be found (usually a custom role defined on a management group)
-- `pim_available` — True if the tenant has PIM; false if Azure refused a PIM read because the tenant has no Entra ID P2 or ID Governance licence (the PIM reads that succeeded are kept); null if a PIM read failed for another reason, which also fails the run
+- `pim_available` — True if the tenant has PIM; false if Azure refused a PIM read because the tenant has no Entra ID P2 or ID Governance licence, even when another PIM read failed (the PIM reads that succeeded are kept); null if a PIM read failed for another reason and none was refused for the licence. Any PIM failure other than the licence refusal fails the run
 
 **Who holds over-broad access at subscription scope or above?**
 - `over_broad_builtin_assignments` — Number of role assignments at subscription scope or above that grant an over-broad built-in role (Owner, Contributor, User Access Administrator or Role Based Access Control Administrator)
@@ -969,19 +970,19 @@ Summary fields:
 - `assignments_without_pim_schedule` — Number of role assignments at any scope that PIM lists no schedule for; these read permanent; null if the PIM schedules couldn't be read
 
 **Who can activate an over-broad role on demand?**
-- `eligible_role_assignments` — Number of PIM-eligible assignments (a user, group or app that can activate a role when needed) at any scope; null if they couldn't be read
+- `total_eligible_role_assignments` — Number of PIM-eligible assignments (a user, group or app that can activate a role when needed) at any scope; null if they couldn't be read
 - `eligible_over_broad_assignments` — Number of PIM-eligible assignments to over-broad roles at any scope; null if they couldn't be read
 - `permanently_eligible_over_broad_assignments` — Number of PIM-eligible assignments to over-broad roles with no end date; null if they couldn't be read
 - `principals_eligible_for_over_broad_roles` — Number of distinct users, groups and apps eligible for an over-broad role; null if they couldn't be read
 
 **Does activating an over-broad role require MFA, a reason, approval and a time limit?**
 - `over_broad_role_policies_read` — List of over-broad role names whose PIM settings on the subscription were read; null if they couldn't be read or PIM isn't available. Only the subscription's settings are read: an eligibility on a management group or resource group follows that scope's own settings, which aren't read
-- `over_broad_roles_activation_without_mfa_or_auth_context` — List of over-broad role names whose PIM activation on the subscription needs neither MFA nor a Conditional Access authentication context (only PIM's activation rule is read; MFA that Conditional Access requires at sign-in isn't checked); null if any of the four over-broad roles' settings weren't read, or if PIM isn't available
-- `over_broad_roles_activation_without_justification` — List of over-broad role names whose PIM activation on the subscription doesn't ask for a reason; null if any of the four over-broad roles' settings weren't read, or if PIM isn't available
-- `over_broad_roles_activation_without_approval` — List of over-broad role names whose PIM activation on the subscription doesn't need someone's approval; null if any of the four over-broad roles' settings weren't read, or if PIM isn't available
-- `max_over_broad_activation_hours` — Hours: the longest maximum PIM activation time set on any over-broad role on the subscription; null if no over-broad role sets one, if any of the four over-broad roles' settings weren't read, or if PIM isn't available
-- `over_broad_roles_allowing_permanent_active_assignment` — List of over-broad role names whose PIM settings let an admin assign the role through PIM with no end date; null if any of the four over-broad roles' settings weren't read, or if PIM isn't available
-- `over_broad_roles_allowing_permanent_eligible_assignment` — List of over-broad role names whose PIM settings let an admin make someone eligible with no end date; null if any of the four over-broad roles' settings weren't read, or if PIM isn't available
+- `over_broad_roles_activation_without_mfa_or_auth_context` — List of over-broad role names whose PIM activation on the subscription needs neither MFA nor a Conditional Access authentication context (only PIM's activation rule is read; MFA that Conditional Access requires at sign-in isn't checked). A role with no authentication-context rule is judged on MFA alone, so it's listed when MFA is off; null if any of the four over-broad roles' settings weren't read, if a role without an authentication context lacks the MFA rule, or if PIM isn't available
+- `over_broad_roles_activation_without_justification` — List of over-broad role names whose PIM activation on the subscription doesn't ask for a reason; null if any of the four over-broad roles' settings weren't read or lack the rule this reads, or if PIM isn't available
+- `over_broad_roles_activation_without_approval` — List of over-broad role names whose PIM activation on the subscription doesn't need someone's approval; null if any of the four over-broad roles' settings weren't read or lack the rule this reads, or if PIM isn't available
+- `max_over_broad_activation_hours` — Hours: the longest maximum PIM activation time set on any over-broad role on the subscription; null if any of the four over-broad roles' settings weren't read, set no maximum or set one that doesn't parse as a duration, or if PIM isn't available
+- `over_broad_roles_allowing_permanent_active_assignment` — List of over-broad role names whose PIM settings let an admin assign the role through PIM with no end date; null if any of the four over-broad roles' settings weren't read or lack the rule this reads, or if PIM isn't available
+- `over_broad_roles_allowing_permanent_eligible_assignment` — List of over-broad role names whose PIM settings let an admin make someone eligible with no end date; null if any of the four over-broad roles' settings weren't read or lack the rule this reads, or if PIM isn't available
 
 
 ## Logging and monitoring
@@ -1354,7 +1355,10 @@ Commands Executed:
 - `GET Microsoft.AlertsManagement/alertsSummary` — Azure's own count of alerts in the 30 days, to prove none were missed
 - `GET Microsoft.AlertsManagement/alerts` — every alert fired in the 30 days Azure keeps them
 - `GET {alert id}/history` (per alert) — who acknowledged and closed it, when, and whether its action groups ran
-- `GET Microsoft.Insights/metricAlerts`, `scheduledQueryRules`, `activityLogAlerts` and `GET Microsoft.AlertsManagement/smartDetectorAlertRules` — every alert rule, to count its fires
+- `GET Microsoft.Insights/metricAlerts` — metric alert rules, to count their fires
+- `GET Microsoft.Insights/scheduledQueryRules` — log search alert rules, to count their fires
+- `GET Microsoft.AlertsManagement/smartDetectorAlertRules` — smart detector alert rules, to count their fires
+- `GET Microsoft.Insights/activityLogAlerts` — activity log alert rules, to count their fires
 
 Output: `azure_monitor_fired_alerts_<subscription>.json` — each fired alert with its rule, severity, state, times and history, and each alert rule with how often and when it last fired.
 
@@ -1366,7 +1370,7 @@ Summary fields:
 - `alerts_summary_total` — Number of alerts in the window by Azure's own alert summary; null if it couldn't be read or Microsoft.AlertsManagement isn't registered
 - `all_alerts_listed` — True if at least `alerts_summary_total` alerts were listed; false if fewer were; null if the summary or the alert list couldn't be read, or Microsoft.AlertsManagement isn't registered
 - `alert_histories_read` — Number of alerts whose state history was read; null if the alert list wasn't read
-- `alert_histories_unread` — Number of alerts whose state history couldn't be read (deleted or refused), so who acknowledged or closed them is unknown; null if the alert list wasn't read
+- `alert_histories_unread` — Number of alerts whose state history couldn't be read (deleted, refused or failed), so who acknowledged or closed them is unknown; null if the alert list wasn't read
 - `provider_registration_status` — Whether Microsoft.AlertsManagement and Microsoft.Insights are registered on the subscription: registered, not_registered or unknown for each
 
 **What fired?**
@@ -1384,17 +1388,17 @@ Summary fields:
 - `alerts_acknowledged` — Number of alerts someone acknowledged, now or earlier in their history; null while any alert's history is unread (`alert_histories_unread` above 0), never a partial count; null if the alert list wasn't read
 - `alerts_closed` — Number of alerts in the Closed state; null if the alert list wasn't read
 - `alerts_closed_by_person` — Number of closed alerts whose closing change (the last change to Closed; an earlier close on an alert that was reopened doesn't count) was made by any actor other than System, which includes service principals and automation acting through the API as well as people; null while any alert's history is unread (`alert_histories_unread` above 0), never a partial count; null if the alert list wasn't read
-- `median_hours_to_close` — Number of hours from an alert firing to its closing change, the median across closed alerts with a readable history; null if none; null if the alert list wasn't read
-- `max_hours_to_close` — Number of hours from an alert firing to its closing change, the longest across closed alerts with a readable history; null if none; null if the alert list wasn't read
-- `oldest_open_alert_fired_at` — Time of firing of the oldest alert not in the Closed state; null if every alert is closed; null if the alert list wasn't read
+- `median_hours_to_close` — Number of hours from an alert firing to its closing change, the median across closed alerts whose history shows the closing change; null if no closed alert's history shows one, or the alert list wasn't read
+- `max_hours_to_close` — Number of hours from an alert firing to its closing change, the longest across closed alerts whose history shows the closing change; null if no closed alert's history shows one, or the alert list wasn't read
+- `oldest_open_alert_fired_at` — Time of firing of the oldest alert not in the Closed state; null if no alert is open, or the alert list wasn't read
 
 **Does every rule fire?**
-- `alert_rules_listed` — Number of listed alert rules: metric, log search, smart detector and activity log alert rules the subscription's rule lists return
-- `alert_rules_by_type` — Number of listed alert rules of each kind (metric, log_search, smart_detector, activity_log)
-- `enabled_alert_rules` — Number of listed alert rules that are enabled
+- `alert_rules_listed` — Number of listed alert rules: metric, log search, smart detector and activity log alert rules the subscription's rule lists return; null if a rule list failed, never a partial count
+- `alert_rules_by_type` — Number of listed alert rules of each kind (metric, log_search, smart_detector, activity_log); null if a rule list failed
+- `enabled_alert_rules` — Number of listed alert rules that are enabled; null if a rule list failed
 - `rules_that_fired` — Number of alert rules, listed or not, with at least one alert in the window; null if the alert list wasn't read (Microsoft.AlertsManagement not registered, or the list failed)
-- `enabled_rules_never_fired` — Number of enabled listed alert rules with no alert in the window; null if the alert list wasn't read
-- `rules_fired_not_listed` — Number of alert rules that fired an alert in the window but aren't in the subscription's rule lists: in another subscription, deleted, a kind the fetcher doesn't list (such as Prometheus rule groups or classic alert rules), or its rule list failed or its provider isn't registered; null if the alert list wasn't read
+- `enabled_rules_never_fired` — Number of enabled listed alert rules with no alert in the window; null if the alert list wasn't read or a rule list failed
+- `rules_fired_not_listed` — Number of alert rules that fired an alert in the window but aren't in the subscription's rule lists: in another subscription, deleted, a kind the fetcher doesn't list (such as Prometheus rule groups or classic alert rules), or its provider isn't registered; null if the alert list wasn't read or a rule list failed
 
 
 ### azure_network_flow_logs
@@ -1484,11 +1488,11 @@ Commands Executed:
 - `subscriptions.list()` — picks a subscription when none is set
 - `providers.get("Microsoft.Insights")` — tells "not registered" from "no settings"
 - Resource Graph `Resources` query — every resource; the run fails if the rows collected differ from Resource Graph's total
-- `diagnostic_settings_category.list()` (per resource) — which log, audit and metric categories it emits; about 14 resources a second with 4 workers, so roughly 25 minutes per 20,000 resources, within a 3600-second timeout
+- `diagnostic_settings_category.list()` (per resource) — which log, audit and metric categories it emits; about 14 resources a second with 4 workers, so roughly 25 minutes per 20,000 resources. That is this pass alone; the destination queries below run after it within the same 3600-second timeout
 - `diagnostic_settings.list()` (per log-emitting resource) — its settings and destinations
 - `GET {workspace id}` and `GET {workspace id}/tables` (per destination workspace) — its query id, and which tables are on the Basic or Auxiliary plan
-- KQL `union *` on each destination workspace (text in `results.ingestion_query`) — newest event time (TimeGenerated) and record count for each resource over the lookback. One query per workspace; it costs nothing on Analytics tables but scans them all, so a large workspace can take minutes (600-second wait), and a query that times out or hits a service limit fails the run. It leaves out tables written whatever a diagnostic setting says: AzureActivity, AzureMetrics, InsightsMetrics, Perf, Heartbeat, Syslog, Event and the Container Insights tables (ContainerLog, ContainerLogV2, ContainerInventory, ContainerNodeInventory, ContainerImageInventory, ContainerServiceLog and the Kube tables). Application Insights tables stay, since their rows are the component's own telemetry; a component whose linked workspace is also its destination reads arrived, whatever its setting does
-- KQL on each Basic or Auxiliary table (text in `results.basic_table_query`), only when `basic_logs_lookback_hours` is above 0 — newest event time and record count over that many hours for the tables union * skips; off by default because these queries bill per GB scanned. Custom (_CL) tables and the left-out tables above are never queried, and a table whose query fails stays unqueried without failing the run
+- KQL `union *` on each destination workspace (text in `results.ingestion_query`) — newest event time (TimeGenerated) and record count for each resource over the lookback. One query per workspace; it costs nothing on Analytics tables but scans them all, so a large workspace can take minutes. A query that hits a service limit fails the run. One that runs past the 600-second wait is retried up to 4 more times, and destinations are read one after another, so a slow destination can push the run past its 3600-second timeout. It leaves out tables written whatever a diagnostic setting says: AzureActivity, AzureMetrics, InsightsMetrics, Perf, Heartbeat, Syslog, Event and the Container Insights tables (ContainerLog, ContainerLogV2, ContainerInventory, ContainerNodeInventory, ContainerImageInventory, ContainerServiceLog and the Kube tables). Application Insights tables stay, since their rows are the component's own telemetry; a component whose linked workspace is also its destination reads arrived, whatever its setting does
+- KQL on each Basic or Auxiliary table through the `/search` endpoint, since `/query` refuses these tables (text in `results.basic_table_query`), only when `basic_logs_lookback_hours` is above 0 — newest event time and record count over that many hours for the tables union * skips; off by default because these queries bill per GB scanned. Custom (_CL) tables and the left-out tables above are never queried, and a table whose query fails stays unqueried without failing the run
 
 Output: `azure_resource_diagnostic_settings_<subscription>.json` — each resource with its diagnostic settings, where its logs go, which log and audit categories aren't exported, and per destination workspace whether its logs arrived (log_analytics_ingestion, last_ingested, ingested_in_window), plus each destination workspace's status, unqueried_tables and table_errors (the Basic or Auxiliary queries that failed) in log_analytics_destinations.
 
@@ -1496,7 +1500,7 @@ Summary fields:
 
 **Was every resource found and checked?**
 - `resources_enumerated` — Number of resources Resource Graph returned
-- `resource_graph_total_records` — Number of resources Resource Graph reported in total; must equal resources_enumerated, and the run fails if they differ, which proves no resource was missed; null if Resource Graph gave no total
+- `resource_graph_total_records` — Number of resources Resource Graph reported in total; must equal `resources_enumerated`, and the run fails if they differ, which proves no resource was missed; null if Resource Graph gave no total
 - `resource_graph_pages` — Number of Resource Graph result pages read
 - `child_services_synthesized` — Number of storage blob, file, queue and table services added to the inventory (Resource Graph doesn't list them)
 - `resources_evaluated` — Number of resources checked, including the added storage services
@@ -1510,13 +1514,13 @@ Summary fields:
 - `resources_emitting_logs` — Number of log-producing resources (resources whose type produces resource logs). A SQL server's master database counts like any database: its setting is where server-level auditing is exported, while the server itself has metrics only
 - `resources_with_enabled_log_setting` — Number of log-producing resources that export logs: they have a diagnostic setting with at least one destination (an empty destination id counts as none) and at least one enabled log category or category group
 - `resources_emitting_logs_without_setting` — Number of log-producing resources with no diagnostic setting exporting any log category
-- `log_setting_coverage_percentage` — Percentage of log-producing resources that export their logs = resources_with_enabled_log_setting / resources_emitting_logs × 100 (a whole number, 0–100); 0 when resources_emitting_logs is 0
+- `log_setting_coverage_percentage` — Percentage of log-producing resources that export their logs = `resources_with_enabled_log_setting` / `resources_emitting_logs` × 100 (a whole number, 0–100); 0 when `resources_emitting_logs` is 0
 - `uncovered_by_type` — Number of log-producing resources that don't export logs, for each resource type
 - `all_log_emitting_resources_covered` — True if every log-producing resource exports its logs and no resource read failed, including when there are none; false otherwise
 
 **Do the logs go to Log Analytics?**
 - `resources_sending_to_log_analytics` — Number of log-producing resources that export logs to a Log Analytics workspace
-- `log_analytics_coverage_percentage` — Percentage of log-producing resources that export logs to Log Analytics = resources_sending_to_log_analytics / resources_emitting_logs × 100 (a whole number, 0–100); 0 when resources_emitting_logs is 0
+- `log_analytics_coverage_percentage` — Percentage of log-producing resources that export logs to Log Analytics = `resources_sending_to_log_analytics` / `resources_emitting_logs` × 100 (a whole number, 0–100); 0 when `resources_emitting_logs` is 0
 
 **Were the destination workspaces read?**
 - `ingestion_lookback_days` — Number of days of records the workspace query looks back over
@@ -1530,14 +1534,14 @@ Summary fields:
 
 **Are the logs actually arriving?**
 - `resources_with_recent_ingestion` — Number of log-producing resources exporting to Log Analytics with recent ingestion: at least one record in a destination workspace, in a table that isn't left out, with an event time (TimeGenerated) in the lookback
-- `resources_without_recent_ingestion` — Number of log-producing resources exporting to Log Analytics with no record in the lookback, where every destination workspace was read in full or no longer exists. Read in full means queried, with no unqueried Basic or Auxiliary table that could hold the resource's logs: a storage service's own StorageBlobLogs, StorageFileLogs, StorageQueueLogs or StorageTableLogs, or for any other resource a resource-specific table, unless every setting sending there is explicitly in AzureDiagnostics mode; an unset mode counts as resource-specific. No record is not proof of a broken setting: an idle resource writes nothing and counts here too, and log_analytics_ingestion shows what did arrive. With basic_logs_lookback_hours above 0, Basic and Auxiliary tables are read over that many hours only, so a resource whose only Basic or Auxiliary records are older counts here
+- `resources_without_recent_ingestion` — Number of log-producing resources exporting to Log Analytics with no record in the lookback, where every destination workspace was read in full or no longer exists. Read in full means queried, with no unqueried Basic or Auxiliary table that could hold the resource's logs: a storage service's own StorageBlobLogs, StorageFileLogs, StorageQueueLogs or StorageTableLogs, or for any other resource a resource-specific table, unless every setting sending there is explicitly in AzureDiagnostics mode; an unset mode counts as resource-specific. No record is not proof of a broken setting: an idle resource writes nothing and counts here too, and `log_analytics_ingestion` shows what did arrive. With `basic_logs_lookback_hours` above 0, Basic and Auxiliary tables are read over that many hours only, so a resource whose only Basic or Auxiliary records are older counts here
 - `resources_ingestion_unknown` — Number of log-producing resources exporting to Log Analytics with no record found, where a destination workspace refused the read, failed, or has an unqueried Basic or Auxiliary table that could hold the resource's logs
-- `recent_ingestion_percentage` — Percentage of resources exporting to Log Analytics with recent ingestion = resources_with_recent_ingestion / resources_sending_to_log_analytics × 100 (a whole number, 0–100); 0 when resources_sending_to_log_analytics is 0. Resources counted in resources_ingestion_unknown are in the total but not the numerator
+- `recent_ingestion_percentage` — Percentage of resources exporting to Log Analytics with recent ingestion = `resources_with_recent_ingestion` / `resources_sending_to_log_analytics` × 100 (a whole number, 0–100); 0 when `resources_sending_to_log_analytics` is 0. Resources counted in `resources_ingestion_unknown` are in the total but not the numerator
 - `no_recent_ingestion_by_type` — Number of resources without recent ingestion, for each resource type
 - `all_log_analytics_resources_ingesting` — True if every log-producing resource exporting to Log Analytics has recent ingestion; false if any has none (an idle resource included) or is unknown; true when none exports to Log Analytics
 
 **Do logs go to an approved workspace?**
-- `approved_workspaces_configured` — True if an approved workspace list (approved_log_workspaces) was set; false if not. A resource id on the list matches exactly; a bare name matches a workspace of that name in any subscription
+- `approved_workspaces_configured` — True if an approved workspace list (`approved_log_workspaces`) was set; false if not. A resource id on the list matches exactly; a bare name matches a workspace of that name in any subscription
 - `settings_exporting_to_unapproved_workspace` — Number of diagnostic settings exporting logs to a workspace not on the approved list; null when no list is set
 - `resources_sending_to_approved_workspace` — Number of log-producing resources with a diagnostic setting exporting logs to an approved workspace; null when no list is set
 - `resources_exporting_to_unapproved_workspace` — Number of resources with a diagnostic setting exporting logs to a workspace not on the approved list; null when no list is set
@@ -1585,21 +1589,21 @@ Summary fields:
 - `apps_without_http_log_records` — Number of exporting apps and slots with no HTTP log record in the lookback, where every destination workspace was queried, lacks the table, or no longer exists
 - `apps_http_logs_unknown` — Number of exporting apps and slots whose arrival is unknown: a destination workspace refused or failed the read, or keeps the table on a Basic or Auxiliary plan, which is not queried because it bills per GB scanned
 - `http_log_arrival_percentage` — Percentage of exporting apps and slots whose HTTP logs are arriving = `apps_with_http_log_records` / `apps_exporting_http_logs` × 100 (a whole number, 0–100); 0 when `apps_exporting_http_logs` is 0. Apps whose arrival is unknown count in the total but not as arriving
-- `http_log_records` — Number of HTTP log records that arrived for the subscription's apps and slots in the lookback
-- `http_log_retention_days` — Number of days the AppServiceHTTPLogs table keeps records for queries (interactive retention), the shortest across destination workspaces that have the table; null if none has it
-- `http_log_total_retention_days` — Number of days the AppServiceHTTPLogs table keeps records in all, including long-term (archive) retention, the shortest across destination workspaces that have the table; null if none has it
+- `http_log_records` — Number of HTTP log records that arrived for the subscription's apps and slots in the lookback, counted once when an app sends them to more than one workspace
+- `http_log_retention_days` — Number of days the AppServiceHTTPLogs table keeps records for queries (interactive retention), the shortest across the workspaces apps send HTTP logs to that have the table; null if none has it
+- `http_log_total_retention_days` — Number of days the AppServiceHTTPLogs table keeps records in all, including long-term (archive) retention, the shortest across the workspaces apps send HTTP logs to that have the table; null if none has it
 
 **Do SQL Managed Instance audit events arrive?**
 - `instances_exporting_audit` — Number of exporting managed instances: those with a diagnostic setting that sends SQLSecurityAuditEvents, by name or through the audit or allLogs group, to a Log Analytics workspace
 - `instances_with_audit_records` — Number of exporting managed instances whose audit events are arriving: at least one event reached a destination workspace in the lookback, which shows a T-SQL server audit is running
 - `instances_without_audit_records` — Number of exporting managed instances with no audit event in the lookback, where every destination workspace was queried, lacks the table, or no longer exists
 - `instances_audit_unknown` — Number of exporting managed instances whose arrival is unknown: a destination workspace refused or failed the read, or keeps the table on a Basic or Auxiliary plan
-- `audit_records` — Number of audit events that arrived for the subscription's managed instances in the lookback
+- `audit_records` — Number of audit events that arrived for the subscription's managed instances in the lookback, counted once when an instance sends them to more than one workspace
 - `failed_audit_events` — Number of audit events recording an action that failed, such as a failed login
-- `audit_actions` — Number of audit events for each action, such as LOGIN SUCCEEDED or LOGIN FAILED
+- `audit_actions` — Number of audit events for each action, such as LOGIN SUCCEEDED or LOGIN FAILED, or unknown when an event names none
 - `managed_databases_with_audit_records` — Number of listed databases named in at least one audit event; events that name no database, such as server logins, don't count
-- `audit_log_retention_days` — Number of days the AzureDiagnostics table keeps audit events for queries (interactive retention), the shortest across destination workspaces that have the table; null if none has it
-- `audit_log_total_retention_days` — Number of days the AzureDiagnostics table keeps audit events in all, including long-term (archive) retention, the shortest across destination workspaces that have the table; null if none has it
+- `audit_log_retention_days` — Number of days the AzureDiagnostics table keeps audit events for queries (interactive retention), the shortest across the workspaces instances send audit events to that have the table; null if none has it
+- `audit_log_total_retention_days` — Number of days the AzureDiagnostics table keeps audit events in all, including long-term (archive) retention, the shortest across the workspaces instances send audit events to that have the table; null if none has it
 
 **Who connects to the managed instances?**
 - `audit_principals` — Number of named principals (users, apps, managed identities and SQL logins) in audit events, counted once per instance
@@ -1618,7 +1622,7 @@ Summary fields:
 ## Microsoft Sentinel
 
 ### azure_sentinel_analytics_rules
-Short Description: Lists each Sentinel workspace's detection rules with their queries, suppression and the log tables each reads, flagging arriving logs no enabled rule reads and rules whose logs never arrive.
+Short Description: Lists each Sentinel workspace's detection rules with their queries, suppression and the log tables each reads, flagging arriving logs no enabled rule reads and rules with no recent logs.
 
 Script: fetchers/azure/sentinel_analytics_rules/fetcher.py
 
@@ -1634,7 +1638,7 @@ Commands Executed:
 - KQL `union *` summarized by table (per workspace) — each table's last ingestion time in the window
 - KQL on `SecurityAlert` by product (per workspace) — which products sent alerts, for incident-creation rules (only when the workspace has one and `SecurityAlert` received data)
 
-Output: `azure_sentinel_analytics_rules_<subscription>.json` — for each Sentinel workspace, every analytics rule with its query, suppression, the tables it reads and which of them got no data, plus the arriving tables no enabled rule reads.
+Output: `azure_sentinel_analytics_rules_<subscription>.json` — for each Sentinel workspace, every analytics rule with its full query text as written (including any user names, IP addresses or file paths the query names), suppression, the tables it reads and which of them got no data, plus the arriving tables no enabled rule reads.
 
 Summary fields:
 
@@ -1645,13 +1649,13 @@ Summary fields:
 **Is threat detection turned on?**
 - `enabled_rules_total` — Number of enabled analytics rules across all Sentinel workspaces
 - `min_enabled_rules` — Number of enabled analytics rules on the Sentinel workspace with the fewest; null if no workspace's rules could be read
-- `workspaces_with_no_enabled_rules` — Number of Sentinel workspaces with no enabled analytics rule
+- `workspaces_with_no_enabled_rules` — Number of Sentinel workspaces whose rules were read and have no enabled analytics rule
 - `workspaces_with_fusion_enabled` — Number of Sentinel workspaces where the Fusion rule (multistage attack detection) is enabled; Fusion is turned off by design on workspaces onboarded to the Defender portal, where Defender XDR correlates alerts instead
 
 **Do the enabled rules read the logs that arrive?**
-- `ingesting_tables_not_read` — Number of tables, across all Sentinel workspaces, that received data in the window (default 14 days) but that no enabled analytics rule reads; null if the table list or the ingestion query failed on every workspace. A rule reads a table when its query names it, in code or as a string passed to `table()` or to a function the query defines; tables in other workspaces don't count. When the query names none, the data types its template lists count instead, except for Fusion, ML and threat intelligence rules. An incident-creation rule reads `SecurityAlert`. Workspace and Sentinel telemetry (Usage, Heartbeat, SecurityIncident and the like) and `SecurityAlert`, which also holds Sentinel's own alerts, are left out
+- `ingesting_tables_not_read` — Number of tables, across all Sentinel workspaces, that received data in the window (default 14 days) but that no enabled analytics rule reads; null if the table list or the ingestion query failed on every workspace. A rule reads a table when its query names it, in code or as a string passed to `table()` or to a function the query defines; tables in other workspaces don't count. When the query names none, the data types its template lists count instead, except for Fusion, ML and threat intelligence rules. Tables a query reads only through a parser function (such as `_Im_Dns`) aren't seen, so when the query also names a table directly, the parser's sources can show here. An incident-creation rule reads `SecurityAlert`. Workspace and Sentinel telemetry (Usage, Heartbeat, SecurityIncident and the like) and `SecurityAlert`, which also holds Sentinel's own alerts, are left out
 - `enabled_rules_missing_data` — Number of enabled analytics rules missing data, across all Sentinel workspaces; null if the table list or the ingestion query failed on every workspace. A rule is missing data when a table its query reads got nothing in the window, when none of the data types its template lists got anything (a template's data types are alternative sources), or, for an incident-creation rule, when its product sent no alert
-- `enabled_rules_tables_unknown` — Number of enabled analytics rules whose tables can't be worked out (Fusion, ML and threat intelligence rules, and rules whose query reads only through parser functions or wildcards and whose template lists no data types); null if no workspace's table list could be read
+- `enabled_rules_tables_unknown` — Number of enabled analytics rules whose tables can't be worked out (Fusion, ML and threat intelligence rules, and rules whose query reads only through parser functions or wildcards and whose template lists no data type the workspace has as a table); null if no workspace's table list could be read
 
 
 ### azure_sentinel_automation_rules
@@ -3652,8 +3656,8 @@ Summary fields:
 - `minimum_tls_1_2_apps` — Number of web apps whose minimum TLS version is 1.2 or 1.3
 - `scm_minimum_tls_1_2_apps` — Number of web apps whose deployment (SCM) site's minimum TLS version is 1.2 or 1.3
 - `min_tls_cipher_suite_set_apps` — Number of web apps with a minimum TLS cipher suite set (without one, every suite App Service offers stays allowed)
-- `cbc_cipher_suites_allowed_apps` — Number of web apps that still allow a CBC-mode cipher suite, read from App Service's fixed suite order cut at the app's minimum
-- `non_forward_secret_cipher_suites_allowed_apps` — Number of web apps that still allow a static-RSA (TLS_RSA_*) cipher suite, which has no forward secrecy
+- `cbc_cipher_suites_allowed_apps` — Number of web apps that still allow a CBC-mode cipher suite, read from App Service's fixed suite order cut at the app's minimum suite; a minimum TLS version of 1.3 allows only the two TLS 1.3 suites, and an app whose minimum suite isn't in that order isn't counted
+- `non_forward_secret_cipher_suites_allowed_apps` — Number of web apps that still allow a static-RSA (TLS_RSA_*) cipher suite, which has no forward secrecy, worked out from the suite order the way `cbc_cipher_suites_allowed_apps` is
 - `http2_enabled_apps` — Number of web apps with HTTP/2 switched on
 
 **Are deployment endpoints locked down?**
@@ -3690,8 +3694,8 @@ Summary fields:
 - `apps_scanned_for_literal_secrets` — Number of web apps whose app settings and connection strings were read; null if the scan is off
 - `apps_literal_secret_scan_not_authorized` — Number of web apps whose settings could not be read because `Microsoft.Web/sites/config/list/action` is not granted; null if the scan is off
 - `apps_literal_secret_scan_not_read` — Number of web apps the scan skipped without a failure: a ReadOnly lock refused config/list (409 ScopeLocked), or the app's id has no resource group; null if the scan is off
-- `apps_with_literal_secrets` — Number of scanned web apps with at least one setting holding a literal secret; null if the scan is off. A setting counts when it is not a Key Vault or App Configuration reference and either its value carries a credential (a key ending in Password, Pwd, AccountKey, SharedAccessKey, SharedAccessSignature, AccessKey, Secret, ApiKey or SubscriptionKey followed by =, such as ClientSecret= or DbPassword=; a SAS sig= parameter; a private key; or a password in a URL), or it is an app setting whose name contains password, passwd, secret, API key, access key, account key, private key or credential, or has the word key, token, pwd or sas, unless the name also has id, name, uri, url, endpoint, vault, version, header, enabled, path, file, lifetime, expiry, expiration or type, and whose value is a single word of 8 or more characters that is not a URL, a boolean or made wholly of key=value; pairs. Application Insights' instrumentation key and connection string never count. This is a heuristic, so 0 doesn't prove there are no literal secrets
-- `literal_secret_settings` — Number of app settings and connection strings holding a literal secret across the scanned web apps; null if the scan is off
+- `apps_with_literal_secrets` — Number of scanned web apps with at least one setting holding a literal secret; null if the scan is off, or if there are web apps and none could be scanned. A setting counts when it is not a Key Vault or App Configuration reference and either its value carries a credential (a key ending in Password, Pwd, AccountKey, SharedAccessKey, SharedAccessSignature, AccessKey, Secret, ApiKey or SubscriptionKey followed by = and a value other than true or false, such as ClientSecret= or DbPassword=; a SAS sig= parameter; a private key; or a password in a URL), or it is an app setting whose name contains password, passwd, secret, API key, access key, account key, private key or credential, or has the word key, token, pwd or sas, unless the name also has id, name, uri, url, endpoint, vault, version, header, enabled, path, file, lifetime, expiry, expiration or type, and whose value is a single word of 8 or more characters that is not a URL, a boolean or made wholly of key=value; pairs. Application Insights' instrumentation key and connection string never count. This is a heuristic, so 0 doesn't prove there are no literal secrets
+- `literal_secret_settings` — Number of app settings and connection strings holding a literal secret across the scanned web apps; null if the scan is off, or if there are web apps and none could be scanned
 
 **Are the runtimes still supported?**
 - `apps_with_declared_runtime` — Number of web apps whose configuration names at least one language runtime version
@@ -3722,7 +3726,7 @@ Commands Executed:
 - `web_apps.get_configuration()` and `get_configuration_slot()` (per app with slots, and per slot) — the settings compared between each slot and production
 - `activity_logs.list()` (Microsoft.Web events over the last activity_log_days, 90 by default) — slot swaps, publishing-credential retrievals and package deployments, with who requested each
 
-Output: `azure_app_service_deployments_<subscription>.json` — each web app's and slot's recorded deployments and deployment events with who and when, its deployment source, how each slot differs from production, and what the evidence cannot attribute. All times are ISO 8601 UTC.
+Output: `azure_app_service_deployments_<subscription>.json` — each web app's and slot's recorded deployments and deployment events with who and when, its deployment source, how each slot differs from production, and what the evidence cannot attribute; all times are ISO 8601 UTC.
 
 Summary fields:
 
@@ -3730,10 +3734,10 @@ Summary fields:
 - `total_web_apps` — Number of web apps checked
 - `total_deployment_slots` — Number of deployment slots across all web apps
 - `apps_with_slots` — Number of web apps with at least one deployment slot
-- `excluded_function_apps` — Number of function apps left out
+- `excluded_function_apps` — Number of function apps and other sites that aren't web apps (kind not starting with app) left out
 - `provider_registration_status` — Whether the App Service provider (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown
-- `activity_log_days` — Days of Activity Log requested (activity_log_days, 1 to 90; 90 is all the Activity Log keeps). The window is that many days back from the run, starting 5 minutes inside the 90-day limit; the Activity Log counts below cover the window only
-- `activity_log_complete` — True if every page of the window was read; false if the read failed (the Activity Log counts below are then null) or stopped at 200,000 events (the newest events were kept, so the counts are a lower bound; results.activity_log.oldest_event_time shows how far back the read reached)
+- `activity_log_days` — Days of Activity Log requested (`activity_log_days`, 1 to 90; 90 is all the Activity Log keeps). The window is that many days back from the run; at 90 it starts 5 minutes inside the 90-day limit, so its oldest edge is still kept
+- `activity_log_complete` — True if every page of the window was read; false if the read failed or stopped at 200,000 events, keeping the newest (results.activity_log.oldest_event_time shows how far back the read reached)
 
 **Where do the apps deploy from?**
 - `apps_with_source_control` — Number of web apps with a source repository set up for deployment
@@ -3748,32 +3752,32 @@ Summary fields:
 - `apps_kudu_deployment_records_unknown` — Number of web apps with no Kudu deployment record where a read failed
 - `kudu_deployment_records` — Number of Kudu deployment records across all web apps and slots
 - `failed_kudu_deployment_records` — Number of Kudu deployment records whose status is Failed
-- `kudu_deployments_by_deployer` — Number of Kudu deployment records for each deploying tool, as App Service names it
+- `kudu_deployments_by_deployer` — Number of Kudu deployment records for each deploying tool, as App Service names it (unknown when a record names none)
 - `latest_kudu_deployment_time` — Time of the newest Kudu deployment record across all web apps and slots; null if there is none
 
 **Who released what, and when (Activity Log)?**
-- `slot_swaps` — Number of slot swap requests in the window on a listed web app or slot. A request is the events sharing one correlation id, counted once; this and every Activity Log count below is null if the Activity Log couldn't be read and a lower bound if activity_log_complete is false
-- `failed_slot_swaps` — Number of slot swaps in the window that failed: any event under the request's correlation id has status Failed
-- `apps_with_slot_swaps` — Number of web apps with at least one slot swap in the window, on the app or a slot
+- `slot_swaps` — Number of slot swap requests in the window on a listed web app or slot, the events sharing one correlation id counted once; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
+- `failed_slot_swaps` — Number of slot swap requests in the window where any event under the request's correlation id has status Failed; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
+- `apps_with_slot_swaps` — Number of web apps with at least one slot swap request in the window, on the app or a slot; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
 - `latest_slot_swap_time` — Time of the newest slot swap request in the window (ISO 8601 UTC); null if there is none or the Activity Log couldn't be read
-- `publish_profile_downloads` — Number of publish profile download requests (publishxml, the Web Deploy and FTP credentials Visual Studio uses) in the window
-- `apps_with_publish_profile_downloads` — Number of web apps whose publish profile was downloaded in the window, for the app or a slot
-- `publishing_credential_reads` — Number of requests reading a web app's or slot's publishing credentials through config/publishingcredentials/list (the Kudu and FTP user name and password that pipelines and the portal fetch) in the window
-- `apps_with_publishing_credential_reads` — Number of web apps whose publishing credentials were read in the window, for the app or a slot
-- `package_deployments` — Number of MSDeploy, OneDeploy or ZipDeploy deployment requests made through Azure Resource Manager in the window
-- `apps_with_package_deployments` — Number of web apps with at least one package deployment through Azure Resource Manager in the window
-- `deployment_activity_by_caller_type` — Number of slot swaps, publish profile downloads, publishing credential reads and package deployments on listed web apps and slots, for each kind of requester:
+- `publish_profile_downloads` — Number of publish profile download requests (publishxml, the Web Deploy and FTP credentials Visual Studio uses) in the window on a listed web app or slot, one per correlation id; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
+- `apps_with_publish_profile_downloads` — Number of web apps whose publish profile was downloaded in the window, for the app or a slot; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
+- `publishing_credential_reads` — Number of requests reading a web app's or slot's publishing credentials through config/publishingcredentials/list (the Kudu and FTP user name and password that pipelines and the portal fetch) in the window on a listed web app or slot, one per correlation id; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
+- `apps_with_publishing_credential_reads` — Number of web apps whose publishing credentials were read in the window, for the app or a slot; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
+- `package_deployments` — Number of MSDeploy, OneDeploy or ZipDeploy deployment requests made through Azure Resource Manager in the window on a listed web app or slot, one per correlation id; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
+- `apps_with_package_deployments` — Number of web apps with at least one package deployment through Azure Resource Manager in the window, on the app or a slot; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
+- `deployment_activity_by_caller_type` — Number of slot swap, publish profile download, publishing credential read and package deployment requests on listed web apps and slots, for each kind of requester (null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false):
   - user (a person: the token's identity type is user, or the caller is a user name containing @)
   - app (a service principal or managed identity: the token's identity type is app)
   - unknown (the log names neither)
-- `deployment_activity_on_unlisted_sites` — Number of the same requests on a site this run didn't list (a deleted app or slot, a function app, or a slot whose list couldn't be read), counted here instead of on an app
+- `deployment_activity_on_unlisted_sites` — Number of slot swap, publish profile download, publishing credential read and package deployment requests on a site this run didn't list (a deleted app or slot, a function app, or a slot whose list couldn't be read), counted here instead of on an app; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
 
 **Is there any trace of how each app is deployed?**
 - `apps_with_deployment_evidence` — Number of web apps with deployment evidence: a Kudu deployment record, slot swap, publish profile download, publishing credential read or package deployment on the app or a slot. When the Activity Log couldn't be read, only Kudu records count
-- `apps_without_deployment_evidence` — Number of web apps with none of that deployment evidence on the app or any slot where every Kudu read succeeded; null if the Activity Log window wasn't read in full (the read failed or stopped at 200,000 events)
+- `apps_without_deployment_evidence` — Number of web apps with no deployment evidence on the app or any slot, where the slot list and every Kudu read succeeded; null if the Activity Log window wasn't read in full (the read failed or stopped at 200,000 events)
 
 **Do the slots match production?**
-- `slots_matching_production` — Number of deployment slots whose compared settings all match production. Compared: minimum TLS version and cipher suite, the SCM (deployment) site's minimum TLS version, FTPS state, HTTP/2, remote debugging, runtime versions, the main and SCM sites' access restrictions (rules in priority order, names ignored, and default actions), whether SCM uses the main site's rules, HTTPS-only, client certificates and public network access. Microsoft lists runtime versions as swapped; HTTPS-only, TLS, client certificates and access restrictions stay with the slot, so a match is posture parity between slot and production, and a slot locked down differently on purpose reads as differing
+- `slots_matching_production` — Number of deployment slots whose compared settings all match production. Compared: minimum TLS version and cipher suite, the SCM (deployment) site's minimum TLS version, FTPS state, HTTP/2, remote debugging, runtime versions, the main and SCM sites' access restrictions (rules in priority order, names ignored, and default actions), whether SCM uses the main site's rules, HTTPS-only, client certificates and public network access. Microsoft lists runtime versions as swapped; HTTPS-only, TLS, client certificates and access restrictions stay with the slot, so a match is posture parity between slot and production, and a slot locked down differently on purpose reads as differing. An unset public network access differs from an explicit Enabled, since with a private endpoint unset can mean disabled
 - `slots_differing_from_production` — Number of deployment slots with at least one compared setting that differs from production
 - `slots_comparison_unknown` — Number of deployment slots not compared because the slot's or production's settings couldn't be read
 
@@ -4235,10 +4239,10 @@ Commands Executed:
 - `keys.list()` and `keys.get()` (per key) — keys, their dates and rotation policy
 - `secrets.list()` (per vault) — secret names and expiry dates, never values
 - `KeyClient.list_properties_of_keys()` and `get_key_rotation_policy()` (per vault, per key) — rotation policies on the data plane
-- `CertificateClient.list_properties_of_certificates()` and `get_certificate_policy()` (per vault, per certificate) — certificate expiry and renewal policy; on the list, a 401 or 403 is that vault's not_authorized answer and any other error fails the run; on a policy read, a 401, 403 or 404 leaves that one certificate with policy_readable false and auto_renew_enabled null, and any other error fails the run
+- `CertificateClient.list_properties_of_certificates()` and `get_certificate_policy()` (per vault, per certificate) — certificate expiry and renewal policy; certificates not yet issued (still pending) are not listed; on the list, a 401 or 403 is that vault's not_authorized answer and any other error fails the run; on a policy read, a 401, 403 or 404 leaves that one certificate with policy_readable false and auto_renew_enabled null, and any other error fails the run
 - `certificates.list()` (App Service) — App Service certificates, their expiry and source; a failure fails the run
 
-Output: `azure_key_vault_key_rotation_<subscription>.json` — every key vault's keys with their rotation policies, secrets with their expiry, and certificates with their expiry and renewal policy, plus every App Service certificate with its expiry and where it comes from.
+Output: `azure_key_vault_key_rotation_<subscription>.json` — every key vault's keys with their rotation policies, secrets with their expiry, and certificates with their expiry and renewal policy, plus every App Service certificate with its expiry and where it comes from; no key material, secret value, certificate body or PFX password is read.
 
 Summary fields:
 
@@ -4271,7 +4275,7 @@ Summary fields:
 **Do Key Vault certificates renew themselves?**
 - `total_certificates` — Number of certificates in the key vaults whose certificates could be listed
 - `certificates_with_readable_policy` — Number of Key Vault certificates whose policy could be read
-- `certificates_with_auto_renew` — Number of Key Vault certificates whose policy has an AutoRenew lifetime action, so Key Vault renews them before they expire
+- `certificates_with_auto_renew` — Number of Key Vault certificates whose policy has an AutoRenew lifetime action; Key Vault renews only self-signed and integrated-CA (DigiCert, GlobalSign) certificates, and each certificate's policy.issuer_name says which (Unknown means a CA Key Vault does not integrate with, so nothing renews it)
 - `certificate_auto_renew_percentage` — Percentage of Key Vault certificates with a readable policy that auto-renew = `certificates_with_auto_renew` / `certificates_with_readable_policy` × 100 (a whole number, 0–100); 0 when `certificates_with_readable_policy` is 0. Certificates whose policy couldn't be read, and vaults that refused the list, are left out of both
 
 **Are certificates expired or about to expire?**
@@ -4283,7 +4287,7 @@ Summary fields:
 **Where do App Service certificates come from?**
 - `total_app_service_certificates` — Number of App Service certificates in the subscription
 - `app_service_certificates_by_source` — Number of App Service certificates from each source, with every source listed and 0 when it has none:
-  - key_vault (synced from a Key Vault secret; the record's key_vault_certificate_auto_renew is that vault certificate's auto-renew, or null when the vault's certificates couldn't be read or it holds no certificate of that name, as for an App Service Certificate order)
+  - key_vault (synced from a Key Vault secret; the record's key_vault_certificate_auto_renew is that vault certificate's auto-renew, or null when the vault's certificates or that certificate's policy couldn't be read, the vault is not in this subscription, or it holds no certificate of that name, as for an App Service Certificate order)
   - managed (an App Service managed certificate, recognised by its canonical name or domain validation method; App Service renews it)
   - uploaded (an uploaded PFX file that nobody renews)
 - `app_service_certificates_key_vault_sync_failing` — Number of Key Vault-backed App Service certificates whose last sync from the vault failed (an error status such as KeyVaultSecretDoesNotExist); Succeeded, pending (Initialized, WaitingOnCertificateOrder) and unknown statuses are not counted
@@ -4735,23 +4739,23 @@ Summary fields:
 - `minimum_tls_1_2_accounts` — Number of storage accounts whose minimum TLS version is 1.2 or 1.3
 
 **Is storage reachable from the network?**
-- `public_blob_access_accounts` — Number of storage accounts that allow anonymous (public) access to blobs
+- `public_blob_access_accounts` — Number of storage accounts that allow anonymous (public) access to blobs; an account that omits the setting allows it
 - `private_endpoint_accounts` — Number of storage accounts with at least one private endpoint connection
 
 **Are access keys controlled?**
 - `shared_key_access_accounts` — Number of storage accounts that accept access-key (shared key) authorization; an account that omits the setting allows it
 - `key_expiration_policy_accounts` — Number of storage accounts with an access-key expiry policy (a maximum key age in days)
 - `access_key_age_known_accounts` — Number of storage accounts whose two access keys both have a known creation time
-- `access_key_max_age_days` — Days since the oldest access key in the subscription was created or last rotated; null when no key's creation time is known
-- `accounts_with_access_key_older_than_90_days` — Number of storage accounts with an access key created or last rotated more than 90 days ago
-- `accounts_with_access_key_beyond_expiration_period` — Number of storage accounts with an access key older than the account's own key expiry policy; accounts with no policy are never counted
+- `access_key_max_age_days` — Days since the oldest access key in the subscription was created or last rotated; null when there are no storage accounts or any key's creation time is unknown (older accounts whose keys have not been rotated since Azure began recording it)
+- `accounts_with_access_key_older_than_90_days` — Number of storage accounts with an access key created or last rotated more than 90 days ago; null when a key whose creation time is unknown leaves an account undecided
+- `accounts_with_access_key_beyond_expiration_period` — Number of storage accounts with an access key older than the account's own key expiry policy; accounts with no policy are never counted; null when an account with a policy has a key whose creation time is unknown
 
 **Is data replicated to a healthy second region?**
 - `geo_redundant_accounts` — Number of storage accounts that replicate to a second region (GRS, RA-GRS, GZRS or RA-GZRS)
 - `read_access_geo_redundant_accounts` — Number of storage accounts whose second-region copy can be read (RA-GRS or RA-GZRS)
 - `geo_replication_stats_collected_accounts` — Number of geo-redundant storage accounts whose replication status was read
 - `geo_replication_live_accounts` — Number of geo-redundant storage accounts whose replication status is Live (replicating normally)
-- `geo_replication_max_sync_lag_minutes` — Longest time, in minutes, since a second-region copy last synced with its primary, measured when the fetcher ran; null when no replication status was read
+- `geo_replication_max_sync_lag_minutes` — Longest time, in minutes, since a second-region copy last synced with its primary, each measured when its replication status was read; null when there is no geo-redundant account or any one's last sync time is unknown
 - `geo_failover_ready_accounts` — Number of geo-redundant storage accounts that Azure reports can fail over to the second region now
 - `secondary_unavailable_accounts` — Number of geo-redundant storage accounts whose second region is reported unavailable
 - `geo_failed_over_accounts` — Number of storage accounts that have failed over to their second region at least once
@@ -4766,7 +4770,7 @@ Summary fields:
 **Which containers can be read anonymously?**
 - `total_containers` — Number of blob containers across all storage accounts whose containers were listed
 - `containers_with_public_access_level` — Number of blob containers set to the Blob or Container public access level
-- `anonymously_accessible_containers` — Number of blob containers anyone can read without signing in: the container has a public access level and its account allows public blob access
+- `anonymously_accessible_containers` — Number of blob containers anyone can read without signing in: the container has a public access level and its account does not forbid public blob access (Azure allows it when the setting is on or was never set)
 - `accounts_with_containers_not_collected` — Number of storage accounts whose container list failed; their containers are missing from the counts
 
 **Is each account owned and classified?**
