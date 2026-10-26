@@ -158,7 +158,7 @@ evidence_set:
   reference_id: EVD-GITLAB-SCN
   name: GitLab FedRAMP Significant Change Notifications
   instructions: >
-    Script: fetchers/gitlab/significant_change_notifications/fetcher.py. Commands
+    Script: gitlab/significant_change_notifications/fetcher.py. Commands
     executed: GitLab API GET /projects/:id/merge_requests (paginated, filtered by
     state and updated_after) and GET /projects/:id/merge_requests/:iid/approvals.
     Merge requests carrying a ticked "Significant Change — SCN required" checkbox

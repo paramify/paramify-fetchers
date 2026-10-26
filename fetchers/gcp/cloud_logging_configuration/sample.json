@@ -1,0 +1,184 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_cloud_logging_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.alert_policies[]",
+      "records": 4,
+      "fields": {
+        "condition_count": 4,
+        "condition_filters": 4,
+        "display_name": 4,
+        "enabled": 4,
+        "name": 4,
+        "notification_channel_count": 4,
+        "severity": 4
+      }
+    },
+    {
+      "path": "results.log_buckets[]",
+      "records": 3,
+      "fields": {
+        "analytics_enabled": 3,
+        "cmek": 3,
+        "description": 3,
+        "index_config_count": 3,
+        "kms_key_name": 0,
+        "lifecycle_state": 3,
+        "location": 3,
+        "locked": 3,
+        "name": 3,
+        "resource_name": 3,
+        "restricted_field_count": 3,
+        "retention_days": 3
+      }
+    },
+    {
+      "path": "results.log_metrics[]",
+      "records": 1,
+      "fields": {
+        "alerted": 1,
+        "alerting_policies": 1,
+        "bucket_name": 0,
+        "description": 1,
+        "disabled": 1,
+        "filter": 1,
+        "metric_type": 1,
+        "name": 1
+      }
+    },
+    {
+      "path": "results.sinks[]",
+      "records": 3,
+      "fields": {
+        "description": 0,
+        "destination": 3,
+        "destination_type": 3,
+        "disabled": 3,
+        "exclusions": 0,
+        "exports_all_logs": 3,
+        "filter": 3,
+        "filters_on_audit_logs": 3,
+        "include_children": 3,
+        "name": 3,
+        "scope": 3,
+        "writer_identity": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:36Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target",
+      "skipped_calls": [
+        {
+          "message": "403 Permission 'logging.sinks.list' denied on resource '//logging.googleapis.com/organizations/111111111111' (or it may not exist). Remediate access with this Troubleshooter URL or share it with your administrator - https://console.cloud.google.com/iam-admin/troubleshooter/summary;errorId=CiQwMWEwMTBkYy02N2U0LTdjNjYtYmM5ZS1lZDJjMzVkYTkyNDcSGm9yZ2FuaXphdGlvbnMvNzUxNTUxNTc0NzQ2 . [reason: \"IAM_PERMISSION_DENIED\" domain: \"iam.googleapis.com\" metadata { key: \"troubleshooter_url\" value: \"https://console.cloud.google.com/iam-admin/troubleshooter/summary;errorId=CiQwMWEwMTBkYy02N2U0LTdjNjYtYmM5ZS1lZDJjMzVkYTkyNDcSGm9yZ2FuaXphdGlvbnMvNzUxNTUxNTc0NzQ2\" } metadata { key: \"resource\" value: \"organizations/111111111111\" } metadata { key: \"permission\" value: \"logging.sinks.list\" } metadata { key: \"erro…",
+          "operation": "logging.sinks.list (organizations/111111111111)",
+          "type": "PermissionDenied"
+        }
+      ]
+    },
+    "results": {
+      "alert_policies": [
+        {
+          "condition_count": 1,
+          "condition_filters": [
+            "metric.type=\"logging.googleapis.com/user/example_iam_changes\" AND resource.type=\"global\""
+          ],
+          "display_name": "example IAM changes (fixture)",
+          "enabled": true,
+          "name": "00000000000000000001",
+          "notification_channel_count": 0,
+          "severity": "SEVERITY_UNSPECIFIED"
+        }
+      ],
+      "ancestry": [
+        "organizations/111111111111"
+      ],
+      "log_buckets": [
+        {
+          "analytics_enabled": false,
+          "cmek": false,
+          "description": "Default bucket",
+          "index_config_count": 0,
+          "kms_key_name": null,
+          "lifecycle_state": "ACTIVE",
+          "location": "global",
+          "locked": false,
+          "name": "_Default",
+          "resource_name": "projects/example-project/locations/global/buckets/_Default",
+          "restricted_field_count": 0,
+          "retention_days": 30
+        }
+      ],
+      "log_metrics": [
+        {
+          "alerted": true,
+          "alerting_policies": [
+            "example IAM changes (fixture)",
+            "example IAM changes (fixture)",
+            "example IAM changes (fixture)"
+          ],
+          "bucket_name": null,
+          "description": "IAM policy changes (fixture)",
+          "disabled": false,
+          "filter": "protoPayload.methodName=\"SetIamPolicy\"",
+          "metric_type": "logging.googleapis.com/user/example_iam_changes",
+          "name": "example_iam_changes"
+        }
+      ],
+      "log_router_settings": {
+        "disable_default_sink": false,
+        "kms_key_name": null,
+        "kms_service_account": "service-222222222222@gcp-sa-logging.iam.gserviceaccount.com",
+        "storage_location": null
+      },
+      "sinks": [
+        {
+          "description": null,
+          "destination": "storage.googleapis.com/example-project-logs",
+          "destination_type": "cloud_storage",
+          "disabled": false,
+          "exclusions": [],
+          "exports_all_logs": false,
+          "filter": "severity>=WARNING",
+          "filters_on_audit_logs": false,
+          "include_children": false,
+          "name": "example-sink",
+          "scope": "project",
+          "writer_identity": "serviceAccount:service-222222222222@gcp-sa-logging.iam.gserviceaccount.com"
+        }
+      ]
+    },
+    "summary": {
+      "alerted_log_metrics": 1,
+      "all_logs_captured_by_a_sink": false,
+      "ancestor_sinks": 0,
+      "cmek_log_bucket_percentage": 0,
+      "cmek_log_buckets": 0,
+      "default_sink_disabled": false,
+      "enabled_alert_policies": 4,
+      "enabled_sinks": 3,
+      "locked_log_buckets": 1,
+      "log_router_cmek_key": null,
+      "log_router_storage_location": null,
+      "longest_retention_days": 400,
+      "project_sinks": 3,
+      "shortest_retention_days": 30,
+      "sinks_exporting_all_logs": 0,
+      "sinks_filtering_audit_logs": 2,
+      "total_alert_policies": 4,
+      "total_log_buckets": 3,
+      "total_log_metrics": 1,
+      "total_sinks": 3
+    }
+  }
+}

@@ -44,7 +44,7 @@ evidence_set:
   reference_id: EVD-AZURE-DDOS
   name: Azure DDoS Protection
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient),
+    Script: azure/ddos_protection/fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient),
     all reads, Reader is sufficient: ddos_protection_plans.list(),
     virtual_networks.list_all(), public_ip_addresses.list_all(),
     network_interfaces.list_all(), load_balancers.list_all(); plus the

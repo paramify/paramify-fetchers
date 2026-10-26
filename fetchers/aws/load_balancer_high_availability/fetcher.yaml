@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-LB-HA
   name: Load Balancer High Availability
-  instructions: 'Script: fetcher.sh. Commands executed: aws elbv2 describe-load-balancers, aws elbv2 describe-target-groups, aws elbv2 describe-load-balancer-attributes'
+  instructions: 'Script: aws/load_balancer_high_availability/fetcher.sh. Commands executed: aws elbv2 describe-load-balancers, aws elbv2 describe-target-groups, aws elbv2 describe-load-balancer-attributes'

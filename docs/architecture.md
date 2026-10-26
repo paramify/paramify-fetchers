@@ -56,7 +56,7 @@ Here is a finished evidence file from an AWS VPC segmentation run, shortened:
     "evidence_set": {
       "reference_id": "EVD-VPC-SEGMENTATION",
       "name": "VPC Network Segmentation",
-      "instructions": "Script: fetcher.sh. Commands: aws ec2 describe-vpcs, describe-subnets, describe-vpc-peering-connections, describe-vpc-endpoints.",
+      "instructions": "Script: aws/vpc_network_segmentation/fetcher.sh. Commands: aws ec2 describe-vpcs, describe-subnets, describe-vpc-peering-connections, describe-vpc-endpoints.",
       "description": "Lists VPCs, subnets, peering connections, and endpoints to document network topology and segmentation."
     }
   },
@@ -115,7 +115,7 @@ examples/                       # sample run manifests
 tests/                          # framework test suite (pytest)
 example_manifest.yaml           # worked reference manifest
 run_and_upload.sh               # example collect→upload glue
-docs/                           # contract, design, and reference guides
+docs/                           # guides and reference pages
 ```
 
 Directories that start with `_` are not fetchers, and the runner skips them.

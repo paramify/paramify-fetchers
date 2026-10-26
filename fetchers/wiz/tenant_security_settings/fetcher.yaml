@@ -65,7 +65,7 @@ evidence_set:
   reference_id: EVD-WIZ-TENANT-SECURITY-SETTINGS
   name: Wiz Tenant Security Settings
   instructions: >-
-    Script: fetcher.py. Read-only service account (read:security_settings).
+    Script: wiz/tenant_security_settings/fetcher.py. Read-only service account (read:security_settings).
     Reads ipRestrictions and portalInactivityTimeoutSettings. Reports which
     access paths are IP-restricted and whether the portal inactivity timeout is
     enabled.

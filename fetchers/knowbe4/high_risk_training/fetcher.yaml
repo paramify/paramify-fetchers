@@ -37,4 +37,4 @@ ksis:
 evidence_set:
   reference_id: EVD-HIGH-RISK-TRAINING
   name: KnowBe4 Role Specific Training for High Risk Users
-  instructions: 'Script: high_risk_training.sh. Commands executed: KnowBe4 API calls for role-specific training data'
+  instructions: 'Script: knowbe4/high_risk_training/fetcher.sh. Commands executed: KnowBe4 API calls for role-specific training data'

@@ -1,0 +1,44 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_dynamodb_encryption_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.tables[]",
+      "records": 2,
+      "fields": {
+        "name": 2,
+        "sse_type": 2,
+        "kms_arn": 2,
+        "sse_status": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:43Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "tables": [
+        {
+          "name": "pft-defaults",
+          "sse_type": "AWS_OWNED",
+          "kms_arn": "None",
+          "sse_status": "DEFAULT"
+        }
+      ],
+      "summary": {
+        "total_tables": 2,
+        "kms_encrypted_tables": 1,
+        "kms_encryption_percentage": 50
+      }
+    }
+  }
+}
