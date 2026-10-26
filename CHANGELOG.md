@@ -115,7 +115,7 @@ schemas and the `paramify` CLI — not the internal code.
   DelegatedPermissionGrant.Read.All (or Directory.Read.All) and read null without
   it. User owners' names and account state need User.Read.All (or
   Directory.Read.All); without it they read null, and so does the disabled-owner
-  count. Also maps to KSI-CNA-MAT.
+  count. Also maps to KSI-PIY-GIV and KSI-SVC-VCM.
 - **`azure_front_door_origins` 0.5.0: Kudu and silent regions.** An app whose
   Kudu (scm) site has its own access restrictions
   (`scmIpSecurityRestrictionsUseMain` off) that let every public caller in is no

@@ -63,7 +63,8 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-IAM-SNU
-  - KSI-CNA-MAT
+  - KSI-PIY-GIV
+  - KSI-SVC-VCM
 
 evidence_set:
   reference_id: EVD-AZURE-ENTRA-SERVICE-PRINCIPALS
