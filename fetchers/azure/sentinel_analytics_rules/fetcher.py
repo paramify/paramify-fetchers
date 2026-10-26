@@ -101,7 +101,7 @@ def _is_source(toks: List[str], i: int) -> bool:
         j = i - 1
         while j >= 0 and toks[j] not in {"|", ";", "(", ")", "union"}:
             j -= 1
-        return at(j) == "union"
+        return at(j) == "union" or (at(j) == "(" and at(j - 1) == "in")
     return False
 
 
@@ -122,15 +122,17 @@ def query_tables(query: Optional[str], tables: Set[str], columns: Set[str]) -> L
     """Local workspace tables a KQL query names, in code or as a string passed to table() or a function it defines."""
     toks = [t for t in _KQL_TOKEN.findall(query or "") if not t.startswith("//")]
     functions = {toks[k + 1] for k in range(len(toks) - 3) if toks[k] == "let" and toks[k + 2] == "=" and toks[k + 3] == "("}
+    # Names the query assigns or declares (`extend X =`, `let X =`, `datatable(X:string)`) count only where a table can stand.
+    ambiguous = columns | {toks[k] for k in range(len(toks) - 1) if toks[k + 1] in {"=", ":"}}
     found = set()
     for i, tok in enumerate(toks):
         if tok[0] in "\"'@`":
             literal = tok.lstrip("@").strip("\"'`")
             argument = i > 0 and toks[i - 1] in {"(", ","} and i + 1 < len(toks) and toks[i + 1] in {")", ","}
-            if argument and literal in tables and literal not in columns and _call_name(toks, i) in functions | {"table"}:
+            if argument and literal in tables and _call_name(toks, i) in functions | {"table"}:
                 found.add(literal)
         elif (tok in tables or _CUSTOM_TABLE.match(tok)) and (i == 0 or toks[i - 1] != "."):
-            if tok not in columns or _is_source(toks, i):
+            if tok not in ambiguous or _is_source(toks, i):
                 found.add(tok)
     return sorted(found)
 

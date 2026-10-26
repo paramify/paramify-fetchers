@@ -406,7 +406,16 @@ AMBIGUOUS = {"Operation"}
     ("let m = materialize(Operation | take 1);\nm | take 1", ["Operation"]),
     ('search in (SigninLogs, AuditLogs) "admin"', ["AuditLogs", "SigninLogs"]),
     ('find in (SecurityEvent, Syslog) where Computer == "x"', ["SecurityEvent", "Syslog"]),
+    ('find in (SecurityEvent, Operation) where Computer == "x"', ["Operation", "SecurityEvent"]),
     ("union Signin* | take 1", []),  # wildcards aren't resolved, so the rule falls back to its template
+    ('table("Operation") | take 1', ["Operation"]),
+    # Names the query assigns or declares are columns or variables, not tables.
+    ("SigninLogs | extend Event = tostring(Props.x) | where isnotempty(Event)", ["SigninLogs"]),
+    ("let Heartbeat = 5; SigninLogs | where X > Heartbeat", ["SigninLogs"]),
+    ("datatable(Event:string)['a'] | join (SigninLogs) on Event", ["SigninLogs"]),
+    ("SigninLogs | parse Msg with * 'x' Event:string | summarize Usage = count() by Event", ["SigninLogs"]),
+    ("SigninLogs | mv-expand Event = Props | project-rename Usage = Event", ["SigninLogs"]),
+    ("SigninLogs | extend Event = 1 | join (Event | take 1) on Computer", ["Event", "SigninLogs"]),
 ])
 def test_analytics_rules_tables_named_in_a_query(query, expected):
     assert MODS["sentinel_analytics_rules"].query_tables(query, TABLES, AMBIGUOUS) == expected
