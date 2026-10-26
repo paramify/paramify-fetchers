@@ -1,0 +1,26 @@
+key: azure_frontdoor_serving_two_us_regions
+name: Front Door Serves From Two US Regions
+type: AUTOMATED
+role: configuration
+statement: >
+  Front Door's serving origin groups have enabled origins at their active
+  priority in at least two different US Azure regions (summary
+  serving_regions), every serving origin group has an enabled origin, every
+  enabled origin's region resolved, and the collection had no partial failure.
+  Substantiates "Front Door has healthy enabled origins in both US regions" for
+  the alternate processing site narrative (KSI-CNA-OFA). Any two US regions
+  pass: it does not pin the approved pair. It does not assert live origin
+  health (azure_frontdoor_no_region_unhealthy_last_hour), that each origin group
+  spans both regions (azure_frontdoor_groups_active_active), or anything about
+  App Service, SQL MI or storage redundancy.
+
+# Positive lookaheads; any renamed key or a single US region reads as no match. serving_regions is a sorted set, so the two US entries differ.
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"serving_groups_region_unresolved":\s*0\b)(?=[\s\S]*?"serving_groups_without_enabled_origin":\s*0\b)(?=[\s\S]*?"serving_regions":\s*\[[^\]]*?"(?:(?:east|west|central|northcentral|southcentral|westcentral)us[23]?|usgov(?:arizona|iowa|texas|virginia)|usdod(?:central|east))"[^\]]*?"(?:(?:east|west|central|northcentral|southcentral|westcentral)us[23]?|usgov(?:arizona|iowa|texas|virginia)|usdod(?:central|east))")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-FRONTDOOR-ORIGINS
