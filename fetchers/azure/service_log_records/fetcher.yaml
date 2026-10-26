@@ -97,21 +97,21 @@ evidence_set:
     - apps_without_http_log_records — Number of exporting apps and slots with no HTTP log record in the lookback, where every destination workspace was queried, lacks the table, or no longer exists
     - apps_http_logs_unknown — Number of exporting apps and slots whose arrival is unknown: a destination workspace refused or failed the read, or keeps the table on a Basic or Auxiliary plan, which is not queried because it bills per GB scanned
     - http_log_arrival_percentage — Percentage of exporting apps and slots whose HTTP logs are arriving = apps_with_http_log_records / apps_exporting_http_logs × 100 (a whole number, 0–100); 0 when apps_exporting_http_logs is 0. Apps whose arrival is unknown count in the total but not as arriving
-    - http_log_records — Number of HTTP log records that arrived for the subscription's apps and slots in the lookback
-    - http_log_retention_days — Number of days the AppServiceHTTPLogs table keeps records for queries (interactive retention), the shortest across destination workspaces that have the table; null if none has it
-    - http_log_total_retention_days — Number of days the AppServiceHTTPLogs table keeps records in all, including long-term (archive) retention, the shortest across destination workspaces that have the table; null if none has it
+    - http_log_records — Number of HTTP log records that arrived for the subscription's apps and slots in the lookback, counted once when an app sends them to more than one workspace
+    - http_log_retention_days — Number of days the AppServiceHTTPLogs table keeps records for queries (interactive retention), the shortest across the workspaces apps send HTTP logs to that have the table; null if none has it
+    - http_log_total_retention_days — Number of days the AppServiceHTTPLogs table keeps records in all, including long-term (archive) retention, the shortest across the workspaces apps send HTTP logs to that have the table; null if none has it
 
     Do SQL Managed Instance audit events arrive?
     - instances_exporting_audit — Number of exporting managed instances: those with a diagnostic setting that sends SQLSecurityAuditEvents, by name or through the audit or allLogs group, to a Log Analytics workspace
     - instances_with_audit_records — Number of exporting managed instances whose audit events are arriving: at least one event reached a destination workspace in the lookback, which shows a T-SQL server audit is running
     - instances_without_audit_records — Number of exporting managed instances with no audit event in the lookback, where every destination workspace was queried, lacks the table, or no longer exists
     - instances_audit_unknown — Number of exporting managed instances whose arrival is unknown: a destination workspace refused or failed the read, or keeps the table on a Basic or Auxiliary plan
-    - audit_records — Number of audit events that arrived for the subscription's managed instances in the lookback
+    - audit_records — Number of audit events that arrived for the subscription's managed instances in the lookback, counted once when an instance sends them to more than one workspace
     - failed_audit_events — Number of audit events recording an action that failed, such as a failed login
     - audit_actions — Number of audit events for each action, such as LOGIN SUCCEEDED or LOGIN FAILED
     - managed_databases_with_audit_records — Number of listed databases named in at least one audit event; events that name no database, such as server logins, don't count
-    - audit_log_retention_days — Number of days the AzureDiagnostics table keeps audit events for queries (interactive retention), the shortest across destination workspaces that have the table; null if none has it
-    - audit_log_total_retention_days — Number of days the AzureDiagnostics table keeps audit events in all, including long-term (archive) retention, the shortest across destination workspaces that have the table; null if none has it
+    - audit_log_retention_days — Number of days the AzureDiagnostics table keeps audit events for queries (interactive retention), the shortest across the workspaces instances send audit events to that have the table; null if none has it
+    - audit_log_total_retention_days — Number of days the AzureDiagnostics table keeps audit events in all, including long-term (archive) retention, the shortest across the workspaces instances send audit events to that have the table; null if none has it
 
     Who connects to the managed instances?
     - audit_principals — Number of named principals (users, apps, managed identities and SQL logins) in audit events, counted once per instance

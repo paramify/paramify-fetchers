@@ -106,8 +106,39 @@ def test_app_with_records_is_arriving_and_carries_its_sample():
         "http_logs_exported": True, "http_log_records": 10, "last_http_log": "2026-10-12T10:00:00Z",
         "distinct_client_ips": 3, "status_classes": {"2xx": 7, "3xx": 0, "4xx": 2, "5xx": 1},
         "top_clients": [{"client_ip": "203.0.113.5", "requests": 6}], "http_logs_arriving": True, "is_slot": False}
-    assert record["latest_request"]["uri_stem"] == "/"
+    assert record["latest_request"] == {"time": "2026-10-12T10:00:00Z", "client_ip": "203.0.113.5",
+                                        "host": "app1.example.net", "method": "GET", "status": 200}
     assert record["hosts"] == ["app1.example.net"]
+
+
+def test_host_values_that_are_not_host_names_are_left_out():
+    workspaces = {slr.id_key(LAW): ws(
+        http=[http_row(Hosts='["app1.example.net","<script>x</script>","../../etc/passwd","app1.example.net:443"]')],
+        http_latest=[{"ResourceId": SITE.lower(), "TimeGenerated": "2026-10-12T10:00:00Z", "CIp": "203.0.113.5",
+                      "CsHost": "/bin/sh", "CsMethod": "GET", "ScStatus": 404}],
+    )}
+    record = slr.app_record({"id": SITE}, [setting(group="allLogs")], workspaces, 10)
+    assert record["hosts"] == ["app1.example.net", "app1.example.net:443"]
+    assert (record["latest_request"]["host"], record["latest_request"]["status"]) == (None, 404)
+
+
+def test_logs_sent_to_two_workspaces_count_once():
+    def both(**rows):
+        return {slr.id_key(LAW): ws(**rows), slr.id_key(LAW_FAR): ws(**rows)}
+
+    def two(category):
+        return [setting(category=category), setting(workspace=LAW_FAR, category=category)]
+
+    http = both(http=[http_row()], http_clients=[{"ResourceId": SITE.lower(), "CIp": "203.0.113.5", "Requests": 6}])
+    http[slr.id_key(LAW_FAR)]["http"] = [http_row(records=4, last="2026-10-12T12:00:00Z")]
+    app = slr.app_record({"id": SITE}, two("AppServiceHTTPLogs"), http, 10)
+    assert (app["http_log_records"], app["status_classes"]["2xx"], app["top_clients"], app["last_http_log"]) == (
+        10, 7, [{"client_ip": "203.0.113.5", "requests": 6}], "2026-10-12T12:00:00Z")
+
+    audit = both(audit=[audit_row("Orders")], principals=[principal_row("ops@example.com", 5, 5)])
+    mi = slr.instance_record({"id": MI}, two("SQLSecurityAuditEvents"), [{"name": "Orders"}], audit, 10)
+    assert (mi["audit_records"], mi["failed_audit_events"], mi["databases"][0]["audit_records"],
+            mi["principals"][0]["events"]) == (5, 5, 5, 5)
 
 
 @pytest.mark.parametrize("workspace, arriving", [
@@ -244,7 +275,7 @@ def test_summary_counts():
     tables = [{"name": "AppServiceHTTPLogs", "exists": True, "retention_in_days": 30},
               {"name": "AzureDiagnostics", "exists": True, "retention_in_days": 90},
               {"name": "AppDependencies", "exists": False, "retention_in_days": None}]
-    summary = slr.summarize(apps, mis, [], [{"status": slr.WS_QUERIED, "tables": tables}], 7)
+    summary = slr.summarize(apps, mis, [], [{"workspace_id": LAW, "status": slr.WS_QUERIED, "tables": tables}], 7)
     assert {k: summary[k] for k in (
         "apps", "apps_exporting_http_logs", "apps_with_http_log_records", "apps_without_http_log_records",
         "http_log_arrival_percentage", "instances_exporting_audit", "instances_with_audit_records",
@@ -256,6 +287,20 @@ def test_summary_counts():
         "managed_databases": 2, "managed_databases_with_audit_records": 1, "http_log_retention_days": 30,
         "audit_log_retention_days": 90, "dependency_retention_days": None, "log_workspaces_queried": 1,
     }
+
+
+def test_retention_counts_only_the_workspaces_that_receive_each_log_type():
+    def tables(http, audit):
+        return [{"name": "AppServiceHTTPLogs", "exists": True, "retention_in_days": http, "total_retention_in_days": http},
+                {"name": "AzureDiagnostics", "exists": True, "retention_in_days": audit, "total_retention_in_days": audit}]
+
+    apps = [slr.app_record({"id": SITE}, [setting(category="AppServiceHTTPLogs")], {}, 10)]
+    mis = [slr.instance_record({"id": MI}, [setting(workspace=LAW_FAR, group="audit")], [], {}, 10)]
+    workspaces = [{"workspace_id": LAW, "status": slr.WS_QUERIED, "tables": tables(365, 30)},
+                  {"workspace_id": LAW_FAR, "status": slr.WS_QUERIED, "tables": tables(30, 365)}]
+    summary = slr.summarize(apps, mis, [], workspaces, 7)
+    assert [summary[k] for k in ("http_log_retention_days", "http_log_total_retention_days", "audit_log_retention_days",
+                                 "audit_log_total_retention_days")] == [365, 365, 365, 365]
 
 
 @pytest.mark.parametrize("column", ["succeeded_s", "database_name_s", "action_name_s", "server_principal_name_s",
@@ -346,6 +391,8 @@ def test_collect_reads_slots_and_a_shared_workspace_once():
     assert [a["is_slot"] for a in results["apps"]] == [False, True]
     assert [g for g in client.gets if "/tables/" not in g] == [LAW]
     assert len(results["workspaces"]) == 1
+    assert set(results["queries"].values()) == set(client.queries)
+    assert all("{" not in q and "ago(7d)" in q for q in results["queries"].values())
     assert {k: summary[k] for k in ("apps", "apps_with_http_log_records", "apps_without_http_log_records",
                                     "instances_with_audit_records", "managed_databases",
                                     "http_log_total_retention_days", "audit_log_total_retention_days")} == {

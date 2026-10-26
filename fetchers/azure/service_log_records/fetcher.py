@@ -3,6 +3,7 @@
 
 import json
 import logging
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -49,7 +50,7 @@ HTTP_QUERY = (
 )
 HTTP_LATEST_QUERY = (
     f"{HTTP_TABLE} " + _SCOPE
-    + "| summarize arg_max(TimeGenerated, CIp, CsHost, CsMethod, CsUriStem, ScStatus) by ResourceId = tolower(_ResourceId)"
+    + "| summarize arg_max(TimeGenerated, CIp, CsHost, CsMethod, ScStatus) by ResourceId = tolower(_ResourceId)"
 )
 HTTP_CLIENTS_QUERY = (
     f"{HTTP_TABLE} " + _SCOPE
@@ -77,6 +78,13 @@ DEPENDENCY_QUERY = (
     + "| summarize Calls = sum(ItemCount), Failed = sumif(ItemCount, Success == false), LastCall = max(TimeGenerated) "
     "by Component = tolower(_ResourceId), AppRole = AppRoleName, Target, DependencyType"
 )
+QUERIES = (
+    (HTTP_TABLE, "http", HTTP_QUERY), (HTTP_TABLE, "http_latest", HTTP_LATEST_QUERY),
+    (HTTP_TABLE, "http_clients", HTTP_CLIENTS_QUERY), (AUDIT_TABLE, "audit", AUDIT_QUERY),
+    (AUDIT_TABLE, "principals", PRINCIPAL_QUERY), (DEPENDENCY_TABLE, "dependencies", DEPENDENCY_QUERY),
+)
+# The Host header is the client's to set; a probe's text there can make the evidence upload refuse the file.
+HOST_NAME = re.compile(r"^[A-Za-z0-9.-]+(:[0-9]+)?$")
 
 WS_QUERIED = "queried"
 WS_NOT_AUTHORIZED = "not_authorized"
@@ -132,6 +140,14 @@ def ws_status(exc: BaseException) -> str:
     ):
         return WS_NOT_AUTHORIZED
     return WS_ERROR
+
+
+def host_name(value):
+    return value if isinstance(value, str) and HOST_NAME.match(value) else None
+
+
+def filled_queries(subscription_id: str, days: int, sample: int) -> dict:
+    return {key: kql.format(days=days, subscription_id=subscription_id, sample=sample) for _, key, kql in QUERIES}
 
 
 def dynamic_list(value) -> list:
@@ -190,12 +206,19 @@ def _rows_for(rid: str, destinations: list[str], workspaces: dict, key: str) -> 
     return rows
 
 
+def _fullest(rid: str, destinations: list[str], workspaces: dict, key: str) -> list[str]:
+    """Each destination keeps its own copy of the records, so counts come from the one holding the most, not a sum."""
+    totals = {wid: sum(r.get("Records") or 0 for r in _rows_for(rid, [wid], workspaces, key)) for wid in destinations}
+    return [max(totals, key=totals.get)] if totals else []
+
+
 def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
     destinations = exporting_workspaces(settings, HTTP_CATEGORY, HTTP_GROUPS)
     rid = (site.get("id") or "").lower()
-    summary = _rows_for(rid, destinations, workspaces, "http")
+    counted = _fullest(rid, destinations, workspaces, "http")
+    summary = _rows_for(rid, counted, workspaces, "http")
     latest = _rows_for(rid, destinations, workspaces, "http_latest")
-    clients = _rows_for(rid, destinations, workspaces, "http_clients")
+    clients = _rows_for(rid, counted, workspaces, "http_clients")
     records = sum(r.get("Records") or 0 for r in summary)
     newest_time = _latest(r.get("TimeGenerated") for r in latest)
     newest = next((r for r in latest if r.get("TimeGenerated") == newest_time), None)
@@ -208,17 +231,17 @@ def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
         "http_logs_exported": bool(destinations) if settings is not None else None,
         "http_log_workspaces": destinations,
         "http_log_records": records,
-        "last_http_log": _latest(r.get("LastRecord") for r in summary),
+        "last_http_log": _latest(r.get("LastRecord") for r in _rows_for(rid, destinations, workspaces, "http")),
         "distinct_client_ips": max((r.get("ClientIps") or 0 for r in summary), default=0),
         "status_classes": {k: sum(r.get(f"Status{k}") or 0 for r in summary) for k in ("2xx", "3xx", "4xx", "5xx")},
-        "hosts": sorted({h for r in summary for h in dynamic_list(r.get("Hosts"))})[:sample],
+        "hosts": sorted({h for r in summary for h in dynamic_list(r.get("Hosts")) if host_name(h)})[:sample],
         "top_clients": sorted(
             ({"client_ip": c.get("CIp"), "requests": c.get("Requests")} for c in clients),
             key=lambda c: (-(c["requests"] or 0), c["client_ip"] or ""),
         )[:sample],
         "latest_request": {
-            "time": newest.get("TimeGenerated"), "client_ip": newest.get("CIp"), "host": newest.get("CsHost"),
-            "method": newest.get("CsMethod"), "uri_stem": newest.get("CsUriStem"), "status": newest.get("ScStatus"),
+            "time": newest.get("TimeGenerated"), "client_ip": newest.get("CIp"), "host": host_name(newest.get("CsHost")),
+            "method": newest.get("CsMethod"), "status": newest.get("ScStatus"),
         } if newest else None,
         "http_logs_arriving": _arriving(records, destinations, workspaces, HTTP_TABLE),
     }
@@ -227,8 +250,9 @@ def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
 def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int) -> dict:
     destinations = exporting_workspaces(settings, AUDIT_CATEGORY, AUDIT_GROUPS)
     rid = (mi.get("id") or "").lower()
-    rows = _rows_for(rid, destinations, workspaces, "audit")
-    principal_rows = _rows_for(rid, destinations, workspaces, "principals")
+    counted = _fullest(rid, destinations, workspaces, "audit")
+    rows = _rows_for(rid, counted, workspaces, "audit")
+    principal_rows = _rows_for(rid, counted, workspaces, "principals")
     records = sum(r.get("Records") or 0 for r in rows)
     listed = {(d.get("name") or "").lower(): d["name"] for d in databases or [] if d.get("name")}
     dbs: dict = {}
@@ -275,7 +299,7 @@ def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int
         "audit_workspaces": destinations,
         "audit_records": records,
         "failed_audit_events": sum(r.get("Failed") or 0 for r in rows),
-        "last_audit_record": _latest(r.get("LastRecord") for r in rows),
+        "last_audit_record": _latest(r.get("LastRecord") for r in _rows_for(rid, destinations, workspaces, "audit")),
         "audit_actions": sorted_counts(actions),
         "databases": db_records,
         "audit_records_without_database": sum(r.get("Records") or 0 for r in rows if not r.get("Database")),
@@ -323,7 +347,15 @@ def _min_retention(workspaces: list[dict], table: str, key: str = "retention_in_
     return min(days) if days else None
 
 
+def _receiving(workspaces: list[dict], destinations) -> list[dict]:
+    """A workspace that gets only the other log type still lists this table, at its default retention."""
+    wanted = {id_key(w) for w in destinations}
+    return [w for w in workspaces if id_key(w.get("workspace_id")) in wanted]
+
+
 def summarize(apps: list[dict], instances: list[dict], dependencies: list[dict], workspaces: list[dict], days: int) -> dict:
+    http_workspaces = _receiving(workspaces, (w for a in apps for w in a["http_log_workspaces"]))
+    audit_workspaces = _receiving(workspaces, (w for m in instances for w in m["audit_workspaces"]))
     exporting_apps = [a for a in apps if a["http_logs_exported"]]
     exporting_mis = [m for m in instances if m["audit_exported"]]
     status = Counter(w["status"] for w in workspaces)
@@ -360,11 +392,11 @@ def summarize(apps: list[dict], instances: list[dict], dependencies: list[dict],
         "log_workspaces_queried": status[WS_QUERIED],
         "log_workspaces_not_authorized": status[WS_NOT_AUTHORIZED],
         "log_workspaces_not_found": status[WS_NOT_FOUND],
-        "http_log_retention_days": _min_retention(workspaces, HTTP_TABLE),
-        "audit_log_retention_days": _min_retention(workspaces, AUDIT_TABLE),
+        "http_log_retention_days": _min_retention(http_workspaces, HTTP_TABLE),
+        "audit_log_retention_days": _min_retention(audit_workspaces, AUDIT_TABLE),
         "dependency_retention_days": _min_retention(workspaces, DEPENDENCY_TABLE),
-        "http_log_total_retention_days": _min_retention(workspaces, HTTP_TABLE, TOTAL_RETENTION),
-        "audit_log_total_retention_days": _min_retention(workspaces, AUDIT_TABLE, TOTAL_RETENTION),
+        "http_log_total_retention_days": _min_retention(http_workspaces, HTTP_TABLE, TOTAL_RETENTION),
+        "audit_log_total_retention_days": _min_retention(audit_workspaces, AUDIT_TABLE, TOTAL_RETENTION),
         "dependency_total_retention_days": _min_retention(workspaces, DEPENDENCY_TABLE, TOTAL_RETENTION),
     }
 
@@ -394,7 +426,7 @@ def read_workspace(client, workspace_id: str, subscription_id: str, days: int, s
     """A refused or deleted workspace is evidence; any other failure fails the run."""
     out = {"workspace_id": workspace_id, "name": basename(workspace_id), "status": WS_QUERIED, "error": None,
            "tables": [], "read_tables": []}
-    scope = {"days": days, "subscription_id": subscription_id, "sample": sample}
+    kql = filled_queries(subscription_id, days, sample)
     try:
         customer_id = dig(client.get(workspace_id, LAW_API), "properties", "customerId")
         if not customer_id:
@@ -403,13 +435,8 @@ def read_workspace(client, workspace_id: str, subscription_id: str, days: int, s
                          for t in (HTTP_TABLE, AUDIT_TABLE, DEPENDENCY_TABLE)]
         ready = {t["name"] for t in out["tables"] if t["exists"] and readable(t)}
         timespan = iso_duration_days(days)
-        queries = (
-            (HTTP_TABLE, "http", HTTP_QUERY), (HTTP_TABLE, "http_latest", HTTP_LATEST_QUERY),
-            (HTTP_TABLE, "http_clients", HTTP_CLIENTS_QUERY), (AUDIT_TABLE, "audit", AUDIT_QUERY),
-            (AUDIT_TABLE, "principals", PRINCIPAL_QUERY), (DEPENDENCY_TABLE, "dependencies", DEPENDENCY_QUERY),
-        )
-        for table, key, kql in queries:
-            out[key] = _query(client, customer_id, table, kql.format(**scope), timespan) if table in ready else []
+        for table, key, _ in QUERIES:
+            out[key] = _query(client, customer_id, table, kql[key], timespan) if table in ready else []
         out["read_tables"] = sorted(t["name"] for t in out["tables"] if readable(t))
     except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
         status = ws_status(exc)
@@ -480,8 +507,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
         "workspaces": workspace_records,
         "lookback_days": days,
         "sample_size": sample,
-        "queries": {"http": HTTP_QUERY, "http_latest": HTTP_LATEST_QUERY, "http_clients": HTTP_CLIENTS_QUERY,
-                    "audit": AUDIT_QUERY, "principals": PRINCIPAL_QUERY, "dependencies": DEPENDENCY_QUERY},
+        "queries": filled_queries(subscription_id, days, sample),
     }
     return results, summarize(apps, mis, dependencies, workspace_records, days)
 
