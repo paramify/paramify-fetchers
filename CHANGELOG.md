@@ -587,8 +587,10 @@ schemas and the `paramify` CLI — not the internal code.
   PIM settings are in `pim_role_policies`: MFA or authentication context,
   justification, approval, maximum activation hours, and whether permanent
   eligible or active assignments are allowed; `over_broad_role_policies_read`
-  names the roles read, and the policy lists read null unless all four were.
-  The summary adds the standing, eligibility and policy keys; each reads null
+  names the roles read. The policy lists read null unless all four were read
+  and each has the rule the list depends on, so an unread setting never reads
+  as compliant. The summary adds the standing, eligibility
+  (`total_eligible_role_assignments` and others) and policy keys; each reads null
   when the PIM read it depends on fails. Without Entra ID P2 or ID Governance,
   `pim_available` is false, the PIM reads that succeeded are kept, and the run
   succeeds. Any other PIM refusal now fails the run with `not_authorized` where

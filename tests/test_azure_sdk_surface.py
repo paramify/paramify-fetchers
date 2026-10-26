@@ -1192,6 +1192,24 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/rbac_role_assignments — approval on activation",
     ),
     (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyApprovalRule",
+        ["setting"],
+        "azure/rbac_role_assignments — approval on activation",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "ApprovalStage",
+        ["primary_approvers"],
+        "azure/rbac_role_assignments — activation_approver_sets",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyAuthenticationContextRule",
+        ["is_enabled", "claim_value"],
+        "azure/rbac_role_assignments — an authentication context in place of MFA on activation",
+    ),
+    (
         "azure.mgmt.sql.models",
         "TransparentDataEncryptionProperties",
         ["state"],

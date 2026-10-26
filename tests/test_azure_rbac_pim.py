@@ -58,27 +58,30 @@ def _rule(rule_type, rule_id, **fields):
     return ns(rule_type=rule_type, id=rule_id, **fields)
 
 
-def _policy(role, *, mfa=False, approval=False, permanent_active=False):
+def _policy(role, *, mfa=False, approval=False, permanent_active=False, permanent_eligible=False, auth_context=None,
+            drop=()):
     enabled = ["Justification"] + (["MultiFactorAuthentication"] if mfa else [])
+    rules = [
+        _rule("RoleManagementPolicyExpirationRule", "Expiration_EndUser_Assignment",
+              is_expiration_required=True, maximum_duration="PT8H"),
+        _rule("RoleManagementPolicyEnablementRule", "Enablement_EndUser_Assignment", enabled_rules=enabled),
+        _rule("RoleManagementPolicyApprovalRule", "Approval_EndUser_Assignment", setting=ns(
+            is_approval_required=approval, is_requestor_justification_required=True, approval_mode="SingleStage",
+            approval_stages=[ns(primary_approvers=[ns()] if approval else [])],
+        )),
+        _rule("RoleManagementPolicyAuthenticationContextRule", "AuthenticationContext_EndUser_Assignment",
+              is_enabled=auth_context is not None, claim_value=auth_context),
+        _rule("RoleManagementPolicyExpirationRule", "Expiration_Admin_Eligibility",
+              is_expiration_required=not permanent_eligible, maximum_duration="P365D"),
+        _rule("RoleManagementPolicyExpirationRule", "Expiration_Admin_Assignment",
+              is_expiration_required=not permanent_active, maximum_duration="P180D"),
+        _rule("RoleManagementPolicyNotificationRule", "Notification_Admin_Admin_Assignment"),
+    ]
     return rbac.project_policy_assignment(ns(
         scope=SUB,
         role_definition_id=role,
         policy_id=f"{SUB}/providers/Microsoft.Authorization/roleManagementPolicies/p-{role[-4:]}",
-        effective_rules=[
-            _rule("RoleManagementPolicyExpirationRule", "Expiration_EndUser_Assignment",
-                  is_expiration_required=True, maximum_duration="PT8H"),
-            _rule("RoleManagementPolicyEnablementRule", "Enablement_EndUser_Assignment", enabled_rules=enabled),
-            _rule("RoleManagementPolicyApprovalRule", "Approval_EndUser_Assignment", setting=ns(
-                is_approval_required=approval, is_requestor_justification_required=True, approval_mode="SingleStage",
-                approval_stages=[ns(primary_approvers=[ns()] if approval else [])],
-            )),
-            _rule("RoleManagementPolicyAuthenticationContextRule", "AuthenticationContext_EndUser_Assignment", is_enabled=False),
-            _rule("RoleManagementPolicyExpirationRule", "Expiration_Admin_Eligibility",
-                  is_expiration_required=True, maximum_duration="P365D"),
-            _rule("RoleManagementPolicyExpirationRule", "Expiration_Admin_Assignment",
-                  is_expiration_required=not permanent_active, maximum_duration="P180D"),
-            _rule("RoleManagementPolicyNotificationRule", "Notification_Admin_Admin_Assignment"),
-        ],
+        effective_rules=[r for r in rules if r.id not in drop],
     ))
 
 
@@ -113,7 +116,7 @@ def test_unread_schedules_leave_standing_unknown():
     summary = rbac.summarize_pim([grant], False, None, None, None)
     assert summary["pim_available"] is None
     assert summary["permanent_over_broad_assignments"] is None
-    assert summary["eligible_role_assignments"] is None
+    assert summary["total_eligible_role_assignments"] is None
     assert summary["over_broad_roles_activation_without_mfa_or_auth_context"] is None
 
 
@@ -176,6 +179,47 @@ def test_a_missing_over_broad_policy_leaves_the_policy_lists_unknown():
     assert summary["max_over_broad_activation_hours"] is None
 
 
+@pytest.mark.parametrize("rule,keys", [
+    ("Enablement_EndUser_Assignment", ["over_broad_roles_activation_without_mfa_or_auth_context",
+                                       "over_broad_roles_activation_without_justification"]),
+    ("Approval_EndUser_Assignment", ["over_broad_roles_activation_without_approval"]),
+    ("Expiration_Admin_Assignment", ["over_broad_roles_allowing_permanent_active_assignment"]),
+    ("Expiration_Admin_Eligibility", ["over_broad_roles_allowing_permanent_eligible_assignment"]),
+    ("Expiration_EndUser_Assignment", ["max_over_broad_activation_hours"]),
+])
+def test_a_missing_rule_leaves_its_list_unknown_not_compliant(rule, keys):
+    policies = [rbac.policy_record(_policy(OWNER, drop=(rule,)))] + [
+        rbac.policy_record(_policy(role)) for role in (CONTRIBUTOR, UAA, RBAC_ADMIN)
+    ]
+    summary = rbac.summarize_pim([], True, [], policies, True)
+    for key in keys:
+        assert summary[key] is None, key
+    assert len(summary["over_broad_role_policies_read"]) == 4
+
+
+def test_an_authentication_context_stands_in_for_mfa():
+    policies = [rbac.policy_record(_policy(OWNER, auth_context="c1", drop=("Enablement_EndUser_Assignment",)))] + [
+        rbac.policy_record(_policy(CONTRIBUTOR, auth_context="c1")),
+        rbac.policy_record(_policy(UAA, mfa=True)),
+        rbac.policy_record(_policy(RBAC_ADMIN)),
+    ]
+    assert policies[1]["activation_authentication_context"] == "c1"
+    summary = rbac.summarize_pim([], True, [], policies, True)
+    assert summary["over_broad_roles_activation_without_mfa_or_auth_context"] == [
+        "Role Based Access Control Administrator"
+    ]
+
+
+def test_roles_allowing_permanent_eligibility_are_listed():
+    policies = [rbac.policy_record(_policy(OWNER, permanent_eligible=True))] + [
+        rbac.policy_record(_policy(role)) for role in (CONTRIBUTOR, UAA, RBAC_ADMIN)
+    ]
+    assert policies[0]["permanent_eligible_assignment_allowed"] is True
+    summary = rbac.summarize_pim([], True, [], policies, True)
+    assert summary["over_broad_roles_allowing_permanent_eligible_assignment"] == ["Owner"]
+    assert summary["over_broad_roles_allowing_permanent_active_assignment"] == []
+
+
 def test_schedules_match_grants_inherited_from_above_and_made_below():
     root = _grant("r1", OWNER, scope="/")
     group = _grant("m1", CONTRIBUTOR, scope="/providers/Microsoft.Management/managementGroups/mg1")
@@ -207,9 +251,13 @@ class _Pages:
         return iter(self.items)
 
 
+def _fake_client(schedules, eligible, policies):
+    return ns(role_assignment_schedule_instances=schedules, role_eligibility_schedule_instances=eligible,
+              role_management_policy_assignments=policies)
+
+
 def _fake_sdk(monkeypatch, schedules, eligible, policies):
-    client = ns(role_assignment_schedule_instances=schedules, role_eligibility_schedule_instances=eligible,
-                role_management_policy_assignments=policies)
+    client = _fake_client(schedules, eligible, policies)
     module = types.ModuleType("azure.mgmt.authorization")
     module.AuthorizationManagementClient = lambda **kwargs: client
     monkeypatch.setitem(sys.modules, "azure.mgmt.authorization", module)
@@ -224,10 +272,10 @@ NOT_ONBOARDED = HttpResponseError("(TenantNotOnboarded) The tenant has not onboa
 DENIED = HttpResponseError("(AuthorizationFailed) The client does not have authorization to perform action.")
 
 
-def test_a_tenant_without_p2_is_a_state_not_a_failure(monkeypatch):
-    _fake_sdk(monkeypatch, _Pages(UNLICENSED), _Pages(UNLICENSED), _Pages(NOT_ONBOARDED))
+def test_a_tenant_without_p2_is_a_state_not_a_failure():
+    client = _fake_client(_Pages(UNLICENSED), _Pages(UNLICENSED), _Pages(NOT_ONBOARDED))
     collector = rbac.Collector(logging.getLogger("test"))
-    pim = rbac.collect_pim("sub", object(), collector, ROLE_NAMES)
+    pim = rbac.collect_pim("sub", client, collector, ROLE_NAMES)
 
     assert collector.ok
     assert pim["available"] is False
@@ -239,14 +287,14 @@ def test_a_tenant_without_p2_is_a_state_not_a_failure(monkeypatch):
     assert grant["standing"] == "permanent"
 
 
-def test_a_denied_pim_read_is_recorded_not_authorized(monkeypatch):
+def test_a_denied_pim_read_is_recorded_not_authorized():
     owner = _grant("a1", OWNER)
     policy = ns(scope=SUB, role_definition_id=OWNER, policy_id="p", effective_rules=[])
     reader_policy = ns(scope=SUB, role_definition_id=READER, policy_id="r", effective_rules=[])
-    _fake_sdk(monkeypatch, _Pages(items=[ns(**{**_schedule(owner), "status": "Provisioned"})]), _Pages(DENIED),
-              _Pages(items=[policy, reader_policy]))
+    client = _fake_client(_Pages(items=[ns(**{**_schedule(owner), "status": "Provisioned"})]), _Pages(DENIED),
+                          _Pages(items=[policy, reader_policy]))
     collector = rbac.Collector(logging.getLogger("test"))
-    pim = rbac.collect_pim("sub", object(), collector, ROLE_NAMES)
+    pim = rbac.collect_pim("sub", client, collector, ROLE_NAMES)
 
     assert not collector.ok
     assert rbac.classify_failure_code(collector.failures) == "not_authorized"
@@ -261,12 +309,12 @@ def test_only_provisioned_instances_count(status, kept):
     assert rbac.provisioned({"status": status}) is kept
 
 
-def test_one_licence_refusal_keeps_the_reads_that_succeeded(monkeypatch):
+def test_one_licence_refusal_keeps_the_reads_that_succeeded():
     owner = _grant("a1", OWNER)
     timed = ns(**{**_schedule(owner, end=LATER), "status": "Provisioned"})
-    _fake_sdk(monkeypatch, _Pages(items=[timed]), _Pages(UNLICENSED), _Pages(NOT_ONBOARDED))
+    client = _fake_client(_Pages(items=[timed]), _Pages(UNLICENSED), _Pages(NOT_ONBOARDED))
     collector = rbac.Collector(logging.getLogger("test"))
-    pim = rbac.collect_pim("sub", object(), collector, ROLE_NAMES)
+    pim = rbac.collect_pim("sub", client, collector, ROLE_NAMES)
 
     assert collector.ok
     assert pim["available"] is False
@@ -276,10 +324,10 @@ def test_one_licence_refusal_keeps_the_reads_that_succeeded(monkeypatch):
     assert owner["standing"] == "time_bound"
 
 
-def test_a_licence_refusal_and_a_denial_fail_the_run(monkeypatch):
-    _fake_sdk(monkeypatch, _Pages(UNLICENSED), _Pages(DENIED), _Pages(NOT_ONBOARDED))
+def test_a_licence_refusal_and_a_denial_fail_the_run():
+    client = _fake_client(_Pages(UNLICENSED), _Pages(DENIED), _Pages(NOT_ONBOARDED))
     collector = rbac.Collector(logging.getLogger("test"))
-    pim = rbac.collect_pim("sub", object(), collector, ROLE_NAMES)
+    pim = rbac.collect_pim("sub", client, collector, ROLE_NAMES)
 
     assert pim["available"] is False
     assert pim["schedules"] == [] and pim["eligible"] is None
