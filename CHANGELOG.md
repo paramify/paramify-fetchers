@@ -12,6 +12,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_groups`** (`EVD-AZURE-ENTRA-GROUPS`) — every Entra ID group with
+  its members and owners, its kind, whether it can hold directory roles, and
+  whether membership is set by a rule (dynamic, with paused rules flagged), by hand
+  or synced from on-premises. Summarizes role-assignable groups without an owner or
+  with guests, groups without an owner or with only disabled owners, and groups
+  holding guests, disabled users, nested groups or service principals. Members and
+  owners past `$expand`'s 20-item limit are read from beta, since v1.0 leaves out
+  service principals. Groups whose owners Graph doesn't return (synced,
+  distribution, mail-enabled security) are left out of the owner figures, a
+  hidden-membership group with no visible members reads unknown, and a partial
+  group list nulls every count. Needs GroupMember.Read.All (or Directory.Read.All);
+  User.Read.All, Member.Read.Hidden and Application.Read.All are optional, and
+  without User.Read.All the guest, disabled-user and disabled-owner figures read
+  null.
 - **Oracle Cloud Infrastructure category** (`fetchers/oci/`, fifteen
   fetchers, `pip install -e '.[oci]'`). Authenticates with an API signing key
   the runner injects as a secret (`OCI_PRIVATE_KEY` carries the PEM content,
@@ -102,6 +116,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_app_service_configuration` 0.3.0: cipher suites, basic-auth publishing, Key Vault
+  references and runtime end of support.** Each web app now reports its minimum TLS cipher
+  suite and the suites still allowed (whether CBC or static-RSA suites remain), the SCM site's
+  minimum TLS version, whether basic-auth publishing is allowed on the SCM and FTP endpoints,
+  which app settings and connection strings are Key Vault references and whether each
+  resolves, and whether each declared runtime is past end of support, joined to App
+  Service's own runtime stack list. All Reader GETs; no setting value is read. Existing
+  fields are unchanged. Also maps to KSI-SVC-VCM (client certificate mode and managed
+  identity).
+  - **Opt-in literal-secret scan.** With `scan_literal_secrets` on (off by default), it
+    reads app settings and connection strings through config/list, which needs
+    `Microsoft.Web/sites/config/list/action`, and lists the names of those holding a
+    literal secret instead of a Key Vault or App Configuration reference, each with the
+    reason (`credential_in_value` or `secret_like_name`). Values are classified in memory
+    and never written. A 403 reads `not_authorized` for that app and a ReadOnly lock's 409
+    reads `not_read`; neither is a collection failure. When apps exist but none could be
+    scanned, the secret counts are null rather than 0. The same read supplies a Windows
+    app's Node version (`WEBSITE_NODE_DEFAULT_VERSION`, matched to the Node stack only and
+    written only when it is a version number) to runtime support; without it, a Windows
+    app on the default .NET Framework v4.0 reads as unknown rather than supported.
+    Production sites only; deployment slots are not read.
 - **`azure_storage_encryption_status` 0.2.0 adds geo-replication, access-key age
   and containers.** Each account now carries its primary and secondary region and
   their status, and a geo-redundant account its replication health from
