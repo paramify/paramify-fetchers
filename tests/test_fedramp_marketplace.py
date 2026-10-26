@@ -253,3 +253,55 @@ def test_absent_from_data_json_is_not_delisted(market):
     record = market.record("New", "FR0000000011")
     assert (record["certification_state"], record["status_sources_disagree"]) == (mp.CERTIFIED, True)
     assert (record["package_id_resolves"], record["suggested_package_ids"]) == (True, [])
+
+
+# -- final-audit fixes ---------------------------------------------------------
+
+def add_company(market):
+    """Two products from one company, as data.json has them: `name` is the company."""
+    market.products["FR0000000020"] = product("FR0000000020", "Acme Mail", impact="High", csp="Acme Corp")
+    market.products["FR0000000021"] = product("FR0000000021", "Acme Docs", status="FedRAMP Ready", csp="Acme Corp")
+
+
+@pytest.mark.parametrize("name", ["Acme Corp (Gmail)", "Acme Corp - Unlisted Product", "Acme Corp", "acme corp: storage"])
+def test_company_name_alone_is_not_a_match(market, name):
+    add_company(market)
+    assert market.match_name(name) == (None, "company_only", ["FR0000000020", "FR0000000021"])
+
+
+def test_product_names_still_match(market):
+    add_company(market)
+    assert market.match_name("Acme Mail")[:2] == ("FR0000000020", "name")
+    assert market.match_name("Acme Corp Acme Mail")[:2] == ("FR0000000020", "name")
+    assert market.match_name("Acme Corp - Acme Docs")[:2] == ("FR0000000021", "name")
+    assert market.match_name("Acme Mail (High)")[:2] == ("FR0000000020", "name")
+
+
+@pytest.mark.parametrize("raw,stripped", [
+    ("Cloud-Native Platform", "Cloud-Native Platform"),   # unspaced hyphen is part of the name
+    ("A - B - C", "A - B"),                               # last segment only
+    ("Acme Mail – High", "Acme Mail"),                    # en dash
+    ("Acme Mail: Moderate", "Acme Mail"),
+    ("Acme Mail (FR0000000020)", "Acme Mail"),
+    ("Plain Name", "Plain Name"),
+])
+def test_strip_qualifier(raw, stripped):
+    assert mp.strip_qualifier(raw) == stripped
+
+
+def test_unrecognised_latest_status_is_unknown(market):
+    market.changelog["FR0000000001"].append(row("FR0000000001", "FedRAMP Certified (Revoked)", "2026-10-25"))
+    record = market.record("Good", "FR0000000001")
+    assert (record["certification_state"], record["package_id_resolves"]) == (mp.UNKNOWN, True)
+    assert record["latest_status_change"]["to_status"] == "FedRAMP Certified (Revoked)"
+    s = mp.summarize([record])
+    assert (s["vendors_not_certified"], s["vendors_not_certified_or_in_process"], s["vendors_status_unknown"]) == (1, 1, 1)
+
+
+def test_build_records_reports_company_only_as_unmatched(market):
+    add_company(market)
+    records = ws.build_records(market, [element("Acme Corp (Gmail)", "e1")], ["COM_FEDRAMP_SYSTEM"], {})
+    (r,) = records
+    assert (r["package_id"], r["match_method"], r["certification_state"], r["package_id_resolves"]) == (
+        None, "company_only", mp.NOT_LISTED, False)
+    assert r["suggested_package_ids"] == ["FR0000000020", "FR0000000021"]

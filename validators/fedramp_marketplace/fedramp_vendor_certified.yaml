@@ -4,7 +4,7 @@ type: AUTOMATED
 role: configuration
 statement: Every third-party vendor package checked is currently FedRAMP certified on the FedRAMP Marketplace.
 
-# Strict option: Ready, In Process, In Remediation, delisted and not-listed vendors all fail. Use fedramp_vendor_certified_or_in_process instead to accept vendors still working toward certification.
+# Strict option: Ready, In Process, In Remediation, delisted, not-listed and unknown-status vendors all fail. Use fedramp_vendor_certified_or_in_process instead to accept vendors still working toward certification.
 #
 # Reads the fetcher's own count in `summary`, which is written ahead of the
 # vendor list, so MATCH_GROUP's first match is always the summary. The

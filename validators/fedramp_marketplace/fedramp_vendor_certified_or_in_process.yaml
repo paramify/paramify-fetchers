@@ -4,7 +4,7 @@ type: AUTOMATED
 role: configuration
 statement: Every third-party vendor package checked is FedRAMP certified, FedRAMP Ready or In Process on the FedRAMP Marketplace.
 
-# Lenient option: Ready and In Process pass; In Remediation, delisted and not-listed vendors fail. Attach this OR fedramp_vendor_certified to a set, not both: a set passes only when all its validators pass, so the strict one would decide.
+# Lenient option: Ready and In Process pass; In Remediation, delisted, not-listed and unknown-status vendors fail. Attach this OR fedramp_vendor_certified to a set, not both: a set passes only when all its validators pass, so the strict one would decide.
 #
 # Reads the fetcher's own count in `summary`, which is written ahead of the
 # vendor list, so MATCH_GROUP's first match is always the summary. The

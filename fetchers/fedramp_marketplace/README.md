@@ -15,12 +15,15 @@ latest status change and a link to its listing at
 ## What a record says
 
 - `certification_state`: `certified`, `in_process`, `ready`, `in_remediation`,
-  `delisted` or `not_listed`, from the changelog's latest transition, which is
+  `delisted`, `not_listed` or `unknown`, from the changelog's latest transition, which is
   what fedramp.gov/marketplace shows: a latest row of "No Status Found
   (Delisted)" is delisted. `data.json` lags the changelog and omits some live
   packages, so it decides only for a package the changelog has never recorded;
   missing from `data.json` alone is not a delisting. `status_sources_disagree`
-  is true when `data.json` shows a different state or omits an active package. FedRAMP publishes no corrective action plan (CAP) status.
+  is true when `data.json` shows a different state or omits an active package.
+  A latest transition to a status this fetcher does not recognise reads as
+  `unknown` (counted in `vendors_status_unknown`), which fails both
+  certification validators rather than letting an older row decide. FedRAMP publishes no corrective action plan (CAP) status.
 - `certification_class` A–D and `class_source`: the CSO-PKG overview
   (`cso_pkg`), else the changelog's `cert_class` (`changelog`), else derived
   from impact level (`derived`: LI-SaaS B, Low B, Moderate C, High D).
@@ -37,12 +40,21 @@ this order, recorded in `match_method`:
 
 1. `package_id_overrides` config (`Element Name=PACKAGE_ID`).
 2. A package ID written in the element name, e.g. `Paramify Cloud (FR2428769635XL)`.
-3. The element name against the listings, retried without a trailing
-   ` - <qualifier>`. Several matches are narrowed to a certified listing over
-   in process over ready, then to the one whose impact level the name mentions.
+3. The element name against each listing's **product** name (`cso`, the
+   service offering, or `<company> <product>`), never the company name alone.
+   If nothing matches, the name is retried without one trailing qualifier:
+   ` - <qualifier>` (a spaced hyphen or en/em dash, last segment only),
+   `: <qualifier>` or `(<qualifier>)`. An unspaced hyphen such as
+   `Cloud-Native` is not a qualifier. Several matches are narrowed to a
+   certified listing over in process over ready, then to the one whose impact
+   level the name mentions (the most specific level wins, so `20x Moderate`
+   beats `Moderate`).
 
-Anything still ambiguous is reported unmatched with its candidates, and fails
-the certification and package-ID validators until it is renamed or overridden.
+A name that matches only a company, such as `Google LLC (Gmail)` or a bare
+`Salesforce`, is reported unmatched (`company_only`), with that company's
+listings in `suggested_package_ids`, because a company name says nothing about
+which product is in use. Anything unmatched or still ambiguous fails the
+certification and package-ID validators until it is renamed or overridden.
 
 ## Settings
 

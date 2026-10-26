@@ -39,6 +39,9 @@ READY = "ready"
 IN_REMEDIATION = "in_remediation"
 DELISTED = "delisted"
 NOT_LISTED = "not_listed"
+# The latest changelog row carries a status this client does not recognise
+# (FedRAMP added one, e.g. a suspension). Never read as certified.
+UNKNOWN = "unknown"
 
 # When one name matches several listings, the strongest state wins.
 STATE_RANK = {CERTIFIED: 0, IN_PROCESS: 1, READY: 2}
@@ -83,6 +86,7 @@ PACKAGE_ID_PATTERN = re.compile(r"\b(FR\d{9,10}[A-Z]{0,3}|F\d{10}[A-Z]{0,3})\b")
 # The digits-only base of a standard package ID; only these can have a re-issue.
 _BASE_ID_PATTERN = re.compile(r"^(?:FR\d{9,10}|F\d{10})$")
 _REISSUE_SUFFIX = re.compile(r"[A-Z]{1,3}")
+_QUALIFIER = re.compile(r"^(?P<base>.+?)\s*(?:\([^()]*\)|\s[-–—]\s(?:(?!\s[-–—]\s).)+|:\s*[^:]+)\s*$")
 _CLASS_PATTERN = re.compile(r"^(?:Class\s+)?([A-D])\b", re.IGNORECASE)
 
 
@@ -213,8 +217,14 @@ class Marketplace:
     # -- one package --------------------------------------------------------
 
     def latest_change(self, package_id: str) -> Optional[Dict[str, Any]]:
-        mapped = [r for r in self.changelog.get(package_id, []) if r.get("to_status") in CHANGELOG_STATUS]
-        return mapped[-1] if mapped else None
+        """The package's latest status transition, whether or not its status is one this client knows.
+
+        Skipping an unrecognised status would let an older "FedRAMP Certified"
+        row decide over a newer, possibly adverse one, so state() reads an
+        unrecognised latest status as unknown instead.
+        """
+        rows = [r for r in self.changelog.get(package_id, []) if (r.get("to_status") or "").strip()]
+        return rows[-1] if rows else None
 
     def listing_state(self, package_id: str) -> Optional[str]:
         product = self.products.get(package_id)
@@ -232,6 +242,9 @@ class Marketplace:
         only for a package the changelog has never recorded.
         """
         change = self.latest_change(package_id)
+        if change and change["to_status"] not in CHANGELOG_STATUS:
+            logger.warning("%s: unrecognised changelog status %r; reporting unknown", package_id, change["to_status"])
+            return UNKNOWN, False
         change_state = CHANGELOG_STATUS[change["to_status"]] if change else None
         listing_state = self.listing_state(package_id)
         if change_state is not None:
@@ -335,20 +348,28 @@ class Marketplace:
     def match_name(self, name: str) -> Tuple[Optional[str], str, List[str]]:
         """(package_id, how, candidates) for a vendor known only by name.
 
-        An exact name wins; otherwise a trailing " - <qualifier>" or
-        "(<qualifier>)" is dropped and kept as a hint. Several matches are
-        narrowed by state (certified > in process > ready) and then by the hint
-        naming an impact level. Anything still ambiguous is returned unmatched.
+        The name is compared with each listing's product name (`cso`, the
+        service offering, or "<company> <product>"), never with the company
+        name alone: "Google LLC (Gmail)" must not resolve to Google's one
+        certified listing. An exact name wins; otherwise a trailing
+        " - <qualifier>", ": <qualifier>" or "(<qualifier>)" is dropped and kept
+        as a hint. Several matches are narrowed by state (certified > in
+        process > ready) and then by the hint naming an impact level. Anything
+        still ambiguous is returned unmatched. A name that matches only a
+        company is returned unmatched as company_only, with that company's
+        listings as candidates for an override.
         """
         hits = self._listings_named(name)
         hint = ""
+        stripped = ""
         if not hits:
-            stripped = re.sub(r"\s*(?:[-–—:]\s*[^-–—:]+|\([^)]*\))\s*$", "", name).strip()
-            if stripped and stripped != name.strip():
+            stripped = strip_qualifier(name)
+            if stripped != name.strip():
                 hint = name.strip()[len(stripped):]
                 hits = self._listings_named(stripped)
         if not hits:
-            return None, "unmatched", []
+            company = self._listings_of_company(name) or (self._listings_of_company(stripped) if stripped else [])
+            return None, ("company_only" if company else "unmatched"), company
         if len(hits) == 1:
             return hits[0], "name", hits
 
@@ -375,11 +396,25 @@ class Marketplace:
             return []
         out = []
         for pid, p in self.products.items():
-            names = {p.get("cso"), p.get("name"), p.get("service_offering")}
+            # data.json's `name` is the company (csp) for every listing, so it is not a product name.
+            names = {p.get("cso"), p.get("service_offering")}
             names |= {f"{p.get('csp')} {p.get('cso')}", f"{p.get('csp')} - {p.get('cso')}"}
             if key in {_norm(n) for n in names if n}:
                 out.append(pid)
         return sorted(out)
+
+    def _listings_of_company(self, name: str) -> List[str]:
+        """Listings whose company (csp) is this name: candidates to suggest, never a match."""
+        key = _norm(name)
+        if not key:
+            return []
+        return sorted(pid for pid, p in self.products.items() if _norm(p.get("csp") or "") == key)
+
+
+def strip_qualifier(name: str) -> str:
+    """The name without one trailing qualifier ("A - B - C" -> "A - B"); the name itself if it has none."""
+    match = _QUALIFIER.match(name.strip())
+    return match.group("base").strip() if match else name.strip()
 
 
 def _norm(value: Any) -> str:
@@ -413,6 +448,7 @@ def summarize(vendors: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             lambda v: state(v) not in (CERTIFIED, IN_PROCESS, READY)
         ),
         "vendors_unresolved": count(lambda v: not v.get("package_id_resolves")),
+        "vendors_status_unknown": count(lambda v: state(v) == UNKNOWN),
     }
 
 

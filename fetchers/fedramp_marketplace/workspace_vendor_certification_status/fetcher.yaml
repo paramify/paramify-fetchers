@@ -63,18 +63,26 @@ evidence_set:
 
     Each element is matched to a package ID, recorded in match_method: a
     configured override (config_override), else a package ID written in the
-    element name (id_in_name), else its name against the listings (name). A
-    name with a trailing " - <qualifier>" is retried without it. When several
-    listings match, a certified one is preferred over in process, then ready
-    (name_preferred_state), then one whose impact level the element name
-    mentions (name_impact_level). Anything still ambiguous or unmatched is
-    reported with package_id null, certification_state not_listed and the
-    candidates in suggested_package_ids; it fails the certification and
-    package-ID checks until it is renamed or given an override.
+    element name (id_in_name), else its name against each listing's product
+    name (name): cso, the service offering, or "<company> <product>", never
+    the company name alone. If nothing matches, the name is retried without
+    one trailing qualifier: " - <qualifier>" (spaced hyphen or en/em dash,
+    last segment), ": <qualifier>" or "(<qualifier>)"; an unspaced hyphen is
+    not a qualifier. When several listings match, a certified one is
+    preferred over in process, then ready (name_preferred_state), then the
+    one whose impact level the element name mentions, most specific level
+    first (name_impact_level). A name that matches only a company is
+    unmatched (company_only), with that company's listings as candidates.
+    Anything unmatched or still ambiguous is reported with package_id null,
+    certification_state not_listed and the candidates in
+    suggested_package_ids; it fails the certification and package-ID checks
+    until it is renamed or given an override.
 
     certification_state, certification_class and class_source,
     package_id_resolves, summary and feed are as in
     EVD-FEDRAMP-VENDOR-CERTIFICATION: the changelog's latest transition
-    decides the state (missing from data.json alone is not a delisting), class comes from the CSO-PKG, else the changelog, else is
+    decides the state (missing from data.json alone is not a delisting; an
+    unrecognised latest status is unknown), class comes from the CSO-PKG,
+    else the changelog, else is
     derived from impact level (LI-SaaS B, Low B, Moderate C, High D), and
     FedRAMP publishes no CAP status.

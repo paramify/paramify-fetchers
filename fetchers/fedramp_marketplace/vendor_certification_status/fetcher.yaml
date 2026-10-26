@@ -44,7 +44,7 @@ evidence_set:
     configured package ID is looked up in all three.
 
     certification_state is one of certified, in_process, ready,
-    in_remediation, delisted or not_listed. The changelog's latest transition
+    in_remediation, delisted, not_listed or unknown. The changelog's latest transition
     decides, because fedramp.gov/marketplace follows it: a package whose
     latest row is "No Status Found (Delisted)" is delisted (its marketplace
     page returns 404). data.json lags the changelog and omits some live
@@ -52,7 +52,9 @@ evidence_set:
     recorded, and missing from data.json alone is not a delisting. An ID
     found in neither file is not_listed. In Remediation is only published in
     the changelog. status_sources_disagree is true when data.json shows a
-    different state, or omits a package the changelog shows as active. FedRAMP publishes no corrective action
+    different state, or omits a package the changelog shows as active. A
+    latest transition to a status this fetcher does not recognise is unknown
+    (counted in vendors_status_unknown) and fails both certification checks. FedRAMP publishes no corrective action
     plan (CAP) status, so this evidence cannot show one.
 
     certification_class (A-D) comes from the most authoritative source
