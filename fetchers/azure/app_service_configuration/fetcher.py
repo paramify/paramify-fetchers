@@ -813,6 +813,8 @@ def summarize(apps: list[dict], scan_enabled: bool = False) -> dict:
     total = len(apps)
     scans = [a.get("literal_secret_scan") or {} for a in apps]
     scanned = [s for s in scans if s.get("status") == SCAN_DONE]
+    # Apps present but none scanned (403 or locked everywhere): the secret counts are unknown, not 0.
+    secrets_counted = scan_enabled and (bool(scanned) or not apps)
     https_only = sum(1 for a in apps if a["https_only"])
     managed_identity = sum(1 for a in apps if a["managed_identity_enabled"])
     return {
@@ -936,7 +938,7 @@ def summarize(apps: list[dict], scan_enabled: bool = False) -> dict:
         "apps_with_runtime_support_unknown": sum(
             1 for a in apps if dig(a, "runtime_support", "past_end_of_support") is None
         ),
-        # --- opt-in literal-secret scan (null counts when off) ---
+        # --- opt-in literal-secret scan (null counts when off, or when no app could be scanned) ---
         "literal_secret_scan_enabled": scan_enabled,
         "apps_scanned_for_literal_secrets": len(scanned) if scan_enabled else None,
         "apps_literal_secret_scan_not_authorized": (
@@ -945,8 +947,10 @@ def summarize(apps: list[dict], scan_enabled: bool = False) -> dict:
         "apps_literal_secret_scan_not_read": (
             sum(1 for s in scans if s.get("status") == SCAN_NOT_READ) if scan_enabled else None
         ),
-        "apps_with_literal_secrets": sum(1 for s in scanned if s["has_literal_secrets"]) if scan_enabled else None,
-        "literal_secret_settings": sum(len(s["literal_secrets"]) for s in scanned) if scan_enabled else None,
+        "apps_with_literal_secrets": (
+            sum(1 for s in scanned if s["has_literal_secrets"]) if secrets_counted else None
+        ),
+        "literal_secret_settings": sum(len(s["literal_secrets"]) for s in scanned) if secrets_counted else None,
     }
 
 

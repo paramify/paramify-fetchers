@@ -544,6 +544,42 @@ def test_main_with_the_scan_off_leaves_the_scan_block_counts_null(monkeypatch, t
     assert block["enabled"] is False and block["apps_not_authorized"] is None and block["apps_not_read"] is None
 
 
+def test_scan_with_no_app_scanned_leaves_the_secret_counts_null(monkeypatch):
+    locked = Exception("(ScopeLocked) The scope cannot perform POST operation because of a read-only lock")
+    apps, collector = collect(monkeypatch, web_client(settings={"web-a": DENIED, "web-b": locked}, strings={}),
+                              scan=True)
+    assert collector.ok
+    summary = appsvc.summarize(list(apps.values()), scan_enabled=True)
+    assert summary["apps_scanned_for_literal_secrets"] == 0
+    assert summary["apps_literal_secret_scan_not_authorized"] == 1
+    assert summary["apps_literal_secret_scan_not_read"] == 1
+    assert summary["apps_with_literal_secrets"] is None
+    assert summary["literal_secret_settings"] is None
+
+
+def test_scan_with_no_apps_counts_zero_secrets():
+    summary = appsvc.summarize([], scan_enabled=True)
+    assert summary["apps_scanned_for_literal_secrets"] == 0
+    assert summary["apps_with_literal_secrets"] == 0
+    assert summary["literal_secret_settings"] == 0
+
+
+def test_main_exits_zero_when_the_scan_is_denied_everywhere(monkeypatch, tmp_path):
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv(appsvc.SCAN_ENV, "true")
+    monkeypatch.setattr(appsvc, "resolve_subscription", lambda c: {"subscription_id": SUB, "subscription_source": "env"})
+    monkeypatch.setattr(appsvc, "credential", lambda: object())
+    monkeypatch.setattr(appsvc, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(appsvc, "web_client", lambda *a: web_client(settings={"web-a": DENIED, "web-b": DENIED},
+                                                                     strings={}))
+    monkeypatch.setattr(appsvc, "_attach_diagnostic_settings", lambda *a: None)
+    assert appsvc.main() == 0
+    [path] = tmp_path.glob("azure_app_service_configuration_*.json")
+    summary = json.loads(path.read_text())["summary"]
+    assert summary["apps_literal_secret_scan_not_authorized"] == 2
+    assert summary["apps_with_literal_secrets"] is None and summary["literal_secret_settings"] is None
+
+
 def test_read_only_lock_reads_not_read_with_a_reason_not_a_failure(monkeypatch):
     locked = Exception("(ScopeLocked) The scope cannot perform POST operation because of a read-only lock")
     client = web_client(settings={"web-a": locked}, strings={})
