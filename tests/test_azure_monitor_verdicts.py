@@ -496,7 +496,8 @@ def table(name, plan):
 
 class _Workspaces:
     def __init__(self, get_error=None, customer_id="cust-1", tables=()):
-        self.get_error, self.customer_id, self.tables, self.queries = get_error, customer_id, list(tables), []
+        self.get_error, self.customer_id, self.tables = get_error, customer_id, list(tables)
+        self.queries, self.searches = [], []
 
     def get(self, path, api_version):
         if self.get_error:
@@ -509,9 +510,14 @@ class _Workspaces:
 
     def query(self, customer_id, kql, timespan):
         self.queries.append((customer_id, kql, timespan))
-        if kql.startswith("union"):
-            return [{"ResourceId": VAULT.lower(), "Table": "AzureDiagnostics", "Records": 1,
-                     "LastIngested": "2026-10-12T00:00:00Z"}]
+        if not kql.startswith("union"):  # as live: /query refuses a Basic or Auxiliary table
+            raise azure_rest.QueryError("(400) BadArgumentError",
+                                        f"Failed to resolve table or column expression named '{kql.split(' ')[0]}'")
+        return [{"ResourceId": VAULT.lower(), "Table": "AzureDiagnostics", "Records": 1,
+                 "LastIngested": "2026-10-12T00:00:00Z"}]
+
+    def search(self, customer_id, kql, timespan):
+        self.searches.append((customer_id, kql, timespan))
         return [{"ResourceId": VAULT.lower(), "Table": "StorageBlobLogs", "Records": 4,
                  "LastIngested": "2026-10-12T01:00:00Z"}]
 
@@ -526,16 +532,18 @@ def test_destination_query_is_scoped_to_the_subscription_and_skips_non_log_table
                                           "ContainerLogV2", "KubePodInventory"))
     assert "'AppRequests'" not in kql and "'AppServiceHTTPLogs'" not in kql
     assert (len(client.queries), out["all_tables_queried"], out["resources"][VAULT.lower()]["records"]) == (1, True, 1)
+    assert client.searches == []
 
 
-def test_basic_and_auxiliary_tables_are_queried_one_by_one_over_the_short_window():
+def test_basic_and_auxiliary_tables_are_searched_one_by_one_over_the_short_window():
     tables = [table("StorageBlobLogs", "Basic"), table("AzureDiagnostics", "Analytics"), table("Aux_CL", "Auxiliary"),
               table("ContainerLogV2", "Basic"), table("AKSAudit", "Auxiliary")]
     client = _Workspaces(tables=tables)
     out = rds.read_workspace_ingestion(client, LAW_A, "s1", 7, 24, _Collector())
-    assert [(q[2], q[1].split(" ")[0]) for q in client.queries[1:]] == [("PT24H", "['AKSAudit']"),
-                                                                        ("PT24H", "['StorageBlobLogs']")]
-    assert all("ago(24h)" in q[1] and "startswith '/subscriptions/s1/'" in q[1] for q in client.queries[1:])
+    assert [q[1].split(" ")[0] for q in client.queries] == ["union"]
+    assert [(q[0], q[2], q[1].split(" ")[0]) for q in client.searches] == [("cust-1", "PT24H", "['AKSAudit']"),
+                                                                           ("cust-1", "PT24H", "['StorageBlobLogs']")]
+    assert all("ago(24h)" in q[1] and "startswith '/subscriptions/s1/'" in q[1] for q in client.searches)
     assert [t["name"] for t in out["non_analytics_tables"]] == ["AKSAudit", "Aux_CL", "ContainerLogV2", "StorageBlobLogs"]
     assert (out["all_tables_queried"], out["unqueried_tables"], out["table_errors"]) == (True, [], [])
     assert out["resources"][VAULT.lower()]["tables"] == ["AzureDiagnostics", "StorageBlobLogs"]
@@ -545,6 +553,7 @@ def test_unqueried_storage_tables_leave_only_their_own_service_unknown():
     client = _Workspaces(tables=[table("StorageBlobLogs", "Basic"), table("ContainerLogV2", "Basic")])
     out = rds.read_workspace_ingestion(client, LAW_A, "s1", 7, 0, _Collector())
     assert (len(client.queries), out["all_tables_queried"], out["unqueried_tables"]) == (1, False, ["StorageBlobLogs"])
+    assert client.searches == []
     workspaces = {rds.workspace_key(LAW_A): out}
     vault = {**exporting(LAW_A), "id": VAULT + "-other"}
     blob = {**exporting(LAW_A), "id": f"{RG}/providers/Microsoft.Storage/storageAccounts/sa/blobServices/default",
@@ -567,10 +576,10 @@ def test_an_unqueried_resource_specific_table_counts_unless_the_setting_is_in_az
 
 
 class _BasicFails(_Workspaces):
-    def query(self, customer_id, kql, timespan):
+    def search(self, customer_id, kql, timespan):
         if "['AKSAudit']" in kql:
             raise azure_rest.QueryError("(400) BadArgumentError", "Failed to resolve scalar expression named '_ResourceId'")
-        return super().query(customer_id, kql, timespan)
+        return super().search(customer_id, kql, timespan)
 
 
 def test_a_failing_basic_table_query_keeps_the_union_rows_and_leaves_that_table_unqueried():
@@ -581,6 +590,24 @@ def test_a_failing_basic_table_query_keeps_the_union_rows_and_leaves_that_table_
         rds.INGESTION_QUERIED, [], False, ["AKSAudit"])
     assert [e["table"] for e in out["table_errors"]] == ["AKSAudit"]
     assert out["resources"][VAULT.lower()]["tables"] == ["AzureDiagnostics", "StorageBlobLogs"]
+
+
+def test_search_posts_to_search_with_the_timespan_in_the_url_not_the_body():
+    from types import SimpleNamespace as NS
+
+    sent = []
+    body = {"tables": [{"columns": [{"name": "Table"}, {"name": "Records"}], "rows": [["StorageBlobLogs", 4]]}]}
+    session = NS(post=lambda url, **kw: sent.append((url, kw)) or NS(status_code=200, json=lambda: body))
+    cred = NS(get_token=lambda scope: NS(token="tok", expires_on=9_999_999_999))
+    client = azure_rest.AzureRestClient(cred, session)
+    assert client.search("cust-1", "['StorageBlobLogs'] | count", "PT6H") == [{"Table": "StorageBlobLogs", "Records": 4}]
+    client.query("cust-1", "union *", "P7D")
+    (search_url, search_kw), (query_url, query_kw) = sent
+    assert (search_url, search_kw["params"], search_kw["json"]) == (
+        f"{client.logs}/v1/workspaces/cust-1/search", {"timespan": "PT6H"}, {"query": "['StorageBlobLogs'] | count"})
+    assert (query_url, query_kw["json"], "params" in query_kw) == (
+        f"{client.logs}/v1/workspaces/cust-1/query", {"query": "union *", "timespan": "P7D"}, False)
+    assert search_kw["headers"]["x-ms-app"] == query_kw["headers"]["x-ms-app"] == azure_rest.CLIENT_APP
 
 
 @pytest.mark.parametrize("raw, hours", [(None, 0), ("", 0), ("0", 0), ("6", 6), ("-3", 0), ("x", 0)])

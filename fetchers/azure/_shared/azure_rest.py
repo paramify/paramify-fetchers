@@ -165,13 +165,20 @@ class AzureRestClient:
 
     def query(self, customer_id: str, kql: str, timespan: str) -> List[Dict[str, Any]]:
         """Rows of the primary table; a partial result raises rather than returning short."""
+        return self._logs_rows(f"{customer_id}/query", json={"query": kql, "timespan": timespan})
+
+    def search(self, customer_id: str, kql: str, timespan: str) -> List[Dict[str, Any]]:
+        """query() for Basic and Auxiliary tables, which /query refuses; /search takes the timespan in the URL."""
+        return self._logs_rows(f"{customer_id}/search", json={"query": kql}, params={"timespan": timespan})
+
+    def _logs_rows(self, path: str, **kwargs: Any) -> List[Dict[str, Any]]:
         response = self._send(
             "post",
-            f"{self.logs}/v1/workspaces/{customer_id}/query",
+            f"{self.logs}/v1/workspaces/{path}",
             self.logs,
             headers={"Prefer": f"wait={QUERY_TIMEOUT}", "x-ms-app": CLIENT_APP},
-            json={"query": kql, "timespan": timespan},
             timeout=QUERY_TIMEOUT + 30,
+            **kwargs,
         )
         if response.status_code >= 400:
             code, message = _error_parts(response)

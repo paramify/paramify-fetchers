@@ -565,7 +565,7 @@ def read_workspace_ingestion(
     for name in list(unqueried) if hours else []:
         query = BASIC_TABLE_QUERY.format(table=name, hours=hours, subscription_id=subscription_id)
         try:
-            rows += client.query(out["customer_id"], query, f"PT{hours}H")
+            rows += client.search(out["customer_id"], query, f"PT{hours}H")
             unqueried.remove(name)
         except Exception as exc:  # noqa: BLE001 — one table's failure leaves it unqueried, not the run failed
             logger.warning("Basic table %s in %s not queried: %s", name, workspace_id, exc)
