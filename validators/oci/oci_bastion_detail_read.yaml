@@ -1,0 +1,23 @@
+key: oci_bastion_detail_read
+name: OCI Bastion Settings Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Every bastion's detail was read. The client allow-list and session TTL exist
+  only on the per-bastion detail call, so a bastion whose detail failed is
+  counted nowhere in the posture numbers, and its partner's zero would mean
+  "not read" rather than "not open". Pair with oci_bastion_inventory_present,
+  which proves there was a bastion to read. Does NOT assert anything about
+  posture. Fails when the summary key is renamed.
+regex: '"bastions_with_unreadable_detail":\s*(?<bastions_with_unreadable_detail>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-BASTION-JIT

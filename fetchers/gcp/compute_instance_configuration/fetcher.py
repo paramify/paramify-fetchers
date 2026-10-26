@@ -89,9 +89,15 @@ def project_record(project: dict | None) -> dict:
     it apart from a genuinely unset project is metadata.api_failures.
     """
     common = metadata_items(first(project, "commonInstanceMetadata", "common_instance_metadata"))
+    os_login = metadata_enabled(common.get(OS_LOGIN_KEY))
+    os_login_2fa_configured = metadata_enabled(common.get(OS_LOGIN_2FA_KEY))
     return {
-        "os_login_enabled": metadata_enabled(common.get(OS_LOGIN_KEY)),
-        "os_login_2fa_enabled": metadata_enabled(common.get(OS_LOGIN_2FA_KEY)),
+        "os_login_enabled": os_login,
+        # 2FA is enforced only through OS Login; the flag alone does nothing.
+        "os_login_2fa_enabled": os_login and os_login_2fa_configured,
+        # The raw project flag, which instances inherit key by key: an instance
+        # that turns OS Login on itself gets 2FA from here.
+        "os_login_2fa_configured": os_login_2fa_configured,
         "default_service_account": first(
             project, "defaultServiceAccount", "default_service_account"
         ),
@@ -165,8 +171,19 @@ def instance_record(instance: dict, project_defaults: dict) -> dict:
     integrity = bool(first(shielded, "enableIntegrityMonitoring", "enable_integrity_monitoring"))
     gke_managed = str(name or "").startswith(GKE_INSTANCE_PREFIX)
 
+    # Each key resolves on its own: the instance's value if set, else the project's.
     os_login_override = flags.get(OS_LOGIN_KEY)
     os_login_2fa_override = flags.get(OS_LOGIN_2FA_KEY)
+    os_login = (
+        metadata_enabled(os_login_override)
+        if os_login_override is not None
+        else bool(project_defaults.get("os_login_enabled"))
+    )
+    os_login_2fa_configured = (
+        metadata_enabled(os_login_2fa_override)
+        if os_login_2fa_override is not None
+        else bool(project_defaults.get("os_login_2fa_configured"))
+    )
 
     return {
         "name": name,
@@ -191,18 +208,13 @@ def instance_record(instance: dict, project_defaults: dict) -> dict:
             confidential, "confidentialInstanceType", "confidential_instance_type"
         ),
         # --- SSH / console access ---
-        "os_login_enabled": (
-            metadata_enabled(os_login_override)
-            if os_login_override is not None
-            else bool(project_defaults.get("os_login_enabled"))
-        ),
+        "os_login_enabled": os_login,
         # The inherited project default is "off" when the project is silent.
         "os_login_source": "instance" if os_login_override is not None else "project",
-        "os_login_2fa_enabled": (
-            metadata_enabled(os_login_2fa_override)
-            if os_login_2fa_override is not None
-            else bool(project_defaults.get("os_login_2fa_enabled"))
-        ),
+        # Effective 2FA: enable-oslogin-2fa has no effect unless OS Login is on.
+        "os_login_2fa_enabled": os_login and os_login_2fa_configured,
+        # The resolved enable-oslogin-2fa flag, whether or not OS Login is on.
+        "os_login_2fa_configured": os_login_2fa_configured,
         "serial_port_access_enabled": metadata_enabled(flags.get(SERIAL_PORT_KEY)),
         "block_project_ssh_keys": metadata_enabled(flags.get(BLOCK_PROJECT_SSH_KEYS_KEY)),
         # Presence only. The key's value is a list of public keys and is not copied.

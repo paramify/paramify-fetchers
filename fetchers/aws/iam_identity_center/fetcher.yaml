@@ -35,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-IAM-IDENTITY-CENTER
   name: IAM Identity Center
-  instructions: 'Script: iam_identity_center.sh. Commands executed: aws sso-admin list-instances, aws sso-admin list-permission-sets'
+  instructions: 'Script: aws/iam_identity_center/fetcher.sh. Commands executed: aws sso-admin list-instances, aws sso-admin list-permission-sets'

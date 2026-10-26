@@ -1,0 +1,99 @@
+name: azure_managed_identity_configuration
+version: 0.1.0
+description: >
+  Inventories the Azure managed identities in the subscription — the non-user accounts Azure
+  resources sign in as. For every user-assigned identity: the resources it is attached to, its
+  federated credentials (which outside systems such as GitHub Actions can sign in as it, and how
+  narrowly), its Azure role assignments and its Microsoft Graph application permissions. For every
+  resource with a system-assigned identity: its role assignments and Graph permissions. Each role is
+  judged by what its permissions allow — full control, granting access, reading keys, full data
+  access — not by its name, so custom roles are judged the same way as built-in ones.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_managed_identity_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-IAM-SNU   # non-user identities and the outside systems federated to sign in as them
+  - KSI-IAM-ELP   # what each identity's roles and Graph permissions let it do
+
+evidence_set:
+  reference_id: EVD-AZURE-MANAGED-IDENTITY-CONFIG
+  name: Azure Managed Identity Configuration
+  instructions: >
+    Script: azure/managed_identity_configuration/fetcher.py. Azure SDK calls: azure-mgmt-msi ManagedServiceIdentityClient
+    user_assigned_identities.list_by_subscription(); Azure Resource Graph
+    (resources | where isnotnull(identity)) for every resource's identity block, paged to the end and
+    checked against the reported total; azure-mgmt-authorization
+    role_definitions.list(subscription scope) for each role's name and permissions, and
+    role_assignments.list_for_subscription() for every assignment, matched to identities by principal id.
+    Federated credentials are read as ARM JSON from {identity}/federatedIdentityCredentials on api-version
+    2025-01-31-preview (which returns flexible claims-matching expressions), falling back to 2024-11-30
+    whenever ARM rejects the preview version (InvalidApiVersion, NoSuchApi or NoRegisteredProviderFound).
+    Microsoft Graph (msgraph-sdk): servicePrincipals/{principal id}/appRoleAssignments for each identity,
+    and the resource service principal's appRoles to name each permission. No call reads a secret or token.
+    Role capabilities come from the role definition's permissions, not its name: full_control when an
+    action is "*"; can_grant_access when it allows Microsoft.Authorization/roleAssignments/write (after
+    notActions); can_read_keys when it allows a control-plane operation that returns a data-plane
+    credential (storage, AI services, AI Search, Cosmos DB, Redis, Event Hubs and Service Bus listKeys,
+    Foundry connection listSecrets, App Service config list, API Management subscription listSecrets);
+    full_data_access when a data action is "*" or ends in "/*". broad_role still marks the four built-in
+    roles Owner, Contributor, User Access Administrator and Role Based Access Control Administrator. A
+    role assignment's condition, when present, may narrow what it allows and is recorded. Each identity's
+    role_full_control, role_can_grant_access, role_can_read_keys and role_full_data_access are true when
+    any of its assignments is; role_resolved false means the role definition was not visible at the
+    subscription scope, and its capabilities are null.
+    attached_resources lists resources in this subscription that name a user-assigned identity; an
+    empty list (no_resource_attached in the summary) does not prove the identity is unused, since a
+    resource in another subscription, a deployment script or a federated workload can still use it, and
+    sign-in activity is not read. unattached_identities_with_roles counts those that still hold roles:
+    standing access with no visible owner. An identity with federated credentials is used by an outside
+    workload (GitHub Actions, AKS workload identity) and is never attached to a resource by design, so it
+    is counted in federated_only_identities_with_roles instead.
+    Federated credentials carry issuer, subject, audiences and claims_matching_expression; issuer_kind
+    labels github_actions, azure_devops, aks_workload_identity, google, aws or other; github_subject_kind
+    is branch, tag, environment, pull_request, workflow or other for GitHub subjects. broad_subject is true
+    for a pull_request subject (any pull request's workflow can sign in), a claims-matching expression, or
+    a "*" in the subject. nonstandard_audience is true when an audience is not api://AzureADTokenExchange
+    (or its sovereign-cloud variants).
+    Graph: graph_access is read, not_authorized (the credential cannot read the directory; every
+    identity's graph_app_roles is then null and counted in identities_graph_roles_unknown), failed, or
+    not_read when there were no identities to look up. Each
+    Graph permission records its resource, the resource's app id and the permission name. privileged is
+    judged only for Microsoft Graph's own permissions: true for ReadWrite or FullControl permissions,
+    Mail.Send, and tenant-wide reads of mail, files, sites, chats, calendars, contacts and notes (such as
+    Mail.Read, Files.Read.All, Sites.Read.All); false for other Graph permissions and for any other API;
+    null when the permission or its resource could not be resolved, which also counts the identity in
+    identities_graph_roles_unknown. Default access (no app role) is not privileged.
+    Role assignments are those visible from this subscription; assignments the same identity holds in
+    other subscriptions are not read. has_subscription_or_higher_role covers subscription, management
+    group and root scopes. Lists that could not be read are null and set metadata.partial_failure.
+    provider_registration_status (registered / not_registered / unknown) is the
+    Microsoft.ManagedIdentity resource provider's state.

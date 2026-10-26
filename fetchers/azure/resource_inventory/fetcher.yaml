@@ -1,16 +1,38 @@
 name: azure_resource_inventory
-version: 0.1.0
+version: 0.2.0
 description: >
   An automatically generated inventory of every resource in the subscription, read
   from Azure Resource Graph's `Resources` table rather than service by service: each
   resource's id, name, type, location, resource group, tags, SKU and kind where the
-  resource type has them, and its provisioning state. Summarized as the total count
-  and the counts by resource type and by location, plus how many resources carry no
-  tags at all. The inventory is paged to the end — a result Resource Graph reports as
+  resource type has them, and its provisioning state. Each resource also carries its
+  Defender for Cloud coverage (assessments that came back Healthy or Unhealthy,
+  unhealthy assessments and unhealthy High/Critical assessments, from
+  `SecurityResources`; NotApplicable assessments did not happen and are counted
+  apart, never as coverage) and its Azure Policy coverage (policy states and
+  non-compliant states, from `PolicyResources`); results on a child resource, such
+  as a subnet, count for the inventoried parent. The summary
+  gives the total count and the counts by resource type and by location, how many
+  resources carry no tags, and for Defender and for Policy the resources not covered.
+  A resource counts as not covered only when its type is covered on some other
+  resource in the subscription; types the service covers on no resource (types it
+  has no recommendations or assigned policies for, or a service not in use) are
+  listed apart with their counts, and a service that covers nothing, or an empty
+  inventory (what Resource Graph returns to a caller without Reader), never reads
+  as complete. The unhealthy, High/Critical and non-compliant counts cover inventoried
+  resources and their children only: assessments and policy states about the
+  subscription itself, a resource group, or anything else not in the inventory (a
+  deleted resource, a type Resource Graph keeps outside `Resources`) are counted
+  apart, with their own unhealthy, unhealthy High/Critical and non-compliant totals,
+  and broken down by the type of what they target (never its name) under
+  results.coverage_queries. Assessments of AWS, GCP or on-premises machines (a
+  `resourceDetails` source other than Azure) always count there, by source, even
+  when their id sits under an inventoried resource such as a multicloud connector.
+  Every query is paged to the end — a result Resource Graph reports as
   truncated, or a page count that disagrees with its own total, is a collection
-  failure rather than a short list. Resource Graph indexes ARM resources only:
-  resource groups and subscriptions live in its separate `ResourceContainers` table
-  and are not counted here.
+  failure rather than a short list, and a failed coverage query leaves that
+  service's counts null rather than every resource uncovered. Resource Graph indexes
+  ARM resources only: resource groups and subscriptions live in its separate
+  `ResourceContainers` table and are not counted here. Needs Reader.
 category: azure
 
 supports_targets: true
@@ -44,15 +66,40 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-PIY-GIV      # Generating inventories — a complete, automatically generated resource inventory
+  - KSI-MLA-EVC      # Evaluating configurations — which resources Azure Policy evaluates, and which it misses
+  - KSI-CNA-EIS      # Enforcing intended state — which resources Defender for Cloud persistently assesses
+  - KSI-SVC-EIS      # Evaluating and improving security — unhealthy High/Critical assessments on each resource
 
 evidence_set:
   reference_id: EVD-AZURE-RESOURCE-INVENTORY
   name: Azure Resource Inventory
   instructions: >
-    Script: fetcher.py. Azure SDK call (azure-mgmt-resourcegraph ResourceGraphClient):
-    resources(QueryRequest(subscriptions=[<subscription_id>], query="Resources |
-    project id, name, type, location, resourceGroup, tags, sku, kind,
-    provisioningState = tostring(properties.provisioningState) | order by id asc",
+    Script: azure/resource_inventory/fetcher.py. Azure SDK calls (azure-mgmt-resourcegraph ResourceGraphClient),
+    each resources(QueryRequest(subscriptions=[<subscription_id>], query=...,
     options=QueryRequestOptions(top=1000, skip_token=<previous page's $skipToken>,
-    result_format="objectArray"))), repeated until no $skipToken is returned. Reader
-    is sufficient — Resource Graph returns only the resources the caller can read.
+    result_format="objectArray"))) repeated until no $skipToken is returned:
+    "Resources | project id, name, type, location, resourceGroup, tags, sku, kind,
+    provisioningState = tostring(properties.provisioningState) | order by id asc";
+    "SecurityResources | where type =~ 'microsoft.security/assessments' | project id,
+    resourceDetails = properties.resourceDetails, status =
+    tostring(properties.status.code), severity = tostring(properties.metadata.severity)
+    | order by id asc"; and "PolicyResources | where type =~
+    'microsoft.policyinsights/policystates' | project id, resourceId =
+    tostring(properties.resourceId), complianceState =
+    tostring(properties.complianceState) | order by id asc". The three are joined by
+    resource id in the fetcher. Reader is sufficient — Resource Graph returns only
+    the resources the caller can read. Every policy state, Exempt and Unknown
+    included, counts toward policy_evaluations, so toward
+    resources_evaluated_by_policy and policy_evaluated_percentage; only NonCompliant
+    counts toward policy_non_compliant. Each query stops at 1,000 pages (1,000,000
+    rows), a guard in the fetcher rather than a documented Resource Graph limit. A
+    query past it is a collection failure, never a truncated result: the run exits
+    1 with the error in metadata.api_failures. A failed SecurityResources or
+    PolicyResources query leaves that service's counts null; a failed Resources
+    query leaves the inventory empty, so its totals read 0 and both services'
+    counts are null. PolicyResources, one state per resource, assignment and
+    policy, is the query a large subscription can push past the guard. A query that
+    long will usually hit the runner's default 600-second timeout first (exit 124,
+    no evidence file). KSI-CNA-EIS and KSI-SVC-EIS are supporting evidence:
+    Defender's coverage and unhealthy findings, not the enforcement or remediation
+    itself.

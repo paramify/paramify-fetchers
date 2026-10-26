@@ -1,0 +1,92 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_policy_assignments",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.policy_assignments[]",
+      "records": 2,
+      "fields": {
+        "assignment_identity_type": 0,
+        "description": 1,
+        "display_name": 2,
+        "enforced": 2,
+        "enforcement_mode": 2,
+        "excluded_scope_count": 2,
+        "id": 2,
+        "inherited_from_management_group": 2,
+        "location": 0,
+        "name": 2,
+        "not_scopes": 0,
+        "parameters": 0,
+        "policy_definition": 2,
+        "policy_definition_id": 2,
+        "scope": 2,
+        "scope_kind": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:10:23Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "policy_assignments": [
+        {
+          "assignment_identity_type": null,
+          "description": "This is the default set of policies monitored by Azure Security Center. It was automatically assigned as part of onboarding to Security Center. The default assignment contains only audit policies. For more information please visit https://aka.ms/ascpolicies",
+          "display_name": "ASC Default (subscription: 00000000-0000-4000-8000-111111111111)",
+          "enforced": true,
+          "enforcement_mode": "Default",
+          "excluded_scope_count": 0,
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/providers/Microsoft.Authorization/policyAssignments/SecurityCenterBuiltIn",
+          "inherited_from_management_group": false,
+          "location": null,
+          "name": "SecurityCenterBuiltIn",
+          "not_scopes": [],
+          "parameters": {},
+          "policy_definition": {
+            "display_name": "Microsoft cloud security benchmark",
+            "kind": "policy_set_definition",
+            "name": "00000000-0000-4000-8000-222222222222",
+            "policy_type": "BuiltIn",
+            "reason": null,
+            "source_scope": "built_in",
+            "status": "resolved"
+          },
+          "policy_definition_id": "/providers/Microsoft.Authorization/policySetDefinitions/00000000-0000-4000-8000-222222222222",
+          "scope": "/subscriptions/00000000-0000-4000-8000-111111111111",
+          "scope_kind": "subscription"
+        }
+      ],
+      "provider_registration_status": "registered"
+    },
+    "summary": {
+      "assignments_with_excluded_scopes": 0,
+      "assignments_with_parameters": 0,
+      "audit_only_assignments": 0,
+      "built_in_definition_assignments": 2,
+      "custom_definition_assignments": 0,
+      "enforced_assignments": 2,
+      "enforced_percentage": 100,
+      "inherited_assignments": 1,
+      "initiative_assignments": 1,
+      "provider_registration_status": "registered",
+      "resource_group_scoped_assignments": 0,
+      "security_center_builtin_assigned": true,
+      "security_center_builtin_enforced": true,
+      "single_definition_assignments": 1,
+      "subscription_scoped_assignments": 1,
+      "total_policy_assignments": 2,
+      "unresolved_definition_assignments": 0
+    }
+  }
+}

@@ -53,6 +53,6 @@ evidence_set:
   reference_id: EVD-AZURE-COSMOSDB-CONFIG
   name: Azure Cosmos DB Account Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK call (azure-mgmt-cosmosdb CosmosDBManagementClient):
+    Script: azure/cosmosdb_configuration/fetcher.py. Azure SDK call (azure-mgmt-cosmosdb CosmosDBManagementClient):
     database_accounts.list(). Records each account's encryption key source,
     authentication, network exposure, failover and backup policy.

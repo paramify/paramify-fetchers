@@ -127,7 +127,7 @@ resolves every open issue.
 ## 4. Run it
 
 Add it to a manifest with one target per scan
-([building a manifest](../README.md#building-a-manifest)), then run it. No
+([building a manifest](cli_guide.md#building-a-manifest)), then run it. No
 Paramify connection is needed. The runner points `EVIDENCE_DIR` at the run's
 `issue-reports/` directory.
 

@@ -450,7 +450,17 @@ def fetchers():
     cat = api.catalog(api.find_repo_root(REPO_ROOT))
     allf = [f for c in cat["categories"] for f in c["fetchers"]]
     assert allf, "no fetchers discovered — cannot run parity smoke tests"
-    with_secret = next((f for f in allf if f["secrets"] and not f["supports_targets"]), None)
+    # A fetcher whose only requirements are its secrets: wiring them must make the
+    # manifest valid. One with required config that has no default (a portal URL,
+    # a course list) would still be invalid, so it is skipped.
+    with_secret = next(
+        (
+            f for f in allf
+            if f["secrets"] and not f["supports_targets"]
+            and not any(c.get("required") and c.get("default") is None for c in f["config"])
+        ),
+        None,
+    )
     fanout = next((f for f in allf if f["supports_targets"]), None)
     return {"any": allf[0], "with_secret": with_secret, "fanout": fanout}
 
@@ -779,6 +789,68 @@ def test_set_platform_config_bad_int_json(in_repo, tmp_path):
     out = json.loads(r.output)
     assert out["ok"] is False and out["errors"]
     assert "integer" in out["errors"][0]
+
+
+def test_set_config_keeps_env_reference_on_a_string_field(in_repo, tmp_path):
+    m = str(tmp_path / "m.yaml")
+    runner.invoke(app, ["manifest", "init", "-f", m])
+    runner.invoke(app, ["manifest", "add", "azure_front_door_origins", "-f", m])
+    _json(runner.invoke(app, ["manifest", "set-config", "azure_front_door_origins",
+                              "scope_exclusions=${env:MY_VALUE}", "-f", m, "--json"]))
+    shown = _json(runner.invoke(app, ["manifest", "show", "-f", m, "--json"]))
+    assert _entry(shown, "azure_front_door_origins")["config"]["scope_exclusions"] == "${env:MY_VALUE}"
+
+
+@pytest.mark.parametrize("command", [
+    ["set-config", "azure_front_door_origins", "metrics_lookback_days=${env:MY_VALUE}"],  # integer
+    ["set-config", "aws_iam_roles", "exclude_aws_managed_roles=${env:MY_VALUE}"],  # boolean
+    ["set-platform-config", "rippling", "page_size=${env:MY_VALUE}"],  # integer
+    ["set-platform-config", "azure", "metrics_lookback_days=${env:MY_VALUE}"],  # a fetcher's integer
+])
+def test_env_reference_on_a_typed_config_field_is_refused(in_repo, tmp_path, command):
+    m = str(tmp_path / "m.yaml")
+    runner.invoke(app, ["manifest", "init", "-f", m])
+    if command[0] == "set-config":
+        runner.invoke(app, ["manifest", "add", command[1], "-f", m])
+    r = runner.invoke(app, ["manifest", *command, "-f", m, "--json"])
+    assert r.exit_code == 1
+    assert "references work on string config fields only" in json.loads(r.output)["errors"][0]
+    shown = _json(runner.invoke(app, ["manifest", "show", "-f", m, "--json"]))
+    assert "MY_VALUE" not in json.dumps(shown)
+
+
+@pytest.mark.parametrize("command, message", [
+    (["set-config", "azure_front_door_tls", "scope_exclusions=${env:PARAMIFY_UPLOAD_API_TOKEN}"],
+     "config 'scope_exclusions' reads ${env:PARAMIFY_UPLOAD_API_TOKEN}, which holds a secret"),
+    (["set-platform-config", "azure", "scope_exclusions=${env:AZURE_CLIENT_SECRET}"],
+     "config 'scope_exclusions' reads ${env:AZURE_CLIENT_SECRET}, which holds a secret"),
+    (["set-config", "azure_front_door_tls", "scope_exclusions=qa.* ${env:MY_VALUE}"],
+     "a ${env:} reference must be the whole value"),
+])
+def test_env_reference_to_a_secret_or_inside_a_value_is_refused(in_repo, tmp_path, command, message):
+    m = str(tmp_path / "m.yaml")
+    runner.invoke(app, ["manifest", "init", "-f", m])
+    if command[0] == "set-config":
+        runner.invoke(app, ["manifest", "add", command[1], "-f", m])
+    r = runner.invoke(app, ["manifest", *command, "-f", m, "--json"])
+    assert r.exit_code == 1
+    assert message in json.loads(r.output)["errors"][0]
+    shown = _json(runner.invoke(app, ["manifest", "show", "-f", m, "--json"]))
+    assert "${env:" not in json.dumps(shown)
+
+
+def test_env_reference_in_a_target_field_is_refused(in_repo, tmp_path):
+    m = str(tmp_path / "m.yaml")
+    runner.invoke(app, ["manifest", "init", "-f", m])
+    runner.invoke(app, ["manifest", "add", "azure_front_door_origins", "-f", m])
+    r = runner.invoke(app, ["manifest", "add-target", "azure_front_door_origins", "production_tag=${env:TAG}",
+                            "-f", m, "--json"])
+    assert r.exit_code == 1 and "target fields aren't resolved" in json.loads(r.output)["errors"][0]
+    _json(runner.invoke(app, ["manifest", "add-target", "azure_front_door_origins", "production_tag=env=prod",
+                              "-f", m, "--json"]))
+    r = runner.invoke(app, ["manifest", "set-target", "azure_front_door_origins", "0", "production_tag=${env:TAG}",
+                            "-f", m, "--json"])
+    assert r.exit_code == 1 and "target fields aren't resolved" in json.loads(r.output)["errors"][0]
 
 
 # --------------------------------------------------------------------------- #

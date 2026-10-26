@@ -1,0 +1,82 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_auto_scaling_high_availability",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 1,
+      "fields": {
+        "Type": 1,
+        "ASGInfo": 1,
+        "Instances": 0
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:10:53Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "Type": "AutoScalingGroup",
+        "ASGInfo": {
+          "AutoScalingGroupName": "pft-asg",
+          "AutoScalingGroupARN": "arn:aws:autoscaling:us-east-2:111111111111:autoScalingGroup:00000000-0000-4000-8000-222222222222:autoScalingGroupName/pft-asg",
+          "LaunchTemplate": {
+            "LaunchTemplateId": "lt-092336420cfb9128a",
+            "LaunchTemplateName": "pft-asg-3db52236d1535a5a2b722763aa",
+            "Version": "$Latest"
+          },
+          "MinSize": 0,
+          "MaxSize": 1,
+          "DesiredCapacity": 0,
+          "DefaultCooldown": 300,
+          "AvailabilityZones": [
+            "us-east-2a",
+            "us-east-2b"
+          ],
+          "AvailabilityZoneIds": [
+            "use2-az1",
+            "use2-az2"
+          ],
+          "LoadBalancerNames": [],
+          "TargetGroupARNs": [],
+          "HealthCheckType": "EC2",
+          "HealthCheckGracePeriod": 300,
+          "Instances": [],
+          "CreatedTime": "2026-09-28T17:04:11.005000+00:00",
+          "SuspendedProcesses": [],
+          "VPCZoneIdentifier": "subnet-0189b9682dd8910c2,subnet-0ac42ef667a21d880",
+          "EnabledMetrics": [],
+          "Tags": [],
+          "TerminationPolicies": [
+            "Default"
+          ],
+          "NewInstancesProtectedFromScaleIn": false,
+          "ServiceLinkedRoleARN": "arn:aws:iam::111111111111:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling",
+          "TrafficSources": [],
+          "AvailabilityZoneDistribution": {
+            "CapacityDistributionStrategy": "balanced-best-effort"
+          },
+          "CapacityReservationSpecification": {
+            "CapacityReservationPreference": "default"
+          },
+          "InstanceLifecyclePolicy": {
+            "RetentionTriggers": {
+              "TerminateHookAbandon": "terminate"
+            }
+          }
+        },
+        "Instances": []
+      }
+    ]
+  }
+}

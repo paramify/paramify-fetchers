@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CODEBUILD-CONFIG
   name: AWS CodeBuild Pipeline Configuration
-  instructions: 'Script: fetcher.sh. Commands executed: aws codebuild list-projects, aws codebuild batch-get-projects (collects per-project source, environment, logsConfig, and artifacts encryption).'
+  instructions: 'Script: aws/codebuild_pipeline_config/fetcher.sh. Commands executed: aws codebuild list-projects, aws codebuild batch-get-projects (collects per-project source, environment, logsConfig, and artifacts encryption).'

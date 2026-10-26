@@ -61,7 +61,7 @@ evidence_set:
   reference_id: EVD-AZURE-APPSVC-CONFIG
   name: Azure App Service Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Web"), then
+    Script: azure/app_service_configuration/fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Web"), then
     azure-mgmt-web WebSiteManagementClient web_apps.list(), get_configuration() and
     get_auth_settings_v2_without_secrets() per web app (access restrictions come from
     get_configuration()), and azure-mgmt-monitor MonitorManagementClient

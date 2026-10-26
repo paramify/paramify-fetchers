@@ -94,3 +94,21 @@ def env_var_name(value) -> Optional[str]:
 def is_env_ref_attempt(value) -> bool:
     """True if the value opens with the reference sigil, well-formed or not."""
     return isinstance(value, str) and bool(_ENV_REF_ATTEMPT.match(value.strip()))
+
+
+def is_partial_env_ref(value) -> bool:
+    """True if the reference sigil appears in the value anywhere but at its start."""
+    return isinstance(value, str) and "${env:" in value and not is_env_ref_attempt(value)
+
+
+def view_runtime_value(field: Optional[dict]):
+    """The value the runner uses for one api.effective_config() field, which shows a reference as written: the
+    reference resolved when it is the value, None when the runner refuses the field, else the value itself."""
+    if not field or field.get("reference_state") == "invalid":
+        return None
+    if field.get("value_from_env"):
+        try:
+            return resolve(field["value"])
+        except SecretResolutionError:
+            return None
+    return field.get("value")
