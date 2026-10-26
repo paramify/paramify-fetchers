@@ -102,7 +102,7 @@ evidence_set:
     - apps_signed_in_to — Number of distinct apps signed in to; null if the logs weren't read
 
     Did each sign-in require and pass MFA?
-    - successful_single_factor_sign_ins — Number of successful sign-ins that required only one factor (a password alone, for example); null if the logs weren't read
+    - successful_single_factor_sign_ins — Number of successful sign-ins that required only one factor (a password alone, for example). This and multi_factor_percentage follow what Entra required for the sign-in (authenticationRequirement), not the method the user presented, so a passwordless sign-in that no policy required MFA for counts as single-factor; null if the logs weren't read
     - successful_multi_factor_sign_ins — Number of successful sign-ins that required and passed MFA; null if the logs weren't read
     - multi_factor_percentage — Percentage of successful sign-ins that passed MFA = successful_multi_factor_sign_ins / successful_sign_ins × 100 (a whole number, 0–100); null when successful_sign_ins is 0 or the logs weren't read
     - users_with_single_factor_sign_ins — Number of users with at least one successful single-factor sign-in; null if the logs weren't read
