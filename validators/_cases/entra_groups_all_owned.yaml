@@ -1,0 +1,29 @@
+validator: entra_groups_all_owned
+cases:
+  - name: cloud_groups_owned
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ENTRA-GROUPS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"groups":[{"has_owner":true,"is_role_assignable":false,"source":"cloud"}]},"summary":{"cloud_groups":40,"cloud_groups_without_owner":0,"groups_readable":true,"groups_without_owner":6,"member_details_readable":true,"members_readable":true,"owner_details_readable":true,"owners_readable":true,"role_assignable_groups":2,"role_assignable_groups_without_owner":0,"synced_groups":6,"total_groups":46}},"schema_version":"1.0"}'
+
+  - name: ownerless_cloud_groups
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ENTRA-GROUPS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"groups":[{"has_owner":true,"is_role_assignable":false,"source":"cloud"}]},"summary":{"cloud_groups":40,"cloud_groups_without_owner":75,"groups_readable":true,"groups_without_owner":81,"member_details_readable":true,"members_readable":true,"owner_details_readable":true,"owners_readable":true,"role_assignable_groups":2,"role_assignable_groups_without_owner":0,"synced_groups":6,"total_groups":46}},"schema_version":"1.0"}'
+
+  - name: ownerless_role_assignable_group
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ENTRA-GROUPS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"groups":[{"has_owner":true,"is_role_assignable":false,"source":"cloud"}]},"summary":{"cloud_groups":40,"cloud_groups_without_owner":0,"groups_readable":true,"groups_without_owner":6,"member_details_readable":true,"members_readable":true,"owner_details_readable":true,"owners_readable":true,"role_assignable_groups":2,"role_assignable_groups_without_owner":1,"synced_groups":6,"total_groups":46}},"schema_version":"1.0"}'
+
+  - name: owners_unread
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ENTRA-GROUPS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":true},"results":{"groups":[{"has_owner":true,"is_role_assignable":false,"source":"cloud"}]},"summary":{"cloud_groups":40,"cloud_groups_without_owner":null,"groups_readable":true,"groups_without_owner":null,"member_details_readable":true,"members_readable":true,"owner_details_readable":true,"owners_readable":false,"role_assignable_groups":2,"role_assignable_groups_without_owner":null,"synced_groups":6,"total_groups":46}},"schema_version":"1.0"}'
+
+  - name: owners_unread_flag_only
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ENTRA-GROUPS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"groups":[{"has_owner":true,"is_role_assignable":false,"source":"cloud"}]},"summary":{"cloud_groups":40,"cloud_groups_without_owner":0,"groups_readable":true,"groups_without_owner":6,"member_details_readable":true,"members_readable":true,"owner_details_readable":true,"owners_readable":false,"role_assignable_groups":2,"role_assignable_groups_without_owner":0,"synced_groups":6,"total_groups":46}},"schema_version":"1.0"}'
+
+  - name: groups_unread
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ENTRA-GROUPS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":true},"results":{},"summary":{"cloud_groups":null,"cloud_groups_without_owner":null,"groups_readable":false,"groups_without_owner":null,"member_details_readable":true,"members_readable":true,"owner_details_readable":true,"owners_readable":false,"role_assignable_groups":2,"role_assignable_groups_without_owner":null,"synced_groups":6,"total_groups":null}},"schema_version":"1.0"}'
+
+  - name: ownerless_count_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ENTRA-GROUPS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"groups":[{"has_owner":true,"is_role_assignable":false,"source":"cloud"}]},"summary":{"cloud_groups":40,"cloud_groups_ownerless":0,"groups_readable":true,"groups_without_owner":6,"member_details_readable":true,"members_readable":true,"owner_details_readable":true,"owners_readable":true,"role_assignable_groups":2,"role_assignable_groups_without_owner":0,"synced_groups":6,"total_groups":46}},"schema_version":"1.0"}'

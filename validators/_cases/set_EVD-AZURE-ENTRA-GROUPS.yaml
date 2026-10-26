@@ -1,0 +1,10 @@
+# Set-level: every validator on the set, with azure_collection_succeeded.
+evidence_set: EVD-AZURE-ENTRA-GROUPS
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ENTRA-GROUPS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"groups":[{"has_owner":true,"is_role_assignable":false,"source":"cloud"}]},"summary":{"cloud_groups":40,"cloud_groups_without_owner":0,"groups_readable":true,"groups_without_owner":6,"member_details_readable":true,"members_readable":true,"owner_details_readable":true,"owners_readable":true,"role_assignable_groups":2,"role_assignable_groups_without_owner":0,"synced_groups":6,"total_groups":46}},"schema_version":"1.0"}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ENTRA-GROUPS"},"exit_code":1,"status":"failed"},"payload":{"metadata":{"api_failures":[],"partial_failure":true},"results":{"groups":[{"has_owner":true,"is_role_assignable":false,"source":"cloud"}]},"summary":{"cloud_groups":40,"cloud_groups_without_owner":null,"groups_readable":true,"groups_without_owner":null,"member_details_readable":true,"members_readable":true,"owner_details_readable":true,"owners_readable":false,"role_assignable_groups":2,"role_assignable_groups_without_owner":null,"synced_groups":6,"total_groups":46}},"schema_version":"1.0"}'
