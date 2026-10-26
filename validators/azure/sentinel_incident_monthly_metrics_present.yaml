@@ -1,0 +1,20 @@
+key: sentinel_incident_monthly_metrics_present
+name: Azure Sentinel Monthly Incident Metrics Present
+type: AUTOMATED
+role: integrity
+statement: >
+  A workspace's monthly incident metrics are there to read: a monthly list whose first month carries both
+  mttr_hours and an updates_retained verdict, and the collection had no partial failure. So
+  sentinel_incident_metrics_every_month's zero count reflects the months rather than renamed keys.
+  Integrity partner; asserts nothing about compliance on its own.
+
+# Stays inside the first month object; quoted strings are read whole so an owner name holding a brace cannot end it.
+regex: '"partial_failure":\s*false\b[\s\S]*?"monthly":\s*\[\s*\{(?:"(?:[^"\\]|\\.)*"|[^{}\[\]"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"mttr_hours":\s*(?:null|\d)(?:"(?:[^"\\]|\\.)*"|[^{}\[\]"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"updates_retained":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-INCIDENTS
