@@ -47,7 +47,7 @@ evidence_set:
   reference_id: EVD-GCP-IAM-SA
   name: IAM Service Accounts and Keys
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls: iam
+    Script: gcp/iam_service_accounts/fetcher.py. Google Cloud client library calls: iam
     serviceAccounts.list(), then keys.list() and getIamPolicy() per account;
     cloudresourcemanager projects.getIamPolicy(). Key metadata only. One
     evidence file per project.

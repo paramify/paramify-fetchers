@@ -1,0 +1,39 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_access_analyzer_findings",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 1,
+      "fields": {
+        "arn": 1,
+        "name": 1,
+        "status": 1,
+        "type": 1,
+        "findings": 0
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:10:45Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "arn": "arn:aws:access-analyzer:us-east-2:111111111111:analyzer/pft-account",
+        "name": "pft-account",
+        "status": "ACTIVE",
+        "type": "ACCOUNT",
+        "findings": []
+      }
+    ]
+  }
+}

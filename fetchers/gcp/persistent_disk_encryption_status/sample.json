@@ -1,0 +1,86 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_persistent_disk_encryption_status",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.disks[]",
+      "records": 5,
+      "fields": {
+        "attached_to": 3,
+        "cmek": 5,
+        "kms_key_name": 1,
+        "name": 5,
+        "size_gb": 5,
+        "status": 5,
+        "type": 0,
+        "zone": 5
+      }
+    },
+    {
+      "path": "results.snapshots[]",
+      "records": 1,
+      "fields": {
+        "cmek": 1,
+        "disk_size_gb": 1,
+        "kms_key_name": 0,
+        "name": 1,
+        "source_disk": 1,
+        "status": 1,
+        "storage_locations": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:55:46Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "disks": [
+        {
+          "attached_to": [
+            "gke-example-gke-default-pool-f1fa58b6-kwh7"
+          ],
+          "cmek": false,
+          "kms_key_name": null,
+          "name": "gke-example-gke-default-pool-f1fa58b6-kwh7",
+          "size_gb": "32",
+          "status": "READY",
+          "type": null,
+          "zone": "us-central1-a"
+        }
+      ],
+      "snapshots": [
+        {
+          "cmek": false,
+          "disk_size_gb": "10",
+          "kms_key_name": null,
+          "name": "snap-default",
+          "source_disk": "pd-default",
+          "status": "READY",
+          "storage_locations": [
+            "us"
+          ]
+        }
+      ]
+    },
+    "summary": {
+      "cmek_disk_percentage": 20,
+      "cmek_disks": 1,
+      "cmek_snapshot_percentage": 0,
+      "cmek_snapshots": 0,
+      "google_managed_disks": 4,
+      "google_managed_snapshots": 1,
+      "total_disks": 5,
+      "total_snapshots": 1
+    }
+  }
+}

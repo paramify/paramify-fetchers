@@ -1,0 +1,208 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_backup_recovery_status",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.recovery_services_vaults[]",
+      "records": 1,
+      "fields": {
+        "backup_policies": 1,
+        "backup_protected_items": 0,
+        "backup_storage_version": 0,
+        "cross_region_restore": 0,
+        "cross_region_restore_enabled": 1,
+        "encryption_key_uri": 0,
+        "id": 1,
+        "immutability_enabled": 1,
+        "immutability_state": 0,
+        "infrastructure_encryption": 0,
+        "location": 1,
+        "multi_user_authorization": 0,
+        "name": 1,
+        "private_endpoint_state_for_backup": 1,
+        "provisioning_state": 1,
+        "public_network_access": 1,
+        "resource_group": 1,
+        "sku_name": 1,
+        "sku_tier": 0,
+        "soft_delete_enabled": 1,
+        "soft_delete_retention_period_in_days": 0,
+        "soft_delete_state": 0,
+        "standard_tier_storage_redundancy": 0,
+        "total_backup_policies": 1,
+        "total_protected_items": 1
+      }
+    },
+    {
+      "path": "results.recovery_services_vaults[].backup_policies[]",
+      "records": 4,
+      "fields": {
+        "backup_management_type": 4,
+        "daily_retention_days": 3,
+        "id": 4,
+        "instant_rp_retention_range_in_days": 3,
+        "location": 0,
+        "max_retention_days": 4,
+        "meets_retention_threshold": 4,
+        "name": 4,
+        "policy_type": 3,
+        "protected_items_count": 4,
+        "retention_policy": 3,
+        "retention_threshold_days": 4,
+        "schedule_policy": 3,
+        "sub_protection_policies": 1,
+        "time_zone": 3,
+        "type": 4,
+        "workload_type": 1
+      }
+    },
+    {
+      "path": "results.recovery_services_vaults[].backup_policies[].sub_protection_policies[]",
+      "records": 2,
+      "fields": {
+        "policy_type": 2,
+        "retention_policy": 2,
+        "schedule_policy": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:09:14Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "provider_registration_status": "registered",
+      "recovery_services_vaults": [
+        {
+          "backup_policies": [
+            {
+              "backup_management_type": "AzureIaasVM",
+              "daily_retention_days": 30,
+              "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.RecoveryServices/vaults/rsv-pf-jov5akcv/backupPolicies/pf-vm-backup-policy",
+              "instant_rp_retention_range_in_days": 2,
+              "location": null,
+              "max_retention_days": 180,
+              "meets_retention_threshold": true,
+              "name": "pf-vm-backup-policy",
+              "policy_type": "V1",
+              "protected_items_count": 0,
+              "retention_policy": {
+                "daily_schedule": {
+                  "days_of_the_week": null,
+                  "months_of_year": null,
+                  "retention_duration": {
+                    "count": 30,
+                    "duration_type": "Days"
+                  },
+                  "retention_schedule_format_type": null,
+                  "retention_times": [
+                    "2026-08-14T23:00:00Z"
+                  ]
+                },
+                "monthly_schedule": {
+                  "days_of_the_week": null,
+                  "months_of_year": null,
+                  "retention_duration": {
+                    "count": 6,
+                    "duration_type": "Months"
+                  },
+                  "retention_schedule_format_type": "Weekly",
+                  "retention_times": [
+                    "2026-08-14T23:00:00Z"
+                  ]
+                },
+                "retention_duration": {
+                  "count": null,
+                  "duration_type": null
+                },
+                "retention_policy_type": "LongTermRetentionPolicy",
+                "weekly_schedule": {
+                  "days_of_the_week": [
+                    "Sunday"
+                  ],
+                  "months_of_year": null,
+                  "retention_duration": {
+                    "count": 12,
+                    "duration_type": "Weeks"
+                  },
+                  "retention_schedule_format_type": null,
+                  "retention_times": [
+                    "2026-08-14T23:00:00Z"
+                  ]
+                },
+                "yearly_schedule": null
+              },
+              "retention_threshold_days": 30,
+              "schedule_policy": {
+                "schedule_policy_type": "SimpleSchedulePolicy",
+                "schedule_run_days": null,
+                "schedule_run_frequency": "Daily",
+                "schedule_run_times": [
+                  "2026-08-14T23:00:00Z"
+                ],
+                "schedule_weekly_frequency": 0
+              },
+              "sub_protection_policies": [],
+              "time_zone": "UTC",
+              "type": "Microsoft.RecoveryServices/vaults/backupPolicies",
+              "workload_type": null
+            }
+          ],
+          "backup_protected_items": [],
+          "backup_storage_version": null,
+          "cross_region_restore": null,
+          "cross_region_restore_enabled": false,
+          "encryption_key_uri": null,
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.RecoveryServices/vaults/rsv-pf-jov5akcv",
+          "immutability_enabled": false,
+          "immutability_state": null,
+          "infrastructure_encryption": null,
+          "location": "eastus",
+          "multi_user_authorization": null,
+          "name": "rsv-pf-jov5akcv",
+          "private_endpoint_state_for_backup": "None",
+          "provisioning_state": "Succeeded",
+          "public_network_access": "Enabled",
+          "resource_group": "rg-example-example-profile",
+          "sku_name": "Standard",
+          "sku_tier": null,
+          "soft_delete_enabled": false,
+          "soft_delete_retention_period_in_days": null,
+          "soft_delete_state": null,
+          "standard_tier_storage_redundancy": null,
+          "total_backup_policies": 4,
+          "total_protected_items": 0
+        }
+      ]
+    },
+    "summary": {
+      "cross_region_restore_vaults": 0,
+      "immutability_enabled_vaults": 0,
+      "policies_meeting_retention_threshold": 4,
+      "policies_without_readable_retention": 0,
+      "protected_items_by_workload_type": {},
+      "protected_items_in_protected_state": 0,
+      "protected_items_meeting_retention_threshold": 0,
+      "protected_items_with_healthy_last_backup": 0,
+      "protected_items_with_policy": 0,
+      "provider_registration_status": "registered",
+      "retention_threshold_days": 30,
+      "retention_threshold_percentage": 0,
+      "soft_delete_enabled_vaults": 0,
+      "total_backup_policies": 4,
+      "total_protected_items": 0,
+      "total_recovery_services_vaults": 1,
+      "vaults_with_protected_items": 0,
+      "vaults_without_protected_items": 1
+    }
+  }
+}

@@ -1,0 +1,116 @@
+name: oci_object_storage_buckets
+version: 0.1.0
+description: >-
+  Shows each bucket's public access, live pre-authenticated requests, encryption key, versioning, retention, replication and read and write logging.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_object_storage_buckets.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect buckets from. Optional — omit to collect from
+      the tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — buckets live
+      in the compartments of the workloads that write to them.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-SVC-SIN      # Encrypted and secured from unwanted access — key, public access, PARs
+  - KSI-IAM-ELP      # A pre-authenticated request is an access grant to whoever holds the link
+  - KSI-MLA-LET      # Which resources and event types are logged — per-bucket read/write logs
+
+evidence_set:
+  reference_id: EVD-OCI-OBJECT-STORAGE-BUCKETS
+  name: Bucket Access, Encryption and Data Logging
+  instructions: |
+    Script: oci/object_storage_buckets/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope, without OBJECT_READ; no object content is read and no pre-authenticated request URL is retrievable.
+
+    Commands Executed:
+    - object_storage.get_namespace — the tenancy's Object Storage namespace
+    - identity.list_compartments — the compartments beneath the target
+    - logging.list_log_groups (per compartment) — log groups
+    - logging.list_logs (per log group) — Object Storage read and write logs, matched to buckets by name
+    - object_storage.list_buckets (per compartment) — buckets
+    - object_storage.get_bucket (per bucket) — public access type, key, versioning and replication flag, which the listing leaves out
+    - object_storage.list_preauthenticated_requests (per bucket) — pre-authenticated requests with their access type and expiry
+    - object_storage.list_retention_rules (per bucket) — retention rules and whether each is locked
+    - object_storage.list_replication_policies (per bucket) — replication policies and their destinations
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_object_storage_buckets_<compartment>_<region>.json — every bucket with its access type, pre-authenticated requests, key, versioning, retention rules, replication policies and logs.
+
+    Summary fields:
+
+    Which buckets exist?
+    - object_storage_readable — True if the bucket listing was read in at least one compartment; false if every listing failed
+    - total_buckets — Number of buckets
+
+    Who can reach them?
+    - public_buckets — Number of buckets whose public access type is anything other than NoPublicAccess
+    - public_bucket_names — List of public bucket names
+    - public_access_types_in_use — List of public access types in use (ObjectRead, ObjectReadWithoutList)
+    - buckets_with_unknown_public_access — Number of buckets whose access type could not be read
+    - buckets_with_unreadable_pars — Number of buckets whose pre-authenticated requests could not be listed; their URL exposure is unknown
+    - buckets_reachable_by_par — Number of buckets (requests read) with at least one unexpired pre-authenticated request
+    - buckets_private_but_reachable_by_par — Number of those whose access type says NoPublicAccess, so anyone holding the URL can still reach them
+    - total_active_pars — Number of unexpired pre-authenticated requests across buckets
+    - pars_granting_whole_bucket — Number of unexpired requests granting access to every object (AnyObjectRead, AnyObjectWrite or AnyObjectReadWrite)
+    - pars_granting_write — Number of unexpired requests granting write access
+    - bucket_names_public_or_par_reachable — List of bucket names, with the last characters of their OCID, that are public or reachable by request
+
+    Whose key encrypts them?
+    - buckets_with_customer_managed_key — Number of buckets encrypted with a Vault key the customer holds (a kms_key_id is set)
+    - customer_managed_key_percentage — Percentage of buckets under a customer-managed key = buckets_with_customer_managed_key / total_buckets × 100, a whole number; 0 when total_buckets is 0
+
+    Is the data durable and immutable?
+    - buckets_with_versioning — Number of buckets with versioning enabled
+    - versioning_percentage — Percentage of buckets with versioning = buckets_with_versioning / total_buckets × 100, a whole number; 0 when total_buckets is 0
+    - buckets_with_retention_rules — Number of buckets with at least one retention rule
+    - buckets_with_locked_retention_rules — Number of buckets with a retention rule whose lock time has passed, so it can no longer be shortened
+    - buckets_with_replication — Number of buckets with at least one replication policy
+    - replication_destination_regions — List of regions replication policies copy to
+
+    Is access logged?
+    - buckets_with_write_logging — Number of buckets with an enabled Object Storage write log
+    - buckets_with_read_logging — Number of buckets with an enabled Object Storage read log
+    - buckets_with_no_data_logging — Number of buckets with neither
+    - write_logging_percentage — Percentage of buckets with write logging = buckets_with_write_logging / total_buckets × 100, a whole number; 0 when total_buckets is 0
+    - buckets_emitting_object_events — Number of buckets emitting object events to the Events service
