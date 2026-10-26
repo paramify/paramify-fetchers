@@ -287,15 +287,32 @@ def registered(alerts_management=fa.REGISTRATION_UNKNOWN, insights=fa.REGISTRATI
 def test_collect_rules_skips_an_unregistered_provider_and_records_a_failed_list():
     client, collector = _Subscription("/smartDetectorAlertRules", azure_rest.ArmError(500, "InternalServerError", "x")), \
         sys.modules["azure_common"].Collector(fa.logger)
-    rules = fa.collect_rules(client, "s1", registered(insights=fa.NOT_REGISTERED), collector)
-    assert (client.lists, rules, collector.ok) == (["Microsoft.AlertsManagement/smartDetectorAlertRules"], [], False)
+    rules, read = fa.collect_rules(client, "s1", registered(insights=fa.NOT_REGISTERED), collector)
+    assert (client.lists, rules, read, collector.ok) == (
+        ["Microsoft.AlertsManagement/smartDetectorAlertRules"], [], False, False)
+
+
+def test_collect_rules_counts_an_unregistered_provider_as_read():
+    client, collector = _Subscription(), sys.modules["azure_common"].Collector(fa.logger)
+    rules, read = fa.collect_rules(client, "s1", registered(insights=fa.NOT_REGISTERED), collector)
+    assert (rules, read, collector.ok) == ([], True, True)
 
 
 def test_collect_reads_alerts_then_counts_each_rules_fires():
     client, collector = _Subscription(), sys.modules["azure_common"].Collector(fa.logger)
-    alerts, rules, total, read = fa.collect(client, "s1", registered(), collector)
-    assert (len(alerts), total, read, collector.ok) == (1, 1, True, True)
+    alerts, rules, total, read, rules_read = fa.collect(client, "s1", registered(), collector)
+    assert (len(alerts), total, read, rules_read, collector.ok) == (1, 1, True, True, True)
     assert [(r["name"], r["fire_count"]) for r in rules] == [("cpu-high", 1)]
+
+
+def test_rule_counts_are_unknown_when_a_rule_list_failed():
+    client = _Subscription("/scheduledQueryRules", azure_rest.ArmError(500, "InternalServerError", "x"))
+    collector = sys.modules["azure_common"].Collector(fa.logger)
+    alerts, rules, total, read, rules_read = fa.collect(client, "s1", registered(), collector)
+    summary = fa.summarize(alerts, rules, total, read, rules_read)
+    assert (rules_read, collector.ok) == (False, False)
+    assert {k: summary[k] for k in fa.RULE_COUNTS} == dict.fromkeys(fa.RULE_COUNTS, None)
+    assert (summary["alerts_fired"], summary["rules_that_fired"]) == (1, 1)
 
 
 @pytest.mark.parametrize("registration, failing, total, ok", [
@@ -305,10 +322,10 @@ def test_collect_reads_alerts_then_counts_each_rules_fires():
 def test_collect_leaves_rule_fires_unknown_when_the_alerts_were_not_read(registration, failing, total, ok):
     client = _Subscription(failing, azure_rest.ArmError(403, "AuthorizationFailed", "no"))
     collector = sys.modules["azure_common"].Collector(fa.logger)
-    alerts, rules, summary_total, read = fa.collect(client, "s1", registration, collector)
-    assert (alerts, summary_total, read, collector.ok) == ([], total, False, ok)
+    alerts, rules, summary_total, read, rules_read = fa.collect(client, "s1", registration, collector)
+    assert (alerts, summary_total, read, rules_read, collector.ok) == ([], total, False, True, ok)
     assert [(r["name"], r["fire_count"]) for r in rules] == [("cpu-high", None)]
-    assert fa.summarize(alerts, rules, summary_total, read)["enabled_rules_never_fired"] is None
+    assert fa.summarize(alerts, rules, summary_total, read, rules_read)["enabled_rules_never_fired"] is None
 
 
 @pytest.mark.parametrize("summary_total", [None, 0])

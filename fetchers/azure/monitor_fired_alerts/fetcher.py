@@ -20,7 +20,6 @@ from azure_common import (  # noqa: E402
     basename,
     build_payload,
     classify_failure_code,
-    credential,
     failure_reason,
     provider_registration_status,
     report_failure,
@@ -29,7 +28,7 @@ from azure_common import (  # noqa: E402
     sorted_counts,
     write_evidence,
 )
-from azure_rest import AzureRestClient, parse_time  # noqa: E402
+from azure_rest import AzureRestClient, parse_time, pinned_credential  # noqa: E402
 
 logger = logging.getLogger("azure_monitor_fired_alerts")
 
@@ -62,6 +61,11 @@ ALERT_COUNTS = (
     "alerts_closed_by_person", "alerts_with_notifications", "alerts_with_failed_notifications",
     "alerts_with_actions_suppressed", "median_hours_to_close", "max_hours_to_close", "oldest_open_alert_fired_at",
     "alert_histories_read", "alert_histories_unread",
+)
+# Unknown, not a partial count, when a rule list failed.
+RULE_COUNTS = (
+    "alert_rules_listed", "alert_rules_by_type", "enabled_alert_rules", "enabled_rules_never_fired",
+    "rules_fired_not_listed",
 )
 
 
@@ -213,7 +217,9 @@ def rule_activity(rules: list[dict], alerts: list[dict], alerts_read: bool = Tru
     return sorted(out, key=lambda r: (r["id"] or "").lower())
 
 
-def summarize(alerts: list[dict], rules: list[dict], summary_total, alerts_read: bool = True) -> dict:
+def summarize(
+    alerts: list[dict], rules: list[dict], summary_total, alerts_read: bool = True, rules_read: bool = True
+) -> dict:
     closed = [a for a in alerts if (a["alert_state"] or "").lower() == STATE_CLOSED]
     # A count over histories is unknown, never a partial number, while any history is unread.
     histories_read = all(a["history_status"] == HISTORY_READ for a in alerts)
@@ -259,7 +265,8 @@ def summarize(alerts: list[dict], rules: list[dict], summary_total, alerts_read:
         ),
         "rules_fired_not_listed": sum(1 for r in rules if not r["listed"]) if alerts_read else None,
     }
-    return summary if alerts_read else {**summary, **dict.fromkeys(ALERT_COUNTS, None)}
+    unknown = (() if alerts_read else ALERT_COUNTS) + (() if rules_read else RULE_COUNTS)
+    return {**summary, **dict.fromkeys(unknown, None)}
 
 
 def history_status(exc: BaseException) -> str:
@@ -304,8 +311,9 @@ def collect_alerts(client, subscription_id: str, collector: Collector) -> tuple:
     return alerts, total if isinstance(total, int) else None, raw is not None
 
 
-def collect_rules(client, subscription_id: str, registration: dict, collector: Collector) -> list[dict]:
-    rules = []
+def collect_rules(client, subscription_id: str, registration: dict, collector: Collector) -> tuple:
+    """(rules, whether every rule list tried was read); an unregistered provider has none to read."""
+    rules, read = [], True
     for rule_type, namespace, path, api in RULE_SOURCES:
         if registration[namespace] == NOT_REGISTERED:
             continue
@@ -313,18 +321,19 @@ def collect_rules(client, subscription_id: str, registration: dict, collector: C
             f"{path} list",
             lambda path=path, api=api: client.list(f"/subscriptions/{subscription_id}/providers/{path}", api),
         )
+        read = read and listed is not None
         rules.extend(rule_record(rule_type, r) for r in listed or [])
-    return rules
+    return rules, read
 
 
 def collect(client, subscription_id: str, registration: dict, collector: Collector) -> tuple:
-    """(alerts, rules, summary total, whether the alert list was read)."""
+    """(alerts, rules, summary total, whether the alert list was read, whether every rule list was read)."""
     alerts: list[dict] = []
     total, alerts_read = None, False
     if registration["Microsoft.AlertsManagement"] != NOT_REGISTERED:
         alerts, total, alerts_read = collect_alerts(client, subscription_id, collector)
-    rules = rule_activity(collect_rules(client, subscription_id, registration, collector), alerts, alerts_read)
-    return alerts, rules, total, alerts_read
+    listed, rules_read = collect_rules(client, subscription_id, registration, collector)
+    return alerts, rule_activity(listed, alerts, alerts_read), total, alerts_read, rules_read
 
 
 def main() -> int:
@@ -341,16 +350,18 @@ def main() -> int:
 
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
-    cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
+    cred = collector.guard("azure.identity.DefaultAzureCredential", lambda: pinned_credential(subscription_id))
 
     alerts: list[dict] = []
     rules: list[dict] = []
-    total, alerts_read = None, False
+    total, alerts_read, rules_read = None, False, False
     registration = {ns: REGISTRATION_UNKNOWN for ns in ("Microsoft.AlertsManagement", "Microsoft.Insights")}
     if subscription_id and cred is not None:
         for ns in registration:
             registration[ns] = provider_registration_status(collector, subscription_id, cred, ns)
-        alerts, rules, total, alerts_read = collect(AzureRestClient(cred), subscription_id, registration, collector)
+        alerts, rules, total, alerts_read, rules_read = collect(
+            AzureRestClient(cred), subscription_id, registration, collector
+        )
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -371,7 +382,10 @@ def main() -> int:
             "time_range": TIME_RANGE,
             "provider_registration_status": registration,
         },
-        summary={**summarize(alerts, rules, total, alerts_read), "provider_registration_status": registration},
+        summary={
+            **summarize(alerts, rules, total, alerts_read, rules_read),
+            "provider_registration_status": registration,
+        },
     )
 
     filename = f"azure_monitor_fired_alerts_{sanitize_for_filename(subscription_id or 'unknown')}.json"

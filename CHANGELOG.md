@@ -22,9 +22,10 @@ schemas and the `paramify` CLI — not the internal code.
   run. Every metric, log search, smart detector and activity log alert rule is
   listed with `fire_count`, `last_fired_at` and `open_alerts`, so enabled rules that
   never fired stand out (`enabled_rules_never_fired`); a rule that fired but is not
-  in the subscription is kept with `listed: false`. The alert list is checked
-  against Alerts Management's own summary total (`all_alerts_listed`). Counts that
-  need an alert list or history that wasn't read are null, never 0.
+  in the subscription's rule lists is kept with `listed: false`. The alert list is
+  checked against Alerts Management's own summary total (`all_alerts_listed`).
+  Counts that need an alert list, a rule list or a history that wasn't read are
+  null, never 0.
 - **Oracle Cloud Infrastructure category** (`fetchers/oci/`, fifteen
   fetchers, `pip install -e '.[oci]'`). Authenticates with an API signing key
   the runner injects as a secret (`OCI_PRIVATE_KEY` carries the PEM content,
