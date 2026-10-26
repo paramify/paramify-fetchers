@@ -53,7 +53,7 @@ evidence_set:
   reference_id: EVD-AZURE-SENTINEL-AUTOMATION-RULES
   name: Azure Sentinel Automation Rules
   instructions: >
-    Script: fetcher.py. ARM REST per Sentinel workspace: automationRules at
+    Script: azure/sentinel_automation_rules/fetcher.py. ARM REST per Sentinel workspace: automationRules at
     api-version 2025-09-01, every nextLink followed. active means
     triggeringLogic.isEnabled is true and expirationTimeUtc is absent or in the
     future. Condition values are counted, not copied. Playbook internals (Logic

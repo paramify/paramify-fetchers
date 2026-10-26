@@ -59,7 +59,7 @@ evidence_set:
   reference_id: EVD-SPLUNK-LOG-SOURCE-FRESHNESS
   name: Splunk Log Source Freshness
   instructions: >-
-    Every host with events in any index (`hosts[]`, from tstats over all time)
+    Script: splunk/log_source_freshness/fetcher.py. Every host with events in any index (`hosts[]`, from tstats over all time)
     and every forwarder that connected in the last `forwarder_lookback_days`
     (`forwarders[]`, from _internal metrics). A row is `silent` when Splunk last
     received from it more than `max_silence_minutes` ago, or that far in the

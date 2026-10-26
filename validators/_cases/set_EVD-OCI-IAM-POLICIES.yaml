@@ -1,0 +1,21 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them. Two posture validators and the inventory partner that keeps their zeros honest.
+evidence_set: EVD-OCI-IAM-POLICIES
+cases:
+  - name: only_the_default_admin_policy_is_broad
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_policies": 4, "manage_all_resources_in_tenancy_outside_default_admin_policy": 0, "unconditional_any_principal_statements": 0}}}'
+
+  - name: a_second_tenancy_wide_manage_all
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_policies": 4, "manage_all_resources_in_tenancy_outside_default_admin_policy": 1, "unconditional_any_principal_statements": 0}}}'
+
+  - name: an_unconditional_any_user_grant
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_policies": 4, "manage_all_resources_in_tenancy_outside_default_admin_policy": 0, "unconditional_any_principal_statements": 1}}}'
+
+  - name: nothing_was_collected
+    expect: FAIL
+    note: >
+      Every tenancy holds at least the default admin policy; a zero here means the listing was not read.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_policies": 0, "manage_all_resources_in_tenancy_outside_default_admin_policy": 0, "unconditional_any_principal_statements": 0}}}'

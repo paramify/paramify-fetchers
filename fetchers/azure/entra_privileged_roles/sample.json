@@ -1,0 +1,101 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_entra_privileged_roles",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.directory_roles[]",
+      "records": 1,
+      "fields": {
+        "description": 1,
+        "display_name": 1,
+        "group_member_count": 1,
+        "id": 1,
+        "is_global_administrator": 1,
+        "is_privileged": 1,
+        "member_count": 1,
+        "members": 1,
+        "role_template_id": 1,
+        "service_principal_member_count": 1,
+        "user_member_count": 1
+      }
+    },
+    {
+      "path": "results.directory_roles[].members[]",
+      "records": 1,
+      "fields": {
+        "account_enabled": 0,
+        "display_name": 1,
+        "id": 1,
+        "principal_type": 1,
+        "user_principal_name": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T17:08:29Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target_correlation_only",
+      "tenant_domain": "example-1.com",
+      "tenant_id": "00000000-0000-4000-8000-222222222222",
+      "tenant_name": "example-tenant-name",
+      "tenant_source": "organization"
+    },
+    "results": {
+      "directory_roles": [
+        {
+          "description": "Can manage all aspects of Microsoft Entra ID and Microsoft services that use Microsoft Entra identities.",
+          "display_name": "Global Administrator",
+          "group_member_count": 0,
+          "id": "00000000-0000-4000-8000-333333333333",
+          "is_global_administrator": true,
+          "is_privileged": true,
+          "member_count": 1,
+          "members": [
+            {
+              "account_enabled": null,
+              "display_name": "Person1",
+              "id": "00000000-0000-4000-8000-444444444444",
+              "principal_type": "User",
+              "user_principal_name": "user1@example.com"
+            }
+          ],
+          "role_template_id": "00000000-0000-4000-8000-555555555555",
+          "service_principal_member_count": 0,
+          "user_member_count": 1
+        }
+      ],
+      "privileged_role_names_checked": [
+        "Application Administrator",
+        "Authentication Administrator",
+        "Billing Administrator"
+      ]
+    },
+    "summary": {
+      "distinct_principals_with_a_directory_role": 1,
+      "distinct_privileged_principals": 1,
+      "global_administrator_count": 1,
+      "global_administrator_role_activated": true,
+      "groups_in_privileged_roles": 0,
+      "privileged_assignment_percentage": 100,
+      "privileged_role_assignments": 1,
+      "privileged_role_names_assigned": [
+        "Global Administrator"
+      ],
+      "privileged_roles_activated": 1,
+      "privileged_roles_with_members": 1,
+      "roles_with_no_members": 0,
+      "service_principals_in_privileged_roles": 0,
+      "total_directory_roles_activated": 1,
+      "total_role_assignments": 1,
+      "users_in_privileged_roles": 1
+    }
+  }
+}

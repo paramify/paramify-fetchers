@@ -1,0 +1,139 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_backup_validation",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 7,
+      "fields": {
+        "Type": 7,
+        "BucketName": 6,
+        "VersioningEnabled": 6,
+        "ReplicationEnabled": 6,
+        "ReplicationDestination": 1,
+        "EncryptionEnabled": 6,
+        "VersioningInfo": 5,
+        "ReplicationInfo": 1,
+        "EncryptionInfo": 6,
+        "VaultName": 1,
+        "VaultArn": 1,
+        "CreationDate": 1,
+        "RecoveryPoints": 1
+      }
+    },
+    {
+      "path": "results[].EncryptionInfo.ServerSideEncryptionConfiguration.Rules[]",
+      "records": 6,
+      "fields": {
+        "ApplyServerSideEncryptionByDefault": 6,
+        "BucketKeyEnabled": 6,
+        "BlockedEncryptionTypes": 6
+      }
+    },
+    {
+      "path": "results[].ReplicationInfo.ReplicationConfiguration.Rules[]",
+      "records": 1,
+      "fields": {
+        "ID": 1,
+        "Priority": 1,
+        "Filter": 0,
+        "Status": 1,
+        "Destination": 1,
+        "DeleteMarkerReplication": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:10:56Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "Type": "S3_Backup",
+        "BucketName": "pft-111111111111-e25deb-repl-src",
+        "VersioningEnabled": true,
+        "ReplicationEnabled": true,
+        "ReplicationDestination": "arn:aws:s3:::pft-111111111111-e25deb-repl-dst",
+        "EncryptionEnabled": true,
+        "VersioningInfo": {
+          "Status": "Enabled"
+        },
+        "ReplicationInfo": {
+          "ReplicationConfiguration": {
+            "Role": "arn:aws:iam::111111111111:role/pft-s3-replication",
+            "Rules": [
+              {
+                "ID": "all",
+                "Priority": 0,
+                "Filter": {},
+                "Status": "Enabled",
+                "Destination": {
+                  "Bucket": "arn:aws:s3:::pft-111111111111-e25deb-repl-dst"
+                },
+                "DeleteMarkerReplication": {
+                  "Status": "Disabled"
+                }
+              }
+            ]
+          }
+        },
+        "EncryptionInfo": {
+          "ServerSideEncryptionConfiguration": {
+            "Rules": [
+              {
+                "ApplyServerSideEncryptionByDefault": {
+                  "SSEAlgorithm": "AES256"
+                },
+                "BucketKeyEnabled": false,
+                "BlockedEncryptionTypes": {
+                  "EncryptionType": [
+                    "SSE-C"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "summary": {
+      "rds_backup_coverage": {
+        "with_backups": 0,
+        "total": 0
+      },
+      "rds_replication_coverage": {
+        "with_replication": 0,
+        "total": 0
+      },
+      "rds_encryption_coverage": {
+        "with_encryption": 0,
+        "total": 0
+      },
+      "rds_deletion_protection": {
+        "with_protection": 0,
+        "total": 0
+      },
+      "s3_versioning_coverage": {
+        "with_versioning": 5,
+        "total": 6
+      },
+      "s3_replication_coverage": {
+        "with_replication": 1,
+        "total": 6
+      },
+      "s3_encryption_coverage": {
+        "with_encryption": 6,
+        "total": 6
+      },
+      "backup_vaults": 1
+    }
+  }
+}

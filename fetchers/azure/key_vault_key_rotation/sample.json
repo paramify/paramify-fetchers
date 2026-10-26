@@ -1,0 +1,136 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_key_vault_key_rotation",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.key_vaults[]",
+      "records": 2,
+      "fields": {
+        "data_plane_message": 0,
+        "data_plane_status": 2,
+        "id": 2,
+        "keys": 2,
+        "location": 2,
+        "name": 2,
+        "rbac_authorization_enabled": 2,
+        "resource_group": 2,
+        "secrets": 0,
+        "vault_uri": 2
+      }
+    },
+    {
+      "path": "results.key_vaults[].keys[]",
+      "records": 2,
+      "fields": {
+        "created": 2,
+        "curve_name": 0,
+        "enabled": 2,
+        "expiration_set": 2,
+        "expires": 0,
+        "id": 2,
+        "key_size": 2,
+        "key_type": 2,
+        "location": 2,
+        "name": 2,
+        "not_before": 0,
+        "recovery_level": 2,
+        "rotation_enabled": 2,
+        "rotation_policy": 2,
+        "rotation_policy_readable": 2,
+        "rotation_policy_source": 2,
+        "updated": 2
+      }
+    },
+    {
+      "path": "results.key_vaults[].keys[].rotation_policy.lifetime_actions[]",
+      "records": 2,
+      "fields": {
+        "action": 2,
+        "time_after_create": 0,
+        "time_before_expiry": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:10:07Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "key_vaults": [
+        {
+          "data_plane_message": null,
+          "data_plane_status": "accessible",
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.KeyVault/vaults/kv-pf-jov5akcv",
+          "keys": [
+            {
+              "created": "2026-08-14T16:23:41Z",
+              "curve_name": null,
+              "enabled": true,
+              "expiration_set": false,
+              "expires": null,
+              "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.KeyVault/vaults/kv-pf-jov5akcv/keys/storage-cmk",
+              "key_size": 2048,
+              "key_type": "RSA",
+              "location": "eastus",
+              "name": "storage-cmk",
+              "not_before": null,
+              "recovery_level": "CustomizedRecoverable",
+              "rotation_enabled": false,
+              "rotation_policy": {
+                "created": null,
+                "expires_in": null,
+                "id": null,
+                "lifetime_actions": [
+                  {
+                    "action": "Notify",
+                    "time_after_create": null,
+                    "time_before_expiry": "P30D"
+                  }
+                ],
+                "updated": null
+              },
+              "rotation_policy_readable": true,
+              "rotation_policy_source": "data_plane",
+              "updated": "2026-08-14T16:23:41Z"
+            }
+          ],
+          "location": "eastus",
+          "name": "kv-pf-jov5akcv",
+          "rbac_authorization_enabled": false,
+          "resource_group": "rg-example-example-profile",
+          "secrets": [],
+          "vault_uri": "https://kv-pf-jov5akcv.vault.azure.net/"
+        }
+      ],
+      "provider_registration_status": "registered"
+    },
+    "summary": {
+      "data_plane_accessible_vaults": 2,
+      "data_plane_inaccessible_vaults": 0,
+      "enabled_keys": 2,
+      "enabled_secrets": 0,
+      "key_expiration_percentage": 0,
+      "keys_with_expiration": 0,
+      "keys_with_readable_rotation_policy": 2,
+      "keys_with_rotation_enabled": 0,
+      "keys_with_rotation_policy": 2,
+      "provider_registration_status": "registered",
+      "rbac_authorization_vaults": 0,
+      "rotation_enabled_percentage": 0,
+      "secret_expiration_percentage": 0,
+      "secrets_with_expiration": 0,
+      "total_key_vaults": 2,
+      "total_keys": 2,
+      "total_secrets": 0
+    }
+  }
+}

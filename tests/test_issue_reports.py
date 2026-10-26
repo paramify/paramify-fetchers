@@ -854,11 +854,13 @@ def test_preflight_warns_on_a_missing_close_policy(tmp_path):
     assert any("close_cycle" in w for w in pf["warnings"]), pf["warnings"]
 
 
-def test_upload_reads_close_cycle_from_the_producing_manifest(tmp_path):
+@pytest.mark.parametrize("written", ["after_run", "${env:CLOSE_POLICY}"])
+def test_upload_reads_close_cycle_from_the_producing_manifest(tmp_path, monkeypatch, written):
     """A run collected before close_cycle was set recorded none; setting it in the
     manifest afterwards must be enough, not a reason to collect again."""
     import yaml
 
+    monkeypatch.setenv("CLOSE_POLICY", "after_run")
     write_issue_report_fetcher(tmp_path)
     (tmp_path / "uploaders").symlink_to(REPO_ROOT / "uploaders")
     manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
@@ -873,12 +875,34 @@ def test_upload_reads_close_cycle_from_the_producing_manifest(tmp_path):
     before = api.issues_upload_preflight(run_dir, tmp_path, None, dry_run=True)
     assert before["assessments"][0]["error"]
 
-    manifest["run"]["fetchers"][0]["config"][CLOSE_CYCLE_FIELD] = "after_run"
+    manifest["run"]["fetchers"][0]["config"][CLOSE_CYCLE_FIELD] = written
     path.write_text(yaml.safe_dump(manifest))
     after = api.issues_upload_preflight(run_dir, tmp_path, None, dry_run=True)
     [plan] = after["assessments"]
     assert plan["error"] is None
     assert plan["operation"] == "PROCESS_CLOSE"
+
+
+def test_upload_never_resolves_a_close_cycle_reference_the_runner_refuses(tmp_path, monkeypatch):
+    import yaml
+
+    probe = "leak-probe-cccccccc"
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", probe)
+    write_issue_report_fetcher(tmp_path)
+    (tmp_path / "uploaders").symlink_to(REPO_ROOT / "uploaders")
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "t_vuln_scan", "config": {ASSESSMENT_ID_FIELD: "A-1"}},
+    ]}}
+    path = tmp_path / "pipelines.yaml"
+    path.write_text(yaml.safe_dump(manifest))
+    run_dir = Path(api.run(manifest, tmp_path, manifest_path=path)["run_dir"])
+
+    manifest["run"]["fetchers"][0]["config"][CLOSE_CYCLE_FIELD] = "${env:PARAMIFY_UPLOAD_API_TOKEN}"
+    path.write_text(yaml.safe_dump(manifest))
+    assert any("which holds a secret" in e for e in api.validate(manifest, tmp_path))
+    preflight = api.issues_upload_preflight(run_dir, tmp_path, None, dry_run=True)
+    assert preflight["assessments"][0]["error"]
+    assert probe not in json.dumps(preflight, default=str)
 
 
 # --------------------------------------------------------------------------- #

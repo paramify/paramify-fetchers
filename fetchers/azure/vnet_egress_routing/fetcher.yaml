@@ -61,7 +61,7 @@ evidence_set:
   reference_id: EVD-AZURE-VNET-EGRESS
   name: Azure VNet Egress Routing
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient),
+    Script: azure/vnet_egress_routing/fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient),
     all reads, Reader is sufficient: virtual_networks.list_all(),
     virtual_network_peerings.list() per VNet, route_tables.list_all(),
     network_interfaces.list_all(), azure_firewalls.list_all(),

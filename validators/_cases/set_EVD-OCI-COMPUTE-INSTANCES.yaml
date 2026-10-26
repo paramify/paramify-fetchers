@@ -1,0 +1,17 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them. A zero cannot prove the zero was measured — only the set, with its integrity partner, can.
+evidence_set: EVD-OCI-COMPUTE-INSTANCES
+cases:
+  - name: no_legacy_endpoint_anywhere
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_instances": 3, "instances_with_legacy_metadata_endpoint": 0}}}'
+
+  - name: an_instance_keeps_the_legacy_endpoint
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_instances": 3, "instances_with_legacy_metadata_endpoint": 1}}}'
+
+  - name: nothing_was_collected
+    expect: FAIL
+    note: >
+      oci_instance_inventory_present fails: a zero from zero instances proves nothing.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_instances": 0, "instances_with_legacy_metadata_endpoint": 0}}}'

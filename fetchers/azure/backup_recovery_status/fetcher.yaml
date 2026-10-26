@@ -47,7 +47,7 @@ evidence_set:
   reference_id: EVD-AZURE-BACKUP-RECOVERY
   name: Azure Backup and Recovery Status
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-recoveryservices
+    Script: azure/backup_recovery_status/fetcher.py. Azure SDK calls (azure-mgmt-recoveryservices
     RecoveryServicesClient): vaults.list_by_subscription_id(); then
     (azure-mgmt-recoveryservicesbackup RecoveryServicesBackupClient):
     backup_policies.list(), backup_protected_items.list(). Retention threshold 30 days.

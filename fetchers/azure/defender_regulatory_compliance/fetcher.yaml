@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-AZURE-DEFENDER-REG-COMPLIANCE
   name: Microsoft Defender for Cloud Regulatory Compliance
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-security SecurityCenter):
+    Script: azure/defender_regulatory_compliance/fetcher.py. Azure SDK calls (azure-mgmt-security SecurityCenter):
     regulatory_compliance_standards.list(), then per standard
     regulatory_compliance_controls.list(<standard>), then per control
     regulatory_compliance_assessments.list(<standard>, <control>). Security Reader

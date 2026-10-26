@@ -27,4 +27,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-APM-SERVICES
   name: Datadog APM Services
-  instructions: 'Calls GET /api/v2/services/definitions with pagination. Extracts service name, team, tier, languages, and contact presence. Writes JSON catalog.'
+  instructions: 'Script: datadog/apm_services/fetcher.py. Calls GET /api/v2/services/definitions with pagination. Extracts service name, team, tier, languages, and contact presence. Writes JSON catalog.'
