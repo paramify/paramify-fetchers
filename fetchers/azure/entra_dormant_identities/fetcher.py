@@ -319,7 +319,7 @@ def summarize(users: List[dict], sps: List[dict], deleted: List[dict], status: D
         clean = None
     else:
         clean = True
-    figures["no_inactive_identity_holds_a_role"] = clean
+    figures["no_dormant_guest_or_deleted_identity_holds_a_role"] = clean
     return figures
 
 

@@ -219,7 +219,7 @@ def test_inactive_guest_and_deleted_role_holders(monkeypatch):
     assert s["disabled_service_principals_holding_roles"] == 1
     assert s["deleted_principals_holding_azure_roles"] == 1
     assert s["azure_role_assignments_to_deleted_principals"] == 2
-    assert s["no_inactive_identity_holds_a_role"] is False
+    assert s["no_dormant_guest_or_deleted_identity_holds_a_role"] is False
 
     assert results["tenant_id"] == TENANT
     users = {u["id"]: u for u in results["users"]}
@@ -273,12 +273,12 @@ def test_refused_app_registrations_make_the_all_clear_unknown_not_false(monkeypa
     graph["/directoryRoles/r-dr/members"] = []
     arm["roleAssignments"] = [_assignment("a1", "u-active"), _assignment("a10", "sp-new", ptype="ServicePrincipal")]
     _, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects))
-    assert s["applications_readable"] is True and s["no_inactive_identity_holds_a_role"] is True
+    assert s["applications_readable"] is True and s["no_dormant_guest_or_deleted_identity_holds_a_role"] is True
 
     _, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects, errors={"/applications": DENIED}))
     assert s["dormant_service_principals_holding_roles"] == 0
     assert s["service_principals_holding_roles_dormancy_unknown"] == 1
-    assert s["no_inactive_identity_holds_a_role"] is None
+    assert s["no_dormant_guest_or_deleted_identity_holds_a_role"] is None
 
 
 def test_an_app_with_no_owner_organization_is_unknown(monkeypatch):
@@ -301,7 +301,7 @@ def test_a_refused_subscription_read_leaves_every_missing_principal_unknown(monk
     (sp,) = results["service_principals"]
     assert sp["registered_in_this_tenant"] is None and sp["dormant"] is None
     assert s["service_principals_holding_roles_dormancy_unknown"] == 1
-    assert s["no_inactive_identity_holds_a_role"] is None
+    assert s["no_dormant_guest_or_deleted_identity_holds_a_role"] is None
 
 
 def test_graph_signed_in_to_another_tenant_reads_nothing_and_fails(monkeypatch):
@@ -314,7 +314,7 @@ def test_graph_signed_in_to_another_tenant_reads_nothing_and_fails(monkeypatch):
     assert results["users"] == results["service_principals"] == results["deleted_principals"] == []
     assert s["tenant_readable"] is False and s["users_readable"] is False
     assert s["users_checked"] is None and s["deleted_principals_holding_azure_roles"] is None
-    assert s["no_inactive_identity_holds_a_role"] is None
+    assert s["no_dormant_guest_or_deleted_identity_holds_a_role"] is None
 
 
 def test_an_unread_graph_tenant_leaves_every_principal_without_a_client_sign_in_unknown(monkeypatch):
@@ -344,7 +344,7 @@ def test_an_assignment_to_a_deleted_group_is_listed_not_a_failure(monkeypatch):
     (deleted,) = results["deleted_principals"]
     assert deleted["id"] == "g-gone" and deleted["principal_types_recorded"] == ["Group"]
     assert s["deleted_principals_holding_azure_roles"] == 1 and s["users_holding_roles"] == 1
-    assert s["no_inactive_identity_holds_a_role"] is False
+    assert s["no_dormant_guest_or_deleted_identity_holds_a_role"] is False
 
 
 def test_a_404_on_a_group_the_directory_still_has_is_a_failure(monkeypatch):
@@ -433,7 +433,7 @@ def test_denied_sign_in_activity_still_lists_users_and_roles(monkeypatch):
     assert s["dormant_service_principals_holding_roles"] is None
     assert s["guest_users_holding_roles"] == 1
     assert s["deleted_principals_holding_azure_roles"] == 1
-    assert s["no_inactive_identity_holds_a_role"] is False
+    assert s["no_dormant_guest_or_deleted_identity_holds_a_role"] is False
     assert all(u["dormant"] is None and u["last_successful_sign_in_date_time"] is None for u in results["users"])
 
 
@@ -448,7 +448,7 @@ def test_a_refused_user_list_nulls_every_user_count(monkeypatch):
                 "guest_users", "dormant_users", "guest_users_holding_roles", "disabled_users_holding_roles"):
         assert s[key] is None, key
     assert s["service_principals_holding_roles"] == 7
-    assert s["no_inactive_identity_holds_a_role"] is False  # the dormant service principals still show
+    assert s["no_dormant_guest_or_deleted_identity_holds_a_role"] is False  # the dormant service principals still show
 
 
 def test_refused_directory_roles_null_the_directory_counts(monkeypatch):
@@ -505,19 +505,19 @@ def test_no_flag_is_true_only_when_everything_was_read(monkeypatch):
     arm["roleAssignments"] = [_assignment("a1", "u-active")]
     _, s, collector = _collect(monkeypatch, FakeClient(graph, arm, objects))
     assert collector.failures == []
-    assert s["no_inactive_identity_holds_a_role"] is True
+    assert s["no_dormant_guest_or_deleted_identity_holds_a_role"] is True
 
     # A managed identity holding a role but missing from the sign-in report leaves the answer open.
     arm["roleAssignments"].append(_assignment("a8", "sp-mi-new", ptype="ServicePrincipal"))
     _, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects))
     assert s["service_principals_holding_roles_dormancy_unknown"] == 1
-    assert s["no_inactive_identity_holds_a_role"] is None
+    assert s["no_dormant_guest_or_deleted_identity_holds_a_role"] is None
     arm["roleAssignments"].pop()
 
     client = FakeClient(graph, arm, objects, errors={"/roleAssignments": DENIED})
     _, s, _ = _collect(monkeypatch, client)
     assert s["azure_roles_readable"] is False
-    assert s["no_inactive_identity_holds_a_role"] is None
+    assert s["no_dormant_guest_or_deleted_identity_holds_a_role"] is None
 
 
 def test_reads_page_sizes_and_beta_endpoints(monkeypatch):
