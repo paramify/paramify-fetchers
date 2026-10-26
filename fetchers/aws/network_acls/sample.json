@@ -1,0 +1,60 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_network_acls",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 4,
+      "fields": {
+        "NetworkAclId": 4,
+        "VpcId": 4,
+        "IsDefault": 4,
+        "Entries": 4
+      }
+    },
+    {
+      "path": "results[].Entries[]",
+      "records": 18,
+      "fields": {
+        "RuleNumber": 18,
+        "Direction": 18,
+        "Protocol": 18,
+        "RuleAction": 18,
+        "FromPort": 3,
+        "ToPort": 3,
+        "CidrBlock": 18
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:13:01Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "NetworkAclId": "acl-00245cb812568a796",
+        "VpcId": "vpc-0effedbf104e8ed6f",
+        "IsDefault": false,
+        "Entries": [
+          {
+            "RuleNumber": 100,
+            "Direction": "INBOUND",
+            "Protocol": "6",
+            "RuleAction": "allow",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrBlock": "10.0.0.1/16"
+          }
+        ]
+      }
+    ]
+  }
+}

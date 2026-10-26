@@ -1,0 +1,41 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_dynamodb_pitr_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 2,
+      "fields": {
+        "TableName": 2,
+        "PITREnabled": 2,
+        "PointInTimeRecoveryStatus": 2,
+        "ContinuousBackupsStatus": 2,
+        "EarliestRestorableDateTime": 2,
+        "LatestRestorableDateTime": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:45Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "TableName": "pft-defaults",
+        "PITREnabled": false,
+        "PointInTimeRecoveryStatus": "DISABLED",
+        "ContinuousBackupsStatus": "ENABLED",
+        "EarliestRestorableDateTime": "N/A",
+        "LatestRestorableDateTime": "N/A"
+      }
+    ]
+  }
+}

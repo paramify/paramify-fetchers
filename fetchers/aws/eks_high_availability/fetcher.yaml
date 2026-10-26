@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-EKS-HA
   name: EKS High Availability
-  instructions: 'Script: eks_high_availability.sh. Commands executed: aws eks list-clusters, aws eks describe-cluster, aws eks list-nodegroups, aws eks describe-nodegroup'
+  instructions: 'Script: aws/eks_high_availability/fetcher.sh. Commands executed: aws eks list-clusters, aws eks describe-cluster, aws eks list-nodegroups, aws eks describe-nodegroup'

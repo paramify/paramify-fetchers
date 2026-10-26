@@ -53,7 +53,7 @@ evidence_set:
   reference_id: EVD-AZURE-AKS-CONFIG
   name: Azure Kubernetes Service Cluster Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-containerservice
+    Script: azure/aks_cluster_configuration/fetcher.py. Azure SDK calls: azure-mgmt-containerservice
     ContainerServiceClient.managed_clusters.list(), preceded by azure-mgmt-resource
     ResourceManagementClient.providers.get("Microsoft.ContainerService"). One evidence
     file per subscription.

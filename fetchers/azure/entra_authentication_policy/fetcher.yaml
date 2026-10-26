@@ -76,7 +76,7 @@ evidence_set:
   reference_id: EVD-AZURE-ENTRA-AUTH-METHODS-POLICY
   name: Microsoft Entra ID Authentication Methods Policy
   instructions: >
-    Script: fetcher.py. Microsoft Graph calls: GET /policies/authenticationMethodsPolicy
+    Script: azure/entra_authentication_policy/fetcher.py. Microsoft Graph calls: GET /policies/authenticationMethodsPolicy
     and GET /policies/identitySecurityDefaultsEnforcementPolicy (Policy.Read.All);
     GET /groupSettings and GET /groupSettingTemplates/5cf42378-d67d-4f36-ba46-e8b86229381d
     (Password Rule Settings) and GET /subscribedSkus (Directory.Read.All);

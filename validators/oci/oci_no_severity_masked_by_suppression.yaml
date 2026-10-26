@@ -1,0 +1,24 @@
+key: oci_no_severity_masked_by_suppression
+name: OCI No Dependency Severity Masked by Suppression
+type: AUTOMATED
+role: configuration
+statement: >
+  No ADM vulnerability audit reports a lower headline severity than it would
+  without its ignore list or CVSS ceilings. ADM reports each severity twice;
+  where `max_observed_severity` sits below `max_observed_severity_with_ignored`
+  the audit reads cleaner than the dependencies are. Suppression that leaves
+  the headline unchanged is not failed here — it is counted in the evidence.
+  Pair with oci_dependency_audit_present: a zero from no audits is not a pass.
+  Fails when the summary key is renamed.
+regex: '"audits_where_suppression_lowered_severity":\s*(?<audits_where_suppression_lowered_severity>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-DEP-VULNS

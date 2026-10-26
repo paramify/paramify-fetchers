@@ -1,5 +1,5 @@
 name: checkov_bicep
-version: 0.2.0
+version: 0.2.1
 description: >
   Runs Checkov IaC security scanning over the Bicep and ARM templates in a repo.
   Clones the repo (generic git, any host, including Azure DevOps), or with
@@ -100,8 +100,8 @@ config_schema:
     type: string
     env: CHECKOV_SKIP_CHECKS
     description: >-
-      CSV of check IDs to skip; added to _shared/skip-checks.default.txt
-      unless use_default_skip_checks is false. Skipped checks do not appear in
+      Check IDs to skip, separated by commas, spaces or newlines (each entry trimmed); added to
+      _shared/skip-checks.default.txt unless use_default_skip_checks is false. Skipped checks do not appear in
       checkov's results; the effective list is recorded in metadata.skip_checks.
   use_default_skip_checks:
     type: boolean
@@ -115,8 +115,8 @@ config_schema:
     type: string
     env: CHECKOV_SKIP_RESOURCES
     description: >-
-      CSV of whole-name resource globs (* is the only wildcard, e.g.
-      Microsoft.Storage/storageAccounts.dev*); merged with _shared/skip-resources.default.txt.
+      Whole-name resource globs, comma- or newline-separated (each entry trimmed; * is the only
+      wildcard, e.g. Microsoft.Storage/storageAccounts.dev*); merged with _shared/skip-resources.default.txt.
       Applied post-scan: a failed check on a matching resource is moved to skipped_checks
       (check_result.result SKIPPED, suppress_comment naming the pattern), so it still counts
       in total_checks. summary.skipped_by_resource_filter counts them; metadata.skip_resources
@@ -125,13 +125,21 @@ config_schema:
     type: string
     env: CHECKOV_SKIP_PATHS
     description: >-
-      CSV of paths to skip during the scan, recorded in metadata.skip_paths. Also how to
-      exclude a file checkov cannot parse, which otherwise fails the run. file_counts still
-      counts skipped files.
+      Python regular expressions for the paths to leave out of the scan, comma- or newline-separated
+      (each entry trimmed; it may contain spaces but not a comma). checkov searches each file's path
+      for every entry, so legacy skips any path containing legacy; escape . * ? + ( ) [ ] with a
+      backslash to match them literally, e.g. legacy \(old\). These are not globs: an entry that is
+      not a valid regular expression, such as *.json, fails the run with bad_config before anything
+      is fetched. Checking them needs python3 on PATH. Recorded in metadata.skip_paths. Also how to
+      exclude a file checkov cannot parse, which otherwise fails the run. file_counts still counts
+      skipped files.
   checks:
     type: string
     env: CHECKOV_BICEP_CHECKS
-    description: CSV allowlist of check IDs to run (overrides skips for those checks).
+    description: >-
+      Allowlist of check IDs to run, separated by commas, spaces or newlines (each entry trimmed);
+      overrides skips for those checks. Recorded in metadata.checks, which is empty when the scan
+      was not restricted.
   external_checks_dir:
     type: string
     env: CHECKOV_EXTERNAL_CHECKS_DIR
@@ -148,4 +156,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CHECKOV-BICEP
   name: Checkov Bicep/ARM IaC Scan
-  instructions: 'Script: checkov_bicep/fetcher.sh. Shallow-clones the target repo, or with source_type tfvc looks up the changeset to read (the newest, or the one named) through the Azure DevOps TFVC REST API and downloads tfvc_path at that changeset as a zip; then counts its .bicep files and ARM templates (.json whose $schema is a deploymentTemplate), and runs the checkov CLI (--framework bicep,arm) over them, merging default + configured skip-checks/skip-resources. Records passed/failed/skipped checks from both frameworks (each check tagged with check_type), per-framework counts in summary.by_framework, file_counts, and provenance: metadata.source_type, then repo, branch actually scanned and commit (git) or project, tfvc_path and changeset (tfvc), plus the effective skip-check list and skip-resource patterns. Failed checks on skipped resources are moved to skipped_checks, not dropped. status is success only when at least one check ran and every file parsed: no Bicep/ARM files (no_files), zero checks evaluated (no_checks, e.g. resources only behind registry modules), or files checkov could not parse (partial, listed in results.parsing_errors and metadata.api_failures) all exit non-zero, and summary counts are null when nothing was scanned. Needs: a token that can read the code (Azure DevOps PAT: Code (Read)).'
+  instructions: 'Script: checkov/bicep/fetcher.sh. Shallow-clones the target repo, or with source_type tfvc looks up the changeset to read (the newest, or the one named) through the Azure DevOps TFVC REST API and downloads tfvc_path at that changeset as a zip; then counts its .bicep files and ARM templates (.json whose $schema is a deploymentTemplate), and runs the checkov CLI (--framework bicep,arm) over them, merging default + configured skip-checks/skip-resources. Records passed/failed/skipped checks from both frameworks (each check tagged with check_type), per-framework counts in summary.by_framework, file_counts, and provenance: metadata.source_type, then repo, branch actually scanned and commit (git) or project, tfvc_path and changeset (tfvc), plus the checks allowlist (metadata.checks, empty when every check ran), the effective skip-check list, skip-resource patterns and skip paths. Failed checks on skipped resources are moved to skipped_checks, not dropped. status is success only when at least one check ran and every file parsed: no Bicep/ARM files (no_files), zero checks evaluated (no_checks, e.g. resources only behind registry modules), or files checkov could not parse (partial, listed in results.parsing_errors and metadata.api_failures) all exit non-zero, and summary counts are null when nothing was scanned. Needs: a token that can read the code (Azure DevOps PAT: Code (Read)).'

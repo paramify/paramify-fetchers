@@ -95,6 +95,12 @@ from framework.issue_reports import (
     CLOSE_CYCLE_VALUES,
     ISSUE_REPORTS_DIR,
 )
+from framework.runner.executor import is_credential_env_name
+from framework.secret_resolver import (
+    env_var_name,
+    is_env_ref_attempt,
+    is_partial_env_ref,
+)
 
 _DEFAULT_MANIFEST = "manifest.yaml"
 
@@ -105,7 +111,6 @@ _HELP_OPTS = {"help_option_names": ["-h", "--help"]}
 
 app = typer.Typer(
     no_args_is_help=True,
-    add_completion=False,
     context_settings=_HELP_OPTS,
     help="Paramify fetcher framework — discover, build, run, and inspect evidence fetchers.",
 )
@@ -226,7 +231,21 @@ def _parse_kv(arg: str, path, json_out: bool):
     return arg.split("=", 1)
 
 
-def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool):
+def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool, target: bool = False):
+    # The runner resolves ${env:VAR} in string config fields only, so anywhere else
+    # a reference would be saved as literal text (or coerced to false).
+    if is_env_ref_attempt(value) or is_partial_env_ref(value):
+        if target:
+            _fail(path, f"{key}: target fields aren't resolved, so ${{env:}} references don't work there", json_out)
+        if is_partial_env_ref(value):
+            _fail(path, f"config '{key}': a ${{env:}} reference must be the whole value, not part of it", json_out)
+        var = env_var_name(value)
+        if var and is_credential_env_name(var):
+            _fail(path, f"config '{key}' reads ${{env:{var}}}, which holds a secret; config references can't read "
+                        f"secrets", json_out)
+        if typ != "string":
+            _fail(path, f"config '{key}' is {typ}; ${{env:}} references work on string config fields only", json_out)
+        return value
     try:
         return _coerce(value, typ)
     except ValueError:
@@ -266,6 +285,13 @@ def _platform_config_type(root: Path, category: str, key: str) -> str:
                 if fld["name"] == key:
                     return fld["type"]
     return "string"
+
+
+def _category_fetcher_types(root: Path, category: str, key: str) -> List[str]:
+    """The types the category's fetchers declare for `key`, since a platform value reaches each of them."""
+    cat = api.catalog(root)
+    return [fld["type"] for c in cat["categories"] if c["name"] == category
+            for f in c["fetchers"] for fld in f["config"] if fld["name"] == key]
 
 
 def _target_field_type(root: Path, fetcher_name: str, key: str) -> str:
@@ -1082,9 +1108,25 @@ def samples_status(
     )
 
 
+def _complete_sampled_fetcher(incomplete: str) -> List[tuple]:
+    """Tab completion for `samples show`: only fetchers that have a sample, each
+    with its version and capture date as the hint. Outside the repo, nothing."""
+    try:
+        rows = api.sample_status(api.find_repo_root())
+    except Exception:
+        return []
+    return [
+        (r["fetcher"], f"v{r['sample_version']} {r['source']} {r['captured_on'] or ''}".rstrip())
+        for r in rows
+        if r["has_sample"] and r["fetcher"].startswith(incomplete)
+    ]
+
+
 @samples_app.command("show")
 def samples_show(
-    fetcher: str = typer.Argument(..., help="Fetcher name"),
+    fetcher: str = typer.Argument(
+        ..., help="Fetcher name", autocompletion=_complete_sampled_fetcher,
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Show one fetcher's sample: how many records were seen, how often each
@@ -1650,7 +1692,7 @@ def manifest_add_target(
     vals = {}
     for kv in (values or []):
         k, raw = _parse_kv(kv, path, json_out)
-        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out)
+        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out, target=True)
     secret_env = {}
     for s in (secret or []):
         k, v = _parse_kv(s, path, json_out)
@@ -1679,7 +1721,7 @@ def manifest_set_target(
     vals = {}
     for kv in (values or []):
         k, raw = _parse_kv(kv, path, json_out)
-        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out)
+        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out, target=True)
     secret_env = {}
     for sv in (secret or []):
         k, v = _parse_kv(sv, path, json_out)
@@ -1718,7 +1760,10 @@ def manifest_set_platform_config(
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
-    value = _coerce_or_fail(raw, _platform_config_type(root, category, key), key, path, json_out)
+    typ = _platform_config_type(root, category, key)
+    if is_env_ref_attempt(raw) and typ == "string":
+        typ = next((t for t in _category_fetcher_types(root, category, key) if t != "string"), typ)
+    value = _coerce_or_fail(raw, typ, key, path, json_out)
     api.set_platform_config(m, category, key, value)
     _save_and_report(m, path, root, json_out)
 
