@@ -46,6 +46,8 @@ READ_CONCURRENCY = 8
 # Graph pages these lists 100 at a time and documents $top/$skip; a full page with no nextLink means ask for more.
 PAGE_SIZE = 100
 PAGE_LIMIT = 1000
+# Graph's reviewedBy/appliedBy on a decision no one reviewed or applied.
+NOBODY = "00000000-0000-0000-0000-000000000000"
 
 logger = logging.getLogger(NAME)
 # The probe that sorts licence refusals from failures logs nothing itself; _read logs what it decides.
@@ -145,7 +147,7 @@ def project_instance(instance) -> Dict[str, Any]:
 
 
 def _identity(model) -> Optional[Dict[str, Any]]:
-    if model is None:
+    if model is None or graph_attr(model, "id") == NOBODY:
         return None
     projected = {
         "id": graph_attr(model, "id"),
@@ -368,6 +370,8 @@ async def _page(probe: Collector, operation: str, builder) -> List[Any]:
         items.extend(batch)
         if probe.failures or len(batch) != PAGE_SIZE:
             break
+    else:
+        probe.record(operation, RuntimeError(f"stopped after {PAGE_LIMIT} full pages; refusing to keep paging"))
     return items
 
 

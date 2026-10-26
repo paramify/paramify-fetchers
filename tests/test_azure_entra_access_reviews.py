@@ -395,6 +395,17 @@ def test_an_inactive_users_duration_renders_as_iso_days():
     assert scope["type"] == "accessReviewInactiveUsersQueryScope"
 
 
+def test_graphs_nobody_identity_reads_as_no_reviewer():
+    nobody = ns(odata_type=None, id=ar.NOBODY, display_name="", user_principal_name="")
+    item = ar.project_decision(ns(
+        id="1", decision="NotReviewed", reviewed_by=nobody, applied_by=nobody, apply_result="New",
+        principal=ns(odata_type="#microsoft.graph.userIdentity", id="u1", display_name="User One",
+                     user_principal_name="u1@contoso.test"),
+    ))
+    assert item["reviewed_by"] is None and item["applied_by"] is None
+    assert item["principal"]["id"] == "u1"
+
+
 def test_graph_unauthorized_text_classifies_by_its_status():
     failures = [{"operation": "graph.op", "type": "ODataError",
                  "message": "Attempted to perform an unauthorized operation. (status 403)"}]
@@ -433,6 +444,28 @@ def test_a_list_that_ignores_skip_stops_with_a_failure():
     items, collector, _ = _read(_Echo(items=[ns(id=f"d{n}") for n in range(100)]))
     assert items is None
     assert "already read" in collector.failures[0]["message"]
+
+
+def test_a_list_still_full_at_the_page_limit_stops_with_a_failure(monkeypatch):
+    monkeypatch.setattr(ar, "PAGE_LIMIT", 2)
+    items, collector, _ = _read(_Builder(items=[ns(id=f"d{n}") for n in range(300)]))
+    assert items is None
+    assert "full pages" in collector.failures[0]["message"]
+
+
+def test_next_links_are_followed_before_skip():
+    class _Linked(_Builder):
+        async def get(self, request_configuration=None):
+            if request_configuration is None:  # the nextLink request
+                return ns(value=self.items[100:], odata_next_link=None)
+            self.requests.append(request_configuration.query_parameters.skip)
+            return ns(value=self.items[:100], odata_next_link="https://graph.test/next")
+
+    builder = _Linked(items=[ns(id=f"d{n}") for n in range(150)])
+    items, collector, _ = _read(builder)
+    assert collector.ok
+    assert len(items) == 150
+    assert builder.requests == [0]
 
 
 def _fake_graph(monkeypatch, definitions):
