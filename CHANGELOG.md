@@ -29,9 +29,12 @@ schemas and the `paramify` CLI — not the internal code.
   policies, force-pushing, checking in other users' changes, administering
   builds, releases, service connections, environments and the library, and
   managing audit streams. `branch_policy_bypass_holders` lists who may bypass Git
-  branch policies. PAT scopes: Security (Manage), because Azure DevOps has no
+  branch policies, and is null when the organization has no Git repositories (TFVC
+  only). A count reads null, not 0, when a namespace, the repository list or an
+  identity lookup it depends on could not be read. `AZURE_DEVOPS_PROJECTS` limits
+  TFVC paths too. PAT scopes: Security (Manage), because Azure DevOps has no
   read-only scope for access control lists (the fetcher only reads), plus
-  Identity (Read) and Project and Team (Read).
+  Identity (Read), Code (Read) and Project and Team (Read).
 - **`azure_devops_audit_streams`** (`EVD-AZURE-DEVOPS-AUDIT-STREAMS`): whether an
   Azure DevOps organization exports its audit log, which it otherwise keeps for
   90 days. Records:

@@ -6,7 +6,7 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
@@ -27,24 +27,26 @@ GRAPH = "vssps"
 
 SCOPE_SECURITY = "Security (Manage)"
 SCOPE_IDENTITY = "Identity (Read)"
+SCOPE_CODE = "Code (Read)"
 
-# Namespaces read, by lowercased name; the high-impact actions in each, by lowercased action name.
+# Namespaces read; the high-impact actions in each, by lowercased action name.
 NAMESPACES = {
-    "collection": {"generic_write", "manage_enterprise_policies"},
-    "project": {"generic_write", "delete", "update_visibility", "administer_build"},
-    "git repositories": {"managepermissions", "editpolicies", "policyexempt", "pullrequestbypasspolicy",
+    "Collection": {"generic_write", "manage_enterprise_policies"},
+    "Project": {"generic_write", "delete", "update_visibility", "administer_build"},
+    "Git Repositories": {"managepermissions", "editpolicies", "policyexempt", "pullrequestbypasspolicy",
                          "deleterepository", "forcepush"},
-    "versioncontrolitems": {"adminprojectrights", "checkinother"},
-    "versioncontrolprivileges": {"adminconfiguration"},
-    "build": {"administerbuildpermissions", "editbuilddefinition", "deletebuilddefinition",
+    "VersionControlItems": {"adminprojectrights", "checkinother"},
+    "VersionControlPrivileges": {"adminconfiguration"},
+    "Build": {"administerbuildpermissions", "editbuilddefinition", "deletebuilddefinition",
               "overridebuildcheckinvalidation"},
-    "releasemanagement": {"administerreleasepermissions", "editreleasedefinition", "deletereleasedefinition",
+    "ReleaseManagement": {"administerreleasepermissions", "editreleasedefinition", "deletereleasedefinition",
                           "managereleaseapprovers"},
-    "serviceendpoints": {"administer"},
-    "environment": {"administer", "manage"},
-    "library": {"administer"},
-    "auditlog": {"manage_streams", "delete_streams"},
+    "ServiceEndpoints": {"administer"},
+    "Environment": {"administer", "manage"},
+    "Library": {"administer"},
+    "AuditLog": {"manage_streams", "delete_streams"},
 }
+HIGH_IMPACT = {name.lower(): actions for name, actions in NAMESPACES.items()}
 BYPASS_ACTIONS = {("git repositories", "policyexempt"), ("git repositories", "pullrequestbypasspolicy")}
 ADMIN_GROUPS = {
     "project collection administrators", "project collection service accounts",
@@ -104,6 +106,18 @@ def bits(mask: Any, actions: List[Dict[str, Any]]) -> List[str]:
     return names
 
 
+def ref_path(parts: List[str]) -> str:
+    """A Git ref token's path, with the hex-encoded UTF-16 name segments after refs/<kind>/ decoded."""
+    def decode(segment: str) -> str:
+        try:
+            return bytes.fromhex(segment).decode("utf-16-le")
+        except ValueError:
+            return segment
+    if len(parts) > 2 and parts[0].lower() == "refs":
+        return "/".join(parts[:2] + [decode(p) for p in parts[2:]])
+    return "/".join(parts)
+
+
 def parse_token(namespace: str, token: str, projects_by_name: Dict[str, str]) -> Tuple[str, Optional[str], Optional[str]]:
     """(scope, project id, resource) for a namespace's security token."""
     parts = [p for p in re.split(r"[/\\]", token or "") if p]
@@ -123,14 +137,15 @@ def parse_token(namespace: str, token: str, projects_by_name: Dict[str, str]) ->
         pid = parts[1].lower()
         if len(parts) == 2:
             return "project", pid, None
-        return ("repository", pid, parts[2]) if len(parts) == 3 else ("branch", pid, "/".join(parts[2:]))
+        return ("repository", pid, parts[2]) if len(parts) == 3 else ("branch", pid, f"{parts[2]}/{ref_path(parts[3:])}")
     if namespace in ("build", "releasemanagement"):
         if not parts:
             return "organization", None, None
         pid = parts[0].lower()
         if len(parts) == 1:
             return "project", pid, None
-        if namespace == "releasemanagement" and "environment" in (p.lower() for p in parts):
+        if namespace == "releasemanagement" and len(parts) >= 4 and parts[-2].lower() == "environment" \
+                and parts[-3].isdigit():
             return "release_stage", pid, "/".join(parts[1:])
         return ("pipeline" if parts[-1].isdigit() else "folder"), pid, "/".join(parts[1:])
     if namespace == "serviceendpoints":
@@ -155,24 +170,27 @@ def parse_token(namespace: str, token: str, projects_by_name: Dict[str, str]) ->
     return "other", None, token
 
 
-def resolve(client, collector, descriptors: List[str]) -> Dict[str, Dict[str, Any]]:
-    """Identity descriptor -> identity, in batches; an unresolved descriptor is left out."""
+def resolve(client, collector, descriptors: List[str]) -> Tuple[Dict[str, Dict[str, Any]], Set[str]]:
+    """(lowercased descriptor -> identity, lowercased descriptors whose batch failed); unresolved ones are left out."""
     found: Dict[str, Dict[str, Any]] = {}
+    unread: Set[str] = set()
     for start in range(0, len(descriptors), IDENTITY_BATCH):
         batch = descriptors[start:start + IDENTITY_BATCH]
         rows = call(collector, f"identities.read({start // IDENTITY_BATCH + 1})", SCOPE_IDENTITY,
                     lambda batch=batch: client.list("_apis/identities", SECURITY_API, params={
                         "descriptors": ",".join(batch), "queryMembership": "None"}, service=GRAPH))
+        if rows is None:
+            unread |= {d.lower() for d in batch}
         for row in rows or []:
             if isinstance(row, dict) and row.get("descriptor"):
                 descriptor = row["descriptor"]
                 if isinstance(descriptor, dict):
                     descriptor = f"{descriptor.get('identityType')};{descriptor.get('identifier')}"
                 found[str(descriptor).lower()] = row
-    return found
+    return found, unread
 
 
-def identity_record(descriptor: str, row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def identity_record(descriptor: str, row: Optional[Dict[str, Any]], looked_up: bool = True) -> Dict[str, Any]:
     subject = (row or {}).get("subjectDescriptor")
     kind = SUBJECT_KINDS.get(str(subject or "").split(".", 1)[0].lower()) if subject else None
     kind = kind or DESCRIPTOR_KINDS.get(descriptor.split(";", 1)[0].lower(), "other")
@@ -184,7 +202,7 @@ def identity_record(descriptor: str, row: Optional[Dict[str, Any]]) -> Dict[str,
         "name": name,
         "kind": kind,
         "resolved": row is not None,
-        "admin_group": kind == "group" and short in ADMIN_GROUPS,
+        "admin_group": None if row is None and not looked_up else kind == "group" and short in ADMIN_GROUPS,
     }
 
 
@@ -195,8 +213,8 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
     narrowed = bool(requested_projects())
 
     listed = call(collector, "securitynamespaces.list", SCOPE_SECURITY,
-                  lambda: client.list("_apis/securitynamespaces", SECURITY_API), default=[])
-    namespaces = [n for n in listed if isinstance(n, dict) and str(n.get("name") or "").lower() in NAMESPACES]
+                  lambda: client.list("_apis/securitynamespaces", SECURITY_API))
+    namespaces = [n for n in listed or [] if isinstance(n, dict) and str(n.get("name") or "").lower() in HIGH_IMPACT]
     found_names = {str(n.get("name") or "").lower() for n in namespaces}
 
     raw_entries = []
@@ -208,14 +226,16 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         acls = call(collector, f"accesscontrollists.query({ns.get('name')})", SCOPE_SECURITY,
                     lambda ns=ns: client.list(f"_apis/accesscontrollists/{ns.get('namespaceId')}", SECURITY_API,
                                               params={"includeExtendedInfo": "true", "recurse": "true"}))
-        count = 0
+        kept = count = 0
         for acl in acls or []:
             if not isinstance(acl, dict):
                 continue
             token = str(acl.get("token") or "")
             scope, pid, resource = parse_token(key, token, projects_by_name)
-            if narrowed and pid and pid not in project_names:
+            # A TFVC path names its project; one outside the filter has no id here.
+            if narrowed and (pid not in project_names if pid else scope in ("project", "path")):
                 continue
+            kept += 1
             if acl.get("inheritPermissions") is False:
                 acls_off += 1
             for ace in (acl.get("acesDictionary") or {}).values():
@@ -227,22 +247,29 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
             "id": ns.get("namespaceId"),
             "name": ns.get("name"),
             "acls_read": acls is not None,
-            "acls": None if acls is None else len(acls),
+            "acls": None if acls is None else kept,
             "entries": count,
             "actions": {a.get("name"): a.get("displayName") for a in sorted(actions, key=lambda a: a.get("bit") or 0)},
         })
 
+    repos = call(collector, "git.repositories.list", SCOPE_CODE,
+                 lambda: client.list("_apis/git/repositories", SECURITY_API))
+    git_repositories = None if repos is None else sum(
+        1 for r in repos if isinstance(r, dict)
+        and (not narrowed or str((r.get("project") or {}).get("id") or "").lower() in project_names))
+
     descriptors = sorted({str(e[8].get("descriptor")) for e in raw_entries if e[8].get("descriptor")})
-    resolved = resolve(client, collector, descriptors) if descriptors else {}
-    identities = {d: identity_record(d, resolved.get(d.lower())) for d in descriptors}
+    resolved, unread = resolve(client, collector, descriptors) if descriptors else ({}, set())
+    identities = {d: identity_record(d, resolved.get(d.lower()), d.lower() not in unread) for d in descriptors}
 
     entries = []
     for ns, key, actions, token, scope, pid, resource, inherit, ace in raw_entries:
         extended = ace.get("extendedInfo") if isinstance(ace.get("extendedInfo"), dict) else {}
         allow, deny = ace.get("allow") or 0, ace.get("deny") or 0
         allowed = bits(allow & ~deny, actions)
-        high = sorted(a for a in allowed if a.lower() in NAMESPACES[key])
+        high = sorted(a for a in allowed if a.lower() in HIGH_IMPACT[key])
         who = identities.get(str(ace.get("descriptor")))
+        admin = (who or {}).get("admin_group")
         entries.append({
             "namespace": ns.get("name"),
             "token": token,
@@ -259,44 +286,61 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
             "effective_allow": bits(extended.get("effectiveAllow"), actions),
             "effective_deny": bits(extended.get("effectiveDeny"), actions),
             "high_impact_allowed": high,
-            "high_impact_outside_admin_groups": bool(high) and not (who or {}).get("admin_group"),
+            "high_impact_outside_admin_groups": (None if admin is None else not admin) if high else False,
         })
     entries.sort(key=lambda e: (str(e["namespace"]).lower(), e["token"], str((e["identity"] or {}).get("name") or "")))
+    git = [n for n in namespace_records if str(n["name"]).lower() == "git repositories"]
     results = {
         "namespaces": namespace_records,
-        "namespaces_not_found": sorted(set(NAMESPACES) - found_names) if listed else [],
+        "namespaces_not_found": None if listed is None else sorted(n for n in NAMESPACES if n.lower() not in found_names),
         "identities": sorted(identities.values(), key=lambda i: (i["kind"], str(i["name"] or i["descriptor"]).lower())),
         "entries": entries,
     }
-    return results, summarize(entries, identities, namespace_records, acls_off, results["namespaces_not_found"])
+    return results, summarize(
+        entries, identities, namespace_records, acls_off, results["namespaces_not_found"],
+        complete=listed is not None and all(n["acls_read"] for n in namespace_records) and bool(projects or not narrowed),
+        git_repositories=git_repositories,
+        git_read=bool(git) and all(n["acls_read"] for n in git),
+    )
 
 
-def summarize(entries, identities, namespaces, acls_off: int, not_found: List[str]) -> Dict[str, Any]:
+def summarize(entries, identities, namespaces, acls_off: int, not_found: Optional[List[str]], *, complete: bool,
+              git_repositories: Optional[int], git_read: bool) -> Dict[str, Any]:
+    """Counts read null when a namespace (or, for the admin-group split, an identity) couldn't be read."""
     def name(identity):
         return (identity or {}).get("name") or (identity or {}).get("descriptor")
 
+    def names(rows):
+        # One name per identity, so two people who share a display name both appear.
+        return sorted({(e["identity"] or {}).get("descriptor"): name(e["identity"]) for e in rows}.values(),
+                      key=lambda n: str(n).lower())
+
+    def known(value, ok=True):
+        return value if complete and ok else None
+
     outside = [e for e in entries if e["high_impact_outside_admin_groups"]]
+    admins_known = all(e["high_impact_outside_admin_groups"] is not None for e in entries)
     rights = Counter(f"{e['namespace']}: {a}" for e in outside for a in e["high_impact_allowed"])
-    bypass = {name(e["identity"]) for e in entries
-              if any((str(e["namespace"]).lower(), a.lower()) in BYPASS_ACTIONS for a in e["high_impact_allowed"])}
+    bypass = [e for e in entries
+              if any((str(e["namespace"]).lower(), a.lower()) in BYPASS_ACTIONS for a in e["high_impact_allowed"])]
     return {
         "namespaces_collected": sum(1 for n in namespaces if n["acls_read"]),
         "namespaces_not_found": not_found,
-        "acls_total": sum(n["acls"] or 0 for n in namespaces),
-        "acls_with_inheritance_off": acls_off,
-        "entries_total": len(entries),
-        "entries_by_scope": sorted_counts(Counter(e["scope"] for e in entries)),
-        "entries_with_deny": sum(1 for e in entries if e["deny"]),
-        "identities_with_explicit_entries": len(identities),
-        "unresolved_identities": sum(1 for i in identities.values() if not i["resolved"]),
-        "users_with_direct_entries": sorted({name(e["identity"]) for e in entries
-                                             if (e["identity"] or {}).get("kind") == "user"}, key=str.lower),
-        "high_impact_grants": sum(1 for e in entries if e["high_impact_allowed"]),
-        "high_impact_grants_outside_admin_groups": len(outside),
-        "identities_with_high_impact_rights_outside_admin_groups": sorted({name(e["identity"]) for e in outside},
-                                                                          key=str.lower),
-        "high_impact_rights_outside_admin_groups_by_right": sorted_counts(rights),
-        "branch_policy_bypass_holders": sorted(bypass, key=str.lower),
+        "namespaces_not_read": None if not_found is None else sorted(n["name"] for n in namespaces if not n["acls_read"]),
+        "acls_total": known(sum(n["acls"] or 0 for n in namespaces)),
+        "acls_with_inheritance_off": known(acls_off),
+        "entries_total": known(len(entries)),
+        "entries_by_scope": known(sorted_counts(Counter(e["scope"] for e in entries))),
+        "entries_with_deny": known(sum(1 for e in entries if e["deny"])),
+        "identities_with_explicit_entries": known(len(identities)),
+        "unresolved_identities": known(sum(1 for i in identities.values() if not i["resolved"])),
+        "users_with_direct_entries": known(names(e for e in entries if (e["identity"] or {}).get("kind") == "user")),
+        "high_impact_grants": known(sum(1 for e in entries if e["high_impact_allowed"])),
+        "high_impact_grants_outside_admin_groups": known(len(outside), admins_known),
+        "identities_with_high_impact_rights_outside_admin_groups": known(names(outside), admins_known),
+        "high_impact_rights_outside_admin_groups_by_right": known(sorted_counts(rights), admins_known),
+        "git_repositories": git_repositories,
+        "branch_policy_bypass_holders": names(bypass) if git_read and git_repositories else None,
         "not_collected": dict(NOT_COLLECTED),
     }
 
