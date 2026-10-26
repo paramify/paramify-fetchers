@@ -95,7 +95,8 @@ def test_replaced_id_is_suggested_not_substituted(market):
 
 
 def test_name_match_prefers_certified_listing(market):
-    assert market.match_name("Twin Cloud - 20x Moderate")[:2] == ("FR0000000005XL", "name_preferred_state")
+    # A qualifier's impact level decides first; with no level named, the certified listing wins.
+    assert market.match_name("Twin Cloud - 20x Moderate")[:2] == ("FR0000000005XL", "name_impact_level")
     assert market.match_name("Twin Cloud")[:2] == ("FR0000000005XL", "name_preferred_state")
 
 
@@ -305,3 +306,41 @@ def test_build_records_reports_company_only_as_unmatched(market):
     assert (r["package_id"], r["match_method"], r["certification_state"], r["package_id_resolves"]) == (
         None, "company_only", mp.NOT_LISTED, False)
     assert r["suggested_package_ids"] == ["FR0000000020", "FR0000000021"]
+
+
+# -- re-audit fixes ------------------------------------------------------------
+
+def test_named_level_beats_a_certified_sibling(market):
+    # Twin Cloud High is only Ready; its 20x Moderate sibling is certified. "High" must not borrow that.
+    assert market.match_name("Twin Cloud - High")[:2] == ("FR0000000005", "name_impact_level")
+    assert market.match_name("Twin Cloud (High)")[:2] == ("FR0000000005", "name_impact_level")
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("Good Cloud (High)", ("FR0000000001", "name")),                      # its one listing is High
+    ("Good Cloud (Moderate)", (None, "impact_level_mismatch")),           # never resolved to the High listing
+    ("Twin Cloud - Low", (None, "impact_level_mismatch")),                # no Low listing among two
+    ("Twin Cloud - Moderate", (None, "impact_level_mismatch")),           # Moderate is not 20x Moderate
+])
+def test_named_level_must_match_exactly(market, name, expected):
+    assert market.match_name(name)[:2] == expected
+
+
+def test_state_preference_follows_the_changelog(market):
+    # FR0000000003 "Still Listed": data.json Authorized, changelog delisted.
+    # A sibling data.json still shows In Process, which the changelog has certified.
+    market.products["FR0000000030"] = product("FR0000000030", "Still Listed", status="FedRAMP In Process")
+    market.changelog["FR0000000030"] = [row("FR0000000030", "FedRAMP Certified", "2026-10-01")]
+    assert market.match_name("Still Listed")[:2] == ("FR0000000030", "name_preferred_state")
+
+
+def test_reissue_is_picked_by_changelog_state(market):
+    # The lettered ID is still in data.json as Authorized but delisted in the changelog;
+    # its base ID is certified in the changelog and missing from data.json.
+    market.products["FR0000000040XL"] = product("FR0000000040XL", "Moved Cloud")
+    market.changelog["FR0000000040XL"] = [row("FR0000000040XL", "FedRAMP Certified", "2025-01-01"),
+                                          row("FR0000000040XL", "No Status Found (Delisted)", "2026-09-01")]
+    market.changelog["FR0000000040"] = [row("FR0000000040", "FedRAMP Certified", "2026-09-02")]
+    record = market.record("Moved", "FR0000000040XL")
+    assert (record["certification_state"], record["package_id_resolves"], record["suggested_package_ids"]) == (
+        mp.DELISTED, False, ["FR0000000040"])

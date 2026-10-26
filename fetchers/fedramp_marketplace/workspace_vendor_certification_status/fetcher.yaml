@@ -68,11 +68,14 @@ evidence_set:
     the company name alone. If nothing matches, the name is retried without
     one trailing qualifier: " - <qualifier>" (spaced hyphen or en/em dash,
     last segment), ": <qualifier>" or "(<qualifier>)"; an unspaced hyphen is
-    not a qualifier. When several listings match, a certified one is
-    preferred over in process, then ready (name_preferred_state), then the
-    one whose impact level the element name mentions, most specific level
-    first (name_impact_level). A name that matches only a company is
-    unmatched (company_only), with that company's listings as candidates.
+    not a qualifier. Impact level decides first: a qualifier naming a level
+    ("X (High)") matches only a listing at exactly that level, even a sole
+    candidate, and is otherwise unmatched (impact_level_mismatch) rather than
+    resolved to a listing certified at another level; without one, several
+    listings are narrowed to the most specific level the name mentions
+    (name_impact_level). What remains prefers certified over in process, then
+    ready, by the changelog state (name_preferred_state). A name that matches
+    only a company is unmatched (company_only).
     Anything unmatched or still ambiguous is reported with package_id null,
     certification_state not_listed and the candidates in
     suggested_package_ids; it fails the certification and package-ID checks

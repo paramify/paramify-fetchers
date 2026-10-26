@@ -63,7 +63,7 @@ evidence_set:
     impact level (derived: LI-SaaS B, Low B, Moderate C, High D).
 
     package_id_resolves is false for an ID FedRAMP does not know and for a
-    delisted ID with a certified re-issue (FR2023864279 -> FR2023864279A),
+    delisted ID with a re-issue the changelog shows as certified (FR2023864279 -> FR2023864279A),
     which is named in suggested_package_ids but never substituted.
 
     summary carries the counts the validators read; feed.feed_age_hours is the

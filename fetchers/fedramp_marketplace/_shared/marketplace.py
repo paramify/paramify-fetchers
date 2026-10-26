@@ -273,18 +273,22 @@ class Marketplace:
         """Listed IDs that look like a re-issue of this one (FR2023864279 -> FR2023864279A).
 
         Only a standard ID (FR + 9-10 digits, or F + 10 digits) has a base, and a
-        re-issue is that base plus 1-3 letters, so FR1 suggests nothing and
-        MSO365MTA is not taken for a re-issue of MSO365MT.
+        re-issue is that base plus 1-3 letters (or the base itself, for a
+        lettered ID), so FR1 suggests nothing and MSO365MTA is not taken for a
+        re-issue of MSO365MT. A candidate counts when state() says certified.
         """
         base = re.sub(r"(?<=\d)[A-Z]+$", "", package_id)
         if not _BASE_ID_PATTERN.match(base):
             return []
+        # Any package FedRAMP knows (data.json omits some live ones), certified
+        # by the same changelog-first state the record itself reports.
+        known = set(self.products) | set(self.changelog)
         return sorted(
-            pid for pid in self.products
+            pid for pid in known
             if pid != package_id
             and pid.startswith(base)
             and (pid == base or _REISSUE_SUFFIX.fullmatch(pid[len(base):]))
-            and self.listing_state(pid) == CERTIFIED
+            and self.state(pid)[0] == CERTIFIED
         )
 
     def id_in_name(self, name: str) -> Optional[str]:
@@ -353,11 +357,19 @@ class Marketplace:
         name alone: "Google LLC (Gmail)" must not resolve to Google's one
         certified listing. An exact name wins; otherwise a trailing
         " - <qualifier>", ": <qualifier>" or "(<qualifier>)" is dropped and kept
-        as a hint. Several matches are narrowed by state (certified > in
-        process > ready) and then by the hint naming an impact level. Anything
-        still ambiguous is returned unmatched. A name that matches only a
-        company is returned unmatched as company_only, with that company's
-        listings as candidates for an override.
+        as a hint.
+
+        Impact level comes FIRST. A qualifier that names a level ("X (High)",
+        "X - 20x Moderate") names the offering, so only a listing at exactly
+        that level can match, even when it is the only candidate; if none is,
+        the element is unmatched as impact_level_mismatch rather than resolved
+        to a listing certified at another level. Without such a qualifier,
+        several matches are narrowed to the most specific level the name
+        mentions. What remains is narrowed by certification state from the
+        changelog (certified > in process > ready), the same state
+        fedramp.gov shows. Anything still ambiguous is returned unmatched. A
+        name that matches only a company is returned unmatched as
+        company_only, with that company's listings as candidates.
         """
         hits = self._listings_named(name)
         hint = ""
@@ -370,24 +382,41 @@ class Marketplace:
         if not hits:
             company = self._listings_of_company(name) or (self._listings_of_company(stripped) if stripped else [])
             return None, ("company_only" if company else "unmatched"), company
-        if len(hits) == 1:
+        # 1. Impact level. A level named in the qualifier must match exactly.
+        named = _level_named(hint) if hint else None
+        mentioned: Dict[str, str] = {}
+        if named:
+            pool = [pid for pid in hits if _norm(self.products[pid].get("impact_level")) == _norm(named)]
+            if not pool:
+                return None, "impact_level_mismatch", hits
+            if len(pool) == 1:
+                return pool[0], ("name" if len(hits) == 1 else "name_impact_level"), hits
+            mentioned = {pid: named for pid in pool}
+        elif len(hits) == 1:
             return hits[0], "name", hits
+        else:
+            # No level in a qualifier: narrow by the most specific level the name mentions.
+            mentioned = {
+                pid: _norm(self.products[pid].get("impact_level"))
+                for pid in hits
+                if _mentions(hint or name, self.products[pid].get("impact_level"))
+            }
+            if mentioned:
+                longest = max(len(level) for level in mentioned.values())
+                pool = sorted(pid for pid, level in mentioned.items() if len(level) == longest)
+                if len(pool) == 1:
+                    return pool[0], "name_impact_level", hits
+            else:
+                pool = hits
 
-        ranked = sorted(hits, key=lambda pid: STATE_RANK.get(self.listing_state(pid) or "", 9))
-        best_rank = STATE_RANK.get(self.listing_state(ranked[0]) or "", 9)
-        best = [pid for pid in ranked if STATE_RANK.get(self.listing_state(pid) or "", 9) == best_rank]
+        # 2. Certification state, from the changelog as fedramp.gov shows it.
+        def rank(pid: str) -> int:
+            return STATE_RANK.get(self.state(pid)[0], 9)
+
+        best_rank = min(rank(pid) for pid in pool)
+        best = [pid for pid in pool if rank(pid) == best_rank]
         if len(best) == 1:
-            return best[0], "name_preferred_state", hits
-        mentioned = {
-            pid: _norm(self.products[pid].get("impact_level"))
-            for pid in best
-            if _mentions(hint or name, self.products[pid].get("impact_level"))
-        }
-        # Keep only the most specific level named: "20x moderate" beats "moderate".
-        longest = max((len(level) for level in mentioned.values()), default=0)
-        hinted = [pid for pid, level in mentioned.items() if len(level) == longest]
-        if len(hinted) == 1:
-            return hinted[0], "name_impact_level", hits
+            return best[0], ("name_impact_level" if mentioned else "name_preferred_state"), hits
         return None, "ambiguous", hits
 
     def _listings_named(self, name: str) -> List[str]:
@@ -409,6 +438,14 @@ class Marketplace:
         if not key:
             return []
         return sorted(pid for pid, p in self.products.items() if _norm(p.get("csp") or "") == key)
+
+
+def _level_named(text: str) -> Optional[str]:
+    """The most specific impact level a qualifier names ("20x Moderate" before "Moderate"), or None."""
+    for level in sorted(DERIVED_CLASS, key=len, reverse=True):
+        if _mentions(text, level):
+            return level
+    return None
 
 
 def strip_qualifier(name: str) -> str:
