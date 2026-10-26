@@ -35,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-BACKUP-RECOVERY-HA
   name: Backup Recovery High Availability
-  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-snapshots --owner-ids self, aws dlm get-lifecycle-policies'
+  instructions: 'Script: aws/backup_recovery_high_availability/fetcher.sh. Commands executed: aws ec2 describe-snapshots --owner-ids self, aws dlm get-lifecycle-policies'

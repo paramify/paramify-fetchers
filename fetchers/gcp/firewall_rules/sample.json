@@ -1,0 +1,135 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_firewall_rules",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.firewall_rules[]",
+      "records": 7,
+      "fields": {
+        "action": 7,
+        "allowed": 6,
+        "applies_to_all_instances": 7,
+        "creation_timestamp": 7,
+        "denied": 1,
+        "description": 4,
+        "destination_ranges": 1,
+        "direction": 7,
+        "disabled": 7,
+        "enforced": 7,
+        "exposes_all_ports": 7,
+        "id": 7,
+        "internet_exposed_sensitive_services": 3,
+        "log_metadata": 0,
+        "logging_enabled": 7,
+        "name": 7,
+        "network": 7,
+        "open_to_internet": 7,
+        "priority": 7,
+        "source_includes_internet": 7,
+        "source_ranges": 6,
+        "source_service_accounts": 0,
+        "source_tags": 0,
+        "target_service_accounts": 0,
+        "target_tags": 1
+      }
+    },
+    {
+      "path": "results.firewall_rules[].allowed[]",
+      "records": 10,
+      "fields": {
+        "all_ports": 10,
+        "ports": 7,
+        "protocol": 10
+      }
+    },
+    {
+      "path": "results.firewall_rules[].denied[]",
+      "records": 1,
+      "fields": {
+        "all_ports": 1,
+        "ports": 1,
+        "protocol": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T16:22:33Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "firewall_rules": [
+        {
+          "action": "allow",
+          "allowed": [
+            {
+              "all_ports": false,
+              "ports": [
+                "0-65535"
+              ],
+              "protocol": "tcp"
+            }
+          ],
+          "applies_to_all_instances": true,
+          "creation_timestamp": "2026-08-17T07:16:54.362-07:00",
+          "denied": [],
+          "description": "Allow internal traffic on the default network",
+          "destination_ranges": [],
+          "direction": "INGRESS",
+          "disabled": false,
+          "enforced": true,
+          "exposes_all_ports": false,
+          "id": "0000000000000000005",
+          "internet_exposed_sensitive_services": [],
+          "log_metadata": null,
+          "logging_enabled": false,
+          "name": "default-allow-internal",
+          "network": "default",
+          "open_to_internet": false,
+          "priority": 65534,
+          "source_includes_internet": false,
+          "source_ranges": [
+            "10.0.0.1/9"
+          ],
+          "source_service_accounts": [],
+          "source_tags": [],
+          "target_service_accounts": [],
+          "target_tags": []
+        }
+      ]
+    },
+    "summary": {
+      "allow_rules": 6,
+      "compute_api_readable": true,
+      "deny_rules": 1,
+      "disabled_rules": 0,
+      "egress_rules": 1,
+      "ingress_rules": 6,
+      "internet_exposed_sensitive_services": [
+        "rdp",
+        "ssh"
+      ],
+      "internet_open_rules_applying_to_all_instances": 3,
+      "logging_enabled_percentage": 14,
+      "networks_with_rules": [
+        "default",
+        "example-vpc"
+      ],
+      "rdp_open_to_internet": true,
+      "rules_exposing_all_ports_to_internet": 1,
+      "rules_exposing_sensitive_ports_to_internet": 3,
+      "rules_open_to_internet": 4,
+      "rules_with_logging_enabled": 1,
+      "ssh_open_to_internet": true,
+      "total_rules": 7
+    }
+  }
+}

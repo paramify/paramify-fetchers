@@ -107,21 +107,70 @@ paths = ['''fetchers/azure/entra_authentication_policy/fetcher\.py$''']
 regexes = ['''(?m)^PASSWORD_RULE_TEMPLATE_ID = "5cf42378-d67d-4f36-ba46-e8b86229381d"\s*$''']
 regexTarget = "line"
 
-# --- False positive: synthetic Azure keys in the DevOps audit-stream tests --- #
-# GRID_KEY and LAW_KEY in tests/test_azure_devops_audit_streams.py are fixture
-# values for an Event Grid key and a Log Analytics shared key. They are base64
-# of the plain strings "secret-key-do-not-write" and
-# "law-shared-key-do-not-write", chosen so the test can assert the fetcher never
-# writes a key into evidence. generic-api-key fires on the `_KEY` names plus
-# base64 entropy (4.56 / 4.44), not on a real credential.
+# --- False positive: base64 placeholder keys in Azure DevOps audit-stream tests #
+# tests/test_azure_devops_audit_streams.py defines two fixture "keys" that the
+# fetcher must never write into evidence; the tests assert they are absent from
+# the output. They are base64 of plain-English placeholders, not credentials:
+#   GRID_KEY = base64("secret-key-do-not-write")
+#   LAW_KEY  = base64("law-shared-key-do-not-write")
 #
-# Scoped to that test path and the exact two literals, so any other value
-# assigned to these names is still reported. `(?m)` is required for the reason
-# documented on the Service Management API entry.
+# generic-api-key fires because the names end in `_KEY` and base64 clears the
+# rule's entropy threshold — name-plus-entropy, not a leak.
+#
+# Scoped to that one test path and the two exact literals, so any other value
+# assigned to these names, or a real key elsewhere in the file, is still
+# reported. `(?m)` is required for the reason documented on the Service
+# Management API entry.
 [[allowlists]]
-description = "Base64 'do-not-write' fixture keys in the Azure DevOps audit-stream tests"
+description = "Base64 placeholder keys in the Azure DevOps audit-stream tests are not credentials"
 targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''tests/test_azure_devops_audit_streams\.py$''']
-regexes = ['''(?m)^(?:GRID_KEY = "c2VjcmV0LWtleS1kby1ub3Qtd3JpdGU="|LAW_KEY = "bGF3LXNoYXJlZC1rZXktZG8tbm90LXdyaXRl")\s*$''']
+regexes = [
+    '''(?m)^GRID_KEY = "c2VjcmV0LWtleS1kby1ub3Qtd3JpdGU="\s*$''',
+    '''(?m)^LAW_KEY = "bGF3LXNoYXJlZC1rZXktZG8tbm90LXdyaXRl"\s*$''',
+]
+regexTarget = "line"
+
+# --- False positive: canary secret in the Cornerstone fetcher tests ---------- #
+# tests/test_cornerstone_fetchers.py (branch feat/cornerstone-training-fetchers,
+# commit 5bcb762) defines a deliberate canary:
+#   SECRET = "csod-s3cr3t-that-must-never-appear-91ab"
+# It is a made-up client secret the tests feed to the fetcher and then assert is
+# ABSENT from the evidence it writes. It never authenticated to anything; its
+# whole job is to be recognisable if it leaks into output.
+#
+# generic-api-key fires because the name is `SECRET` and the value clears the
+# rule's entropy threshold — name-plus-entropy, not a leak. CI's `gitleaks git`
+# walks every ref the checkout fetches, so this branch's commit turns the scan
+# red on unrelated PRs; this entry unblocks that all-refs scan.
+#
+# Scoped to that one test path and the exact literal, so any other value
+# assigned to SECRET, or a real credential elsewhere in the file, is still
+# reported. `(?m)` is required for the reason documented on the Service
+# Management API entry.
+[[allowlists]]
+description = "Canary client secret in the Cornerstone tests is asserted absent from evidence, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''tests/test_cornerstone_fetchers\.py$''']
+regexes = ['''(?m)^SECRET = "csod-s3cr3t-that-must-never-appear-91ab"\s*$''']
+regexTarget = "line"
+
+# --- False positive: GCP key-algorithm enum in evidence samples -------------- #
+# The same `KEY_ALG_RSA_2048` enum name as the entry above, this time in the
+# committed evidence sample for gcp_iam_service_accounts (docs/evidence_samples.md):
+# the sample shows one service-account key's metadata, and `key_algorithm` is
+# one of its fields. Samples are sanitized output — they carry no key material,
+# and long hex ids in them are replaced with counters.
+#
+# Scoped to sample.json files and the exact enum literal, so any other value
+# under that field is still reported. `(?m)` is required for the reason
+# documented on the Service Management API entry.
+[[allowlists]]
+description = "GCP KEY_ALG_RSA_2048 is an algorithm enum name in evidence samples"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''fetchers/[^/]+/[^/]+/sample\.json$''']
+regexes = ['''(?m)^\s*"key_algorithm": "KEY_ALG_RSA_2048",\s*$''']
 regexTarget = "line"

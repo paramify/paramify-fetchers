@@ -114,6 +114,82 @@ def graph_list(model: Any, name: str) -> List[Any]:
 
 
 # --------------------------------------------------------------------------- #
+# Privileged directory roles
+# --------------------------------------------------------------------------- #
+#
+# Shared so that azure_entra_privileged_roles (who holds these roles) and
+# azure_entra_mfa_status (whether those holders can MFA) agree on what an admin is.
+
+# The role Prowler's entra_global_admin_in_less_than_five_users check counts.
+GLOBAL_ADMINISTRATOR = "Global Administrator"
+
+# A SECOND way to recognize that role, never the only one — `is_privileged_role`
+# matches the display name first, so a wrong constant here cannot drop the role from
+# the counts.
+#
+# Provenance: this GUID has no upstream ancestor. Prowler's config.py carries the ARM
+# *RBAC* role GUIDs (reused verbatim by rbac_role_assignments) but no Entra *directory*
+# role template ids; the two are different id spaces, and Prowler's directory-role code
+# matches on the display name, as this does.
+GLOBAL_ADMINISTRATOR_TEMPLATE_ID = "62e90394-69f5-4237-9190-012177145e10"
+
+# Entra built-in directory roles that grant tenant-wide administrative power: each can
+# take over identities, grant itself more access, or alter the controls protecting the
+# tenant.
+#
+# Matched on display name because that is the stable documented identifier Graph
+# returns for a built-in role (v1.0 does not localize these), and is what Prowler
+# matches on. Each record also carries `role_template_id` verbatim, so a validator can
+# pin the GUID without this list asserting one.
+PRIVILEGED_ROLE_NAMES = frozenset(
+    {
+        # --- full tenant control ---
+        GLOBAL_ADMINISTRATOR,
+        "Privileged Role Administrator",       # can grant any role, including GA
+        "Privileged Authentication Administrator",  # can reset a GA's credentials
+        # --- identity takeover ---
+        "Authentication Administrator",
+        "User Administrator",
+        "Helpdesk Administrator",
+        "Password Administrator",
+        "Directory Writers",
+        # --- can grant itself access via an app or a federated identity ---
+        "Application Administrator",
+        "Cloud Application Administrator",
+        "Hybrid Identity Administrator",
+        "Domain Name Administrator",
+        "External Identity Provider Administrator",
+        # --- controls the controls ---
+        "Conditional Access Administrator",
+        "Security Administrator",
+        "Compliance Administrator",
+        "Intune Administrator",
+        # --- workload-wide data access ---
+        "Exchange Administrator",
+        "SharePoint Administrator",
+        "Teams Administrator",
+        # --- reads everything (no write, but full-tenant disclosure) ---
+        "Global Reader",
+        "Security Reader",
+        # --- commercial control of the tenant ---
+        "Billing Administrator",
+        "Partner Tier2 Support",
+    }
+)
+
+
+def is_privileged_role(role: dict) -> bool:
+    """Whether this directory role grants tenant-wide administrative power.
+
+    Name first, template id second. The redundancy is deliberate: Global Administrator
+    stays recognized even if it ever came back under a different display name.
+    """
+    if (role.get("display_name") or "") in PRIVILEGED_ROLE_NAMES:
+        return True
+    return str(role.get("role_template_id") or "").lower() == GLOBAL_ADMINISTRATOR_TEMPLATE_ID
+
+
+# --------------------------------------------------------------------------- #
 # Client construction + async failure guarding
 # --------------------------------------------------------------------------- #
 
@@ -190,6 +266,7 @@ async def paginate(
     builder,
     request_configuration=None,
     page_limit: int = 1000,
+    raise_on_error: bool = False,
 ) -> List[Any]:
     """Follow `@odata.nextLink` to the end and return every item.
 
@@ -203,6 +280,8 @@ async def paginate(
     a tenant that 429s on page 40 still yields 39 pages *and* a non-zero exit.
     `page_limit` is a runaway guard, not a paging cap: a server echoing the same
     nextLink back would otherwise loop forever inside the fetcher's timeout.
+    `raise_on_error=True` re-raises instead, for a caller that must tell a 403 or 404 from a
+    failure and would otherwise read a partial list as complete.
     """
     items: List[Any] = []
     try:
@@ -225,6 +304,8 @@ async def paginate(
                 break
             response = await builder.with_url(next_link).get()
     except Exception as exc:  # noqa: BLE001 — boundary: record, keep what we have
+        if raise_on_error:
+            raise  # the caller classifies it (403 vs 404 vs failure) and records it itself
         collector.record(operation, exc)
     return items
 

@@ -51,7 +51,7 @@ evidence_set:
   reference_id: EVD-SPLUNK-DATA-INPUTS
   name: Splunk Data Inputs
   instructions: >-
-    What the queried instance is configured to collect (`inputs[]`: inputs.conf
+    Script: splunk/data_inputs/fetcher.py. What the queried instance is configured to collect (`inputs[]`: inputs.conf
     matched to Splunk's own list of running inputs) and every host, index and
     sourcetype the deployment actually receives (`received[]`, from tstats),
     each `silent` past `max_silence_minutes`. `index_resolved` turns "default"

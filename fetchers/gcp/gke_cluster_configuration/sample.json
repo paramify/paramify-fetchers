@@ -1,0 +1,192 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_gke_cluster_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.clusters[]",
+      "records": 1,
+      "fields": {
+        "autopilot": 1,
+        "binary_authorization_enabled": 1,
+        "binary_authorization_mode": 0,
+        "client_certificate_issued": 1,
+        "confidential_nodes_enabled": 1,
+        "control_plane_endpoint_access": 1,
+        "control_plane_logging_components": 1,
+        "control_plane_monitoring_components": 1,
+        "current_master_version": 1,
+        "current_node_count": 1,
+        "dataplane_v2": 1,
+        "etcd_cmek": 1,
+        "etcd_encryption_state": 1,
+        "etcd_kms_key_name": 0,
+        "id": 1,
+        "initial_cluster_version": 1,
+        "intranode_visibility": 1,
+        "legacy_abac_enabled": 1,
+        "location": 1,
+        "locations": 1,
+        "logging_service": 1,
+        "managed_prometheus_enabled": 1,
+        "master_authorized_network_count": 1,
+        "master_authorized_networks_enabled": 1,
+        "master_ipv4_cidr_block": 0,
+        "monitoring_service": 1,
+        "name": 1,
+        "network_policy_enabled": 1,
+        "network_policy_provider": 1,
+        "node_pool_count": 1,
+        "node_pools": 1,
+        "node_service_account": 1,
+        "private_control_plane_endpoint": 1,
+        "private_nodes": 1,
+        "rbac_only_authorization": 1,
+        "release_channel": 1,
+        "shielded_nodes_enabled": 1,
+        "status": 1,
+        "workload_identity_enabled": 1,
+        "workload_identity_pool": 1
+      }
+    },
+    {
+      "path": "results.clusters[].node_pools[]",
+      "records": 1,
+      "fields": {
+        "auto_repair": 1,
+        "auto_upgrade": 1,
+        "autoscaling_enabled": 1,
+        "boot_disk_cmek": 1,
+        "boot_disk_kms_key": 0,
+        "image_type": 1,
+        "initial_node_count": 1,
+        "integrity_monitoring": 1,
+        "legacy_endpoints_disabled": 1,
+        "locations": 1,
+        "machine_type": 1,
+        "name": 1,
+        "secure_boot": 1,
+        "service_account": 1,
+        "status": 1,
+        "upgrade_strategy": 1,
+        "uses_default_service_account": 1,
+        "version": 1,
+        "workload_metadata_mode": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:48Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "clusters": [
+        {
+          "autopilot": false,
+          "binary_authorization_enabled": false,
+          "binary_authorization_mode": null,
+          "client_certificate_issued": false,
+          "confidential_nodes_enabled": false,
+          "control_plane_endpoint_access": "public",
+          "control_plane_logging_components": [
+            "SYSTEM_COMPONENTS",
+            "WORKLOADS"
+          ],
+          "control_plane_monitoring_components": [
+            "CADVISOR",
+            "DAEMONSET",
+            "DCGM"
+          ],
+          "current_master_version": "1.35.6-gke.1641000",
+          "current_node_count": 1,
+          "dataplane_v2": false,
+          "etcd_cmek": false,
+          "etcd_encryption_state": "DECRYPTED",
+          "etcd_kms_key_name": null,
+          "id": "0000000000000000000000000000000000000000000000000000000000000001",
+          "initial_cluster_version": "1.35.6-gke.1641000",
+          "intranode_visibility": false,
+          "legacy_abac_enabled": false,
+          "location": "us-central1-a",
+          "locations": [
+            "us-central1-a"
+          ],
+          "logging_service": "logging.googleapis.com/kubernetes",
+          "managed_prometheus_enabled": true,
+          "master_authorized_network_count": 0,
+          "master_authorized_networks_enabled": false,
+          "master_ipv4_cidr_block": null,
+          "monitoring_service": "monitoring.googleapis.com/kubernetes",
+          "name": "example-gke",
+          "network_policy_enabled": true,
+          "network_policy_provider": "CALICO",
+          "node_pool_count": 1,
+          "node_pools": [
+            {
+              "auto_repair": true,
+              "auto_upgrade": true,
+              "autoscaling_enabled": false,
+              "boot_disk_cmek": false,
+              "boot_disk_kms_key": null,
+              "image_type": "COS_CONTAINERD",
+              "initial_node_count": 1,
+              "integrity_monitoring": true,
+              "legacy_endpoints_disabled": true,
+              "locations": [
+                "us-central1-a"
+              ],
+              "machine_type": "e2-small",
+              "name": "default-pool",
+              "secure_boot": true,
+              "service_account": "default",
+              "status": "RUNNING",
+              "upgrade_strategy": "SURGE",
+              "uses_default_service_account": true,
+              "version": "1.35.6-gke.1641000",
+              "workload_metadata_mode": "GKE_METADATA"
+            }
+          ],
+          "node_service_account": "default",
+          "private_control_plane_endpoint": false,
+          "private_nodes": false,
+          "rbac_only_authorization": true,
+          "release_channel": "REGULAR",
+          "shielded_nodes_enabled": true,
+          "status": "RUNNING",
+          "workload_identity_enabled": true,
+          "workload_identity_pool": "example-project.svc.id.goog"
+        }
+      ]
+    },
+    "summary": {
+      "auto_repair_node_pools": 1,
+      "auto_upgrade_node_pools": 1,
+      "auto_upgrade_percentage": 100,
+      "binary_authorization_clusters": 0,
+      "cmek_boot_disk_node_pools": 0,
+      "default_service_account_node_pools": 1,
+      "etcd_cmek_clusters": 0,
+      "gke_api_readable": true,
+      "legacy_abac_clusters": 0,
+      "master_authorized_networks_clusters": 0,
+      "network_policy_clusters": 1,
+      "private_control_plane_clusters": 0,
+      "private_node_clusters": 0,
+      "private_node_percentage": 0,
+      "release_channel_clusters": 1,
+      "shielded_nodes_clusters": 1,
+      "total_clusters": 1,
+      "total_node_pools": 1,
+      "workload_identity_clusters": 1,
+      "workload_identity_percentage": 100
+    }
+  }
+}

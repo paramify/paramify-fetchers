@@ -1,6 +1,6 @@
 name: aws_iam_mfa_status
-version: 0.1.0
-description: Reports MFA enforcement for the root account and every IAM user, including whether each MFA device is hardware or virtual, for MFA evidence.
+version: 0.2.0
+description: Reports MFA enforcement for the root account and every IAM user, including whether each MFA device is a FIDO security key, hardware TOTP or virtual, for MFA evidence.
 category: aws
 
 supports_targets: true
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-IAM-MFA
   name: IAM MFA Status
-  instructions: 'Script: iam_mfa_status.sh. Commands executed: aws iam get-account-summary, aws iam list-virtual-mfa-devices, aws iam list-users, aws iam list-mfa-devices.'
+  instructions: 'Script: aws/iam_mfa_status/fetcher.sh. Commands executed: aws iam get-account-summary, aws iam list-virtual-mfa-devices, aws iam list-users, aws iam list-mfa-devices.'

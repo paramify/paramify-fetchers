@@ -1,0 +1,100 @@
+name: azure_app_gateway_tls_listeners
+version: 0.1.0
+description: >
+  Every Azure Application Gateway in the subscription and each of its listeners,
+  layer 7 (HTTP/HTTPS) and layer 4 (TCP/TLS): the listener protocol, port, and
+  whether it faces a public or private frontend; for a plain HTTP listener,
+  whether every routing rule on it only redirects, and whether it redirects to
+  HTTPS; for an encrypted listener, the TLS policy it actually gets and that
+  policy's minimum TLS version. Also records each gateway's FIPS mode flag.
+  The gateway count is checked against Resource Graph, and the collection fails
+  on a mismatch rather than publishing a partial list.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_app_gateway_tls_listeners.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # inbound traffic is encrypted: listener protocol and minimum TLS version
+  - KSI-CNA-MAT   # sc-8: no plaintext listener exposed on the gateway
+
+evidence_set:
+  reference_id: EVD-AZURE-APPGW-TLS-LISTENERS
+  name: Azure Application Gateway TLS Listeners
+  instructions: >
+    Script: azure/app_gateway_tls_listeners/fetcher.py. Azure SDK calls: azure-mgmt-network
+    application_gateways.list_all() (the SDK pager follows nextLink), and an
+    independent count from Resource Graph (`resources | where type =~
+    'microsoft.network/applicationgateways' | count`). If the two counts differ,
+    the run fails (results.completeness.match false). Reader at subscription
+    scope is sufficient; all calls are GETs.
+    Resource Graph can lag behind list_all around a create or delete, so a
+    mismatch is checked once more after 30 seconds (results.completeness.recounted).
+
+    One record per listener in results.listeners, from the gateway's
+    httpListeners (layer "L7", protocol Http/Https) and listeners (layer "L4",
+    protocol Tcp/Tls). port and frontend_type come from the listener's frontend
+    port and frontend IP configuration; frontend_type is "public" when that
+    configuration carries a public IP, else "private".
+
+    redirect_only (L7 only): true when every routing rule on the listener
+    redirects. A Basic rule redirects when it has a redirectConfiguration; a
+    PathBasedRouting rule redirects when its URL path map's default and every
+    path rule have one. false if any rule routes to a backend, or the listener
+    has no rule. null when a rule type cannot be resolved (AdvancedRouting).
+    redirect_target_https is true when every redirect targets an Https
+    listener or an https:// URL. It is null when unknown.
+
+    tls_policy_source says where an encrypted listener's TLS policy comes from,
+    in precedence order: "ssl_profile" (the listener's SSL profile carries its
+    own sslPolicy), "gateway" (the gateway's sslPolicy), "platform_default"
+    (neither is set, and the gateway reports defaultPredefinedSslPolicy), or
+    "default_not_reported" (nothing is set or reported, so the version is
+    unknown rather than assumed). It is "not_applicable" for Http and Tcp.
+    effective_min_tls_version comes from minProtocolVersion for a Custom or
+    CustomV2 policy. A predefined policy name maps through Microsoft's
+    published table: AppGwSslPolicy20150501 TLSv1_0, AppGwSslPolicy20170401
+    TLSv1_1, and AppGwSslPolicy20170401S, 20220101 and 20220101S TLSv1_2. A
+    legacy policy with only disabledSslProtocols gets the lowest version not
+    disabled. These fields are emitted together, so a validator never reads the
+    version without its source.
+
+    secure_transport is true for Https and Tls listeners, and for an Http
+    listener that is redirect_only with an HTTPS target; otherwise false.
+    An L4 Tcp listener is always false and counts as plaintext, even when the
+    client's TLS passes straight through to the backend: the gateway does not
+    terminate or inspect it, so nothing here shows that the traffic is
+    encrypted.
+    summary.plaintext_listeners counts the false ones, and
+    summary.public_plaintext_listeners those on a public frontend. A stopped
+    gateway is still listed; gateway_operational_state says so.
+
+    enable_fips on each gateway is the API's enableFips. null means the API
+    did not return the field; it is not read as false.

@@ -65,7 +65,7 @@ evidence_set:
   reference_id: EVD-AZURE-SENTINEL-DATA-SOURCES
   name: Azure Sentinel Data Sources
   instructions: >
-    Script: fetcher.py. ARM REST, api-version 2025-09-01: list Log Analytics
+    Script: azure/sentinel_data_sources/fetcher.py. ARM REST, api-version 2025-09-01: list Log Analytics
     workspaces, keep those with a SecurityInsights onboardingStates/default,
     then list dataConnectors. Log Analytics query API: max(TimeGenerated) and
     count() per table over the window, and per SecurityAlert ProductName.

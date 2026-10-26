@@ -48,7 +48,7 @@ evidence_set:
   reference_id: EVD-AZURE-KEYVAULT-ROTATION
   name: Azure Key Vault Key Rotation
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient):
+    Script: azure/key_vault_key_rotation/fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient):
     vaults.list_by_subscription(), keys.list(), keys.get(), secrets.list(); then
     (azure-keyvault-keys KeyClient): list_properties_of_keys(),
     get_key_rotation_policy().

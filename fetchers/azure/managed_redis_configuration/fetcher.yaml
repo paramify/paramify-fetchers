@@ -50,7 +50,7 @@ evidence_set:
   reference_id: EVD-AZURE-MANAGED-REDIS-CONFIG
   name: Azure Managed Redis Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-redisenterprise
+    Script: azure/managed_redis_configuration/fetcher.py. Azure SDK calls (azure-mgmt-redisenterprise
     RedisEnterpriseManagementClient): redis_enterprise.list() for every cluster in the
     subscription, then databases.list_by_cluster(resource_group, cluster) for each.
     Access keys are never listed. minimum_tls_version comes from the cluster;

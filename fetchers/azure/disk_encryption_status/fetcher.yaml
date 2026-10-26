@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-AZURE-DISK-ENC
   name: Azure Managed Disk Encryption
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-compute
+    Script: azure/disk_encryption_status/fetcher.py. Azure SDK calls: azure-mgmt-compute
     ComputeManagementClient.disks.list(), preceded by azure-mgmt-resource
     ResourceManagementClient.providers.get("Microsoft.Compute"). One evidence file per
     subscription.

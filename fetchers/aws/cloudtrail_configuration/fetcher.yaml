@@ -35,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CLOUDTRAIL-CONFIG
   name: CloudTrail Configuration
-  instructions: 'Script: cloudtrail_configuration.sh. Commands executed: aws cloudtrail list-trails, aws cloudtrail get-trail, aws cloudtrail get-trail-status'
+  instructions: 'Script: aws/cloudtrail_configuration/fetcher.sh. Commands executed: aws cloudtrail list-trails, aws cloudtrail get-trail, aws cloudtrail get-trail-status'

@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-GLUE-ENC
   name: Glue Encryption
-  instructions: 'Script: fetcher.sh. Commands executed: aws glue get-security-configurations, aws glue get-data-catalog-encryption-settings.'
+  instructions: 'Script: aws/glue_encryption_status/fetcher.sh. Commands executed: aws glue get-security-configurations, aws glue get-data-catalog-encryption-settings.'

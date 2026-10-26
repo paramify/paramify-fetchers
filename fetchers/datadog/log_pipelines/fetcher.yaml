@@ -27,4 +27,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-LOG-PIPELINES
   name: Datadog Log Pipelines
-  instructions: 'Calls GET /api/v1/logs/config/pipelines. Extracts pipeline name, type, enabled state, filter query, and processor count. Writes JSON pipeline config list.'
+  instructions: 'Script: datadog/log_pipelines/fetcher.py. Calls GET /api/v1/logs/config/pipelines. Extracts pipeline name, type, enabled state, filter query, and processor count. Writes JSON pipeline config list.'

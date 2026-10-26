@@ -49,7 +49,7 @@ variable the fetcher reads: the runner drops any it doesn't know about
 ```yaml
 name: okta_password_policy                # <category>_<short_name>, globally unique
 version: 0.1.0
-description: Collects each Okta password policy's length, complexity, age, and lockout settings.
+description: Shows each Okta password policy's length, complexity, age and lockout settings.
 category: okta
 
 supports_targets: false                   # true to run once per target (fanout)
@@ -73,7 +73,15 @@ secrets:
 evidence_set:
   reference_id: EVD-OKTA-PASSWORD-POLICY
   name: Okta Password Policy
-  instructions: GET /api/v1/policies?type=PASSWORD; records length, complexity, age, and lockout.
+  instructions: |                         # plain text; layout below
+    Script: okta/password_policy/fetcher.py
+
+    Access: The Read-Only Administrator role in Okta.
+
+    Commands Executed:
+    - GET /api/v1/policies (type PASSWORD) — every password policy
+
+    Output: okta_password_policy.json — each password policy with its length, complexity, age and lockout settings.
 ```
 
 Check that it parses. `describe` shows the secrets the runner will ask for:
@@ -87,6 +95,57 @@ paramify list | grep <category>_<short_name>
 paramify describe <category>_<short_name>
 ```
 </details>
+
+### The `description` and `instructions` text
+
+Paramify shows both as plain text. Line breaks come through, but markdown and
+HTML don't render, so leave out backticks, bold and tags. `description` becomes
+the evidence set's description, and `instructions` fills its Instructions tab.
+An `evidence_set.description`, when set, replaces `description` in Paramify and
+follows the same rule. The uploader sends both only when it creates the evidence
+set.
+
+- **`description`**: one sentence of at most 30 words on what the evidence
+  shows, not how it's collected. Start with what it shows ("Shows whether…",
+  "Lists…", "Labels each…"), and don't repeat the fetcher's name.
+- **`instructions`**: a `|` block with these sections in order, a blank line
+  between each:
+  - **Script:** the entry's path under `fetchers/`, alone on its line.
+  - **Access:** the role or permission it needs, then any optional access and
+    what reads as unknown without it ("Optional: …; without it, …"). Leave out
+    how it signs in.
+  - **Commands Executed:** one `- ` line per call: the actual call (SDK method,
+    REST path, CLI command or queried table), ` — `, and a few words on why. Add
+    "(per project)" when it repeats. No API versions, query strings or paging.
+  - **Output:** the output file's name, with a placeholder like `<subscription>`
+    for the part that varies, ` — `, then one sentence on what it holds.
+  - **Summary fields:** every field the summary writes, once, in groups. Each
+    group opens with the question it answers ("Is every web app backed up?"),
+    ordered from what exists to how it's configured to whether it works. Each
+    field line opens with its value type: "Number of …", "Number of … for each
+    …", "Percentage of …", "True if …; false if …; null if …", "List of …",
+    "Whether …: <its values>", or a unit ("Hours since …"), and never leans on
+    another line ("of those"). Define the fetcher's own judgement words where
+    they first appear. Give each percentage's formula using the summary's own
+    field names, and what it reads when the denominator is 0.
+
+A breakdown's field line ends in `:`, and each value sits under it, indented two
+spaces, as `- <value> (<meaning>)`:
+
+```text
+    Summary fields:
+
+    Which password policies are in force?
+    - total_policies — Number of password policies
+    - policies_by_status — Number of password policies for each status:
+      - ACTIVE (applies to the groups it's assigned to)
+      - INACTIVE (turned off, so it applies to nobody)
+```
+
+[`azure/alert_rules`](../fetchers/azure/alert_rules/fetcher.yaml) is a full
+example. `tests/test_contracts.py` checks this layout for the fetchers listed in
+`TEXT_FORMAT_FETCHERS`; until a platform is converted, its instructions only
+need to open with the `Script:` path.
 
 ## 3. Write `fetcher.py` and smoke-test it
 
@@ -195,7 +254,7 @@ exit 1:
 
 Export your real credentials, then add the fetcher to a manifest and run it.
 After each edit, the builder lists the secrets still missing
-([manifest commands](../README.md#building-a-manifest)). Your agent's
+([manifest commands](cli_guide.md#building-a-manifest)). Your agent's
 `wire-manifest` skill can do this step.
 
 ![paramify manifest init, add, and two set-secret commands, validate reporting OK, and paramify run finishing okta_password_policy with OK and exit 0](img/authoring_fetcher/04-run.png)
@@ -230,7 +289,7 @@ paramify evidence evidence/run-<timestamp>/<category>_<short_name>.json
 ## 6. Upload it and check Paramify
 
 Preview first. `--dry-run` makes no API calls and shows the evidence set each
-file goes to. Then [upload the run](../README.md#collect-then-upload).
+file goes to. Then [upload the run](cli_guide.md#collect-then-upload).
 
 ![paramify upload --dry-run: one file, okta_password_policy.json, bound for set EVD-OKTA-PASSWORD-POLICY](img/authoring_fetcher/06-upload-preview.png)
 
@@ -248,7 +307,7 @@ file from step 5.
 ![The Okta Password Policy evidence set's artifact opened as JSON in Paramify, showing the policies payload](img/authoring_fetcher/app-01-artifact-json.png)
 
 **Next:** [write validators for it](suggest_validator_guide.md) ·
-[publish its script](../README.md#show-how-evidence-is-generated-optional)
+[publish its script](cli_guide.md#show-how-evidence-is-generated-optional)
 
 ---
 

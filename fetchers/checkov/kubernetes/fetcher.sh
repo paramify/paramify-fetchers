@@ -10,7 +10,8 @@
 # Target env (per repo): CHECKOV_REPO_URL (required), CHECKOV_CLONE_BRANCH
 # Secret (per repo):     GIT_CLONE_TOKEN (omit for public repos)
 # Config env:            CHECKOV_SOFT_FAIL, CHECKOV_COMPACT, CHECKOV_SKIP_CHECKS,
-#                        CHECKOV_SKIP_PATHS, CHECKOV_K8S_CHECKS, CHECKOV_EXTERNAL_CHECKS_DIR,
+#                        CHECKOV_USE_DEFAULT_SKIP_CHECKS, CHECKOV_SKIP_PATHS,
+#                        CHECKOV_K8S_CHECKS, CHECKOV_EXTERNAL_CHECKS_DIR,
 #                        CHECKOV_REPO_ID, CHECKOV_GIT_USERNAME
 # Required tools:        git, checkov, jq
 #
@@ -66,12 +67,56 @@ checkov_require_tools "$COMPONENT" || {
 _TARGET_ID="$(printf '%s' "$REPO_URL" | sed -e 's#^https\{0,1\}://##' -e 's#\.git$##' | tr -c 'A-Za-z0-9._-' '_')"
 OUTPUT_JSON="$OUTPUT_DIR/${COMPONENT}_${_TARGET_ID}.json"
 
+# --- skip-checks: the shipped defaults file (unless use_default_skip_checks is
+# false) + CHECKOV_SKIP_CHECKS (k8s-prefixed only), minus any explicitly-requested
+# checks. A check passed to --skip-check is absent from checkov's output (not
+# even under skipped_checks), so the effective list is recorded in metadata.
+SKIP_CHECKS_LIST=""
+REQUESTED_CHECKS="${CHECKOV_K8S_CHECKS:-}"
+add_skip() {
+    local c="$1"; [ -z "$c" ] && return
+    case ",$REQUESTED_CHECKS," in *",$c,"*) return ;; esac
+    case ",$SKIP_CHECKS_LIST," in *",$c,"*) return ;; esac
+    SKIP_CHECKS_LIST="${SKIP_CHECKS_LIST:+$SKIP_CHECKS_LIST,}$c"
+}
+DEFAULT_SKIPS_APPLIED=true
+[ "${CHECKOV_USE_DEFAULT_SKIP_CHECKS:-true}" = "false" ] && DEFAULT_SKIPS_APPLIED=false
+DEFAULT_SKIP_CHECKS_FILE="$SCRIPT_DIR/../_shared/skip-checks-k8s.default.txt"
+if [ "$DEFAULT_SKIPS_APPLIED" = "true" ] && [ -f "$DEFAULT_SKIP_CHECKS_FILE" ]; then
+    while IFS= read -r c || [ -n "$c" ]; do
+        c="$(printf '%s' "$c" | xargs)"; [ -z "$c" ] && continue
+        case "$c" in \#*) continue ;; esac
+        add_skip "$c"
+    done < "$DEFAULT_SKIP_CHECKS_FILE"
+fi
+if [ -n "${CHECKOV_SKIP_CHECKS:-}" ]; then
+    IFS=',' read -ra _U <<< "$CHECKOV_SKIP_CHECKS"
+    for c in "${_U[@]}"; do
+        c="$(printf '%s' "$c" | xargs)"
+        case "$c" in CKV_K8S_*|CKV2_K8S_*) add_skip "$c" ;; esac
+    done
+fi
+
+# What was actually checked out; checkov_clone_repo overwrites these.
+SCANNED_BRANCH="$BRANCH"; BRANCH_FALLBACK=false
+
+# Provenance + scan configuration, shared by every result this fetcher writes.
+metadata_json() {
+    jq -n --arg repo "$REPO_URL" --arg branch "$SCANNED_BRANCH" --arg requested "$BRANCH" \
+          --argjson fallback "$BRANCH_FALLBACK" --arg sha "${1:-unknown}" --arg ts "$TIMESTAMP" \
+          --arg skips "$SKIP_CHECKS_LIST" --argjson defaults "$DEFAULT_SKIPS_APPLIED" \
+       '{repo_url: $repo, branch: $branch, requested_branch: $requested, branch_fallback: $fallback,
+         commit_sha: $sha, scan_timestamp: $ts,
+         skip_checks: ($skips | split(",") | map(select(. != ""))),
+         default_skip_checks_applied: $defaults}'
+}
+
 write_status_json() {
     local status="$1" message="$2" sha="${3:-unknown}"
-    jq -n --arg repo "$REPO_URL" --arg branch "$BRANCH" --arg sha "$sha" --arg ts "$TIMESTAMP" \
+    jq -n --argjson meta "$(metadata_json "$sha")" --arg ts "$TIMESTAMP" \
           --arg status "$status" --arg msg "$message" --arg src "$REPO_URL" \
        '{
-          metadata: {repo_url: $repo, branch: $branch, commit_sha: $sha, scan_timestamp: $ts},
+          metadata: $meta,
           framework: "kubernetes", scan_timestamp: $ts, source_type: "git", source: $src,
           status: $status, message: $msg,
           summary: {passed_checks: 0, failed_checks: 0, skipped_checks: 0, total_checks: 0, aggregate_percentage: 0},
@@ -87,7 +132,7 @@ if ! checkov_clone_repo "$REPO_URL" "$BRANCH" "$TOKEN" "$GIT_USER" "$COMPONENT";
     report_failure "git clone of $REPO_URL (branch $BRANCH, then default branch) failed - check the repo URL, the branch and GIT_CLONE_TOKEN"
     exit 1
 fi
-log_info "Cloned $REPO_URL @ ${COMMIT_SHA:0:12} (branch $BRANCH)"
+log_info "Cloned $REPO_URL @ ${COMMIT_SHA:0:12} (branch $SCANNED_BRANCH)"
 
 # No manifests is meaningful evidence (not a failure).
 if [ -z "$(find "$CLONE_DIR" \( -name '*.yaml' -o -name '*.yml' \) -type f -print -quit 2>/dev/null)" ]; then
@@ -97,7 +142,7 @@ if [ -z "$(find "$CLONE_DIR" \( -name '*.yaml' -o -name '*.yml' \) -type f -prin
 fi
 
 # --- build checkov args ---
-CHECKOV_ARGS="--framework kubernetes --output json --quiet --repo-id $REPO_ID --branch $BRANCH"
+CHECKOV_ARGS="--framework kubernetes --output json --quiet --repo-id $REPO_ID --branch $SCANNED_BRANCH"
 [ "${CHECKOV_SOFT_FAIL:-true}" = "true" ] && CHECKOV_ARGS="$CHECKOV_ARGS --soft-fail"
 [ "${CHECKOV_COMPACT:-true}" = "true" ]   && CHECKOV_ARGS="$CHECKOV_ARGS --compact"
 [ -n "${CHECKOV_K8S_CHECKS:-}" ]          && CHECKOV_ARGS="$CHECKOV_ARGS --check $CHECKOV_K8S_CHECKS"
@@ -105,30 +150,6 @@ if [ -n "${CHECKOV_EXTERNAL_CHECKS_DIR:-}" ] && [ -d "$CHECKOV_EXTERNAL_CHECKS_D
     CHECKOV_ARGS="$CHECKOV_ARGS --external-checks-dir $CHECKOV_EXTERNAL_CHECKS_DIR"
 fi
 
-# Merge skip-checks: defaults file + CHECKOV_SKIP_CHECKS (k8s-prefixed only),
-# minus any explicitly-requested checks.
-SKIP_CHECKS_LIST=""
-REQUESTED_CHECKS="${CHECKOV_K8S_CHECKS:-}"
-add_skip() {
-    local c="$1"; [ -z "$c" ] && return
-    case ",$REQUESTED_CHECKS," in *",$c,"*) return ;; esac
-    SKIP_CHECKS_LIST="${SKIP_CHECKS_LIST:+$SKIP_CHECKS_LIST,}$c"
-}
-DEFAULT_SKIP_CHECKS_FILE="$SCRIPT_DIR/../_shared/skip-checks-k8s.default.txt"
-if [ -f "$DEFAULT_SKIP_CHECKS_FILE" ]; then
-    while IFS= read -r c || [ -n "$c" ]; do
-        c="$(printf '%s' "$c" | xargs)"; [ -z "$c" ] && continue
-        case "$c" in \#*) continue ;; esac
-        add_skip "$c"
-    done < "$DEFAULT_SKIP_CHECKS_FILE"
-fi
-if [ -n "${CHECKOV_SKIP_CHECKS:-}" ]; then
-    IFS=',' read -ra _U <<< "$CHECKOV_SKIP_CHECKS"
-    for c in "${_U[@]}"; do
-        c="$(printf '%s' "$c" | xargs)"
-        case "$c" in CKV_K8S_*|CKV2_K8S_*) add_skip "$c" ;; esac
-    done
-fi
 [ -n "$SKIP_CHECKS_LIST" ] && CHECKOV_ARGS="$CHECKOV_ARGS --skip-check $SKIP_CHECKS_LIST"
 
 if [ -n "${CHECKOV_SKIP_PATHS:-}" ]; then
@@ -155,12 +176,12 @@ SKIPPED=$(jq '(.results.skipped_checks // []) | length' "$NORM")
 TOTAL=$((PASSED + FAILED + SKIPPED))
 PCT=$(awk "BEGIN { if ($TOTAL > 0) printf \"%.2f\", ($PASSED / $TOTAL) * 100; else print 0 }")
 
-jq --arg repo "$REPO_URL" --arg branch "$BRANCH" --arg sha "$COMMIT_SHA" --arg ts "$TIMESTAMP" \
+jq --argjson meta "$(metadata_json "$COMMIT_SHA")" --arg ts "$TIMESTAMP" \
    --arg src "$REPO_URL" \
    --argjson passed "$PASSED" --argjson failed "$FAILED" --argjson skipped "$SKIPPED" \
    --argjson total "$TOTAL" --argjson pct "$PCT" \
    '. + {
-       metadata: {repo_url: $repo, branch: $branch, commit_sha: $sha, scan_timestamp: $ts},
+       metadata: $meta,
        framework: "kubernetes", scan_timestamp: $ts, source_type: "git", source: $src,
        status: "success",
        summary: ((.summary // {}) + {

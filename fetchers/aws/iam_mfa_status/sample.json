@@ -1,0 +1,41 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_iam_mfa_status",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.users[]",
+      "records": 8,
+      "fields": {
+        "UserName": 8,
+        "MFAEnabled": 8,
+        "MFADevices": 0
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:12:13Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "root_account": {
+        "RootMFAEnabled": true,
+        "RootHardwareMFA": true
+      },
+      "users": [
+        {
+          "UserName": "user2@example.com",
+          "MFAEnabled": false,
+          "MFADevices": []
+        }
+      ]
+    }
+  }
+}
