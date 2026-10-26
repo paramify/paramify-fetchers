@@ -104,6 +104,6 @@ evidence_set:
     - privileged_roles_activation_without_mfa_or_auth_context — List of privileged role names whose activation needs neither MFA nor a Conditional Access authentication context; null if a privileged role's policy didn't say whether activation needs MFA
     - privileged_roles_activation_without_justification — List of privileged role names whose activation doesn't ask for a reason; null if a privileged role's policy didn't say whether activation needs one
     - privileged_roles_activation_without_approval — List of privileged role names whose activation doesn't need someone's approval; null if a privileged role's policy didn't say whether activation needs approval
-    - max_privileged_activation_hours — Hours: the longest maximum activation time set on any privileged role; null if no privileged role sets one
+    - max_privileged_activation_hours — Hours: the longest maximum activation time set on any privileged role; null if a privileged role's activation rule wasn't returned
     - privileged_roles_allowing_permanent_active_assignment — List of privileged role names whose policy lets an admin assign the role permanently as active, with no end date; null if a privileged role's policy didn't say whether an active assignment needs an end date
     - privileged_roles_allowing_permanent_eligible_assignment — List of privileged role names whose policy lets an admin make someone permanently eligible, with no end date; null if a privileged role's policy didn't say whether an eligible assignment needs an end date

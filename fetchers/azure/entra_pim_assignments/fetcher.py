@@ -268,6 +268,7 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
             return None
         return names(priv_policies, lambda p: p[field] is flagged and pred(p))
 
+    hours = [p["activation_maximum_hours"] for p in priv_policies]
     permanent_users = None if any(a["principal_type"] is None for a in priv_permanent) else sum(
         1 for a in priv_permanent if a["principal_type"] == "User"
     )
@@ -301,9 +302,7 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
         "privileged_roles_allowing_permanent_eligible_assignment": policy_names(
             "permanent_eligible_assignment_allowed", True
         ),
-        "max_privileged_activation_hours": max(
-            (p["activation_maximum_hours"] for p in priv_policies if p["activation_maximum_hours"] is not None), default=None
-        ),
+        "max_privileged_activation_hours": None if None in hours else max(hours, default=None),
     }
 
 

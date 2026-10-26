@@ -190,6 +190,7 @@ def test_a_privileged_policy_missing_a_rule_makes_its_lists_unknown():
         "privileged_roles_allowing_permanent_eligible_assignment",
     ):
         assert summary[field] is None, field
+    assert summary["max_privileged_activation_hours"] is None
 
     # An authentication context covers activation whatever the MFA rule says; the other lists stay known.
     gated = _policy(GA, context="c1")
