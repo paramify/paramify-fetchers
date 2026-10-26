@@ -1,0 +1,141 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_load_balancer_tls_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.proxies[]",
+      "records": 2,
+      "fields": {
+        "backend_service": 0,
+        "certificate_map": 0,
+        "creation_timestamp": 2,
+        "effective_min_tls_version": 2,
+        "effective_profile": 2,
+        "id": 2,
+        "meets_tls_floor": 2,
+        "name": 2,
+        "proxy_header": 0,
+        "quic_override": 0,
+        "scope": 2,
+        "server_tls_policy": 0,
+        "ssl_certificate_count": 2,
+        "ssl_certificates": 2,
+        "ssl_policy": 1,
+        "ssl_policy_resolved": 2,
+        "tls_early_data": 2,
+        "type": 2,
+        "url_map": 2,
+        "uses_default_ssl_policy": 2,
+        "weak_tls": 2
+      }
+    },
+    {
+      "path": "results.ssl_policies[]",
+      "records": 2,
+      "fields": {
+        "creation_timestamp": 2,
+        "custom_ciphers": 0,
+        "description": 0,
+        "enabled_cipher_count": 2,
+        "enabled_ciphers": 0,
+        "id": 2,
+        "meets_tls_floor": 2,
+        "min_tls_version": 2,
+        "name": 2,
+        "permissive_profile": 2,
+        "post_quantum_key_exchange": 0,
+        "profile": 2,
+        "scope": 2,
+        "weak_tls": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:55:44Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "proxies": [
+        {
+          "backend_service": null,
+          "certificate_map": null,
+          "creation_timestamp": "2026-08-17T07:21:15.608-07:00",
+          "effective_min_tls_version": "TLS_1_2",
+          "effective_profile": "MODERN",
+          "id": "0000000000000000007",
+          "meets_tls_floor": true,
+          "name": "example-proxy-modern",
+          "proxy_header": null,
+          "quic_override": null,
+          "scope": "global",
+          "server_tls_policy": null,
+          "ssl_certificate_count": 1,
+          "ssl_certificates": [
+            "example-cert"
+          ],
+          "ssl_policy": "example-modern",
+          "ssl_policy_resolved": true,
+          "tls_early_data": "DISABLED",
+          "type": "target_https_proxy",
+          "url_map": "example-urlmap",
+          "uses_default_ssl_policy": false,
+          "weak_tls": false
+        }
+      ],
+      "ssl_policies": [
+        {
+          "creation_timestamp": "2026-08-17T07:20:40.955-07:00",
+          "custom_ciphers": [],
+          "description": null,
+          "enabled_cipher_count": 0,
+          "enabled_ciphers": [],
+          "id": "0000000000000000008",
+          "meets_tls_floor": true,
+          "min_tls_version": "TLS_1_2",
+          "name": "example-modern",
+          "permissive_profile": false,
+          "post_quantum_key_exchange": null,
+          "profile": "MODERN",
+          "scope": "global",
+          "weak_tls": false
+        }
+      ]
+    },
+    "summary": {
+      "compute_api_readable": true,
+      "default_min_tls_version_when_no_policy": "TLS_1_0",
+      "https_proxies": 2,
+      "permissive_profile_ssl_policies": 1,
+      "proxies_meeting_tls_floor": 1,
+      "proxies_on_default_ssl_policy": 1,
+      "proxies_with_certificate_map": 0,
+      "proxies_with_server_tls_policy": 0,
+      "proxies_with_ssl_policy": 1,
+      "proxies_with_unresolved_ssl_policy": 0,
+      "proxies_with_weak_tls": 1,
+      "ssl_policy_min_tls_versions": [
+        "TLS_1_0",
+        "TLS_1_2"
+      ],
+      "ssl_policy_profiles": [
+        "COMPATIBLE",
+        "MODERN"
+      ],
+      "ssl_proxies": 0,
+      "tls_floor": "TLS_1_2",
+      "tls_floor_percentage": 50,
+      "total_proxies": 2,
+      "total_ssl_policies": 2,
+      "weak_ssl_policies": 1
+    }
+  }
+}

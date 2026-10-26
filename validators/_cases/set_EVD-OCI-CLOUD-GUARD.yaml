@@ -1,0 +1,21 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them. Enabled, a target exists, and every target assesses configuration.
+evidence_set: EVD-OCI-CLOUD-GUARD
+cases:
+  - name: enabled_with_an_assessing_target
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"cloud_guard_enabled": true, "total_targets": 1, "configuration_assessment_percentage": 100}}}'
+
+  - name: disabled
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"cloud_guard_enabled": false, "total_targets": 0, "configuration_assessment_percentage": 0}}}'
+
+  - name: enabled_but_no_target
+    expect: FAIL
+    note: >
+      Enabled with nothing to assess; oci_cloud_guard_target_present is what fails.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"cloud_guard_enabled": true, "total_targets": 0, "configuration_assessment_percentage": 0}}}'
+
+  - name: a_target_assessing_nothing
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"cloud_guard_enabled": true, "total_targets": 2, "configuration_assessment_percentage": 50}}}'

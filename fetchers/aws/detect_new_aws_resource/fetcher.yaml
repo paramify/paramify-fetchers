@@ -46,4 +46,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DETECT-NEW-RESOURCE
   name: Detect New AWS Resource
-  instructions: 'Script: fetcher.sh. Commands executed: aws configservice describe-configuration-recorders, aws configservice describe-configuration-recorder-status, aws configservice describe-delivery-channels, aws events list-rules, aws events describe-rule, aws events list-targets-by-rule, aws sns list-topics, aws sns list-subscriptions-by-topic'
+  instructions: 'Script: aws/detect_new_aws_resource/fetcher.sh. Commands executed: aws configservice describe-configuration-recorders, aws configservice describe-configuration-recorder-status, aws configservice describe-delivery-channels, aws events list-rules, aws events describe-rule, aws events list-targets-by-rule, aws sns list-topics, aws sns list-subscriptions-by-topic'

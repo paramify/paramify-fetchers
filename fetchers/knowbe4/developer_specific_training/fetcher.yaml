@@ -37,4 +37,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DEVELOPER-SPECIFIC-TRAINING
   name: KnowBe4 Developer Specific Training
-  instructions: 'Script: developer_specific_training.sh. Commands executed: KnowBe4 API calls for user training data and enrollments'
+  instructions: 'Script: knowbe4/developer_specific_training/fetcher.sh. Commands executed: KnowBe4 API calls for user training data and enrollments'

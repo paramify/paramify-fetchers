@@ -1,0 +1,206 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_kms_key_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.crypto_keys[]",
+      "records": 7,
+      "fields": {
+        "algorithm": 7,
+        "create_time": 7,
+        "crypto_key_backend": 0,
+        "days_until_next_rotation": 5,
+        "destroy_scheduled_days": 7,
+        "destroy_scheduled_duration": 7,
+        "external_key": 7,
+        "hardware_backed": 7,
+        "iam_bindings": 5,
+        "iam_member_count": 7,
+        "import_only": 7,
+        "key_id": 7,
+        "key_ring": 7,
+        "kms_admin_members": 0,
+        "kms_use_members": 5,
+        "location": 7,
+        "max_rotation_days": 7,
+        "meets_rotation_interval": 7,
+        "name": 7,
+        "next_rotation_time": 5,
+        "next_rotation_within_max_days": 7,
+        "primary_algorithm": 7,
+        "primary_generate_time": 7,
+        "primary_protection_level": 7,
+        "primary_version_enabled": 7,
+        "primary_version_id": 7,
+        "primary_version_state": 7,
+        "protection_level": 7,
+        "public_members": 0,
+        "publicly_accessible": 7,
+        "purpose": 7,
+        "rotation_enabled": 7,
+        "rotation_period": 5,
+        "rotation_period_days": 5,
+        "rotation_period_within_max_days": 7,
+        "rotation_supported": 7,
+        "separation_of_duties_members": 0,
+        "separation_of_duties_violated": 7
+      }
+    },
+    {
+      "path": "results.crypto_keys[].iam_bindings[]",
+      "records": 5,
+      "fields": {
+        "members": 5,
+        "role": 5
+      }
+    },
+    {
+      "path": "results.key_rings[]",
+      "records": 2,
+      "fields": {
+        "create_time": 2,
+        "crypto_key_count": 2,
+        "crypto_keys": 2,
+        "iam_bindings": 0,
+        "iam_member_count": 2,
+        "key_ring_id": 2,
+        "kms_admin_members": 0,
+        "kms_use_members": 0,
+        "location": 2,
+        "name": 2,
+        "public_members": 0,
+        "publicly_accessible": 2,
+        "separation_of_duties_members": 0,
+        "separation_of_duties_violated": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-17T21:08:54Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "crypto_keys": [
+        {
+          "algorithm": "GOOGLE_SYMMETRIC_ENCRYPTION",
+          "create_time": "2026-08-17T14:17:38.556393612Z",
+          "crypto_key_backend": null,
+          "days_until_next_rotation": 58,
+          "destroy_scheduled_days": 30,
+          "destroy_scheduled_duration": "2592000s",
+          "external_key": false,
+          "hardware_backed": false,
+          "iam_bindings": [
+            {
+              "members": [
+                "serviceAccount:bq-111111111111@bigquery-encryption.iam.gserviceaccount.com"
+              ],
+              "role": "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+            }
+          ],
+          "iam_member_count": 1,
+          "import_only": false,
+          "key_id": "bq-key",
+          "key_ring": "example-test",
+          "kms_admin_members": [],
+          "kms_use_members": [
+            "serviceAccount:bq-111111111111@bigquery-encryption.iam.gserviceaccount.com"
+          ],
+          "location": "us-central1",
+          "max_rotation_days": 90,
+          "meets_rotation_interval": true,
+          "name": "projects/example-project/locations/us-central1/keyRings/example-test/cryptoKeys/bq-key",
+          "next_rotation_time": "2026-11-15T14:17:37Z",
+          "next_rotation_within_max_days": true,
+          "primary_algorithm": "GOOGLE_SYMMETRIC_ENCRYPTION",
+          "primary_generate_time": "2026-08-17T14:17:38.556393612Z",
+          "primary_protection_level": "SOFTWARE",
+          "primary_version_enabled": false,
+          "primary_version_id": "1",
+          "primary_version_state": "DESTROYED",
+          "protection_level": "SOFTWARE",
+          "public_members": [],
+          "publicly_accessible": false,
+          "purpose": "ENCRYPT_DECRYPT",
+          "rotation_enabled": true,
+          "rotation_period": "7776000s",
+          "rotation_period_days": 90,
+          "rotation_period_within_max_days": true,
+          "rotation_supported": true,
+          "separation_of_duties_members": [],
+          "separation_of_duties_violated": false
+        }
+      ],
+      "key_rings": [
+        {
+          "create_time": "2026-08-17T14:17:34.760003746Z",
+          "crypto_key_count": 6,
+          "crypto_keys": [
+            "bq-key",
+            "bucket-key",
+            "disk-key"
+          ],
+          "iam_bindings": [],
+          "iam_member_count": 0,
+          "key_ring_id": "example-test",
+          "kms_admin_members": [],
+          "kms_use_members": [],
+          "location": "us-central1",
+          "name": "projects/example-project/locations/us-central1/keyRings/example-test",
+          "public_members": [],
+          "publicly_accessible": false,
+          "separation_of_duties_members": [],
+          "separation_of_duties_violated": false
+        }
+      ],
+      "locations": [
+        "africa-south1",
+        "asia",
+        "asia-east1"
+      ]
+    },
+    "summary": {
+      "external_keys": 0,
+      "hsm_keys": 0,
+      "key_rings_with_iam_bindings": 0,
+      "keys_by_protection_level": {
+        "SOFTWARE": 7
+      },
+      "keys_by_purpose": {
+        "ENCRYPT_DECRYPT": 7
+      },
+      "keys_meeting_rotation_interval": 5,
+      "keys_violating_separation_of_duties": 0,
+      "keys_with_disabled_primary_version": 7,
+      "keys_with_iam_bindings": 5,
+      "keys_with_overdue_next_rotation": 0,
+      "keys_without_rotation_period": 2,
+      "kms_api_readable": true,
+      "locations_scanned": 70,
+      "longest_rotation_period_days": 90,
+      "primary_version_states": {
+        "DESTROYED": 7
+      },
+      "publicly_accessible": false,
+      "publicly_accessible_key_rings": 0,
+      "publicly_accessible_keys": 0,
+      "rotation_compliance_percentage": 71,
+      "rotation_eligible_keys": 7,
+      "rotation_enabled_keys": 5,
+      "rotation_interval_days": 90,
+      "shortest_destroy_scheduled_days": 30,
+      "shortest_rotation_period_days": 90,
+      "total_crypto_keys": 7,
+      "total_key_rings": 2
+    }
+  }
+}

@@ -60,7 +60,7 @@ evidence_set:
   reference_id: EVD-GCP-IAM-BINDINGS
   name: IAM Policy Bindings and Audit Configuration
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls:
+    Script: gcp/iam_policy_bindings/fetcher.py. Google Cloud client library calls:
     cloudresourcemanager projects.getIamPolicy() at policy version 3,
     projects.get(), organizations.get() and folders.get() for ancestry. One
     evidence file per project.

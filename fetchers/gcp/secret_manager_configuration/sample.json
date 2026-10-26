@@ -1,0 +1,163 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_secret_manager_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.secrets[]",
+      "records": 2,
+      "fields": {
+        "cmek": 2,
+        "create_time": 2,
+        "enabled_version_count": 2,
+        "expire_time": 0,
+        "expired": 2,
+        "has_expiry": 2,
+        "iam_policy_bindings": 0,
+        "kms_key_names": 1,
+        "labels": 0,
+        "latest_enabled_version_create_time": 2,
+        "location": 2,
+        "name": 2,
+        "next_rotation_time": 1,
+        "notification_topic_count": 2,
+        "public_access_members": 0,
+        "publicly_accessible": 2,
+        "replica_count": 2,
+        "replica_locations": 1,
+        "replicas": 2,
+        "replicas_with_cmek": 2,
+        "replication_policy": 2,
+        "resource_name": 2,
+        "rotation_configured": 2,
+        "rotation_overdue": 2,
+        "rotation_period": 1,
+        "rotation_period_days": 1,
+        "version_count": 2,
+        "version_destroy_ttl": 0,
+        "version_states": 2,
+        "versions": 2
+      }
+    },
+    {
+      "path": "results.secrets[].replicas[]",
+      "records": 2,
+      "fields": {
+        "cmek": 2,
+        "kms_key_name": 1,
+        "location": 1
+      }
+    },
+    {
+      "path": "results.secrets[].versions[]",
+      "records": 2,
+      "fields": {
+        "create_time": 2,
+        "destroy_time": 0,
+        "id": 2,
+        "kms_key_version": 0,
+        "scheduled_destroy_time": 0,
+        "state": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:55:48Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "secrets": [
+        {
+          "cmek": true,
+          "create_time": "2026-08-17T14:31:30.899482Z",
+          "enabled_version_count": 1,
+          "expire_time": null,
+          "expired": false,
+          "has_expiry": false,
+          "iam_policy_bindings": [],
+          "kms_key_names": [
+            "projects/example-project/locations/us-central1/keyRings/example-test/cryptoKeys/secret-key"
+          ],
+          "labels": {},
+          "latest_enabled_version_create_time": "2026-08-17T14:31:31.369387Z",
+          "location": "global",
+          "name": "example-cmek",
+          "next_rotation_time": null,
+          "notification_topic_count": 0,
+          "public_access_members": [],
+          "publicly_accessible": false,
+          "replica_count": 1,
+          "replica_locations": [
+            "us-central1"
+          ],
+          "replicas": [
+            {
+              "cmek": true,
+              "kms_key_name": "projects/example-project/locations/us-central1/keyRings/example-test/cryptoKeys/secret-key",
+              "location": "us-central1"
+            }
+          ],
+          "replicas_with_cmek": 1,
+          "replication_policy": "user_managed",
+          "resource_name": "projects/111111111111/secrets/example-cmek",
+          "rotation_configured": false,
+          "rotation_overdue": false,
+          "rotation_period": null,
+          "rotation_period_days": null,
+          "version_count": 1,
+          "version_destroy_ttl": null,
+          "version_states": {
+            "DESTROYED": 0,
+            "DISABLED": 0,
+            "ENABLED": 1,
+            "STATE_UNSPECIFIED": 0
+          },
+          "versions": [
+            {
+              "create_time": "2026-08-17T14:31:31.369387Z",
+              "destroy_time": null,
+              "id": "1",
+              "kms_key_version": null,
+              "scheduled_destroy_time": null,
+              "state": "ENABLED"
+            }
+          ]
+        }
+      ]
+    },
+    "summary": {
+      "automatic_replication_secrets": 1,
+      "cmek_percentage": 50,
+      "cmek_secrets": 1,
+      "destroyed_versions": 0,
+      "disabled_versions": 0,
+      "enabled_versions": 2,
+      "google_managed_secrets": 1,
+      "longest_rotation_period_days": 30,
+      "max_rotation_period_days": 90,
+      "non_public_secret_percentage": 100,
+      "publicly_accessible_secrets": 0,
+      "replica_locations": [
+        "us-central1"
+      ],
+      "rotation_percentage": 50,
+      "secret_manager_api_readable": true,
+      "secrets_rotating_within_max_period": 1,
+      "secrets_with_expiry": 0,
+      "secrets_with_no_enabled_version": 0,
+      "secrets_with_overdue_rotation": 0,
+      "secrets_with_rotation": 1,
+      "total_secrets": 2,
+      "total_versions": 2,
+      "user_managed_replication_secrets": 1
+    }
+  }
+}

@@ -95,4 +95,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CHECKOV-KUBERNETES
   name: Checkov Kubernetes IaC Scan
-  instructions: 'Script: checkov_kubernetes/fetcher.sh. Shallow-clones the target repo and runs the checkov CLI (--framework kubernetes) over its .yaml/.yml manifests, merging default + configured skip-checks, and records passed/failed/skipped checks with repo+commit provenance. metadata records the branch actually scanned (branch_fallback when the requested branch could not be cloned) and the effective skip-check list, since checks passed to --skip-check do not appear in the results.'
+  instructions: 'Script: checkov/kubernetes/fetcher.sh. Shallow-clones the target repo and runs the checkov CLI (--framework kubernetes) over its .yaml/.yml manifests, merging default + configured skip-checks, and records passed/failed/skipped checks with repo+commit provenance. metadata records the branch actually scanned (branch_fallback when the requested branch could not be cloned) and the effective skip-check list, since checks passed to --skip-check do not appear in the results.'

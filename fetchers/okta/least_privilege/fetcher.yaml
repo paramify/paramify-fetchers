@@ -32,4 +32,4 @@ ksis:
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-05
   name: Okta Least Privilege
-  instructions: 'Script: okta_least_privilege.py. Uses Okta APIs to identify admins and summarize privileged access. Output: okta_least_privilege.json'
+  instructions: 'Script: okta/least_privilege/fetcher.py. Uses Okta APIs to identify admins and summarize privileged access. Output: okta_least_privilege.json'
