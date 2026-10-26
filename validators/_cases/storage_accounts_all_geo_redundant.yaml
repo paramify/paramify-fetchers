@@ -1,0 +1,47 @@
+validator: storage_accounts_all_geo_redundant
+cases:
+  - name: all_accounts_geo_redundant
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"geo_redundant_accounts": 3, "minimum_tls_1_2_accounts": 3, "total_storage_accounts": 3}}}'
+
+  - name: all_accounts_geo_redundant_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "partial_failure": false
+          },
+          "summary": {
+            "geo_redundant_accounts": 46,
+            "minimum_tls_1_2_accounts": 3,
+            "total_storage_accounts": 46
+          }
+        }
+      }
+
+  - name: one_account_lrs
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"geo_redundant_accounts": 2, "minimum_tls_1_2_accounts": 3, "total_storage_accounts": 3}}}'
+
+  - name: prefix_not_equal
+    expect: FAIL
+    note: >
+      4 of 46 must not read as equal because 46 starts with 4.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"geo_redundant_accounts": 4, "minimum_tls_1_2_accounts": 3, "total_storage_accounts": 46}}}'
+
+  - name: no_accounts
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"geo_redundant_accounts": 0, "minimum_tls_1_2_accounts": 3, "total_storage_accounts": 0}}}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": true}, "summary": {"geo_redundant_accounts": 3, "minimum_tls_1_2_accounts": 3, "total_storage_accounts": 3}}}'
+
+  - name: rollup_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"grs_accounts": 3, "minimum_tls_1_2_accounts": 3, "total_storage_accounts": 3}}}'
