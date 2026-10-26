@@ -421,6 +421,8 @@ def test_a_full_page_without_a_next_link_is_followed_with_skip():
 
 
 def test_the_real_request_builder_sends_top_and_skip():
+    pytest.importorskip("azure.core")
+    pytest.importorskip("msgraph")
     from azure.core.credentials_async import AsyncTokenCredential
     from msgraph import GraphServiceClient
 
