@@ -46,5 +46,5 @@ evidence_set:
   reference_id: EVD-GCP-FW-RULES
   name: VPC Firewall Rules
   instructions: >
-    Script: fetcher.py. Google Cloud client library call: compute
+    Script: gcp/firewall_rules/fetcher.py. Google Cloud client library call: compute
     firewalls.list(). One evidence file per project.

@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-IAM-PASSWORD-POLICY
   name: IAM Account Password Policy
-  instructions: 'Script: iam_password_policy.sh. Commands executed: aws iam get-account-password-policy.'
+  instructions: 'Script: aws/iam_password_policy/fetcher.sh. Commands executed: aws iam get-account-password-policy.'

@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SECRETS-ROTATION
   name: Secrets Manager Rotation
-  instructions: 'Script: fetcher.sh. Commands executed: aws secretsmanager list-secrets.'
+  instructions: 'Script: aws/secrets_manager_rotation/fetcher.sh. Commands executed: aws secretsmanager list-secrets.'

@@ -101,7 +101,7 @@ evidence_set:
   reference_id: EVD-WIZ-INFRA-VULNS
   name: Wiz Infrastructure Vulnerabilities
   instructions: >-
-    Script: fetcher.py. Read-only service account (scope read:vulnerabilities).
+    Script: wiz/infrastructure_vulnerabilities/fetcher.py. Read-only service account (scope read:vulnerabilities).
     Pages vulnerabilityFindings filtered to open status, keeps findings whose
     vulnerable asset is infrastructure (not container or code), and summarizes
     by severity, KEV, fix availability, asset count and age against remediation

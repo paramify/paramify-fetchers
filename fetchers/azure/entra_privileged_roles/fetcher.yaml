@@ -59,6 +59,6 @@ evidence_set:
   reference_id: EVD-AZURE-ENTRA-PRIV-ROLES
   name: Microsoft Entra ID Privileged Directory Roles
   instructions: >
-    Script: fetcher.py. Microsoft Graph calls: GET /directoryRoles; GET
+    Script: azure/entra_privileged_roles/fetcher.py. Microsoft Graph calls: GET /directoryRoles; GET
     /directoryRoles/{id}/members per role; GET /organization. Both collections paged
     via @odata.nextLink.

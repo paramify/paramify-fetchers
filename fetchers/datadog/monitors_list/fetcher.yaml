@@ -27,4 +27,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-MONITORS
   name: Datadog Monitors List
-  instructions: 'Calls GET /api/v1/monitor with pagination. Extracts monitor name, type, overall_state, query, thresholds, and notify settings. Writes JSON monitor list.'
+  instructions: 'Script: datadog/monitors_list/fetcher.py. Calls GET /api/v1/monitor with pagination. Extracts monitor name, type, overall_state, query, thresholds, and notify settings. Writes JSON monitor list.'

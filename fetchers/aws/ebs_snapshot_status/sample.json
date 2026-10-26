@@ -1,0 +1,56 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_ebs_snapshot_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 2,
+      "fields": {
+        "VolumeId": 2,
+        "Encrypted": 2,
+        "HasSnapshot": 2,
+        "Snapshots": 2
+      }
+    },
+    {
+      "path": "results[].Snapshots[]",
+      "records": 2,
+      "fields": {
+        "SnapshotId": 2,
+        "VolumeId": 2,
+        "Encrypted": 2,
+        "StartTime": 2,
+        "Public": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:47Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "VolumeId": "vol-0f59747775ea40019",
+        "Encrypted": true,
+        "HasSnapshot": true,
+        "Snapshots": [
+          {
+            "SnapshotId": "snap-015018e7b409c2b97",
+            "VolumeId": "vol-0f59747775ea40019",
+            "Encrypted": true,
+            "StartTime": "2026-09-28T17:04:26.532000+00:00",
+            "Public": false
+          }
+        ]
+      }
+    ]
+  }
+}

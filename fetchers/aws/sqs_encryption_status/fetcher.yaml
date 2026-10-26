@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SQS-ENC
   name: SQS Queue Encryption
-  instructions: 'Script: fetcher.sh. Commands executed: aws sqs list-queues, aws sqs get-queue-attributes.'
+  instructions: 'Script: aws/sqs_encryption_status/fetcher.sh. Commands executed: aws sqs list-queues, aws sqs get-queue-attributes.'

@@ -54,7 +54,7 @@ evidence_set:
   reference_id: EVD-AZURE-POSTGRESQL-CONFIG
   name: Azure PostgreSQL Flexible Server Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-postgresqlflexibleservers
+    Script: azure/postgresql_configuration/fetcher.py. Azure SDK calls (azure-mgmt-postgresqlflexibleservers
     PostgreSQLManagementClient): servers.list_by_subscription(), configurations.get()
     for six named server parameters, firewall_rules.list_by_server(),
     administrators_microsoft_entra.list_by_server().
