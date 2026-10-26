@@ -123,7 +123,10 @@ schemas and the `paramify` CLI — not the internal code.
   set by the new `owner_tag_keys` and `classification_tag_keys` config. Summary
   adds geo-replication, key-age, container and tag counts. Any other error reading
   geo stats or listing containers fails the run. Also maps to `KSI-CNA-OFA`,
-  `KSI-RPL-ABO`, `KSI-PIY-GIV` and `KSI-SVC-VCM`. Existing fields are unchanged.
+  `KSI-RPL-ABO`, `KSI-PIY-GIV` and `KSI-SVC-VCM`. One existing field changes:
+  `allow_blob_public_access` reads an unset `allowBlobPublicAccess` as true, as
+  Azure treats it (the same rule as shared-key and cross-tenant access), so
+  `public_blob_access_accounts` now counts those accounts.
   A read-only run on a real subscription with Reader exercised geo stats, key ages
   and container listing; `LastSyncTimeUnavailable`, key expiry policies,
   immutability policies, legal holds and container metadata are proven by

@@ -353,7 +353,7 @@ def account_record(
 ) -> dict:
     """Normalize one projected storage account into an evidence record.
 
-    Prowler's defaults are preserved: the API omits allow_cross_tenant_replication,
+    The API omits allow_blob_public_access, allow_cross_tenant_replication,
     allow_shared_key_access and the network_rule_set fields when they sit at their
     (permissive) service defaults, so absent must read as that default, not as None.
     """
@@ -364,6 +364,7 @@ def account_record(
     key_source = account.get("encryption_type")
     key_expiration = account.get("key_expiration_period_in_days")
 
+    blob_public = account.get("allow_blob_public_access")
     cross_tenant = account.get("allow_cross_tenant_replication")
     shared_key = account.get("allow_shared_key_access")
     entra_auth = account.get("default_to_entra_authorization")
@@ -390,7 +391,7 @@ def account_record(
         "enable_https_traffic_only": bool(account.get("enable_https_traffic_only") or False),
         "minimum_tls_version": account.get("minimum_tls_version"),
         # --- network exposure ---
-        "allow_blob_public_access": bool(account.get("allow_blob_public_access") or False),
+        "allow_blob_public_access": True if blob_public is None else bool(blob_public),
         "public_network_access": account.get("public_network_access"),
         "network_rule_set": {
             "bypass": network_rule_set.get("bypass") or "AzureServices",

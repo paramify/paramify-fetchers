@@ -96,7 +96,7 @@ evidence_set:
     - minimum_tls_1_2_accounts — Number of storage accounts whose minimum TLS version is 1.2 or 1.3
 
     Is storage reachable from the network?
-    - public_blob_access_accounts — Number of storage accounts that allow anonymous (public) access to blobs
+    - public_blob_access_accounts — Number of storage accounts that allow anonymous (public) access to blobs; an account that omits the setting allows it
     - private_endpoint_accounts — Number of storage accounts with at least one private endpoint connection
 
     Are access keys controlled?

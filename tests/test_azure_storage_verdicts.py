@@ -263,6 +263,13 @@ def test_public_container_is_effective_when_the_account_setting_was_never_set(mo
     assert st.summarize([r])["anonymously_accessible_containers"] == 1
 
 
+@pytest.mark.parametrize("setting, allowed", [(None, True), (True, True), (False, False)])
+def test_unset_account_public_blob_access_reads_as_allowed(setting, allowed):
+    r = record(account(allow_public=setting))
+    assert r["allow_blob_public_access"] is allowed
+    assert st.summarize([r])["public_blob_access_accounts"] == int(allowed)
+
+
 def test_account_without_blob_service_is_not_supported(monkeypatch):
     error = StorageError("(FeatureNotSupportedForAccount) Blob is not supported for the account.")
     (r,), c = collect(monkeypatch, account(), containers_error=error)
