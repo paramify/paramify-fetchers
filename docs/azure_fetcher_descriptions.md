@@ -1731,7 +1731,7 @@ Commands Executed:
 - `GET Microsoft.SecurityInsights/incidents` (per workspace) — every incident, with its Defender XDR id and link when it came from there
 - KQL on `SecurityIncident`, latest row per incident (per workspace) — close times and tasks, which the incident list lacks
 - KQL on `SecurityIncident`, every row in the lookback (per workspace) — status, owner and severity changes and who made them
-- KQL on `SecurityIncident` joined to `SecurityAlert` (per workspace) — the entities on each incident's alerts, up to 25 of each kind, with processes as image name and process id and URLs as scheme and host only
+- KQL on `SecurityAlert` for the alert ids `SecurityIncident` lists (per workspace) — the entities on each incident's alerts, up to 25 of each kind, with processes as image name and process id and URLs as scheme and host only
 - `GET Microsoft.OperationalInsights/workspaces/tables/SecurityIncident` (per workspace) — whether the table exists, and its retention
 
 Output: `azure_sentinel_incidents_<subscription>.json` — for each Sentinel workspace, every incident created in the lookback (default 90 days) plus older ones still open, with its severity, status, owner, response timeline and entities, and per month the mean time to detect (first activity, the earliest alert's event, to creation), acknowledge and close, and the open backlog at month end, which is null for month ends older than the `SecurityIncident` table's retention. Monthly detection, acknowledgement and close times cover the in-scope incidents only, while the backlog covers every incident, so an older incident closed in the lookback leaves the backlog without counting in that month's close time, and monthly MTTR may read low. In a workspace connected to Microsoft Defender XDR, analysts usually work incidents in the Defender portal, and `SecurityIncident` then shows mostly the XDR sync's updates, which aren't a person's, so those incidents read as not acknowledged, time to acknowledge has few or no values, and an open one can count in `open_unacknowledged` while someone works it. Their acknowledgement times would need Defender XDR's incident activity history, which neither `SecurityIncident` nor Graph's `security/incidents` (its current state and comments, but not when an incident was first activated or assigned) provides.
@@ -1746,7 +1746,7 @@ Summary fields:
 - `incidents_in_scope` — Number of incidents created in the lookback, plus older incidents still open; null if any workspace's incidents couldn't be read
 - `open_incidents` — Number of incidents still open (New or Active); null if any workspace's incidents couldn't be read
 - `closed_incidents` — Number of in-scope incidents that are closed; null if any workspace's incidents couldn't be read
-- `acknowledged_incidents` — Number of in-scope incidents with a known acknowledgement time; null if any workspace's incidents or `SecurityIncident` history couldn't be read. An incident is acknowledged at the first update by a person that moves it to Active or Closed or gives it an owner or a different one, up to its first close, so a reopen never counts and removing an owner doesn't either. Updates with no modifier don't count, nor do updates by automation rules, playbooks, alert grouping, Fusion, incident creation or the Defender XDR sync, matched by the names Microsoft's docs and workbooks use, so incidents worked only in the Defender portal show none. Microsoft doesn't document what a person's update writes as the modifier, so any other modifier counts as a person, including an unlisted system such as a Logic App calling the API directly. Only an incident created in the lookback and within the `SecurityIncident` table's retention whose creation row was read can have a known time, and a later row missing doesn't undo one already found
+- `acknowledged_incidents` — Number of in-scope incidents with a known acknowledgement time; null if any workspace's incidents or `SecurityIncident` history couldn't be read. An incident is acknowledged at the first update by a person that moves it to Active or Closed or gives it an owner or a different one (by object id when both updates have one, so a renamed owner isn't a different one), up to its first close, so a reopen never counts and removing an owner doesn't either; a person creating it already Active or owned acknowledges it at creation. Updates with no modifier don't count, nor do updates by automation rules, playbooks, alert grouping, Fusion, incident creation or the Defender XDR sync, matched by the names Microsoft's docs and workbooks use, so incidents worked only in the Defender portal show none. Microsoft doesn't document what a person's update writes as the modifier, so any other modifier counts as a person, including an unlisted system such as a Logic App calling the API directly. Only an incident created in the lookback and within the `SecurityIncident` table's retention whose creation row was read can have a known time, and a later row missing doesn't undo one already found
 - `open_unacknowledged` — Number of open incidents whose every update was read and that no person has acknowledged. Every update was read when the incident was created in the lookback and within the `SecurityIncident` table's retention, its creation row was read, and its latest row read matches its current status, owner and severity and is no older than a change made in the last hour; null if any workspace's incidents or `SecurityIncident` history couldn't be read. Open incidents whose updates weren't all read aren't counted, since their acknowledgement can't be known; `open_new_unowned_history_incomplete` counts the ones still New with no owner. Only updates up to the first close count, so an incident an automation rule closed and a person then reopened and worked counts as unacknowledged, while one a person acknowledged before an alert reopened it to New doesn't
 - `open_new_unowned_history_incomplete` — Number of open incidents still New with no owner whose updates weren't all read: created before the `SecurityIncident` history read starts (the lookback or the table's retention, whichever is later), an update missing from it, its creation row not ingested yet, or its `SecurityIncident` history unreadable; null if any workspace's incidents couldn't be read. Taken from the incident list, and never overlapping `open_unacknowledged`, which counts only incidents whose every update was read
 - `recurring_titles` — Number of incident titles shared by two or more incidents created in the lookback, counted per workspace and summed, so a title recurring in two workspaces counts twice; null if any workspace's incidents couldn't be read
@@ -1754,7 +1754,6 @@ Summary fields:
 **Can every close time be shown?**
 - `closed_missing_close_time` — Number of closed incidents whose close time wasn't found in the `SecurityIncident` table, even though it should still be within the table's retention; null if any workspace's incidents or close times couldn't be read
 - `closed_close_time_not_retained` — Number of closed incidents whose close record is older than the `SecurityIncident` table's retention, so the close time is gone; null if any workspace's incidents or close times couldn't be read
-
 
 ### azure_sentinel_playbooks
 Short Description: Shows which Sentinel playbooks are live and whether they contain accounts, isolate devices, update incidents or notify people.
@@ -2602,9 +2601,9 @@ Summary fields:
 
 
 ### azure_dns_configuration
-Short Description: Shows the targets, TTL and failover method of each public DNS record, whether each public zone is signed with DNSSEC, and which virtual networks each private zone is linked to.
+Short Description: Shows the targets, TTL and failover method of each in-scope public DNS record, whether each public zone is DNSSEC-signed, and which virtual networks each private zone links to.
 
-Script: fetchers/azure/dns_configuration/fetcher.py
+Script: fetchers/azure/dns_configuration/fetcher.py (uses the shared helper fetchers/azure/_shared/scope_exclusions.py)
 
 Access: Reader on the subscription.
 
@@ -2617,7 +2616,7 @@ Commands Executed:
 - `private_zones.list()` — every private DNS zone
 - `virtual_network_links.list()` (per private zone) — the virtual networks linked to the zone and whether they auto-register records
 
-Output: `azure_dns_configuration_<subscription>.json` — each public zone with its DNSSEC state, signing keys and record sets, and each private zone with its virtual network links.
+Output: `azure_dns_configuration_<subscription>.json` — each public zone with its DNSSEC state, signing keys and in-scope record sets, each private zone with its virtual network links, and the public record sets left out of scope with the pattern each matched.
 
 Summary fields:
 
@@ -2626,6 +2625,12 @@ Summary fields:
 - `total_private_zones` — Number of private DNS zones in the subscription
 - `provider_registration_status` — Whether Microsoft.Network is registered on the subscription: registered, not_registered or unknown
 
+**Which public record sets are left out of scope?**
+- `scope_exclusion_patterns` — List of the patterns in the fetcher's `scope_exclusions` setting, in the order given: case-insensitive globs (`*` matches any run of characters, dots included; `?` matches one character) that must match a whole name, tried against each public record set's relative name (`www`, or `@` for the zone apex) and its FQDN, with or without the trailing dot. A relative name matches in every public zone; an FQDN picks out one zone's record. A record set a pattern matches is out of scope: it is listed in the evidence's excluded list with its zone, type and the pattern, and left out of every other count; every other record set is in scope. Zones, their DNSSEC state and private zones are never taken out. A pattern with a prefix such as `route:` fails the run. Empty when no patterns are set, so every record set is in scope
+- `scope_exclusion_patterns_unmatched` — List of configured patterns that matched no public record set's relative name or FQDN, such as a mistyped name
+- `excluded_record_sets` — Number of public record sets out of scope because a pattern matches their relative name or FQDN
+- `in_scope_record_sets` — Number of public record sets read and in scope (equal to `total_public_record_sets`); 0 means the patterns took out every record set, which a check can catch by requiring more than 0
+
 **Are public zones signed with DNSSEC?**
 - `dnssec_enabled_public_zones` — Number of public zones with DNSSEC enabled: a DNSSEC configuration exists, its provisioning state is Succeeded and it has at least one signing key
 - `dnssec_disabled_public_zones` — Number of public zones without DNSSEC enabled (no DNSSEC configuration, or one that hasn't succeeded or has no signing key)
@@ -2633,15 +2638,15 @@ Summary fields:
 - `dnssec_percentage` — Percentage of public zones with DNSSEC enabled = `dnssec_enabled_public_zones` / `total_public_zones` × 100 (a whole number, 0–100); 0 when `total_public_zones` is 0. Zones with unknown DNSSEC (`dnssec_unknown_public_zones`) count in the total but not as enabled, so they lower it
 
 **What records do the public zones publish?**
-- `total_public_record_sets` — Number of record sets across all public zones (a record set is every record of one type at one name)
+- `total_public_record_sets` — Number of in-scope record sets across all public zones (a record set is every record of one type at one name)
 - `public_zones_record_sets_unread` — Number of public zones whose record sets couldn't be read; the run fails when this is above 0
-- `public_record_sets_by_type` — Number of public record sets of each type, such as A, AAAA, CNAME, MX, TXT, NS, SOA, SRV, CAA and PTR; DS, TLSA and NAPTR record sets are counted, but the SDK has no fields for their values, so their targets are empty
-- `public_alias_record_sets` — Number of public record sets that are aliases: instead of a fixed value they follow an Azure resource or another record set in the zone. Each record set's `alias_target_type` says which: front_door (a Front Door endpoint), traffic_manager (a Traffic Manager profile), cdn_endpoint (an Azure CDN endpoint, whose failover method reads cdn), public_ip (a public IP address), record_set (another record set in the zone) or other
+- `public_record_sets_by_type` — Number of in-scope public record sets of each type, such as A, AAAA, CNAME, MX, TXT, NS, SOA, SRV, CAA and PTR; DS, TLSA and NAPTR record sets are counted, but the SDK has no fields for their values, so their targets are empty
+- `public_alias_record_sets` — Number of in-scope public record sets that are aliases: instead of a fixed value they follow an Azure resource or another record set in the zone. Each record set's `alias_target_type` says which: front_door (a Front Door endpoint), traffic_manager (a Traffic Manager profile), cdn_endpoint (an Azure CDN endpoint, whose failover method reads cdn), public_ip (a public IP address), record_set (another record set in the zone) or other
 
 **How does each public endpoint fail over?**
-- `public_endpoint_record_sets` — Number of public endpoint record sets (A, AAAA and CNAME, the records that send clients to a server)
-- `public_endpoint_record_sets_empty` — Number of public endpoint record sets with no value and no alias target, so they answer nothing. Dangling records aren't detected: an alias whose target resource was deleted, or a CNAME to a host that no longer exists, isn't counted here
-- `public_endpoint_record_sets_by_failover_method` — Number of public endpoint record sets for each failover method, the way traffic moves to another region (each record set's `failover_method`; it is null for other record types and for empty record sets, which are left out here). A record that points at another record set in the zone, through an alias or a CNAME to a name in the zone, takes that record set's own method; only one link is followed:
+- `public_endpoint_record_sets` — Number of in-scope public endpoint record sets (A, AAAA and CNAME, the records that send clients to a server)
+- `public_endpoint_record_sets_empty` — Number of in-scope public endpoint record sets with no value and no alias target, so they answer nothing. Dangling records aren't detected: an alias whose target resource was deleted, or a CNAME to a host that no longer exists, isn't counted here
+- `public_endpoint_record_sets_by_failover_method` — Number of in-scope public endpoint record sets for each failover method, the way traffic moves to another region (each record set's `failover_method`; it is null for other record types and for empty record sets, which are left out here). A record that points at another record set in the zone, through an alias or a CNAME to a name in the zone, takes that record set's own method, even when that record set is out of scope; only one link is followed:
   - front_door (an alias to a Front Door endpoint or a CNAME to an azurefd.net host; Front Door moves traffic between its origins. Only azurefd.net host names are recognised)
   - traffic_manager (an alias to a Traffic Manager profile or a CNAME to a trafficmanager.net or usgovtrafficmanager.net host; Traffic Manager answers with a healthy endpoint)
   - cdn (an alias to an Azure CDN endpoint or a CNAME to an azureedge.net host; the CDN endpoint's origins decide)
@@ -2652,11 +2657,10 @@ Summary fields:
 - `private_zones_without_links` — Number of private zones linked to no virtual network (a zone whose links couldn't be read also counts here, and the run fails)
 - `auto_registration_links` — Number of virtual network links with auto-registration on, so virtual machines in the network get DNS records in the zone automatically
 
-
 ### azure_front_door_origins
-Short Description: Shows whether Front Door's back ends span two healthy, serving regions, are reached securely, accept traffic only through their own profile, and have a regional twin with enough capacity.
+Short Description: Shows whether Front Door's in-scope back ends span two healthy, serving regions, are reached securely, accept traffic only through their own profile, and have a regional twin with enough capacity.
 
-Script: fetchers/azure/front_door_origins/fetcher.py (uses the shared Front Door helpers fetchers/azure/_shared/frontdoor.py)
+Script: fetchers/azure/front_door_origins/fetcher.py (uses the shared Front Door helpers fetchers/azure/_shared/frontdoor.py and fetchers/azure/_shared/scope_exclusions.py)
 
 Access: Reader on the subscription. Optional: Reader on other subscriptions holding origin apps; without it, those origins read as not visible and not locked.
 
@@ -2667,14 +2671,15 @@ Commands Executed:
 - `profiles.get()` (per profile) — the profile's Front Door id, which Front Door sends as the X-Azure-FDID header
 - `afd_origin_groups.list_by_profile()` and `afd_origins.list_by_origin_group()` — origin groups, origins, probes and origin authentication
 - `afd_endpoints.list_by_profile()` and `routes.list_by_endpoint()` — which routes send traffic to each group, and over which protocol
+- `afd_custom_domains.list_by_profile()` (per profile) — each custom domain's host name, to match against the scope exclusion patterns and count the hosts in scope
 - `rule_sets.list_by_profile()` and `rules.list_by_rule_set()` — rules that override a route's origin group or protocol
 - `Resources | where id in~ (…)` — the region of each origin's target resource
 - `Resources | where type =~ 'microsoft.web/sites'` — every App Service app in the subscription, and each origin's app or slot, with its public network access and plan
 - `Resources | where type =~ 'microsoft.web/serverfarms'` — each app's plan capacity and zone redundancy
-- `web_apps.get_configuration()` or `get_configuration_slot()` (per origin app) — the app's access restrictions
+- `web_apps.get_configuration()` or `get_configuration_slot()` (per app an in-scope origin group reaches) — the access restrictions of the app and of its Kudu (scm) site
 - `metrics.list()` for OriginHealthPercentage and OriginRequestCount (per profile) — hourly health and request count of each origin over the lookback window
 
-Output: `azure_front_door_origins_<subscription>.json` — each origin group with its origins, regions and connection settings, its measured health and traffic per region, each App Service origin with whether only its Front Door profile can reach it, and each app with its regional twin.
+Output: `azure_front_door_origins_<subscription>.json` — each in-scope origin group with its origins, regions and connection settings, its measured health and traffic per region, each App Service origin with whether only its Front Door profile can reach it, each in-scope app with its regional twin, and the custom domains, endpoints, routes, origin groups and apps left out of scope with the pattern or reason that took each out.
 
 Summary fields:
 
@@ -2683,19 +2688,34 @@ Summary fields:
 - `premium_profiles` — Number of Front Door Premium profiles
 - `standard_profiles` — Number of Front Door Standard profiles
 - `skipped_profiles_by_sku` — Number of classic CDN profiles skipped, for each SKU
-- `total_origin_groups` — Number of origin groups across all profiles
-- `serving_origin_groups` — Number of origin groups that serve traffic: an enabled route on an enabled endpoint sends requests to the group, directly or through a rule-set override
-- `unused_origin_groups` — Number of origin groups that no serving route reaches
-- `total_origins` — Number of origins across all groups
-- `enabled_origins` — Number of origins that are enabled (an origin with no state set counts as enabled)
-- `private_link_origins` — Number of origins Front Door reaches over private link
-- `origins_by_region_source` — Number of origins for each way their region was found:
+- `total_origin_groups` — Number of in-scope origin groups across all profiles (a group is in scope unless the scope exclusion patterns take out every route reaching it, as `excluded_origin_groups` describes)
+- `serving_origin_groups` — Number of origin groups that serve traffic: in-scope groups that an enabled in-scope route on an enabled endpoint sends requests to, directly or through a rule-set override
+- `unused_origin_groups` — Number of in-scope origin groups that no serving route reaches
+- `total_origins` — Number of origins across all in-scope groups
+- `enabled_origins` — Number of origins in in-scope groups that are enabled (an origin with no state set counts as enabled)
+- `private_link_origins` — Number of origins in in-scope groups that Front Door reaches over private link
+- `origins_by_region_source` — Number of origins in in-scope groups for each way their region was found:
   - azure_origin (the Azure resource the origin names)
   - private_link_target (the resource its private link points at)
   - host_name (the App Service app or storage account owning its host name)
   - None (region not found)
 - `origin_api_version` — What the fetcher reads origins and origin groups with: the Front Door API version
 - `provider_registration_status` — Whether Microsoft.Cdn is registered on the subscription: registered, not_registered or unknown
+
+**Which parts of Front Door are left out of scope?**
+- `scope_exclusion_patterns` — List of the patterns in the fetcher's `scope_exclusions` setting, in the order given: case-insensitive globs (`*` matches any run of characters, dots included; `?` matches one character) that must match a whole name. A plain pattern matches the host name of a custom domain or of an endpoint (the endpoint's own `*.azurefd.net` name); a pattern starting `route:` (such as `route:qa-*`) matches route names instead, and a plain pattern never matches a route's name. A pattern with any other prefix, or with nothing after `route:`, fails the run. Whatever a pattern takes out is out of scope: it is listed in the evidence's excluded list with the pattern (or the reason, when it went out because of something else) and left out of every verdict and count; everything else is in scope. Empty when no patterns are set, so everything is in scope
+- `scope_exclusion_patterns_unmatched` — List of configured patterns that matched no custom-domain host name, endpoint host name or route name, such as a mistyped name
+- `excluded_custom_domains` — Number of custom domains out of scope because their host name matches a pattern
+- `excluded_endpoints` — Number of endpoints whose own `*.azurefd.net` host name matches a pattern
+- `excluded_routes` — Number of routes out of scope: a `route:` pattern matches the route's name, or every host the route serves (its custom domains, plus the endpoint's own host name when the route links it) is out of scope. A route that serves no host goes out only by name
+- `excluded_origin_groups` — Number of origin groups out of scope: at least one route reaches the group, directly or through a rule-set override, and every route reaching it is out of scope. A group no route reaches stays in scope, and an in-scope group is judged only on its in-scope routes. An out-of-scope group's origins, App Service origins and health are left out of every count
+- `excluded_apps` — Number of production apps out of scope because every origin pointing at them sits in an out-of-scope origin group; an app no origin points at stays in scope
+- `in_scope_hosts` — Number of custom domains and endpoints whose host name no pattern matches; 0 means the patterns took out every host, which a check can catch by requiring more than 0
+- `in_scope_custom_domains` — Number of custom domains whose host name no pattern matches
+- `in_scope_endpoints` — Number of endpoints whose own host name no pattern matches
+- `in_scope_routes` — Number of routes in scope
+- `in_scope_origin_groups` — Number of origin groups in scope (equal to `total_origin_groups`)
+- `in_scope_apps` — Number of production apps in scope (`production_web_apps` plus `production_function_apps`)
 
 **Does more than one region serve traffic?**
 - `serving_regions` — List of regions holding an active origin in a serving group (active = enabled at the group's best priority)
@@ -2714,50 +2734,52 @@ Summary fields:
 - `serving_groups_with_health_data` — Number of serving groups with health-probe results in the window (a group without a health probe has none)
 - `serving_groups_with_traffic` — Number of serving groups whose origins received requests in the window
 - `serving_groups_without_traffic` — Number of serving groups whose origins received no requests in the window
-- `serving_groups_all_regions_healthy_last_hour` — Number of serving groups where every region with health data was healthy in the newest hour with data; a region is healthy in an hour when one of its origins passed at least the share of health probes the group's load-balancing settings require (3 of 4, so 75%, by default)
-- `serving_groups_region_unhealthy_last_hour` — Number of serving groups where a region with health data was not healthy in the newest hour with data
+- `serving_groups_all_regions_healthy_last_hour` — Number of serving groups where every region holding an enabled origin has health data in the last health hour and was healthy then. The last health hour is the newest hour in which any origin of the group's profile has health data, and it counts only when it is one of the window's last 3 hours; otherwise no group of that profile is judged. A region with no health data that hour keeps the group out of this count. A region is healthy in an hour when one of its origins passed at least the share of health probes the group's load-balancing settings require (3 of 4, so 75%, by default)
+- `serving_groups_region_unhealthy_last_hour` — Number of serving groups where a region holding an enabled origin has health data in the last health hour and was not healthy then
 - `serving_multi_region_groups` — Number of serving groups whose enabled origins span two or more regions
-- `serving_multi_region_groups_all_regions_healthy_last_hour` — Number of serving multi-region groups where every region with health data was healthy in the newest hour with data
-- `serving_multi_region_groups_all_regions_serving_last_hour` — Number of serving multi-region groups where every region with an enabled origin received requests in the newest hour with data
+- `serving_multi_region_groups_all_regions_healthy_last_hour` — Number of serving multi-region groups where every region holding an enabled origin has health data in the last health hour and was healthy then
+- `serving_multi_region_groups_all_regions_serving_last_hour` — Number of serving multi-region groups where every region holding an enabled origin received requests in the last request hour: the newest hour in which any origin of the group's profile received requests, counted only when it is one of the window's last 3 hours, otherwise no group of that profile is counted. Requests and health each use their own newest hour, because Azure Monitor can deliver one metric later than the other
 - `serving_multi_region_groups_with_traffic_shift` — Number of serving multi-region groups where the set of regions receiving requests changed at least once in the window
 - `regions_serving_traffic` — List of regions whose origins in serving groups received requests in the window
-- `origin_metric_series_unmatched` — Number of metric series whose origin matched no origin in the profile (such as an origin deleted during the window)
+- `origin_metric_series_unmatched` — Number of metric series whose origin matched no origin in the profile, in any origin group in scope or out (such as an origin deleted during the window)
 
 **Does Front Door reach its origins securely?**
 - `serving_groups_connection_protected` — Number of serving groups reached securely: at least one enabled origin, only HTTPS to the origins, certificate name checks on, and private link on every enabled origin or managed-identity authentication on the group
 - `serving_groups_connection_unprotected` — Number of serving groups not reached securely
-- `serving_groups_http_to_origin` — Number of serving groups where a route can forward plain HTTP to the origins
+- `serving_groups_http_to_origin` — Number of serving groups where an in-scope route can forward plain HTTP to the origins
 - `serving_groups_certificate_name_check_disabled` — Number of serving groups with an enabled origin that skips checking the origin certificate's name
 - `serving_groups_without_private_link_or_origin_auth` — Number of serving groups where not every enabled origin uses private link and the group has no managed-identity authentication
 - `serving_groups_all_private_link` — Number of serving groups where every enabled origin uses private link
 - `serving_groups_origin_authentication` — Number of serving groups that authenticate to their origins with a managed identity
 
 **Does each App Service origin accept traffic only through its own Front Door profile?**
-- `app_service_origins` — Number of origins that are App Service apps or slots, found by the origin's Azure resource, its private-link target, or the app owning its host name
+- `app_service_origins` — Number of origins in in-scope groups that are App Service apps or slots, found by the origin's Azure resource, its private-link target, or the app owning its host name
 - `serving_app_service_origins` — Number of App Service origins that are enabled and in a serving group
-- `serving_app_service_origins_locked_to_front_door` — Number of serving App Service origins locked to Front Door: the app's public network access is off, or its access restrictions turn away every public caller except Front Door requests carrying the profile's own Front Door id (or another profile's in the subscription) in the X-Azure-FDID header
+- `serving_app_service_origins_locked_to_front_door` — Number of serving App Service origins locked to Front Door: the app's public network access is off, or its access restrictions turn away every public caller except Front Door requests whose X-Azure-FDID header carries the Front Door id of the origin's own profile, or of another profile in the subscription that also serves the app through an enabled origin in an in-scope serving group, and its Kudu (scm) site doesn't let every public caller in
 - `serving_app_service_origins_not_locked` — Number of serving App Service origins not locked to Front Door
 - `serving_app_service_origins_public_network_access_disabled` — Number of serving App Service origins whose app has public network access turned off
 - `serving_app_service_origins_public_access_unrestricted` — Number of serving App Service origins whose app lets any public caller in, through an "Allow all" rule, an allow default, or no rules
 - `serving_app_service_origins_non_front_door_allow_rule` — Number of serving App Service origins whose app allows a public caller other than Front Door, such as an IP range or subnet
 - `serving_app_service_origins_front_door_rule_without_fdid` — Number of serving App Service origins whose app allows the Front Door service tag without an X-Azure-FDID header, so any customer's Front Door can reach it
 - `serving_app_service_origins_unknown_front_door_id_allowed` — Number of serving App Service origins whose app allows a Front Door id that no profile in the subscription has
+- `serving_app_service_origins_other_front_door_id_allowed` — Number of serving App Service origins whose app allows the Front Door id of another profile in the subscription that doesn't serve the app through an in-scope serving group, so requests through that profile skip the serving profile's WAF
 - `serving_app_service_origins_profile_front_door_id_not_allowed` — Number of serving App Service origins reached over the public internet whose app's rules don't admit the origin's own profile
 - `serving_app_service_origins_profile_front_door_id_unknown` — Number of serving App Service origins reached over the public internet whose profile's Front Door id couldn't be read
+- `serving_app_service_origins_scm_public_access_unrestricted` — Number of serving App Service origins whose app's Kudu (scm) site, the deployment and console endpoint, uses its own access restrictions rather than the main site's, and they let any public caller in (an "Allow all" rule, an allow default, or no rules)
 - `serving_app_service_origins_access_restrictions_unread` — Number of serving App Service origins whose app's access restrictions couldn't be read
 - `serving_app_service_origins_site_not_found` — Number of serving App Service origins pointing at an app that no longer exists in the subscription
 - `serving_app_service_origins_site_not_visible` — Number of serving App Service origins pointing at an app in another subscription the credential can't read
 
 **Does each production app have a regional twin with enough capacity?**
 - `production_tag` — The configured tag that marks production apps, set per target; null when every app in the subscription counts as production
-- `production_web_apps` — Number of production web apps (apps, not slots, whose kind isn't a function app)
+- `production_web_apps` — Number of in-scope production web apps (apps, not slots, whose kind isn't a function app)
 - `production_web_apps_behind_front_door` — Number of production web apps reached by an enabled origin in a serving group
 - `production_web_apps_not_behind_front_door` — Number of production web apps that no enabled origin in a serving group reaches
 - `production_web_apps_regional_twin_ready` — Number of production web apps behind Front Door with a twin (another enabled origin in the same group, on a different app, in a different region) whose plan is platform-scaled or has at least as many instances
 - `production_web_apps_without_regional_twin` — Number of production web apps behind Front Door with no twin in another region, including apps whose possible twin's region wasn't found
 - `production_web_apps_twin_capacity_short` — Number of production web apps whose every twin's plan has fewer instances than the app's own plan
 - `production_web_apps_twin_capacity_unknown` — Number of production web apps with a twin whose capacity can't be compared (a plan wasn't found, or the twin isn't an App Service app)
-- `production_function_apps` — Number of production function apps (apps whose kind contains functionapp)
+- `production_function_apps` — Number of in-scope production function apps (apps whose kind contains functionapp)
 - `production_function_apps_behind_front_door` — Number of production function apps reached by an enabled origin in a serving group
 - `production_function_apps_not_behind_front_door` — Number of production function apps that no enabled origin in a serving group reaches
 - `production_function_apps_regional_twin_ready` — Number of production function apps behind Front Door with a twin in another region whose plan is platform-scaled or has at least as many instances
@@ -2765,11 +2787,10 @@ Summary fields:
 - `production_function_apps_twin_capacity_short` — Number of production function apps whose every twin's plan has fewer instances than the app's own plan
 - `production_function_apps_twin_capacity_unknown` — Number of production function apps with a twin whose capacity can't be compared
 
-
 ### azure_front_door_tls
-Short Description: Shows whether every serving Front Door route accepts only HTTPS and whether every custom domain it serves enforces TLS 1.2 or higher with an in-date certificate.
+Short Description: Shows whether every in-scope serving Front Door route accepts only HTTPS and whether every in-scope custom domain it serves enforces TLS 1.2 or higher with an in-date certificate.
 
-Script: fetchers/azure/front_door_tls/fetcher.py (uses the shared Front Door helpers fetchers/azure/_shared/frontdoor.py)
+Script: fetchers/azure/front_door_tls/fetcher.py (uses the shared Front Door helpers fetchers/azure/_shared/frontdoor.py and fetchers/azure/_shared/scope_exclusions.py)
 
 Access: Reader on the subscription.
 
@@ -2778,11 +2799,11 @@ Commands Executed:
 - `providers.get()` for Microsoft.Cdn — notes an unregistered provider
 - `profiles.list()` — Front Door Standard and Premium profiles; other CDN profiles are counted and skipped
 - `afd_endpoints.list_by_profile()` and `routes.list_by_endpoint()` (per profile) — endpoints, their routes, and the protocols and HTTPS redirect each route has
-- `afd_custom_domains.list_by_profile()` (per profile) — custom domains with their cipher suite set, minimum TLS version and validation state
+- `afd_custom_domains.list_by_profile()` (per profile) — custom domains with their host name, cipher suite set, minimum TLS version and validation state
 - `secrets.list_by_profile()` (per profile) — the certificates the domains use, with issuer and expiry (no private keys)
 - `rule_sets.list_by_profile()` and `rules.list_by_rule_set()` (per profile) — rules that redirect HTTP to HTTPS
 
-Output: `azure_front_door_tls_<subscription>.json` — each route with the protocols it accepts and whether it accepts only HTTPS, and each custom domain with its TLS floor, certificate type, issuer and expiry, and whether a serving route uses it.
+Output: `azure_front_door_tls_<subscription>.json` — each in-scope route with the protocols it accepts and whether it accepts only HTTPS, each in-scope custom domain with its TLS floor, certificate type, issuer and expiry, and whether a serving route uses it, and the custom domains, endpoints, routes and secrets left out of scope with the pattern or reason that took each out.
 
 Summary fields:
 
@@ -2791,12 +2812,25 @@ Summary fields:
 - `premium_profiles` — Number of Front Door Premium profiles
 - `standard_profiles` — Number of Front Door Standard profiles
 - `skipped_profiles_by_sku` — Number of other Azure CDN profiles skipped, for each SKU
-- `total_routes` — Number of routes across all endpoints, enabled or not
-- `serving_routes` — Number of serving routes: the route and its endpoint are both enabled
-- `total_custom_domains` — Number of custom domains across all profiles
-- `served_custom_domains` — Number of served custom domains: a serving route lists the domain
-- `unrouted_custom_domains` — Number of custom domains that no route lists, enabled or not
+- `total_routes` — Number of in-scope routes across all endpoints, enabled or not (a route is in scope unless the scope exclusion patterns take it out, as `excluded_routes` describes)
+- `serving_routes` — Number of serving routes: in-scope routes where the route and its endpoint are both enabled
+- `total_custom_domains` — Number of in-scope custom domains across all profiles (custom domains whose host name no scope exclusion pattern matches)
+- `served_custom_domains` — Number of served custom domains: in-scope custom domains listed by an enabled route on an enabled endpoint; a route out of scope still counts here, so a domain is never left out because of its route
+- `unrouted_custom_domains` — Number of in-scope custom domains that no route lists, enabled or not, in scope or not
 - `provider_registration_status` — Whether the Front Door and CDN provider (Microsoft.Cdn) is registered on the subscription: registered, not_registered or unknown
+
+**Which parts of Front Door are left out of scope?**
+- `scope_exclusion_patterns` — List of the patterns in the fetcher's `scope_exclusions` setting, in the order given: case-insensitive globs (`*` matches any run of characters, dots included; `?` matches one character) that must match a whole name. A plain pattern matches the host name of a custom domain or of an endpoint (the endpoint's own `*.azurefd.net` name); a pattern starting `route:` (such as `route:qa-*`) matches route names instead, and a plain pattern never matches a route's name. A pattern with any other prefix, or with nothing after `route:`, fails the run. Whatever a pattern takes out is out of scope: it is listed in the evidence's excluded list with the pattern (or the reason, when it went out because of something else) and left out of every other count; everything else is in scope. Empty when no patterns are set, so everything is in scope
+- `scope_exclusion_patterns_unmatched` — List of configured patterns that matched no custom-domain host name, endpoint host name or route name, such as a mistyped name
+- `excluded_custom_domains` — Number of custom domains out of scope because their host name matches a pattern
+- `excluded_endpoints` — Number of endpoints whose own `*.azurefd.net` host name matches a pattern; an in-scope route on such an endpoint lists only its in-scope hosts and doesn't count as serving the endpoint's own domain
+- `excluded_routes` — Number of routes out of scope: a `route:` pattern matches the route's name, or every host the route serves (its custom domains, plus the endpoint's own host name when the route links it) is out of scope. A route that serves no host goes out only by name
+- `excluded_secrets` — Number of profile secrets out of scope because every custom domain that uses them is out of scope
+- `in_scope_hosts` — Number of custom domains and endpoints whose host name no pattern matches; 0 means the patterns took out every host, which a check can catch by requiring more than 0
+- `in_scope_custom_domains` — Number of custom domains whose host name no pattern matches (equal to `total_custom_domains`)
+- `in_scope_endpoints` — Number of endpoints whose own host name no pattern matches
+- `in_scope_routes` — Number of routes in scope (equal to `total_routes`)
+- `in_scope_secrets` — Number of profile secrets in scope, of every type (certificates, and any other secret a profile holds, such as a URL signing key); a secret no custom domain uses stays in scope
 
 **Does every serving route accept only HTTPS?**
 - `serving_routes_https_only` — Number of serving routes that accept only HTTPS: HTTP isn't among the route's protocols, or HTTP requests are redirected to HTTPS by the route's HTTPS redirect setting or by a rule-set rule (a redirect to HTTPS with no condition, or with only a request-scheme condition matching HTTP, reached before any rule that stops evaluation). A route with no protocols set accepts HTTP and HTTPS, and a route with no redirect set doesn't redirect
@@ -2804,13 +2838,13 @@ Summary fields:
 - `serving_routes_https_only_protocols` — Number of serving routes that accept only HTTPS because HTTP isn't among their protocols
 - `serving_routes_https_redirect` — Number of serving routes that accept HTTP but redirect it to HTTPS through the route's own HTTPS redirect setting
 - `serving_routes_rule_set_redirect` — Number of serving routes that accept HTTP, have the route's HTTPS redirect off, and redirect every HTTP request to HTTPS through a rule-set rule
-- `serving_routes_on_endpoint_default_domain` — Number of serving routes that also serve the endpoint's own `*.azurefd.net` domain, whose TLS follows Front Door's platform policy rather than any setting in the profile
+- `serving_routes_on_endpoint_default_domain` — Number of serving routes that also serve the endpoint's own `*.azurefd.net` domain while that host name is in scope; its TLS follows Front Door's platform policy rather than any setting in the profile
 
 **Does every served domain enforce TLS 1.2 or higher?**
 - `served_domains_below_tls12` — Number of served custom domains whose TLS floor is below TLS 1.2 (TLS 1.0). The TLS floor is the lowest TLS version a domain accepts: its minimum TLS version when its cipher suite set is Customized; otherwise the floor its predefined cipher suite set implies (TLS10_2019 gives TLS 1.0, TLS12_2022 and TLS12_2023 give TLS 1.2); otherwise its minimum TLS version when no set is stored
 - `served_domains_minimum_tls13` — Number of served custom domains whose TLS floor is TLS 1.3
 - `served_domains_tls_floor_unknown` — Number of served custom domains whose TLS floor couldn't be worked out: an unrecognised cipher suite set, neither a set nor a minimum version stored, or a version other than TLS 1.0, 1.2 or 1.3
-- `domains_by_cipher_suite_set` — Number of custom domains, served or not, for each cipher suite set:
+- `domains_by_cipher_suite_set` — Number of in-scope custom domains, served or not, for each cipher suite set:
   - TLS10_2019 (predefined, TLS 1.0 floor)
   - TLS12_2022 (predefined, TLS 1.2 floor)
   - TLS12_2023 (predefined, TLS 1.2 floor)
@@ -2825,18 +2859,17 @@ Summary fields:
 - `served_domains_certificate_expiring_soon` — Number of served custom domains whose certificate hasn't expired but expires within `expiry_warning_days` days
 - `served_domains_certificate_expiry_unknown` — Number of served custom domains with no readable certificate expiry (a missing certificate, a managed certificate without a secret, or an unreadable date); these count as neither expired nor valid
 - `expiry_warning_days` — Days before expiry at which a certificate counts as expiring soon (30, fixed in the fetcher)
-- `domains_by_certificate_type` — Number of custom domains, served or not, for each certificate type:
+- `domains_by_certificate_type` — Number of in-scope custom domains, served or not, for each certificate type:
   - CustomerCertificate (the customer's own certificate, held in Key Vault)
   - ManagedCertificate (issued and renewed by Front Door)
   - AzureFirstPartyManagedCertificate (issued by Azure, for Microsoft's own first-party domains)
   - None (no certificate type stored)
-- `certificate_secrets` — Number of certificate secrets across all profiles (customer, Front Door managed and Azure first-party managed certificates), whether or not a domain uses them
-
+- `certificate_secrets` — Number of in-scope certificate secrets across all profiles (customer, Front Door managed and Azure first-party managed certificates), whether or not a domain uses them
 
 ### azure_front_door_waf_coverage
-Short Description: Shows whether every host a Front Door route serves is behind a web application firewall that blocks attacks on every path, and whether each profile exports its WAF log.
+Short Description: Shows whether every in-scope host a Front Door route serves is behind a web application firewall that blocks attacks on every path, and whether each profile exports its WAF log.
 
-Script: fetchers/azure/front_door_waf_coverage/fetcher.py (uses the shared Front Door helpers fetchers/azure/_shared/frontdoor.py)
+Script: fetchers/azure/front_door_waf_coverage/fetcher.py (uses the shared Front Door helpers fetchers/azure/_shared/frontdoor.py and fetchers/azure/_shared/scope_exclusions.py)
 
 Access: Reader on the subscription.
 
@@ -2845,13 +2878,13 @@ Commands Executed:
 - `providers.get()` for Microsoft.Cdn — notes an unregistered provider
 - `profiles.list()` — Front Door Standard and Premium profiles; other CDN profiles are counted and skipped
 - `afd_endpoints.list_by_profile()` and `routes.list_by_endpoint()` (per profile) — endpoints, their routes and the hosts each route serves
-- `afd_custom_domains.list_by_profile()` (per profile) — custom domains, to find the ones no route serves
+- `afd_custom_domains.list_by_profile()` (per profile) — custom domains and their host names, to find the ones no route serves and match them against the scope exclusion patterns
 - `security_policies.list_by_profile()` (per profile) — which WAF policy applies to which routes, domains or the whole profile, and on which paths
 - `policies.list_by_subscription()` — Front Door WAF policies with their mode, rule sets, overrides and custom rules
 - `managed_rule_sets.list()` — Microsoft's managed rule set definitions, to work out which rules are on
 - `diagnostic_settings_category.list()` and `diagnostic_settings.list()` (per profile) — whether the WAF log and access log are exported, and where
 
-Output: `azure_front_door_waf_coverage_<subscription>.json` — each host on each route with the WAF policy that applies to it and whether it is protected (and why not), plus endpoints with no routes, custom domains no route serves, the security policies, and where each profile exports its WAF log.
+Output: `azure_front_door_waf_coverage_<subscription>.json` — each in-scope host on each in-scope route with the WAF policy that applies to it and whether it is protected (and why not), plus in-scope endpoints with no routes, in-scope custom domains no route serves, the security policies, where each profile exports its WAF log, and the custom domains, endpoints, routes and host-routes left out of scope with the pattern or reason that took each out.
 
 Summary fields:
 
@@ -2860,16 +2893,29 @@ Summary fields:
 - `premium_profiles` — Number of Front Door Premium profiles
 - `standard_profiles` — Number of Front Door Standard profiles
 - `skipped_profiles_by_sku` — Number of other Azure CDN profiles skipped, for each SKU
-- `total_endpoints` — Number of endpoints across all profiles, enabled or not
-- `endpoints_without_routes` — Number of endpoints with no routes
-- `total_routes` — Number of routes across all endpoints, enabled or not
-- `total_custom_domains` — Number of custom domains across all profiles
-- `unrouted_custom_domains` — Number of custom domains that no route lists, enabled or not
-- `total_security_policies` — Number of security policies across all profiles, of any type
-- `total_host_routes` — Number of host-routes: each host a route serves (each custom domain the route lists, plus the endpoint's own `*.azurefd.net` domain when the route links it), counted once per route, enabled or not
-- `serving_host_routes` — Number of serving host-routes: the route and its endpoint are both enabled; only serving host-routes are judged in the groups below
+- `total_endpoints` — Number of endpoints across all profiles, enabled or not, whose own host name is in scope or that carry at least one in-scope route (an endpoint is in scope unless a scope exclusion pattern matches its host name, as `excluded_endpoints` describes)
+- `endpoints_without_routes` — Number of endpoints with no routes whose own host name is in scope
+- `total_routes` — Number of in-scope routes across all endpoints, enabled or not (a route is in scope unless the scope exclusion patterns take it out, as `excluded_routes` describes)
+- `total_custom_domains` — Number of in-scope custom domains across all profiles (custom domains whose host name no scope exclusion pattern matches)
+- `unrouted_custom_domains` — Number of in-scope custom domains that no route lists, enabled or not, in scope or not
+- `total_security_policies` — Number of security policies across all profiles, of any type; scope exclusions don't apply to security policies
+- `total_host_routes` — Number of in-scope host-routes: each host a route serves (each custom domain the route lists, plus the endpoint's own `*.azurefd.net` domain when the route links it), counted once per route, enabled or not, leaving out any whose host or route is out of scope
+- `serving_host_routes` — Number of serving host-routes: in-scope host-routes where the route and its endpoint are both enabled; only serving host-routes are judged in the groups below
 - `security_policies_api_version` — What the fetcher reads security policies with: the Front Door API version it pins, the first that reports which routes a policy covers and whether it covers the whole profile
 - `provider_registration_status` — Whether the Front Door and CDN provider (Microsoft.Cdn) is registered on the subscription: registered, not_registered or unknown
+
+**Which parts of Front Door are left out of scope?**
+- `scope_exclusion_patterns` — List of the patterns in the fetcher's `scope_exclusions` setting, in the order given: case-insensitive globs (`*` matches any run of characters, dots included; `?` matches one character) that must match a whole name. A plain pattern matches the host name of a custom domain or of an endpoint (the endpoint's own `*.azurefd.net` name); a pattern starting `route:` (such as `route:qa-*`) matches route names instead, and a plain pattern never matches a route's name. A pattern with any other prefix, or with nothing after `route:`, fails the run. Whatever a pattern takes out is out of scope: it is listed in the evidence's excluded list with the pattern (or the reason, when it went out because of something else) and left out of every verdict and count; everything else is in scope. Empty when no patterns are set, so everything is in scope
+- `scope_exclusion_patterns_unmatched` — List of configured patterns that matched no custom-domain host name, endpoint host name or route name, such as a mistyped name
+- `excluded_custom_domains` — Number of custom domains out of scope because their host name matches a pattern
+- `excluded_endpoints` — Number of endpoints whose own `*.azurefd.net` host name matches a pattern; their own domain's host-routes go out, but routes on them that serve an in-scope custom domain stay
+- `excluded_routes` — Number of routes out of scope: a `route:` pattern matches the route's name, or every host the route serves (its custom domains, plus the endpoint's own host name when the route links it) is out of scope. A route that serves no host goes out only by name
+- `excluded_host_routes` — Number of host-routes out of scope because the host's name matches a pattern or the host's route is out of scope
+- `in_scope_hosts` — Number of custom domains and endpoints whose host name no pattern matches; 0 means the patterns took out every host, which a check can catch by requiring more than 0
+- `in_scope_custom_domains` — Number of custom domains whose host name no pattern matches (equal to `total_custom_domains`)
+- `in_scope_endpoints` — Number of endpoints whose own host name no pattern matches; unlike `total_endpoints`, an endpoint whose host name matches doesn't count even when it carries in-scope routes
+- `in_scope_routes` — Number of routes in scope (equal to `total_routes`)
+- `in_scope_host_routes` — Number of host-routes in scope (equal to `total_host_routes`)
 
 **Which WAF applies to each serving host?**
 - `host_routes_route_scope` — Number of serving host-routes whose WAF comes from a WAF security policy naming the route (and, when it also names domains, naming this host); route level wins over domain and profile level
@@ -2893,7 +2939,6 @@ Summary fields:
 - `profiles_with_waf_in_use` — Number of profiles where at least one serving host-route has a WAF security policy, blocking or not
 - `profiles_waf_log_exported` — Number of profiles, with or without a WAF in use, whose WAF log (FrontDoorWebApplicationFirewallLog) is exported: a diagnostic setting with a destination (Log Analytics workspace, storage account, event hub or partner solution) turns the log on by name, through allLogs, or through a category group the log belongs to
 - `profiles_with_waf_in_use_without_waf_log_export` — Number of profiles with a WAF in use whose WAF log isn't exported
-
 
 ### azure_front_door_waf_policies
 Short Description: Shows each Front Door web application firewall policy's mode and managed rules, whether it actually blocks attacks and why not, and whether any Front Door uses it.
@@ -3022,19 +3067,25 @@ Commands Executed:
 - `private_zones.list()` — private DNS zones in the subscription
 - `virtual_network_links.list()` (per zone) — the virtual networks each zone is linked to
 - `record_sets.list()` (per zone) — the zone's records, except SOA
-- `Resources | where type =~ 'microsoft.network/networkinterfaces'` (private endpoint network interfaces, across every readable subscription) — which private endpoint holds each private IP and the names it serves
-- `Resources | where type =~ 'microsoft.network/virtualnetworks'` (across every readable subscription) — virtual networks and their address ranges
+- `Resources | where type =~ 'microsoft.network/networkinterfaces'` (private endpoint network interfaces, across every readable subscription) — which private endpoint holds each private IP, the names it serves and the virtual network it sits in
+- `Resources | where type =~ 'microsoft.network/privateendpoints'` (across every readable subscription) — each private endpoint's connection statuses, so only an Approved endpoint backs a record
+- `Resources | where type =~ 'microsoft.network/networkinterfaces'` (other network interfaces) and `…/loadbalancers` (across every readable subscription) — private IPs held by something other than a private endpoint, such as an internal load balancer
+- `Resources | where type =~ 'microsoft.network/virtualnetworks' and id in~ (…)` (the zones' linked virtual networks, then the networks peered with a privatelink zone's linked networks) — address ranges, peerings, and each subnet's ranges and the resource groups of the network interfaces in it
+- `Resources | where type =~ 'microsoft.network/virtualnetworks' | mv-expand properties.virtualNetworkPeerings` (a privatelink zone's linked virtual networks the credential can't read) — the readable networks peered with them
 - `subscriptions.list()` and `ResourceContainers` resource groups — which subscriptions and resource groups are readable, to tell a deleted virtual network from an unreadable one
+- `private_dns_zone_groups.list()` (per private endpoint holding a privatelink A record's IP, in the endpoint's own subscription) — the zones, names and IPs the endpoint registers through its own private DNS zone group
 - `Resources | where type =~ 'microsoft.network/privatednszones'` and `…/virtualnetworklinks` (across every readable subscription) — zones with the same name elsewhere, and the virtual networks they serve
 
-Output: `azure_private_dns_zone_configuration_<subscription>.json` — each private DNS zone with its virtual network links, its records, and for each privatelink record whether a live private endpoint backs it.
+Output: `azure_private_dns_zone_configuration_<subscription>.json` — each private DNS zone with its virtual network links, its records, and for each privatelink record whether a live private endpoint backs it and what proves it (a match in the zone's virtual networks or the endpoint's own DNS zone group).
 
 Summary fields:
 
 **What was checked?**
 - `total_zones` — Number of private DNS zones in the subscription
-- `privatelink_zones` — Number of private DNS zones whose name starts with privatelink. (the zones Azure services use for private endpoints)
-- `custom_zones` — Number of private DNS zones whose name doesn't start with privatelink.
+- `privatelink_zones` — Number of private DNS zones with a privatelink or privatelink-… label anywhere in the name (the zones Azure services use for private endpoints, such as privatelink.blob.core.windows.net, AKS zones with privatelink in the middle of the name, or Azure Virtual Desktop's privatelink-global.wvd.microsoft.com)
+- `custom_zones` — Number of private DNS zones with no privatelink or privatelink-… label in the name
+- `zones_links_unknown` — Number of private DNS zones whose virtual network links couldn't be listed, so whether they're linked is unknown (never counted as unlinked)
+- `zones_records_unknown` — Number of private DNS zones whose records couldn't be listed, so their records are unknown (never counted as having none)
 - `provider_registration_status` — Whether Microsoft.Network is registered on the subscription: registered, not_registered or unknown
 
 **Which virtual networks does each zone serve?**
@@ -3050,15 +3101,17 @@ Summary fields:
 - `duplicate_zone_names_scope` — Whether duplicate zone names were looked for across readable subscriptions or only this one: readable_subscriptions (every subscription the credential can read), target_subscription (only this subscription, because the cross-subscription query failed) or null when the subscription has no zones
 
 **Does every privatelink record point at a live private endpoint?**
-- `privatelink_a_records` — Number of privatelink A records (A records in a privatelink. zone, other than the zone apex); each IP is judged by matching it to a private endpoint's network interface and that endpoint's names (an endpoint name is the record's full name or starts with the record's name)
-- `privatelink_records_backed` — Number of privatelink A records whose every IP is held by a private endpoint that serves the record's name (an endpoint that publishes no names counts by IP alone)
-- `privatelink_records_partially_backed` — Number of privatelink A records where some IPs are backed by a private endpoint and some aren't
-- `privatelink_records_ip_mismatch` — Number of privatelink A records with no backed IP and at least one IP held by a private endpoint that serves a different name
-- `privatelink_records_stale` — Number of privatelink A records with no backed or mismatched IP and at least one IP that no private endpoint holds but that sits in a readable virtual network, most likely left behind by a deleted endpoint
-- `privatelink_records_unknown` — Number of privatelink A records with no backed, mismatched or stale IP and at least one IP whose check depends on a private endpoint or virtual network query that failed (records with no IPs also count here)
-- `privatelink_records_unverified` — Number of privatelink A records whose every IP is held by no visible private endpoint and lies outside every readable virtual network (the endpoint may sit in a subscription the credential can't read)
-- `privatelink_records_backed_percentage` — Percentage of privatelink A records that are fully backed = `privatelink_records_backed` / `privatelink_a_records` × 100 (a whole number, 0–100); 0 when `privatelink_a_records` is 0. Partially backed, mismatched, stale, unknown and unverified records count in the total but not as backed
-
+- `privatelink_a_records` — Number of privatelink A records (A records in a privatelink zone, other than the zone apex). Each IP is checked only within the virtual networks the zone resolves for: its linked virtual networks and the networks with a Connected peering to a linked network, seen from either side and one hop only, because the same private IP can be reused in unrelated networks. A private endpoint serves the record's name when one of its names is the record's full name or the record's name under the zone's public suffix (the zone name without its privatelink label; Key Vault's privatelink.vaultcore.azure.net maps to vault.azure.net, and likewise in Azure Government and Azure China); an endpoint that publishes no names is matched by IP alone
+- `privatelink_records_backed` — Number of privatelink A records whose every IP is backed. An IP is backed when an Approved private endpoint (every connection Approved) holds it in a virtual network the zone resolves for and serves the record's name, or when an Approved private endpoint whose network interface holds every IP of the record registers exactly this zone, name and IPs through its own private DNS zone group (Azure keeps that record for the endpoint, so this works in any network layout) and the zone's own virtual networks show no other endpoint, unapproved endpoint or other resource holding the IP
+- `privatelink_records_partially_backed` — Number of privatelink A records with at least one backed IP and at least one IP that isn't backed, so a dead IP next to a live one stays visible
+- `privatelink_records_ip_mismatch` — Number of privatelink A records with no backed IP and at least one IP held, in a virtual network the zone resolves for, by a private endpoint that serves a different name
+- `privatelink_records_endpoint_not_approved` — Number of privatelink A records with no backed or mismatched IP and at least one IP held by a private endpoint that serves the record's name but isn't approved (not every connection is Approved: Pending, Rejected or Disconnected)
+- `privatelink_records_stale` — Number of privatelink A records with no backed, mismatched or unapproved-endpoint IP and at least one stale IP: nothing holds it, it lies in a subnet of a readable virtual network the zone resolves for, and every resource group with a network interface in that subnet is readable, so it was most likely left behind by a deleted endpoint
+- `privatelink_records_unknown` — Number of privatelink A records with no backed, mismatched, unapproved-endpoint or stale IP and at least one IP whose check depends on a query that failed: the zone's link list, the private endpoint, approval, other-IP-holder, virtual network or peering lookups, the readable-scope listing, or the zone group read of an endpoint that could have registered the record (an IP that would otherwise read stale reads unknown then)
+- `privatelink_records_unverified` — Number of privatelink A records with no backed, mismatched, unapproved-endpoint, stale or unknown IP and at least one IP that can't be checked: no readable virtual network the zone resolves for holds or contains it (the zone has no links, its links point only at unreadable networks, the endpoint sits in a subscription the credential can't read, or it sits more than one peering hop away, as with Virtual WAN or spoke to spoke, and no zone group registers the record), a network interface in its subnet is in a resource group the credential can't read, or it lies in overlapping virtual networks that disagree
+- `privatelink_records_platform_managed` — Number of privatelink A records whose every IP is held, in a virtual network the zone resolves for, by a network interface or internal load balancer frontend that isn't a private endpoint (for example an AKS private cluster's API server)
+- `privatelink_records_no_addresses` — Number of privatelink A records with no IP address
+- `privatelink_records_backed_percentage` — Percentage of privatelink A records that are fully backed = `privatelink_records_backed` / `privatelink_a_records` × 100 (a whole number, 0–100); 0 when `privatelink_a_records` is 0. Partially backed, mismatched, unapproved-endpoint, stale, unknown, unverified, platform-managed and no-address records count in the total but not as backed, so 100 is out of reach while any platform-managed record (such as an AKS API server's) exists
 
 ### azure_private_endpoint_configuration
 Short Description: Shows whether each private endpoint is approved and published in private DNS, whether the service behind it is closed to public access, and whether its subnet's NSG filters endpoint traffic.
@@ -3076,7 +3129,7 @@ Commands Executed:
 - `Resources | where id in~ (…) | mv-expand properties.subnets` (the endpoints' virtual networks) — each endpoint subnet's private endpoint network policy, NSG and route table
 - `subscriptions.list()` and `ResourceContainers` resource groups — which subscriptions and resource groups are readable, to tell a deleted target from an unreadable one
 
-Output: `azure_private_endpoint_configuration_<subscription>.json` — each private endpoint with its connections and their approval, the resource each one reaches and whether that resource is open to the internet, its subnet's filtering, its private IPs and its private DNS zones.
+Output: `azure_private_endpoint_configuration_<subscription>.json` — each private endpoint with its connections and their approval, the resource each one reaches and whether that resource is open to the internet, its subnet's filtering, its private IPs (unknown when one of its network interfaces couldn't be read) and its private DNS zones.
 
 Summary fields:
 
@@ -3097,7 +3150,8 @@ Summary fields:
   - Mixed (the endpoint's connections have different statuses)
   - None (the endpoint has no connection)
 - `endpoints_with_private_dns_zone_group` — Number of private endpoints published in private DNS (a private DNS zone group on the endpoint names at least one private DNS zone, so Azure keeps the endpoint's records in that zone)
-- `endpoints_without_private_dns_zone_group` — Number of private endpoints not published in any private DNS zone
+- `endpoints_without_private_dns_zone_group` — Number of private endpoints not known to be published in private DNS: no zone group on the endpoint names a private DNS zone, or the endpoint's zone groups couldn't be listed, so an unread endpoint never counts as published
+- `endpoints_private_dns_zone_group_unknown` — Number of private endpoints whose private DNS zone groups couldn't be listed, so whether they're published is unknown
 
 **Could the resources behind the endpoints be read?**
 - `total_target_resources` — Number of distinct target resources the endpoints connect to (an App Service slot, reached through its parent site, counts as the slot)
@@ -3107,12 +3161,12 @@ Summary fields:
 - `target_resources_lookup_unknown` — Number of target resources whose lookup failed, so whether they exist is unknown
 
 **Are the resources behind the endpoints closed to the internet?**
-- `target_resources_public_access_disabled` — Number of found target resources whose public network access is Disabled
-- `target_resources_public_access_not_disabled` — Number of found target resources whose public network access is anything other than Disabled, including no value
-- `target_resources_public_access_enabled` — Number of found target resources whose public network access is set to a value other than Disabled (for example Enabled)
+- `target_resources_public_access_disabled` — Number of found target resources whose public network access is Disabled or SecuredByPerimeter (behind a network security perimeter)
+- `target_resources_public_access_not_disabled` — Number of found target resources whose public network access is anything other than Disabled or SecuredByPerimeter, including no value
+- `target_resources_public_access_enabled` — Number of found target resources whose public network access is set to a value other than Disabled or SecuredByPerimeter (for example Enabled)
 - `target_resources_public_access_unset` — Number of found target resources with no public network access value; its meaning depends on the service (a storage account without it allows public traffic subject to its firewall)
-- `target_resources_public_access_firewall_deny_default` — Number of found target resources whose public network access isn't Disabled but whose firewall default action is Deny, so only allow-listed networks can reach them
-- `target_public_access_disabled_percentage` — Percentage of found target resources with public network access Disabled = `target_resources_public_access_disabled` / `target_resources_found` × 100 (a whole number, 0–100); 0 when `target_resources_found` is 0. Targets not found, not visible or unknown are left out of both
+- `target_resources_public_access_firewall_deny_default` — Number of found target resources whose public network access isn't Disabled or SecuredByPerimeter but whose firewall default action is Deny, so only allow-listed networks can reach them
+- `target_public_access_disabled_percentage` — Percentage of found target resources with public network access Disabled or SecuredByPerimeter = `target_resources_public_access_disabled` / `target_resources_found` × 100 (a whole number, 0–100); 0 when `target_resources_found` is 0. Targets not found, not visible or unknown are left out of both
 
 **Does the subnet's NSG filter endpoint traffic?**
 - `total_endpoint_subnets` — Number of distinct subnets that hold private endpoints
@@ -3122,7 +3176,6 @@ Summary fields:
 - `endpoint_subnets_nsg_applies` — Number of read endpoint subnets whose private endpoint network policy makes Azure apply an NSG to endpoint traffic (Enabled or NetworkSecurityGroupEnabled)
 - `endpoint_subnets_with_nsg` — Number of read endpoint subnets with an NSG attached
 - `endpoint_subnets_with_nsg_not_applied` — Number of read endpoint subnets with an NSG attached that Azure doesn't apply to private endpoint traffic, because the policy isn't Enabled or NetworkSecurityGroupEnabled (for example Disabled or RouteTableEnabled)
-
 
 ### azure_virtual_wan_configuration
 Short Description: Shows whether Virtual WAN hubs are secured by a firewall and whether each site-to-site VPN link uses encryption, IKEv2 and strong IPsec algorithms.
