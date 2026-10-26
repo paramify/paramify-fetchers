@@ -1,0 +1,157 @@
+validator: azure_kv_network_fields_present
+cases:
+  - name: flags_present
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"key_vaults": [{"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv1", "location": "westus", "name": "kv1", "network_acl_default_deny": true, "network_acls": {"bypass": "AzureServices", "default_action": "Deny", "ip_rules": ["203.0.113.0/24"], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_network_access": "Enabled", "public_network_access_disabled": false, "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}, {"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv2", "location": "westus", "name": "kv2", "network_acl_default_deny": false, "network_acls": {"bypass": "AzureServices", "default_action": "Allow", "ip_rules": [], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_network_access": "Disabled", "public_network_access_disabled": true, "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}, {"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv3", "location": "westus", "name": "kv3", "network_acl_default_deny": true, "network_acls": {"bypass": "AzureServices", "default_action": "Deny", "ip_rules": ["203.0.113.0/24"], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_network_access": "Disabled", "public_network_access_disabled": true, "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}]}, "summary": {"network_acl_default_deny_vaults": 2, "public_network_access_disabled_vaults": 2, "total_key_vaults": 3}}}'
+
+  - name: flags_present_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "partial_failure": false
+          },
+          "results": {
+            "key_vaults": [
+              {
+                "access_model": "rbac",
+                "access_policies": [],
+                "access_policy_count": 0,
+                "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv1",
+                "location": "westus",
+                "name": "kv1",
+                "network_acl_default_deny": true,
+                "network_acls": {
+                  "bypass": "AzureServices",
+                  "default_action": "Deny",
+                  "ip_rules": [
+                    "203.0.113.0/24"
+                  ],
+                  "virtual_network_rules": [
+                    {
+                      "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s",
+                      "ignore_missing_vnet_service_endpoint": false
+                    }
+                  ]
+                },
+                "private_endpoint_connections": [
+                  {
+                    "id": "pe1",
+                    "private_link_service_connection_state": {
+                      "status": "Approved"
+                    }
+                  }
+                ],
+                "provisioning_state": "Succeeded",
+                "public_network_access": "Enabled",
+                "public_network_access_disabled": false,
+                "rbac_authorization_enabled": true,
+                "sku": {
+                  "family": "A",
+                  "name": "standard"
+                }
+              },
+              {
+                "access_model": "rbac",
+                "access_policies": [],
+                "access_policy_count": 0,
+                "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv2",
+                "location": "westus",
+                "name": "kv2",
+                "network_acl_default_deny": false,
+                "network_acls": {
+                  "bypass": "AzureServices",
+                  "default_action": "Allow",
+                  "ip_rules": [],
+                  "virtual_network_rules": [
+                    {
+                      "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s",
+                      "ignore_missing_vnet_service_endpoint": false
+                    }
+                  ]
+                },
+                "private_endpoint_connections": [
+                  {
+                    "id": "pe1",
+                    "private_link_service_connection_state": {
+                      "status": "Approved"
+                    }
+                  }
+                ],
+                "provisioning_state": "Succeeded",
+                "public_network_access": "Disabled",
+                "public_network_access_disabled": true,
+                "rbac_authorization_enabled": true,
+                "sku": {
+                  "family": "A",
+                  "name": "standard"
+                }
+              },
+              {
+                "access_model": "rbac",
+                "access_policies": [],
+                "access_policy_count": 0,
+                "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv3",
+                "location": "westus",
+                "name": "kv3",
+                "network_acl_default_deny": true,
+                "network_acls": {
+                  "bypass": "AzureServices",
+                  "default_action": "Deny",
+                  "ip_rules": [
+                    "203.0.113.0/24"
+                  ],
+                  "virtual_network_rules": [
+                    {
+                      "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s",
+                      "ignore_missing_vnet_service_endpoint": false
+                    }
+                  ]
+                },
+                "private_endpoint_connections": [
+                  {
+                    "id": "pe1",
+                    "private_link_service_connection_state": {
+                      "status": "Approved"
+                    }
+                  }
+                ],
+                "provisioning_state": "Succeeded",
+                "public_network_access": "Disabled",
+                "public_network_access_disabled": true,
+                "rbac_authorization_enabled": true,
+                "sku": {
+                  "family": "A",
+                  "name": "standard"
+                }
+              }
+            ]
+          },
+          "summary": {
+            "network_acl_default_deny_vaults": 2,
+            "public_network_access_disabled_vaults": 2,
+            "total_key_vaults": 3
+          }
+        }
+      }
+
+  - name: no_vaults
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"key_vaults": []}, "summary": {"network_acl_default_deny_vaults": 0, "public_network_access_disabled_vaults": 0, "total_key_vaults": 0}}}'
+
+  - name: deny_flag_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"key_vaults": [{"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "default_deny": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv1", "location": "westus", "name": "kv1", "network_acls": {"bypass": "AzureServices", "default_action": "Deny", "ip_rules": ["203.0.113.0/24"], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_network_access": "Enabled", "public_network_access_disabled": false, "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}, {"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "default_deny": false, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv2", "location": "westus", "name": "kv2", "network_acls": {"bypass": "AzureServices", "default_action": "Allow", "ip_rules": [], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_network_access": "Disabled", "public_network_access_disabled": true, "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}, {"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "default_deny": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv3", "location": "westus", "name": "kv3", "network_acls": {"bypass": "AzureServices", "default_action": "Deny", "ip_rules": ["203.0.113.0/24"], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_network_access": "Disabled", "public_network_access_disabled": true, "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}]}, "summary": {"network_acl_default_deny_vaults": 2, "public_network_access_disabled_vaults": 2, "total_key_vaults": 3}}}'
+
+  - name: public_flag_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"key_vaults": [{"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv1", "location": "westus", "name": "kv1", "network_acl_default_deny": true, "network_acls": {"bypass": "AzureServices", "default_action": "Deny", "ip_rules": ["203.0.113.0/24"], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_access_off": false, "public_network_access": "Enabled", "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}, {"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv2", "location": "westus", "name": "kv2", "network_acl_default_deny": false, "network_acls": {"bypass": "AzureServices", "default_action": "Allow", "ip_rules": [], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_access_off": true, "public_network_access": "Disabled", "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}, {"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv3", "location": "westus", "name": "kv3", "network_acl_default_deny": true, "network_acls": {"bypass": "AzureServices", "default_action": "Deny", "ip_rules": ["203.0.113.0/24"], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_access_off": true, "public_network_access": "Disabled", "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}]}, "summary": {"network_acl_default_deny_vaults": 2, "public_network_access_disabled_vaults": 2, "total_key_vaults": 3}}}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": true}, "results": {"key_vaults": [{"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv1", "location": "westus", "name": "kv1", "network_acl_default_deny": true, "network_acls": {"bypass": "AzureServices", "default_action": "Deny", "ip_rules": ["203.0.113.0/24"], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_network_access": "Enabled", "public_network_access_disabled": false, "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}, {"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv2", "location": "westus", "name": "kv2", "network_acl_default_deny": false, "network_acls": {"bypass": "AzureServices", "default_action": "Allow", "ip_rules": [], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_network_access": "Disabled", "public_network_access_disabled": true, "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}, {"access_model": "rbac", "access_policies": [], "access_policy_count": 0, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv3", "location": "westus", "name": "kv3", "network_acl_default_deny": true, "network_acls": {"bypass": "AzureServices", "default_action": "Deny", "ip_rules": ["203.0.113.0/24"], "virtual_network_rules": [{"id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s", "ignore_missing_vnet_service_endpoint": false}]}, "private_endpoint_connections": [{"id": "pe1", "private_link_service_connection_state": {"status": "Approved"}}], "provisioning_state": "Succeeded", "public_network_access": "Disabled", "public_network_access_disabled": true, "rbac_authorization_enabled": true, "sku": {"family": "A", "name": "standard"}}]}, "summary": {"network_acl_default_deny_vaults": 2, "public_network_access_disabled_vaults": 2, "total_key_vaults": 3}}}'
