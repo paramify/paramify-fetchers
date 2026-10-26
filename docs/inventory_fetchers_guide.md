@@ -15,7 +15,7 @@ or ask [your AI agent](../README.md#drive-it-with-an-ai-agent)). The example is
 
 ## 1. Run it
 
-[Add it to a manifest](../README.md#building-a-manifest), then run it.
+[Add it to a manifest](cli_guide.md#building-a-manifest), then run it.
 
 ![paramify run collecting acme_asset_inventory: OK, exit 0](img/inventory_fetchers/01-run.png)
 

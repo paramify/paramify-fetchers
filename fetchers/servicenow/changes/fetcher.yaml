@@ -1,6 +1,6 @@
 name: servicenow_changes
-version: 0.1.0
-description: Pulls ITSM change records from the ServiceNow Paramify ITSM API and writes the raw JSON response as evidence.
+version: 0.2.0
+description: Pulls ITSM change records from the ServiceNow Paramify ITSM API and writes the JSON response as evidence.
 category: servicenow
 
 supports_targets: false
@@ -36,3 +36,11 @@ config_schema:
       Watermark timestamp (YYYY-MM-DD HH:MM:SS). When set, only changes modified
       since this time are returned. Omit for a full pull — the fetcher persists
       no watermark of its own, so an incremental pull yields partial evidence.
+
+evidence_set:
+  reference_id: EVD-SERVICENOW-CHANGES
+  name: ServiceNow ITSM Change Records
+  instructions: >-
+    Script: servicenow/changes/fetcher.py. Calls GET on the changes endpoint of a
+    ServiceNow Scripted REST API with basic auth and writes the JSON
+    response. An optional last_run watermark is sent as sysparm_last_run.

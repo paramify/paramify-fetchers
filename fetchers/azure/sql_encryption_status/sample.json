@@ -1,0 +1,120 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_sql_encryption_status",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.sql_servers[]",
+      "records": 1,
+      "fields": {
+        "all_user_databases_tde_enabled": 1,
+        "customer_managed_key": 1,
+        "databases": 1,
+        "encryption_protector": 1,
+        "fully_qualified_domain_name": 1,
+        "id": 1,
+        "location": 1,
+        "name": 1,
+        "resource_group": 1,
+        "server_key_type": 1,
+        "state": 1,
+        "tde_disabled_user_databases": 1,
+        "tde_enabled_user_databases": 1,
+        "total_databases": 1,
+        "total_user_databases": 1,
+        "type": 1,
+        "version": 1
+      }
+    },
+    {
+      "path": "results.sql_servers[].databases[]",
+      "records": 2,
+      "fields": {
+        "id": 2,
+        "is_system_database": 2,
+        "location": 2,
+        "managed_by": 1,
+        "name": 2,
+        "status": 2,
+        "tde_enabled": 2,
+        "tde_id": 2,
+        "tde_state": 2,
+        "type": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:10:45Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "provider_registration_status": "registered",
+      "sql_servers": [
+        {
+          "all_user_databases_tde_enabled": true,
+          "customer_managed_key": true,
+          "databases": [
+            {
+              "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Sql/servers/sql-pf-jov5akcv/databases/master",
+              "is_system_database": true,
+              "location": "centralus",
+              "managed_by": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Sql/servers/sql-pf-jov5akcv",
+              "name": "master",
+              "status": "Online",
+              "tde_enabled": false,
+              "tde_id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Sql/servers/sql-pf-jov5akcv/databases/master/transparentDataEncryption/Current",
+              "tde_state": "Disabled",
+              "type": "Microsoft.Sql/servers/databases"
+            }
+          ],
+          "encryption_protector": {
+            "auto_rotation_enabled": false,
+            "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Sql/servers/sql-pf-jov5akcv/encryptionProtector/current",
+            "key_vault_key_uri": "https://kvdb-pf-jov5akcv.vault.azure.net/keys/sql-tde-cmk/00000000000000000000000000000001",
+            "kind": "azurekeyvault",
+            "name": "current",
+            "server_key_name": "kvdb-pf-jov5akcv_sql-tde-cmk_3e041417fd2a4b9499d6132f1e7060b2",
+            "server_key_type": "AzureKeyVault",
+            "type": "Microsoft.Sql/servers/encryptionProtector"
+          },
+          "fully_qualified_domain_name": "sql-pf-jov5akcv.database.windows.net",
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Sql/servers/sql-pf-jov5akcv",
+          "location": "centralus",
+          "name": "sql-pf-jov5akcv",
+          "resource_group": "rg-example-example-profile",
+          "server_key_type": "AzureKeyVault",
+          "state": "Ready",
+          "tde_disabled_user_databases": 0,
+          "tde_enabled_user_databases": 1,
+          "total_databases": 2,
+          "total_user_databases": 1,
+          "type": "Microsoft.Sql/servers",
+          "version": "12.0"
+        }
+      ]
+    },
+    "summary": {
+      "cmk_percentage": 100,
+      "customer_managed_key_servers": 1,
+      "key_auto_rotation_servers": 0,
+      "provider_registration_status": "registered",
+      "servers_with_a_tde_disabled_user_database": 0,
+      "service_managed_key_servers": 0,
+      "tde_disabled_user_databases": 0,
+      "tde_enabled_user_databases": 1,
+      "tde_percentage": 100,
+      "tde_unknown_user_databases": 0,
+      "total_databases": 2,
+      "total_sql_servers": 1,
+      "total_user_databases": 1
+    }
+  }
+}

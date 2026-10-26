@@ -1,0 +1,13 @@
+validator: oci_no_broad_grants_outside_admin_policy
+cases:
+  - name: oci_no_broad_grants_outside_admin_policy_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_policies": 4, "manage_all_resources_in_tenancy_outside_default_admin_policy": 0}}'
+
+  - name: oci_no_broad_grants_outside_admin_policy_fails
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_policies": 4, "manage_all_resources_in_tenancy_outside_default_admin_policy": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_policies": 4, "manage-all-resources-in-tenancy-outside-default-admin-policy": 0}}'

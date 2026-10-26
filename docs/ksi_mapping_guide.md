@@ -75,8 +75,8 @@ each of the rest, the step 2 lookup shows which other tool's fetcher covers it.
 ## 4. Collect the evidence
 
 Pick a fetcher from step 2, such as `aws_backup_validation`.
-[Add it to a manifest](../README.md#building-a-manifest), then
-[run and upload it](../README.md#collect-then-upload). Paramify never receives
+[Add it to a manifest](cli_guide.md#building-a-manifest), then
+[run and upload it](cli_guide.md#collect-then-upload). Paramify never receives
 `ksis`: there, evidence reaches a KSI through a solution capability attached to
 it ([associate the evidence set](https://support.paramify.com/hc/en-us/articles/55867837610003-Setup-Validators)).
 

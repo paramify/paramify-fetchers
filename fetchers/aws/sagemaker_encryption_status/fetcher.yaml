@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SAGEMAKER-ENC
   name: SageMaker Encryption
-  instructions: 'Script: fetcher.sh. Commands executed: aws sagemaker list-notebook-instances, aws sagemaker describe-notebook-instance, aws sagemaker list-training-jobs, aws sagemaker describe-training-job, aws sagemaker list-endpoint-configs, aws sagemaker describe-endpoint-config.'
+  instructions: 'Script: aws/sagemaker_encryption_status/fetcher.sh. Commands executed: aws sagemaker list-notebook-instances, aws sagemaker describe-notebook-instance, aws sagemaker list-training-jobs, aws sagemaker describe-training-job, aws sagemaker list-endpoint-configs, aws sagemaker describe-endpoint-config.'

@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-AZURE-RESOURCE-DIAG-SETTINGS
   name: Azure Resource Diagnostic Settings
   instructions: >
-    Script: fetcher.py. Reader (or Monitoring Reader) at subscription scope.
+    Script: azure/resource_diagnostic_settings/fetcher.py. Reader (or Monitoring Reader) at subscription scope.
     (1) Azure Resource Graph query "Resources | project id, name, type, kind,
     location, resourceGroup | order by id asc", paged by skip token to the end; the run
     fails if the rows collected differ from Resource Graph's total_records
