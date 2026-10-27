@@ -28,7 +28,6 @@ GRAPH_API = "7.1-preview.1"
 ENTITLEMENTS_API = "7.1"
 GRAPH = "vssps"
 ENTITLEMENTS = "vsaex"
-MAX_ENTITLEMENT_PAGES = 1000
 
 SCOPE_GRAPH = "Graph (Read)"
 SCOPE_ENTITLEMENTS = "Member Entitlement Management (Read)"
@@ -134,22 +133,8 @@ def computed(group: Dict[str, Any]) -> bool:
 
 
 def entitlements(client) -> List[Dict[str, Any]]:
-    """Every user entitlement; the page holds `items` (older versions `members`) and a body continuationToken."""
-    out: List[Dict[str, Any]] = []
-    params: Dict[str, Any] = {}
-    seen: Set[str] = set()
-    for _ in range(MAX_ENTITLEMENT_PAGES):
-        body = client.get("_apis/userentitlements", ENTITLEMENTS_API, params=params, service=ENTITLEMENTS)
-        body = body if isinstance(body, dict) else {}
-        out += [e for e in body.get("items") or body.get("members") or body.get("value") or [] if isinstance(e, dict)]
-        token = body.get("continuationToken")
-        if not token:
-            return out
-        if token in seen:
-            raise DevOpsError(None, "ContinuationLoop", f"userentitlements returned continuation token {token!r} twice")
-        seen.add(token)
-        params = {"continuationToken": token}
-    raise DevOpsError(None, "TooManyPages", f"userentitlements still had more after {MAX_ENTITLEMENT_PAGES} pages")
+    """Every user entitlement; a page holds `items` (older versions `members`) and a body continuationToken."""
+    return client.list("_apis/userentitlements", ENTITLEMENTS_API, service=ENTITLEMENTS, item_key=("items", "members"))
 
 
 def last_access(raw: Any) -> Optional[datetime]:
