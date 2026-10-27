@@ -85,6 +85,7 @@ QUERIES = (
 )
 # The Host header is the client's to set; a probe's text there can make the evidence upload refuse the file.
 HOST_NAME = re.compile(r"^[A-Za-z0-9.-]+(:[0-9]+)?$")
+QUERY_CODE = re.compile(r"^\((\d{3})\)\s*(\S*)")
 
 WS_QUERIED = "queried"
 WS_NOT_AUTHORIZED = "not_authorized"
@@ -127,17 +128,24 @@ def principal_kind(name) -> str | None:
     return ENTRA if "@" in name else SQL_LOGIN
 
 
+def _status_and_code(exc: BaseException) -> tuple:
+    """ArmError carries both; QueryError's code reads '(403) InsufficientAccessError'."""
+    status, code = getattr(exc, "status", None), str(getattr(exc, "code", None) or "")
+    match = QUERY_CODE.match(code)
+    if match:
+        status, code = int(match.group(1)), match.group(2)
+    return status, code.lower()
+
+
 def ws_status(exc: BaseException) -> str:
-    message = str(exc).lower()
-    status = getattr(exc, "status", None)
+    """Classified on the status and error code only: messages can carry workspace names and query text."""
+    status, code = _status_and_code(exc)
     # ARM answers SubscriptionNotFound (404) for a subscription the caller holds no role in.
-    if "subscriptionnotfound" in message:
+    if code == "subscriptionnotfound":
         return WS_NOT_AUTHORIZED
-    if status == 404 or "resourcenotfound" in message or "workspacenotfound" in message:
+    if status == 404:
         return WS_NOT_FOUND
-    if status in (401, 403) or any(
-        m in message for m in ("(401)", "(403)", "authorizationfailed", "insufficientaccess", "forbidden")
-    ):
+    if status in (401, 403):
         return WS_NOT_AUTHORIZED
     return WS_ERROR
 

@@ -344,6 +344,13 @@ def test_a_query_failure_after_the_tables_were_read_fails_the_run_and_keeps_the_
     (azure_rest.ArmError(404, "SubscriptionNotFound", "The subscription 's2' could not be found."),
      slr.WS_NOT_AUTHORIZED),
     (azure_rest.QueryError("(400) BadArgumentError", "Failed to resolve scalar expression named 'x'"), slr.WS_ERROR),
+    (azure_rest.QueryError("(400) BadArgumentError", "unknown column in workspace forbidden-ws"), slr.WS_ERROR),
+    (azure_rest.QueryError("(400) BadArgumentError", "lookup said ResourceNotFound"), slr.WS_ERROR),
+    (azure_rest.ArmError(400, "InvalidRequest", "workspace forbidden-ws: ResourceNotFound (403)"), slr.WS_ERROR),
+    (azure_rest.ArmError(401, "InvalidAuthenticationToken", "expired"), slr.WS_NOT_AUTHORIZED),
+    (azure_rest.QueryError("PartialError", "Query result set has exceeded the internal record count limit"),
+     slr.WS_ERROR),
+    (LookupError("no customerId on workspace"), slr.WS_ERROR),
 ])
 def test_ws_status(error, status):
     assert slr.ws_status(error) == status
