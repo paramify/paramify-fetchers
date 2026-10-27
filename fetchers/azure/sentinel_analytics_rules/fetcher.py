@@ -38,6 +38,7 @@ _KQL_TOKEN = re.compile(
     re.S,
 )
 _CUSTOM_TABLE = re.compile(r"\w+_CL$")
+_IDENTIFIER = re.compile(r"[A-Za-z_]\w*$")
 _SOURCE_AFTER = {None, "|", ";", ")", ",", "}", "on"}
 _SOURCE_BEFORE = {None, ";", "{", "union", "join", "lookup"}
 _TABULAR_CALLS = {"materialize", "toscalar", "union", "join", "lookup", "in"}
@@ -118,18 +119,58 @@ def _call_name(toks: List[str], i: int) -> Optional[str]:
     return None
 
 
+def _tokens(query: Optional[str]) -> Tuple[List[str], Set[int]]:
+    """KQL tokens without comments, and the positions of bracket-quoted names (['T']) read as bare names."""
+    raw = [t for t in _KQL_TOKEN.findall(query or "") if not t.startswith("//")]
+    toks: List[str] = []
+    quoted: Set[int] = set()
+    i = 0
+    while i < len(raw):
+        name = raw[i + 1].strip("\"'") if raw[i] == "[" and i + 2 < len(raw) and raw[i + 2] == "]" else ""
+        if raw[i + 1:i + 2] and raw[i + 1][0] in "\"'" and _IDENTIFIER.match(name):
+            quoted.add(len(toks))
+            toks.append(name)
+            i += 3
+            continue
+        toks.append(raw[i])
+        i += 1
+    return toks, quoted
+
+
+def _binding_positions(toks: List[str]) -> Set[int]:
+    """Where the query names a column or result rather than reading one: mv-expand and mv-apply targets,
+    `as` names and the withsource= column."""
+    at: Set[int] = set()
+    for k, tok in enumerate(toks):
+        if (tok in {"expand", "apply"} and toks[k - 2:k] == ["mv", "-"]) or (tok == "as" and k > 0 and toks[k - 1] == "|"):
+            j = k + 1
+            while j < len(toks) and toks[j] not in {"|", ";", "on"}:
+                at.add(j)
+                j += 1
+        if tok == "withsource" and toks[k + 1:k + 2] == ["="] and k + 2 < len(toks):
+            at.add(k + 2)
+    return at
+
+
 def query_tables(query: Optional[str], tables: Set[str], columns: Set[str]) -> List[str]:
     """Local workspace tables a KQL query names, in code or as a string passed to table() or a function it defines."""
-    toks = [t for t in _KQL_TOKEN.findall(query or "") if not t.startswith("//")]
+    toks, quoted = _tokens(query)
     functions = {toks[k + 1] for k in range(len(toks) - 3) if toks[k] == "let" and toks[k + 2] == "=" and toks[k + 3] == "("}
-    # Names the query assigns or declares (`extend X =`, `let X =`, `datatable(X:string)`) count only where a table can stand.
-    ambiguous = columns | {toks[k] for k in range(len(toks) - 1) if toks[k + 1] in {"=", ":"}}
+    binding = _binding_positions(toks)
+    # Names the query assigns, declares or binds (`extend X =`, `let X =`, `datatable(X:string)`, `mv-expand X`) count
+    # only where a table can stand; so does a bracket-quoted name, which can be an index.
+    ambiguous = columns | {toks[k] for k in range(len(toks) - 1) if toks[k + 1] in {"=", ":"}} | {toks[k] for k in binding}
     found = set()
     for i, tok in enumerate(toks):
-        if tok[0] in "\"'@`":
+        if i in binding:
+            continue
+        if i in quoted:
+            if (tok in tables or _CUSTOM_TABLE.match(tok)) and _is_source(toks, i):
+                found.add(tok)
+        elif tok[0] in "\"'@`":
             literal = tok.lstrip("@").strip("\"'`")
             argument = i > 0 and toks[i - 1] in {"(", ","} and i + 1 < len(toks) and toks[i + 1] in {")", ","}
-            if argument and literal in tables and _call_name(toks, i) in functions | {"table"}:
+            if argument and (literal in tables or _CUSTOM_TABLE.match(literal)) and _call_name(toks, i) in functions | {"table"}:
                 found.add(literal)
         elif (tok in tables or _CUSTOM_TABLE.match(tok)) and (i == 0 or toks[i - 1] != "."):
             if tok not in ambiguous or _is_source(toks, i):

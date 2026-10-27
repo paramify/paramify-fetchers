@@ -421,6 +421,25 @@ def test_analytics_rules_tables_named_in_a_query(query, expected):
     assert MODS["sentinel_analytics_rules"].query_tables(query, TABLES, AMBIGUOUS) == expected
 
 
+@pytest.mark.parametrize("query, expected", [
+    # Names that mv-expand, mv-apply, `as` and withsource= bind are columns or results, not tables.
+    ("SigninLogs | mv-expand Event | where isnotempty(Event)", ["SigninLogs"]),
+    ("SigninLogs | mv-expand kind=array Event, Usage to typeof(string) | where isnotempty(Event)", ["SigninLogs"]),
+    ("SigninLogs | mv-apply Event on (take 1) | project Event", ["SigninLogs"]),
+    ("SigninLogs | as Event | where isnotempty(Event)", ["SigninLogs"]),
+    ("SigninLogs | as hint.materialized=true Event | project Event", ["SigninLogs"]),
+    ("union withsource=Event SigninLogs, AuditLogs | where isnotempty(Event)", ["AuditLogs", "SigninLogs"]),
+    ("find withsource=Event in (SigninLogs) where X == 1 | project Event", ["SigninLogs"]),
+    # Bracket-quoted names, and table() with a custom table.
+    ("['SigninLogs'] | take 1", ["SigninLogs"]),
+    ('union ["AuditLogs"], Syslog', ["AuditLogs", "Syslog"]),
+    ("SigninLogs | extend x = Props['AuditLogs'] | take 1", ["SigninLogs"]),
+    ('table("Other_CL") | take 1', ["Other_CL"]),
+])
+def test_analytics_rules_names_a_query_binds_and_quoted_tables(query, expected):
+    assert MODS["sentinel_analytics_rules"].query_tables(query, TABLES, AMBIGUOUS) == expected
+
+
 def test_analytics_rules_tables_and_data(azure, tmp_path):
     azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
         rule("signins", "Scheduled", True, query="SigninLogs | where ResultType != '0'",
