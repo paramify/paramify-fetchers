@@ -95,6 +95,7 @@ evidence_set:
     - owner_details_readable — True if owners were read and every service principal that can have one (any service principal except Microsoft's own apps and managed identities), and every app registration with no service principal, either has an owner known to be enabled or has every owner's account state (enabled or disabled); false if not, and service_principals_with_only_disabled_owners reads null
     - application_permissions_readable — True if every service principal's application permissions (app roles on an API, used with no user signed in) and their names were read; false if any read failed, and the application permission fields read null
     - delegated_grants_readable — True if the delegated grants (permissions to call an API on behalf of a signed-in user) were read; false if they couldn't be (usually DelegatedPermissionGrant.Read.All isn't granted), and the delegated grant fields read null
+    - delegated_grants_status — How the delegated grant read went: ok; not_authorized (Graph answered 401 or 403, usually because DelegatedPermissionGrant.Read.All isn't granted; the run still succeeds); or failed (any other error, which fails the run, or the read was never reached)
 
     What kinds of non-user accounts exist?
     - application_service_principals — Number of service principals of type Application (the identity of an app)

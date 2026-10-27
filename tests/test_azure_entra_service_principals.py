@@ -38,6 +38,13 @@ EXCHANGE_APP_ID = "00000002-0000-0ff1-ce00-000000000000"
 DENIED = Exception("Insufficient privileges to complete the operation. (status 403)")
 SERVER_ERROR = Exception("Service unavailable (status 500)")
 
+
+def _api_error(status, message):
+    """kiota's APIError carries the HTTP status as `response_status_code`."""
+    exc = Exception(message)
+    exc.response_status_code = status
+    return exc
+
 # The summary keys of 0.1.0, which this change must keep.
 V010_SUMMARY_KEYS = {
     "total_service_principals", "disabled_service_principals", "application_service_principals",
@@ -269,6 +276,7 @@ def test_owners_and_privileged_permissions(monkeypatch, tmp_path):
         "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory",
     ]
     assert summary["delegated_grants_readable"] is True
+    assert summary["delegated_grants_status"] == "ok"
     assert summary["service_principals_with_delegated_grants"] == 2
     assert summary["admin_consented_delegated_grants"] == 1
     assert summary["service_principals_with_privileged_delegated_grants"] == 1
@@ -576,9 +584,26 @@ def test_denied_grants_leave_delegated_figures_null_without_failing(monkeypatch,
     assert evidence["metadata"]["api_failures"] == []
     summary = evidence["summary"]
     assert summary["delegated_grants_readable"] is False
+    assert summary["delegated_grants_status"] == "not_authorized"
     assert summary["delegated_permission_grants"] is None
     assert summary["service_principals_with_privileged_delegated_grants"] is None
     assert summary["service_principals_with_privileged_application_permissions"] == 2
+
+
+def test_grants_status_follows_the_status_code_not_the_message(monkeypatch, tmp_path):
+    graph = FakeGraph(**_tenant())
+    graph.oauth2_permission_grants.error = _api_error(403, "Access to this resource is restricted.")
+    code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+    assert code == 0
+    assert evidence["summary"]["delegated_grants_status"] == "not_authorized"
+
+    # A gateway error that happens to say "Forbidden" is a failure, not a missing permission.
+    graph = FakeGraph(**_tenant())
+    graph.oauth2_permission_grants.error = _api_error(502, "Forbidden by upstream proxy")
+    code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+    assert code == 1
+    assert evidence["summary"]["delegated_grants_status"] == "failed"
+    assert evidence["metadata"]["api_failures"]
 
 
 def test_other_grant_failures_still_fail_the_run(monkeypatch, tmp_path):
@@ -589,3 +614,4 @@ def test_other_grant_failures_still_fail_the_run(monkeypatch, tmp_path):
     assert exit_code == 1
     assert status["code"] == "partial_failure"
     assert evidence["summary"]["delegated_grants_readable"] is False
+    assert evidence["summary"]["delegated_grants_status"] == "failed"

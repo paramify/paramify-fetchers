@@ -64,6 +64,7 @@ from entra_graph import (  # noqa: E402
     aguard,
     graph_attr,
     graph_list,
+    is_denied,
     is_graph_resource,
     is_privileged_graph_permission,
     paginate,
@@ -773,6 +774,7 @@ def access_summary(records: list[dict], unmatched_apps: list[dict], readable: di
         # --- which API permissions non-Microsoft service principals hold ---
         "application_permissions_readable": perms_ok,
         "delegated_grants_readable": grants_ok,
+        "delegated_grants_status": readable.get("delegated_grants_status", "failed"),
         "service_principals_with_application_permissions": when(
             perms_ok, sum(1 for r in non_microsoft if r.get("application_permissions"))
         ),
@@ -975,18 +977,20 @@ async def _access(collector: Collector, client, service_principals: list[dict]) 
     grant_models = await paginate(
         deferred, "graph.oauth2PermissionGrants.get", client.oauth2_permission_grants
     )
-    failures = [{"type": type(e).__name__, "message": str(e)} for _, e in deferred.calls]
     grants: dict | None = None
-    if not failures:
+    if not deferred.calls:
+        grants_status = "ok"
         grants = {}
         for g in (project_permission_grant(m) for m in grant_models):
             grants.setdefault(g["client_id"], []).append(g)
-    elif classify_failure_code(failures) == "not_authorized":
+    elif all(is_denied(exc) for _, exc in deferred.calls):
+        grants_status = "not_authorized"
         logger.warning(
             "Delegated permission grants are unreadable without DelegatedPermissionGrant.Read.All "
             "(or Directory.Read.All)"
         )
     else:
+        grants_status = "failed"
         for operation, exc in deferred.calls:
             collector.record(operation, exc)
 
@@ -1001,6 +1005,7 @@ async def _access(collector: Collector, client, service_principals: list[dict]) 
         "owners": sp_owners is not None and app_owners is not None,
         "application_permissions": permissions_ok,
         "delegated_grants": grants is not None,
+        "delegated_grants_status": grants_status,
     }
     return access, readable
 
