@@ -31,7 +31,7 @@ dependencies = [
 # same app on 1.x.
 tui = ["textual>=8,<9"]
 checkov = ["checkov"]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "pytest-xdist", "ruff", "mypy"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every
 # one producing wrong or empty evidence rather than an error. Keep the two files
