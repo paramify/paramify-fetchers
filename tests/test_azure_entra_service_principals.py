@@ -12,6 +12,8 @@ from pathlib import Path
 from types import ModuleType
 from types import SimpleNamespace as ns
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER = REPO_ROOT / "fetchers" / "azure" / "entra_service_principals" / "fetcher.py"
 sys.path.insert(0, str(REPO_ROOT / "fetchers" / "_lib"))
@@ -19,11 +21,12 @@ sys.path.insert(0, str(REPO_ROOT / "fetchers" / "_lib"))
 spec = importlib.util.spec_from_file_location("azure_entra_service_principals_under_test", FETCHER)
 sps = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sps)
+import entra_graph  # noqa: E402  (on sys.path once the fetcher is loaded)
 
 TENANT = "00000000-0000-0000-0000-0000000000aa"
 VENDOR_TENANT = "00000000-0000-0000-0000-0000000000bb"
 MICROSOFT_TENANT = "f8cdef31-a31e-4b4a-93e4-5f571e91255a"
-GRAPH_APP_ID = sps.MICROSOFT_GRAPH_APP_ID
+GRAPH_APP_ID = entra_graph.MICROSOFT_GRAPH_APP_ID
 ROLE_RW_DIRECTORY = "10000000-0000-0000-0000-000000000001"
 ROLE_DIR_RW = "10000000-0000-0000-0000-000000000002"
 ROLE_USER_READ = "10000000-0000-0000-0000-000000000003"
@@ -317,6 +320,35 @@ def test_tenant_data_permissions_are_privileged_only_as_application_permissions(
     )
     assert application["privileged"] is True
     assert delegated["privileged_scopes"] == ["Application.ReadWrite.OwnedBy"]
+
+
+@pytest.mark.parametrize(
+    "permission",
+    [
+        # Any application write on Graph, as azure_managed_identity_configuration has always judged it.
+        "Calendars.ReadWrite",
+        "Policy.ReadWrite.CrossTenantAccess",
+        "Synchronization.ReadWrite.All",
+        "AdministrativeUnit.ReadWrite.All",
+        "RoleManagement.ReadWrite.Exchange",
+        "User.ManageIdentities.All",
+        "Mail.ReadBasic.All",
+        "Calendars.Read",
+    ],
+)
+def test_the_shared_judgment_flags_these_application_permissions(permission):
+    resources = {"sp-graph": {"app_id": GRAPH_APP_ID, "display_name": "Microsoft Graph", "app_roles": {"r": permission}}}
+    record = sps.application_permission_record({"resource_id": "sp-graph", "app_role_id": "r"}, resources)
+    assert record["privileged"] is True
+
+
+def test_directory_access_as_user_is_a_privileged_delegated_scope():
+    resources = {"sp-graph": {"app_id": GRAPH_APP_ID, "display_name": "Microsoft Graph", "app_roles": {}}}
+    delegated = sps.delegated_grant_record(
+        {"resource_id": "sp-graph", "scope": "Directory.AccessAsUser.All Calendars.ReadWrite"}, resources
+    )
+    # A delegated write to the signed-in user's own data is still not privileged.
+    assert delegated["privileged_scopes"] == ["Directory.AccessAsUser.All"]
 
 
 def test_privileged_names_match_in_any_case():

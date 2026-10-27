@@ -57,9 +57,15 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from entra_graph import (  # noqa: E402
+    DEFAULT_ACCESS_ROLE_ID,
+    PRIVILEGED_APPLICATION_GRAPH_SUBSTRINGS,
+    PRIVILEGED_GRAPH_PERMISSIONS,
+    TENANT_DATA_GRAPH_PERMISSIONS,
     aguard,
     graph_attr,
     graph_list,
+    is_graph_resource,
+    is_privileged_graph_permission,
     paginate,
     resolve_tenant,
     tenant_filename_key,
@@ -139,70 +145,8 @@ OWNER_SELECT = ("id", "displayName", "userPrincipalName", "accountEnabled")
 OWNERS_EXPAND = f"owners($select={','.join(OWNER_SELECT)})"
 RESOURCE_SELECT = ("id", "appId", "displayName", "appRoles")
 
-MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
-# An assignment of this appRoleId grants access to the resource but no named role.
-DEFAULT_ACCESS_ROLE_ID = "00000000-0000-0000-0000-000000000000"
 CONSENT_ALL_PRINCIPALS = "AllPrincipals"
-
-# Microsoft Graph permissions, application or delegated, that let the holder grant itself
-# more access, take over users' sign-in, or change the controls that protect the tenant.
-PRIVILEGED_GRAPH_PERMISSIONS = frozenset(
-    {
-        # --- can grant itself or anyone any role or permission ---
-        "RoleManagement.ReadWrite.Directory",
-        "AppRoleAssignment.ReadWrite.All",
-        "Application.ReadWrite.All",
-        "Application.ReadWrite.OwnedBy",
-        "DelegatedPermissionGrant.ReadWrite.All",
-        "Directory.ReadWrite.All",
-        "RoleAssignmentSchedule.ReadWrite.Directory",
-        "RoleEligibilitySchedule.ReadWrite.Directory",
-        "RoleManagementPolicy.ReadWrite.Directory",
-        "PrivilegedAccess.ReadWrite.AzureAD",
-        "PrivilegedAccess.ReadWrite.AzureADGroup",
-        "PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup",
-        "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
-        "EntitlementManagement.ReadWrite.All",
-        "DeviceManagementRBAC.ReadWrite.All",
-        # --- can take over users' sign-in ---
-        "User.ReadWrite.All",
-        "User-PasswordProfile.ReadWrite.All",
-        "UserAuthenticationMethod.ReadWrite.All",
-        "Group.ReadWrite.All",
-        "GroupMember.ReadWrite.All",
-        "Domain.ReadWrite.All",
-        "IdentityProvider.ReadWrite.All",
-        "Organization.ReadWrite.All",
-        # --- can change the controls that protect the tenant ---
-        "Policy.ReadWrite.ConditionalAccess",
-        "Policy.ReadWrite.AuthenticationMethod",
-        "Policy.ReadWrite.PermissionGrant",
-        "Policy.ReadWrite.Authorization",
-        "DeviceManagementConfiguration.ReadWrite.All",
-    }
-)
-# Tenant-wide data access, privileged only as an application permission: delegated, the
-# same names reach only what the signed-in user can already open.
-TENANT_DATA_GRAPH_PERMISSIONS = frozenset(
-    {
-        "Mail.Read",
-        "Mail.ReadWrite",
-        "Mail.Send",
-        "MailboxSettings.ReadWrite",
-        "Files.Read.All",
-        "Files.ReadWrite.All",
-        "Sites.Read.All",
-        "Sites.ReadWrite.All",
-        "Sites.FullControl.All",
-        "Chat.Read.All",
-        "Chat.ReadWrite.All",
-        "ChannelMessage.Read.All",
-    }
-)
 PRIVILEGED_APPLICATION_GRAPH_PERMISSIONS = PRIVILEGED_GRAPH_PERMISSIONS | TENANT_DATA_GRAPH_PERMISSIONS
-# Matched case-insensitively: a grant made through the API may store a scope in any case.
-_PRIVILEGED_APPLICATION_KEYS = frozenset(p.lower() for p in PRIVILEGED_APPLICATION_GRAPH_PERMISSIONS)
-_PRIVILEGED_DELEGATED_KEYS = frozenset(p.lower() for p in PRIVILEGED_GRAPH_PERMISSIONS)
 
 
 # --- projections: the only code here that touches a Graph model ---
@@ -544,11 +488,6 @@ def _owner_records(owners: list[dict] | None) -> list[dict] | None:
     )
 
 
-def is_privileged_permission(resource_app_id, permission, application: bool = True) -> bool:
-    listed = _PRIVILEGED_APPLICATION_KEYS if application else _PRIVILEGED_DELEGATED_KEYS
-    return resource_app_id == MICROSOFT_GRAPH_APP_ID and str(permission or "").lower() in listed
-
-
 def application_permission_record(assignment: dict, resources: dict) -> dict:
     """One app role assignment, named from the resource's appRoles; unnamed on Graph is unknown."""
     resource = resources.get(assignment.get("resource_id")) or {}
@@ -560,9 +499,9 @@ def application_permission_record(assignment: dict, resources: dict) -> dict:
         privileged = False
     elif permission is None:
         app_id = resource.get("app_id")
-        privileged = False if app_id and app_id != MICROSOFT_GRAPH_APP_ID else None
+        privileged = False if app_id and not is_graph_resource(app_id) else None
     else:
-        privileged = is_privileged_permission(resource.get("app_id"), permission)
+        privileged = is_graph_resource(resource.get("app_id")) and is_privileged_graph_permission(permission)
     return {
         "resource_id": assignment.get("resource_id"),
         "resource_app_id": resource.get("app_id"),
@@ -587,7 +526,8 @@ def delegated_grant_record(grant: dict, resources: dict) -> dict:
         "principal_id": grant.get("principal_id"),
         "scopes": scopes,
         "privileged_scopes": [
-            s for s in scopes if is_privileged_permission(resource.get("app_id"), s, application=False)
+            s for s in scopes
+            if is_graph_resource(resource.get("app_id")) and is_privileged_graph_permission(s, application=False)
         ],
     }
 
@@ -1149,6 +1089,7 @@ def main() -> int:
             "applications_without_service_principal": unmatched,
             "evaluated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "privileged_application_graph_permissions_checked": sorted(PRIVILEGED_APPLICATION_GRAPH_PERMISSIONS),
+            "privileged_application_graph_permission_substrings": list(PRIVILEGED_APPLICATION_GRAPH_SUBSTRINGS),
             "privileged_delegated_graph_permissions_checked": sorted(PRIVILEGED_GRAPH_PERMISSIONS),
         },
         summary=summarize(records, unmatched, readable),
