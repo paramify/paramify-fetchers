@@ -6,8 +6,10 @@ statement: >-
   Every group created in Entra ID, including every role-assignable group, lists an owner, and the
   whole group list and every group's owners were read. Substantiates failing orphaned access groups:
   each group that grants access has someone accountable for its membership (KSI-IAM-AAM). Groups
-  synced from on-premises Active Directory are not counted, since their owners are managed there. Does
-  NOT prove the owner is current or enabled (groups_with_only_disabled_owners), that owners review
+  synced from on-premises Active Directory, distribution groups and mail-enabled security groups are
+  not counted, since Graph returns no owners for them (they are counted in
+  groups_with_owners_not_in_graph); a mail-enabled security group can still hold a role. Does NOT
+  prove the owner is current or enabled (groups_with_only_disabled_owners), that owners review
   membership, or which groups grant access to the system.
 
 regex: '"partial_failure":\s*false[\s\S]*?"cloud_groups_without_owner":\s*(?<cloud_groups_without_owner>\d+|null)[\s\S]*?"groups_readable":\s*(?<groups_readable>true|false)[\s\S]*?"owners_readable":\s*(?<owners_readable>true|false)[\s\S]*?"role_assignable_groups_without_owner":\s*(?<role_assignable_groups_without_owner>\d+|null)'
