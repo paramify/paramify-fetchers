@@ -18,7 +18,7 @@ statement: >-
 
 # Reads the component counts rather than no_dormant_guest_or_deleted_identity_holds_a_role, which is
 # null whenever any role-holding service principal's dormancy is unknown (any managed identity with a role).
-# Threshold in the regex: dormant_after_days 1-90.
+# Threshold in the regex: dormant_after_days at most 90.
 regex: '"partial_failure":\s*false[\s\S]*?"applications_readable":\s*(?<applications_readable>true|false)[\s\S]*?"deleted_principals_holding_azure_roles":\s*(?<deleted_principals_holding_azure_roles>\d+|null)[\s\S]*?"disabled_service_principals_holding_roles":\s*(?<disabled_service_principals_holding_roles>\d+|null)[\s\S]*?"disabled_users_holding_roles":\s*(?<disabled_users_holding_roles>\d+|null)[\s\S]*?"dormant_after_days":\s*(?<dormant_after_days>[1-8]?\d|90)(?!\d)[\s\S]*?"dormant_service_principals_holding_roles":\s*(?<dormant_service_principals_holding_roles>\d+|null)[\s\S]*?"dormant_users_holding_roles":\s*(?<dormant_users_holding_roles>\d+|null)[\s\S]*?"guest_users_holding_roles":\s*(?<guest_users_holding_roles>\d+|null)[\s\S]*?"never_signed_in_users_holding_roles":\s*(?<never_signed_in_users_holding_roles>\d+|null)[\s\S]*?"service_principal_sign_in_activity":\s*"(?<service_principal_sign_in_activity>[a-z_]+)"[\s\S]*?"tenant_readable":\s*(?<tenant_readable>true|false)[\s\S]*?"user_sign_in_activity":\s*"(?<user_sign_in_activity>[a-z_]+)"'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0; MATCH_GROUP[4] EQUALS 0; MATCH_GROUP[6] EQUALS 0; MATCH_GROUP[7] EQUALS 0; MATCH_GROUP[8] EQUALS 0; MATCH_GROUP[9] EQUALS 0; MATCH_GROUP[10] EQUALS read; MATCH_GROUP[11] EQUALS true; MATCH_GROUP[12] EQUALS read
 validation_rules:
