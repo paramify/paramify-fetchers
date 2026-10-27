@@ -414,10 +414,14 @@ class _RefusingClient(_ListClient):
         return super().get(path, api_version)
 
 
-@pytest.mark.parametrize("refused, ok", [((), True), ((1,), True), ((1, 2), False)])
-def test_a_run_whose_every_history_is_refused_fails(refused, ok):
+@pytest.mark.parametrize("fired, refused, ok", [
+    (2, (), True), (2, (1,), True), (2, (1, 2), False),
+    (0, (), True),  # a quiet subscription has no history to refuse
+])
+def test_a_run_whose_every_history_is_refused_fails(fired, refused, ok):
     collector = sys.modules["azure_common"].Collector(fa.logger)
-    alerts, _, _ = fa.collect_alerts(_RefusingClient([raw_alert(1), raw_alert(2)], refused), "s1", collector)
+    raw = [raw_alert(n) for n in range(1, fired + 1)]
+    alerts, _, _ = fa.collect_alerts(_RefusingClient(raw, refused), "s1", collector)
     assert [a["history_status"] for a in alerts].count(fa.HISTORY_NOT_AUTHORIZED) == len(refused)
     assert collector.ok is ok
     if not ok:
