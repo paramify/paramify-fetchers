@@ -182,7 +182,7 @@ def service_principal_record(sp: dict, activity: Optional[dict], activity_ok: bo
     # The report isn't documented to cover managed identities' or other tenants' apps' (Microsoft's
     # included) sign-ins as a client, so only this tenant's own apps read dormant without one on record.
     if not activity_ok or (since is None and not own_app):
-        dormant = None
+        dormant = None if (enabled or not activity_ok) else False
     elif since is not None:
         dormant = enabled and since > days
     elif created_at is None and own_app and not apps_ok:
@@ -213,8 +213,8 @@ def service_principal_record(sp: dict, activity: Optional[dict], activity_ok: bo
 
 
 def _listed(user: dict) -> bool:
-    """Users written to the evidence: role holders, dormant users and guests; the rest are only counted."""
-    return bool(user["directory_roles"] or user["azure_roles"] or user["dormant"] or user["is_guest"])
+    """Users written to the evidence: role holders, dormant users, guests and, if a role read failed, the unknown."""
+    return user["holds_role"] is not False or bool(user["dormant"] or user["is_guest"])
 
 
 def _held(found: bool, ok: bool) -> Optional[bool]:

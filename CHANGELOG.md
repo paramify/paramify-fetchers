@@ -19,14 +19,15 @@ schemas and the `paramify` CLI — not the internal code.
   last successful sign-in and roles (direct or through a group); the user counts
   come from every user. Also lists every role-holding service principal with its
   last sign-in as a client, and every deleted principal (a deleted group
-  included) an Azure role assignment still names. Dormant is no successful sign-in in `ENTRA_DORMANT_DAYS` days (90
-  by default); an account or app created within that many days isn't dormant
-  yet. Only this tenant's own apps read dormant with no sign-in as a client on
-  record; managed identities and other tenants' apps read unknown. Without
-  sign-in activity the users and roles are still listed and the dormancy
-  figures read null, and every count reads null when a read it needs was
-  refused. If Microsoft Graph answers for another tenant than the
-  subscription's, the run fails without reading the directory.
+  included) an Azure role assignment still names. Dormant is no successful
+  sign-in in `ENTRA_DORMANT_DAYS` days (90 by default); an account or app created
+  within that many days isn't dormant yet. Only this tenant's own apps read
+  dormant with no sign-in as a client on record; enabled managed identities and
+  other tenants' apps read unknown. Without sign-in activity the users holding a
+  role and the guests are still listed and the dormancy figures read null, and
+  every count reads null when a read it needs was refused. If Microsoft Graph
+  answers for another tenant than the subscription's, the run fails without
+  reading the directory.
   `_shared/azure_rest.py` gains `graph_pages` and `graph_list` for paged Graph
   reads on v1.0 or beta.
 - **Oracle Cloud Infrastructure category** (`fetchers/oci/`, fifteen
