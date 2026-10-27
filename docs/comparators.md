@@ -44,9 +44,10 @@ skips that entry with the same reason and runs the rest:
   (`depends_on b, which can't run (dependency cycle: a -> b -> a)`).
 
 So a private mirror that drops an input fetcher fails only the comparators that
-read it, directly or through another comparator. Filing a fetcher with `depends_on` under `comparators/`, and one without
-under `fetchers/`, is this repo's layout rule, checked by
-`tests/test_contracts.py`.
+read it, directly or through another comparator.
+
+Filing a fetcher with `depends_on` under `comparators/`, and one without under
+`fetchers/`, is this repo's layout rule, checked by `tests/test_contracts.py`.
 
 ## `fetcher.yaml`
 

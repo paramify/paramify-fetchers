@@ -58,12 +58,12 @@ def _fetcher_yamls() -> list[Path]:
 
 
 FETCHER_YAMLS = _fetcher_yamls()
+CATEGORY_YAMLS = sorted((FETCHERS_ROOT / "_categories").glob("*.yaml"))
 
 
 def _short(yaml_path: Path) -> str:
     """`<category>/<short_name>` of a fetcher.yaml in either tree."""
     return f"{yaml_path.parent.parent.name}/{yaml_path.parent.name}"
-CATEGORY_YAMLS = sorted((FETCHERS_ROOT / "_categories").glob("*.yaml"))
 
 
 def _load_schema(name: str) -> dict:
