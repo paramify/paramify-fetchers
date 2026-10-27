@@ -488,20 +488,27 @@ def _owner_records(owners: list[dict] | None) -> list[dict] | None:
     )
 
 
+def _judged(resource: dict) -> bool | None:
+    """Only Microsoft Graph permissions are judged privileged or not; None when the API is unknown."""
+    app_id = resource.get("app_id")
+    return None if not app_id else is_graph_resource(app_id)
+
+
 def application_permission_record(assignment: dict, resources: dict) -> dict:
-    """One app role assignment, named from the resource's appRoles; unnamed on Graph is unknown."""
+    """One app role assignment, named from the resource's appRoles.
+
+    `privileged` is null on an API other than Graph (`judged` false) and for an unnamed role.
+    """
     resource = resources.get(assignment.get("resource_id")) or {}
     role_id = str(assignment.get("app_role_id") or "")
     default_access = role_id == DEFAULT_ACCESS_ROLE_ID
     permission = None if default_access else (resource.get("app_roles") or {}).get(role_id)
-    privileged: bool | None
+    judged = True if default_access else _judged(resource)
+    privileged: bool | None = None
     if default_access:
         privileged = False
-    elif permission is None:
-        app_id = resource.get("app_id")
-        privileged = False if app_id and not is_graph_resource(app_id) else None
-    else:
-        privileged = is_graph_resource(resource.get("app_id")) and is_privileged_graph_permission(permission)
+    elif judged and permission is not None:
+        privileged = is_privileged_graph_permission(permission)
     return {
         "resource_id": assignment.get("resource_id"),
         "resource_app_id": resource.get("app_id"),
@@ -510,14 +517,19 @@ def application_permission_record(assignment: dict, resources: dict) -> dict:
         "permission": permission,
         "default_access": default_access,
         "privileged": privileged,
+        "judged": judged,
         "created_date_time": assignment.get("created_date_time"),
     }
 
 
 def delegated_grant_record(grant: dict, resources: dict) -> dict:
-    """One delegated grant: AllPrincipals is admin consent for every user, Principal one user."""
+    """One delegated grant: AllPrincipals is admin consent for every user, Principal one user.
+
+    `privileged_scopes` is null on an API other than Graph (`judged` false).
+    """
     resource = resources.get(grant.get("resource_id")) or {}
     scopes = sorted({s for s in str(grant.get("scope") or "").split() if s})
+    judged = _judged(resource)
     return {
         "resource_id": grant.get("resource_id"),
         "resource_app_id": resource.get("app_id"),
@@ -525,20 +537,22 @@ def delegated_grant_record(grant: dict, resources: dict) -> dict:
         "consent_type": grant.get("consent_type"),
         "principal_id": grant.get("principal_id"),
         "scopes": scopes,
-        "privileged_scopes": [
-            s for s in scopes
-            if is_graph_resource(resource.get("app_id")) and is_privileged_graph_permission(s, application=False)
-        ],
+        "privileged_scopes": (
+            [s for s in scopes if is_privileged_graph_permission(s, application=False)] if judged else None
+        ),
+        "judged": judged,
     }
 
 
 def _privileged_flag(app_perms: list | None, grants: list | None) -> bool | None:
-    """True if either holds a privileged permission; None if that can't be ruled out."""
+    """True if either holds a privileged permission; None if that can't be ruled out (unread, unnamed or not Graph)."""
     if any(p["privileged"] for p in app_perms or []) or any(
         g["privileged_scopes"] for g in grants or []
     ):
         return True
-    if app_perms is None or grants is None or any(p["privileged"] is None for p in app_perms):
+    if app_perms is None or grants is None:
+        return None
+    if any(p["privileged"] is None for p in app_perms) or any(g["privileged_scopes"] is None for g in grants):
         return None
     return False
 
@@ -604,7 +618,7 @@ def add_access(records: list[dict], unmatched: list[dict], access: dict) -> None
             None if app_perms is None else sorted({p["permission"] for p in app_perms if p["privileged"]})
         )
         r["privileged_delegated_permissions"] = (
-            None if sp_grants is None else sorted({s for g in sp_grants for s in g["privileged_scopes"]})
+            None if sp_grants is None else sorted({s for g in sp_grants for s in g["privileged_scopes"] or []})
         )
         r["has_privileged_permission"] = _privileged_flag(app_perms, sp_grants)
 
@@ -765,8 +779,8 @@ def access_summary(records: list[dict], unmatched_apps: list[dict], readable: di
         "application_permission_assignments": when(
             perms_ok, sum(len(r.get("application_permissions") or []) for r in non_microsoft)
         ),
-        "unnamed_graph_application_permissions": when(perms_ok, len([p for p in unnamed if p["privileged"] is None])),
-        "unnamed_other_application_permissions": when(perms_ok, len([p for p in unnamed if p["privileged"] is False])),
+        "unnamed_graph_application_permissions": when(perms_ok, len([p for p in unnamed if p["judged"] is not False])),
+        "unnamed_other_application_permissions": when(perms_ok, len([p for p in unnamed if p["judged"] is False])),
         "service_principals_with_delegated_grants": when(
             grants_ok, sum(1 for r in non_microsoft if r.get("delegated_permission_grants"))
         ),

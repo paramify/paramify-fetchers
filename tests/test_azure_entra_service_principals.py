@@ -32,6 +32,8 @@ ROLE_DIR_RW = "10000000-0000-0000-0000-000000000002"
 ROLE_USER_READ = "10000000-0000-0000-0000-000000000003"
 ROLE_MAIL_READ = "10000000-0000-0000-0000-000000000004"
 ROLE_UNKNOWN = "10000000-0000-0000-0000-0000000000ff"
+ROLE_FULL_ACCESS = "10000000-0000-0000-0000-000000000005"
+EXCHANGE_APP_ID = "00000002-0000-0ff1-ce00-000000000000"
 # The form kiota's APIError takes: "<message> (status <code>)".
 DENIED = Exception("Insufficient privileges to complete the operation. (status 403)")
 SERVER_ERROR = Exception("Service unavailable (status 500)")
@@ -300,13 +302,40 @@ def test_owners_and_privileged_permissions(monkeypatch, tmp_path):
     assert sorted(graph.resource_reads) == ["sp-graph", "sp-owned"]
 
 
-def test_a_privileged_name_on_another_resource_is_not_privileged():
+def test_a_privileged_name_on_another_resource_is_not_judged():
     resources = {"sp-other": {"app_id": "not-graph", "display_name": "Other API", "app_roles": {"r": "Mail.Read"}}}
     record = sps.application_permission_record(
         {"resource_id": "sp-other", "app_role_id": "r", "resource_display_name": "Other API"}, resources
     )
     assert record["permission"] == "Mail.Read"
-    assert record["privileged"] is False
+    assert (record["privileged"], record["judged"]) == (None, False)
+
+
+def test_permissions_on_other_apis_leave_the_flag_unknown(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["service_principals"] += [
+        _sp("sp-exchange", EXCHANGE_APP_ID, "Office 365 Exchange Online", owner_org=MICROSOFT_TENANT,
+            app_roles=[ns(id=ROLE_FULL_ACCESS, value="full_access_as_app")]),
+        _sp("sp-daemon", "app-id-daemon", "Mail daemon", owner_org=VENDOR_TENANT),
+    ]
+    tenant["assignments"]["sp-daemon"] = [_assignment(ROLE_FULL_ACCESS, "sp-exchange", "Office 365 Exchange Online")]
+    tenant["grants"].append(_grant("sp-daemon", "EWS.AccessAsUser.All", resource_id="sp-exchange"))
+    code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+
+    assert code == 0
+    by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
+    daemon = by_id["sp-daemon"]
+    (perm,) = daemon["application_permissions"]
+    assert perm["permission"] == "full_access_as_app"
+    assert (perm["privileged"], perm["judged"]) == (None, False)
+    (grant,) = daemon["delegated_permission_grants"]
+    assert (grant["privileged_scopes"], grant["judged"]) == (None, False)
+    # Not "checked, not privileged": Exchange and SharePoint permissions are never judged.
+    assert daemon["has_privileged_permission"] is None
+    assert daemon["privileged_application_permissions"] == daemon["privileged_delegated_permissions"] == []
+    graph_perm = {p["permission"]: p for p in by_id["sp-owned"]["application_permissions"]}["User.Read.All"]
+    assert (graph_perm["privileged"], graph_perm["judged"]) == (False, True)
+    assert evidence["summary"]["unnamed_other_application_permissions"] == 0
 
 
 def test_tenant_data_permissions_are_privileged_only_as_application_permissions():
@@ -359,7 +388,7 @@ def test_privileged_names_match_in_any_case():
     assert delegated["privileged_scopes"] == ["directory.readwrite.all"]
 
 
-def test_an_unnamed_permission_is_unknown_on_graph_and_not_privileged_elsewhere():
+def test_an_unnamed_permission_is_unknown_on_graph_and_not_judged_elsewhere():
     resources = {
         "sp-graph": {"app_id": GRAPH_APP_ID, "display_name": "Microsoft Graph", "app_roles": {}},
         "sp-other": {"app_id": "not-graph", "display_name": "Other API", "app_roles": {}},
@@ -367,9 +396,9 @@ def test_an_unnamed_permission_is_unknown_on_graph_and_not_privileged_elsewhere(
     on_graph = sps.application_permission_record({"resource_id": "sp-graph", "app_role_id": ROLE_UNKNOWN}, resources)
     elsewhere = sps.application_permission_record({"resource_id": "sp-other", "app_role_id": ROLE_UNKNOWN}, resources)
     missing = sps.application_permission_record({"resource_id": None, "app_role_id": ROLE_UNKNOWN}, resources)
-    assert (on_graph["permission"], on_graph["privileged"]) == (None, None)
-    assert elsewhere["privileged"] is False
-    assert missing["privileged"] is None
+    assert (on_graph["permission"], on_graph["privileged"], on_graph["judged"]) == (None, None, True)
+    assert (elsewhere["privileged"], elsewhere["judged"]) == (None, False)
+    assert (missing["privileged"], missing["judged"]) == (None, None)
 
 
 def test_unnamed_graph_permission_is_counted_and_leaves_the_flag_unknown(monkeypatch, tmp_path):
