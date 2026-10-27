@@ -102,6 +102,7 @@ BOOLEAN_FIELDS = ("http20_enabled", "remote_debugging_enabled", "scm_ip_security
 COMPARED_SITE_FIELDS = ("https_only", "client_cert_enabled", "public_network_access")
 RULE_FIELDS = ("action", "priority", "ip_address", "subnet_mask", "vnet_subnet_resource_id", "tag", "headers")
 # An unset field reads as what App Service applies, so unset and its explicit value aren't drift.
+# FTP and FTPS need no configuration to be on: learn.microsoft.com/azure/app-service/deploy-ftp
 UNSET_DEFAULTS = {"ftps_state": "AllAllowed"}
 DEFAULT_ACTION_RULES = {
     "ip_security_restrictions_default_action": "ip_security_restrictions",
