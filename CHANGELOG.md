@@ -116,7 +116,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
-- **`azure_sentinel_data_sources` 0.2.1: last data received per connector.**
+- **`azure_sentinel_data_sources` 0.2.0: last data received per connector.**
   Each workspace gains `connectors`: every connector definition installed from
   Content Hub (returned by the preview `dataConnectors` listing), every codeless
   definition (`dataConnectorDefinitions`), and each built-in connection kind
@@ -125,7 +125,9 @@ schemas and the `paramify` CLI — not the internal code.
   `lastDataReceivedQuery` as the Sentinel portal does, or a built-in query for a
   connection without one. A data type that is a whole table takes its time from
   the per-table ingestion query, and the rest, parser functions and unions
-  included, run as one union per 100. Tables on the Basic or Auxiliary plan,
+  included, run as one union per 100. A query that starts with `let` can't sit
+  inside a union, so it runs on its own, as written, and so does each query of
+  a batch that fails as malformed. Tables on the Basic or Auxiliary plan,
   which the query API can't read, are listed in `tables_not_measured`, and data
   types on them read as unmeasured. A connector is `connected` when any data
   type received data, and lists the connections that feed it, including the
@@ -143,10 +145,14 @@ schemas and the `paramify` CLI — not the internal code.
   connection turns Cloud Discovery logs on. Where
   Sentinel health monitoring is on, `connector_health` holds each connection's
   latest SentinelHealth status and reason, and each connector shows the worst of
-  its connections. `data_connectors` now also lists kinds only the preview
+  its connections; `connectors_unhealthy` counts the connections whose latest
+  status is Failure or Warning, so Informational, a normal event, reads healthy.
+  `data_connectors` now also lists kinds only the preview
   listing returns, such as Defender XDR (`MicrosoftThreatProtection`), with
-  `seen_in` saying which listing returned each, so `data_connectors_total` can
-  rise. `connectors_configured_without_data` lists the connectors that have at
+  `seen_in` saying which listing returned each.
+  `data_connectors_total` now includes these preview-only kinds, so its value
+  rises on an existing workspace that has one.
+  `connectors_configured_without_data` lists the connectors that have at
   least one connection, their own or a linked one such as Defender XDR, but
   received no data in the window and aren't quiet: unlike
   `connectors_not_connected`, it leaves out connectors installed from Content Hub
