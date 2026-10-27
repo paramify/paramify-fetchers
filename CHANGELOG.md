@@ -165,6 +165,36 @@ schemas and the `paramify` CLI — not the internal code.
   as written, never its value, with whether it is set; the TUI and shared config
   checks compare what it reads, and `validate` names an issue-report reference
   unset in its shell.
+- **`azure_devops_permissions`** (`EVD-AZURE-DEVOPS-PERMISSIONS`): who may do what
+  in an Azure DevOps organization. Every explicit permission entry in the
+  namespaces that govern the organization, projects, Git and TFVC repositories,
+  build and release pipelines, environments, service connections, the library and
+  audit streams, read with `recurse` and `includeExtendedInfo`. Each entry records:
+  - the identity, resolved by descriptor (user, group, Entra group, service
+    principal or service identity);
+  - the scope its token denotes (organization, project, repository, branch, path,
+    pipeline, release stage, environment, service connection, variable group,
+    secure file) and the project;
+  - the allowed, denied, inherited and effective actions by name.
+
+  High-impact rights set on anyone other than the built-in admin groups are
+  flagged: managing permissions, deleting a project, editing or bypassing
+  policies, force-pushing, checking in other users' changes, administering
+  builds, releases, service connections, environments and the library, and
+  managing audit streams. The group named `[<project>]\Contributors` holding only
+  its default rights on that project (editing and deleting build and release
+  pipelines, managing release approvers) is counted apart, in
+  `high_impact_grants_from_defaults`, not in
+  `high_impact_grants_outside_admin_groups`. Rights given to whoever creates a
+  branch, environment or service connection can't be told apart and stay in the
+  outside-admin count. `branch_policy_bypass_holders` lists who may bypass Git
+  branch policies, and is null when the organization has no Git repositories the
+  identity can read (TFVC only, or none readable). A count reads null, not 0, when
+  a namespace, the repository list, the project list or an identity lookup it
+  depends on could not be read. `AZURE_DEVOPS_PROJECTS` limits
+  TFVC paths too. PAT scopes: Security (Manage), because Azure DevOps has no
+  read-only scope for access control lists (the fetcher only reads), plus
+  Identity (Read), Code (Read) and Project and Team (Read).
 
 ### Changed
 
