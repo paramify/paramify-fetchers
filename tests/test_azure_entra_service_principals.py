@@ -456,6 +456,29 @@ def test_a_principal_missing_from_the_second_pass_reads_unknown(monkeypatch, tmp
     assert evidence["summary"]["service_principals_without_owner"] == 1
 
 
+def test_a_principal_deleted_before_its_re_read_reads_unknown_alone(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["sp_owners"] = {"sp-orphan": [_user(f"u-{i}") for i in range(21)]}
+    tenant["assignments"]["sp-mi"] = [_assignment(ROLE_DIR_RW) for _ in range(21)]
+    graph = FakeGraph(**tenant)
+    gone = _api_error(404, "Resource 'sp' does not exist or one of its queried reference-property objects are not present.")
+    graph.sp_owner_items["sp-orphan"].error = gone
+    graph.assignment_items["sp-mi"].error = gone
+    code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 0
+    assert evidence["metadata"]["api_failures"] == []
+    summary = evidence["summary"]
+    assert summary["owners_readable"] is True and summary["application_permissions_readable"] is True
+    by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
+    assert by_id["sp-orphan"]["owners"] is None and by_id["sp-orphan"]["has_owner"] is None
+    assert by_id["sp-mi"]["application_permissions"] is None
+    # Every other principal keeps its answer.
+    assert by_id["sp-owned"]["has_owner"] is True
+    assert by_id["sp-vendor"]["has_owner"] is False
+    assert by_id["sp-orphan"]["privileged_application_permissions"] == ["RoleManagement.ReadWrite.Directory"]
+
+
 def test_owners_past_the_expand_limit_are_read_per_object(monkeypatch, tmp_path):
     tenant = _tenant()
     tenant["app_owners"] = {"app-owned": [_user(f"u-{i}") for i in range(25)]}

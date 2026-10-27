@@ -838,7 +838,8 @@ async def _expanded(
     """{object id: related models} from one paged $expand read; None if any read failed.
 
     An object whose expansion hit EXPAND_LIMIT is re-read on its own, paged, because
-    Graph drops the rest without a nextLink; so is one with an `incomplete` item.
+    Graph drops the rest without a nextLink; so is one with an `incomplete` item. One
+    deleted before its re-read maps to None (`_reread`), not a failure.
     """
     before = len(collector.failures)
     related = {}
@@ -849,6 +850,16 @@ async def _expanded(
             items = await item_reader(oid)
         related[oid] = items
     return related if len(collector.failures) == before else None
+
+
+async def _reread(collector, operation, builder, request_configuration=None) -> list | None:
+    """One object's whole related list; None if the object was deleted since the collection read (404)."""
+    try:
+        return await paginate(collector, operation, builder, request_configuration, raise_on_error=True)
+    except Exception as exc:  # noqa: BLE001 — a 404 is that object alone; anything else is recorded
+        if getattr(exc, "response_status_code", None) != 404:
+            collector.record(operation, exc)
+        return None
 
 
 async def _access(collector: Collector, client, service_principals: list[dict]) -> tuple[dict, dict]:
@@ -877,7 +888,7 @@ async def _access(collector: Collector, client, service_principals: list[dict]) 
         return RequestConfiguration(query_parameters=query(select=["id"], expand=[expansion]))
 
     async def app_owners_of(oid):
-        return await paginate(
+        return await _reread(
             collector,
             f"graph.applications({oid}).owners.get",
             client.applications.by_application_id(oid).owners,
@@ -887,7 +898,7 @@ async def _access(collector: Collector, client, service_principals: list[dict]) 
         )
 
     async def sp_owners_of(oid):
-        return await paginate(
+        return await _reread(
             collector,
             f"graph.servicePrincipals({oid}).owners.get",
             client.service_principals.by_service_principal_id(oid).owners,
@@ -897,7 +908,7 @@ async def _access(collector: Collector, client, service_principals: list[dict]) 
         )
 
     async def assignments_of(oid):
-        return await paginate(
+        return await _reread(
             collector,
             f"graph.servicePrincipals({oid}).appRoleAssignments.get",
             client.service_principals.by_service_principal_id(oid).app_role_assignments,
@@ -906,7 +917,7 @@ async def _access(collector: Collector, client, service_principals: list[dict]) 
     def projected(related, projection):
         if related is None:
             return None
-        return {oid: [projection(m) for m in models] for oid, models in related.items()}
+        return {oid: None if models is None else [projection(m) for m in models] for oid, models in related.items()}
 
     app_owners = projected(
         await _expanded(
@@ -958,7 +969,7 @@ async def _access(collector: Collector, client, service_principals: list[dict]) 
             select=list(RESOURCE_SELECT)
         )
     )
-    resource_ids = {a["resource_id"] for items in (assignments or {}).values() for a in items}
+    resource_ids = {a["resource_id"] for items in (assignments or {}).values() for a in items or []}
     for rid in sorted(r for r in resource_ids if r):
         model = await aguard(
             collector,
