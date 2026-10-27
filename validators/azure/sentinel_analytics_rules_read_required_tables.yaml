@@ -8,7 +8,9 @@ statement: >
   tables_read_by_enabled_rules), and the collection had no partial failure. The required tables are a
   placeholder baseline for an Azure and Entra ID estate: Entra ID audit logs (AuditLogs) and sign-in logs
   (SigninLogs), and the Azure activity log (AzureActivity); the organization adds or removes tables. Each
-  table is a lookahead inside one workspace's list, so order does not matter. Substantiates KSI-MLA-RVL
+  table is a lookahead inside one workspace's list, so order does not matter. A rule counts when its
+  query names the table or, if the fetcher finds no table in the query, when its template's required
+  data types do (enabled_rules_by_template in later fetchers). Substantiates KSI-MLA-RVL
   (Continuous Monitoring; Continuous Monitoring Strategy; Security Event Notifications): "enabled
   analytics rules cover the required log sources". Does not prove what the rules detect, or tables read
   only through parser functions, which the fetcher cannot see.
