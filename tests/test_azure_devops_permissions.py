@@ -359,6 +359,15 @@ def test_unlisted_repositories_leave_the_bypass_list_unknown(tmp_path):
     assert s["entries_total"] == 15
 
 
+def test_a_project_filter_without_the_project_list_leaves_the_repository_count_unknown(tmp_path, monkeypatch):
+    monkeypatch.setenv("AZURE_DEVOPS_PROJECTS", "Web")
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/projects")] = err(500, "boom")
+    code, evidence, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert code == 1 and s["git_repositories"] is None and s["branch_policy_bypass_holders"] is None
+
+
 def test_refused_identity_lookup_leaves_the_admin_split_unknown(tmp_path):
     fake = FakeADO()
     fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = err(401, "TF400813: not authorized.")

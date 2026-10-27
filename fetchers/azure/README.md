@@ -108,8 +108,9 @@ each call's Microsoft Graph reference page lists them.
 The PAT is optional. Without one, the fetchers sign in as the ambient Entra identity,
 which must be added to the organization: project Reader for pipelines, View audit log
 for audit streams, and an organization member who can view permissions in each
-namespace for permissions. Only the Entra sign-in can read the Log Audit Events policy; with a
-PAT, `azure_devops_audit_streams` judges auditing from the audit log instead.
+namespace and read every Git repository for permissions. Only the Entra sign-in can
+read the Log Audit Events policy; with a PAT, `azure_devops_audit_streams` judges
+auditing from the audit log instead.
 
 ## Wiring into a manifest
 

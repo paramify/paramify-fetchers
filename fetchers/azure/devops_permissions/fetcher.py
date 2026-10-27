@@ -254,7 +254,8 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
 
     repos = call(collector, "git.repositories.list", SCOPE_CODE,
                  lambda: client.list("_apis/git/repositories", SECURITY_API))
-    git_repositories = None if repos is None else sum(
+    # Under a project filter, no project list means no repository can be matched to a project.
+    git_repositories = None if repos is None or (narrowed and not projects) else sum(
         1 for r in repos if isinstance(r, dict)
         and (not narrowed or str((r.get("project") or {}).get("id") or "").lower() in project_names))
 
