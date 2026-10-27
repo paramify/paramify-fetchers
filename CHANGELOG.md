@@ -19,13 +19,16 @@ schemas and the `paramify` CLI — not the internal code.
   `acknowledged_by`, `closed_at` / `closed_by` (with `closed_by_person` false for
   System), hours to acknowledge and close, and how many times its action groups ran
   or failed. A history that answers 404 or 403 reads unknown without failing the
-  run. Every metric, log search, smart detector and activity log alert rule is
-  listed with `fire_count`, `last_fired_at` and `open_alerts`, so enabled rules that
-  never fired stand out (`enabled_rules_never_fired`); a rule that fired but is not
-  in the subscription's rule lists is kept with `listed: false`. The alert list is
-  checked against Alerts Management's own summary total (`all_alerts_listed`).
-  Counts that need an alert list, a rule list or a history that wasn't read are
-  null, never 0.
+  run, unless every history is refused, which fails it as not authorized. Every
+  metric, log search, smart detector and activity log alert rule is listed with
+  `fire_count`, `last_fired_at` and `open_alerts`, so enabled rules that never
+  fired stand out (`enabled_rules_never_fired`); a rule that fired but is not in the
+  subscription's rule lists is kept with `listed: false`. Built-in rules such as
+  Azure Backup's and Service Health's get rule type `builtin` and are not counted as
+  rules. The alert list is checked against Alerts Management's own summary total
+  (`all_alerts_listed`). Counts and close times that need an alert list, a rule list
+  or a history that wasn't read are null, never 0 or partial. Descriptions and
+  comments are capped at 500 characters, marked when cut.
 - **`azure_entra_groups`** (`EVD-AZURE-ENTRA-GROUPS`) — every Entra ID group with
   its members and owners, its kind, whether it can hold directory roles, and
   whether membership is set by a rule (dynamic, with paused rules flagged), by hand
