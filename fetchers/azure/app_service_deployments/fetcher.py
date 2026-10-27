@@ -43,6 +43,8 @@ logger = logging.getLogger("azure_app_service_deployments")
 DEPLOY_STATUS = {0: "Pending", 1: "Building", 2: "Deploying", 3: "Failed", 4: "Success"}
 HISTORY_LIMIT = 50
 ACTIVITY_LIMIT = 100
+# Kudu's author and message are free text from the commit or client; a long one is cut, not copied whole.
+MAX_TEXT = 500
 
 # The Activity Log keeps 90 days; a read past this many events is cut and says so.
 ACTIVITY_LOG_MAX_DAYS = 90
@@ -107,7 +109,8 @@ LIMITATIONS = [
     "create none, so an empty Kudu history does not mean no deployments.",
     "A Kudu record's author and message come from the commit or the deploying client; a push from a "
     "pipeline often names the tool, not a person. Kudu keeps a bounded history; the newest "
-    f"{HISTORY_LIMIT} records per app or slot are kept, with the full count.",
+    f"{HISTORY_LIMIT} records per app or slot are kept, with the full count. An author or message longer than "
+    f"{MAX_TEXT} characters is cut and marked as truncated.",
     "Activity Log events are control-plane requests, kept 90 days. A slot swap names who requested it, "
     "when and on which slot; the slot it swapped with is not logged. A publish-profile download (publishxml) "
     "or a publishing-credentials read (config/publishingcredentials/list) names who obtained the shared Web "
@@ -195,6 +198,12 @@ def _iso(value):
     return value.isoformat() if isinstance(value, datetime) else value
 
 
+def capped(text):
+    if not isinstance(text, str) or len(text) <= MAX_TEXT:
+        return text
+    return f"{text[:MAX_TEXT]}… [truncated from {len(text)} characters]"
+
+
 def redact_url(url):
     """Drop any user:password a repository URL carries."""
     if not url:
@@ -211,9 +220,9 @@ def deployment_record(deployment: dict) -> dict:
         "deployment_id": basename(deployment.get("name") or deployment.get("id")),
         "status": DEPLOY_STATUS.get(status, None if status is None else str(status)),
         "active": bool(deployment.get("active") or False),
-        "author": deployment.get("author"),
+        "author": capped(deployment.get("author")),
         "deployer": deployment.get("deployer"),
-        "message": deployment.get("message"),
+        "message": capped(deployment.get("message")),
         "start_time": _iso(deployment.get("start_time")),
         "end_time": _iso(deployment.get("end_time")),
     }

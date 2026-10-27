@@ -534,3 +534,11 @@ def test_a_callerless_failure_under_a_reused_correlation_id_does_not_flip_a_fini
     assert (swaps["count"], swaps["failed"], swaps["latest"]["status"]) == (1, 0, "Succeeded")
     # Callerless rows alone stay with their own site rather than merging across sites.
     assert [apps[a]["activity"]["publish_profile_downloads"]["count"] for a in ("web-a", "web-b")] == [1, 1]
+
+
+def test_kudu_author_and_message_are_capped_and_marked():
+    long = "m" * 20_000
+    record = deploys.deployment_record({"status": 4, "author": long, "message": long})
+    for text in (record["author"], record["message"]):
+        assert text.startswith("m" * deploys.MAX_TEXT) and len(text) < deploys.MAX_TEXT + 40 and "truncated" in text
+    assert deploys.deployment_record({"author": "dev@example.com", "message": "fix"})["message"] == "fix"
