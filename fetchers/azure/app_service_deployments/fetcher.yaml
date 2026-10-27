@@ -77,7 +77,7 @@ evidence_set:
     - apps_with_slots — Number of web apps with at least one deployment slot
     - excluded_function_apps — Number of function apps and other sites that aren't web apps (kind not starting with app) left out
     - provider_registration_status — Whether the App Service provider (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown
-    - activity_log_days — Days of Activity Log requested (activity_log_days, 1 to 90; 90 is all the Activity Log keeps). The window is that many days back from the run; at 90 it starts 5 minutes inside the 90-day limit, so its oldest edge is still kept
+    - activity_log_days — Days of Activity Log requested (activity_log_days, 1 to 90; 90 is all the Activity Log keeps). The window is that many days back from the run; at 90 it starts an hour inside the 90-day limit, so its oldest edge is still kept when a long paged read reaches it
     - activity_log_complete — True if every page of the window was read; false if the read failed or stopped at 200,000 events, keeping the newest (results.activity_log.oldest_event_time shows how far back the read reached)
 
     Where do the apps deploy from?

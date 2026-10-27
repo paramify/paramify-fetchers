@@ -48,8 +48,8 @@ MAX_TEXT = 500
 
 # The Activity Log keeps 90 days; a read past this many events is cut and says so.
 ACTIVITY_LOG_MAX_DAYS = 90
-# The window starts this far inside retention, so its oldest edge is still served.
-ACTIVITY_LOG_RETENTION_MARGIN = timedelta(minutes=5)
+# The window starts this far inside retention, so its oldest edge is still served when a long paged read reaches it.
+ACTIVITY_LOG_RETENTION_MARGIN = timedelta(hours=1)
 ACTIVITY_LOG_MAX_EVENTS = 200_000
 # No $select: the documented list omits `caller`, so selecting could drop or reject the requester.
 

@@ -327,7 +327,8 @@ def test_read_activity_log_sends_both_bounds_and_pages_to_the_end(monkeypatch):
     events, window = deploys.read_activity_log(SUB, object(), collector, 90, NOW)
     assert collector.ok and window["complete"] is True and window["cut_reason"] is None
     assert window["events_read"] == len(DEFAULT_EVENTS)
-    assert "eventTimestamp ge '2026-08-01T12:05:00Z'" in seen["filter"]
+    # An hour inside the 90-day limit, so the oldest edge is still kept when a long paged read reaches it.
+    assert "eventTimestamp ge '2026-08-01T13:00:00Z'" in seen["filter"]
     assert "eventTimestamp le '2026-10-30T12:00:00Z'" in seen["filter"]
     assert "resourceProvider eq 'Microsoft.Web'" in seen["filter"]
     assert len(events) == len(DEFAULT_EVENTS) - 2
