@@ -83,6 +83,9 @@ QUERIES = (
     (HTTP_TABLE, "http_clients", HTTP_CLIENTS_QUERY), (AUDIT_TABLE, "audit", AUDIT_QUERY),
     (AUDIT_TABLE, "principals", PRINCIPAL_QUERY), (DEPENDENCY_TABLE, "dependencies", DEPENDENCY_QUERY),
 )
+# Dependencies span every App Insights component in the subscription, so they are the likeliest to hit the
+# query row or size cap; a failure there leaves the table unread without failing the run.
+BEST_EFFORT = frozenset({"dependencies"})
 # The Host header is the client's to set; a probe's text there can make the evidence upload refuse the file.
 HOST_NAME = re.compile(r"^[A-Za-z0-9.-]+(:[0-9]+)?$")
 QUERY_CODE = re.compile(r"^\((\d{3})\)\s*(\S*)")
@@ -199,9 +202,7 @@ def _arriving(records, destinations: list[str], workspaces: dict, table: str):
         return True
     for wid in destinations:
         ws = workspaces.get(id_key(wid)) or {}
-        if ws.get("status") == WS_NOT_FOUND:
-            continue
-        if ws.get("status") != WS_QUERIED or table not in ws.get("read_tables", ()):
+        if ws.get("status") != WS_NOT_FOUND and table not in ws.get("read_tables", ()):
             return None
     return False
 
@@ -396,6 +397,7 @@ def summarize(apps: list[dict], instances: list[dict], dependencies: list[dict],
         "app_roles_with_dependencies": len(dependencies),
         "dependency_targets": sum(d["targets_total"] for d in dependencies),
         "dependency_types": sorted({t for d in dependencies for t in d["dependency_types"]}),
+        "dependency_query_failures": sum(1 for w in workspaces if "dependencies" in w.get("failed_queries", ())),
         "log_workspaces": len(workspaces),
         "log_workspaces_queried": status[WS_QUERIED],
         "log_workspaces_not_authorized": status[WS_NOT_AUTHORIZED],
@@ -430,10 +432,24 @@ def _query(client, customer_id: str, table: str, kql: str, timespan: str) -> lis
         raise
 
 
+def _error_text(exc: BaseException) -> str:
+    return " ".join(str(exc).split())[:300]
+
+
+def _unread(out: dict, workspace_id: str, exc: BaseException, collector) -> dict:
+    """A refused or deleted workspace is evidence; any other failure here fails the run."""
+    status = ws_status(exc)
+    if status == WS_ERROR:
+        collector.record(f"loganalytics.query(service logs, {workspace_id})", exc)
+    else:
+        logger.warning("Log Analytics workspace %s: %s (%s)", workspace_id, status, exc)
+    return {**out, "status": status, "error": _error_text(exc), "read_tables": []}
+
+
 def read_workspace(client, workspace_id: str, subscription_id: str, days: int, sample: int, collector) -> dict:
-    """A refused or deleted workspace is evidence; any other failure fails the run."""
-    out = {"workspace_id": workspace_id, "name": basename(workspace_id), "status": WS_QUERIED, "error": None,
-           "tables": [], "read_tables": []}
+    """Each query stands alone: a failed one leaves only its own table unread."""
+    out: dict = {"workspace_id": workspace_id, "name": basename(workspace_id), "status": WS_QUERIED, "error": None,
+                 "tables": [], "read_tables": [], "failed_queries": [], **{key: [] for _, key, _ in QUERIES}}
     kql = filled_queries(subscription_id, days, sample)
     try:
         customer_id = dig(client.get(workspace_id, LAW_API), "properties", "customerId")
@@ -441,18 +457,27 @@ def read_workspace(client, workspace_id: str, subscription_id: str, days: int, s
             raise LookupError(f"no customerId on workspace {workspace_id}")
         out["tables"] = [table_record(t, _optional_table(client, workspace_id, t))
                          for t in (HTTP_TABLE, AUDIT_TABLE, DEPENDENCY_TABLE)]
-        ready = {t["name"] for t in out["tables"] if t["exists"] and readable(t)}
-        timespan = iso_duration_days(days)
-        for table, key, _ in QUERIES:
-            out[key] = _query(client, customer_id, table, kql[key], timespan) if table in ready else []
-        out["read_tables"] = sorted(t["name"] for t in out["tables"] if readable(t))
     except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
-        status = ws_status(exc)
-        if status == WS_ERROR:
-            collector.record(f"loganalytics.query(service logs, {workspace_id})", exc)
-        else:
-            logger.warning("Log Analytics workspace %s: %s (%s)", workspace_id, status, exc)
-        return {**out, "status": status, "error": " ".join(str(exc).split())[:300], "read_tables": []}
+        return _unread(out, workspace_id, exc, collector)
+    ready = {t["name"] for t in out["tables"] if t["exists"] and readable(t)}
+    timespan = iso_duration_days(days)
+    unread = set()
+    for table, key, _ in QUERIES:
+        if table not in ready:
+            continue
+        try:
+            out[key] = _query(client, customer_id, table, kql[key], timespan)
+        except Exception as exc:  # noqa: BLE001 — a refusal covers the workspace; anything else only this query
+            if ws_status(exc) != WS_ERROR:
+                return _unread(out, workspace_id, exc, collector)
+            unread.add(table)
+            out["failed_queries"].append(key)
+            if key in BEST_EFFORT:
+                logger.warning("Log Analytics workspace %s: %s query failed (%s)", workspace_id, key, exc)
+            else:
+                collector.record(f"loganalytics.query({key}, {workspace_id})", exc)
+                out["status"], out["error"] = WS_ERROR, out["error"] or _error_text(exc)
+    out["read_tables"] = sorted(t["name"] for t in out["tables"] if readable(t) and t["name"] not in unread)
     return out
 
 
@@ -505,7 +530,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
     )
     dependencies = dependency_records(workspaces, sample)
     workspace_records = [
-        {k: ws[k] for k in ("workspace_id", "name", "status", "error", "tables", "read_tables")}
+        {k: ws[k] for k in ("workspace_id", "name", "status", "error", "tables", "read_tables", "failed_queries")}
         for ws in workspaces.values()
     ]
     results = {

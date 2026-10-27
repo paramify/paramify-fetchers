@@ -147,6 +147,7 @@ def test_logs_sent_to_two_workspaces_count_once():
     (ws(status=slr.WS_NOT_AUTHORIZED, read=()), None),
     (ws(status=slr.WS_NOT_FOUND, read=()), False),
     (ws(status=slr.WS_ERROR, read=()), None),
+    (ws(status=slr.WS_ERROR, read=("AppServiceHTTPLogs",)), False),
 ])
 def test_app_without_records(workspace, arriving):
     record = slr.app_record({"id": SLOT, "name": "app1/staging"}, [setting(category="AppServiceHTTPLogs")],
@@ -335,8 +336,60 @@ class _QueryFails(_Client):
 def test_a_query_failure_after_the_tables_were_read_fails_the_run_and_keeps_the_tables():
     collector = Collector(slr.logger)
     out = slr.read_workspace(_QueryFails({"AzureDiagnostics": "Analytics"}), LAW, "s1", 7, 10, collector)
-    assert (out["status"], out["read_tables"], collector.ok) == (slr.WS_ERROR, [], False)
+    assert (out["status"], out["read_tables"], collector.ok) == (
+        slr.WS_ERROR, ["AppDependencies", "AppServiceHTTPLogs"], False)
+    assert out["failed_queries"] == ["audit", "principals"]
     assert [t["name"] for t in out["tables"] if t["exists"]] == ["AzureDiagnostics"]
+
+
+ALL_ANALYTICS = {t: "Analytics" for t in ("AppServiceHTTPLogs", "AzureDiagnostics", "AppDependencies")}
+
+
+class _OneQueryFails(_Client):
+    def __init__(self, marker, error):
+        super().__init__(ALL_ANALYTICS)
+        self.marker, self.error = marker, error
+
+    def query(self, customer_id, kql, timespan):
+        if self.marker in kql:
+            raise self.error
+        super().query(customer_id, kql, timespan)
+        return [{"ResourceId": SITE.lower(), "Records": 1}]
+
+
+def test_a_failed_dependency_query_is_best_effort():
+    collector = Collector(slr.logger)
+    client = _OneQueryFails("AppDependencies |", azure_rest.QueryError("PartialError", "record count limit"))
+    out = slr.read_workspace(client, LAW, "s1", 7, 10, collector)
+    assert (out["status"], out["failed_queries"], collector.ok) == (slr.WS_QUERIED, ["dependencies"], True)
+    assert out["read_tables"] == ["AppServiceHTTPLogs", "AzureDiagnostics"]
+    assert out["http"] and out["audit"] and out["dependencies"] == []
+
+
+def test_a_failed_query_leaves_the_other_tables_read():
+    collector = Collector(slr.logger)
+    client = _OneQueryFails("arg_max(", azure_rest.QueryError("(504) GatewayTimeout", "timed out"))
+    out = slr.read_workspace(client, LAW, "s1", 7, 10, collector)
+    assert (out["status"], out["failed_queries"], collector.ok) == (slr.WS_ERROR, ["http_latest"], False)
+    assert out["read_tables"] == ["AppDependencies", "AzureDiagnostics"]
+    assert out["http"] and out["http_clients"] and out["audit"] and out["principals"]
+    app = slr.app_record({"id": SITE}, [setting(category="AppServiceHTTPLogs")], {slr.id_key(LAW): {**out, "http": []}}, 10)
+    mi = slr.instance_record({"id": MI}, [setting(group="audit")], [], {slr.id_key(LAW): out}, 10)
+    assert (app["http_logs_arriving"], mi["audit_arriving"]) == (None, False)
+
+
+def test_summary_counts_workspaces_whose_dependency_query_failed():
+    workspaces = [{"workspace_id": LAW, "status": slr.WS_QUERIED, "tables": [], "failed_queries": ["dependencies"]},
+                  {"workspace_id": LAW_FAR, "status": slr.WS_ERROR, "tables": [], "failed_queries": ["audit"]}]
+    summary = slr.summarize([], [], [], workspaces, 7)
+    assert (summary["dependency_query_failures"], summary["log_workspaces_queried"]) == (1, 1)
+
+
+def test_a_refused_query_marks_the_workspace_not_authorized_without_a_failure():
+    collector = Collector(slr.logger)
+    client = _OneQueryFails("AppServiceHTTPLogs |", azure_rest.QueryError("(403) InsufficientAccessError", "no"))
+    out = slr.read_workspace(client, LAW, "s1", 7, 10, collector)
+    assert (out["status"], out["read_tables"], collector.ok) == (slr.WS_NOT_AUTHORIZED, [], True)
 
 
 @pytest.mark.parametrize("error, status", [

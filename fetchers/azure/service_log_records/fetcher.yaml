@@ -75,7 +75,7 @@ evidence_set:
     - GET {workspace id}/tables/{table} for AppServiceHTTPLogs, AzureDiagnostics and AppDependencies — each table's plan and retention; a missing table has never received a record
     - POST /v1/workspaces/{workspace}/query, KQL on AppServiceHTTPLogs — records, last record, status classes, hosts, latest request and top client IPs per app
     - POST /v1/workspaces/{workspace}/query, KQL on AzureDiagnostics where Category is SQLSecurityAuditEvents — audit events per instance, database and action, and per principal
-    - POST /v1/workspaces/{workspace}/query, KQL on AppDependencies — calls per app role, target and type, read only in destination workspaces
+    - POST /v1/workspaces/{workspace}/query, KQL on AppDependencies — calls per app role, target and type, read only in destination workspaces; best-effort, a failure leaves only this table unread
 
     Output: azure_service_log_records_<subscription>.json — each app and slot with its HTTP log export and arrival, each managed instance with its audit events, databases and principals, each app role's dependencies, and each destination workspace's tables and retention.
 
@@ -87,7 +87,7 @@ evidence_set:
     - managed_instances — Number of SQL managed instances in the subscription
     - managed_databases — Number of databases listed on the managed instances
     - log_workspaces — Number of destination workspaces: Log Analytics workspaces that a diagnostic setting sends App Service HTTP logs or managed instance audit events to
-    - log_workspaces_queried — Number of destination workspaces read without a refusal or error: each table's plan was read and every Analytics table among them was queried (a workspace whose tables are all Basic, Auxiliary or missing counts too)
+    - log_workspaces_queried — Number of destination workspaces read without a refusal or error: each table's plan was read and every Analytics table among them was queried (a workspace whose tables are all Basic, Auxiliary or missing counts too, and so does one whose only failure was the best-effort dependency query)
     - log_workspaces_not_authorized — Number of destination workspaces that refused the read (401 or 403, or in a subscription the caller can't see)
     - log_workspaces_not_found — Number of destination workspaces that no longer exist
 
@@ -95,7 +95,7 @@ evidence_set:
     - apps_exporting_http_logs — Number of exporting apps and slots: those with a diagnostic setting that sends AppServiceHTTPLogs, by name or through the allLogs group, to a Log Analytics workspace
     - apps_with_http_log_records — Number of exporting apps and slots whose HTTP logs are arriving: at least one record reached a destination workspace in the lookback
     - apps_without_http_log_records — Number of exporting apps and slots with no HTTP log record in the lookback, where every destination workspace was queried, lacks the table, or no longer exists
-    - apps_http_logs_unknown — Number of exporting apps and slots whose arrival is unknown: a destination workspace refused or failed the read, or keeps the table on a Basic or Auxiliary plan, which is not queried because it bills per GB scanned
+    - apps_http_logs_unknown — Number of exporting apps and slots whose arrival is unknown: a destination workspace refused or failed the read, a query on the AppServiceHTTPLogs table failed there, or the workspace keeps the table on a Basic or Auxiliary plan, which is not queried because it bills per GB scanned
     - http_log_arrival_percentage — Percentage of exporting apps and slots whose HTTP logs are arriving = apps_with_http_log_records / apps_exporting_http_logs × 100 (a whole number, 0–100); 0 when apps_exporting_http_logs is 0. Apps whose arrival is unknown count in the total but not as arriving
     - http_log_records — Number of HTTP log records that arrived for the subscription's apps and slots in the lookback, counted once when an app sends them to more than one workspace
     - http_log_retention_days — Number of days the AppServiceHTTPLogs table keeps records for queries (interactive retention), the shortest across the workspaces apps send HTTP logs to that have the table; null if none has it
@@ -105,7 +105,7 @@ evidence_set:
     - instances_exporting_audit — Number of exporting managed instances: those with a diagnostic setting that sends SQLSecurityAuditEvents, by name or through the audit or allLogs group, to a Log Analytics workspace
     - instances_with_audit_records — Number of exporting managed instances whose audit events are arriving: at least one event reached a destination workspace in the lookback, which shows a T-SQL server audit is running
     - instances_without_audit_records — Number of exporting managed instances with no audit event in the lookback, where every destination workspace was queried, lacks the table, or no longer exists
-    - instances_audit_unknown — Number of exporting managed instances whose arrival is unknown: a destination workspace refused or failed the read, or keeps the table on a Basic or Auxiliary plan
+    - instances_audit_unknown — Number of exporting managed instances whose arrival is unknown: a destination workspace refused or failed the read, a query on the audit events failed there, or the workspace keeps the table on a Basic or Auxiliary plan
     - audit_records — Number of audit events that arrived for the subscription's managed instances in the lookback, counted once when an instance sends them to more than one workspace
     - failed_audit_events — Number of audit events recording an action that failed, such as a failed login
     - audit_actions — Number of audit events for each action, such as LOGIN SUCCEEDED or LOGIN FAILED
@@ -123,5 +123,6 @@ evidence_set:
     - app_roles_with_dependencies — Number of Application Insights app roles (cloud role names) in the subscription that recorded dependency calls in a destination workspace in the lookback; only destination workspaces are read, so a component sending to any other workspace isn't counted and 0 can mean not looked at
     - dependency_targets — Number of distinct targets (data stores and services) the app roles called, counted once per app role
     - dependency_types — List of the kinds of dependency called, such as SQL, HTTP or Azure blob
+    - dependency_query_failures — Number of destination workspaces whose AppDependencies query failed, for example on the query API's row or size cap; the dependency read is best-effort, so this doesn't fail the run, and those workspaces' app roles aren't counted
     - dependency_retention_days — Number of days the AppDependencies table keeps records for queries (interactive retention), the shortest across destination workspaces that have the table; null if none has it
     - dependency_total_retention_days — Number of days the AppDependencies table keeps records in all, including long-term (archive) retention, the shortest across destination workspaces that have the table; null if none has it
