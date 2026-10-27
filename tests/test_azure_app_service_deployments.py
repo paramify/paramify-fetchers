@@ -550,3 +550,10 @@ def test_deployment_evidence_counts_add_up_to_the_apps(monkeypatch):
     assert [summary_of(apps)[k] for k in keys] == [0, 1, 1]
     unread = summary_of(apps, {"days": 90, "complete": False, "cut_reason": "read_failed"})
     assert [unread[k] for k in keys] == [0, None, 2]
+
+
+def test_source_control_url_tokens_are_stripped():
+    assert deploys.redact_url("https://git.example.com/team/app.git?token=s3cret&ref=main") == (
+        "https://git.example.com/team/app.git")
+    assert deploys.redact_url("https://u:p@git.example.com/app.git?access_token=s3cret#x") == "https://git.example.com/app.git"
+    assert deploys.redact_url("https://git.example.com/app.git") == "https://git.example.com/app.git"

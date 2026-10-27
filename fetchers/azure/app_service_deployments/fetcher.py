@@ -205,13 +205,13 @@ def capped(text):
 
 
 def redact_url(url):
-    """Drop any user:password a repository URL carries."""
+    """Drop any user:password, query string (?token=) or fragment a repository URL carries."""
     if not url:
         return url
     parts = urlsplit(str(url))
-    if "@" not in parts.netloc:
+    if "@" not in parts.netloc and not parts.query and not parts.fragment:
         return url
-    return urlunsplit(parts._replace(netloc=parts.netloc.rsplit("@", 1)[1]))
+    return urlunsplit(parts._replace(netloc=parts.netloc.rsplit("@", 1)[-1], query="", fragment=""))
 
 
 def deployment_record(deployment: dict) -> dict:
