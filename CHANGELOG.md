@@ -131,6 +131,25 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_key_vault_key_rotation` 0.2.0 covers certificates.** Each vault now
+  lists its certificates with their expiry (`expired`, `days_until_expiry`),
+  thumbprint and policy: issuer, validity, key shape and lifetime actions, read as
+  `auto_renew_enabled`. A vault whose certificate list answers 401 or 403 reads
+  `certificates_status: not_authorized` instead of looking like a vault with no
+  certificates, and any other error fails the run. New
+  `results.app_service_certificates` lists every App Service certificate with its
+  expiry and `source`: `key_vault`, `managed` or `uploaded`. A Key Vault-backed one
+  says whether its last sync succeeded and, where the vault was readable, whether
+  the certificate behind it auto-renews. The PFX, certificate blob and password are
+  never read. `web_provider_registration_status` in results and summary tells "App
+  Service not in use" from "no certificates"; a failing `certificates.list()` or
+  Microsoft.Web `providers.get()` fails the run. Summary adds certificate and App
+  Service certificate counts, expired and expiring-within-30-days counts, and
+  `certificate_auto_renew_percentage` over readable policies. Adds the
+  `azure-keyvault-certificates` dependency to the `azure` extra. Also mapped to
+  `KSI-SVC-SIN`. Existing fields are unchanged. A read-only production run with Reader exercised the `not_authorized`
+  path and the App Service list; readable vault certificates and managed or uploaded
+  App Service certificates are proven by synthetic tests only.
 - **`azure_rbac_role_assignments` 0.3.0: PIM eligibility, standing and activation
   rules.** Every active grant, at every scope, now carries `standing`:
   `permanent`, `time_bound` or `pim_activated`, read from its PIM schedule

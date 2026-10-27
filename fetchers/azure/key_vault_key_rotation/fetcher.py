@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Azure Key Vault key rotation for one subscription: each key's rotation policy and
-expiry, each secret's expiry. No key material or secret value is read.
+expiry, each secret's expiry, each certificate's expiry and auto-renew policy, and every
+App Service certificate's expiry and source. No key material, secret value or
+certificate body is read.
 
 Ported from prowler/providers/azure/services/keyvault/keyvault_service.py (Apache-2.0).
 Both planes are read and merged by key name, and `rotation_policy_source` records which
@@ -14,6 +16,7 @@ failed run.
 import logging
 import os
 import sys
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -26,6 +29,7 @@ from azure_common import (  # noqa: E402
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
+    arm_id_key,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -36,6 +40,7 @@ from azure_common import (  # noqa: E402
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
+    sorted_counts,
     write_evidence,
     report_failure,
 )
@@ -61,6 +66,26 @@ SOURCE_MANAGEMENT_PLANE = "management_plane"
 # hardcodes this form; preferring `vault_uri` is what keeps this correct in the
 # sovereign clouds (vault.usgovcloudapi.net / vault.azure.cn).
 DEFAULT_VAULT_URI_SUFFIX = "vault.azure.net"
+
+# Certificates carry their own data-plane grant (an access policy can allow keys and not certificates).
+CERTIFICATES_ACCESSIBLE = "accessible"
+CERTIFICATES_NOT_AUTHORIZED = "not_authorized"
+CERTIFICATES_FAILED = "failed"
+CERTIFICATES_NOT_ATTEMPTED = "not_attempted"
+REFUSED_STATUS_CODES = {401, 403}
+NOT_FOUND_STATUS_CODE = 404
+
+AUTO_RENEW_ACTION = "autorenew"
+EXPIRY_WARNING_DAYS = 30
+
+# Where an App Service certificate comes from decides who renews it.
+APP_SERVICE_SOURCE_KEY_VAULT = "key_vault"
+APP_SERVICE_SOURCE_MANAGED = "managed"
+APP_SERVICE_SOURCE_UPLOADED = "uploaded"
+APP_SERVICE_SOURCES = (APP_SERVICE_SOURCE_KEY_VAULT, APP_SERVICE_SOURCE_MANAGED, APP_SERVICE_SOURCE_UPLOADED)
+# keyVaultSecretStatus: Succeeded syncs; these are still pending or unknown; every other value is a failure.
+KEY_VAULT_SYNC_SUCCEEDED = "succeeded"
+KEY_VAULT_SYNC_UNDECIDED = {"unknown", "initialized", "waitingoncertificateorder"}
 
 
 # --- projection: the only code that touches an SDK model ---
@@ -255,6 +280,69 @@ def project_management_rotation_policy(policy) -> dict | None:
     }
 
 
+def project_certificate_properties(properties) -> dict:
+    """Read a data-plane `CertificateProperties`: metadata only, never the certificate or its key."""
+    thumbprint = model_attr(properties, "x509_thumbprint")
+    return {
+        "id": model_attr(properties, "id"),
+        "name": model_attr(properties, "name"),
+        "enabled": model_attr(properties, "enabled"),
+        "created": model_attr(properties, "created_on"),
+        "updated": model_attr(properties, "updated_on"),
+        "expires": model_attr(properties, "expires_on"),
+        "not_before": model_attr(properties, "not_before"),
+        "recovery_level": model_attr(properties, "recovery_level"),
+        "x509_thumbprint": thumbprint.hex().upper() if isinstance(thumbprint, (bytes, bytearray)) else thumbprint,
+    }
+
+
+def project_certificate_policy(policy) -> dict | None:
+    """Read a data-plane `CertificatePolicy`: issuer, validity, key shape and lifetime actions."""
+    if policy is None:
+        return None
+    return {
+        "issuer_name": model_attr(policy, "issuer_name"),
+        "subject": model_attr(policy, "subject"),
+        "validity_in_months": model_attr(policy, "validity_in_months"),
+        "key_type": model_attr(policy, "key_type"),
+        "key_size": model_attr(policy, "key_size"),
+        "key_curve_name": model_attr(policy, "key_curve_name"),
+        "reuse_key": model_attr(policy, "reuse_key"),
+        "exportable": model_attr(policy, "exportable"),
+        "content_type": model_attr(policy, "content_type"),
+        "lifetime_actions": [
+            {
+                "action": model_attr(action, "action"),
+                "lifetime_percentage": model_attr(action, "lifetime_percentage"),
+                "days_before_expiry": model_attr(action, "days_before_expiry"),
+            }
+            for action in (model_attr(policy, "lifetime_actions") or [])
+        ],
+    }
+
+
+def project_app_service_certificate(certificate) -> dict:
+    """Read an azure-mgmt-web `Certificate`; `pfx_blob`, `cer_blob` and `password` are never read."""
+    properties = properties_bag(certificate)
+    return {
+        "id": model_attr(certificate, "id"),
+        "name": model_attr(certificate, "name"),
+        "location": model_attr(certificate, "location"),
+        "subject_name": model_attr(properties, "subject_name"),
+        "host_names": model_attr(properties, "host_names"),
+        "issuer": model_attr(properties, "issuer"),
+        "issue_date": model_attr(properties, "issue_date"),
+        "expiration_date": model_attr(properties, "expiration_date"),
+        "thumbprint": model_attr(properties, "thumbprint"),
+        "canonical_name": model_attr(properties, "canonical_name"),
+        "domain_validation_method": model_attr(properties, "domain_validation_method"),
+        "key_vault_id": model_attr(properties, "key_vault_id"),
+        "key_vault_secret_name": model_attr(properties, "key_vault_secret_name"),
+        "key_vault_secret_status": model_attr(properties, "key_vault_secret_status"),
+        "server_farm_id": model_attr(properties, "server_farm_id"),
+    }
+
+
 # --- pure transforms (flat snake_case dicts in, evidence records out) ---
 
 def rotation_policy_record(policy: dict | None) -> dict | None:
@@ -342,6 +430,127 @@ def secret_record(secret: dict) -> dict:
     }
 
 
+def _utc_timestamp(value) -> str | None:
+    """`_iso8601_timestamp`, plus ISO strings with an offset brought to UTC."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+    return _iso8601_timestamp(value)
+
+
+def days_until(timestamp: str | None, now: datetime) -> int | None:
+    """Whole days from `now` to `timestamp`, negative once it has passed."""
+    if not timestamp:
+        return None
+    try:
+        moment = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return (moment - now).days
+
+
+def has_auto_renew_action(policy: dict | None) -> bool:
+    return any(
+        str(action.get("action") or "").strip().lower() == AUTO_RENEW_ACTION
+        for action in ((policy or {}).get("lifetime_actions") or [])
+    )
+
+
+def certificate_record(
+    certificate: dict, policy: dict | None, policy_readable: bool, now: datetime
+) -> dict:
+    """One Key Vault certificate; `auto_renew_enabled` is None when its policy could not be read."""
+    expires = _utc_timestamp(certificate.get("expires"))
+    days = days_until(expires, now)
+    return {
+        "id": certificate.get("id"),
+        "name": certificate.get("name"),
+        "enabled": True if certificate.get("enabled") is None else bool(certificate.get("enabled")),
+        "created": _utc_timestamp(certificate.get("created")),
+        "updated": _utc_timestamp(certificate.get("updated")),
+        "expires": expires,
+        "not_before": _utc_timestamp(certificate.get("not_before")),
+        "expired": None if days is None else days < 0,
+        "days_until_expiry": days,
+        "recovery_level": certificate.get("recovery_level"),
+        "x509_thumbprint": certificate.get("x509_thumbprint"),
+        "policy": policy if policy_readable else None,
+        "policy_readable": bool(policy_readable),
+        "auto_renew_enabled": has_auto_renew_action(policy) if policy_readable else None,
+    }
+
+
+def app_service_source(certificate: dict) -> str:
+    """Key Vault-backed, App Service managed (a canonical name or domain validation), or an uploaded PFX."""
+    if certificate.get("key_vault_id"):
+        return APP_SERVICE_SOURCE_KEY_VAULT
+    if certificate.get("canonical_name") or certificate.get("domain_validation_method"):
+        return APP_SERVICE_SOURCE_MANAGED
+    return APP_SERVICE_SOURCE_UPLOADED
+
+
+def key_vault_sync_succeeded(sync_status) -> bool | None:
+    """True on Succeeded, None while missing, unknown or pending, False on any error status."""
+    status = str(sync_status or "").strip().lower()
+    if not status or status in KEY_VAULT_SYNC_UNDECIDED:
+        return None
+    return status == KEY_VAULT_SYNC_SUCCEEDED
+
+
+def key_vault_auto_renew_index(vaults: list[dict]) -> dict:
+    """(vault id, certificate name) -> auto_renew_enabled, for vaults whose certificates were read."""
+    return {
+        (arm_id_key(vault.get("id")), str(cert.get("name") or "").lower()): cert.get("auto_renew_enabled")
+        for vault in vaults
+        if vault.get("certificates_status") == CERTIFICATES_ACCESSIBLE
+        for cert in vault.get("certificates") or []
+    }
+
+
+def app_service_certificate_record(
+    certificate: dict, now: datetime, auto_renew_index: dict | None = None
+) -> dict:
+    """One App Service certificate, linked to its Key Vault certificate's auto-renew where readable."""
+    resource_id = certificate.get("id")
+    expires = _utc_timestamp(certificate.get("expiration_date"))
+    days = days_until(expires, now)
+    source = app_service_source(certificate)
+    vault_id = certificate.get("key_vault_id")
+    secret_name = certificate.get("key_vault_secret_name")
+    sync_status = certificate.get("key_vault_secret_status")
+    from_key_vault = source == APP_SERVICE_SOURCE_KEY_VAULT
+    return {
+        "id": resource_id,
+        "name": certificate.get("name"),
+        "location": certificate.get("location"),
+        "resource_group": resource_group_from_id(resource_id),
+        "subject_name": certificate.get("subject_name"),
+        "host_names": sorted(certificate.get("host_names") or []),
+        "issuer": certificate.get("issuer"),
+        "issue_date": _utc_timestamp(certificate.get("issue_date")),
+        "expiration_date": expires,
+        "expired": None if days is None else days < 0,
+        "days_until_expiry": days,
+        "thumbprint": certificate.get("thumbprint"),
+        "source": source,
+        "canonical_name": certificate.get("canonical_name"),
+        "server_farm_id": certificate.get("server_farm_id"),
+        "key_vault_id": vault_id,
+        "key_vault_secret_name": secret_name,
+        "key_vault_secret_status": sync_status,
+        "key_vault_sync_succeeded": key_vault_sync_succeeded(sync_status) if from_key_vault else None,
+        "key_vault_certificate_auto_renew": (
+            (auto_renew_index or {}).get((arm_id_key(vault_id), str(secret_name or "").lower()))
+            if from_key_vault
+            else None
+        ),
+    }
+
+
 def merge_rotation_policies(keys: list[dict], data_plane_policies: dict) -> list[dict]:
     """Attach each data-plane rotation policy to its management-plane key, by name.
 
@@ -384,6 +593,56 @@ def vault_record(vault: dict) -> dict:
         "data_plane_message": vault.get("data_plane_message"),
         "keys": vault.get("keys") or [],
         "secrets": vault.get("secrets") or [],
+        # not_authorized is "could not see", never "holds no certificates".
+        "certificates_status": vault.get("certificates_status") or CERTIFICATES_NOT_ATTEMPTED,
+        "certificates_message": vault.get("certificates_message"),
+        "certificates": vault.get("certificates") or [],
+    }
+
+
+def _expiring_soon(records: list[dict]) -> int:
+    return sum(
+        1
+        for r in records
+        if r["days_until_expiry"] is not None and 0 <= r["days_until_expiry"] <= EXPIRY_WARNING_DAYS
+    )
+
+
+def source_counts(app_service_certificates: list[dict]) -> dict:
+    """Every source listed, 0 when it has none, so a validator can match "uploaded": 0."""
+    counts = Counter({source: 0 for source in APP_SERVICE_SOURCES})
+    counts.update(c["source"] for c in app_service_certificates)
+    return sorted_counts(counts)
+
+
+def summarize_certificates(vaults: list[dict], app_service_certificates: list[dict]) -> dict:
+    """Auto-renew coverage is measured over certificates whose policy was readable."""
+    certificates = [cert for vault in vaults for cert in vault.get("certificates") or []]
+    readable = [cert for cert in certificates if cert["policy_readable"]]
+    auto_renew = sum(1 for cert in readable if cert["auto_renew_enabled"])
+    from_key_vault = [
+        c for c in app_service_certificates if c["source"] == APP_SERVICE_SOURCE_KEY_VAULT
+    ]
+    return {
+        "certificate_accessible_vaults": sum(
+            1 for v in vaults if v.get("certificates_status") == CERTIFICATES_ACCESSIBLE
+        ),
+        "certificate_not_authorized_vaults": sum(
+            1 for v in vaults if v.get("certificates_status") == CERTIFICATES_NOT_AUTHORIZED
+        ),
+        "total_certificates": len(certificates),
+        "certificates_with_readable_policy": len(readable),
+        "certificates_with_auto_renew": auto_renew,
+        "certificate_auto_renew_percentage": coverage_percentage(auto_renew, len(readable)),
+        "expired_certificates": sum(1 for cert in certificates if cert["expired"]),
+        "certificates_expiring_within_30_days": _expiring_soon(certificates),
+        "total_app_service_certificates": len(app_service_certificates),
+        "app_service_certificates_by_source": source_counts(app_service_certificates),
+        "expired_app_service_certificates": sum(1 for c in app_service_certificates if c["expired"]),
+        "app_service_certificates_expiring_within_30_days": _expiring_soon(app_service_certificates),
+        "app_service_certificates_key_vault_sync_failing": sum(
+            1 for c in from_key_vault if c["key_vault_sync_succeeded"] is False
+        ),
     }
 
 
@@ -606,12 +865,122 @@ def collect_rotation_policies(vault: dict, cred, collector: Collector) -> None:
     vault["keys"] = merge_rotation_policies(vault.get("keys") or [], policies)
 
 
-def collect_key_vaults(subscription_id, cred, collector: Collector) -> list[dict]:
-    """Both planes: the management-plane inventory, then per-vault rotation policies."""
+def http_status(exc: BaseException) -> int | None:
+    """The HTTP status of a Key Vault HttpResponseError; None for anything else, credential failures included."""
+    return getattr(exc, "status_code", None) if is_data_plane_inaccessible(exc) else None
+
+
+def _first_line(exc: BaseException) -> str:
+    lines = str(exc).strip().splitlines()
+    return lines[0] if lines else type(exc).__name__
+
+
+def collect_certificates(vault: dict, cred, collector: Collector, now: datetime) -> None:
+    """List one vault's certificates and read each one's policy."""
+    from azure.keyvault.certificates import CertificateClient
+
+    vault["certificates"] = []
+    vault_uri = vault_data_plane_uri(vault)
+    if not vault_uri:
+        vault["certificates_status"] = CERTIFICATES_NOT_ATTEMPTED
+        vault["certificates_message"] = "no vault uri and no vault name to derive one from"
+        return
+
+    name = vault.get("name")
+    try:
+        client = CertificateClient(vault_url=vault_uri, credential=cred)
+        # list() forces the ItemPaged: a 403 surfaces on the first page, not here.
+        listed = list(client.list_properties_of_certificates())
+    except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
+        vault["certificates_message"] = " ".join(str(exc).split())[:300]
+        if http_status(exc) in REFUSED_STATUS_CODES:
+            logger.warning(
+                "key vault %s: certificates not readable by this credential — %s", name, _first_line(exc)
+            )
+            vault["certificates_status"] = CERTIFICATES_NOT_AUTHORIZED
+            return
+        collector.record(f"keyvault.certificates.list_properties_of_certificates ({name})", exc)
+        vault["certificates_status"] = CERTIFICATES_FAILED
+        return
+
+    records = []
+    for properties in listed:
+        cert_name = model_attr(properties, "name")
+        policy, readable = None, False
+        if cert_name:
+            try:
+                policy, readable = project_certificate_policy(client.get_certificate_policy(cert_name)), True
+            except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash
+                if http_status(exc) not in REFUSED_STATUS_CODES | {NOT_FOUND_STATUS_CODE}:
+                    collector.record(
+                        f"keyvault.certificates.get_certificate_policy ({name}/{cert_name})", exc
+                    )
+                else:
+                    logger.warning(
+                        "key vault %s: no readable policy for certificate %s — %s",
+                        name,
+                        cert_name,
+                        _first_line(exc),
+                    )
+        records.append(
+            certificate_record(project_certificate_properties(properties), policy, readable, now)
+        )
+    vault["certificates_status"] = CERTIFICATES_ACCESSIBLE
+    vault["certificates_message"] = None
+    vault["certificates"] = sorted(records, key=lambda r: r.get("name") or "")
+
+
+def collect_key_vaults(subscription_id, cred, collector: Collector, now: datetime | None = None) -> list[dict]:
+    """Both planes: the management-plane inventory, then per-vault rotation policies and certificates."""
+    now = now or datetime.now(timezone.utc)
     vaults = collect_management_plane(subscription_id, cred, collector)
     for vault in vaults:
         collect_rotation_policies(vault, cred, collector)
+        collect_certificates(vault, cred, collector, now)
     return sorted((vault_record(v) for v in vaults), key=lambda r: r.get("id") or "")
+
+
+def collect_app_service_certificates(
+    subscription_id, cred, collector: Collector, vaults: list[dict], now: datetime
+) -> list[dict]:
+    """certificates.list(): every Microsoft.Web/certificates resource; Reader is enough."""
+    from azure.mgmt.web import WebSiteManagementClient
+
+    def _client():
+        return WebSiteManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
+
+    client = collector.guard("web.WebSiteManagementClient (init)", _client)
+    if client is None:
+        return []
+    listed = collector.guard(
+        "web.certificates.list",
+        lambda: [project_app_service_certificate(c) for c in client.certificates.list()],
+        default=[],
+    )
+    index = key_vault_auto_renew_index(vaults)
+    return sorted(
+        (app_service_certificate_record(c, now, index) for c in listed),
+        key=lambda r: r.get("id") or "",
+    )
+
+
+def evidence_sections(
+    vaults: list[dict], registration: str, app_service_certificates: list[dict], web_registration: str
+) -> tuple[dict, dict]:
+    """The payload's results and summary."""
+    results = {
+        "key_vaults": vaults,
+        "provider_registration_status": registration,
+        "app_service_certificates": app_service_certificates,
+        "web_provider_registration_status": web_registration,
+    }
+    summary = {
+        **summarize(vaults),
+        **summarize_certificates(vaults, app_service_certificates),
+        "provider_registration_status": registration,
+        "web_provider_registration_status": web_registration,
+    }
+    return results, summary
 
 
 def main() -> int:
@@ -631,7 +1000,10 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     vaults: list[dict] = []
+    app_service_certificates: list[dict] = []
     registration = REGISTRATION_UNKNOWN
+    web_registration = REGISTRATION_UNKNOWN
+    now = datetime.now(timezone.utc)
     if subscription_id and cred is not None:
         # ARM returns an empty list, not an error, for an unregistered provider.
         registration = provider_registration_status(
@@ -643,7 +1015,13 @@ def main() -> int:
                 "vaults in use; reporting status not_registered",
                 subscription_id,
             )
-        vaults = collect_key_vaults(subscription_id, cred, collector)
+        vaults = collect_key_vaults(subscription_id, cred, collector, now)
+        web_registration = provider_registration_status(
+            collector, subscription_id, cred, "Microsoft.Web"
+        )
+        app_service_certificates = collect_app_service_certificates(
+            subscription_id, cred, collector, vaults, now
+        )
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -653,15 +1031,13 @@ def main() -> int:
             ),
         )
 
+    results, summary = evidence_sections(vaults, registration, app_service_certificates, web_registration)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={
-            "key_vaults": vaults,
-            "provider_registration_status": registration,
-        },
-        summary={**summarize(vaults), "provider_registration_status": registration},
+        results=results,
+        summary=summary,
     )
 
     filename = (
