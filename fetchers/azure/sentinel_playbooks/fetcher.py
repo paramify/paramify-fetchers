@@ -7,7 +7,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
@@ -93,7 +93,7 @@ def get_workflow(client, workflow_id: str) -> Dict[str, Any]:
     return client.get(workflow_id, LOGIC_API)
 
 
-def trigger_kind(path: str) -> str:
+def trigger_kind(path: Optional[str]) -> str:
     path = (path or "").lower()
     if "incident" in path:
         return "incident"
@@ -105,7 +105,8 @@ def trigger_kind(path: str) -> str:
 
 
 def recipients(body: Dict[str, Any]) -> Tuple[List[str], int]:
-    static, dynamic = set(), 0
+    static: Set[str] = set()
+    dynamic = 0
     for field in ("To", "Cc", "Bcc", "to", "cc", "bcc", "emailMessage/To"):
         value = body.get(field)
         if not isinstance(value, str) or not value.strip():

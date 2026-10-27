@@ -5,7 +5,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
@@ -47,7 +47,7 @@ def directory_roles(client) -> Dict[str, List[Dict[str, Any]]]:
 
 def project_user(user: Dict[str, Any], roles: Dict[str, List[Dict[str, Any]]], now: datetime) -> Dict[str, Any]:
     updated = parse_time(user.get("riskLastUpdatedDateTime"))
-    held = roles.get(user.get("id"), [])
+    held = roles.get(cast(str, user.get("id")), [])
     return {
         "id": user.get("id"),
         "user_principal_name": user.get("userPrincipalName"),
