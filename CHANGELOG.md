@@ -179,7 +179,9 @@ schemas and the `paramify` CLI — not the internal code.
   Sentinel health monitoring is on, `connector_health` holds each connection's
   latest SentinelHealth status and reason, and each connector shows the worst of
   its connections; `connectors_unhealthy` counts the connections whose latest
-  status is Failure or Warning, so Informational, a normal event, reads healthy.
+  status is Failure or Warning. The status is read from Data fetch status change
+  events (Success or Failure) only, so the hourly Informational failure summary,
+  written only after polling errors, can't hide a Failure.
   `data_connectors` now also lists kinds only the preview
   listing returns, such as Defender XDR (`MicrosoftThreatProtection`), with
   `seen_in` saying which listing returned each.

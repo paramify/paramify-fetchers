@@ -649,20 +649,21 @@ def test_data_sources_health_shows_the_worst_connection(azure, tmp_path):
     connectors_workspace(azure)
     azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"] += [
         {"id": f"{SI_A}/dataConnectors/{n}", "name": n, "kind": "RestApiPoller", "properties": {"connectorDefinitionName": "MyCcp"}}
-        for n in ("ccp2", "ccp3", "ccp4")]
+        for n in ("ccp2", "ccp3")]
     # A Warning listed first doesn't hide a Failure.
     azure.queries.insert(0, ("SentinelResourceType", table(
         ["SentinelResourceId", "TimeGenerated", "Status", "Reason", "Description", "SentinelResourceKind", "SentinelResourceName"],
         [[f"{SI_A}/dataConnectors/ccp1", iso(NOW), "Success", None, None, "RestApiPoller", "ccp1"],
          [f"{SI_A}/dataConnectors/ccp2", iso(NOW), "Warning", "Throttled", "slow", "RestApiPoller", "ccp2"],
-         [f"{SI_A}/dataConnectors/ccp3", iso(NOW), "Failure", "Unauthorized", "token expired", "RestApiPoller", "ccp3"],
-         [f"{SI_A}/dataConnectors/ccp4", iso(NOW), "Informational", None, "data fetched", "RestApiPoller", "ccp4"]])))
+         [f"{SI_A}/dataConnectors/ccp3", iso(NOW), "Failure", "Unauthorized", "token expired", "RestApiPoller", "ccp3"]])))
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
     ccp = next(c for c in ws["connectors"] if c["id"] == "MyCcp")
-    assert ccp["connections"] == ["ccp1", "ccp2", "ccp3", "ccp4"] and ccp["health_status"] == "Failure"
-    # Informational is a normal event, so only the Warning and the Failure count.
+    assert ccp["connections"] == ["ccp1", "ccp2", "ccp3"] and ccp["health_status"] == "Failure"
     assert ws["connectors_unhealthy"] == 2 and ev["summary"]["connectors_unhealthy"] == 2
+    # The hourly Informational failure summary, written only after polling errors, mustn't hide a Failure.
+    health = next(q for _, _, q in azure.calls if q and "SentinelResourceType" in q)
+    assert "OperationName == 'Data fetch status change'" in health
 
 
 def test_data_sources_batches_map_rows_back(azure, tmp_path, monkeypatch):

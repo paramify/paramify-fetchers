@@ -37,8 +37,8 @@ ALERTS_TABLE = "SecurityAlert"
 ALERT_ONLY_EXTRAS = {"McasShadowItReporting": "discoveryLogs"}
 SENTINEL_PRODUCTS = frozenset({"azure sentinel", "microsoft sentinel"})
 HEALTH_TABLE = "SentinelHealth"
-# Worst first for a connector fed by several connections; any other status, Informational and null included, sits between
-# Warning and Success. Only Warning and Failure count as unhealthy.
+# Worst first for a connector fed by several connections; any other status, null included, sits between Warning and
+# Success. Only Warning and Failure count as unhealthy.
 HEALTH_RANK = {"failure": 3, "warning": 2, "success": 0}
 
 INGESTION_QUERY = (
@@ -51,9 +51,12 @@ ALERT_PRODUCTS_QUERY = (
     "| where TimeGenerated > ago({days}d) "
     "| summarize LastIngested = max(TimeGenerated), Records = count() by ProductName"
 )
+# A connector's status is its Data fetch status change (Success or Failure); the hourly Informational failure summary,
+# written only after polling errors, would otherwise hide a Failure.
 HEALTH_QUERY = (
     "SentinelHealth "
     "| where TimeGenerated > ago({days}d) and SentinelResourceType == 'Data connector' "
+    "and OperationName == 'Data fetch status change' "
     "| summarize arg_max(TimeGenerated, Status, Reason, Description, SentinelResourceKind, SentinelResourceName) "
     "by SentinelResourceId"
 )
