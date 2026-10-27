@@ -746,8 +746,15 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure.mgmt.storage",
         "StorageManagementClient",
         "storage_accounts",
+        ["list", "get_properties"],
+        "azure/storage_encryption_status — get_properties expands geoReplicationStats",
+    ),
+    (
+        "azure.mgmt.storage",
+        "StorageManagementClient",
+        "blob_containers",
         ["list"],
-        "azure/storage_encryption_status",
+        "azure/storage_encryption_status — container access level and immutability",
     ),
     (
         "azure.mgmt.storage",
@@ -1713,6 +1720,49 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "ManagedTransparentDataEncryptionProperties",
         ["state"],
         "azure/sql_managed_instance_encryption — a lost field reads as 'not encrypted'",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "StorageAccountProperties",
+        [
+            "key_creation_time",
+            "geo_replication_stats",
+            "primary_location",
+            "secondary_location",
+            "status_of_primary",
+            "status_of_secondary",
+            "last_geo_failover_time",
+        ],
+        "azure/storage_encryption_status — a renamed key_creation_time reads every "
+        "access key's age as unknown",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "GeoReplicationStats",
+        ["status", "last_sync_time", "can_failover", "can_planned_failover",
+         "post_failover_redundancy", "post_planned_failover_redundancy"],
+        "azure/storage_encryption_status — geo-replication health",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "KeyCreationTime",
+        ["key1", "key2"],
+        "azure/storage_encryption_status — access-key age",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "ContainerProperties",
+        ["public_access", "metadata", "has_immutability_policy", "has_legal_hold",
+         "immutable_storage_with_versioning"],
+        "azure/storage_encryption_status — a renamed public_access reads a public "
+        "container as private",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "NetworkRuleSet",
+        ["default_action", "ip_rules", "ipv6_rules", "virtual_network_rules"],
+        "azure/storage_encryption_status — a renamed ipv6_rules reads an account "
+        "that admits IPv6 clients as closed to the internet",
     ),
     (
         "azure.mgmt.keyvault.models",

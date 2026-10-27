@@ -116,9 +116,6 @@ class FakeAzure:
             ]},
             (f"{SI_A}/dataConnectors", "2025-10-01-preview"): {"value": []},
             (f"{SI_A}/dataConnectorDefinitions", "2025-09-01"): {"value": []},
-            (f"{WS_A}/tables", "2023-09-01"): law_tables(
-                ["AzureActivity", "SecurityAlert", "Usage", "Heartbeat", "SigninLogs", "AuditLogs", "OfficeActivity",
-                 "SentinelHealth", "SecurityIncident", "McasShadowItReporting", "MyCcp_CL"], basic=["StorageBlobLogs"]),
             (f"{SI_A}/alertRules", "2025-09-01"): {
                 "value": [rule("fusion", "Fusion", True, "f71aba3d-28fb-450b-b192-4e76a83015c8")],
                 "nextLink": f"https://management.azure.com{SI_A}/alertRules?api-version=2025-09-01&$skipToken=p2"},
@@ -131,8 +128,21 @@ class FakeAzure:
                 rule("nrt", "NRT", True)]},
             (f"{SI_A}/alertRuleTemplates", "2025-09-01"): {"value": [
                 {"name": "65360bb0-8986-4ade-a89d-af3cf44d28aa", "kind": "Scheduled"},
-                {"name": "f71aba3d-28fb-450b-b192-4e76a83015c8", "kind": "Fusion"},
+                {"name": "f71aba3d-28fb-450b-b192-4e76a83015c8", "kind": "Fusion", "properties": {"requiredDataConnectors": [
+                    {"connectorId": "AzureActiveDirectoryIdentityProtection", "dataTypes": ["SecurityAlert (IPC)"]},
+                    {"connectorId": "Syslog", "dataTypes": ["Syslog"]}]}},
                 {"name": "b3cfc7c0-092c-481c-a55b-34a3979758cb", "kind": "MicrosoftSecurityIncidentCreation"}]},
+            (f"{SI_A}/alertRuleTemplates", "2025-10-01-preview"): {"value": [
+                {"name": "f71aba3d-28fb-450b-b192-4e76a83015c8", "kind": "Fusion"},
+                {"name": "tpl-nrt", "kind": "NRT", "properties": {"requiredDataConnectors": [
+                    {"connectorId": "AzureActivity", "dataTypes": ["AzureActivity"]}]}}]},
+            (f"{SI_A}/alertRuleTemplates/tpl-nrt", "2025-10-01-preview"): {
+                "name": "tpl-nrt", "kind": "NRT", "properties": {"requiredDataConnectors": [
+                    {"connectorId": "AzureActivity", "dataTypes": ["AzureActivity"]}]}},
+            (f"{WS_A}/tables", "2023-09-01"): {"value": WORKSPACE_TABLES + EXTRA_TABLES["value"]},
+            (f"{WS_A}/savedSearches", "2023-09-01"): {"value": [
+                {"name": "parser", "properties": {"category": "Security", "functionAlias": "CiscoASA", "query": "Syslog"}},
+                {"name": "hunt", "properties": {"category": "Hunting Queries", "query": "SigninLogs | take 1"}}]},
             (f"{SI_A}/incidents", "2025-09-01"): {"value": [
                 incident("i-new", "New", NOW - timedelta(days=200)),
                 incident("i-closed", "Closed", NOW - timedelta(days=3), "TruePositive"),
@@ -229,7 +239,7 @@ def azure(monkeypatch, tmp_path):
     monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", SUB)
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
     monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
-    for env in ("SENTINEL_WORKSPACES", "AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID"):
+    for env in ("SENTINEL_WORKSPACES", "AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID", "SENTINEL_RULE_QUERY_TEXT"):
         monkeypatch.delenv(env, raising=False)
     return fake
 
@@ -733,7 +743,34 @@ def test_analytics_rules_merge_preview_kinds(azure, tmp_path):
     assert ws["enabled_rules"] == 3 and ws["disabled_rules"] == 1
     assert ws["enabled_by_kind"] == {"Fusion": 1, "NRT": 1, "Scheduled": 1}
     assert ws["fusion_enabled"] is True and ws["rules_only_in_preview"] == 1
+    # No rule uses a template only the preview API has, so none is read from it.
     assert ws["templates_available"] == 3 and ws["templates_in_use"] == 2
+    assert not any(c[1].startswith(f"{SI_A}/alertRuleTemplates") and c[2] == "2025-10-01-preview" for c in azure.calls)
+
+
+def test_analytics_rules_nrt_rule_falls_back_to_a_preview_only_template(azure, tmp_path):
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": [
+        rule("nrt", "NRT", True, "tpl-nrt", query="_ASim_AuditEvent | take 1")]}
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    nrt = next(r for r in ws_a(ev)["rules"] if r["name"] == "nrt")
+    assert code == 0 and ws_a(ev)["notes"] == []
+    assert (nrt["tables_read"], nrt["tables_from"], nrt["tables_without_data"]) == (["AzureActivity"], "template", [])
+    preview = [c[1] for c in azure.calls if c[1].startswith(f"{SI_A}/alertRuleTemplates") and c[2] == "2025-10-01-preview"]
+    assert preview == [f"{SI_A}/alertRuleTemplates/tpl-nrt"]
+    assert ws_a(ev)["templates_available"] == 4 and ws_a(ev)["templates_in_use"] == 3
+
+
+@pytest.mark.parametrize("status, notes", [(404, 0), (403, 1)])
+def test_analytics_rules_preview_template_lookup(azure, tmp_path, status, notes):
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": [
+        rule("nrt", "NRT", True, "tpl-nrt", query="_ASim_AuditEvent | take 1")]}
+    azure.arm[(f"{SI_A}/alertRuleTemplates/tpl-nrt", "2025-10-01-preview")] = Resp(
+        status, {"error": {"code": "NotFound" if status == 404 else "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    nrt = next(r for r in ws["rules"] if r["name"] == "nrt")
+    assert code == 0 and nrt["tables_read"] is None and ws["templates_available"] == 3
+    assert len(ws["notes"]) == notes and all("tpl-nrt" in n for n in ws["notes"])
 
 
 def test_analytics_rules_preview_failure_is_a_note(azure, tmp_path):
@@ -741,8 +778,8 @@ def test_analytics_rules_preview_failure_is_a_note(azure, tmp_path):
         400, {"error": {"code": "InvalidApiVersionParameter", "message": "retired"}})
     code, ev = run("sentinel_analytics_rules", tmp_path)
     ws = ws_a(ev)
-    assert code == 0 and ws["enabled_rules"] == 2
-    assert "NRT" in ws["notes"][0]
+    assert code == 0 and ws["enabled_rules"] == 2 and ws["templates_available"] == 3
+    assert len(ws["notes"]) == 1 and "NRT" in ws["notes"][0]
 
 
 def test_analytics_rules_forbidden_fails_the_run(azure, tmp_path):
@@ -751,6 +788,431 @@ def test_analytics_rules_forbidden_fails_the_run(azure, tmp_path):
     assert code == 1 and ev["metadata"]["partial_failure"] is True
     assert ws_a(ev)["rules"] is None
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+
+
+# OfficeActivity has an Operation column, so the name Operation counts only where a table can stand.
+WORKSPACE_TABLES = [
+    {"name": n, "properties": {"plan": "Analytics", "schema": {
+        "standardColumns": [{"name": "TimeGenerated"}], "columns": [{"name": c} for c in cols]}}}
+    for n, cols in (("AzureActivity", []), ("SigninLogs", []), ("SecurityAlert", []), ("Syslog", []),
+                    ("CommonSecurityLog", []), ("OfficeActivity", ["Operation"]), ("Operation", []),
+                    ("Event", []), ("Usage", []), ("Heartbeat", []), ("SecurityEvent", []),
+                    ("AzureDiagnostics", []), ("AuditLogs", []))]
+# The data-source fetcher's additions to the default listing; StorageBlobLogs is Basic.
+EXTRA_TABLES = law_tables(["SentinelHealth", "SecurityIncident", "McasShadowItReporting", "MyCcp_CL"], basic=["StorageBlobLogs"])
+TABLES = {t["name"] for t in WORKSPACE_TABLES}
+AMBIGUOUS = {"Operation"}
+
+
+@pytest.mark.parametrize("query, expected", [
+    ("SigninLogs | where ResultType != '0'", ["SigninLogs"]),
+    ("// SigninLogs | take 1\nAzureActivity | take 1", ["AzureActivity"]),
+    ("let f = (t:string) { table(t) | take 1 };\nunion f('SigninLogs'), f(\"OfficeActivity\")", ["OfficeActivity", "SigninLogs"]),
+    ("OfficeActivity | where Operation == 'x' | summarize make_set(Operation) by Operation", ["OfficeActivity"]),
+    ("OfficeActivity | project UserId, Operation | where true", ["OfficeActivity"]),
+    ("Operation | where OperationStatus == 'Failed'", ["Operation"]),
+    ("union isfuzzy=true Syslog, Operation | take 1", ["Operation", "Syslog"]),
+    ("Syslog | join kind=inner (Operation | take 1) on Computer", ["Operation", "Syslog"]),
+    ("let x = Operation; x | where Detail has 'url // not a comment'", ["Operation"]),
+    ("MyApp_CL | where msg has \"AzureActivity\"", ["MyApp_CL"]),
+    ("OfficeActivity | extend p = pack(\"Operation\", Operation)", ["OfficeActivity"]),
+    ("_Im_NetworkSession | take 1", []),
+    (r'SecurityEvent | where P startswith @"C:\Windows\Temp\" | join (SigninLogs) on X | where y == "z"',
+     ["SecurityEvent", "SigninLogs"]),
+    (r"SecurityEvent | where FilePath == @'C:\SigninLogs\' | take 1", ["SecurityEvent"]),
+    ('SecurityEvent | where M has @"say ""SigninLogs"" now" | take 1', ["SecurityEvent"]),
+    ('Usage | where DataType in ("SecurityEvent", "Syslog")', ["Usage"]),
+    ("AzureDiagnostics | where Category in ('AuditLogs')", ["AzureDiagnostics"]),
+    ('workspace("other").SecurityEvent | take 1', []),
+    ("SigninLogs | extend e = parse_json(Props).Event | take 1", ["SigninLogs"]),
+    ("Syslog | lookup kind=leftouter (Operation | take 1) on Computer", ["Operation", "Syslog"]),
+    ("Syslog | lookup Operation on Computer", ["Operation", "Syslog"]),
+    ("let n = toscalar(SigninLogs | count);\nAzureActivity | where Count > n", ["AzureActivity", "SigninLogs"]),
+    ("let m = materialize(Operation | take 1);\nm | take 1", ["Operation"]),
+    ('search in (SigninLogs, AuditLogs) "admin"', ["AuditLogs", "SigninLogs"]),
+    ('find in (SecurityEvent, Syslog) where Computer == "x"', ["SecurityEvent", "Syslog"]),
+    ('find in (SecurityEvent, Operation) where Computer == "x"', ["Operation", "SecurityEvent"]),
+    ("union Signin* | take 1", []),  # wildcards aren't resolved, so the rule falls back to its template
+    ('table("Operation") | take 1', ["Operation"]),
+    # Names the query assigns or declares are columns or variables, not tables.
+    ("SigninLogs | extend Event = tostring(Props.x) | where isnotempty(Event)", ["SigninLogs"]),
+    ("let Heartbeat = 5; SigninLogs | where X > Heartbeat", ["SigninLogs"]),
+    ("datatable(Event:string)['a'] | join (SigninLogs) on Event", ["SigninLogs"]),
+    ("SigninLogs | parse Msg with * 'x' Event:string | summarize Usage = count() by Event", ["SigninLogs"]),
+    ("SigninLogs | mv-expand Event = Props | project-rename Usage = Event", ["SigninLogs"]),
+    ("SigninLogs | extend Event = 1 | join (Event | take 1) on Computer", ["Event", "SigninLogs"]),
+])
+def test_analytics_rules_tables_named_in_a_query(query, expected):
+    assert MODS["sentinel_analytics_rules"].query_tables(query, TABLES, AMBIGUOUS) == expected
+
+
+@pytest.mark.parametrize("query, expected", [
+    # Names that mv-expand, mv-apply, `as` and withsource= bind are columns or results, not tables.
+    ("SigninLogs | mv-expand Event | where isnotempty(Event)", ["SigninLogs"]),
+    ("SigninLogs | mv-expand kind=array Event, Usage to typeof(string) | where isnotempty(Event)", ["SigninLogs"]),
+    ("SigninLogs | mv-apply Event on (take 1) | project Event", ["SigninLogs"]),
+    ("SigninLogs | as Event | where isnotempty(Event)", ["SigninLogs"]),
+    ("SigninLogs | as hint.materialized=true Event | project Event", ["SigninLogs"]),
+    ("union withsource=Event SigninLogs, AuditLogs | where isnotempty(Event)", ["AuditLogs", "SigninLogs"]),
+    ("find withsource=Event in (SigninLogs) where X == 1 | project Event", ["SigninLogs"]),
+    # Bracket-quoted names, and table() with a custom table.
+    ("['SigninLogs'] | take 1", ["SigninLogs"]),
+    ('union ["AuditLogs"], Syslog', ["AuditLogs", "Syslog"]),
+    ("SigninLogs | extend x = Props['AuditLogs'] | take 1", ["SigninLogs"]),
+    ('table("Other_CL") | take 1', ["Other_CL"]),
+])
+def test_analytics_rules_names_a_query_binds_and_quoted_tables(query, expected):
+    assert MODS["sentinel_analytics_rules"].query_tables(query, TABLES, AMBIGUOUS) == expected
+
+
+def test_analytics_rules_carry_a_hash_and_length_of_each_query():
+    import hashlib
+
+    mod = MODS["sentinel_analytics_rules"]
+    query = "SigninLogs | where ResultType != '0' // ü"
+    with_query = mod.project_rule(rule("q", "Scheduled", True, query=query))
+    without = mod.project_rule(rule("f", "Fusion", True))
+    assert (with_query["query_sha256"], with_query["query_length"]) == (
+        hashlib.sha256(query.encode("utf-8")).hexdigest(), len(query))
+    assert (without["query_sha256"], without["query_length"]) == (None, None)
+
+
+def test_analytics_rules_query_text_is_opt_in(azure, tmp_path, monkeypatch):
+    query = "SigninLogs | where AppDisplayName has '; unset $(id)'"
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [rule("signins", "Scheduled", True, query=query)]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    _, ev = run("sentinel_analytics_rules", tmp_path)
+    [default] = ws_a(ev)["rules"]
+    assert "query" not in default and "unset" not in json.dumps(ev)
+    assert (default["query_length"], default["tables_read"], ws_a(ev)["query_text_included"]) == (
+        len(query), ["SigninLogs"], False)
+    for f in tmp_path.glob("azure_sentinel_analytics_rules_*.json"):
+        f.unlink()
+    monkeypatch.setenv("SENTINEL_RULE_QUERY_TEXT", "true")
+    _, ev = run("sentinel_analytics_rules", tmp_path)
+    [opted] = ws_a(ev)["rules"]
+    assert (opted["query"], opted["query_sha256"], ws_a(ev)["query_text_included"]) == (
+        query, default["query_sha256"], True)
+
+
+FUNCTIONS = {"CiscoASA"}
+
+
+@pytest.mark.parametrize("query, expected", [
+    # A name the workspace doesn't list, where only a table can stand, is a table it never provisioned.
+    ("AWSCloudTrail | where EventName == 'x'", ["AWSCloudTrail"]),
+    ("let x = AWSCloudTrail; x | take 1", ["AWSCloudTrail"]),
+    ("union isfuzzy=true AWSCloudTrail, GCPAuditLogs", ["AWSCloudTrail", "GCPAuditLogs"]),
+    ("SigninLogs | join kind=inner (AWSCloudTrail | take 1) on X", ["AWSCloudTrail", "SigninLogs"]),
+    ('search in (AWSCloudTrail, SigninLogs) "admin"', ["AWSCloudTrail", "SigninLogs"]),
+    ("let n = toscalar(AWSCloudTrail | count); SigninLogs | where C > n", ["AWSCloudTrail", "SigninLogs"]),
+    ('table("AWSCloudTrail") | take 1', ["AWSCloudTrail"]),
+    # Workspace functions, built-in parsers, the query's own names, literals and value lists are not tables.
+    ("CiscoASA | where x == 1", []),
+    ("_Im_Dns | take 1", []),
+    ("let Base = SigninLogs | take 1; Base | take 1", ["SigninLogs"]),
+    ("let f = (t:string) { table(t) }; f('Unlisted')", []),
+    ("let enabled = true; SigninLogs | where E == enabled", ["SigninLogs"]),
+    ("SigninLogs | where Category in (Foo, Bar)", ["SigninLogs"]),
+    ("SigninLogs | extend x = (Foo) | take 1", ["SigninLogs"]),
+    ("SigninLogs | mv-expand Foo | take 1", ["SigninLogs"]),
+    ('workspace("other").AWSCloudTrail | take 1', []),
+])
+def test_analytics_rules_unlisted_tables(query, expected):
+    mod = MODS["sentinel_analytics_rules"]
+    assert mod.query_tables(query, TABLES, AMBIGUOUS, FUNCTIONS) == expected
+    # Without the workspace's functions, an unlisted name could be one, so only listed tables count.
+    assert mod.query_tables(query, TABLES, AMBIGUOUS) == [t for t in expected if t in TABLES]
+
+
+def test_analytics_rules_unprovisioned_tables_read_as_missing_data(azure, tmp_path):
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
+        rule("aws", "Scheduled", True, query="AWSCloudTrail | where EventName == 'ConsoleLogin'"),
+        rule("asa", "Scheduled", True, query="CiscoASA | where x == 1"),
+        rule("gcp", "Scheduled", True, "tpl-gcp", query="_Im_Authentication | take 1")]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    azure.arm[(f"{SI_A}/alertRuleTemplates", "2025-09-01")] = {"value": [
+        {"name": "tpl-gcp", "kind": "Scheduled", "properties": {"requiredDataConnectors": [
+            {"connectorId": "GCPAudit", "dataTypes": ["GCPAuditLogs"]}]}}]}
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    by_name = {r["name"]: r for r in ws["rules"]}
+    assert code == 0 and ws["notes"] == []
+    assert [(by_name[n]["tables_read"], by_name[n]["tables_from"], by_name[n]["tables_without_data"])
+            for n in ("aws", "asa", "gcp")] == [
+        (["AWSCloudTrail"], "query", ["AWSCloudTrail"]), (None, None, None),
+        (["GCPAuditLogs"], "template", ["GCPAuditLogs"])]
+    assert ws["enabled_rules_tables_unknown"] == 1
+    assert sorted(r["name"] for r in ws["enabled_rules_missing_data"]) == ["aws", "gcp"]
+
+
+def test_analytics_rules_template_parsers_are_not_tables():
+    template = {"properties": {"requiredDataConnectors": [
+        {"connectorId": "DNS", "dataTypes": ["_Im_Dns"]}, {"connectorId": "SyslogAma", "dataTypes": ["Syslog"]}]}}
+    assert MODS["sentinel_analytics_rules"].template_tables(template) == ["Syslog"]
+
+
+def test_analytics_rules_without_the_workspace_functions_unlisted_names_stay_unknown(azure, tmp_path):
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
+        rule("aws", "Scheduled", True, query="AWSCloudTrail | where EventName == 'ConsoleLogin'")]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    azure.arm[(f"{WS_A}/savedSearches", "2023-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and len(ws["notes"]) == 1 and "saved search" in ws["notes"][0]
+    assert (ws["rules"][0]["tables_read"], ws["enabled_rules_tables_unknown"]) == (None, 1)
+
+
+def test_analytics_rules_tables_and_data(azure, tmp_path):
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
+        rule("signins", "Scheduled", True, query="SigninLogs | where ResultType != '0'",
+             suppressionEnabled=True, suppressionDuration="PT5H"),
+        rule("parser", "Scheduled", True, "tpl-net", query="_Im_NetworkSession | where DstPortNumber == 4444"),
+        rule("dns", "Scheduled", True, "tpl-dns", query="_Im_Dns | take 1"),
+        rule("custom", "Scheduled", True, query="MyApp_CL | where Level == 'Error'"),
+        rule("off", "Scheduled", False, query="OfficeActivity | take 1"),
+        rule("mde", "MicrosoftSecurityIncidentCreation", True,
+             productFilter="microsoft defender advanced threat protection"),
+        rule("mcas", "MicrosoftSecurityIncidentCreation", True, productFilter="Microsoft Cloud App Security"),
+        rule("fusion", "Fusion", True, "f71aba3d-28fb-450b-b192-4e76a83015c8")]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": [
+        rule("nrt", "NRT", True, query="AzureActivity | where OperationNameValue has 'delete'")]}
+    fusion_template = azure.arm[(f"{SI_A}/alertRuleTemplates", "2025-09-01")]["value"][1]
+    azure.arm[(f"{SI_A}/alertRuleTemplates", "2025-09-01")] = {"value": [
+        fusion_template,
+        {"name": "tpl-net", "kind": "Scheduled", "properties": {"requiredDataConnectors": [
+            {"connectorId": "PaloAltoNetworks", "dataTypes": ["CommonSecurityLog (PaloAlto)"]},
+            {"connectorId": "SyslogAma", "dataTypes": ["Syslog"]}]}},
+        {"name": "tpl-dns", "kind": "Scheduled", "properties": {"requiredDataConnectors": [
+            {"connectorId": "DNS", "dataTypes": ["Event"]},
+            {"connectorId": "Fortinet", "dataTypes": ["CommonSecurityLog (Fortinet)"]}]}}]}
+    azure.queries.insert(0, ("union withsource=ParamifySourceTable", table(
+        ["ParamifySourceTable", "LastIngested", "Records"],
+        [["AzureActivity", iso(NOW), 10], ["SecurityAlert", iso(NOW), 2], ["Syslog", iso(NOW), 7], ["Usage", iso(NOW), 5],
+         ["OfficeActivity", iso(NOW), 3]])))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    ws = ws_a(ev)
+    by_name = {r["name"]: r for r in ws["rules"]}
+    signins = by_name["signins"]
+    assert "query" not in signins and signins["query_length"] == len("SigninLogs | where ResultType != '0'")
+    assert signins["suppression_enabled"] is True and ws["query_text_included"] is False
+    assert signins["suppression_duration"] == "PT5H" and ws["enabled_rules_suppressed"] == 1
+    assert (signins["tables_read"], signins["tables_from"], signins["tables_without_data"]) == (
+        ["SigninLogs"], "query", ["SigninLogs"])
+    # A template's connectors are alternatives: Syslog ingests, so the parser rule has data.
+    assert (by_name["parser"]["tables_read"], by_name["parser"]["tables_from"], by_name["parser"]["tables_without_data"]) == (
+        ["CommonSecurityLog", "Syslog"], "template", [])
+    assert by_name["dns"]["tables_without_data"] == ["CommonSecurityLog", "Event"]
+    assert (by_name["custom"]["tables_from"], by_name["custom"]["tables_without_data"]) == ("query", ["MyApp_CL"])
+    assert by_name["nrt"]["tables_without_data"] == [] and by_name["nrt"]["seen_in"] == ["preview"]
+    assert (by_name["mde"]["tables_from"], by_name["mde"]["tables_without_data"]) == ("alert_product", [])
+    assert by_name["mcas"]["tables_without_data"] == ["SecurityAlert"]
+    fusion = by_name["fusion"]
+    assert (fusion["tables_read"], fusion["tables_from"], fusion["tables_without_data"]) == (None, None, None)
+    assert ws["enabled_rules_tables_unknown"] == 1
+    assert ws["ingesting_tables_not_read"] == ["OfficeActivity"]  # its only rule is disabled; Usage is workspace telemetry
+    assert {r["name"]: r["tables_without_data"] for r in ws["enabled_rules_missing_data"]} == {
+        "custom": ["MyApp_CL"], "dns": ["CommonSecurityLog", "Event"], "mcas": ["SecurityAlert"], "signins": ["SigninLogs"]}
+    assert [(t["table"], t["enabled_rules"], t["last_ingested"] is not None) for t in ws["tables_read_by_enabled_rules"]] == [
+        ("AzureActivity", 1, True), ("CommonSecurityLog", 2, False), ("Event", 1, False), ("MyApp_CL", 1, False),
+        ("SecurityAlert", 2, True), ("SigninLogs", 1, False), ("Syslog", 1, True)]
+    assert ws["workspace_tables_listed"] == len(WORKSPACE_TABLES) + len(EXTRA_TABLES["value"]) and ws["ingestion_window_days"] == 14
+    assert ev["summary"]["enabled_rules_missing_data"] == 4 and ev["summary"]["ingesting_tables_not_read"] == 1
+    # A template's data types are what the rule may read, so tables read only that way are labelled.
+    assert {t["table"]: t["enabled_rules_by_template"] for t in ws["tables_read_by_enabled_rules"]} == {
+        "AzureActivity": 0, "CommonSecurityLog": 2, "Event": 1, "MyApp_CL": 0, "SecurityAlert": 0, "SigninLogs": 0,
+        "Syslog": 1}
+    assert ws["ingesting_tables_read_only_by_templates"] == ["Syslog"]
+    assert ev["summary"]["ingesting_tables_read_only_by_templates"] == 1
+
+
+def test_analytics_rules_disabled_incident_rule_still_gets_its_product_checked(azure, tmp_path):
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
+        rule("mde", "MicrosoftSecurityIncidentCreation", False, productFilter="Microsoft Defender Advanced Threat Protection")]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["rules"][0]["tables_without_data"] == []
+    # SecurityAlert also holds Sentinel's own alerts, so it never counts as an unread source.
+    assert ws["ingesting_tables_not_read"] == ["AzureActivity"]
+
+
+def connection(name, kind, alerts="Enabled"):
+    return {"id": f"{SI_A}/dataConnectors/{name}", "name": name, "kind": kind,
+            "properties": {"tenantId": "t", "dataTypes": {"alerts": {"state": alerts}}}}
+
+
+def incident_rule(name, product, enabled=True):
+    return rule(name, "MicrosoftSecurityIncidentCreation", enabled, productFilter=product)
+
+
+def incident_rules_workspace(azure, rules, stable=(), preview=()):
+    """Incident-creation rules for products that sent no alert (the products query finds only Defender for Endpoint)."""
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": list(rules)}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-09-01")] = stable if isinstance(stable, Resp) else {"value": list(stable)}
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = (
+        preview if isinstance(preview, Resp) else {"value": list(preview)})
+
+
+def test_analytics_rules_alert_only_rule_is_quiet_through_its_own_connection(azure, tmp_path):
+    incident_rules_workspace(azure, [incident_rule("ipc", "Azure Active Directory Identity Protection")],
+                         stable=[connection("aad", "AzureActiveDirectory")])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["notes"] == []
+    assert [r["name"] for r in ws["enabled_rules_missing_data"]] == ["ipc"]
+    assert ws["enabled_rules_quiet"] == [{
+        "name": "ipc", "display_name": "ipc", "product_filter": "Azure Active Directory Identity Protection",
+        "alerts_enabled_on": ["AzureActiveDirectory"],
+        "reason": "its product sent no alert in the window, and its own connection has alerts enabled"}]
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (1, 1)
+
+
+def test_analytics_rules_alert_only_rule_is_quiet_through_defender_xdr(azure, tmp_path):
+    # Only the preview listing returns the Defender XDR connection.
+    incident_rules_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
+                         stable=[connection("o365", "Office365")],
+                         preview=[connection("o365", "Office365"), connection("xdr", "MicrosoftThreatProtection")])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    [quiet] = ws_a(ev)["enabled_rules_quiet"]
+    assert code == 0 and quiet["alerts_enabled_on"] == ["MicrosoftThreatProtection"]
+    assert "Defender XDR, which carries that product's alerts," in quiet["reason"]
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (1, 1)
+
+
+def test_analytics_rules_unknown_product_is_never_quiet(azure, tmp_path):
+    # A product the API may add later has no known connection, so even Defender XDR and every own kind sending
+    # alerts don't make it quiet.
+    kinds = ["AzureActiveDirectory", "AzureAdvancedThreatProtection", "AzureSecurityCenter", "IOT",
+             "MicrosoftCloudAppSecurity", "MicrosoftDefenderAdvancedThreatProtection", "OfficeATP", "MicrosoftThreatProtection"]
+    incident_rules_workspace(azure, [incident_rule("new", "Microsoft Defender for Something New")],
+                         preview=[connection(k.lower(), k) for k in kinds])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and [r["name"] for r in ws["enabled_rules_missing_data"]] == ["new"]
+    assert ws["enabled_rules_quiet"] == []
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (1, 0)
+
+
+def test_analytics_rules_alert_only_rules_not_wired_are_not_quiet(azure, tmp_path):
+    # Defender for Office 365's alerts are Disabled on its own connection and on Defender XDR's; Defender for Cloud
+    # was never connected, and Defender XDR doesn't carry its alerts.
+    incident_rules_workspace(
+        azure,
+        [incident_rule("mdo", "Office 365 Advanced Threat Protection"), incident_rule("mdc", "Azure Security Center"),
+         incident_rule("off", "Azure Advanced Threat Protection", enabled=False)],
+        stable=[connection("atp", "OfficeATP", "Disabled")],
+        preview=[connection("atp", "OfficeATP", "Disabled"), connection("xdr", "MicrosoftThreatProtection", "Disabled")])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["enabled_rules_quiet"] == []
+    assert sorted(r["name"] for r in ws["enabled_rules_missing_data"]) == ["mdc", "mdo"]
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (2, 0)
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [connection("xdr", "MicrosoftThreatProtection")]}
+    for f in tmp_path.glob("azure_sentinel_analytics_rules_*.json"):
+        f.unlink()
+    _, ev = run("sentinel_analytics_rules", tmp_path)
+    assert [r["name"] for r in ws_a(ev)["enabled_rules_quiet"]] == ["mdo"]  # Defender XDR now sends alerts; not for mdc
+
+
+def test_analytics_rules_only_incident_rules_read_quiet(azure, tmp_path):
+    # SecurityAlert got nothing at all; a scheduled rule reading it and SigninLogs stays missing data.
+    incident_rules_workspace(
+        azure,
+        [incident_rule("mdi", "Azure Advanced Threat Protection"),
+         rule("mixed", "Scheduled", True, query="SecurityAlert | join (SigninLogs) on $left.CompromisedEntity == $right.UserPrincipalName")],
+        preview=[connection("xdr", "MicrosoftThreatProtection")])
+    azure.queries.insert(0, ("union withsource=ParamifySourceTable", table(
+        ["ParamifySourceTable", "LastIngested", "Records"], [["AzureActivity", iso(NOW), 10]])))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and [r["name"] for r in ws["enabled_rules_quiet"]] == ["mdi"]
+    assert {r["name"]: r["tables_without_data"] for r in ws["enabled_rules_missing_data"]} == {
+        "mdi": ["SecurityAlert"], "mixed": ["SecurityAlert", "SigninLogs"]}
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (2, 1)
+    assert not any(c[0] == "POST" and "by ProductName" in c[2] for c in azure.calls)
+
+
+def test_analytics_rules_unreadable_connector_listing_leaves_quiet_unknown(azure, tmp_path):
+    incident_rules_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
+                         stable=Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}}),
+                         preview=[connection("o365", "Office365")])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert ws_a(ev)["enabled_rules_quiet"] is None
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (1, None)
+
+
+def test_analytics_rules_failed_preview_connector_listing_is_a_note(azure, tmp_path):
+    retired = Resp(400, {"error": {"code": "InvalidApiVersionParameter", "message": "retired"}})
+    incident_rules_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")], preview=retired)
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["enabled_rules_quiet"] is None and ev["summary"]["enabled_rules_quiet"] is None
+    assert len(ws["notes"]) == 1 and "Defender XDR" in ws["notes"][0]
+    # A rule its own stable-listed connection makes quiet stays quiet without the preview listing.
+    incident_rules_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
+                         stable=[connection("aatp", "AzureAdvancedThreatProtection")], preview=retired)
+    for f in tmp_path.glob("azure_sentinel_analytics_rules_*.json"):
+        f.unlink()
+    _, ev = run("sentinel_analytics_rules", tmp_path)
+    assert [r["name"] for r in ws_a(ev)["enabled_rules_quiet"]] == ["mdi"] and ev["summary"]["enabled_rules_quiet"] == 1
+
+
+def test_analytics_rules_without_alert_only_rules_missing_data_skip_the_connector_listing(azure, tmp_path):
+    incident_rules_workspace(azure, [incident_rule("mde", "Microsoft Defender Advanced Threat Protection")])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    assert code == 0 and ws_a(ev)["enabled_rules_quiet"] == [] and ev["summary"]["enabled_rules_quiet"] == 0
+    assert not any(c[1] == f"{SI_A}/dataConnectors" for c in azure.calls)
+
+
+def test_analytics_rules_quiet_total_is_null_if_any_measured_workspace_is_unknown():
+    summarize = MODS["sentinel_analytics_rules"].summarize
+    quiet = [{"name": "mdi"}]
+    known = {"rules": [], "enabled_rules_missing_data": quiet, "enabled_rules_quiet": quiet}
+    unknown = {"rules": [], "enabled_rules_missing_data": quiet, "enabled_rules_quiet": None}
+    unmeasured = {"rules": [], "enabled_rules_missing_data": None, "enabled_rules_quiet": None}
+    assert summarize([known, unmeasured])["enabled_rules_quiet"] == 1
+    assert summarize([known, unknown])["enabled_rules_quiet"] is None
+    assert summarize([unmeasured])["enabled_rules_quiet"] is None
+
+
+def test_analytics_rules_workspace_without_customer_id(azure, tmp_path):
+    workspaces = azure.arm[(f"/subscriptions/{SUB}/providers/Microsoft.OperationalInsights/workspaces", "2023-09-01")]
+    del workspaces["value"][0]["properties"]["customerId"]
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert ws["rules"] and all(r["tables_without_data"] is None for r in ws["rules"])
+    assert ws["enabled_rules_missing_data"] is None and ev["summary"]["enabled_rules_missing_data"] is None
+    assert ws["enabled_rules_quiet"] is None and ev["summary"]["enabled_rules_quiet"] is None
+    assert not any(c[0] == "POST" for c in azure.calls)
+
+
+def test_analytics_rules_without_ingestion_leave_data_unknown(azure, tmp_path):
+    azure.queries.insert(0, ("union withsource=ParamifySourceTable", Resp(403, {"error": {
+        "code": "InsufficientAccessError", "message": "no query access"}})))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+    assert ws["rules"] and all(r["tables_without_data"] is None for r in ws["rules"])
+    assert ws["ingesting_tables_not_read"] is None and ws["enabled_rules_missing_data"] is None
+    assert ws["enabled_rules_quiet"] is None
+    summary = ev["summary"]
+    assert summary["enabled_rules_missing_data"] is None and summary["ingesting_tables_not_read"] is None
+    assert summary["enabled_rules_quiet"] is None
+    assert summary["enabled_rules_tables_unknown"] == 3
+
+
+def test_analytics_rules_without_the_table_list_still_list_rules(azure, tmp_path):
+    azure.arm[(f"{WS_A}/tables", "2023-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["enabled_rules"] == 3
+    assert all(r["tables_read"] is None for r in ws["rules"]) and "ingesting_tables_not_read" not in ws
+    assert ev["summary"]["enabled_rules_tables_unknown"] is None
 
 
 def test_incidents(azure, tmp_path):

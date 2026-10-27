@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 77 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 79 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -68,7 +68,7 @@ otherwise.
 | A custom role with `Microsoft.Web/sites/host/listkeys/action` and `Microsoft.Web/sites/config/list/action` | `azure_function_app_configuration` | Access keys and app settings read `not_authorized` per app; the run succeeds |
 | `Microsoft.Web/sites/config/list/action` (optional) | `azure_app_service_backups` | The custom backup configuration reads `not_authorized`; the run succeeds |
 | Key Vault Reader (RBAC vaults), or an access policy with key List and Get Rotation Policy (optional) | `azure_key_vault_key_rotation` | The vault reports `data_plane_status: inaccessible`; rotation policies still come from the management plane |
-| Log Analytics Reader on the workspaces they query | `azure_log_analytics_query_audit`, `azure_sentinel_data_sources`, `azure_sentinel_incidents`, `azure_devops_audit_streams` (Azure Monitor Logs streams) | The KQL query fails |
+| Log Analytics Reader on the workspaces they query | `azure_log_analytics_query_audit`, `azure_sentinel_analytics_rules`, `azure_sentinel_data_sources`, `azure_sentinel_incidents`, `azure_devops_audit_streams` (Azure Monitor Logs streams) | The KQL query fails |
 | Reader on other subscriptions (optional) | `azure_alert_rules` and `azure_activity_log_alerts` (action groups), `azure_app_gateway_waf` (WAF policies), `azure_vnet_egress_routing` (Virtual WAN hubs) | That reference reads unresolved; the run succeeds |
 | Reader on the management group (optional) | `azure_policy_assignments` | Management-group custom definitions read `unavailable`; the run succeeds |
 
@@ -104,11 +104,16 @@ each call's Microsoft Graph reference page lists them.
 |---|---|
 | Build, Code, Test Management, Project and Team, Release (all Read), and Environment (Read & manage, as there is no read-only Environment scope) | `azure_devops_pipelines` |
 | Read Audit Log (`vso.auditlog`), from a user with View audit log | `azure_devops_audit_streams` |
+| Graph, Member Entitlement Management (both Read) | `azure_devops_identities` |
+| Security (Manage), as there is no read-only scope for permissions (the fetcher only reads), plus Identity, Code, and Project and Team (all Read) | `azure_devops_permissions` |
 
 The PAT is optional. Without one, the fetchers sign in as the ambient Entra identity,
 which must be added to the organization: project Reader for pipelines, View audit log
-for audit streams. Only the Entra sign-in can read the Log Audit Events policy; with a
-PAT, `azure_devops_audit_streams` judges auditing from the audit log instead.
+for audit streams, organization membership for identities (the least privilege that
+reads last-access dates is not yet measured), and an organization member who can view
+permissions in each namespace and read every Git repository for permissions. Only the
+Entra sign-in can read the Log Audit Events policy; with a PAT,
+`azure_devops_audit_streams` judges auditing from the audit log instead.
 
 ## Wiring into a manifest
 
@@ -144,7 +149,7 @@ and still names the file after the target.
 
 `workspaces` is accepted by the four `azure_sentinel_*` fetchers,
 `azure_log_analytics_query_audit` and `azure_log_analytics_deletion_rights`, and
-`projects` by `azure_devops_pipelines`. Fetchers with lookback windows or list limits
+`projects` by `azure_devops_pipelines` and `azure_devops_permissions`. Fetchers with lookback windows or list limits
 take `set-config` keys; `paramify describe <fetcher>` lists them with their defaults.
 
 Ready-to-edit manifests:
@@ -232,7 +237,7 @@ Data, storage and keys:
 
 | Fetcher | Evidence |
 |---|---|
-| `azure_storage_encryption_status` | Storage accounts: customer- or platform-managed key, infrastructure encryption, HTTPS and TLS, public access, network rules, shared-key access |
+| `azure_storage_encryption_status` | Storage accounts: customer- or platform-managed key, infrastructure encryption, HTTPS and TLS, public access, network rules, shared-key access, access-key age (never the keys), geo-replication health, each blob container's anonymous access and immutability, owner and classification tags |
 | `azure_disk_encryption_status` | Managed disks: platform key, customer-managed key or double encryption, Azure Disk Encryption, export exposure |
 | `azure_key_vault_configuration` | Key vaults: RBAC or access policies, soft delete and purge protection, network exposure, and whether audit events are exported |
 | `azure_key_vault_key_rotation` | Every key's rotation policy and expiry, and every secret's expiry. No key material or secret value is read |
@@ -273,7 +278,7 @@ Microsoft Sentinel:
 
 | Fetcher | Evidence |
 |---|---|
-| `azure_sentinel_analytics_rules` | Analytics rules per workspace: kind, state, severity, MITRE tactics and techniques, and whether Fusion is on |
+| `azure_sentinel_analytics_rules` | Analytics rules per workspace: kind, state, severity, MITRE tactics and techniques, a hash of each query (the text is opt-in), suppression, the tables each reads and whether they got data, which incident-creation rules are quiet (no alert from a product whose alerts are wired up), and whether Fusion is on |
 | `azure_sentinel_automation_rules` | Automation rules per workspace: triggers, conditions, state and actions |
 | `azure_sentinel_data_sources` | Data connectors per workspace with each one's last data received and health, and which tables received data in the ingestion window. An alert-only connector (Defender for Endpoint, Office 365, Identity, Cloud, Cloud Apps or IoT, Entra ID Protection, Insider Risk Management) with no alert but a linked connection sending alerts reads quiet, not not connected, and still `connected: false`. `connectors_configured_without_data` counts connectors with a connection but no data that aren't quiet |
 | `azure_sentinel_incidents` | Incidents in the lookback plus every open one: severity, status, classification, owner and time to close |
@@ -302,6 +307,8 @@ Azure DevOps:
 |---|---|
 | `azure_devops_pipelines` | Pipelines and what their YAML tests, scans and deploys, whether a failing test stops each deploy, runs, test results, environment checks and branch policies |
 | `azure_devops_audit_streams` | Whether auditing is on, every audit stream and its status, and whether Azure Monitor Logs streams are receiving events |
+| `azure_devops_identities` | Every user's access level, groups and last access, inactive users, and who holds privileged Azure DevOps groups, directly or through Entra groups |
+| `azure_devops_permissions` | Who is allowed or denied what at organization, project, repository, pipeline, environment and service-connection scope, high-impact rights outside the admin groups, and who may bypass Git branch policies |
 
 ## Notes
 
