@@ -271,7 +271,7 @@ Microsoft Sentinel:
 
 | Fetcher | Evidence |
 |---|---|
-| `azure_sentinel_analytics_rules` | Analytics rules per workspace: kind, state, severity, MITRE tactics and techniques, query and suppression, the tables each reads and whether they got data, and whether Fusion is on |
+| `azure_sentinel_analytics_rules` | Analytics rules per workspace: kind, state, severity, MITRE tactics and techniques, a hash of each query (the text is opt-in), suppression, the tables each reads and whether they got data, and whether Fusion is on |
 | `azure_sentinel_automation_rules` | Automation rules per workspace: triggers, conditions, state and actions |
 | `azure_sentinel_data_sources` | Data connectors per workspace, and which tables received data in the ingestion window |
 | `azure_sentinel_incidents` | Incidents in the lookback plus every open one: severity, status, classification, owner and time to close |

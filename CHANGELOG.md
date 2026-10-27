@@ -117,8 +117,10 @@ schemas and the `paramify` CLI — not the internal code.
 ### Changed
 
 - **`azure_sentinel_analytics_rules` 0.2.0: rule queries, suppression and the
-  tables each rule reads.** Each rule now carries its KQL `query` with its
-  `query_sha256` and `query_length`, `suppression_enabled` and
+  tables each rule reads.** Each rule now carries its KQL query's
+  `query_sha256` and `query_length` (the `query` text itself only with
+  `SENTINEL_RULE_QUERY_TEXT=true`, since detection queries hold strings a web
+  firewall refuses), `suppression_enabled` and
   `suppression_duration`, and `tables_read`: the local workspace tables its
   query names, in code, bracket-quoted (`['T']`) or as a string passed to
   `table()` or to a function the query defines (`tables_from: query`), else the
@@ -132,9 +134,9 @@ schemas and the `paramify` CLI — not the internal code.
   unions don't count. A name the workspace doesn't list counts as a table it
   never provisioned where only a table can stand, unless it is one of the
   workspace's functions (read from saved searches); a template's data types
-  count whether or not the workspace lists them. The `query` is the rule's full
-  KQL as written, so it can hold the user names, IP addresses and file paths
-  the rule names. Incident-creation rules read `SecurityAlert` and
+  count whether or not the workspace lists them. When included, the `query` is
+  the rule's full KQL as written, so it can hold the user names, IP addresses
+  and file paths the rule names. Incident-creation rules read `SecurityAlert` and
   have data only when their own product sent an alert. Each workspace lists the
   tables enabled rules read with their last ingestion, the ingesting tables no
   enabled rule reads (`SecurityAlert` left out, since it also holds Sentinel's

@@ -3,6 +3,7 @@
 
 import hashlib
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -28,6 +29,9 @@ from sentinel_ingestion import (  # noqa: E402
 )
 
 NAME = "azure_sentinel_analytics_rules"
+# Detection queries routinely hold text a web firewall refuses (/etc/passwd, <script, ; rm -rf), which would cost
+# the whole evidence file, so the full text is opt-in; the hash and length identify each query without it.
+QUERY_TEXT_ENV = "SENTINEL_RULE_QUERY_TEXT"
 FUSION_TEMPLATE = "f71aba3d-28fb-450b-b192-4e76a83015c8"
 INCIDENT_CREATION = "MicrosoftSecurityIncidentCreation"
 # Kinds with no query of their own: their template's connectors are optional signals, not tables the rule needs.
@@ -266,6 +270,10 @@ def tables_without_data(
     return [t for t in read if t not in ingested]
 
 
+def include_query_text() -> bool:
+    return os.environ.get(QUERY_TEXT_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def is_fusion(rule: Dict[str, Any]) -> bool:
     return rule.get("kind") == "Fusion" or rule.get("alert_rule_template_name") == FUSION_TEMPLATE
 
@@ -405,11 +413,16 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         for r in rules:
             r["tables_without_data"] = tables_without_data(r, ingested, products)
 
+    with_text = include_query_text()
+    for r in rules or []:
+        if not with_text:
+            r.pop("query", None)
     used = {r.get("alert_rule_template_name") for r in rules or [] if r.get("alert_rule_template_name")}
     template_names = {t.get("name") for t in templates or []}
     return {
         "api_versions": {"stable": SI_API, "preview": SI_PREVIEW_API},
         "ingestion_window_days": days,
+        "query_text_included": with_text,
         "rules": rules,
         **(rule_summary(rules) if rules is not None else {}),
         **(coverage(rules, ingested) if rules is not None and listed_tables is not None else {}),

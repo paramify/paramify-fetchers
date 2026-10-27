@@ -51,6 +51,19 @@ config_schema:
       receiving data. The default of 14 matches Sentinel's own rule for showing
       a connector as connected.
 
+  include_rule_query_text:
+    type: boolean
+    required: false
+    default: false
+    env: SENTINEL_RULE_QUERY_TEXT
+    description: >
+      Opt-in. When true, each rule also carries its full KQL query text as
+      written. Off by default: detection queries routinely contain strings a
+      web firewall refuses (file paths, script tags, shell commands), which
+      can get the whole evidence file refused, and allow-lists can hold user
+      names or IP addresses. Every rule carries the query's SHA-256 and length
+      either way.
+
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
 ksis:
@@ -78,7 +91,7 @@ evidence_set:
     - KQL union * summarized by table (per workspace) — each table's last ingestion time in the window
     - KQL on SecurityAlert by product (per workspace) — which products sent alerts, for incident-creation rules (only when the workspace has one and SecurityAlert received data)
 
-    Output: azure_sentinel_analytics_rules_<subscription>.json — for each Sentinel workspace, every analytics rule with its full query text as written (including any user names, IP addresses or file paths the query names) and the query's SHA-256 and length, suppression, the tables it reads and which of them got no data, plus the arriving tables no enabled rule reads, and, per table enabled rules read, how many of those rules read it only through their template.
+    Output: azure_sentinel_analytics_rules_<subscription>.json — for each Sentinel workspace, every analytics rule with its query's SHA-256 and length (and its full query text as written, including any user names, IP addresses or file paths it names, only when include_rule_query_text is on), suppression, the tables it reads and which of them got no data, plus the arriving tables no enabled rule reads, and, per table enabled rules read, how many of those rules read it only through their template.
 
     Summary fields:
 

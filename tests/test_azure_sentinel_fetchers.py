@@ -231,7 +231,7 @@ def azure(monkeypatch, tmp_path):
     monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", SUB)
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
     monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
-    for env in ("SENTINEL_WORKSPACES", "AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID"):
+    for env in ("SENTINEL_WORKSPACES", "AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID", "SENTINEL_RULE_QUERY_TEXT"):
         monkeypatch.delenv(env, raising=False)
     return fake
 
@@ -475,6 +475,24 @@ def test_analytics_rules_carry_a_hash_and_length_of_each_query():
     assert (without["query_sha256"], without["query_length"]) == (None, None)
 
 
+def test_analytics_rules_query_text_is_opt_in(azure, tmp_path, monkeypatch):
+    query = "SigninLogs | where AppDisplayName has '; unset $(id)'"
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [rule("signins", "Scheduled", True, query=query)]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    _, ev = run("sentinel_analytics_rules", tmp_path)
+    [default] = ws_a(ev)["rules"]
+    assert "query" not in default and "unset" not in json.dumps(ev)
+    assert (default["query_length"], default["tables_read"], ws_a(ev)["query_text_included"]) == (
+        len(query), ["SigninLogs"], False)
+    for f in tmp_path.glob("azure_sentinel_analytics_rules_*.json"):
+        f.unlink()
+    monkeypatch.setenv("SENTINEL_RULE_QUERY_TEXT", "true")
+    _, ev = run("sentinel_analytics_rules", tmp_path)
+    [opted] = ws_a(ev)["rules"]
+    assert (opted["query"], opted["query_sha256"], ws_a(ev)["query_text_included"]) == (
+        query, default["query_sha256"], True)
+
+
 FUNCTIONS = {"CiscoASA"}
 
 
@@ -569,7 +587,8 @@ def test_analytics_rules_tables_and_data(azure, tmp_path):
     ws = ws_a(ev)
     by_name = {r["name"]: r for r in ws["rules"]}
     signins = by_name["signins"]
-    assert signins["query"].startswith("SigninLogs") and signins["suppression_enabled"] is True
+    assert "query" not in signins and signins["query_length"] == len("SigninLogs | where ResultType != '0'")
+    assert signins["suppression_enabled"] is True and ws["query_text_included"] is False
     assert signins["suppression_duration"] == "PT5H" and ws["enabled_rules_suppressed"] == 1
     assert (signins["tables_read"], signins["tables_from"], signins["tables_without_data"]) == (
         ["SigninLogs"], "query", ["SigninLogs"])
