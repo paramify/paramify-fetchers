@@ -472,6 +472,10 @@ def test_denied_sign_in_activity_still_lists_role_holders_and_guests(monkeypatch
     # Without sign-in activity no one reads dormant, so the plain member without a role isn't listed.
     assert {u["id"] for u in results["users"]} == {u["id"] for u in _tenant()[0]["/users"]} | {"u-guest-plain"}
     assert all(u["dormant"] is None and u["last_successful_sign_in_date_time"] is None for u in results["users"])
+    # Without the report every service principal's dormancy is unknown, the disabled vendor app's too.
+    sps = {sp["id"]: sp for sp in results["service_principals"]}
+    assert sps["sp-vendor"]["account_enabled"] is False
+    assert all(sp["dormant"] is None for sp in sps.values())
 
 
 def test_a_refused_user_list_nulls_every_user_count(monkeypatch):
