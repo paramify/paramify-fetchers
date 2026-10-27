@@ -443,7 +443,7 @@ def summarize(apps: list[dict], instances: list[dict], dependencies: list[dict],
         "apps": len(apps),
         "apps_exporting_http_logs": len(exporting_apps),
         "apps_with_http_log_records": with_http,
-        "apps_without_http_log_records": sum(1 for a in exporting_apps if a["http_logs_arriving"] is False),
+        "apps_without_http_log_records": sum(1 for a in running if a["http_logs_arriving"] is False),
         "apps_http_logs_unknown": sum(1 for a in exporting_apps if a["http_logs_arriving"] is None),
         "stopped_apps_exporting_http_logs": len(exporting_apps) - len(running),
         "http_log_arrival_percentage": coverage_percentage(

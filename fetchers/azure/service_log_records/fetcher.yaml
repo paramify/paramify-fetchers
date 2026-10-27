@@ -94,7 +94,7 @@ evidence_set:
     Do App Service HTTP logs arrive?
     - apps_exporting_http_logs — Number of exporting apps and slots: those with a diagnostic setting that sends AppServiceHTTPLogs, by name or through the allLogs group, to a Log Analytics workspace
     - apps_with_http_log_records — Number of exporting apps and slots whose HTTP logs are arriving: at least one record reached a destination workspace in the lookback
-    - apps_without_http_log_records — Number of exporting apps and slots with no HTTP log record in the lookback, where every destination workspace was queried, lacks the table, or no longer exists
+    - apps_without_http_log_records — Number of running exporting apps and slots with no HTTP log record in the lookback, where every destination workspace was queried, lacks the table, or no longer exists; stopped apps are left out (see stopped_apps_exporting_http_logs)
     - apps_http_logs_unknown — Number of exporting apps and slots whose arrival is unknown: a destination workspace refused or failed the read, a query on the AppServiceHTTPLogs table failed there, or the workspace keeps the table on a Basic or Auxiliary plan, which is not queried because it bills per GB scanned
     - stopped_apps_exporting_http_logs — Number of exporting apps and slots that are stopped; a stopped app serves no requests, so it has no HTTP logs to send
     - http_log_arrival_percentage — Percentage of running exporting apps and slots whose HTTP logs are arriving = running apps with HTTP log records / (apps_exporting_http_logs − stopped_apps_exporting_http_logs) × 100 (a whole number, 0–100); 0 when no running app exports. Stopped apps are left out of both counts; apps whose arrival is unknown count in the total but not as arriving

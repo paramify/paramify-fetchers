@@ -20,7 +20,8 @@ schemas and the `paramify` CLI — not the internal code.
   actions, events per database, and the principals that signed in, split into Entra
   principals and SQL logins, with names seen only in failed logins counted but not
   listed; per app role, its AppDependencies targets; and each table's interactive
-  and total retention. Stopped apps are left out of the arrival percentage.
+  and total retention. Stopped apps are left out of the arrival percentage and
+  of the count of apps without records.
   Basic and Auxiliary tables are not queried, and a refused or deleted workspace
   reads unknown or false without failing the run. Each query is guarded alone, so a
   failed one leaves only its table unread; the dependency query is best-effort.
