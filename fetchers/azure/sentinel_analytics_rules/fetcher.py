@@ -43,6 +43,7 @@ _SOURCE_AFTER = {None, "|", ";", ")", ",", "}", "on"}
 _SOURCE_BEFORE = {None, ";", "{", "union", "join", "lookup"}
 _TABULAR_CALLS = {"materialize", "toscalar", "union", "join", "lookup", "in"}
 _OPERATOR_PARAMS = {"kind", "isfuzzy", "withsource"}
+_LITERALS = {"true", "false", "null"}
 
 logger = logging.getLogger(NAME)
 
@@ -106,6 +107,34 @@ def _is_source(toks: List[str], i: int) -> bool:
     return False
 
 
+def _unlisted_table(toks: List[str], i: int, skip: Set[str]) -> bool:
+    """A name the workspace doesn't list, standing where only a table can: a table it never provisioned. `in (…)`
+    lists tables only after find or search, and `= (…)` holds one only in a let."""
+    tok = toks[i]
+    if not _IDENTIFIER.match(tok) or tok.startswith("_") or tok.lower() in _LITERALS or tok in skip:
+        return False
+    if (i > 0 and toks[i - 1] == ".") or not _is_source(toks, i):
+        return False
+    at = lambda j: toks[j] if 0 <= j < len(toks) else None  # noqa: E731
+    opener = i - 1
+    if at(opener) == ",":
+        while opener >= 0 and toks[opener] not in {"|", ";", "(", ")", "union"}:
+            opener -= 1
+    if at(opener) != "(":
+        return True
+    before = at(opener - 1)
+    if before == "in":
+        j = opener - 2
+        while j >= 0 and toks[j] not in {"|", ";"}:
+            if toks[j] in {"find", "search"}:
+                return True
+            j -= 1
+        return False
+    if before == "=":
+        return at(opener - 3) == "let"
+    return before is None or bool(re.match(r"\w", before))
+
+
 def _call_name(toks: List[str], i: int) -> Optional[str]:
     """The name called with toks[i] among its arguments, if any."""
     depth = 0
@@ -152,51 +181,65 @@ def _binding_positions(toks: List[str]) -> Set[int]:
     return at
 
 
-def query_tables(query: Optional[str], tables: Set[str], columns: Set[str]) -> List[str]:
-    """Local workspace tables a KQL query names, in code or as a string passed to table() or a function it defines."""
+def query_tables(
+    query: Optional[str], tables: Set[str], columns: Set[str], workspace_functions: Optional[Set[str]] = None
+) -> List[str]:
+    """Local workspace tables a KQL query names, in code or as a string passed to table() or a function it defines.
+
+    Given the workspace's functions, a name it doesn't list counts too where only a table can stand."""
     toks, quoted = _tokens(query)
     functions = {toks[k + 1] for k in range(len(toks) - 3) if toks[k] == "let" and toks[k + 2] == "=" and toks[k + 3] == "("}
     binding = _binding_positions(toks)
     # Names the query assigns, declares or binds (`extend X =`, `let X =`, `datatable(X:string)`, `mv-expand X`) count
     # only where a table can stand; so does a bracket-quoted name, which can be an index.
     ambiguous = columns | {toks[k] for k in range(len(toks) - 1) if toks[k + 1] in {"=", ":"}} | {toks[k] for k in binding}
+    unlisted = workspace_functions is not None
+    skip = ambiguous | functions | (workspace_functions or set())
     found = set()
     for i, tok in enumerate(toks):
         if i in binding:
             continue
+        listed = tok in tables or _CUSTOM_TABLE.match(tok)
         if i in quoted:
-            if (tok in tables or _CUSTOM_TABLE.match(tok)) and _is_source(toks, i):
+            if (listed or (unlisted and tok not in skip)) and _is_source(toks, i):
                 found.add(tok)
         elif tok[0] in "\"'@`":
             literal = tok.lstrip("@").strip("\"'`")
             argument = i > 0 and toks[i - 1] in {"(", ","} and i + 1 < len(toks) and toks[i + 1] in {")", ","}
-            if argument and (literal in tables or _CUSTOM_TABLE.match(literal)) and _call_name(toks, i) in functions | {"table"}:
+            call = _call_name(toks, i) if argument else None
+            if call in functions | {"table"} and (literal in tables or _CUSTOM_TABLE.match(literal)):
                 found.add(literal)
-        elif (tok in tables or _CUSTOM_TABLE.match(tok)) and (i == 0 or toks[i - 1] != "."):
+            elif call == "table" and unlisted and _IDENTIFIER.match(literal):
+                found.add(literal)
+        elif listed and (i == 0 or toks[i - 1] != "."):
             if tok not in ambiguous or _is_source(toks, i):
                 found.add(tok)
+        elif unlisted and _unlisted_table(toks, i, skip):
+            found.add(tok)
     return sorted(found)
 
 
-def template_tables(template: Optional[Dict[str, Any]], tables: Set[str]) -> List[str]:
-    """The template's requiredDataConnectors dataTypes, `SecurityAlert (ASC)` read as SecurityAlert."""
+def template_tables(template: Optional[Dict[str, Any]], workspace_functions: Optional[Set[str]] = None) -> List[str]:
+    """The template's requiredDataConnectors dataTypes, `SecurityAlert (ASC)` read as SecurityAlert. They name
+    tables, so one the workspace doesn't list is a table it never provisioned."""
     connectors = ((template or {}).get("properties") or {}).get("requiredDataConnectors") or []
     names = {dt.split(" (")[0].strip() for c in connectors for dt in c.get("dataTypes") or [] if isinstance(dt, str)}
-    return sorted(n for n in names if n in tables or _CUSTOM_TABLE.match(n))
+    return sorted(n for n in names if _IDENTIFIER.match(n) and n not in (workspace_functions or set()))
 
 
 def rule_tables(
-    rule: Dict[str, Any], tables: Set[str], columns: Set[str], templates: Dict[str, Dict[str, Any]]
+    rule: Dict[str, Any], tables: Set[str], columns: Set[str], templates: Dict[str, Dict[str, Any]],
+    workspace_functions: Optional[Set[str]] = None,
 ) -> Tuple[Optional[List[str]], Optional[str]]:
     """(tables read, where that came from): the query, else the template, else unknown."""
     if rule.get("kind") == INCIDENT_CREATION:
         return [ALERTS_TABLE], "alert_product"
-    found = query_tables(rule.get("query"), tables, columns)
+    found = query_tables(rule.get("query"), tables, columns, workspace_functions)
     if found:
         return found, "query"
     if rule.get("kind") in NO_QUERY_KINDS:
         return None, None
-    found = template_tables(templates.get(rule.get("alert_rule_template_name") or ""), tables)
+    found = template_tables(templates.get(rule.get("alert_rule_template_name") or ""), workspace_functions)
     if found:
         return found, "template"
     return None, None
@@ -301,6 +344,15 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     listed_tables = collector.guard(
         f"operationalinsights.tables.list({ws['name']})", lambda: client.list(f"{ws['id']}/tables", LAW_API)
     )
+    workspace_functions = None
+    try:
+        saved = client.list(f"{ws['id']}/savedSearches", LAW_API)
+        workspace_functions = {a for a in ((s.get("properties") or {}).get("functionAlias") for s in saved) if a}
+    except Exception as exc:  # noqa: BLE001 — without them an unlisted name might be a function, so it stays unknown
+        notes.append(
+            "saved search listing failed, so a name the workspace doesn't list reads as unknown rather than as a "
+            f"table that gets no data: {exc}"
+        )
     rows = None
     if ws.get("customer_id"):
         rows = collector.guard(
@@ -316,7 +368,9 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         names, columns = table_vocabulary(listed_tables) if listed_tables is not None else (None, set())
         by_template = {t.get("name"): t for t in templates or []}
         for r in rules:
-            r["tables_read"], r["tables_from"] = rule_tables(r, names, columns, by_template) if names is not None else (None, None)
+            r["tables_read"], r["tables_from"] = (
+                rule_tables(r, names, columns, by_template, workspace_functions) if names is not None else (None, None)
+            )
         products: Optional[Dict[str, Any]] = {}
         if ingested and ALERTS_TABLE in ingested and any(r["kind"] == INCIDENT_CREATION for r in rules):
             alert_rows = collector.guard(

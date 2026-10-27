@@ -130,6 +130,9 @@ class FakeAzure:
                 {"name": "tpl-nrt", "kind": "NRT", "properties": {"requiredDataConnectors": [
                     {"connectorId": "AzureActivity", "dataTypes": ["AzureActivity"]}]}}]},
             (f"{WS_A}/tables", "2023-09-01"): {"value": WORKSPACE_TABLES},
+            (f"{WS_A}/savedSearches", "2023-09-01"): {"value": [
+                {"name": "parser", "properties": {"category": "Security", "functionAlias": "CiscoASA", "query": "Syslog"}},
+                {"name": "hunt", "properties": {"category": "Hunting Queries", "query": "SigninLogs | take 1"}}]},
             (f"{SI_A}/incidents", "2025-09-01"): {"value": [
                 incident("i-new", "New", NOW - timedelta(days=200)),
                 incident("i-closed", "Closed", NOW - timedelta(days=3), "TruePositive"),
@@ -438,6 +441,68 @@ def test_analytics_rules_tables_named_in_a_query(query, expected):
 ])
 def test_analytics_rules_names_a_query_binds_and_quoted_tables(query, expected):
     assert MODS["sentinel_analytics_rules"].query_tables(query, TABLES, AMBIGUOUS) == expected
+
+
+FUNCTIONS = {"CiscoASA"}
+
+
+@pytest.mark.parametrize("query, expected", [
+    # A name the workspace doesn't list, where only a table can stand, is a table it never provisioned.
+    ("AWSCloudTrail | where EventName == 'x'", ["AWSCloudTrail"]),
+    ("let x = AWSCloudTrail; x | take 1", ["AWSCloudTrail"]),
+    ("union isfuzzy=true AWSCloudTrail, GCPAuditLogs", ["AWSCloudTrail", "GCPAuditLogs"]),
+    ("SigninLogs | join kind=inner (AWSCloudTrail | take 1) on X", ["AWSCloudTrail", "SigninLogs"]),
+    ('search in (AWSCloudTrail, SigninLogs) "admin"', ["AWSCloudTrail", "SigninLogs"]),
+    ("let n = toscalar(AWSCloudTrail | count); SigninLogs | where C > n", ["AWSCloudTrail", "SigninLogs"]),
+    ('table("AWSCloudTrail") | take 1', ["AWSCloudTrail"]),
+    # Workspace functions, built-in parsers, the query's own names, literals and value lists are not tables.
+    ("CiscoASA | where x == 1", []),
+    ("_Im_Dns | take 1", []),
+    ("let Base = SigninLogs | take 1; Base | take 1", ["SigninLogs"]),
+    ("let f = (t:string) { table(t) }; f('Unlisted')", []),
+    ("let enabled = true; SigninLogs | where E == enabled", ["SigninLogs"]),
+    ("SigninLogs | where Category in (Foo, Bar)", ["SigninLogs"]),
+    ("SigninLogs | extend x = (Foo) | take 1", ["SigninLogs"]),
+    ("SigninLogs | mv-expand Foo | take 1", ["SigninLogs"]),
+    ('workspace("other").AWSCloudTrail | take 1', []),
+])
+def test_analytics_rules_unlisted_tables(query, expected):
+    mod = MODS["sentinel_analytics_rules"]
+    assert mod.query_tables(query, TABLES, AMBIGUOUS, FUNCTIONS) == expected
+    # Without the workspace's functions, an unlisted name could be one, so only listed tables count.
+    assert mod.query_tables(query, TABLES, AMBIGUOUS) == [t for t in expected if t in TABLES]
+
+
+def test_analytics_rules_unprovisioned_tables_read_as_missing_data(azure, tmp_path):
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
+        rule("aws", "Scheduled", True, query="AWSCloudTrail | where EventName == 'ConsoleLogin'"),
+        rule("asa", "Scheduled", True, query="CiscoASA | where x == 1"),
+        rule("gcp", "Scheduled", True, "tpl-gcp", query="_Im_Authentication | take 1")]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    azure.arm[(f"{SI_A}/alertRuleTemplates", "2025-09-01")] = {"value": [
+        {"name": "tpl-gcp", "kind": "Scheduled", "properties": {"requiredDataConnectors": [
+            {"connectorId": "GCPAudit", "dataTypes": ["GCPAuditLogs"]}]}}]}
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    by_name = {r["name"]: r for r in ws["rules"]}
+    assert code == 0 and ws["notes"] == []
+    assert [(by_name[n]["tables_read"], by_name[n]["tables_from"], by_name[n]["tables_without_data"])
+            for n in ("aws", "asa", "gcp")] == [
+        (["AWSCloudTrail"], "query", ["AWSCloudTrail"]), (None, None, None),
+        (["GCPAuditLogs"], "template", ["GCPAuditLogs"])]
+    assert ws["enabled_rules_tables_unknown"] == 1
+    assert sorted(r["name"] for r in ws["enabled_rules_missing_data"]) == ["aws", "gcp"]
+
+
+def test_analytics_rules_without_the_workspace_functions_unlisted_names_stay_unknown(azure, tmp_path):
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
+        rule("aws", "Scheduled", True, query="AWSCloudTrail | where EventName == 'ConsoleLogin'")]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    azure.arm[(f"{WS_A}/savedSearches", "2023-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and len(ws["notes"]) == 1 and "saved search" in ws["notes"][0]
+    assert (ws["rules"][0]["tables_read"], ws["enabled_rules_tables_unknown"]) == (None, 1)
 
 
 def test_analytics_rules_tables_and_data(azure, tmp_path):
