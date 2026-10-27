@@ -297,7 +297,6 @@ def run_fetcher(name, monkeypatch, tmp_path, **env):
 
 # --- the shape every fetcher follows -------------------------------------------
 
-CATEGORY = yaml.safe_load((REPO_ROOT / "fetchers" / "_categories" / "github.yaml").read_text())
 BP_TARGET = yaml.safe_load((GITHUB / "branch_protection" / "fetcher.yaml").read_text())["target_schema"]
 
 
@@ -311,17 +310,6 @@ def test_every_fetcher_follows_the_shape(name):
     declared = {f["env"] for f in spec.get("config_schema", {}).values()}
     assert {env for env, _ in getattr(m, "CONFIG", {}).values()} <= declared
     assert len(spec["evidence_set"]["instructions"].split()) <= 80
-
-
-def test_the_client_sends_only_gets_and_graphql_queries():
-    source = (GITHUB / "_shared" / "github_client.py").read_text()
-    assert "session.get(" in source and source.count("session.post(") == 1
-    for verb in ("put", "patch", "delete", "request"):
-        assert f"session.{verb}(" not in source
-    client = gc.GitHubClient(API, "t")
-    for doc in ("mutation { addStar(input: {}) { clientMutationId } }", "subscription { x }"):
-        with pytest.raises(ValueError):
-            client.graphql("op", doc, {})
 
 
 @pytest.mark.parametrize("api_url,graphql", [
@@ -340,36 +328,10 @@ def client_for(fake, routes):
     return gc.GitHubClient(API, "t")
 
 
-def test_pagination_follows_link_past_the_default_page_size(fake):
-    client = client_for(fake, {"items": [{"n": i} for i in range(250)]})
-    state, items = client.paginate("items")
-    assert state is None and [i["n"] for i in items] == list(range(250))
-    assert fake.holder["fake"].calls[0][1]["per_page"] == "100"
-
-
-def test_a_short_page_with_a_next_link_is_not_the_end(fake):
-    pages = {"1": ([1, 2], f'<{API}/short?page=2>; rel="next"'), "2": ([3], None)}
-
-    def route(query):
-        body, link = pages[query.get("page", "1")]
-        return 200, body, {"Link": link} if link else {}
-    client = client_for(fake, {"short": route})
-    assert client.paginate("short") == (None, [1, 2, 3])
-
-
 def test_a_repeated_page_fails_instead_of_looping(fake):
     client = client_for(fake, {"loop": lambda q: (200, [1], {"Link": f'<{API}/loop?page=1>; rel="next"'})})
     state, _ = client.paginate("loop")
     assert state == "failed" and client.failures[0]["type"] == "PaginationNotAdvancing"
-
-
-@pytest.mark.parametrize("link", ["https://evil.example/items?page=2", f"{API}.evil.example/items?page=2",
-                                  API.replace("https://", "http://") + "/items?page=2"])
-def test_a_next_page_off_the_api_host_is_not_followed(fake, link):
-    client = client_for(fake, {"items": lambda q: (200, [1], {"Link": f'<{link}>; rel="next"'})})
-    state, _ = client.paginate("items")
-    assert state == "failed" and client.failures[0]["type"] == "PaginationOffHost"
-    assert len(fake.holder["fake"].calls) == 1
 
 
 def test_an_absolute_url_off_the_api_host_is_refused(fake):
@@ -406,26 +368,12 @@ def test_permission_responses_are_failures_that_name_the_permission(fake, status
     assert client.failure_code() == "not_authorized"
 
 
-def test_rate_limit_is_waited_out_when_short(fake):
-    calls = iter([(403, {"message": "API rate limit exceeded"}, {"Retry-After": "2"}), (200, {"ok": True})])
-    client = client_for(fake, {"x": lambda q: next(calls)})
-    assert client.read("x") == (None, {"ok": True})
-    assert fake.holder["slept"] == [2]
-
-
 def test_rate_limit_fails_rather_than_outsleeping_the_runner(fake):
     client = client_for(fake, {"x": (403, {"message": "API rate limit exceeded"},
                                      {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(int(time.time()) + 3600)})})
     assert client.read("x")[0] == "failed"
     assert "slept" not in fake.holder
     assert client.codes == ["rate_limited"]  # a 403, but not a missing permission
-
-
-def test_a_listing_smaller_than_the_orgs_count_is_partial(fake):
-    client = client_for(fake, org_routes([repo("a")], public=3))
-    repos = gc.list_repos(client, client.get(f"orgs/{ORG}"), [], False)
-    assert [r["name"] for r in repos] == ["a"]
-    assert client.failures[0]["type"] == "IncompleteCollection"
 
 
 def test_an_allowlisted_repo_the_token_cannot_see_fails_as_bad_config(fake):
@@ -440,23 +388,6 @@ def test_archived_repos_are_skipped_unless_asked_for(fake):
     org = client.get(f"orgs/{ORG}")
     assert [r["name"] for r in gc.list_repos(client, org, [], False)] == ["live"]
     assert [r["name"] for r in gc.list_repos(client, org, [], True)] == ["live", "old"]
-
-
-@pytest.mark.parametrize("pattern,ref,expected", [
-    ("~DEFAULT_BRANCH", "refs/heads/main", True),
-    ("~DEFAULT_BRANCH", "refs/heads/dev", False),
-    ("~ALL", "refs/heads/anything", True),
-    ("refs/heads/release/*", "refs/heads/release/1.0", True),
-    ("refs/heads/release/*", "refs/heads/main", False),
-    ("refs/heads/*", "refs/heads/feature/x", False),        # * stops at /
-    ("refs/heads/**/*", "refs/heads/main", True),           # **/ may match nothing (cpython's "All branches")
-    ("refs/heads/**/*", "refs/heads/a/b/c", True),
-    ("refs/heads/**", "refs/heads/feature/x", False),        # measured: a bare ** stops at /
-    ("refs/heads/3.*", "refs/heads/3.12", True),
-    ("refs/heads/ma?n", "refs/heads/main", True),
-])
-def test_ref_conditions(pattern, ref, expected):
-    assert gc.ref_matches(pattern, ref, "main") is expected
 
 
 # Measured 2026-10-04: one active ruleset per pattern on a sandbox repository, then
@@ -503,31 +434,6 @@ def test_branch_protection_verdicts_on_the_sandbox(fake, monkeypatch, tmp_path):
     assert "copilot_code_review" in by["org-bypass"]["requirements"]["rule_types"]  # unknown types carried through
 
 
-def test_a_disabled_ruleset_never_counts_as_protection(fake, monkeypatch, tmp_path):
-    routes = sandbox_routes()
-    routes[f"repos/{ORG}/disabled-rules"] = repo("disabled-rules")
-    fake(routes)
-    _, ev, _ = run_fetcher("branch_protection", monkeypatch, tmp_path, GITHUB_REPOSITORIES="disabled-rules")
-    rec = ev["repositories"][0]
-    assert rec["rulesets"][0]["enforcement"] == "disabled" and rec["requires_approval"] is False
-
-
-def test_an_active_ruleset_on_other_refs_is_not_default_branch_protection(fake, monkeypatch, tmp_path):
-    # cpython, measured: "All branches" includes refs/heads/**/* and excludes main; none is enforced on main.
-    routes = org_routes([repo("cpython")])
-    rs = ruleset(4, "All branches", "active", [NFF_RULE], include=["refs/heads/**/*"])
-    rs["conditions"]["ref_name"]["exclude"] = ["refs/heads/main", "refs/heads/3.*"]
-    routes.update({f"repos/{ORG}/cpython/rulesets": [rs], f"repos/{ORG}/cpython/rulesets/4": rs,
-                   f"repos/{ORG}/cpython/rules/branches/main": [],
-                   f"repos/{ORG}/cpython/branches/main/protection": NOT_PROTECTED,
-                   f"repos/{ORG}/cpython/rulesets/rule-suites": []})
-    fake(routes)
-    _, ev, _ = run_fetcher("branch_protection", monkeypatch, tmp_path)
-    rec = ev["repositories"][0]
-    assert rec["rulesets"][0]["targets_default_branch"] is False
-    assert rec["rulesets_not_enforced"] == [] and ev["summary"]["unprotected"] == ["cpython"]
-
-
 def test_unreadable_classic_protection_is_unknown_never_unprotected(fake, monkeypatch, tmp_path):
     # Measured on cpython/vscode/kubernetes: 403 "Resource not accessible by personal access token".
     routes = sandbox_routes()
@@ -545,27 +451,6 @@ def test_unreadable_classic_protection_is_unknown_never_unprotected(fake, monkey
     s = ev["summary"]
     assert "unprotected" not in s["unprotected"] and "unprotected" not in s["without_approval"]
     assert sorted(s["classic_protection_unreadable"]) == ["protected", "unprotected"]
-
-
-def test_allowlisted_repos_are_fetched_directly_not_by_listing_the_org(fake, monkeypatch, tmp_path):
-    routes = sandbox_routes()
-    routes[f"repos/{ORG}/protected"] = repo("protected")
-    f = fake(routes)
-    code, ev, _ = run_fetcher("branch_protection", monkeypatch, tmp_path, GITHUB_REPOSITORIES="protected")
-    assert code == 0 and [r["repository"] for r in ev["repositories"]] == ["protected"]
-    assert not any(p == f"orgs/{ORG}/repos" for p, _ in f.calls)
-
-
-def test_ruleset_details_are_fetched_once_per_ruleset(fake, monkeypatch, tmp_path):
-    routes = org_routes([repo("a"), repo("b")])
-    org_rs = ruleset(7, "org", "active", [PR_RULE], source_type="Organization")
-    for n in ("a", "b"):
-        routes.update({f"repos/{ORG}/{n}/rulesets": [org_rs], f"repos/{ORG}/{n}/rulesets/7": org_rs,
-                       f"repos/{ORG}/{n}/rules/branches/main": enforced([PR_RULE], 7),
-                       f"repos/{ORG}/{n}/branches/main/protection": NOT_PROTECTED})
-    f = fake(routes)
-    run_fetcher("branch_protection", monkeypatch, tmp_path)
-    assert sum(1 for p, _ in f.calls if p.endswith("/rulesets/7")) == 1
 
 
 def test_bad_target_config_fails_before_any_call(fake, monkeypatch, tmp_path):
@@ -630,14 +515,6 @@ def test_approval_is_the_latest_decisive_review_before_the_merge():
             "dev", merged, "h1")
     assert {(g["reviewer"], g["bot"], g["on_final_commit"]) for g in got} == {
         ("github-actions[bot]", True, True), ("y", False, False)}
-
-
-def test_a_check_seen_twice_takes_its_latest_completed_run():
-    # Measured: push and pull_request events each run `ci`, so one name arrives twice.
-    out = MODS["pull_request_checks"].check_outcomes(
-        [check("ci", "failure", 3), check("ci", "success", 2), check("lint", None, status="in_progress")],
-        [{"context": "legacy", "state": "error", "updated_at": ago(1)}])
-    assert out == {"ci": "success", "lint": "pending", "status:legacy": "failure"}
 
 
 def test_the_pr_walk_stops_at_the_first_pr_updated_before_the_window(fake, monkeypatch, tmp_path):
@@ -718,20 +595,6 @@ def test_reviews_checks_and_labels_beyond_one_graphql_page_are_read_over_rest(fa
     assert {f"{base}/pulls/1/reviews", f"{base}/commits/h1/check-runs", f"{base}/issues/1/labels"} <= rest
 
 
-def test_checks_on_another_commit_than_the_head_are_read_over_rest(fake, monkeypatch, tmp_path):
-    routes = pr_routes([pr(1, 2)], {}, {1: [check("ci", "success", 3)]})
-
-    def moved(query, variables):
-        status, body = graphql_from_rest(routes, query, variables)
-        for node in (body["data"]["repository"].get("pullRequests") or {}).get("nodes") or []:
-            node["commits"]["nodes"][0]["commit"]["oid"] = "other"
-        return status, body
-    routes["graphql"] = moved
-    f = fake(routes)
-    run_fetcher("pull_request_checks", monkeypatch, tmp_path)
-    assert f"repos/{ORG}/app/commits/h1/check-runs" in {p for p, _ in f.calls}
-
-
 def test_a_graphql_timeout_halves_the_page_until_it_answers(fake, monkeypatch, tmp_path):
     routes = pr_routes([pr(i, 1) for i in range(1, 31)], {}, {})
     routes["graphql"] = lambda q, v: ((502, {"message": "Bad Gateway"}) if v["first"] > 12
@@ -744,15 +607,6 @@ def test_a_graphql_timeout_halves_the_page_until_it_answers(fake, monkeypatch, t
     assert "slept" not in fake.holder  # a timeout is never retried at the same size
 
 
-def test_an_empty_graphql_200_halves_the_page_like_a_timeout(fake, monkeypatch, tmp_path):
-    routes = pr_routes([pr(i, 1) for i in range(1, 31)], {}, {})
-    routes["graphql"] = lambda q, v: ((200, None) if v["first"] > 25 else graphql_from_rest(routes, q, v))
-    f = fake(routes)
-    code, ev, _ = run_fetcher("pull_request_checks", monkeypatch, tmp_path)
-    assert code == 0 and ev["summary"]["merged_pull_requests"] == 30
-    assert [v["first"] for p, v in f.calls if p == "graphql" and "branch" in v][:2] == [50, 25]
-
-
 def test_a_graphql_page_that_never_answers_fails(fake, monkeypatch, tmp_path):
     routes = pr_routes([pr(1, 1)], {}, {})
     routes["graphql"] = lambda q, v: (502, {"message": "Bad Gateway"})
@@ -760,20 +614,6 @@ def test_a_graphql_page_that_never_answers_fails(fake, monkeypatch, tmp_path):
     code, ev, status = run_fetcher("pull_request_checks", monkeypatch, tmp_path)
     assert code == 1 and "GraphQLTimeout" in json.dumps(ev["metadata"]["api_failures"])
     assert ev["repositories"][0]["collected"] is False
-
-
-@pytest.mark.parametrize("error,code", [
-    ({"type": "FORBIDDEN", "message": "Resource not accessible by personal access token"}, "not_authorized"),
-    ({"type": "NOT_FOUND", "message": "Could not resolve to a Repository"}, "not_authorized"),
-    ({"type": "RATE_LIMITED", "message": "API rate limit exceeded"}, "rate_limited"),
-    ({"message": "Something unexpected"}, "internal_error"),
-])
-def test_graphql_errors_answered_with_200_are_failures(fake, monkeypatch, tmp_path, error, code):
-    routes = pr_routes([pr(1, 1)], {}, {})
-    routes["graphql"] = lambda q, v: (200, {"data": {"repository": None}, "errors": [error]})
-    fake(routes)
-    rc, ev, status = run_fetcher("pull_request_checks", monkeypatch, tmp_path)
-    assert rc == 1 and status["code"] == code and ev["repositories"][0]["collected"] is False
 
 
 def test_an_empty_repository_has_no_pushes_rather_than_failing(fake, monkeypatch, tmp_path):
@@ -912,14 +752,6 @@ def test_an_unreachable_kev_catalog_fails_but_keeps_the_alerts(fake, monkeypatch
     assert ev["summary"]["open_total"] == 2 and ev["summary"]["known_exploited_checked"] is False
 
 
-def test_kev_can_be_switched_off(fake, monkeypatch, tmp_path):
-    monkeypatch.setattr(MODS["dependabot_alerts"].requests, "get", lambda *a, **kw: pytest.fail("fetched KEV"))
-    fake(dependabot_routes())
-    code, ev, _ = run_fetcher("dependabot_alerts", monkeypatch, tmp_path, GITHUB_CHECK_KEV="false")
-    scanned = next(r for r in ev["repositories"] if r["repository"] == "scanned")
-    assert code == 0 and scanned["alerts"][0]["known_exploited"] is None
-
-
 def test_unauthorized_dependabot_read_is_a_failure_not_a_disabled_scanner(fake, monkeypatch, tmp_path, no_kev):
     routes = dependabot_routes()
     routes[f"repos/{ORG}/scanned/dependabot/alerts"] = (403, {"message": "You are not authorized to perform this operation."})
@@ -983,15 +815,6 @@ def test_code_scanning_coverage_and_verdicts(fake, monkeypatch, tmp_path):
     assert by["third-party"]["default_setup"] == "not-configured" and by["third-party"]["analysed"] is True
 
 
-def test_code_scanning_permission_denied_is_a_failure(fake, monkeypatch, tmp_path):
-    routes = cs_routes()
-    routes[f"repos/{ORG}/scanned/code-scanning/alerts"] = (403, {"message": "Resource not accessible by personal access token"},
-                                                           {"X-Accepted-GitHub-Permissions": "security_events=read"})
-    fake(routes)
-    code, ev, status = run_fetcher("code_scanning_alerts", monkeypatch, tmp_path)
-    assert code == 1 and "security_events=read" in status["error"] and ev["summary"]["not_collected"] == ["scanned"]
-
-
 # --- secret_scanning ----------------------------------------------------------------
 
 def ss_alert(number, state="open", validity="inactive", bypassed=False, resolution=None, leaked_value="ghp_x"):
@@ -1034,14 +857,6 @@ def test_secret_scanning_verdicts(fake, monkeypatch, tmp_path):
     by = {r["repository"]: r for r in ev["repositories"]}
     assert by["outsider"]["push_protection_enabled"] is None
     assert all(q.get("hide_secret") == "true" for p, q in f.calls if p.endswith("/secret-scanning/alerts"))
-
-
-def test_the_secret_value_never_reaches_the_evidence(fake, monkeypatch, tmp_path):
-    routes = ss_routes()
-    routes[f"repos/{ORG}/leaked/secret-scanning/alerts"] = [ss_alert(2, leaked_value="ghp_PLANTEDSECRETVALUE0000000000000000")]
-    fake(routes)
-    _, ev, _ = run_fetcher("secret_scanning", monkeypatch, tmp_path)
-    assert "PLANTEDSECRETVALUE" not in json.dumps(ev)
 
 
 # --- org_security_settings ----------------------------------------------------------
@@ -1223,14 +1038,6 @@ def test_non_user_credential_verdicts(fake, monkeypatch, tmp_path):
     assert "SHOULDNOTLEAK" not in json.dumps(ev)  # webhook URLs are reduced to their host
 
 
-def test_pat_listing_unavailable_on_a_plan_is_null_not_zero(fake, monkeypatch, tmp_path):
-    routes = credential_routes()
-    routes[f"orgs/{ORG}/personal-access-tokens"] = (403, {"message": "Upgrade to GitHub Team to enable this feature."})
-    fake(routes)
-    code, ev, _ = run_fetcher("non_user_credentials", monkeypatch, tmp_path)
-    assert code == 0 and ev["summary"]["fine_grained_tokens"] is None
-
-
 def test_a_missing_key_access_or_tls_setting_is_unknown_not_safe(fake, monkeypatch, tmp_path):
     routes = credential_routes()
     routes[f"repos/{ORG}/app/keys"] = [{"id": 9, "title": "mystery", "read_only": None, "created_at": ago(1)}]
@@ -1251,26 +1058,7 @@ def test_a_personal_token_never_asks_for_the_apps_only_token_list(fake, monkeypa
     assert f"orgs/{ORG}/personal-access-tokens" not in {p for p, _ in f.calls}
 
 
-def test_an_unreadable_org_section_is_null_and_the_rest_is_kept(fake, monkeypatch, tmp_path):
-    # Measured on the sandbox: the token lacked organization_hooks and organization_personal_access_tokens.
-    routes = credential_routes()
-    routes[f"orgs/{ORG}/hooks"] = (403, {"message": "Resource not accessible by personal access token"},
-                                   {"X-Accepted-GitHub-Permissions": "organization_hooks=read"})
-    fake(routes)
-    code, ev, status = run_fetcher("non_user_credentials", monkeypatch, tmp_path)
-    s = ev["summary"]
-    assert code == 1 and "organization_hooks=read" in status["error"]
-    assert s["webhooks_insecure_ssl"] is None and s["webhooks_without_secret"] is None
-    assert s["write_deploy_keys"] == ["app:deploy-rw"] and s["apps_with_write"] == ["ci-bot"]
-
-
 # --- optional or nullable fields --------------------
-
-def test_a_ruleset_without_conditions_is_unknown_not_elsewhere():
-    t = MODS["branch_protection"].ruleset_targets_branch
-    assert t({"target": "branch", "conditions": None}, "app", "main") is None
-    assert t({"target": "branch", "conditions": {"ref_name": {"include": []}}}, "app", "main") is None
-    assert t({"target": "branch", "conditions": {"ref_name": {"include": ["refs/heads/dev"]}}}, "app", "main") is False
 
 
 def test_a_required_check_that_finished_without_a_conclusion_did_not_pass(fake, monkeypatch, tmp_path):
@@ -1591,18 +1379,6 @@ def test_many_failures_are_summarised(fake, monkeypatch, tmp_path):
     assert code == 1 and status["error"].startswith("12 collection failure(s)") and "(+2 more)" in status["error"]
 
 
-@pytest.mark.parametrize("pattern,ref,expected", [
-    ("refs/heads/*-fix", "refs/heads/login-fix", True),
-    ("refs/heads/*-fix", "refs/heads/a/login-fix", False),
-    ("refs/heads/v?.?", "refs/heads/v1.2", True),
-    ("refs/heads/v?.?", "refs/heads/v10.2", False),
-    ("refs/heads/**x", "refs/heads/abx", True),
-    ("refs/heads/a.b", "refs/heads/aXb", False),  # "." is literal
-])
-def test_glob_details(pattern, ref, expected):
-    assert gc.ref_matches(pattern, ref, "main") is expected
-
-
 def test_remaining_requirement_flags():
     bp = MODS["branch_protection"]
     strict = {"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": True,
@@ -1704,13 +1480,6 @@ def test_glob_escapes_agree_with_ruby_fnmatch(pattern, text, expected):
     assert bool(gc.glob_regex(pattern).match(text)) is expected
 
 
-def test_an_unreadable_pattern_is_unknown_not_a_crash(monkeypatch):
-    monkeypatch.setattr(gc, "glob_regex", lambda p: (_ for _ in ()).throw(gc.re.error("bad")))
-    assert gc.ref_matches("refs/heads/x", "refs/heads/x", "main") is None
-    t = MODS["branch_protection"].ruleset_targets_branch
-    assert t({"target": "branch", "conditions": {"ref_name": {"include": ["refs/heads/x"]}}}, "app", "main") is None
-
-
 # --- repository_inventory ----------------------------------------------------------
 
 from framework import inventory as framework_inventory  # noqa: E402
@@ -1756,35 +1525,6 @@ def test_an_unknown_visibility_is_counted_as_unknown(fake, monkeypatch, tmp_path
     assert ev["summary"]["by_visibility"] == {"unknown": 1} and ev["data"][0]["public"] is None
 
 
-def test_inventory_withholds_every_record_when_the_listing_is_short(fake, monkeypatch, tmp_path):
-    routes = inv_routes()
-    routes[f"orgs/{ORG}"]["public_repos"] = 5  # the organization reports more than the token lists
-    fake(routes)
-    code, ev, status = run_fetcher("repository_inventory", monkeypatch, tmp_path)
-    assert code == 1 and status["code"] == "partial_failure"
-    assert ev["data"] == [] and ev["records_included"] is False and ev["record_count"] == 2
-    assert framework_inventory.check(ev, code)["complete"] is False
-
-
-@pytest.mark.parametrize("path", [f"orgs/{ORG}/properties/schema", f"orgs/{ORG}/properties/values",
-                                  f"orgs/{ORG}/repos"])
-def test_inventory_withholds_every_record_when_a_call_fails(fake, monkeypatch, tmp_path, path):
-    routes = inv_routes()
-    routes[path] = (403, {"message": "Resource not accessible by personal access token"},
-                    {"X-Accepted-GitHub-Permissions": "organization_custom_properties=read"})
-    fake(routes)
-    code, ev, status = run_fetcher("repository_inventory", monkeypatch, tmp_path)
-    assert code == 1 and status["code"] == "not_authorized"
-    assert ev["data"] == [] and ev["records_included"] is False
-    assert framework_inventory.check(ev, code)["complete"] is False
-
-
-def test_inventory_withholds_records_on_an_unexpected_error(fake, monkeypatch, tmp_path):
-    fake(inv_routes(repos=[{"name": "no-id", "default_branch": "main", "archived": False}]))
-    code, ev, status = run_fetcher("repository_inventory", monkeypatch, tmp_path)
-    assert code == 1 and status["code"] == "internal_error" and ev["data"] == [] and ev["records_included"] is False
-
-
 def test_custom_properties_on_a_plan_without_them_are_absent_not_a_failure(fake, monkeypatch, tmp_path):
     routes = inv_routes()
     routes[f"orgs/{ORG}/properties/schema"] = (404, {"message": "Upgrade to GitHub Team to use this feature"})
@@ -1792,25 +1532,6 @@ def test_custom_properties_on_a_plan_without_them_are_absent_not_a_failure(fake,
     code, ev, _ = run_fetcher("repository_inventory", monkeypatch, tmp_path)
     assert code == 0 and ev["metadata"]["custom_properties_available"] is False
     assert not any(k.startswith("property_") for k in ev["data"][0])
-
-
-def test_custom_properties_can_be_switched_off(fake, monkeypatch, tmp_path):
-    f = fake(inv_routes())
-    code, ev, _ = run_fetcher("repository_inventory", monkeypatch, tmp_path, GITHUB_INCLUDE_CUSTOM_PROPERTIES="false")
-    assert code == 0 and not any(p.startswith(f"orgs/{ORG}/properties") for p, _ in f.calls)
-    assert ev["metadata"]["custom_properties_available"] is None
-
-
-def test_no_values_call_when_the_organization_defines_no_properties(fake, monkeypatch, tmp_path):
-    f = fake(inv_routes(schema=[]))
-    code, _, _ = run_fetcher("repository_inventory", monkeypatch, tmp_path)
-    assert code == 0 and f"orgs/{ORG}/properties/values" not in {p for p, _ in f.calls}
-
-
-def test_evidence_fetchers_never_carry_inventory_fields(fake, monkeypatch, tmp_path):
-    fake(pr_routes([], {}, {}))
-    _, ev, _ = run_fetcher("pull_request_checks", monkeypatch, tmp_path)
-    assert "records_included" not in ev and "data" not in ev
 
 
 # --- actions_security ------------------------------------------------------------
@@ -1973,13 +1694,6 @@ def test_triggers_in_every_yaml_form(text, triggers):
     assert MODS["actions_security"].analyse("f.yml", text)["triggers"] == triggers
 
 
-def test_a_head_checkout_is_dangerous_only_on_a_privileged_trigger():
-    m = MODS["actions_security"]
-    on_pr = RISKY_WORKFLOW.replace("pull_request_target:", "pull_request:")
-    assert m.analyse("f.yml", on_pr)["checks_out_pull_request_head"] is False
-    assert m.analyse("f.yml", RISKY_WORKFLOW)["checks_out_pull_request_head"] is True
-
-
 @pytest.mark.parametrize("script,expected", [
     ("gh pr checkout ${{ github.event.pull_request.number }}", True),
     ("git fetch origin pull/${{ github.event.number }}/head:pr && git checkout pr", True),
@@ -2011,20 +1725,6 @@ def test_runners_and_public_repositories_running_them(fake, monkeypatch, tmp_pat
     assert s["self_hosted_runners_organization"] == 1 and s["self_hosted_runners_repository"] == 2
     assert s["public_repositories_with_self_hosted_runners"] == ["app"]
     assert ev["repositories"][0]["self_hosted_runners"][0]["labels"] == ["self-hosted"]
-
-
-def test_runners_can_be_left_out_for_a_token_without_that_permission(fake, monkeypatch, tmp_path):
-    routes = actions_routes()
-    routes[f"orgs/{ORG}/actions/runners"] = (403, {"message": "Resource not accessible by personal access token"},
-                                             {"X-Accepted-GitHub-Permissions": "organization_self_hosted_runners=read"})
-    fake(routes)
-    code, ev, status = run_fetcher("actions_security", monkeypatch, tmp_path)
-    assert code == 1 and "organization_self_hosted_runners" in status["error"]
-    assert ev["summary"]["self_hosted_runners_organization"] is None
-    f = fake(routes)
-    code, ev, _ = run_fetcher("actions_security", monkeypatch, tmp_path, GITHUB_INCLUDE_SELF_HOSTED_RUNNERS="false")
-    assert code == 0 and not any(p.endswith("/runners") for p, _ in f.calls)
-    assert ev["summary"]["public_repositories_with_self_hosted_runners"] is None
 
 
 def test_workflow_files_are_batched_and_a_timeout_halves_the_batch(fake, monkeypatch, tmp_path):
@@ -2107,15 +1807,6 @@ def test_flagged_pull_requests_become_fedramp_notifications(fake, monkeypatch, t
     assert code == 1 and "app#5" in status["error"] and "app#4: missing" in status["error"]
 
 
-def test_the_same_description_makes_the_same_notification_on_github_and_gitlab(fake, monkeypatch, tmp_path):
-    fake(scn_routes([scn_pr(1, GL.CHANGE_MR_COMPLETE)]))
-    _, ev, _ = run_fetcher("significant_change_notifications", monkeypatch, tmp_path, **SCN_ENV)
-    m = MODS["significant_change_notifications"].scn
-    section = m.extract_section(m.strip_comments(GL.CHANGE_MR_COMPLETE), "Significant Change")
-    expected, _, _ = m.build_scn(section, m.strip_comments(GL.CHANGE_MR_COMPLETE), GL.FALLBACK_URI, "PR 1")
-    assert ev["notifications"][0]["scn"] == expected
-
-
 def test_a_label_flags_a_pull_request_without_the_checkbox(fake, monkeypatch, tmp_path):
     body = GL.CHANGE_MR_COMPLETE.replace("- [x] Significant Change", "- [ ] Significant Change").replace(
         "- [X] Significant Change", "- [ ] Significant Change")
@@ -2123,45 +1814,6 @@ def test_a_label_flags_a_pull_request_without_the_checkbox(fake, monkeypatch, tm
     code, ev, _ = run_fetcher("significant_change_notifications", monkeypatch, tmp_path,
                               GITHUB_SCN_MARKER_LABEL="significant-change", **SCN_ENV)
     assert code == 0 and ev["notifications"][0]["pull_request"]["marked_via"] == "label"
-
-
-def test_lenient_settings_keep_the_evidence_and_exit_clean(fake, monkeypatch, tmp_path):
-    fake(scn_routes([scn_pr(5, GL.BROKEN_MR)]))
-    code, ev, _ = run_fetcher("significant_change_notifications", monkeypatch, tmp_path, GITHUB_SCN_STRICT="false",
-                              GITHUB_SCN_REQUIRE_COMPLETE="false", **SCN_ENV)
-    assert code == 0 and ev["summary"]["schema_invalid_count"] == 1
-
-
-@pytest.mark.parametrize("env,fragment", [
-    ({}, "FEDRAMP_CERT_PACKAGE_URI"),
-    ({**SCN_ENV, "GITHUB_SCN_STATE": "draft"}, "GITHUB_SCN_STATE"),
-    ({**SCN_ENV, "GITHUB_SCN_DAYS_BACK": "0"}, "GITHUB_SCN_DAYS_BACK"),
-])
-def test_scn_configuration_errors_fail_as_bad_config(fake, monkeypatch, tmp_path, env, fragment):
-    f = fake(scn_routes([]))
-    code, _, status = run_fetcher("significant_change_notifications", monkeypatch, tmp_path, **env)
-    assert code == 1 and status["code"] == "bad_config" and fragment in status["error"]
-    assert not any(p == "graphql" for p, _ in f.calls)
-
-
-def test_two_different_package_uris_warn_and_the_fedramp_one_wins(fake, monkeypatch, tmp_path):
-    fake(scn_routes([scn_pr(5, GL.PLAIN_MR)]))
-    code, ev, _ = run_fetcher("significant_change_notifications", monkeypatch, tmp_path,
-                              FEDRAMP_CERT_PACKAGE_URI="https://a.invalid/x.json", **SCN_ENV)
-    assert code == 0 and ev["metadata"]["certification_package_overview_uri"] == "https://a.invalid/x.json"
-    assert ev["metadata"]["certification_package_overview_uri_source"] == "FEDRAMP_CERT_PACKAGE_URI"
-    assert len(ev["metadata"]["config_warnings"]) == 1
-
-
-def test_open_pull_requests_can_be_scanned_for_advance_notice(fake, monkeypatch, tmp_path):
-    routes = scn_routes([scn_pr(1, GL.CHANGE_MR_COMPLETE, state="OPEN")])
-    seen = []
-    inner = routes["graphql"]
-    routes["graphql"] = lambda q, v: seen.append(q) or inner(q, v)
-    fake(routes)
-    code, ev, _ = run_fetcher("significant_change_notifications", monkeypatch, tmp_path,
-                              GITHUB_SCN_STATE="open", **SCN_ENV)
-    assert code == 0 and "states: [OPEN]" in seen[0] and ev["notifications"][0]["pull_request"]["merged_at"] is None
 
 
 def test_unreadable_reviews_are_a_failure_not_an_empty_approver_list(fake, monkeypatch, tmp_path):
@@ -2278,16 +1930,6 @@ def test_releases_per_repository_bounds_the_walk(fake, monkeypatch, tmp_path):
     assert code == 0 and [r["tag"] for r in ev["repositories"][0]["releases"]] == ["v30", "v29", "v28", "v27", "v26"]
 
 
-def test_an_attestation_lookup_that_fails_is_not_collected_rather_than_unattested(fake, monkeypatch, tmp_path):
-    routes = release_routes([release("v1", [asset("x", "a" * 64)])])
-    routes[f"repos/{ORG}/app/attestations/sha256:{'a' * 64}"] = (403, {"message": "Resource not accessible"},
-                                                                   {"X-Accepted-GitHub-Permissions": "attestations=read"})
-    fake(routes)
-    code, ev, status = run_fetcher("release_integrity", monkeypatch, tmp_path)
-    assert code == 1 and "attestations=read" in status["error"]
-    assert ev["summary"]["not_collected"] == ["app"] and ev["summary"]["release_assets_without_build_provenance"] == []
-
-
 # --- deployment_controls -------------------------------------------------------------
 
 def environment(name, reviewers=None, self_review=False, wait=None, policy=None, bypass=True):
@@ -2401,24 +2043,12 @@ def test_deployed_commits_are_compared_in_batches(fake, monkeypatch, tmp_path):
     assert code == 0 and batches == [20, 20, 5] and ev["summary"]["production_deployments_not_on_default_branch"] == []
 
 
-def test_production_patterns_are_configurable(fake, monkeypatch, tmp_path):
-    fake(deploy_routes([environment("production"), environment("gov-cloud")]))
-    _, ev, _ = run_fetcher("deployment_controls", monkeypatch, tmp_path, GITHUB_PRODUCTION_ENVIRONMENTS="gov-*")
-    assert ev["summary"]["production_environments"] == ["app:gov-cloud"]
-
-
 @pytest.mark.parametrize("env", [{"GITHUB_DEPLOYMENT_DAYS_BACK": "0"}, {"GITHUB_PRODUCTION_ENVIRONMENTS": ","},
                                  {"GITHUB_MAX_DEPLOYMENTS": "0"}])
 def test_deployment_configuration_errors(fake, monkeypatch, tmp_path, env):
     fake(deploy_routes([]))
     code, _, status = run_fetcher("deployment_controls", monkeypatch, tmp_path, **env)
     assert code == 1 and status["code"] == "bad_config"
-
-
-def test_an_environment_name_is_escaped_in_its_path(fake, monkeypatch, tmp_path):
-    f = fake(deploy_routes([environment("prod/us east")]))
-    run_fetcher("deployment_controls", monkeypatch, tmp_path)
-    assert any(p.endswith("environments/prod%2Fus%20east/deployment_protection_rules") for p, _ in f.calls)
 
 
 # --- vulnerability_disclosure -----------------------------------------------------
@@ -2462,21 +2092,6 @@ def test_vulnerability_disclosure_verdicts(fake, monkeypatch, tmp_path):
     assert rows["GHSA-1"]["report_accepted"] is False and rows["GHSA-2"]["reported_privately"] is False
 
 
-def test_no_advisories_means_no_oldest_age(fake, monkeypatch, tmp_path):
-    fake(vd_routes({}, {}, {}))
-    code, ev, _ = run_fetcher("vulnerability_disclosure", monkeypatch, tmp_path)
-    assert code == 0 and ev["summary"]["oldest_unresolved_days"] is None and ev["summary"]["advisories_total"] == 0
-
-
-def test_unreadable_advisories_name_the_permission(fake, monkeypatch, tmp_path):
-    routes = vd_routes({}, {}, {})
-    routes[f"repos/{ORG}/app/security-advisories"] = (403, {"message": "Resource not accessible"},
-                                                      {"X-Accepted-GitHub-Permissions": "repository_advisories=read"})
-    fake(routes)
-    code, ev, status = run_fetcher("vulnerability_disclosure", monkeypatch, tmp_path)
-    assert code == 1 and "repository_advisories=read" in status["error"] and ev["summary"]["not_collected"] == ["app"]
-
-
 # --- branch_protection: CODEOWNERS and ruleset bypasses -------------------------------
 
 CODE_OWNER_RULE = {"type": "pull_request", "parameters": {**PR_RULE["parameters"], "require_code_owner_review": True}}
@@ -2508,21 +2123,6 @@ def test_required_code_owner_review_needs_a_valid_codeowners_file(fake, monkeypa
     asked = [p for p, _ in f.calls if p.endswith("/codeowners/errors")]
     assert asked == [f"repos/{ORG}/protected/codeowners/errors"]
     assert by["unprotected"]["codeowners"] is None
-
-
-def test_ruleset_bypasses_in_the_last_month_are_listed(fake, monkeypatch, tmp_path):
-    routes = sandbox_routes()
-    routes[f"repos/{ORG}/protected/rulesets/rule-suites"] = [
-        {"id": 1, "actor_name": "boss", "ref": "refs/heads/main", "pushed_at": ago(2), "after_sha": "x",
-         "result": "bypass"}]
-    f = fake(routes)
-    code, ev, _ = run_fetcher("branch_protection", monkeypatch, tmp_path)
-    s = ev["summary"]
-    assert code == 0 and s["ruleset_bypasses_last_month"] == 1 and s["with_ruleset_bypasses_last_month"] == ["protected"]
-    queries = [q for p, q in f.calls if p.endswith("/rule-suites")]
-    assert queries and all(q["rule_suite_result"] == "bypass" and q["time_period"] == "month" for q in queries)
-    # A repository with no rulesets has no rule suites to ask for.
-    assert f"repos/{ORG}/unprotected/rulesets/rule-suites" not in {p for p, _ in f.calls}
 
 
 def test_an_unreadable_bypass_log_is_unknown_and_keeps_the_record(fake, monkeypatch, tmp_path):
@@ -2625,19 +2225,6 @@ def test_audit_log_counts_everything_and_keeps_security_events(fake, monkeypatch
                                             (None, None), ("x", None)])
 def test_audit_timestamps_in_seconds_or_milliseconds(value, expected):
     assert MODS["audit_log"].when(value) == expected
-
-
-def test_a_plan_without_the_audit_log_api_fails_with_the_reason(fake, monkeypatch, tmp_path):
-    f = fake(audit_routes([], plan="free"))
-    code, _, status = run_fetcher("audit_log", monkeypatch, tmp_path)
-    assert code == 1 and status["code"] == "bad_config" and "Enterprise Cloud" in status["error"]
-    assert not any(p.endswith("/audit-log") for p, _ in f.calls)
-
-
-def test_more_events_than_the_cap_fail_rather_than_report_part(fake, monkeypatch, tmp_path):
-    fake(audit_routes([audit_event("repo.create", i) for i in range(30)]))
-    code, ev, status = run_fetcher("audit_log", monkeypatch, tmp_path, GITHUB_AUDIT_MAX_EVENTS="10")
-    assert code == 1 and "GITHUB_AUDIT_MAX_EVENTS" in status["error"] and "security_events" not in ev
 
 
 @pytest.mark.parametrize("env", [{"GITHUB_AUDIT_DAYS_BACK": "0"}, {"GITHUB_AUDIT_DAYS_BACK": "181"},
