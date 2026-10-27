@@ -13,7 +13,9 @@ statement: >
   analytics rules cover the required log sources". Does not prove what the rules detect, or tables read
   only through parser functions, which the fetcher cannot see.
 
-regex: '"partial_failure":\s*false\b[\s\S]*?"tables_read_by_enabled_rules":\s*\[(?=[^\]]*"enabled_rules":\s*[1-9]\d*,\s*"last_ingested":\s*"[^"]+",\s*"table":\s*"AuditLogs")(?=[^\]]*"enabled_rules":\s*[1-9]\d*,\s*"last_ingested":\s*"[^"]+",\s*"table":\s*"AzureActivity")(?=[^\]]*"enabled_rules":\s*[1-9]\d*,\s*"last_ingested":\s*"[^"]+",\s*"table":\s*"SigninLogs")'
+# enabled_rules counts every rule reading the table, its query or its template; later fetchers also
+# give enabled_rules_by_template, the template-only part, which sorts between it and last_ingested.
+regex: '"partial_failure":\s*false\b[\s\S]*?"tables_read_by_enabled_rules":\s*\[(?=[^\]]*"enabled_rules":\s*[1-9]\d*,\s*(?:"enabled_rules_by_template":\s*\d+,\s*)?"last_ingested":\s*"[^"]+",\s*"table":\s*"AuditLogs")(?=[^\]]*"enabled_rules":\s*[1-9]\d*,\s*(?:"enabled_rules_by_template":\s*\d+,\s*)?"last_ingested":\s*"[^"]+",\s*"table":\s*"AzureActivity")(?=[^\]]*"enabled_rules":\s*[1-9]\d*,\s*(?:"enabled_rules_by_template":\s*\d+,\s*)?"last_ingested":\s*"[^"]+",\s*"table":\s*"SigninLogs")'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
