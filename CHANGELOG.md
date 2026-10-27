@@ -119,14 +119,18 @@ schemas and the `paramify` CLI — not the internal code.
   recurrence, default decision, auto-apply setting and reviewers (per stage for a
   multi-stage series), each run's status, and the decisions of each active
   series' latest completed cycle with whether each denial was applied. A cycle is
-  the runs that started on the same day, taken once all have ended. Lists follow
+  the runs that started at the same time, taken once all have ended (Completing
+  and AutoReviewing count as ended). Lists follow
   `@odata.nextLink`, and ask for the next page with `$top`/`$skip` when Graph
   sends a full page without one. The summary says whether every active series
   runs at least monthly, denies unanswered reviews and applies its decisions
-  automatically, how long since each last finished a cycle, and how many denials
-  were applied. A tenant without Entra ID P2 or ID Governance reads
-  `access_reviews_available: false` and the run succeeds; when any read fails the
-  summary gives no figures, so a denied read never reads as no reviews. Needs
+  automatically, and gives the auto-removal and the longest recurrence period
+  apart from monthly so a validator can set its own cadence; also how long since
+  each last finished a cycle, and how many denials were applied. A tenant without
+  Entra ID P2 or ID Governance reads `access_reviews_available: false` and the run
+  succeeds; only Graph's `AadPremiumLicenseRequired` code on the first read counts
+  as that, and any other refusal is a failure. When any read fails the summary
+  gives no figures, so a denied read never reads as no reviews. Needs
   `AccessReview.Read.All`. Reviews of Azure resource roles are kept by Azure
   Resource Manager, not Graph, and are not read.
 
