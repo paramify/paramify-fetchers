@@ -134,7 +134,7 @@ schemas and the `paramify` CLI — not the internal code.
   status). User owners' names and account state need User.Read.All (or
   Directory.Read.All); without it they read null, and so does the disabled-owner
   count. A principal deleted between reads reads null alone. Also maps to
-  KSI-PIY-GIV and KSI-SVC-VCM.
+  KSI-PIY-GIV and KSI-IAM-ELP.
 - **One privileged Graph permission judgment.** `azure_entra_service_principals` and
   `azure_managed_identity_configuration` (0.1.1) now share it: any application
   permission with ReadWrite or FullControl in its name, tenant-wide reads, and a
