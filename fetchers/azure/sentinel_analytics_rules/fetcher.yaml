@@ -1,5 +1,5 @@
 name: azure_sentinel_analytics_rules
-version: 0.2.1
+version: 0.2.0
 description: >-
   Lists each Sentinel workspace's detection rules with their queries,
   suppression and the log tables each reads, flagging arriving logs no enabled
