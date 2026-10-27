@@ -1,0 +1,15 @@
+validator: oci_change_categories_all_monitored
+cases:
+  - name: every_category_monitored
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"monitored_change_categories": ["iam_user_changes"], "unmonitored_change_categories": []}}'
+
+  - name: a_category_unmonitored
+    expect: FAIL
+    note: >
+      The fetcher writes JSON with indent=2, so a non-empty list never renders as a bare []
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"unmonitored_change_categories": [\n    "vcn_changes"\n  ]}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"unmonitoredChangeCategories": []}}'

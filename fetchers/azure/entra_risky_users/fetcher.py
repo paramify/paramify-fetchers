@@ -38,7 +38,7 @@ def directory_roles(client) -> Dict[str, List[Dict[str, Any]]]:
     held: Dict[str, List[Dict[str, Any]]] = {}
     for role in client.graph_list("/directoryRoles"):
         # $expand=members on the collection caps at 20 members per role, so each role's members are paged.
-        for member in client.graph_list(f"/directoryRoles/{role.get('id')}/members", {"$select": "id"}):
+        for member in client.graph_list(f"/directoryRoles/{role.get('id')}/members", params={"$select": "id"}):
             held.setdefault(member.get("id"), []).append(
                 {"name": role.get("displayName"), "privileged": is_privileged(role)}
             )
@@ -75,7 +75,7 @@ def account_enabled(client, user_id: str) -> Optional[bool]:
 
 def collect(client, collector) -> tuple:
     try:
-        raw = client.graph_list("/identityProtection/riskyUsers", {"$top": "500"})
+        raw = client.graph_list("/identityProtection/riskyUsers", params={"$top": "500"})
     except Exception as exc:  # noqa: BLE001
         if not_licensed(exc):
             return {"identity_protection_available": False, "reason": str(exc), "risky_users": None}, {

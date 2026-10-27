@@ -1,0 +1,24 @@
+key: oci_no_tenancy_admin_api_keys
+name: OCI Tenancy Administrators Hold No API Keys
+type: AUTOMATED
+role: configuration
+statement: >
+  No member of the tenancy Administrators group holds an active API signing key,
+  so administrative privilege cannot be exercised by a long-lived credential
+  outside an interactive, MFA-protected sign-in. Cloud Guard raises
+  USER_HAS_API_KEYS for the same condition. Does NOT assert anything about
+  non-admin users' keys, nor about key age — oci_vault_keys covers rotation of
+  Vault keys, and this is about IAM signing keys. Fails when an administrator
+  holds a key, and when the summary key is renamed.
+regex: '"tenancy_admins_with_api_keys":\s*(?<tenancy_admins_with_api_keys>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-IAM-USERS-CREDENTIALS

@@ -165,3 +165,28 @@ def test_a_failed_save_keeps_the_edit_in_memory_and_says_so(tmp_path, monkeypatc
     assert count == 1                                   # the removal survived
     assert len(_targets(path, name)) == 2               # the file did not change
     assert any("not saved" in n.lower() for n in notes)
+
+
+# --------------------------------------------------------------------------- #
+# Entry edits
+# --------------------------------------------------------------------------- #
+
+def test_entry_editor_keeps_an_env_reference_in_a_string_field(tmp_path):
+    m = api.init_manifest()
+    api.set_output_dir(m, str(tmp_path / "evidence"))
+    api.add_entry(m, "azure_front_door_origins")
+    api.set_fetcher_config(m, "azure_front_door_origins", "scope_exclusions", "${env:SCOPE_PATTERNS}")
+    path = tmp_path / "entry.yaml"
+    api.dump_manifest(m, path, REPO_ROOT)
+
+    async def body(app, pilot):
+        await _manifest_tab(pilot)
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, FormModal)
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+    _run(body, path)
+    [entry] = _on_disk(path)["run"]["fetchers"]
+    assert entry["config"]["scope_exclusions"] == "${env:SCOPE_PATTERNS}"

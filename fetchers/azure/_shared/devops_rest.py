@@ -9,7 +9,7 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 from urllib.parse import urlsplit
 
 from azure_common import (
@@ -226,8 +226,9 @@ class DevOpsClient:
         return response.text
 
     def iter(self, path: str, api_version: str = API_VERSION, params: Optional[Dict[str, Any]] = None,
-             service: Optional[str] = None, item_key: str = "value") -> Iterator[Dict[str, Any]]:
-        """Every item across pages: x-ms-continuationtoken or a body continuationToken, else a same-host nextLink."""
+             service: Optional[str] = None, item_key: Union[str, Sequence[str]] = "value") -> Iterator[Dict[str, Any]]:
+        """Every item across pages (header or body continuation token, else a same-host nextLink), from the first item key a page fills."""
+        keys = (item_key,) if isinstance(item_key, str) else tuple(item_key)
         url: Optional[str] = self.url(path, service)
         base_params = {**(params or {}), "api-version": api_version}
         query: Optional[Dict[str, Any]] = base_params
@@ -235,7 +236,7 @@ class DevOpsClient:
         while url:
             response = self._send("GET", url, params=query)
             body = self._json(response)
-            items = body if isinstance(body, list) else body.get(item_key) or []
+            items = body if isinstance(body, list) else next((body[k] for k in keys if body.get(k)), [])
             yield from items
             token = (response.headers or {}).get("x-ms-continuationtoken")
             if not token and isinstance(body, dict) and body.get("hasMore") is not False:
@@ -253,7 +254,7 @@ class DevOpsClient:
                 url = None
 
     def list(self, path: str, api_version: str = API_VERSION, params: Optional[Dict[str, Any]] = None,
-             service: Optional[str] = None, item_key: str = "value") -> List[Dict[str, Any]]:
+             service: Optional[str] = None, item_key: Union[str, Sequence[str]] = "value") -> List[Dict[str, Any]]:
         return list(self.iter(path, api_version, params, service, item_key))
 
 

@@ -1,0 +1,21 @@
+key: oci_zpr_enabled
+name: OCI Zero Trust Packet Routing Enabled
+type: AUTOMATED
+role: configuration
+statement: >
+  Zero Trust Packet Routing is switched on for the tenancy, so a packet no ZPR
+  statement allows is dropped even where a security list would admit it. The
+  fetcher writes false when ZPR's configuration 404s with no policies anywhere
+  (never enabled) and null when the configuration could not be read; both fail
+  here. Does NOT assert what the policies allow;
+  oci_zpr_no_internet_source_statements covers that. Fails when the summary
+  key is renamed.
+regex: '"zpr_enabled":\s*(?<zpr_enabled>true)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-ZPR

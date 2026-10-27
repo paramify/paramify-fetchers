@@ -4,6 +4,7 @@ name: CI
 # is the contract (CLAUDE.md). These jobs gate it:
 #   test      — every fetcher.yaml / category file validates against its JSON Schema
 #   azure-sdk — the Azure SDK operation groups the fetchers read still exist
+#   oci-sdk   — the OCI fetchers run against recorded responses (needs the oci extra)
 #   smoke     — the CLI discovery surface works across all fetchers
 #   lint      — the framework's own code passes ruff + mypy
 #   secrets   — no credentials in the tree or its full git history
@@ -65,9 +66,11 @@ jobs:
       # the CLI must stay clean with textual installed.
       - run: python -m pip install -e ".[dev,tui]"
       # Includes tests/test_contracts.py — the schema contract gate over every
-      # fetcher.yaml and _categories/*.yaml.
+      # fetcher.yaml and _categories/*.yaml. `-n auto` (pytest-xdist) spreads the
+      # suite over the runner's cores: serial it took over 4 minutes. A test that
+      # fails here but passes alone shares state with another test; fix the test.
       - name: pytest
-        run: pytest -q
+        run: pytest -q -n auto
 
   azure-sdk:
     name: azure-sdk (surface)
@@ -98,6 +101,38 @@ jobs:
       - name: pytest (azure SDK surface)
         run: pytest -q tests/test_azure_sdk_surface.py
 
+  oci-sdk:
+    name: oci (fetchers + SDK surface)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # The only job that installs the oci extra. The `test` matrix deliberately
+      # does not, which means every tests/test_oci_*.py SKIPS there: each opens
+      # with pytest.importorskip("oci"), so the whole OCI suite would go green in
+      # CI having run nothing at all — the same false confidence the azure-sdk
+      # job above exists to remove.
+      - run: python -m pip install -e ".[dev,oci]"
+      - name: assert the oci extra actually installed
+        run: python -c "import oci, oci._vendor.requests"
+      # No credentials and no network: the fetchers run as subprocesses against
+      # recorded HTTP responses (fetchers/oci/tests/cassettes), replayed through
+      # the real SDK, so deserialization, pagination and the SDK's error classes
+      # all still run. ~11s for all seventeen.
+      - name: pytest (OCI fetchers, cross-check, SDK surface)
+        # A glob, not a list: two SDK-dependent test files added later were in no
+        # list, so they skipped in `test` and ran nowhere.
+        run: pytest -q tests/test_oci_*.py
+      # The field-name check against the SDK's generated models. Exits non-zero on
+      # a finding; a companion test (above) fails if a record function goes
+      # unregistered, so this cannot pass by having nothing left to check.
+      - name: oci schema check
+        run: python tools/oci_schema_check.py
+
   smoke:
     name: smoke (CLI discovery)
     runs-on: ubuntu-latest
@@ -109,16 +144,40 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install -e .
-      - name: paramify list / catalog / ksi + describe every fetcher
+      - name: paramify list / catalog / ksi
         run: |
           set -euo pipefail
-          paramify list --json > /dev/null
+          paramify list --json > "$RUNNER_TEMP/fetchers.json"
           paramify catalog --json > /dev/null
           paramify ksi --json > /dev/null
-          for f in $(paramify list --json | python -c "import sys, json; [print(x['name']) for x in json.load(sys.stdin)]"); do
-            paramify describe "$f" --json > /dev/null
-          done
-          echo "smoke ok: described all discovered fetchers"
+      # One process for every describe. A `paramify` process per fetcher took
+      # over 2 minutes, nearly all of it Python start-up. CliRunner drives the
+      # same Typer app as the `paramify` entry point, which the step above
+      # already proves works.
+      - name: paramify describe every fetcher
+        run: |
+          python - "$RUNNER_TEMP/fetchers.json" <<'EOF'
+          import json, sys
+          from typer.testing import CliRunner
+          from framework.cli import app
+
+          runner = CliRunner()
+          with open(sys.argv[1]) as fh:
+              names = [f["name"] for f in json.load(fh)]
+          failed = []
+          for name in names:
+              result = runner.invoke(app, ["describe", name, "--json"])
+              try:
+                  assert result.exit_code == 0, f"exit {result.exit_code}: {result.output}"
+                  assert json.loads(result.stdout)["name"] == name, "described another fetcher"
+              except (AssertionError, ValueError) as exc:
+                  failed.append(f"{name}: {exc}")
+          for line in failed:
+              print(line, file=sys.stderr)
+          if failed:
+              sys.exit(f"smoke FAILED: {len(failed)} of {len(names)} fetchers did not describe")
+          print(f"smoke ok: described all {len(names)} discovered fetchers")
+          EOF
 
   secrets:
     name: secrets (gitleaks full history)

@@ -1,0 +1,18 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them. A validator that reads a zero cannot prove the
+# zero was measured — only the set, with its integrity partner, can.
+evidence_set: EVD-OCI-VAULT-KEYS
+cases:
+  - name: every_key_rotated
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"live_keys": 3, "keys_not_rotated_within_window": 0}}}'
+
+  - name: one_key_stale
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"live_keys": 3, "keys_not_rotated_within_window": 1}}}'
+
+  - name: no_keys_collected
+    expect: FAIL
+    note: >
+      'No unrotated keys' and 'no keys read' produce the same zero; only oci_key_inventory_present tells them apart.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"live_keys": 0, "keys_not_rotated_within_window": 0}}}'
