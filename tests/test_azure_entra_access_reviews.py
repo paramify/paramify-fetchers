@@ -627,6 +627,20 @@ def test_a_licence_refusal_after_the_definitions_read_is_a_failure(monkeypatch):
     assert "notes" not in results
 
 
+def test_a_licence_refusal_of_an_instances_read_is_a_failure(monkeypatch):
+    graph = _Definitions([_raw_definition("d-active", "InProgress")], {}, {})
+    graph.by_access_review_schedule_definition_id = lambda def_id: ns(instances=_Builder(_unlicensed()))
+    _fake_graph(monkeypatch, graph)
+    collector = ar.Collector(logging.getLogger("test"))
+    _, definitions, instances, decisions, unlicensed = asyncio.run(ar._collect(collector, object()))
+    assert unlicensed == []
+    assert instances == {"d-active": None}
+    assert len(collector.failures) == 1
+    results, summary = ar.build(definitions, instances, decisions, unlicensed, NOW)
+    assert summary == {"access_reviews_available": None, "collection_complete": False}
+    assert "notes" not in results
+
+
 def test_main_without_p2_succeeds_with_no_status_file(tmp_path, monkeypatch):
     graph = _Definitions([], {}, {})
     graph.exc = _unlicensed()
