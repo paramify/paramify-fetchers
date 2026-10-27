@@ -1,0 +1,23 @@
+key: sentinel_connectors_listed_every_workspace
+name: Azure Sentinel Connectors Listed in Every Workspace
+type: AUTOMATED
+role: configuration
+statement: >
+  Every collected Sentinel workspace's data connectors were all listed (no workspace's connectors_total
+  is null), and at least one workspace has a connector. The integrity partner of
+  sentinel_configured_connectors_receiving_data: it fails when a 0 there would mean nothing was
+  judged, either because there are no connectors or because a workspace's listing was incomplete (for
+  example, a failed preview listing, which the fetcher records as a note, not a failure). Some fetcher
+  versions add up the summary count over only the workspaces they could measure, and this check covers
+  that case too.
+
+# connectors_total is per workspace; the summary has only data_connectors_total, which the quote keeps out.
+regex: '^\s*\{(?=[\s\S]*?"connectors_total":\s*[1-9])(?![\s\S]*?"connectors_total":\s*null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-DATA-SOURCES
