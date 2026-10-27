@@ -479,6 +479,32 @@ def test_data_sources_defender_xdr_links_only_the_products_it_carries(azure, tmp
     assert (mdc["connections"], by_id["IoT"]["connections"]) == ((["mdc"] if own else []), [])
 
 
+def test_data_sources_defender_xdr_link_needs_every_mtp_alerts_value_carried(azure, tmp_path):
+    alert_only_workspace(azure, "Disabled")
+    alert = 'SecurityAlert | where ProductName == "{}"'
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"] += [
+        ui_connector("AzureActiveDirectoryIdentityProtection",
+                     [("SecurityAlert (IPC)", alert.format("Azure Active Directory Identity Protection"))],
+                     [{"type": "MtpAlerts", "value": ["AzureActiveDirectory"]}]),
+        ui_connector("OfficeATP", [("SecurityAlert(OATP)", 'SecurityAlert | where ProviderName == "OATP"')],
+                     [{"type": "MtpAlerts", "value": ["OfficeATP"]}]),
+        ui_connector("OfficeIRM", [("SecurityAlert (OfficeIRM)", alert.format("Microsoft 365 Insider Risk Management"))],
+                     [{"type": "MtpAlerts", "value": ["OfficeIRM"]}]),
+        ui_connector("Mixed", [("SecurityAlert", alert.format("Azure Security Center"))],
+                     [{"type": "MtpAlerts", "value": ["AzureAdvancedThreatProtection", "MicrosoftDefenderForCloudTenantBased"]}])]
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    # OfficeATP's own connection has alerts Disabled, so only Defender XDR makes it quiet.
+    assert code == 0 and ws["connectors_quiet"] == [
+        "AzureActiveDirectoryIdentityProtection", "AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity",
+        "OfficeATP", "OfficeIRM"]
+    assert [by_id[i]["connections"] for i in ("AzureActiveDirectoryIdentityProtection", "OfficeATP", "OfficeIRM")] == [
+        ["mtp"], ["mtp", "oatp"], ["mtp"]]
+    # One value Defender XDR doesn't carry is enough to leave it unlinked.
+    assert by_id["Mixed"]["connections"] == [] and "Mixed" in ws["connectors_not_connected"]
+
+
 def test_data_sources_configured_without_data_leaves_out_unconnected_and_quiet(azure, tmp_path):
     alert_only_workspace(azure, "Disabled")
     # Installed from Content Hub with no connection, and not alert-only; and one connected to a Basic-plan table.
