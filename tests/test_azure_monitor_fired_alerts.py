@@ -135,6 +135,10 @@ def test_unread_history_leaves_the_derived_fields_unknown(status):
     (azure_rest.ArmError(404, "AlertNotFound", "gone"), fa.HISTORY_NOT_FOUND),
     (azure_rest.ArmError(403, "AuthorizationFailed", "no"), fa.HISTORY_NOT_AUTHORIZED),
     (azure_rest.ArmError(500, "InternalServerError", "boom"), fa.HISTORY_ERROR),
+    # Only the HTTP status decides: an error's wording can't turn it into an expected miss.
+    (azure_rest.ArmError(400, "BadRequest", "ResourceNotFound in the request body"), fa.HISTORY_ERROR),
+    (azure_rest.ArmError(409, "Conflict", "Forbidden while the alert is updating"), fa.HISTORY_ERROR),
+    (RuntimeError("AuthorizationFailed"), fa.HISTORY_ERROR),
 ])
 def test_history_status(exc, status):
     assert fa.history_status(exc) == status

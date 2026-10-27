@@ -281,11 +281,11 @@ def summarize(
 
 
 def history_status(exc: BaseException) -> str:
-    message = str(exc).lower()
+    """By HTTP status alone; message wording would let a 400 or 409 pass as an expected miss."""
     status = getattr(exc, "status", None)
-    if status == 404 or "notfound" in message:
+    if status == 404:
         return HISTORY_NOT_FOUND
-    if status in (401, 403) or "authorizationfailed" in message or "forbidden" in message:
+    if status in (401, 403):
         return HISTORY_NOT_AUTHORIZED
     return HISTORY_ERROR
 
