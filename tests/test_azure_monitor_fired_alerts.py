@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+from collections import namedtuple
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -17,6 +20,7 @@ _spec = importlib.util.spec_from_file_location("azure_monitor_fired_alerts_under
 fa = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(fa)
 azure_rest = sys.modules["azure_rest"]
+azure_common = sys.modules["azure_common"]
 
 SUB = "/subscriptions/s1"
 RG = f"{SUB}/resourceGroups/rg1"
@@ -282,7 +286,7 @@ class _Subscription:
         return []
 
 
-def registered(alerts_management=fa.REGISTRATION_UNKNOWN, insights=fa.REGISTRATION_UNKNOWN):
+def registered(alerts_management=azure_common.REGISTRATION_UNKNOWN, insights=azure_common.REGISTRATION_UNKNOWN):
     return {"Microsoft.AlertsManagement": alerts_management, "Microsoft.Insights": insights}
 
 
@@ -418,3 +422,87 @@ def test_a_run_whose_every_history_is_refused_fails(refused, ok):
     assert collector.ok is ok
     if not ok:
         assert sys.modules["azure_common"].classify_failure_code(collector.failures) == "not_authorized"
+
+
+class _Resp:
+    def __init__(self, status, body):
+        self.status_code, self._body, self.reason, self.text = status, body, "", json.dumps(body)
+        self.headers: dict = {}
+
+    def json(self):
+        return self._body
+
+
+ALERTS_PATH = f"{SUB}/providers/Microsoft.AlertsManagement/alerts"
+
+
+class _Arm:
+    """requests.Session for subscription s1: two pages of alerts, their histories, empty rule lists."""
+
+    def __init__(self, refused=()):
+        self.refused, self.urls = {f"a{n}" for n in refused}, []
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        self.urls.append(url)
+        path = urlparse(url).path
+        if path.endswith("/history"):
+            if path.split("/")[-2] in self.refused:
+                return _Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+            return _Resp(200, {"properties": {"modifications": [mod("AlertCreated", "2026-10-10T10:00:00Z")]}})
+        if path.endswith("/alertsSummary"):
+            return _Resp(200, {"properties": {"total": 2}})
+        if path == ALERTS_PATH:
+            if "skipToken=p2" in url:
+                return _Resp(200, {"value": [raw_alert(2)]})
+            assert (params or {}).get("pageCount") == fa.PAGE_COUNT
+            next_link = f"https://management.azure.com{ALERTS_PATH}?api-version={fa.ALERTS_API}&$skipToken=p2"
+            return _Resp(200, {"value": [raw_alert(1)], "nextLink": next_link})
+        return _Resp(200, {"value": []})
+
+
+class _Cred:
+    def get_token(self, scope):
+        return namedtuple("T", "token expires_on")("tok", 9_999_999_999)
+
+
+@pytest.fixture
+def arm(monkeypatch, tmp_path):
+    def serve(refused=()):
+        session = _Arm(refused)
+        monkeypatch.setattr("requests.Session", lambda: session)
+        return session
+
+    monkeypatch.setattr(azure_rest, "pinned_credential", lambda sub: _Cred())
+    monkeypatch.setattr(azure_rest, "REPO_ROOT", tmp_path / "repo")
+    monkeypatch.setattr(fa, "provider_registration_status", lambda collector, sub, cred, ns: azure_common.REGISTERED)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", "s1")
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    for env in ("AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID", "AZURE_ENVIRONMENT"):
+        monkeypatch.delenv(env, raising=False)
+    return serve
+
+
+def test_the_alert_list_follows_next_link(arm):
+    session = arm()
+    alerts, total, read = fa.collect_alerts(azure_rest.AzureRestClient(_Cred(), session), "s1",
+                                            sys.modules["azure_common"].Collector(fa.logger))
+    assert ([a["name"] for a in alerts], total, read) == (["alert 1", "alert 2"], 2, True)
+    assert sum(1 for u in session.urls if urlparse(u).path == ALERTS_PATH) == 2
+
+
+@pytest.mark.parametrize("refused, code", [((), 0), ((2,), 0), ((1, 2), 1)])
+def test_main_writes_evidence_and_exits_by_what_was_read(arm, tmp_path, refused, code):
+    arm(refused)
+    assert fa.main() == code
+    [path] = tmp_path.glob("azure_monitor_fired_alerts_s1.json")
+    evidence = json.loads(path.read_text())
+    summary = evidence["summary"]
+    assert [a["name"] for a in evidence["results"]["alerts"]] == ["alert 1", "alert 2"]
+    assert (summary["alerts_fired"], summary["all_alerts_listed"], summary["alert_histories_unread"]) == (
+        2, True, len(refused))
+    assert summary["provider_registration_status"] == dict.fromkeys(
+        fa.NAMESPACES, azure_common.REGISTERED)
+    if code:
+        assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"

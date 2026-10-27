@@ -2,36 +2,26 @@
 """Every Azure Monitor alert fired in the last 30 days, who acknowledged and closed it, and how often each alert rule fired."""
 
 import logging
-import os
 import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from statistics import median
 
-from dotenv import load_dotenv
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
-    REGISTRATION_UNKNOWN,
     Collector,
     arm_id_key,
     basename,
-    build_payload,
-    classify_failure_code,
-    failure_reason,
     provider_registration_status,
-    report_failure,
-    resolve_subscription,
-    sanitize_for_filename,
     sorted_counts,
-    write_evidence,
 )
-from azure_rest import AzureRestClient, parse_time, pinned_credential  # noqa: E402
+from azure_rest import parse_time, run_subscription  # noqa: E402
 
-logger = logging.getLogger("azure_monitor_fired_alerts")
+NAME = "azure_monitor_fired_alerts"
+logger = logging.getLogger(NAME)
 
 ALERTS_API = "2019-05-05-preview"
 # Azure keeps fired alerts for 30 days; the list defaults to 1 day when timeRange is omitted.
@@ -48,6 +38,7 @@ RULE_SOURCES = (
     ("smart_detector", "Microsoft.AlertsManagement", "Microsoft.AlertsManagement/smartDetectorAlertRules", "2021-04-01"),
     ("activity_log", "Microsoft.Insights", "Microsoft.Insights/activityLogAlerts", "2020-10-01"),
 )
+NAMESPACES = ("Microsoft.AlertsManagement", "Microsoft.Insights")
 RULE_TYPE_BY_PROVIDER = {path.lower(): rule_type for rule_type, _, path, _ in RULE_SOURCES}
 # Backup and Service Health alerts name a built-in rule ("Backup"), not a rule resource.
 RULE_BUILTIN = "builtin"
@@ -360,66 +351,24 @@ def collect(client, subscription_id: str, registration: dict, collector: Collect
     return alerts, rule_activity(listed, alerts, alerts_read), total, alerts_read, rules_read
 
 
+def collect_subscription(client, subscription_id: str, collector: Collector) -> tuple:
+    """(results, summary) for run_subscription."""
+    registration = {ns: provider_registration_status(collector, subscription_id, client.cred, ns) for ns in NAMESPACES}
+    alerts, rules, total, alerts_read, rules_read = collect(client, subscription_id, registration, collector)
+    alerts.sort(key=lambda a: (a["fired_at"] or "", arm_id_key(a["id"])))
+    logger.info("%d alerts, %d alert rules", len(alerts), len(rules))
+    results = {
+        "alerts": alerts,
+        "alert_rules": rules,
+        "time_range": TIME_RANGE,
+        "provider_registration_status": registration,
+    }
+    summary = {**summarize(alerts, rules, total, alerts_read, rules_read), "provider_registration_status": registration}
+    return results, summary
+
+
 def main() -> int:
-    logging.basicConfig(
-        level=os.environ.get("LOG_LEVEL", "INFO"),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
-    # The azure-* SDKs log every request header at INFO; warnings still get through.
-    logging.getLogger("azure").setLevel(logging.WARNING)
-    load_dotenv()
-
-    output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
-    collector = Collector(logger)
-
-    sub = resolve_subscription(collector)
-    subscription_id = sub["subscription_id"]
-    cred = collector.guard("azure.identity.DefaultAzureCredential", lambda: pinned_credential(subscription_id))
-
-    alerts: list[dict] = []
-    rules: list[dict] = []
-    total, alerts_read, rules_read = None, False, False
-    registration = {ns: REGISTRATION_UNKNOWN for ns in ("Microsoft.AlertsManagement", "Microsoft.Insights")}
-    if subscription_id and cred is not None:
-        for ns in registration:
-            registration[ns] = provider_registration_status(collector, subscription_id, cred, ns)
-        alerts, rules, total, alerts_read, rules_read = collect(
-            AzureRestClient(cred), subscription_id, registration, collector
-        )
-    elif not subscription_id:
-        collector.record(
-            "resolve_subscription",
-            RuntimeError(
-                "no subscription id (set AZURE_SUBSCRIPTION_ID or configure an "
-                "ambient Azure credential that can list subscriptions)"
-            ),
-        )
-
-    alerts.sort(key=lambda a: (a["fired_at"] or "", (a["id"] or "").lower()))
-    evidence = build_payload(
-        subscription_id=subscription_id,
-        subscription_source=sub["subscription_source"],
-        collector=collector,
-        results={
-            "alerts": alerts,
-            "alert_rules": rules,
-            "time_range": TIME_RANGE,
-            "provider_registration_status": registration,
-        },
-        summary={
-            **summarize(alerts, rules, total, alerts_read, rules_read),
-            "provider_registration_status": registration,
-        },
-    )
-
-    filename = f"azure_monitor_fired_alerts_{sanitize_for_filename(subscription_id or 'unknown')}.json"
-    path = write_evidence(output_dir, filename, evidence)
-    logger.info("Evidence saved to %s (%d alerts)", path, len(alerts))
-
-    if not collector.ok:
-        report_failure(failure_reason(collector.failures), classify_failure_code(collector.failures))
-        return 1
-    return 0
+    return run_subscription(fetcher=NAME, logger=logger, collect=collect_subscription)
 
 
 if __name__ == "__main__":
