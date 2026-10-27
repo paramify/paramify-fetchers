@@ -151,6 +151,8 @@ class Tally:
             "failed": not ok,
             "successful_single_factor": ok and r["authentication_requirement"] == SINGLE_FACTOR,
             "successful_multi_factor": ok and r["authentication_requirement"] == MULTI_FACTOR,
+            "successful_unknown_requirement": ok
+            and r["authentication_requirement"] not in (SINGLE_FACTOR, MULTI_FACTOR),
             "successful_without_conditional_access": ok and r["conditional_access_status"] == CA_NOT_APPLIED,
             "conditional_access_failures": r["conditional_access_status"] == CA_FAILURE,
             "successful_phishing_resistant": r["phishing_resistant"],
@@ -259,6 +261,7 @@ def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, compl
         # --- did each sign-in require and pass MFA ---
         "successful_single_factor_sign_ins": when(c["successful_single_factor"]),
         "successful_multi_factor_sign_ins": when(c["successful_multi_factor"]),
+        "successful_sign_ins_with_unknown_requirement": when(c["successful_unknown_requirement"]),
         "multi_factor_percentage": when(
             coverage_percentage(c["successful_multi_factor"], c["successful"]) if c["successful"] else None
         ),

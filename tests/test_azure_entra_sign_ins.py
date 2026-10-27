@@ -281,6 +281,16 @@ def test_an_empty_lookback_leaves_ratios_and_risk_unknown(monkeypatch):
     assert s["multi_factor_percentage"] is None
 
 
+def test_an_unreported_requirement_is_counted_apart(monkeypatch):
+    unknown = [_sign_in("q1", "u-1", requirement=None, steps=[_step("Password")]),
+               _sign_in("q2", "u-1", requirement="unknownFutureValue", steps=[_step("Password")]),
+               _sign_in("q3", "u-1", steps=[_step("Password"), _step("SMS")])]
+    _, s = sign_ins.collect(FakeClient([unknown]), _collector(), _window(monkeypatch))
+    assert s["successful_sign_ins_with_unknown_requirement"] == 2
+    assert (s["successful_single_factor_sign_ins"], s["successful_multi_factor_sign_ins"]) == (0, 1)
+    assert s["multi_factor_percentage"] == 33
+
+
 def test_only_failed_sign_ins_leave_the_mfa_percentage_null(monkeypatch):
     failed = [_sign_in("f1", "u-1", error=50126, steps=[_step("Password", ok=False)])]
     _, s = sign_ins.collect(FakeClient([failed]), _collector(), _window(monkeypatch))
