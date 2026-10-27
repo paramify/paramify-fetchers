@@ -1,0 +1,34 @@
+# Third-party FedRAMP certification status, read from FedRAMP's own published
+# marketplace data (github.com/FedRAMP/marketplace-fedramp-gov-data): data.json
+# (the listings), fedramp-status-changelog.json (every status transition) and
+# fedramp-frc-cso-pkg.json (20x certification package overviews).
+#
+# No secret for FedRAMP: the data is public. The workspace fetcher also reads
+# the Paramify workspace's elements and declares its own Paramify token.
+#
+# No `requires:` block: the one dependency is `requests`, a core framework
+# dependency (see _categories/betterstack.yaml for the same reasoning).
+
+name: fedramp_marketplace
+display_name: FedRAMP Marketplace
+description: >-
+  FedRAMP Marketplace certification status of your third-party cloud services:
+  whether each vendor package is still listed, its certification state, class
+  and impact level, its latest status change, and a link to its listing.
+
+config_schema:
+  data_url:
+    type: string
+    default: https://raw.githubusercontent.com/FedRAMP/marketplace-fedramp-gov-data/main
+    env: FEDRAMP_MARKETPLACE_DATA_URL
+    description: >-
+      Base URL the three FedRAMP marketplace files are read from. Point it at a
+      mirror if the runner cannot reach raw.githubusercontent.com.
+  output_mode:
+    type: string
+    default: combined
+    env: FEDRAMP_OUTPUT_MODE
+    description: >-
+      `combined` (default) writes one evidence file listing every vendor;
+      `per_vendor` writes one file per vendor. Per-vendor files all upload to
+      the same evidence set, with the vendor named inside each file.
