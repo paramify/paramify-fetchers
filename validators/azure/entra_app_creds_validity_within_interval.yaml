@@ -1,0 +1,24 @@
+key: entra_app_creds_validity_within_interval
+name: Entra App Registration Credentials Expire Within The Approved Interval
+type: AUTOMATED
+role: configuration
+statement: >-
+  No client secret or certificate on any Microsoft Entra ID app registration has more than 365 days of
+  validity left at collection time, so every credential must be replaced within the approved rotation
+  interval. Checked on every collection, a credential issued for longer than 365 days fails until it
+  is within 365 days of its expiry. Substantiates app credential rotation being configured within the
+  approved interval (KSI-SVC-ASM). Counts violations, so entra_app_creds_expiry_fields_present must
+  pass beside it. Does NOT prove credentials without an expiry date (entra_app_creds_none_expired_or_never_expiring),
+  that a replacement was issued or that the old credential was removed, credentials held on service
+  principals, or Key Vault and storage rotation.
+
+# The interval is the 366+ alternation; change it to the approved number of days.
+regex: '"days_until_expiry":\s*(?<days_until_expiry>36[6-9]|3[7-9]\d|[4-9]\d\d|[1-9]\d{3,})(?![\d.])'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-APP-CREDS

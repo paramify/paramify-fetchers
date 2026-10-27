@@ -1,0 +1,18 @@
+key: entra_app_creds_expiry_fields_present
+name: Entra App Registration Credential Expiry Fields Were Read
+type: AUTOMATED
+role: integrity
+statement: >-
+  Every app registration credential in the evidence carries the per-credential days_until_expiry field,
+  or the tenant has no app registration credentials at all, so entra_app_creds_validity_within_interval's
+  zero count reflects the credentials rather than a renamed field. Asserts nothing about posture.
+
+regex: '"days_until_expiry":\s*(?:-?\d+|null)|"total_credentials":\s*0(?![\d.])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-APP-CREDS

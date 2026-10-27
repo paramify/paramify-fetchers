@@ -1,0 +1,29 @@
+key: entra_app_creds_none_expired_or_never_expiring
+name: Entra App Registration Credentials None Expired Or Never Expiring
+type: AUTOMATED
+role: configuration
+statement: >-
+  No client secret or certificate on any Microsoft Entra ID app registration in the tenant has already
+  expired or has no expiry date, and the app registrations were read without a failure. Substantiates
+  app credentials being kept current and time-bound rather than left expired or valid forever
+  (KSI-IAM-SNU, KSI-SVC-ASM). An approved credential without an expiry date still fails here and must be
+  justified outside this evidence. Does NOT prove credentials held on service principals rather than
+  app registrations (azure_entra_service_principals), that an app has an owner, that a credential is
+  rotated before it expires, Key Vault keys, secrets or certificates, storage account keys, or that no
+  credential is kept in plaintext.
+
+regex: '"partial_failure":\s*false[\s\S]*?"credentials_without_expiry":\s*(?<credentials_without_expiry>\d+)[\s\S]*?"expired_credentials":\s*(?<expired_credentials>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # credentials_without_expiry
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # expired_credentials
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-APP-CREDS
