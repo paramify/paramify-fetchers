@@ -251,6 +251,23 @@ def test_succeeded_events_are_counted_in_the_queries():
     assert "SucceededEvents = countif(Succeeded =~ 'true')" in slr.PRINCIPAL_QUERY
 
 
+def test_audit_rows_stamped_with_a_database_id_count_for_their_instance():
+    workspaces = {slr.id_key(LAW): ws(
+        audit=[audit_row("Orders", action="SCHEMA_OBJECT_ACCESS_GROUP", records=3, failed=0, rid=f"{MI}/databases/Orders"),
+               audit_row("", records=2, failed=2),
+               audit_row("x", records=9, failed=0, rid=f"{MI}2/databases/x")])}
+    record = slr.instance_record({"id": MI}, [setting(group="audit")], [{"name": "Orders"}], workspaces, 10)
+    assert (record["audit_records"], record["databases"][0]["audit_records"], record["audit_arriving"]) == (5, 3, True)
+
+
+def test_a_slots_records_do_not_count_for_its_app():
+    workspaces = {slr.id_key(LAW): ws(http=[http_row(SLOT)], http_latest=[
+        {"ResourceId": SLOT.lower(), "TimeGenerated": "2026-10-12T10:00:00Z", "CsMethod": "GET"}])}
+    app = slr.app_record({"id": SITE}, [setting(category="AppServiceHTTPLogs")], workspaces, 10)
+    slot = slr.app_record({"id": SLOT}, [setting(category="AppServiceHTTPLogs")], workspaces, 10)
+    assert (app["http_log_records"], app["latest_request"], slot["http_log_records"]) == (0, None, 10)
+
+
 def test_instance_whose_workspace_lacks_the_table_reads_not_arriving():
     record = slr.instance_record({"id": MI}, [setting(category="SQLSecurityAuditEvents")], [],
                                  {slr.id_key(LAW): ws(read=("AzureDiagnostics",))}, 10)

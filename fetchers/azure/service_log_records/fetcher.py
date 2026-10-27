@@ -219,18 +219,24 @@ def _arriving(records, destinations: list[str], workspaces: dict, table: str):
     return False
 
 
-def _rows_for(rid: str, destinations: list[str], workspaces: dict, key: str) -> list[dict]:
-    rows = []
+def _rows_for(rid: str, destinations: list[str], workspaces: dict, key: str, nested: str = "") -> list[dict]:
+    """Rows stamped with the resource, or with a child under `nested` (a slot is its own resource, so none for apps)."""
+    prefix = f"{rid}/{nested}/" if nested else None
+    rows: list[dict] = []
     for wid in destinations:
         ws = workspaces.get(id_key(wid)) or {}
-        rows.extend(r for r in ws.get(key) or [] if (r.get("ResourceId") or "").lower() == rid)
+        for r in ws.get(key) or []:
+            row_id = (r.get("ResourceId") or "").lower()
+            if row_id == rid or (prefix and row_id.startswith(prefix)):
+                rows.append(r)
     return rows
 
 
-def _fullest(rid: str, destinations: list[str], workspaces: dict, key: str) -> list[str]:
+def _fullest(rid: str, destinations: list[str], workspaces: dict, key: str, nested: str = "") -> list[str]:
     """Each destination keeps its own copy of the records, so counts come from the one holding the most, not a sum."""
-    totals = {wid: sum(r.get("Records") or 0 for r in _rows_for(rid, [wid], workspaces, key)) for wid in destinations}
-    return [max(totals, key=totals.get)] if totals else []
+    totals = {wid: sum(r.get("Records") or 0 for r in _rows_for(rid, [wid], workspaces, key, nested))
+              for wid in destinations}
+    return [max(totals, key=lambda wid: totals[wid])] if totals else []
 
 
 def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
@@ -271,9 +277,10 @@ def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
 def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int) -> dict:
     destinations = exporting_workspaces(settings, AUDIT_CATEGORY, AUDIT_GROUPS)
     rid = (mi.get("id") or "").lower()
-    counted = _fullest(rid, destinations, workspaces, "audit")
-    rows = _rows_for(rid, counted, workspaces, "audit")
-    principal_rows = _rows_for(rid, counted, workspaces, "principals")
+    # SQL audit events can carry the database's id rather than the instance's.
+    counted = _fullest(rid, destinations, workspaces, "audit", "databases")
+    rows = _rows_for(rid, counted, workspaces, "audit", "databases")
+    principal_rows = _rows_for(rid, counted, workspaces, "principals", "databases")
     records = sum(r.get("Records") or 0 for r in rows)
     listed = {(d.get("name") or "").lower(): d["name"] for d in databases or [] if d.get("name")}
     dbs: dict = {}
@@ -325,7 +332,8 @@ def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int
         "audit_workspaces": destinations,
         "audit_records": records,
         "failed_audit_events": sum(r.get("Failed") or 0 for r in rows),
-        "last_audit_record": _latest(r.get("LastRecord") for r in _rows_for(rid, destinations, workspaces, "audit")),
+        "last_audit_record": _latest(
+            r.get("LastRecord") for r in _rows_for(rid, destinations, workspaces, "audit", "databases")),
         "audit_actions": sorted_counts(actions),
         "databases": db_records,
         "audit_records_without_database": sum(r.get("Records") or 0 for r in rows if not r.get("Database")),
