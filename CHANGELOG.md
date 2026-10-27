@@ -123,13 +123,24 @@ schemas and the `paramify` CLI — not the internal code.
   Tenant-wide data permissions (mail, files, sites, chats) count as privileged only
   as application permissions, since delegated they reach only what the signed-in
   user can open; a permission that can't be named reads unknown and is counted.
+  Only Graph permissions are judged: one on any other API (Exchange, SharePoint)
+  reads `privileged: null` with `judged: false`, and leaves the principal's
+  `has_privileged_permission` null unless it also holds a privileged Graph one.
   The summary adds ownerless principals holding credentials, principals whose
-  only owners are disabled, and principals holding privileged Graph permissions;
-  the existing fields are unchanged. Delegated grants need
-  DelegatedPermissionGrant.Read.All (or Directory.Read.All) and read null without
-  it. User owners' names and account state need User.Read.All (or
+  only owners are disabled, principals holding privileged Graph permissions and
+  `delegated_grants_status`; the existing fields are unchanged. Delegated grants
+  need DelegatedPermissionGrant.Read.All (or Directory.Read.All) and read null
+  without it (`delegated_grants_status: not_authorized`, told by the 401 or 403
+  status). User owners' names and account state need User.Read.All (or
   Directory.Read.All); without it they read null, and so does the disabled-owner
-  count. Also maps to KSI-PIY-GIV and KSI-SVC-VCM.
+  count. A principal deleted between reads reads null alone. Also maps to
+  KSI-PIY-GIV and KSI-SVC-VCM.
+- **One privileged Graph permission judgment.** `azure_entra_service_principals` and
+  `azure_managed_identity_configuration` (0.1.1) now share it: any application
+  permission with ReadWrite or FullControl in its name, tenant-wide reads, and a
+  list of permissions that grant access, take over sign-in or change the tenant's
+  controls, matched in any case. For managed identities the only newly flagged
+  permission is User.ManageIdentities.All.
 - **`azure_app_service_configuration` 0.3.0: cipher suites, basic-auth publishing, Key Vault
   references and runtime end of support.** Each web app now reports its minimum TLS cipher
   suite and the suites still allowed (whether CBC or static-RSA suites remain), the SCM site's
