@@ -21,12 +21,17 @@ schemas and the `paramify` CLI — not the internal code.
   it allows permanent eligible or active assignments. Privileged counts take
   direct grants of privileged roles held tenant-wide, as
   `azure_entra_privileged_roles` does; grants scoped below the tenant are counted
-  apart in `privileged_assignments_scoped_below_tenant`. A tenant without Entra ID
-  P2 reads `pim_available: false`, keeps the reads that succeeded, and the run
-  succeeds; when any read fails the summary gives no figures, so a denied read
-  never reads as zero standing admins. A holder whose type wasn't returned, or a
-  privileged role's policy missing a rule, makes the matching user count or role
-  list null rather than clean. Needs `RoleManagement.Read.Directory`.
+  apart in `privileged_assignments_scoped_below_tenant`, and an assignment with no
+  scope isn't taken as tenant-wide. A tenant without Entra ID P2 reads
+  `pim_available: false`, keeps the role names, skips the other PIM reads, and the
+  run succeeds; only Graph's `AadPremiumLicenseRequired` code on the first PIM read
+  counts as that, and any other refusal is a failure. When any read fails the
+  summary gives no figures, so a denied read never reads as zero standing admins,
+  and a failed role-definitions read leaves `is_privileged` null. A holder whose
+  type wasn't returned, a privileged role's policy missing a rule, or a held
+  privileged role with no policy (`privileged_roles_without_policy`) makes the
+  matching user count or role lists null rather than clean. Needs
+  `RoleManagement.Read.Directory`.
 - **`azure_entra_groups`** (`EVD-AZURE-ENTRA-GROUPS`) — every Entra ID group with
   its members and owners, its kind, whether it can hold directory roles, and
   whether membership is set by a rule (dynamic, with paused rules flagged), by hand
