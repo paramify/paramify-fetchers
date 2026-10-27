@@ -116,7 +116,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
-- **`azure_sentinel_data_sources` 0.2.0: last data received per connector.**
+- **`azure_sentinel_data_sources` 0.2.1: last data received per connector.**
   Each workspace gains `connectors`: every connector definition installed from
   Content Hub (returned by the preview `dataConnectors` listing), every codeless
   definition (`dataConnectorDefinitions`), and each built-in connection kind
@@ -129,7 +129,9 @@ schemas and the `paramify` CLI — not the internal code.
   which the query API can't read, are listed in `tables_not_measured`, and data
   types on them read as unmeasured. A connector is `connected` when any data
   type received data, and lists the connections that feed it, including the
-  Defender XDR connection for alert products it carries. An `alert_only`
+  Defender XDR connection for alert products it carries (definitions whose
+  `MtpAlerts` values are all in Defender XDR's own list, so not tenant-based
+  Defender for Cloud or Defender for IoT). An `alert_only`
   connector, whose data types are all SecurityAlert queries (Defender for
   Endpoint, Defender for Office 365, Defender for Identity, Defender for Cloud,
   Defender for Cloud Apps, Defender for IoT, Entra ID Protection and Insider
@@ -239,17 +241,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
-- **`azure_sentinel_data_sources` links Defender XDR only to the products it
-  carries** (0.2.0 → 0.2.1). Defender XDR's connection was linked to every
-  connector definition with an `MtpAlerts` criterion, including tenant-based
-  Defender for Cloud, whose alerts Defender XDR doesn't carry. So a tenant-based
-  Defender for Cloud connector with no alert in the window read quiet whenever
-  Defender XDR had alerts enabled, and dropped out of `connectors_not_connected`
-  and `connectors_configured_without_data`. Defender XDR is now linked only to
-  definitions whose `MtpAlerts` values are all in Defender XDR's own list:
-  Defender for Endpoint, Defender for Identity, Defender for Office 365, Defender
-  for Cloud Apps, Entra ID Protection and Insider Risk Management. No field
-  changes meaning.
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
   collection as a success.** A 200 response that is not JSON, for example a
   single sign-on or instance hibernation page, and a response whose
