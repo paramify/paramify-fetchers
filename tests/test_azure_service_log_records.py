@@ -352,6 +352,23 @@ def test_summary_counts():
     }
 
 
+def test_stopped_apps_are_left_out_of_the_arrival_percentage():
+    workspaces = {slr.id_key(LAW): ws(http=[http_row(SITE), http_row(SLOT), http_row(SITE + "3")])}
+    exporting = [setting(category="AppServiceHTTPLogs")]
+
+    def app(rid, state):
+        return slr.app_record({"id": rid, "properties": {"state": state}}, exporting, workspaces, 10)
+
+    apps = [app(SITE, "Running"), app(SLOT, "Stopped"), app(SITE + "2", "Stopped"), app(SITE + "3", None)]
+    summary = slr.summarize(apps, [], [], [], 7)
+    assert [a["state"] for a in apps] == ["Running", "Stopped", "Stopped", None]
+    assert {k: summary[k] for k in ("apps_exporting_http_logs", "apps_with_http_log_records",
+                                    "apps_without_http_log_records", "stopped_apps_exporting_http_logs",
+                                    "http_log_arrival_percentage")} == {
+        "apps_exporting_http_logs": 4, "apps_with_http_log_records": 3, "apps_without_http_log_records": 1,
+        "stopped_apps_exporting_http_logs": 2, "http_log_arrival_percentage": 100}
+
+
 def test_retention_counts_only_the_workspaces_that_receive_each_log_type():
     def tables(http, audit):
         return [{"name": "AppServiceHTTPLogs", "exists": True, "retention_in_days": http, "total_retention_in_days": http},

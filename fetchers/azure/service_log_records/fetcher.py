@@ -102,6 +102,7 @@ ANALYTICS = "analytics"
 TOTAL_RETENTION = "total_retention_in_days"
 ENTRA = "entra"
 SQL_LOGIN = "sql_login"
+STOPPED = "stopped"
 
 logger = logging.getLogger(NAME)
 
@@ -253,6 +254,7 @@ def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
         "id": site.get("id"),
         "name": site.get("name"),
         "kind": site.get("kind"),
+        "state": dig(site, "properties", "state"),
         "is_slot": "/slots/" in rid,
         "diagnostic_settings_read": settings is not None,
         "http_logs_exported": bool(destinations) if settings is not None else None,
@@ -397,6 +399,8 @@ def summarize(apps: list[dict], instances: list[dict], dependencies: list[dict],
     status = Counter(w["status"] for w in workspaces)
     databases = [d for m in instances for d in m["databases"] if d["listed"]]
     with_http = sum(1 for a in exporting_apps if a["http_logs_arriving"] is True)
+    # A stopped app serves no requests, so it has no HTTP logs to send.
+    running = [a for a in exporting_apps if (a.get("state") or "").lower() != STOPPED]
     with_audit = sum(1 for m in exporting_mis if m["audit_arriving"] is True)
     return {
         "lookback_days": days,
@@ -405,7 +409,9 @@ def summarize(apps: list[dict], instances: list[dict], dependencies: list[dict],
         "apps_with_http_log_records": with_http,
         "apps_without_http_log_records": sum(1 for a in exporting_apps if a["http_logs_arriving"] is False),
         "apps_http_logs_unknown": sum(1 for a in exporting_apps if a["http_logs_arriving"] is None),
-        "http_log_arrival_percentage": coverage_percentage(with_http, len(exporting_apps)),
+        "stopped_apps_exporting_http_logs": len(exporting_apps) - len(running),
+        "http_log_arrival_percentage": coverage_percentage(
+            sum(1 for a in running if a["http_logs_arriving"] is True), len(running)),
         "http_log_records": sum(a["http_log_records"] for a in apps),
         "managed_instances": len(instances),
         "instances_exporting_audit": len(exporting_mis),

@@ -68,7 +68,7 @@ evidence_set:
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
-    - GET Microsoft.Web/sites and GET {site id}/slots (per app) — every App Service app and deployment slot
+    - GET Microsoft.Web/sites and GET {site id}/slots (per app) — every App Service app and deployment slot, with its state (running or stopped)
     - GET Microsoft.Sql/managedInstances and GET {instance id}/databases (per instance) — every SQL managed instance and its databases
     - GET {resource id}/providers/Microsoft.Insights/diagnosticSettings (per app, slot and instance) — which workspaces receive AppServiceHTTPLogs or SQLSecurityAuditEvents
     - GET {workspace id} (per destination workspace) — the workspace's query id
@@ -96,7 +96,8 @@ evidence_set:
     - apps_with_http_log_records — Number of exporting apps and slots whose HTTP logs are arriving: at least one record reached a destination workspace in the lookback
     - apps_without_http_log_records — Number of exporting apps and slots with no HTTP log record in the lookback, where every destination workspace was queried, lacks the table, or no longer exists
     - apps_http_logs_unknown — Number of exporting apps and slots whose arrival is unknown: a destination workspace refused or failed the read, a query on the AppServiceHTTPLogs table failed there, or the workspace keeps the table on a Basic or Auxiliary plan, which is not queried because it bills per GB scanned
-    - http_log_arrival_percentage — Percentage of exporting apps and slots whose HTTP logs are arriving = apps_with_http_log_records / apps_exporting_http_logs × 100 (a whole number, 0–100); 0 when apps_exporting_http_logs is 0. Apps whose arrival is unknown count in the total but not as arriving
+    - stopped_apps_exporting_http_logs — Number of exporting apps and slots that are stopped; a stopped app serves no requests, so it has no HTTP logs to send
+    - http_log_arrival_percentage — Percentage of running exporting apps and slots whose HTTP logs are arriving = running apps with HTTP log records / (apps_exporting_http_logs − stopped_apps_exporting_http_logs) × 100 (a whole number, 0–100); 0 when no running app exports. Stopped apps are left out of both counts; apps whose arrival is unknown count in the total but not as arriving
     - http_log_records — Number of HTTP log records that arrived for the subscription's apps and slots in the lookback, counted once when an app sends them to more than one workspace
     - http_log_retention_days — Number of days the AppServiceHTTPLogs table keeps records for queries (interactive retention), the shortest across the workspaces apps send HTTP logs to that have the table; null if none has it
     - http_log_total_retention_days — Number of days the AppServiceHTTPLogs table keeps records in all, including long-term (archive) retention, the shortest across the workspaces apps send HTTP logs to that have the table; null if none has it
