@@ -21,8 +21,9 @@ schemas and the `paramify` CLI — not the internal code.
   it allows permanent eligible or active assignments. Privileged counts take
   direct grants of privileged roles held tenant-wide, as
   `azure_entra_privileged_roles` does; grants scoped below the tenant are counted
-  apart in `privileged_assignments_scoped_below_tenant`, and an assignment with no
-  scope isn't taken as tenant-wide. A tenant without Entra ID P2 reads
+  apart in `privileged_assignments_scoped_below_tenant`. A privileged grant with no
+  scope at all could be tenant-wide, so it makes those counts null rather than
+  clean. A tenant without Entra ID P2 reads
   `pim_available: false`, keeps the role names, skips the other PIM reads, and the
   run succeeds; only Graph's `AadPremiumLicenseRequired` code on the first PIM read
   counts as that, and any other refusal is a failure. When any read fails the
