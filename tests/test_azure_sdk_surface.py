@@ -1182,6 +1182,27 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure/key_vault_key_rotation — App Service certificates",
     ),
     (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "web_apps",
+        [
+            "get_scm_allowed",
+            "get_ftp_allowed",
+            "get_app_settings_key_vault_references",
+            "get_site_connection_string_key_vault_references",
+            "list_connection_strings",
+        ],
+        "azure/app_service_configuration — basic-auth publishing, Key Vault references and the "
+        "opt-in literal-secret scan",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "provider",
+        ["get_web_app_stacks"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
         "azure.mgmt.databricks",
         "AzureDatabricksManagementClient",
         "workspaces",
@@ -1902,6 +1923,85 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
         "azure.mgmt.web.models",
         "SiteConfig",
+        ["min_tls_cipher_suite", "scm_min_tls_version", "java_container", "java_container_version"],
+        "azure/app_service_configuration — a renamed min_tls_cipher_suite reads as 'no minimum set'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "CsmPublishingCredentialsPoliciesEntityProperties",
+        ["allow"],
+        "azure/app_service_configuration — a renamed allow reads as 'basic auth off'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "ApiKVReferenceProperties",
+        ["status", "source", "vault_name", "secret_name", "secret_version", "identity_type", "details"],
+        "azure/app_service_configuration — Key Vault reference status",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "StringDictionary",
+        ["properties"],
+        "azure/app_service_configuration — a renamed properties reads every scanned app as holding no settings",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "ConnectionStringDictionary",
+        ["properties"],
+        "azure/app_service_configuration — a renamed properties reads every app as holding no connection strings",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "ConnStringValueTypePair",
+        ["value"],
+        "azure/app_service_configuration — a renamed value reads every connection string as empty",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppStackProperties",
+        ["major_versions"],
+        "azure/app_service_configuration — runtime end of support (a rename reads every runtime unknown)",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppMajorVersion",
+        ["minor_versions"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppMinorVersion",
+        ["value", "stack_settings"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppRuntimeSettings",
+        ["runtime_version", "end_of_life_date", "is_deprecated"],
+        "azure/app_service_configuration — a renamed end_of_life_date reads as 'supported'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppRuntimes",
+        ["linux_runtime_settings", "windows_runtime_settings", "linux_container_settings",
+         "windows_container_settings"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WindowsJavaContainerSettings",
+        ["java_container", "java_container_version", "end_of_life_date", "is_deprecated"],
+        "azure/app_service_configuration — Windows Java container end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "LinuxJavaContainerSettings",
+        ["end_of_life_date", "is_deprecated"],
+        "azure/app_service_configuration — Linux Java container end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
         ["public_network_access", "ip_security_restrictions", "ip_security_restrictions_default_action",
          "scm_ip_security_restrictions", "scm_ip_security_restrictions_default_action",
          "scm_ip_security_restrictions_use_main"],
@@ -2426,6 +2526,44 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "ApplicationsRequestBuilder.ApplicationsRequestBuilderGetQueryParameters",
         ["select", "expand"],
         "azure/entra_service_principals — federated credentials arrive only via $expand",
+    ),
+    (
+        "msgraph.generated.models.group",
+        "Group",
+        [
+            "group_types",
+            "security_enabled",
+            "mail_enabled",
+            "is_assignable_to_role",
+            "membership_rule",
+            "membership_rule_processing_state",
+            "on_premises_sync_enabled",
+            "visibility",
+            "members",
+            "owners",
+        ],
+        "azure/entra_groups — a missing field reads as None, so every group would look "
+        "assigned, cloud-only and not role-assignable, or empty and ownerless",
+    ),
+    (
+        "msgraph.generated.groups.groups_request_builder",
+        "GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters",
+        ["select", "expand"],
+        "azure/entra_groups — members and owners arrive via $expand",
+    ),
+    (
+        "msgraph.generated.models.user",
+        "User",
+        ["odata_type", "user_principal_name", "user_type", "account_enabled"],
+        "azure/entra_groups — a missing field reads as None, so guest and disabled-user "
+        "figures read unknown; without odata_type no member is a user and they read 0",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["odata_type", "account_enabled"],
+        "azure/entra_groups — service principal members and owners; without account_enabled "
+        "groups_with_only_disabled_owners reads unknown",
     ),
     (
         "msgraph.generated.models.authentication_methods_policy",
@@ -3691,6 +3829,20 @@ def test_graph_admin_membership_builders_present() -> None:
     assert getattr(group, "transitive_members", None) is not None, (
         "groups.by_group_id(...).transitive_members is gone.\n"
         "  affected fetchers: azure/entra_mfa_status — admins via a group would be missed"
+    )
+
+
+def test_graph_group_member_builders_present() -> None:
+    """The per-group builders azure/entra_groups reads past the $expand limit."""
+    client = _build("msgraph", "GraphServiceClient")
+    group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
+    assert callable(getattr(group.owners, "with_url", None)), (
+        "groups.by_group_id(...).owners.with_url is gone; the beta owner read needs it.\n"
+        "  affected fetchers: azure/entra_groups"
+    )
+    assert callable(getattr(group.members, "with_url", None)), (
+        "groups.by_group_id(...).members.with_url is gone; the beta member read needs it.\n"
+        "  affected fetchers: azure/entra_groups"
     )
 
 
