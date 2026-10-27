@@ -359,3 +359,11 @@ def test_a_trailing_slash_or_other_case_on_the_alert_rule_is_the_same_rule():
     assert alerts[0]["alert_rule_id"] == METRIC_RULE
     [rule] = fa.rule_activity([listed_metric_rule()], alerts)
     assert (rule["listed"], rule["fire_count"]) == (True, 2)
+
+
+def test_close_times_are_unknown_while_any_history_is_unread():
+    alerts = [alert(1, state="Closed", mods=[mod("StateChange", "2026-10-10T12:00:00Z", by="a@example.com", new="Closed")]),
+              alert(2, status=fa.HISTORY_NOT_AUTHORIZED, state="Closed")]
+    summary = fa.summarize(alerts, [], 2)
+    assert (summary["median_hours_to_close"], summary["max_hours_to_close"], summary["alerts_closed_by_person"]) == (
+        None, None, None)

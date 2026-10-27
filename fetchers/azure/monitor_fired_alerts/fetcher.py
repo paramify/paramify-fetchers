@@ -254,8 +254,8 @@ def summarize(
         "alerts_with_notifications": from_histories(sum(1 for a in alerts if a["actions_triggered"])),
         "alerts_with_failed_notifications": from_histories(sum(1 for a in alerts if a["actions_failed"])),
         "alerts_with_actions_suppressed": sum(1 for a in alerts if a["actions_suppressed"]),
-        "median_hours_to_close": round(median(close_hours), 2) if close_hours else None,
-        "max_hours_to_close": max(close_hours) if close_hours else None,
+        "median_hours_to_close": from_histories(round(median(close_hours), 2) if close_hours else None),
+        "max_hours_to_close": from_histories(max(close_hours) if close_hours else None),
         "oldest_open_alert_fired_at": min(
             (a["fired_at"] for a in open_alerts if parse_time(a["fired_at"])), key=parse_time, default=None
         ),

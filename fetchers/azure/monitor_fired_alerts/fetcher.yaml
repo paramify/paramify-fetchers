@@ -84,8 +84,8 @@ evidence_set:
     - alerts_acknowledged — Number of alerts someone acknowledged, now or earlier in their history; null while any alert's history is unread (alert_histories_unread above 0), never a partial count; null if the alert list wasn't read
     - alerts_closed — Number of alerts in the Closed state; null if the alert list wasn't read
     - alerts_closed_by_person — Number of closed alerts whose closing change (the last change to Closed; an earlier close on an alert that was reopened doesn't count) was made by any actor other than System, which includes service principals and automation acting through the API as well as people; null while any alert's history is unread (alert_histories_unread above 0), never a partial count; null if the alert list wasn't read
-    - median_hours_to_close — Number of hours from an alert firing to its closing change, the median across closed alerts whose history shows the closing change; null if no closed alert's history shows one, or the alert list wasn't read
-    - max_hours_to_close — Number of hours from an alert firing to its closing change, the longest across closed alerts whose history shows the closing change; null if no closed alert's history shows one, or the alert list wasn't read
+    - median_hours_to_close — Number of hours from an alert firing to its closing change, the median across closed alerts whose history shows the closing change; null while any alert's history is unread (alert_histories_unread above 0), never a partial figure; null if no closed alert's history shows one, or the alert list wasn't read
+    - max_hours_to_close — Number of hours from an alert firing to its closing change, the longest across closed alerts whose history shows the closing change; null while any alert's history is unread (alert_histories_unread above 0), never a partial figure; null if no closed alert's history shows one, or the alert list wasn't read
     - oldest_open_alert_fired_at — Time of firing of the oldest alert not in the Closed state; null if no alert is open, or the alert list wasn't read
 
     Does every rule fire?
