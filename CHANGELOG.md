@@ -121,9 +121,10 @@ schemas and the `paramify` CLI — not the internal code.
   swaps, publish-profile downloads, publishing-credential reads and package deployments
   through Resource Manager, one per request with who asked and when. A failed read leaves
   those counts null rather than zero; a read cut at 200,000 events keeps the newest and
-  says so. Requests on sites not listed (deleted apps, function apps) are counted apart.
-  Also where each app deploys from (credentials in the URL removed, a failed read counted
-  as unknown) and each slot's configuration compared with production field by field.
+  says so. Requests on sites not listed (deleted apps, function apps and other sites that
+  aren't web apps) are counted apart. Also where each app deploys from (credentials in the
+  URL removed, a failed read counted as unknown) and each slot's configuration compared
+  with production field by field.
   `results.limitations` says what it cannot attribute: the content or commit a Web Deploy
   or FTP push shipped, who used shared publishing credentials, and anything older than the
   window. Reader only.
