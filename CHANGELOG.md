@@ -117,21 +117,28 @@ schemas and the `paramify` CLI — not the internal code.
 ### Changed
 
 - **`azure_sentinel_analytics_rules` 0.2.0: rule queries, suppression and the
-  tables each rule reads.** Each rule now carries its KQL `query`,
-  `suppression_enabled` and `suppression_duration`, and `tables_read`: the
-  local workspace tables its query names, in code or as a string passed to
+  tables each rule reads.** Each rule now carries its KQL `query` with its
+  `query_sha256` and `query_length`, `suppression_enabled` and
+  `suppression_duration`, and `tables_read`: the local workspace tables its
+  query names, in code, bracket-quoted (`['T']`) or as a string passed to
   `table()` or to a function the query defines (`tables_from: query`), else the
   data types its template lists (`tables_from: template`). Templates are listed
   at the stable and the preview api-version, so NRT rules have one too. A name
   that is also a column, such as `Operation`, or that the query assigns
   (`extend Event = …`, `datatable(Event:string)`), counts only where a table can
-  stand; names after a `.` (`workspace("x").T`, `parse_json(c).Event`) and
-  wildcard unions don't count. The `query` is the rule's full KQL as written,
-  so it can hold the user names, IP addresses and file paths the rule names. Incident-creation rules read `SecurityAlert` and
+  stand; names the query binds (`mv-expand`, `mv-apply`, `as`, `withsource=`),
+  names after a `.` (`workspace("x").T`, `parse_json(c).Event`) and wildcard
+  unions don't count. A name the workspace doesn't list counts as a table it
+  never provisioned where only a table can stand, unless it is one of the
+  workspace's functions (read from saved searches); a template's data types
+  count whether or not the workspace lists them. The `query` is the rule's full
+  KQL as written, so it can hold the user names, IP addresses and file paths
+  the rule names. Incident-creation rules read `SecurityAlert` and
   have data only when their own product sent an alert. Each workspace lists the
   tables enabled rules read with their last ingestion, the ingesting tables no
   enabled rule reads (`SecurityAlert` left out, since it also holds Sentinel's
-  own alerts), and the enabled rules missing data: a table their query reads
+  own alerts), the arriving tables enabled rules read only through their
+  templates' data types, and the enabled rules missing data: a table their query reads
   got nothing in the window (`SENTINEL_INGESTION_WINDOW_DAYS`, default 14), or
   none of their template's data types did, since a template lists alternative
   sources. Fusion, ML Behavior Analytics and Threat Intelligence rules have no
