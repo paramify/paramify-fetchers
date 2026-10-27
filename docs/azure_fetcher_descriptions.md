@@ -4823,48 +4823,56 @@ Access: A personal access token for the organization with Graph and Member Entit
 
 Commands Executed:
 - `GET _apis/connectionData` — identifies the signed-in user
-- `GET _apis/graph/users` (preview API) — people, and service identities such as the build service
-- `GET _apis/graph/serviceprincipals` (preview API) — service principals and managed identities added to the organization
-- `GET _apis/graph/groups` (preview API) — Azure DevOps and Entra groups in the organization
-- `GET _apis/graph/Memberships/{group}` with direction down (per group; preview API) — each group's direct members
+- `GET _apis/graph/users` — people, and service identities such as the build service
+- `GET _apis/graph/serviceprincipals` — service principals and managed identities added to the organization
+- `GET _apis/graph/groups` — Azure DevOps and Entra groups in the organization
+- `GET _apis/graph/Memberships/{group}` (per group) — each group's direct members
 - `GET _apis/userentitlements` — each user's access level, status, date added and last access
 
-Output: `azure_devops_identities_<organization>.json` — every user, service principal and service identity with its access level, last access and direct and inherited groups, every group with its direct members, and each privileged group's effective members with the shortest path to each and whether it crosses an Entra group.
+Output: `azure_devops_identities_<organization>.json` — every user, service principal and service identity with its access level, last access and direct and inherited groups, every group with its direct members, and each privileged group's effective members with a path to each and whether it is held only through an Entra group.
 
 Summary fields:
 
 **Who is in the organization?**
-- `users_total` — Number of people (Entra ID or Microsoft account users) in the organization
-- `guest_users` — Number of people who are guests in their Entra tenant
-- `users_by_access_level` — Number of people at each access level (for example Basic, Stakeholder, or none when no entitlement was read)
-- `users_by_origin` — Number of people from each identity source (aad for Entra ID, msa for Microsoft account)
-- `users_with_sign_in_disabled` — Number of people whose access to the organization is disabled
-- `service_principals_total` — Number of service principals and managed identities added to the organization
-- `service_identities_total` — Number of Azure DevOps service identities, such as the build service
-- `groups_total` — Number of groups, Azure DevOps and Entra
-- `entra_groups_total` — Number of Entra groups added to the organization
-- `groups_not_read` — List of groups whose members couldn't be read (the computed Project Collection Valid Users and Project Valid Users groups, and enterprise-level groups, are never read and aren't listed)
+- `users_total` — Number of people (Entra ID or Microsoft account users) in the organization; null if the users couldn't be read
+- `guest_users` — Number of people who are guests in their Entra tenant; null if the users couldn't be read
+- `users_by_access_level` — Number of people for each access level, such as Basic or Stakeholder, with unknown for a person who has no entitlement; null if the user entitlements couldn't be read
+- `users_by_origin` — Number of people for each identity source; null if the users couldn't be read:
+  - aad (Entra ID)
+  - msa (Microsoft account)
+  - unknown (no identity source recorded)
+- `users_with_sign_in_disabled` — Number of people who can't sign in because their entitlement's status is disabled, pending disable or deleted; null if the user entitlements couldn't be read
+- `users_deleted_in_origin` — List of people deleted in Entra ID or their Microsoft account who are still in the organization; null if the users couldn't be read
+- `service_principals_total` — Number of service principals and managed identities added to the organization; null if they couldn't be read
+- `service_identities_total` — Number of Azure DevOps service identities, such as the build service; null if the users couldn't be read
+- `groups_total` — Number of groups, Azure DevOps and Entra; null if the groups couldn't be read
+- `entra_groups_total` — Number of Entra groups added to the organization; null if the groups couldn't be read
+- `groups_not_read` — List of groups whose members couldn't be read (the computed Project Collection Valid Users and Project Valid Users groups, and Azure DevOps enterprise-level groups, are never read and aren't listed); null if the groups couldn't be read
 
 **Are unused accounts removed?**
-- `inactivity_threshold_days` — Number of days without access after which a person counts as inactive
-- `last_access_collected` — True if the user entitlements, which hold access levels and last access, were read; false if not, so no one can show as inactive
-- `inactive_users` — List of inactive people: people who can still sign in but whose last access, or the day they were added if they never signed in, is older than inactivity_threshold_days
-- `users_never_accessed` — List of people who have never signed in to the organization (Azure DevOps records their last access as 0001-01-01)
+- `inactivity_threshold_days` — Number of days without access after which a person counts as inactive (90 unless `inactive_days` sets it)
+- `last_access_collected` — True if the user entitlements, which hold access levels and last access, were read; false if not
+- `inactive_users` — List of inactive people: people who can still sign in but whose last access, or the day they were added if they never signed in, is older than `inactivity_threshold_days`; null if the user entitlements couldn't be read
+- `users_never_accessed` — List of people who have never signed in to the organization (Azure DevOps records their last access as 0001-01-01); null if the user entitlements couldn't be read
 
 **Who holds privileged access?**
-- `privileged_groups` — Number of privileged groups found, meaning the Azure DevOps groups named Project Collection Administrators, Project Collection Service Accounts, Project Collection Build Administrators, and each project's Project Administrators, Build Administrators, Release Administrators and Endpoint Administrators
-- `privileged_groups_not_fully_read` — List of privileged groups where a nested group's members couldn't be read, so the member list may be short
-- `privileged_members_by_group` — Number of effective members of each privileged group, meaning the people, service principals and service identities in it directly or through nested Azure DevOps or Entra groups
-- `privileged_identities` — Number of distinct people, service principals and service identities that are effective members of at least one privileged group
-- `privileged_users` — List of people who are effective members of at least one privileged group
-- `privileged_service_principals` — List of service principals and managed identities that are effective members of at least one privileged group
-- `privileged_identities_only_through_entra_groups` — Number of identities whose every privileged membership comes through an Entra group
-- `entra_groups_granting_privilege` — List of Entra groups on the way to a privileged group; Azure DevOps records only the members it has seen, so check these in Entra ID for full membership and PIM
-- `inactive_privileged_users` — List of inactive people who are effective members of at least one privileged group
-- `guest_privileged_users` — List of guests who are effective members of at least one privileged group
+- `privileged_groups` — Number of privileged groups found, meaning the Azure DevOps groups named Project Collection Administrators, Project Collection Service Accounts, Project Collection Build Administrators, and each project's Project Administrators, Build Administrators, Release Administrators and Endpoint Administrators; null if the groups couldn't be read
+- `privileged_groups_not_fully_read` — List of privileged groups whose own members, or a nested group's members, couldn't be read, so the member list may be short; null if the groups couldn't be read
+- `privileged_members_by_group` — Number of effective members for each privileged group, meaning the identities in it directly or through nested Azure DevOps or Entra groups; null if the groups couldn't be read
+- `privileged_identities` — Number of distinct identities (people, service principals, service identities and Azure DevOps system identities) that are effective members of at least one privileged group; null if the groups couldn't be read
+- `privileged_users` — List of people who are effective members of at least one privileged group; null if the groups couldn't be read
+- `privileged_service_principals` — List of service principals and managed identities that are effective members of at least one privileged group; null if the groups couldn't be read
+- `privileged_identities_only_through_entra_groups` — Number of identities that hold every privileged group they're in only through an Entra group, with no path through Azure DevOps groups alone; null if the groups couldn't be read
+- `entra_groups_granting_privilege` — List of Entra groups on the way to a privileged group; Azure DevOps records only the members it has seen, so check these in Entra ID for full membership and PIM; null if the groups couldn't be read
+- `inactive_privileged_users` — List of inactive people who are effective members of at least one privileged group; null if the groups or the user entitlements couldn't be read
+- `guest_privileged_users` — List of guests who are effective members of at least one privileged group; null if the groups or the users couldn't be read
 
 **What isn't collected?**
-- `not_collected` — What the fetcher deliberately doesn't collect, by area: time-bound access (Azure DevOps memberships never expire; only a PIM-managed Entra group makes access time-bound); an Entra group's full membership (Azure DevOps records only members it has seen); what each group may do (see the permissions evidence); and when a service principal last used the organization
+- `not_collected` — What the fetcher deliberately doesn't collect, with a note for each area:
+  - time_bound_access (Azure DevOps memberships never expire; only a PIM-managed Entra group makes access time-bound)
+  - entra_group_members (an Entra group's full membership; Azure DevOps records only the members it has seen)
+  - permissions (what each group may do; see the permissions evidence)
+  - service_principal_last_access (when a service principal or managed identity last used the organization)
 
 
 ### azure_devops_permissions
