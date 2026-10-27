@@ -395,3 +395,26 @@ def test_free_text_is_capped_and_marked():
     for text in (record["description"], change["comments"], change["description"]):
         assert text.startswith("x" * fa.MAX_TEXT) and len(text) < fa.MAX_TEXT + 40 and "truncated" in text
     assert alert(description="short")["description"] == "short"
+
+
+class _RefusingClient(_ListClient):
+    """Refuses the histories of the alerts numbered in `refused`."""
+
+    def __init__(self, alerts, refused):
+        super().__init__(alerts, len(alerts))
+        self.refused = {f"a{n}" for n in refused}
+
+    def get(self, path, api_version):
+        if path.endswith("/history") and path.split("/")[-2] in self.refused:
+            raise azure_rest.ArmError(403, "AuthorizationFailed", "no")
+        return super().get(path, api_version)
+
+
+@pytest.mark.parametrize("refused, ok", [((), True), ((1,), True), ((1, 2), False)])
+def test_a_run_whose_every_history_is_refused_fails(refused, ok):
+    collector = sys.modules["azure_common"].Collector(fa.logger)
+    alerts, _, _ = fa.collect_alerts(_RefusingClient([raw_alert(1), raw_alert(2)], refused), "s1", collector)
+    assert [a["history_status"] for a in alerts].count(fa.HISTORY_NOT_AUTHORIZED) == len(refused)
+    assert collector.ok is ok
+    if not ok:
+        assert sys.modules["azure_common"].classify_failure_code(collector.failures) == "not_authorized"

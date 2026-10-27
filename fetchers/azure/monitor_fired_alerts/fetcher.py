@@ -328,6 +328,9 @@ def collect_alerts(client, subscription_id: str, collector: Collector) -> tuple:
     alerts = [alert_record(a) for a in raw or []]
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         alerts = list(pool.map(lambda a: read_history(client, a, collector), alerts))
+    # One refused history is a warning; all of them refused is a missing permission.
+    if alerts and all(a["history_status"] == HISTORY_NOT_AUTHORIZED for a in alerts):
+        collector.record("alertsManagement.alerts.history", PermissionError("every alert's history was refused (403)"))
     return alerts, total if isinstance(total, int) else None, raw is not None
 
 

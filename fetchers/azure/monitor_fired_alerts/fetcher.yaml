@@ -66,7 +66,7 @@ evidence_set:
     - alerts_summary_total — Number of alerts in the window by Azure's own alert summary; null if it couldn't be read or Microsoft.AlertsManagement isn't registered
     - all_alerts_listed — True if at least alerts_summary_total alerts were listed; false if fewer were; null if the summary or the alert list couldn't be read, or Microsoft.AlertsManagement isn't registered
     - alert_histories_read — Number of alerts whose state history was read; null if the alert list wasn't read
-    - alert_histories_unread — Number of alerts whose state history couldn't be read (deleted, refused or failed), so who acknowledged or closed them is unknown; null if the alert list wasn't read
+    - alert_histories_unread — Number of alerts whose state history couldn't be read (deleted, refused or failed), so who acknowledged or closed them is unknown; when every history is refused the run fails as not authorized; null if the alert list wasn't read
     - provider_registration_status — Whether Microsoft.AlertsManagement and Microsoft.Insights are registered on the subscription: registered, not_registered or unknown for each
 
     What fired?
