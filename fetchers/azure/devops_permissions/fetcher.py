@@ -53,6 +53,12 @@ ADMIN_GROUPS = {
     "project collection build administrators", "project administrators", "build administrators",
     "release administrators", "endpoint administrators",
 }
+# High-impact rights each project's built-in Contributors group holds by default, by (namespace, action).
+CONTRIBUTOR_DEFAULTS = {
+    ("build", "editbuilddefinition"), ("build", "deletebuilddefinition"),
+    ("releasemanagement", "editreleasedefinition"), ("releasemanagement", "deletereleasedefinition"),
+    ("releasemanagement", "managereleaseapprovers"),
+}
 # Identity descriptor types; a resolved identity's subject descriptor prefix wins.
 DESCRIPTOR_KINDS = {
     "microsoft.teamfoundation.identity": "group",
@@ -206,6 +212,14 @@ def identity_record(descriptor: str, row: Optional[Dict[str, Any]], looked_up: b
     }
 
 
+def contributor_default(namespace: str, project: Optional[str], who: Optional[Dict[str, Any]], high: List[str]) -> bool:
+    """A project's own Contributors group holding only the high-impact rights it has by default."""
+    name = str((who or {}).get("name") or "").lower()
+    return (bool(high and project) and (who or {}).get("kind") == "group"
+            and name == f"[{project}]\\contributors".lower()
+            and all((namespace, a.lower()) in CONTRIBUTOR_DEFAULTS for a in high))
+
+
 def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     projects = list_projects(client, collector)
     project_names = {str(p.get("id") or "").lower(): p.get("name") for p in projects}
@@ -271,12 +285,14 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         high = sorted(a for a in allowed if a.lower() in HIGH_IMPACT[key])
         who = identities.get(str(ace.get("descriptor")))
         admin = (who or {}).get("admin_group")
+        project = project_names.get(pid or "") if pid else None
+        default = contributor_default(key, project, who, high)
         entries.append({
             "namespace": ns.get("name"),
             "token": token,
             "scope": scope,
             "project_id": pid,
-            "project": project_names.get(pid or "") if pid else None,
+            "project": project,
             "resource": resource,
             "inherit_permissions": inherit,
             "identity": who,
@@ -287,7 +303,8 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
             "effective_allow": bits(extended.get("effectiveAllow"), actions),
             "effective_deny": bits(extended.get("effectiveDeny"), actions),
             "high_impact_allowed": high,
-            "high_impact_outside_admin_groups": (None if admin is None else not admin) if high else False,
+            "high_impact_from_defaults": default,
+            "high_impact_outside_admin_groups": (None if admin is None else not admin) if high and not default else False,
         })
     entries.sort(key=lambda e: (str(e["namespace"]).lower(), e["token"], str((e["identity"] or {}).get("name") or "")))
     git = [n for n in namespace_records if str(n["name"]).lower() == "git repositories"]
@@ -320,6 +337,7 @@ def summarize(entries, identities, namespaces, acls_off: int, not_found: Optiona
         return value if complete and ok else None
 
     outside = [e for e in entries if e["high_impact_outside_admin_groups"]]
+    defaults = [e for e in entries if e["high_impact_from_defaults"]]
     admins_known = all(e["high_impact_outside_admin_groups"] is not None for e in entries)
     rights = Counter(f"{e['namespace']}: {a}" for e in outside for a in e["high_impact_allowed"])
     bypass = [e for e in entries
@@ -340,6 +358,8 @@ def summarize(entries, identities, namespaces, acls_off: int, not_found: Optiona
         "high_impact_grants_outside_admin_groups": known(len(outside), admins_known),
         "identities_with_high_impact_rights_outside_admin_groups": known(names(outside), admins_known),
         "high_impact_rights_outside_admin_groups_by_right": known(sorted_counts(rights), admins_known),
+        "high_impact_grants_from_defaults": known(len(defaults), admins_known),
+        "identities_with_high_impact_rights_from_defaults": known(names(defaults), admins_known),
         "git_repositories": git_repositories,
         "branch_policy_bypass_holders": names(bypass) if git_read and git_repositories else None,
         "not_collected": dict(NOT_COLLECTED),

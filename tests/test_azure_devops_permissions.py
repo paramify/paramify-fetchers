@@ -337,6 +337,45 @@ def test_a_failed_namespace_list_leaves_every_count_unknown(tmp_path):
                                       "high_impact_grants_outside_admin_groups", "branch_policy_bypass_holders"))
 
 
+def contributors_build_acls(*aces):
+    return Resp(body={"value": [acl(WEB, *aces), acl(f"{WEB}/12", ace(SP, bit("Build", "EditBuildDefinition")))]})
+
+
+def test_project_contributors_default_rights_are_counted_apart(tmp_path):
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = contributors_build_acls(
+        ace(CONTRIB, bit("Build", "EditBuildDefinition") | bit("Build", "DeleteBuildDefinition")))
+    _, evidence, _, _ = run(tmp_path, fake)
+    contrib = entry(evidence, "Build", WEB, CONTRIB)
+    assert contrib["high_impact_from_defaults"] is True and contrib["high_impact_outside_admin_groups"] is False
+    s = evidence["summary"]
+    assert s["high_impact_grants_from_defaults"] == 1
+    assert s["identities_with_high_impact_rights_from_defaults"] == ["[Web]\\Contributors"]
+    assert s["high_impact_grants_outside_admin_groups"] == 5
+    assert s["high_impact_rights_outside_admin_groups_by_right"]["Build: EditBuildDefinition"] == 1
+
+
+OPS_CONTRIB = "Microsoft.TeamFoundation.Identity;S-1-9-3-1-1"
+
+
+@pytest.mark.parametrize("who, rights", [
+    (CONTRIB, ("EditBuildDefinition", "AdministerBuildPermissions")),  # a right beyond the defaults
+    (OPS_CONTRIB, ("EditBuildDefinition",)),  # another project's Contributors
+], ids=["beyond-defaults", "other-project"])
+def test_other_contributors_grants_still_count_outside_the_admin_groups(tmp_path, monkeypatch, who, rights):
+    monkeypatch.setitem(IDENTITIES, OPS_CONTRIB, ("[Ops]\\Contributors", "vssgp.oc", True))
+    fake = FakeADO()
+    mask = 0
+    for right in rights:
+        mask |= bit("Build", right)
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = contributors_build_acls(ace(who, mask))
+    _, evidence, _, _ = run(tmp_path, fake)
+    assert entry(evidence, "Build", WEB, who)["high_impact_outside_admin_groups"] is True
+    s = evidence["summary"]
+    assert s["high_impact_grants_from_defaults"] == 0 and s["identities_with_high_impact_rights_from_defaults"] == []
+    assert s["high_impact_grants_outside_admin_groups"] == 6
+
+
 def test_a_tfvc_only_organization_has_no_bypass_list(tmp_path):
     fake = FakeADO()
     fake.routes[("dev.azure.com", "/contoso/_apis/git/repositories")] = Resp(body={"count": 0, "value": []})
@@ -377,6 +416,7 @@ def test_refused_identity_lookup_leaves_the_admin_split_unknown(tmp_path):
     assert s["unresolved_identities"] == 7 and s["high_impact_grants"] == 9
     assert s["high_impact_grants_outside_admin_groups"] is None
     assert s["identities_with_high_impact_rights_outside_admin_groups"] is None
+    assert s["high_impact_grants_from_defaults"] is None
     pca = entry(evidence, "AuditLog", "AllPermissions", PCA)
     assert pca["identity"]["kind"] == "group" and pca["identity"]["admin_group"] is None
     assert pca["high_impact_outside_admin_groups"] is None
