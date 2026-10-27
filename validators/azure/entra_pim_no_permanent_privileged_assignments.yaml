@@ -1,0 +1,28 @@
+key: entra_pim_no_permanent_privileged_assignments
+name: Entra Privileged Roles Have No Permanent Active Assignments
+type: AUTOMATED
+role: configuration
+statement: >-
+  No privileged Entra ID directory role (Global Administrator, Privileged Role Administrator and the
+  other admin roles azure_entra_privileged_roles flags) is held tenant-wide by a permanent active
+  assignment made outside PIM activation, at least one eligible (just-in-time) privileged assignment
+  exists, and every role name, assignment and policy was read. Substantiates privileged roles being
+  eligible and time-limited rather than standing (KSI-IAM-JIT, KSI-IAM-ELP, KSI-MLA-ALA). An approved
+  exception such as an emergency (break-glass) account still fails here and must be justified outside
+  this evidence. Fails without Entra ID P2 or ID Governance. Does NOT prove assignments scoped to an
+  administrative unit, non-privileged roles, Azure resource roles
+  (azure_rbac_no_permanent_over_broad_assignments), or that expired assignments were reviewed.
+
+# A group holding a role counts once, as the group's assignment (memberType Direct).
+regex: '"partial_failure":\s*false[\s\S]*?"collection_complete":\s*true[\s\S]*?"eligible_privileged_assignments":\s*(?<eligible_privileged_assignments>[1-9]\d*)[\s\S]*?"permanent_active_privileged_assignments":\s*(?<permanent_active_privileged_assignments>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # permanent_active_privileged_assignments
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-PIM-ASSIGNMENTS

@@ -1,0 +1,29 @@
+key: azure_rbac_no_deleted_principal_assignments
+name: Azure No Role Assignments To Deleted Principals
+type: AUTOMATED
+role: configuration
+statement: >-
+  No Azure role assignment made at the subscription or below names a principal (user, group or app)
+  that the Entra ID directory no longer has, and every assigned principal was looked up
+  (principal_check complete). Substantiates failing orphaned identities with retained access
+  (KSI-IAM-ELP, KSI-IAM-AAM): an assignment left behind by a deleted principal is access nobody
+  reviews. Does NOT prove assignments inherited from a management group or the tenant root,
+  partner-tenant groups (counted apart in foreign_principal_assignments), Entra directory roles, or
+  other kinds of orphaned resource.
+
+# principal_check reads failed or not_run when the lookup didn't happen, and the count then reads 0.
+regex: '"partial_failure":\s*false[\s\S]*?"deleted_principal_assignments":\s*(?<deleted_principal_assignments>\d+)[\s\S]*?"principal_check":\s*"(?<principal_check>[a-z_]+)"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS complete
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # deleted_principal_assignments
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # principal_check
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "complete" }
+
+evidence_sets:
+  - EVD-AZURE-RESIDUAL-RESOURCES

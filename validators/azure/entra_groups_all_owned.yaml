@@ -1,0 +1,35 @@
+key: entra_groups_all_owned
+name: Entra Groups All Have Owners
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every group created in Entra ID, including every role-assignable group, lists an owner, and the
+  whole group list and every group's owners were read. Substantiates failing orphaned access groups:
+  each group that grants access has someone accountable for its membership (KSI-IAM-AAM). Groups
+  synced from on-premises Active Directory, distribution groups and mail-enabled security groups are
+  not counted, since Graph returns no owners for them (they are counted in
+  groups_with_owners_not_in_graph); a mail-enabled security group can still hold a role. Does NOT
+  prove the owner is current or enabled (groups_with_only_disabled_owners), that owners review
+  membership, or which groups grant access to the system.
+
+regex: '"partial_failure":\s*false[\s\S]*?"cloud_groups_without_owner":\s*(?<cloud_groups_without_owner>\d+|null)[\s\S]*?"groups_readable":\s*(?<groups_readable>true|false)[\s\S]*?"owners_readable":\s*(?<owners_readable>true|false)[\s\S]*?"role_assignable_groups_without_owner":\s*(?<role_assignable_groups_without_owner>\d+|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS true; MATCH_GROUP[3] EQUALS true; MATCH_GROUP[4] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # cloud_groups_without_owner
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # groups_readable
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # owners_readable
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }   # role_assignable_groups_without_owner
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-GROUPS

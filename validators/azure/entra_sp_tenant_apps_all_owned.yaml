@@ -1,0 +1,28 @@
+key: entra_sp_tenant_apps_all_owned
+name: Entra Tenant Service Principals All Have Owners
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every service principal for an app registered in this tenant lists an owner, on the service
+  principal or its app registration, and every owner was read. Substantiates failing orphaned non-user
+  accounts: each workload identity has someone accountable for it (KSI-IAM-AAM). Apps registered in
+  other organizations' tenants, Microsoft's own apps and managed identities are not counted, since
+  their owners live elsewhere. Does NOT prove the owner is a current employee or still enabled
+  (service_principals_with_only_disabled_owners), or that the app is still needed.
+
+# Not service_principals_without_owner, which also counts other tenants' apps that can't have an owner here.
+regex: '"partial_failure":\s*false[\s\S]*?"owners_readable":\s*(?<owners_readable>true|false)[\s\S]*?"tenant_owned_service_principals_without_owner":\s*(?<tenant_owned_service_principals_without_owner>\d+|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # owners_readable
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # tenant_owned_service_principals_without_owner
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-SERVICE-PRINCIPALS

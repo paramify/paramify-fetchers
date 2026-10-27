@@ -1,0 +1,31 @@
+key: azure_rbac_no_permanent_over_broad_assignments
+name: Azure RBAC No Permanent Over-Broad Role Assignments
+type: AUTOMATED
+role: configuration
+statement: >-
+  No user, group or service principal permanently holds Owner, Contributor, User Access Administrator
+  or Role Based Access Control Administrator at any scope that applies in the subscription (tenant
+  root, management group, subscription, resource group or single resource): every such grant is
+  PIM-activated or time-bound, PIM is available, and the PIM schedules were read. Substantiates no
+  standing privileged Azure access without an approved exception (KSI-IAM-JIT, KSI-IAM-ELP,
+  KSI-MLA-ALA). An approved exception (an emergency account, a deployment service principal) still
+  fails here and must be justified outside this evidence. A grant to a group whose membership PIM for
+  Groups manages reads permanent, so it fails too. Does NOT prove narrower roles, custom roles that
+  grant the same rights, or Entra directory roles.
+
+# null (PIM schedules unread) is captured so the rule shows it; it does not equal 0.
+regex: '"partial_failure":\s*false[\s\S]*?"permanent_over_broad_assignments":\s*(?<permanent_over_broad_assignments>\d+|null)[\s\S]*?"pim_available":\s*(?<pim_available>true|false|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS true
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # permanent_over_broad_assignments
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # pim_available
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-AZURE-RBAC-ASSIGNMENTS
