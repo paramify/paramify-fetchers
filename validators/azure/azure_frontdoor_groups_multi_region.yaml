@@ -1,0 +1,25 @@
+key: azure_frontdoor_groups_multi_region
+name: Front Door Serving Groups All Span Two Regions
+type: AUTOMATED
+role: configuration
+statement: >
+  Every serving Front Door origin group has enabled origins in two or more
+  regions (multi_region_failover), and there is at least one serving group.
+  Active-active groups count, and so do groups whose second region sits at a
+  lower priority as a failover origin. The per-group redundancy behind "Front
+  Door has healthy enabled origins in both US regions" (KSI-CNA-OFA), which
+  azure_frontdoor_serving_two_us_regions alone can't show because its
+  serving_regions is a union across groups. It does not assert which regions,
+  live origin health, that both regions serve at once (active-active, a
+  stricter customization), or the App Service plans behind the origins.
+
+# Lookahead captures persist, so the backreference compares the two summary counts in either key order.
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"serving_origin_groups":\s*(?<serving_origin_groups>[1-9]\d*)\b)(?=[\s\S]*?"serving_groups_multi_region_failover":\s*\k<serving_origin_groups>(?!\d))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-FRONTDOOR-ORIGINS

@@ -11,7 +11,7 @@ statement: >
   the alternate processing site narrative (KSI-CNA-OFA). serving_regions is a
   union across groups, not per group: two groups each serving from one region
   pass, though neither is redundant, so per-group redundancy rests on
-  azure_frontdoor_groups_active_active. It lists only best-priority regions, so
+  azure_frontdoor_groups_multi_region. It lists only best-priority regions, so
   an active-passive group reads one region. Any two US regions pass: it does not
   pin the approved pair. It does not assert live origin health
   (azure_frontdoor_no_region_unhealthy_last_hour), or anything about App
