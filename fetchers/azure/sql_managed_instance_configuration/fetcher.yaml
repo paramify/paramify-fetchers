@@ -1,13 +1,8 @@
 name: azure_sql_managed_instance_configuration
-version: 0.1.0
-description: >
-  For each Azure SQL Managed Instance in the subscription, reports how it can be
-  reached and who can sign in to it: whether the public data endpoint is enabled
-  (the only path to the instance from outside its virtual network), the connection
-  type (proxy or redirect), the minimum TLS version, its private endpoint
-  connections, the Entra ID administrator and whether Entra-only authentication is
-  enforced, and the diagnostic settings that export its logs, with whether SQL
-  security audit events are among them.
+version: 0.2.0
+description: >-
+  Shows how each SQL Managed Instance is reached, signed in to and audited, its subnet's NSG rules and routes,
+  its maintenance window and its sensitivity-labeled database columns.
 category: azure
 
 supports_targets: true
@@ -45,38 +40,67 @@ ksis:
   - KSI-IAM-APM   # Entra ID administrator and whether Entra-only auth is enforced
   - KSI-SVC-SIN   # minimum TLS version
   - KSI-MLA-LET   # SQL security audit events exported by a diagnostic setting
+  - KSI-CNA-DFP   # the instance subnet's NSG rules define what traffic is allowed
+  - KSI-CNA-RNT   # the instance subnet's NSG rules and routes
+  - KSI-SVC-PRR   # maintenance window for platform updates
+  - KSI-PIY-GIV   # sensitivity labels and information types on database columns
 
 evidence_set:
   reference_id: EVD-AZURE-SQLMI-CONFIG
   name: Azure SQL Managed Instance Configuration
-  instructions: >
-    Script: azure/sql_managed_instance_configuration/fetcher.py. Azure SDK calls (Reader is sufficient):
-    azure-mgmt-sql SqlManagementClient (api 2025-01-01) managed_instances.list(),
-    managed_instance_administrators.list_by_instance(),
-    managed_instance_azure_ad_only_authentications.list_by_instance(); and
-    azure-mgmt-monitor diagnostic_settings.list() on each instance's resource id.
-    Every list follows nextLink. Per instance: `state`;
-    `public_data_endpoint_enabled` as Azure returned it (null if omitted), and
-    `private_access_only`, true only when it is explicitly false — an instance is
-    always reachable inside its own virtual network, so the public data endpoint
-    is its only public path; `proxy_override` (Proxy, Redirect or Default);
-    `minimal_tls_version` (None, 1.0, 1.1, 1.2) with
-    `minimal_tls_version_recommended` for 1.2 or higher (an omitted version reads
-    as false); `private_endpoint_connections`
-    with each connection's status (Approved, Pending, Rejected);
-    `administrators` (Entra admin type, login, sid, tenant) and
-    `entra_administrator_configured`; `azure_ad_only_authentication`.
-    `diagnostic_settings` lists every setting with its destinations (workspace,
-    storage account, Event Hub authorization rule and hub name) and enabled log
-    categories; `audit_logs_exported` is true when an
-    enabled log is the SQLSecurityAuditEvents category or the audit or allLogs
-    category group, and `audit_log_destinations` lists where those settings send
-    it (an Event Hub by its authorization rule id, since the hub name is
-    optional). A failed call leaves the fields derived from it null —
-    `administrators` and `entra_administrator_configured`,
-    `azure_ad_only_authentication`, and `diagnostic_settings`,
-    `audit_logs_exported` and `audit_log_destinations` — so an unanswered call
-    is never read as "off"; summary counts count only true values. That proves audit records have a route out of the instance,
-    NOT that auditing is on: Managed Instance auditing is created and started in
-    T-SQL (CREATE SERVER AUDIT ... TO EXTERNAL_MONITOR, STATE = ON), which no ARM
-    call can read.
+  instructions: |
+    Script: azure/sql_managed_instance_configuration/fetcher.py
+
+    Access: Reader on the subscription. Reader also reads the current sensitivity labels (Microsoft lists Reader among the roles that can read a database's data classification) and the public maintenance configurations.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.Sql — tells "not registered" apart from "no instances"
+    - managed_instances.list() — every managed instance with its public data endpoint, connection type, minimum TLS version, private endpoints, subnet and maintenance configuration
+    - managed_instance_administrators.list_by_instance() (per instance) — the Entra ID administrator
+    - managed_instance_azure_ad_only_authentications.list_by_instance() (per instance) — whether only Entra ID sign-in is allowed
+    - diagnostic_settings.list() (per instance) — where the instance's logs are exported, and which log categories
+    - subnets.get(), network_security_groups.get() and route_tables.get() (per instance) — the instance's subnet, its NSG's custom and default rules, and its route table's routes
+    - GET Microsoft.Maintenance/publicMaintenanceConfigurations/{name} (per maintenance configuration in use) — the maintenance window's schedule
+    - managed_databases.list_by_instance() (per instance) — its databases
+    - managed_database_sensitivity_labels.list_current_by_database() (per user database) — the columns classified with a sensitivity label or information type
+
+    Output: azure_sql_managed_instance_configuration_<subscription>.json — each SQL Managed Instance with its public data endpoint, connection type, minimum TLS version, private endpoints, Entra administrators, Entra-only setting, diagnostic settings, subnet NSG rules and routes (rules and routes Azure adds to the subnet for the instance marked service_aided), maintenance window, and per user database the count of classified columns by label and information type; an exported audit log shows a route out of the instance, not that auditing is switched on inside it, and a read that failed leaves the fields built from it null, never false.
+
+    Summary fields:
+
+    What was checked?
+    - total_managed_instances — Number of SQL Managed Instances in the subscription
+    - provider_registration_status — Whether Microsoft.Sql is registered on the subscription: registered, not_registered or unknown
+
+    Is the instance closed to the public internet?
+    - instances_public_data_endpoint_enabled — Number of instances with the public data endpoint enabled, the only way to reach an instance from outside its virtual network
+    - instances_private_access_only — Number of instances with the public data endpoint explicitly disabled, so they're reachable only inside their virtual network or through private endpoints; an instance where Azure didn't return the setting counts in neither this field nor instances_public_data_endpoint_enabled
+    - instances_with_approved_private_endpoint — Number of instances with at least one Approved private endpoint connection
+
+    Do connections use TLS 1.2 or later?
+    - instances_minimal_tls_recommended — Number of instances whose minimum TLS version is 1.2 or 1.3 (None, 1.0, 1.1 or no setting doesn't count)
+
+    Who can sign in, and how?
+    - instances_entra_administrator — Number of instances with a Microsoft Entra ID administrator set; an instance whose administrator list couldn't be read doesn't count
+    - instances_entra_only_authentication — Number of instances that accept only Entra ID sign-in (Entra-only authentication on, so SQL logins with passwords are refused); an instance whose setting couldn't be read doesn't count
+
+    Are SQL audit events exported?
+    - instances_audit_logs_exported — Number of instances with a diagnostic setting that sends the SQLSecurityAuditEvents log, on its own or through the audit or allLogs category group, to a Log Analytics workspace, storage account or event hub; an instance whose diagnostic settings couldn't be read doesn't count. This proves a route out, not that auditing is on: Managed Instance auditing is started in T-SQL, which no Azure management call can read
+
+    What traffic do the instance's subnet rules and routes allow?
+    - instances_subnet_unknown — Number of instances whose subnet couldn't be read, so none of the subnet fields below count them
+    - instances_subnet_network_security_group — Number of instances whose subnet has a network security group (NSG)
+    - instances_subnet_allow_any_to_any_rule — Number of instances whose subnet NSG has a custom rule that allows every protocol and port from any address (*, 0.0.0.0/0, Any or Internet) to any address; an instance whose NSG couldn't be read doesn't count
+    - instances_subnet_unrestricted_internet_outbound — Number of instances whose subnet lets traffic out to the Internet on every port: the subnet has no NSG, or the first outbound rule by priority, custom or default, that covers every port and protocol to the Internet is an Allow (the default AllowInternetOutBound, unless a custom rule overrides it); routes are not considered, so traffic a route sends to a firewall still counts. An instance whose NSG couldn't be read doesn't count
+    - instances_subnet_route_table — Number of instances whose subnet has a route table
+
+    When does Azure apply updates?
+    - instances_custom_maintenance_window — Number of instances on a maintenance window other than the system default (SQL_Default, which keeps most updates to 5 PM to 8 AM local time but lets urgent ones through at any hour); the weekday and weekend windows run 10 PM to 6 AM local time
+
+    Are database columns classified?
+    - total_user_databases — Number of user databases (master, model, msdb and tempdb left out) on all instances; null if any instance's database list couldn't be read
+    - user_databases_with_sensitivity_labels — Number of user databases with at least one column classified with a sensitivity label or information type
+    - user_databases_without_sensitivity_labels — Number of user databases with no classified column
+    - user_databases_sensitivity_labels_unknown — Number of user databases whose classifications couldn't be read; a database on an instance whose database list couldn't be read isn't counted here or in total_user_databases
+    - sensitivity_labeled_columns — Number of classified columns across all user databases; null if any database's classifications or any instance's database list couldn't be read

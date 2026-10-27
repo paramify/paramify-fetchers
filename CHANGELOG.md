@@ -198,6 +198,25 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_sql_managed_instance_configuration` 0.2.0: subnet rules and routes,
+  maintenance window and data classification.** Each instance now carries its
+  `subnet_id` and subnet (address range, delegation), the subnet NSG's custom and
+  default rules and the route table's routes, read by id with
+  `subnets.get()`, `network_security_groups.get()` and `route_tables.get()`;
+  rules and routes Azure adds for the instance are marked `service_aided`.
+  `subnet_allow_any_to_any_rules` names custom rules allowing every protocol and
+  port from any address to any address, and
+  `subnet_unrestricted_internet_outbound` reads the NSG the way
+  `azure_network_security_groups` does. The instance's
+  `maintenance_configuration_id` is resolved through
+  `publicMaintenanceConfigurations` to its window (start, duration, time zone,
+  recurrence), with `maintenance_window_default` for `SQL_Default`. Each user
+  database lists how many columns carry each sensitivity label and information
+  type from `managed_database_sensitivity_labels.list_current_by_database()`,
+  without column names. A read that failed leaves the fields built from it
+  null; summary counts count only known values. Reader is still enough. Adds
+  KSI-CNA-DFP, KSI-CNA-RNT, KSI-SVC-PRR and KSI-PIY-GIV, and the fetcher's
+  `description` and `instructions` now follow the plain-text format.
 - **`azure_sentinel_analytics_rules` 0.2.0: rule queries, suppression, the
   tables each rule reads and quiet incident-creation rules.** Each rule now carries its KQL query's
   `query_sha256` and `query_length` (the `query` text itself only with
