@@ -1,0 +1,26 @@
+key: entra_priv_roles_holders_within_approved_count
+name: Entra Privileged Directory Roles Held By No More Than The Approved Principals
+type: AUTOMATED
+role: configuration
+statement: >-
+  At collection time no more than 2 distinct principals (users, groups or service principals) actively
+  hold a privileged Entra ID directory role (Global Administrator, Privileged Role Administrator and the
+  other admin and tenant-wide reader roles azure_entra_privileged_roles flags), every role's members
+  were read, and the roles read include the Global Administrator role, so an empty read cannot pass.
+  The allowance of 2 stands for the approved standing exceptions, Microsoft's two emergency access
+  accounts. Substantiates standing privileged access being limited to approved exceptions
+  (KSI-IAM-JIT). Does NOT prove which principals hold the roles (a swapped account passes), that the
+  holders are the approved ones, whether an assignment is permanent or a PIM activation open at
+  collection time (azure_entra_pim_assignments separates them), eligible assignments, roles scoped to
+  an administrative unit, Azure resource roles, or who is in a group that holds a role.
+
+# The allowance is the [0-2] class; widen it to the approved count. (?![\d.]) stops 12 reading as 1.
+regex: '"partial_failure":\s*false[\s\S]*?"distinct_privileged_principals":\s*(?<distinct_privileged_principals>[0-2])(?![\d.])[\s\S]*?"global_administrator_role_activated":\s*(?<global_administrator_role_activated>true)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-PRIV-ROLES
