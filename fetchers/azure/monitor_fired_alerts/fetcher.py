@@ -156,13 +156,13 @@ def _state_changes(mods: list[dict], state: str) -> list[dict]:
 def with_history(alert: dict, status: str, raw_mods=None) -> dict:
     """Unread history leaves every derived field null, never "nobody acknowledged"."""
     read = status == HISTORY_READ
-    mods = sorted(
+    mods: list[dict] = sorted(
         (modification(m) for m in raw_mods or []),
         key=lambda m: (parse_time(m["at"]) is None, parse_time(m["at"]) or 0, m["event"] or ""),
-    ) if read else None
-    acks = _state_changes(mods, STATE_ACKNOWLEDGED) if read else []
+    ) if read else []
+    acks = _state_changes(mods, STATE_ACKNOWLEDGED)
     # A reopened alert's earlier close does not count; only the close that left it Closed.
-    closes = _state_changes(mods, STATE_CLOSED) if read and (alert["alert_state"] or "").lower() == STATE_CLOSED else []
+    closes = _state_changes(mods, STATE_CLOSED) if (alert["alert_state"] or "").lower() == STATE_CLOSED else []
     ack, close = (acks[0] if acks else None), (closes[-1] if closes else None)
 
     def count(event):
@@ -171,7 +171,7 @@ def with_history(alert: dict, status: str, raw_mods=None) -> dict:
     return {
         **alert,
         "history_status": status,
-        "history": mods,
+        "history": mods if read else None,
         "acknowledged_at": _when(ack),
         "acknowledged_by": ack["by"] if ack else None,
         "closed_at": _when(close),
@@ -336,7 +336,8 @@ def collect_alerts(client, subscription_id: str, collector: Collector) -> tuple:
 
 def collect_rules(client, subscription_id: str, registration: dict, collector: Collector) -> tuple:
     """(rules, whether every rule list tried was read); an unregistered provider has none to read."""
-    rules, read = [], True
+    rules: list[dict] = []
+    read = True
     for rule_type, namespace, path, api in RULE_SOURCES:
         if registration[namespace] == NOT_REGISTERED:
             continue
