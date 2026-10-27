@@ -3,13 +3,16 @@ name: Entra Access Review Denials Applied
 type: AUTOMATED
 role: configuration
 statement: >-
-  In the latest completed cycle of every active Entra ID access review series, every Deny decision (a
-  reviewer's, or the default for an unanswered review) was applied, so the access was removed (or was
-  already gone), and every series, run and decision was read. Substantiates that access-review removal
-  decisions are applied and recorded (KSI-IAM-AAM, KSI-IAM-ELP, KSI-MLA-ALA). A cycle that has just
-  ended and is still applying fails until it finishes. With no Deny decision in the latest cycle it
-  passes; entra_access_reviews_monthly_auto_removal fails the set when no series is active. Does NOT
-  prove earlier cycles' denials, decisions of series that have ended, or that Approve decisions were
+  In the latest completed cycle of every active Entra ID access review series, every decision recorded
+  as Deny was applied, so the access was removed (or was already gone), and every series, run and
+  decision was read. Substantiates that access-review removal decisions are applied and recorded
+  (KSI-IAM-AAM, KSI-IAM-ELP, KSI-MLA-ALA). Only decisions recorded as Deny are checked: Microsoft
+  Graph does not document whether an unanswered review that the default decision removes is recorded
+  as Deny or left NotReviewed, so such removals may not be checked here (the default-deny and
+  auto-apply settings are entra_access_reviews_monthly_auto_removal's). A cycle that has just ended
+  and is still applying fails until it finishes. With no Deny decision in the latest cycle it passes;
+  entra_access_reviews_monthly_auto_removal fails the set when no series is active. Does NOT prove
+  earlier cycles' denials, decisions of series that have ended, or that Approve decisions were
   justified.
 
 # last_cycle_decisions must be numeric, which proves the decisions were read; the summary gives no figures unless every read succeeded.
