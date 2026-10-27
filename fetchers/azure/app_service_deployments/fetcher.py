@@ -49,7 +49,7 @@ ACTIVITY_LOG_MAX_DAYS = 90
 # The window starts this far inside retention, so its oldest edge is still served.
 ACTIVITY_LOG_RETENTION_MARGIN = timedelta(minutes=5)
 ACTIVITY_LOG_MAX_EVENTS = 200_000
-ACTIVITY_LOG_SELECT = "eventTimestamp,operationName,status,caller,resourceId,correlationId,eventDataId,claims"
+# No $select: the documented list omits `caller`, so selecting could drop or reject the requester.
 
 ACTIVITY_OPERATIONS = {
     "microsoft.web/sites/slotsswap/action": "slot_swaps",
@@ -596,7 +596,7 @@ def read_activity_log(subscription_id, cred, collector: Collector, days: int, no
     )
     events = []
     try:
-        for event in monitor.activity_logs.list(filter=query, select=ACTIVITY_LOG_SELECT):
+        for event in monitor.activity_logs.list(filter=query):
             if window["events_read"] >= ACTIVITY_LOG_MAX_EVENTS:
                 window["cut_reason"] = "max_events"
                 break

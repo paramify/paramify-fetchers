@@ -142,7 +142,7 @@ DEFAULT_EVENTS = [
 def activity_client(events=None, fail_after=None):
     seen = {}
 
-    def listing(filter, select):
+    def listing(filter, select=None):
         seen["filter"], seen["select"] = filter, select
         for i, e in enumerate(DEFAULT_EVENTS if events is None else events):
             if fail_after is not None and i == fail_after:
@@ -490,3 +490,19 @@ def test_main_with_the_activity_log_denied_leaves_activity_unknown(monkeypatch, 
     assert summary["slot_swaps"] is None and summary["publish_profile_downloads"] is None
     assert summary["apps_without_deployment_evidence"] is None
     assert summary["apps_with_deployment_evidence"] == 0
+
+
+# --- review fixes ---
+
+# The $select properties the SDK documents for activity_logs.list; `caller` isn't one.
+SELECTABLE = {"authorization", "claims", "correlationId", "description", "eventDataId", "eventName", "eventTimestamp",
+              "httpRequest", "level", "operationId", "operationName", "properties", "resourceGroupName",
+              "resourceProviderName", "resourceId", "status", "submissionTimestamp", "subStatus", "subscriptionId"}
+
+
+def test_the_activity_log_read_asks_only_for_documented_properties(monkeypatch):
+    client, seen = activity_client()
+    monkeypatch.setattr(deploys, "monitor_client", lambda *a: client)
+    events, _ = deploys.read_activity_log(SUB, object(), deploys.Collector(logging.getLogger("t")), 90, NOW)
+    assert seen["select"] is None or set(seen["select"].split(",")) <= SELECTABLE
+    assert events[0]["caller"] == "releaser@example.com"
