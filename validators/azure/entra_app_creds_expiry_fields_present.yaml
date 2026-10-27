@@ -3,11 +3,13 @@ name: Entra App Registration Credential Expiry Fields Were Read
 type: AUTOMATED
 role: integrity
 statement: >-
-  Every app registration credential in the evidence carries the per-credential days_until_expiry field,
-  or the tenant has no app registration credentials at all, so entra_app_creds_validity_within_interval's
-  zero count reflects the credentials rather than a renamed field. Asserts nothing about posture.
+  The app registrations were read without a failure, and at least one credential carries the
+  per-credential days_until_expiry field (an upstream rename drops it from all of them), or the tenant
+  has no app registration credentials at all, so entra_app_creds_validity_within_interval's zero count
+  reflects the credentials rather than a renamed field or a failed read. Asserts nothing about posture.
 
-regex: '"days_until_expiry":\s*(?:-?\d+|null)|"total_credentials":\s*0(?![\d.])'
+# partial_failure first: a denied read writes "total_credentials": 0, which would otherwise match.
+regex: '"partial_failure":\s*false[\s\S]*?(?:"days_until_expiry":\s*(?:-?\d+|null)|"total_credentials":\s*0(?![\d.]))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

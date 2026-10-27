@@ -12,7 +12,8 @@ statement: >-
   be justified outside this evidence. Does NOT prove Microsoft Graph or other API permissions granted
   to service principals (azure_entra_service_principals), Azure resource roles, that a service
   principal is enabled only when required, a service principal reaching a role through a group, or
-  roles scoped to an administrative unit.
+  roles scoped to an administrative unit. Custom directory roles and built-in roles outside the
+  fetcher's list (results.privileged_role_names_checked) are not counted.
 
 regex: '"partial_failure":\s*false[\s\S]*?"global_administrator_role_activated":\s*true[\s\S]*?"service_principals_in_privileged_roles":\s*(?<service_principals_in_privileged_roles>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

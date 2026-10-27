@@ -8,13 +8,17 @@ statement: >-
   other admin and tenant-wide reader roles azure_entra_privileged_roles flags), every role's members
   were read, and the roles read include the Global Administrator role, so an empty read cannot pass.
   The allowance of 2 stands for the approved standing exceptions, Microsoft's two emergency access
-  accounts. Substantiates standing privileged access being limited to approved exceptions
+  accounts. A PIM activation open at collection time counts as a holder, so a run during one can fail.
+  Substantiates the number of standing privileged role holders being held to the approved allowance
   (KSI-IAM-JIT). Does NOT prove which principals hold the roles (a swapped account passes), that the
   holders are the approved ones, whether an assignment is permanent or a PIM activation open at
   collection time (azure_entra_pim_assignments separates them), eligible assignments, roles scoped to
-  an administrative unit, Azure resource roles, or who is in a group that holds a role.
+  an administrative unit, Azure resource roles, or who is in a group that holds a role. Custom
+  directory roles and built-in roles outside the fetcher's list (results.privileged_role_names_checked)
+  are not counted.
 
-# The allowance is the [0-2] class; widen it to the approved count. (?![\d.]) stops 12 reading as 1.
+# The allowance is the [0-2] class. For an allowance of 10 or more, make the class an alternation,
+# e.g. (?:\d|1[0-2]) for 12, keeping (?![\d.]).
 regex: '"partial_failure":\s*false[\s\S]*?"distinct_privileged_principals":\s*(?<distinct_privileged_principals>[0-2])(?![\d.])[\s\S]*?"global_administrator_role_activated":\s*(?<global_administrator_role_activated>true)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
