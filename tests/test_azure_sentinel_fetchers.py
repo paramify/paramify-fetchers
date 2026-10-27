@@ -443,6 +443,18 @@ def test_analytics_rules_names_a_query_binds_and_quoted_tables(query, expected):
     assert MODS["sentinel_analytics_rules"].query_tables(query, TABLES, AMBIGUOUS) == expected
 
 
+def test_analytics_rules_carry_a_hash_and_length_of_each_query():
+    import hashlib
+
+    mod = MODS["sentinel_analytics_rules"]
+    query = "SigninLogs | where ResultType != '0' // ü"
+    with_query = mod.project_rule(rule("q", "Scheduled", True, query=query))
+    without = mod.project_rule(rule("f", "Fusion", True))
+    assert (with_query["query_sha256"], with_query["query_length"]) == (
+        hashlib.sha256(query.encode("utf-8")).hexdigest(), len(query))
+    assert (without["query_sha256"], without["query_length"]) == (None, None)
+
+
 FUNCTIONS = {"CiscoASA"}
 
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Microsoft Sentinel analytics (detection) rules per workspace: enabled state, queries, the tables each reads, and whether those tables get data."""
 
+import hashlib
 import logging
 import re
 import sys
@@ -51,6 +52,7 @@ logger = logging.getLogger(NAME)
 def project_rule(rule: Dict[str, Any]) -> Dict[str, Any]:
     props = rule.get("properties") or {}
     incident = props.get("incidentConfiguration") or {}
+    query = props.get("query")
     return {
         "name": rule.get("name"),
         "display_name": props.get("displayName"),
@@ -68,7 +70,10 @@ def project_rule(rule: Dict[str, Any]) -> Dict[str, Any]:
         "trigger_threshold": props.get("triggerThreshold"),
         "creates_incidents": incident.get("createIncident"),
         "product_filter": props.get("productFilter"),
-        "query": props.get("query"),
+        "query": query,
+        # Identify the query without its text, which can hold strings a WAF refuses (paths, script tags, shell).
+        "query_sha256": hashlib.sha256(query.encode("utf-8")).hexdigest() if isinstance(query, str) else None,
+        "query_length": len(query) if isinstance(query, str) else None,
         "suppression_enabled": props.get("suppressionEnabled"),
         "suppression_duration": props.get("suppressionDuration"),
     }
