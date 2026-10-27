@@ -234,12 +234,28 @@ def test_hidden_risk_levels_leave_the_risk_figures_unknown(monkeypatch):
     assert s["total_sign_ins"] == 4
 
 
+def test_without_p2_a_risk_state_lists_no_sign_in_as_risky(monkeypatch):
+    hidden = [_sign_in("h1", "u-1", level="hidden", state="atRisk", steps=[_step("Password"), _step("SMS")]),
+              _sign_in("h2", "u-2", level="hidden", state="atRisk", requirement="singleFactorAuthentication",
+                       steps=[_step("Password")])]
+    results, s = sign_ins.collect(FakeClient([hidden]), _collector(), _window(monkeypatch))
+    assert s["risky_sign_ins"] is None
+    # The MFA sign-in was an exception only by its risk state; the single-factor one stays, not as risky.
+    assert s["exception_sign_ins"] == s["exception_sign_ins_listed"] == 1
+    (listed,) = results["exception_sign_ins"]
+    assert listed["id"] == "h2" and listed["exception_reasons"] == ["single_factor"]
+    assert listed["ip_address"] is None
+
+
 def test_a_hidden_level_flagged_by_its_state_counts_as_level_none(monkeypatch):
     rated = [_sign_in("p1", "u-1", steps=[_step("Password"), _step("SMS")]),
              _sign_in("p2", "u-1", level="hidden", state="atRisk", steps=[_step("Password"), _step("SMS")])]
-    _, s = sign_ins.collect(FakeClient([rated]), _collector(), _window(monkeypatch))
+    results, s = sign_ins.collect(FakeClient([rated]), _collector(), _window(monkeypatch))
     assert s["risk_levels_available"] is True
     assert s["risky_sign_ins_by_level"] == {"none": 1}
+    # Risk is known in this tenant, so the state-flagged sign-in is listed.
+    assert s["exception_sign_ins"] == 1
+    assert [e["exception_reasons"] for e in results["exception_sign_ins"]] == [["risky"]]
 
 
 def test_ip_address_is_kept_only_on_risky_sign_ins():

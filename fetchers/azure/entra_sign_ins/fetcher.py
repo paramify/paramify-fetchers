@@ -138,6 +138,9 @@ class Tally:
         self.apps: Dict[str, Dict[str, Any]] = {}
         self.exceptions: List[Dict[str, Any]] = []
         self.exceptions_total = 0
+        # Risky by its state alone with the level hidden: listed only if the run shows risk is known.
+        self.state_only_risky: List[Dict[str, Any]] = []
+        self.state_only_risky_total = 0
         self.risk_hidden = 0
 
     def add(self, r: Dict[str, Any]) -> None:
@@ -179,9 +182,14 @@ class Tally:
         app["counts"].update(k for k, v in flags.items() if v)
         app["counts"]["sign_ins"] += 1
         if r["exception_reasons"]:
-            self.exceptions_total += 1
-            if len(self.exceptions) < EXCEPTION_LIMIT:
-                self.exceptions.append(r)
+            if r["exception_reasons"] == ["risky"] and r["risk_level_during_sign_in"] == HIDDEN:
+                self.state_only_risky_total += 1
+                if len(self.state_only_risky) < EXCEPTION_LIMIT:
+                    self.state_only_risky.append(r)
+            else:
+                self.exceptions_total += 1
+                if len(self.exceptions) < EXCEPTION_LIMIT:
+                    self.exceptions.append(r)
 
 
 COUNT_KEYS = (
@@ -198,6 +206,12 @@ def _row(entry: dict, keys, risk_known: bool) -> dict:
             **({"methods": sorted_counts(entry["methods"])} if "methods" in entry else {})}
 
 
+def _without_risk(r: Dict[str, Any]) -> Dict[str, Any]:
+    if "risky" not in r["exception_reasons"]:
+        return r
+    return {**r, "exception_reasons": [x for x in r["exception_reasons"] if x != "risky"], "ip_address": None}
+
+
 def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, complete: bool, truncated: bool):
     risk_levels_available = None if tally.total == 0 else tally.risk_hidden < tally.total
     # Without P2 every level reads hidden, so "no risky sign-ins" is unknown, not 0.
@@ -210,6 +224,16 @@ def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, compl
     # every figure above still counts all of them.
     listed_users = [u for u in users if u["successful_single_factor"] or u["successful_without_conditional_access"]
                     or u["risky"]]
+    if risk_known:
+        exceptions = tally.exceptions + tally.state_only_risky
+        exceptions_total = tally.exceptions_total + tally.state_only_risky_total
+    else:
+        # Without P2 risk is unknown (risky_sign_ins is null), so no sign-in is listed as risky.
+        exceptions = [_without_risk(r) for r in tally.exceptions]
+        exceptions_total = tally.exceptions_total
+    exceptions = sorted(
+        exceptions, key=lambda r: (r["created_date_time"] or "", r["id"] or ""), reverse=True
+    )[:EXCEPTION_LIMIT]
     c = tally.counts
     readable = status == "read"
 
@@ -260,16 +284,14 @@ def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, compl
         "risky_sign_ins_by_state": risk(sorted_counts(tally.states)),
         "users_with_risky_sign_ins": risk(sum(1 for u in users if u["risky"])),
         # --- the sign-ins listed one by one ---
-        "exception_sign_ins": when(tally.exceptions_total),
-        "exception_sign_ins_listed": when(len(tally.exceptions)),
+        "exception_sign_ins": when(exceptions_total),
+        "exception_sign_ins_listed": when(len(exceptions)),
         "users_listed": when(len(listed_users)),
     }
     results = {
         "users": listed_users,
         "apps": apps,
-        "exception_sign_ins": sorted(
-            tally.exceptions, key=lambda r: (r["created_date_time"] or "", r["id"] or ""), reverse=True
-        ),
+        "exception_sign_ins": exceptions,
     }
     return results, summary
 
