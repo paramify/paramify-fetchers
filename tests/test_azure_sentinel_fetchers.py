@@ -453,6 +453,32 @@ def test_data_sources_alert_only_connectors_read_quiet(azure, tmp_path):
     assert (ev["summary"]["connectors_quiet"], ev["summary"]["connectors_not_connected"]) == (2, 4)
 
 
+@pytest.mark.parametrize("own", [False, True])
+def test_data_sources_defender_xdr_links_only_the_products_it_carries(azure, tmp_path, own):
+    alert_only_workspace(azure, "Disabled")
+    # Tenant-based Defender for Cloud's MtpAlerts value isn't in Defender XDR's list; IoT has no MtpAlerts criterion.
+    preview = azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"]
+    preview += [
+        ui_connector("MicrosoftDefenderForCloudTenantBased",
+                     [("SecurityAlert(ASC)", 'SecurityAlert | where ProductName == "Azure Security Center"')],
+                     [{"type": "MtpAlerts", "value": ["MicrosoftDefenderForCloudTenantBased"]}]),
+        ui_connector("IoT", [("SecurityAlert (ASC for IoT)", 'SecurityAlert | where ProductName == "Azure Security Center for IoT"')],
+                     [{"type": "SentinelKinds", "value": ["IOT"]}])]
+    if own:
+        preview.append({"id": f"{SI_A}/dataConnectors/mdc", "name": "mdc", "kind": "RestApiPoller", "properties": {
+            "connectorDefinitionName": "MicrosoftDefenderForCloudTenantBased", "dataTypes": {"alerts": {"state": "Disabled"}}}})
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    # Defender XDR still makes Defender for Identity quiet, but not Defender for Cloud or IoT.
+    assert code == 0 and ws["connectors_quiet"] == ["AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity"]
+    assert {"IoT", "MicrosoftDefenderForCloudTenantBased"} <= set(ws["connectors_not_connected"])
+    assert ("MicrosoftDefenderForCloudTenantBased" in ws["connectors_configured_without_data"]) is own
+    mdc = by_id["MicrosoftDefenderForCloudTenantBased"]
+    assert (mdc["alert_only"], mdc["connected"]) == (True, False)
+    assert (mdc["connections"], by_id["IoT"]["connections"]) == ((["mdc"] if own else []), [])
+
+
 def test_data_sources_configured_without_data_leaves_out_unconnected_and_quiet(azure, tmp_path):
     alert_only_workspace(azure, "Disabled")
     # Installed from Content Hub with no connection, and not alert-only; and one connected to a Basic-plan table.

@@ -79,6 +79,11 @@ DEFENDER_XDR_ALERT_PRODUCTS = (
     '"Microsoft Defender Advanced Threat Protection", "Office 365 Advanced Threat Protection", '
     '"Azure Advanced Threat Protection", "Microsoft Cloud App Security", "Microsoft 365 Defender", "Microsoft Defender XDR"'
 )
+# Defender XDR's own MtpAlerts list: the products whose alerts it carries. Defender for Cloud's and IoT's aren't among them.
+DEFENDER_XDR_CARRIES = frozenset({
+    "AzureActiveDirectory", "AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity",
+    "MicrosoftDefenderAdvancedThreatProtection", "MicrosoftThreatProtection", "OfficeATP", "OfficeIRM",
+})
 
 # Built-in connection kinds and what they fill, for a connection whose connector definition isn't installed.
 BUILT_IN_DATA_TYPES: Dict[str, List[Tuple[str, str]]] = {
@@ -204,14 +209,15 @@ def link(definition: Dict[str, Any], conns: List[Dict[str, Any]]) -> List[str]:
     name = (definition.get("name") or "").lower()
     criteria = (definition.get("properties") or {}).get("connectorUiConfig") or {}
     criteria = criteria.get("connectivityCriterias") or criteria.get("connectivityCriteria") or []
-    mtp_alerts = any(c.get("type") == "MtpAlerts" for c in criteria if isinstance(c, dict))
+    mtp_alerts = {v for c in criteria if isinstance(c, dict) and c.get("type") == "MtpAlerts" for v in c.get("value") or []}
+    via_xdr = bool(mtp_alerts) and mtp_alerts <= DEFENDER_XDR_CARRIES
     linked = []
     for c in conns:
         props = (c["_raw"].get("properties") or {})
         if (
             (definition_of(c["kind"]) or "").lower() == name
             or (props.get("connectorDefinitionName") or "").lower() == name
-            or (mtp_alerts and c["kind"] == "MicrosoftThreatProtection" and sends_alerts(c))
+            or (via_xdr and c["kind"] == "MicrosoftThreatProtection" and sends_alerts(c))
         ):
             linked.append(c["name"])
     return sorted(linked)
