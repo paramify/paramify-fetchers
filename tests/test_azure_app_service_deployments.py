@@ -560,10 +560,10 @@ def test_one_correlation_id_across_apps_stays_one_request_per_app(monkeypatch):
     assert summary["apps_deployment_evidence_unknown"] == 0 and summary["apps_without_deployment_evidence"] == 0
 
 
-def test_kudu_author_and_message_are_capped_and_marked():
+def test_kudu_author_deployer_and_message_are_capped_and_marked():
     long = "m" * 20_000
-    record = deploys.deployment_record({"status": 4, "author": long, "message": long})
-    for text in (record["author"], record["message"]):
+    record = deploys.deployment_record({"status": 4, "author": long, "deployer": long, "message": long})
+    for text in (record["author"], record["deployer"], record["message"]):
         assert text.startswith("m" * deploys.MAX_TEXT) and len(text) < deploys.MAX_TEXT + 40 and "truncated" in text
     assert deploys.deployment_record({"author": "dev@example.com", "message": "fix"})["message"] == "fix"
 

@@ -116,8 +116,8 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_app_service_deployments`** (`EVD-AZURE-APPSVC-DEPLOYMENTS`) — how each App
   Service web app and slot is deployed. Kudu's deployment records (id or commit, status,
   author, deployer, message, times, the active deployment), counted separately so an empty
-  Kudu history is not read as "no deployments"; an author or message past 500 characters
-  is cut and marked. From the Activity Log (Microsoft.Web over `activity_log_days`, 90 by
+  Kudu history is not read as "no deployments"; an author, deployer or message past 500
+  characters is cut and marked. From the Activity Log (Microsoft.Web over `activity_log_days`, 90 by
   default, explicit start and end, paged to the end): slot swaps, publish-profile
   downloads, publishing-credential reads and package deployments through Resource
   Manager, one per request (correlation id, kept on each record) on the site of the event

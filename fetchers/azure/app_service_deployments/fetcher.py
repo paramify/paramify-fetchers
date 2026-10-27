@@ -43,7 +43,7 @@ logger = logging.getLogger("azure_app_service_deployments")
 DEPLOY_STATUS = {0: "Pending", 1: "Building", 2: "Deploying", 3: "Failed", 4: "Success"}
 HISTORY_LIMIT = 50
 ACTIVITY_LIMIT = 100
-# Kudu's author and message are free text from the commit or client; a long one is cut, not copied whole.
+# Kudu's author, deployer and message are free text from the commit or client; a long one is cut, not copied whole.
 MAX_TEXT = 500
 
 # The Activity Log keeps 90 days; a read past this many events is cut and says so.
@@ -116,7 +116,7 @@ LIMITATIONS = [
     "create none, so an empty Kudu history does not mean no deployments.",
     "A Kudu record's author and message come from the commit or the deploying client; a push from a "
     "pipeline often names the tool, not a person. Kudu keeps a bounded history; the newest "
-    f"{HISTORY_LIMIT} records per app or slot are kept, with the full count. An author or message longer than "
+    f"{HISTORY_LIMIT} records per app or slot are kept, with the full count. An author, deployer or message longer than "
     f"{MAX_TEXT} characters is cut and marked as truncated.",
     "Activity Log events are control-plane requests, kept 90 days. A slot swap names who requested it, "
     "when and on which slot; the slot it swapped with is not logged. A publish-profile download (publishxml) "
@@ -231,7 +231,7 @@ def deployment_record(deployment: dict) -> dict:
         "status": _status_name(deployment.get("status")),
         "active": bool(deployment.get("active") or False),
         "author": capped(deployment.get("author")),
-        "deployer": deployment.get("deployer"),
+        "deployer": capped(deployment.get("deployer")),
         "message": capped(deployment.get("message")),
         "start_time": _iso(deployment.get("start_time")),
         "end_time": _iso(deployment.get("end_time")),
