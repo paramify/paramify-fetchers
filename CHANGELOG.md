@@ -25,7 +25,8 @@ schemas and the `paramify` CLI — not the internal code.
   fired stand out (`enabled_rules_never_fired`); a rule that fired but is not in the
   subscription's rule lists is kept with `listed: false`. Built-in rules such as
   Azure Backup's and Service Health's get rule type `builtin` and are not counted as
-  rules. The alert list is checked against Alerts Management's own summary total
+  rules. `max_open_alert_age_hours` gives how long the oldest alert still open (New or
+  Acknowledged) has been open, 0 when none is. The alert list is checked against Alerts Management's own summary total
   (`all_alerts_listed`). Counts and close times that need an alert list, a rule list
   or a history that wasn't read are null, never 0 or partial. Descriptions and
   comments are capped at 500 characters, marked when cut.

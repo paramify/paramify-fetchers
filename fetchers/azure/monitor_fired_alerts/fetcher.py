@@ -5,6 +5,7 @@ import logging
 import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
 
@@ -56,6 +57,7 @@ ALERT_COUNTS = (
     "alerts_by_monitor_service", "alerts_by_rule_type", "alerts_open", "alerts_acknowledged", "alerts_closed",
     "alerts_closed_by_person", "alerts_with_notifications", "alerts_with_failed_notifications",
     "alerts_with_actions_suppressed", "median_hours_to_close", "max_hours_to_close", "oldest_open_alert_fired_at",
+    "max_open_alert_age_hours",
     "alert_histories_read", "alert_histories_unread",
 )
 # Unknown, not a partial count, when a rule list failed.
@@ -226,8 +228,17 @@ def rule_activity(rules: list[dict], alerts: list[dict], alerts_read: bool = Tru
     return sorted(out, key=lambda r: arm_id_key(r["id"]))
 
 
+def max_open_age_hours(open_alerts: list[dict], now: datetime):
+    """Hours since the oldest open alert fired: 0 with none open, None when an open alert has no fire time."""
+    fired = [parse_time(a["fired_at"]) for a in open_alerts]
+    if None in fired:
+        return None
+    return _hours(min(fired), now) if fired else 0
+
+
 def summarize(
-    alerts: list[dict], rules: list[dict], summary_total, alerts_read: bool = True, rules_read: bool = True
+    alerts: list[dict], rules: list[dict], summary_total, alerts_read: bool = True, rules_read: bool = True,
+    now: datetime | None = None,
 ) -> dict:
     closed = [a for a in alerts if (a["alert_state"] or "").lower() == STATE_CLOSED]
     # A count over histories is unknown, never a partial number, while any history is unread.
@@ -265,6 +276,7 @@ def summarize(
         "oldest_open_alert_fired_at": min(
             (a["fired_at"] for a in open_alerts if parse_time(a["fired_at"])), key=parse_time, default=None
         ),
+        "max_open_alert_age_hours": max_open_age_hours(open_alerts, now or datetime.now(timezone.utc)),
         "alert_histories_read": sum(1 for a in alerts if a["history_status"] == HISTORY_READ),
         "alert_histories_unread": sum(1 for a in alerts if a["history_status"] != HISTORY_READ),
         "alert_rules_listed": len(listed),

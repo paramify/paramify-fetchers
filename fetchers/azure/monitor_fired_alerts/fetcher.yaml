@@ -87,6 +87,7 @@ evidence_set:
     - median_hours_to_close — Number of hours from an alert firing to its closing change, the median across closed alerts whose history shows the closing change; null while any alert's history is unread (alert_histories_unread above 0), never a partial figure; null if no closed alert's history shows one, or the alert list wasn't read
     - max_hours_to_close — Number of hours from an alert firing to its closing change, the longest across closed alerts whose history shows the closing change; null while any alert's history is unread (alert_histories_unread above 0), never a partial figure; null if no closed alert's history shows one, or the alert list wasn't read
     - oldest_open_alert_fired_at — Time of firing of the oldest alert not in the Closed state; null if no alert is open, or the alert list wasn't read
+    - max_open_alert_age_hours — Number of hours from the oldest alert not in the Closed state (New or Acknowledged) firing to the run, so an alert acknowledged but left open for weeks shows; at most about 720, since Azure keeps alerts 30 days. The state comes from the alert list, so unread histories don't affect it. 0 if no alert is open; null if an open alert has no firing time, or the alert list wasn't read
 
     Does every rule fire?
     - alert_rules_listed — Number of listed alert rules: metric, log search, smart detector and activity log alert rules the subscription's rule lists return; null if a rule list failed, never a partial count

@@ -6,6 +6,7 @@ import importlib.util
 import json
 import sys
 from collections import namedtuple
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -393,6 +394,20 @@ def test_an_unparsable_change_time_is_not_reported_as_a_time():
         "acknowledged_at": None, "acknowledged_by": "a@example.com", "closed_at": None, "closed_by": "b@example.com",
         "hours_to_close": None}
     assert fa.summarize([record], [], 1)["alerts_acknowledged"] == 1
+
+
+def test_max_open_alert_age_is_hours_since_the_oldest_open_alert_fired():
+    now = datetime(2026, 10, 30, 10, 0, tzinfo=timezone.utc)
+    alerts = [alert(1, state="Acknowledged", fired="2026-10-10T10:00:00Z"),
+              alert(2, state="New", fired="2026-10-29T10:00:00Z", status=fa.HISTORY_NOT_AUTHORIZED),
+              alert(3, state="Closed", fired="2026-10-01T10:00:00Z")]
+    # An acknowledged alert is still open; the state comes from the alert list, so unread histories don't matter.
+    assert fa.summarize(alerts, [], 3, now=now)["max_open_alert_age_hours"] == 480.0
+    # Nothing open reads 0, so a quiet subscription passes; an open alert without a fire time leaves it unknown.
+    assert fa.summarize([alerts[2]], [], 1, now=now)["max_open_alert_age_hours"] == 0
+    assert fa.summarize([], [], 0, now=now)["max_open_alert_age_hours"] == 0
+    assert fa.summarize([alert(4, fired=""), *alerts], [], 4, now=now)["max_open_alert_age_hours"] is None
+    assert fa.summarize([], [], None, alerts_read=False, now=now)["max_open_alert_age_hours"] is None
 
 
 def test_free_text_is_capped_and_marked():
