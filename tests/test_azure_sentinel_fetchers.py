@@ -680,6 +680,20 @@ def test_analytics_rules_alert_only_rule_is_quiet_through_defender_xdr(azure, tm
     assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (1, 1)
 
 
+def test_analytics_rules_unknown_product_is_never_quiet(azure, tmp_path):
+    # A product the API may add later has no known connection, so even Defender XDR and every own kind sending
+    # alerts don't make it quiet.
+    kinds = ["AzureActiveDirectory", "AzureAdvancedThreatProtection", "AzureSecurityCenter", "IOT",
+             "MicrosoftCloudAppSecurity", "MicrosoftDefenderAdvancedThreatProtection", "OfficeATP", "MicrosoftThreatProtection"]
+    alert_only_workspace(azure, [incident_rule("new", "Microsoft Defender for Something New")],
+                         preview=[connection(k.lower(), k) for k in kinds])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and [r["name"] for r in ws["enabled_rules_missing_data"]] == ["new"]
+    assert ws["enabled_rules_quiet"] == []
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (1, 0)
+
+
 def test_analytics_rules_alert_only_rules_not_wired_are_not_quiet(azure, tmp_path):
     # Defender for Office 365's alerts are Disabled on its own connection and on Defender XDR's; Defender for Cloud
     # was never connected, and Defender XDR doesn't carry its alerts.
@@ -771,6 +785,7 @@ def test_analytics_rules_workspace_without_customer_id(azure, tmp_path):
     assert code == 1 and ev["metadata"]["partial_failure"] is True
     assert ws["rules"] and all(r["tables_without_data"] is None for r in ws["rules"])
     assert ws["enabled_rules_missing_data"] is None and ev["summary"]["enabled_rules_missing_data"] is None
+    assert ws["enabled_rules_quiet"] is None and ev["summary"]["enabled_rules_quiet"] is None
     assert not any(c[0] == "POST" for c in azure.calls)
 
 
@@ -782,8 +797,10 @@ def test_analytics_rules_without_ingestion_leave_data_unknown(azure, tmp_path):
     assert code == 1 and json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
     assert ws["rules"] and all(r["tables_without_data"] is None for r in ws["rules"])
     assert ws["ingesting_tables_not_read"] is None and ws["enabled_rules_missing_data"] is None
+    assert ws["enabled_rules_quiet"] is None
     summary = ev["summary"]
     assert summary["enabled_rules_missing_data"] is None and summary["ingesting_tables_not_read"] is None
+    assert summary["enabled_rules_quiet"] is None
     assert summary["enabled_rules_tables_unknown"] == 3
 
 
