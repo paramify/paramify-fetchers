@@ -206,6 +206,10 @@ def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, compl
                    key=lambda u: ((u["user_principal_name"] or "").lower(), u["user_id"] or ""))
     apps = sorted((_row(a, COUNT_KEYS, risk_known) for a in tally.apps.values()),
                   key=lambda a: ((a["app_display_name"] or "").lower(), a["app_id"] or ""))
+    # One row per user runs to tens of MB in a large tenant, so only users with an exception are listed;
+    # every figure above still counts all of them.
+    listed_users = [u for u in users if u["successful_single_factor"] or u["successful_without_conditional_access"]
+                    or u["risky"]]
     c = tally.counts
     readable = status == "read"
 
@@ -258,9 +262,10 @@ def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, compl
         # --- the sign-ins listed one by one ---
         "exception_sign_ins": when(tally.exceptions_total),
         "exception_sign_ins_listed": when(len(tally.exceptions)),
+        "users_listed": when(len(listed_users)),
     }
     results = {
-        "users": users,
+        "users": listed_users,
         "apps": apps,
         "exception_sign_ins": sorted(
             tally.exceptions, key=lambda r: (r["created_date_time"] or "", r["id"] or ""), reverse=True

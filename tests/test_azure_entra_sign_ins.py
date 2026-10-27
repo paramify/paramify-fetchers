@@ -124,7 +124,10 @@ def test_sign_ins_summarized_per_user_and_app(monkeypatch):
     assert reasons == {"s3": ["single_factor", "no_conditional_access"], "s4": ["single_factor"], "s6": ["risky"]}
     users = {u["user_id"]: u for u in results["users"]}
     assert users["u-2"]["successful_single_factor"] == 2
-    assert users["u-1"]["methods"] == {"Authenticator App": 1, "FIDO2 security key": 1, "Password": 1}
+    assert users["u-3"]["risky"] == 1
+    # Users with no exception count in every figure but aren't listed.
+    assert set(users) == {"u-2", "u-3"}
+    assert s["users_signing_in"] == 5 and s["users_listed"] == 2
     apps = {a["app_id"]: a for a in results["apps"]}
     assert apps["app-mail"]["successful_legacy_authentication"] == 1
 
@@ -227,7 +230,7 @@ def test_hidden_risk_levels_leave_the_risk_figures_unknown(monkeypatch):
     assert s["risk_levels_available"] is False
     for key in ("risky_sign_ins", "risky_sign_ins_by_level", "risky_sign_ins_by_state", "users_with_risky_sign_ins"):
         assert s[key] is None, key
-    assert {u["user_id"]: u["risky"] for u in results["users"]} == {"u-1": None, "u-2": None}
+    assert results["users"] == [] and s["users_signing_in"] == 2
     assert s["total_sign_ins"] == 4
 
 
@@ -252,7 +255,7 @@ def test_a_sign_in_with_no_user_id_counts_in_totals_only(monkeypatch):
     results, s = sign_ins.collect(FakeClient([SIGN_INS[:2] + [unknown]]), _collector(), _window(monkeypatch))
     assert s["total_sign_ins"] == 3 and s["failed_sign_ins"] == 1
     assert s["users_signing_in"] == 1
-    assert [u["user_id"] for u in results["users"]] == ["u-1"]
+    assert results["users"] == []
 
 
 def test_an_empty_lookback_leaves_ratios_and_risk_unknown(monkeypatch):
