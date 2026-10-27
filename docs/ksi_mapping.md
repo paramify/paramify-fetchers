@@ -252,7 +252,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2`, `ac-2.1`, `ac-2.3`, `ac-2.13`, `ac-7`, `ps-4`, `ps-8`
 
-*5 fetchers:* [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`okta_suspicious_activity_management`](../fetchers/okta/suspicious_activity_management), [`wiz_threat_detections`](../fetchers/wiz/threat_detections)
+*6 fetchers:* [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`okta_suspicious_activity_management`](../fetchers/okta/suspicious_activity_management), [`wiz_threat_detections`](../fetchers/wiz/threat_detections)
 
 ### CMT — Change Management  (3/3)
 
@@ -572,7 +572,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_residual_resources`](../fetchers/azure/residual_resources) | `KSI-SVC-PRR` |
 | [`azure_resource_diagnostic_settings`](../fetchers/azure/resource_diagnostic_settings) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_resource_inventory`](../fetchers/azure/resource_inventory) | `KSI-CNA-EIS`, `KSI-MLA-EVC`, `KSI-PIY-GIV`, `KSI-SVC-EIS` |
-| [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules) | `KSI-MLA-OSM`, `KSI-MLA-RVL` |
+| [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules) | `KSI-IAM-SUS`, `KSI-MLA-OSM`, `KSI-MLA-RVL` |
 | [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules) | `KSI-IAM-SUS`, `KSI-MLA-RVL` |
 | [`azure_sentinel_data_sources`](../fetchers/azure/sentinel_data_sources) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents) | `KSI-CNA-ULN`, `KSI-IAM-SUS`, `KSI-INR-AAR`, `KSI-INR-RPI`, `KSI-MLA-RVL` |

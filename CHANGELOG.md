@@ -149,6 +149,62 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_sentinel_analytics_rules` 0.2.0: rule queries, suppression, the
+  tables each rule reads and quiet incident-creation rules.** Each rule now carries its KQL query's
+  `query_sha256` and `query_length` (the `query` text itself only with
+  `SENTINEL_RULE_QUERY_TEXT=true`, since detection queries hold strings a web
+  firewall refuses), `suppression_enabled` and
+  `suppression_duration`, and `tables_read`: the local workspace tables its
+  query names, in code, bracket-quoted (`['T']`) or as a string passed to
+  `table()` or to a function the query defines (`tables_from: query`), else the
+  data types its template lists (`tables_from: template`). Templates are listed
+  at the stable api-version; a template a rule uses that only the preview
+  api-version has (an NRT rule's) is read from it by name. A name
+  that is also a column, such as `Operation`, or that the query assigns
+  (`extend Event = …`, `datatable(Event:string)`), counts only where a table can
+  stand; names the query binds (`mv-expand`, `mv-apply`, `as`, `withsource=`),
+  names after a `.` (`workspace("x").T`, `parse_json(c).Event`) and wildcard
+  unions don't count. A name the workspace doesn't list counts as a table it
+  never provisioned where only a table can stand, unless it is one of the
+  workspace's functions (read from saved searches); a template's data types
+  count whether or not the workspace lists them, except `_`-prefixed parsers.
+  When included, the `query` is
+  the rule's full KQL as written, so it can hold the user names, IP addresses
+  and file paths the rule names. Incident-creation rules read `SecurityAlert` and
+  have data only when their own product sent an alert. Each workspace lists the
+  tables enabled rules read with their last ingestion, the ingesting tables no
+  enabled rule reads (`SecurityAlert` left out, since it also holds Sentinel's
+  own alerts), the arriving tables enabled rules read only through their
+  templates' data types, and the enabled rules missing data: a table their query reads
+  got nothing in the window (`SENTINEL_INGESTION_WINDOW_DAYS`, default 14), or
+  none of their template's data types did, since a template lists alternative
+  sources. Fusion, ML Behavior Analytics and Threat Intelligence rules have no
+  query and read as `tables_read: null`, counted in
+  `enabled_rules_tables_unknown`. Each workspace also reports
+  `enabled_rules_suppressed`, `ingestion_window_days` and
+  `workspace_tables_listed`. The summary's counts are null, not 0, when no
+  workspace could be checked. `templates_available` and `templates_in_use` now
+  also count the preview-only templates rules use. The ingestion query
+  needs Log Analytics Reader as well as Microsoft Sentinel Reader. Also mapped
+  to `KSI-IAM-SUS`. An enabled incident-creation rule whose product sent no
+  alert in the window stays in `enabled_rules_missing_data`. Each workspace also
+  lists it in `enabled_rules_quiet`, with the connection kinds that have its
+  alerts enabled and the reason, when a data connection that sends that
+  product's alerts has alerts enabled: the product's own connection, or Defender
+  XDR's for Entra ID Protection and Defender for Identity, Endpoint, Office 365
+  and Cloud Apps. Defender XDR doesn't carry Defender for Cloud or Defender for
+  IoT alerts. No alert in the window is normal for these rules, so a summary
+  `enabled_rules_missing_data` equal to the new `enabled_rules_quiet` means
+  every rule missing data is quiet. A rule whose product has no connection with
+  alerts enabled, a scheduled rule reading `SecurityAlert`, and a rule reading
+  another table with no data are never quiet. The data connectors are listed
+  (stable and preview api-versions; only the preview returns Defender XDR's
+  connection) only when such a rule exists. A failed stable listing is an API
+  failure, a failed preview listing is a note, and either leaves
+  `enabled_rules_quiet` null unless each rule is quiet through a connection
+  that was read. The summary count is null if any workspace with a known
+  `enabled_rules_missing_data` has an unknown `enabled_rules_quiet`. Listing the
+  data connectors needs no access beyond Microsoft Sentinel Reader.
 - **`azure_key_vault_key_rotation` 0.2.0 covers certificates.** Each vault now
   lists its certificates with their expiry (`expired`, `days_until_expiry`),
   thumbprint and policy: issuer, validity, key shape and lifetime actions, read as
