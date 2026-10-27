@@ -271,6 +271,7 @@ Logging and monitoring:
 | `azure_log_analytics_deletion_rights` | Who can purge, delete or shorten the retention of each workspace's log data, active or PIM-eligible |
 | `azure_log_storage_immutability` | Immutability policies, legal holds and soft delete on the blob containers Azure Monitor writes logs to |
 | `azure_network_flow_logs` | Network Watchers and flow logs (target, state, storage, retention, Traffic Analytics), and which virtual networks and subnets an enabled flow log covers |
+| `azure_network_traffic_activity` | The traffic actually seen: Traffic Analytics flows with new destinations, unexpected inbound ports and denied-flow spikes, Front Door requests, and requests that reached Front Door's App Service origins directly |
 | `azure_alert_rules` | Metric, log search and smart detector alert rules, resolved to the receivers they notify and checked against suppression rules |
 | `azure_activity_log_alerts` | Activity log alert rules and which security-relevant control-plane operations they cover |
 
