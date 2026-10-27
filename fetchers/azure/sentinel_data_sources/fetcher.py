@@ -479,7 +479,7 @@ def _strict_total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]
 
 
 def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
-    counts = [w.get("sources_ingesting") for w in workspaces if w.get("sources_ingesting") is not None]
+    counts: List[int] = [w["sources_ingesting"] for w in workspaces if w.get("sources_ingesting") is not None]
     return {
         "min_sources_ingesting": min(counts) if counts else None,
         "workspaces_with_2plus_sources": sum(1 for c in counts if c >= 2),
