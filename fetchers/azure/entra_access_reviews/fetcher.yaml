@@ -43,9 +43,11 @@ secrets: []          # DefaultAzureCredential only — see _categories/azure.yam
 # Microsoft Graph application permission (admin consent): AccessReview.Read.All. Organization.Read.All
 # is optional, for the tenant name. The tenant needs Entra ID P2 or ID Governance; without it access
 # reviews are reported unavailable and the run still succeeds. Reviews of Azure resource roles are kept
-# by Azure Resource Manager, not Graph, and are not read here. The licence refusal is recognised by
-# "licens" in Graph's message, borrowed from PIM; no Microsoft page documents the access-review wording,
-# so it is unconfirmed (a miss reads as a failed read, not as no reviews).
+# by Azure Resource Manager, not Graph, and are not read here. The licence refusal is recognised only on
+# the first read (the series list), by Graph's error code AadPremiumLicenseRequired on a 400 or 403; the
+# message text is never read, so a permission refusal that mentions a licence is a failure. No Microsoft
+# page documents the code for access reviews (it is the one PIM sends), so it is unconfirmed here; a miss
+# reads as a failed read, not as no reviews.
 
 ksis:
   - KSI-IAM-AAM
@@ -71,7 +73,7 @@ evidence_set:
     Summary fields:
 
     What was checked?
-    - access_reviews_available — True if the tenant's access reviews were read; false if Graph refused a read because the tenant has no Entra ID P2 or ID Governance licence (the reads that succeeded stay in the results); null if a read failed
+    - access_reviews_available — True if the tenant's access reviews were read; false if Graph refused the first read (the series list) because the tenant has no Entra ID P2 or ID Governance licence (error code AadPremiumLicenseRequired); null if a read failed, including a licence refusal of any later read
     - collection_complete — True if every review series, its instances and the decisions of each active series' latest completed cycle were read; false if any read failed or was refused for the licence, and every other field except access_reviews_available is left out
     - review_definitions — Number of access review series (definitions), active or ended
     - active_review_definitions — Number of active review series

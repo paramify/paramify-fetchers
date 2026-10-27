@@ -281,19 +281,27 @@ class _Builder:
 
 
 class _ODataError(Exception):
-    """Stands in for msgraph's ODataError, whose str() is '<message> (status <code>)'."""
+    """Stands in for msgraph's ODataError: str() is '<message> (status <code>)', the error code is on .error."""
+
+    def __init__(self, message, status=403, code="Authorization_RequestDenied"):
+        super().__init__(f"{message} (status {status})")
+        self.response_status_code, self.error = status, ns(code=code, message=message)
+
+
+def _unlicensed(status=403):
+    return _ODataError("The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license.",
+                       status, "AadPremiumLicenseRequired")
 
 
 def _read(builder):
     collector, unlicensed = ar.Collector(logging.getLogger("test")), []
-    items = asyncio.run(ar._read(collector, unlicensed, "graph.op", builder))
+    items = asyncio.run(ar._read(collector, "graph.op", builder, unlicensed))
     return items, collector, unlicensed
 
 
-def test_a_licence_refusal_is_a_state_not_a_failure():
-    items, collector, unlicensed = _read(_Builder(_ODataError(
-        "The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license. (status 403)"
-    )))
+@pytest.mark.parametrize("status", [400, 403])
+def test_a_licence_refusal_is_a_state_not_a_failure(status):
+    items, collector, unlicensed = _read(_Builder(_unlicensed(status)))
     assert collector.ok
     assert items is None
     assert len(unlicensed) == 1
@@ -306,11 +314,23 @@ def test_a_licence_refusal_is_a_state_not_a_failure():
 
 def test_a_graph_403_is_recorded_and_classified_not_authorized():
     items, collector, unlicensed = _read(_Builder(_ODataError(
-        "Insufficient privileges to complete the operation. (status 403)"
+        "Insufficient privileges to complete the operation."
     )))
     assert items is None
     assert unlicensed == []
     assert ar.classify_failure_code(collector.failures) == "not_authorized"
+
+
+@pytest.mark.parametrize("error", [
+    _ODataError("Insufficient privileges to complete the operation: not licensed for this API."),
+    _ODataError("Too many requests; licensed tenants get a higher limit.", 429, "TooManyRequests"),
+    _ODataError("The tenant needs a license.", 500, "AadPremiumLicenseRequired"),
+], ids=["permission-403", "throttled-429", "code-on-500"])
+def test_licence_wording_without_the_licence_code_and_status_is_a_failure(error):
+    items, collector, unlicensed = _read(_Builder(error))
+    assert items is None
+    assert unlicensed == []
+    assert len(collector.failures) == 1
 
 
 class _Definitions(_Builder):
@@ -485,7 +505,7 @@ def _fake_graph(monkeypatch, definitions):
 
 def test_a_licence_refusal_of_the_definitions_stops_the_collection(monkeypatch):
     graph = _Definitions([], {}, {})
-    graph.exc = _ODataError("The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license. (status 403)")
+    graph.exc = _unlicensed()
     _fake_graph(monkeypatch, graph)
     collector = ar.Collector(logging.getLogger("test"))
     _, definitions, instances, decisions, unlicensed = asyncio.run(ar._collect(collector, object()))
@@ -505,7 +525,7 @@ def test_a_failed_decisions_read_gives_no_figures(monkeypatch):
     def denied_decisions(def_id):
         instances = original(def_id).instances
         instances.by_access_review_instance_id = lambda inst_id: ns(decisions=_Builder(_ODataError(
-            "Insufficient privileges to complete the operation. (status 403)")))
+            "Insufficient privileges to complete the operation.")))
         return ns(instances=instances)
 
     graph.by_access_review_schedule_definition_id = denied_decisions
@@ -518,9 +538,34 @@ def test_a_failed_decisions_read_gives_no_figures(monkeypatch):
     assert summary == {"access_reviews_available": None, "collection_complete": False}
 
 
+def test_a_licence_refusal_after_the_definitions_read_is_a_failure(monkeypatch):
+    graph = _Definitions(
+        [_raw_definition("d-active", "InProgress")],
+        {"d-active": [_raw_instance("i-sep", "Applied", SEPT)]},
+        {},
+    )
+    original = graph.by_access_review_schedule_definition_id
+
+    def refused_decisions(def_id):
+        instances = original(def_id).instances
+        instances.by_access_review_instance_id = lambda inst_id: ns(decisions=_Builder(_unlicensed()))
+        return ns(instances=instances)
+
+    graph.by_access_review_schedule_definition_id = refused_decisions
+    _fake_graph(monkeypatch, graph)
+    collector = ar.Collector(logging.getLogger("test"))
+    _, definitions, instances, decisions, unlicensed = asyncio.run(ar._collect(collector, object()))
+    assert unlicensed == []
+    assert decisions == {"i-sep": None}
+    assert len(collector.failures) == 1
+    results, summary = ar.build(definitions, instances, decisions, unlicensed, NOW)
+    assert summary == {"access_reviews_available": None, "collection_complete": False}
+    assert "notes" not in results
+
+
 def test_main_without_p2_succeeds_with_no_status_file(tmp_path, monkeypatch):
     graph = _Definitions([], {}, {})
-    graph.exc = _ODataError("The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license. (status 403)")
+    graph.exc = _unlicensed()
     _fake_graph(monkeypatch, graph)
     monkeypatch.setattr(ar, "credential", lambda: object())
     monkeypatch.setattr(ar, "load_dotenv", lambda: None)

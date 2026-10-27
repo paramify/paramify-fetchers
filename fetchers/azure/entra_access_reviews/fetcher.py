@@ -34,8 +34,9 @@ from entra_graph import (  # noqa: E402
 )
 
 NAME = "azure_entra_access_reviews"
-# Without Entra ID P2 (or ID Governance) Graph refuses with a licence error, a state not a failure; the recorded text is the message only.
-UNLICENSED_MARKERS = ("licens",)
+# Without Entra ID P2 (or ID Governance) Graph refuses with this code, a state not a failure; reported on a 400 as well as a 403.
+LICENCE_ERROR_CODE = "AadPremiumLicenseRequired"
+LICENCE_STATUSES = (400, 403)
 ENDED_DEFINITION = {"Completed", "AutoReviewed", "Applied"}
 ENDED_INSTANCE = {"Completed", "AutoReviewed", "Applying", "Applied"}
 PERIOD_DAYS = {"daily": 1, "weekly": 7, "absoluteMonthly": 30, "relativeMonthly": 30, "absoluteYearly": 365, "relativeYearly": 365}
@@ -357,11 +358,13 @@ def _query(builder, **params):
 
 
 async def _page(probe: Collector, operation: str, builder) -> List[Any]:
-    """Every item: nextLinks are followed, and a full page without one asks for the next with $skip."""
+    """Every item: nextLinks are followed, and a full page without one asks for the next with $skip. A failed request raises."""
     items: List[Any] = []
     seen: set = set()
     for page in range(PAGE_LIMIT):
-        batch = await paginate(probe, operation, builder, _query(builder, top=PAGE_SIZE, skip=page * PAGE_SIZE))
+        batch = await paginate(
+            probe, operation, builder, _query(builder, top=PAGE_SIZE, skip=page * PAGE_SIZE), raise_on_error=True
+        )
         ids = [getattr(i, "id", None) for i in batch]
         if seen.intersection(i for i in ids if i):
             probe.record(operation, RuntimeError("$skip returned items already read; refusing to keep paging"))
@@ -375,17 +378,26 @@ async def _page(probe: Collector, operation: str, builder) -> List[Any]:
     return items
 
 
-async def _read(collector: Collector, unlicensed: List[str], operation: str, builder) -> Optional[List[Any]]:
-    """`_page`, with a licence refusal noted rather than recorded; None when the read failed or was refused."""
+def licence_refused(exc: BaseException) -> bool:
+    """Graph's licence refusal, told by its error code; a permission failure never counts, whatever its text."""
+    code = getattr(getattr(exc, "error", None), "code", None)
+    return getattr(exc, "response_status_code", None) in LICENCE_STATUSES and code == LICENCE_ERROR_CODE
+
+
+async def _read(collector: Collector, operation: str, builder, unlicensed: Optional[List[str]] = None) -> Optional[List[Any]]:
+    """`_page`; None when the read failed. Only a read given `unlicensed` notes a licence refusal there instead of failing."""
     probe = Collector(_probe_log)
-    items = await _page(probe, operation, builder)
+    try:
+        items = await _page(probe, operation, builder)
+    except Exception as exc:  # noqa: BLE001 — boundary: a licence refusal or a failure, never a crash
+        if unlicensed is not None and licence_refused(exc):
+            unlicensed.append(f"{operation}: {exc}")
+            logger.info("Access reviews unavailable: %s (%s)", operation, exc)
+            return None
+        probe.record(operation, exc)
     for failure in probe.failures:
-        if any(m in (failure.get("message") or "").lower() for m in UNLICENSED_MARKERS):
-            unlicensed.append(f"{operation}: {failure.get('message')}")
-            logger.info("Access reviews unavailable: %s (%s)", operation, failure.get("message"))
-        else:
-            collector.failures.append(failure)
-            logger.error("API call failed: %s (%s: %s)", operation, failure.get("type"), failure.get("message"))
+        collector.failures.append(failure)
+        logger.error("API call failed: %s (%s: %s)", operation, failure.get("type"), failure.get("message"))
     return None if probe.failures else items
 
 
@@ -394,7 +406,8 @@ async def _collect(collector: Collector, cred) -> tuple:
         tenant = await resolve_tenant(collector, client)
         unlicensed: List[str] = []
         root = client.identity_governance.access_reviews.definitions
-        raw = await _read(collector, unlicensed, "graph.identityGovernance.accessReviews.definitions.get", root)
+        # Only the first read can show the tenant is unlicensed; a refusal after it is a failure.
+        raw = await _read(collector, "graph.identityGovernance.accessReviews.definitions.get", root, unlicensed)
         definitions = None if raw is None else [project_definition(d) for d in raw]
         instances: Dict[str, Optional[List[Dict[str, Any]]]] = {}
         decisions: Dict[str, Optional[List[Dict[str, Any]]]] = {}
@@ -406,7 +419,7 @@ async def _collect(collector: Collector, cred) -> tuple:
         async def read_instances(definition_id: str):
             async with gate:
                 items = await _read(
-                    collector, unlicensed, f"graph.identityGovernance.accessReviews.definitions.instances.get ({definition_id})",
+                    collector, f"graph.identityGovernance.accessReviews.definitions.instances.get ({definition_id})",
                     root.by_access_review_schedule_definition_id(definition_id).instances,
                 )
             instances[definition_id] = None if items is None else [project_instance(i) for i in items]
@@ -416,7 +429,7 @@ async def _collect(collector: Collector, cred) -> tuple:
         async def read_decisions(definition_id: str, instance_id: str):
             async with gate:
                 items = await _read(
-                    collector, unlicensed,
+                    collector,
                     f"graph.identityGovernance.accessReviews.definitions.instances.decisions.get ({instance_id})",
                     root.by_access_review_schedule_definition_id(definition_id)
                     .instances.by_access_review_instance_id(instance_id).decisions,
