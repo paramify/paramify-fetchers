@@ -1,0 +1,32 @@
+key: entra_emergency_mfa_exclusions_approved_and_monitored
+name: Entra MFA Exclusions Limited To Approved Monitored Emergency Accounts
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every enabled user that an enforced Conditional Access MFA policy excludes (directly, through a
+  group or a directory role, or as a guest) is an emergency account named in the fetcher's
+  ENTRA_EMERGENCY_ACCOUNTS setting and is named, by sign-in name or object id, in the query of an
+  enabled Microsoft Sentinel analytics rule or Azure Monitor log search alert rule in the subscription.
+  At least one enforced MFA policy exists, and the policies, their exclusions, the named accounts and
+  the alert rules were all read without a failure. Substantiates that enabled accounts are excluded
+  from MFA only as approved, monitored emergency accounts (KSI-IAM-APM). With no accounts named, any
+  exclusion fails. Does NOT prove that the named list is the approved one (it is the fetcher's
+  configuration), that an alert rule notifies anyone or that its workspace receives sign-in logs, a
+  rule that finds the accounts through a watchlist, a group or a display name (it doesn't count),
+  users held out of MFA by report-only, disabled or non-MFA policies or by a policy's include scope,
+  users excluded through PIM-eligible role assignments, external users who are members under a guest
+  exclusion, that every enabled account is covered by an MFA policy (entra_ca_mfa_required_all_users_all_apps),
+  or the emergency accounts' sign-in methods and last use.
+
+regex: '"partial_failure":\s*false[\s\S]*?"enforced_mfa_policies":\s*(?<enforced_mfa_policies>[1-9]\d*)[\s\S]*?"excluded_users_not_monitored_emergency_accounts":\s*(?<excluded_users_not_monitored_emergency_accounts>\d+|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # excluded_users_not_monitored_emergency_accounts
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-EMERGENCY-ACCOUNTS
