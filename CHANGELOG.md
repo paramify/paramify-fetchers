@@ -219,7 +219,8 @@ schemas and the `paramify` CLI — not the internal code.
   summary keys (`resources_with_recent_ingestion`,
   `resources_without_recent_ingestion`, `resources_ingestion_unknown`,
   `no_recent_ingestion_by_type`, `settings_exporting_to_unapproved_workspace`,
-  and others) report the totals. A refused destination (401, 403, or a
+  and others) report the totals; `all_log_analytics_resources_ingesting` is
+  null, not true, when no setting exports to Log Analytics. A refused destination (401, 403, or a
   subscription the caller can't see) does not fail the run. Checked read-only
   against a production subscription. Existing fields and summary keys are
   unchanged.

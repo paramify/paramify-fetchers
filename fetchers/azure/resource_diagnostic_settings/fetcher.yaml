@@ -62,10 +62,14 @@ config_schema:
     env: BASIC_LOGS_LOOKBACK_HOURS
     description: >
       Hours of Basic and Auxiliary plan tables to query, one table at a time. Off
-      (0) by default, because Log Analytics bills these queries per GB scanned; a
-      resource with no other record whose logs could sit in such a table (a
-      storage service's StorageBlobLogs, for example) then reads
-      ingested_in_window null rather than false. Set a short window to query them.
+      (0) by default, because Log Analytics bills these queries per GB scanned.
+      At 0, in a workspace with any Basic or Auxiliary table, a resource with no
+      other record there reads ingested_in_window null, never false, so
+      resources_without_recent_ingestion stays 0 for it; set a short window to
+      make that count meaningful. Custom (_CL) and left-out tables don't count,
+      a storage service is affected only by its own table (StorageBlobLogs for
+      blob), and a resource whose settings are all in AzureDiagnostics mode only
+      by AzureDiagnostics.
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
@@ -91,7 +95,7 @@ evidence_set:
     - KQL union * on each destination workspace (text in results.ingestion_query) — newest event time (TimeGenerated) and record count for each resource over the lookback. One query per workspace; it costs nothing on Analytics tables but scans them all, so a large workspace can take minutes. A query that hits a service limit fails the run. One that runs past the 600-second wait is retried up to 4 more times, and destinations are read one after another, so a slow destination can push the run past its 3600-second timeout. It leaves out tables written whatever a diagnostic setting says: AzureActivity, AzureMetrics, InsightsMetrics, Perf, Heartbeat, Syslog, Event and the Container Insights tables (ContainerLog, ContainerLogV2, ContainerInventory, ContainerNodeInventory, ContainerImageInventory, ContainerServiceLog and the Kube tables). Application Insights tables stay, since their rows are the component's own telemetry; a component whose linked workspace is also its destination reads arrived, whatever its setting does
     - KQL on each Basic or Auxiliary table through the /search endpoint, since /query refuses these tables (text in results.basic_table_query), only when basic_logs_lookback_hours is above 0 — newest event time and record count over that many hours for the tables union * skips; off by default because these queries bill per GB scanned. Custom (_CL) tables and the left-out tables above are never queried, and a table whose query fails stays unqueried without failing the run
 
-    Output: azure_resource_diagnostic_settings_<subscription>.json — each resource with its diagnostic settings, where its logs go, which log and audit categories aren't exported, and per destination workspace whether its logs arrived (log_analytics_ingestion, last_ingested, ingested_in_window), plus each destination workspace's status, unqueried_tables and table_errors (the Basic or Auxiliary queries that failed) in log_analytics_destinations.
+    Output: azure_resource_diagnostic_settings_<subscription>.json — each resource with its diagnostic settings, where its logs go, which log and audit categories aren't exported, and per destination workspace whether anything from it arrived (log_analytics_ingestion, last_ingested, ingested_in_window), plus each destination workspace's status, unqueried_tables and table_errors (the Basic or Auxiliary queries that failed) in log_analytics_destinations.
 
     Summary fields:
 
@@ -121,7 +125,7 @@ evidence_set:
 
     Were the destination workspaces read?
     - ingestion_lookback_days — Number of days of records the workspace query looks back over
-    - basic_logs_lookback_hours — Number of hours of records read from Basic and Auxiliary plan tables; 0, the default, when Basic and Auxiliary tables were skipped
+    - basic_logs_lookback_hours — Number of hours of records read from Basic and Auxiliary plan tables; 0, the default, when Basic and Auxiliary tables were skipped. At 0, in a workspace with any Basic or Auxiliary table, a resource with no other record there reads unknown, never without recent ingestion, so resources_without_recent_ingestion only means something when this is above 0
     - log_analytics_destinations — Number of distinct destination workspaces that diagnostic settings export logs to
     - log_analytics_destinations_queried — Number of destination workspaces whose records were read
     - log_analytics_destinations_not_authorized — Number of destination workspaces that refused the read (401 or 403, or in a subscription the caller can't see)
@@ -130,12 +134,12 @@ evidence_set:
     - log_analytics_destinations_with_unqueried_tables — Number of queried destination workspaces with a Basic or Auxiliary table that could hold resource logs (not custom, not left out) and was not queried
 
     Are the logs actually arriving?
-    - resources_with_recent_ingestion — Number of log-producing resources exporting to Log Analytics with recent ingestion: at least one record in a destination workspace, in a table that isn't left out, with an event time (TimeGenerated) in the lookback
+    - resources_with_recent_ingestion — Number of log-producing resources exporting to Log Analytics with recent ingestion: at least one record in a destination workspace, in a table that isn't left out, with an event time (TimeGenerated) in the lookback. That record can be anything from the resource, not necessarily from the categories its settings export
     - resources_without_recent_ingestion — Number of log-producing resources exporting to Log Analytics with no record in the lookback, where every destination workspace was read in full or no longer exists. Read in full means queried, with no unqueried Basic or Auxiliary table that could hold the resource's logs: a storage service's own StorageBlobLogs, StorageFileLogs, StorageQueueLogs or StorageTableLogs, or for any other resource a resource-specific table, unless every setting sending there is explicitly in AzureDiagnostics mode; an unset mode counts as resource-specific. No record is not proof of a broken setting: an idle resource writes nothing and counts here too, and log_analytics_ingestion shows what did arrive. With basic_logs_lookback_hours above 0, Basic and Auxiliary tables are read over that many hours only, so a resource whose only Basic or Auxiliary records are older counts here
     - resources_ingestion_unknown — Number of log-producing resources exporting to Log Analytics with no record found, where a destination workspace refused the read, failed, or has an unqueried Basic or Auxiliary table that could hold the resource's logs
     - recent_ingestion_percentage — Percentage of resources exporting to Log Analytics with recent ingestion = resources_with_recent_ingestion / resources_sending_to_log_analytics × 100 (a whole number, 0–100); 0 when resources_sending_to_log_analytics is 0. Resources counted in resources_ingestion_unknown are in the total but not the numerator
     - no_recent_ingestion_by_type — Number of resources without recent ingestion, for each resource type
-    - all_log_analytics_resources_ingesting — True if every log-producing resource exporting to Log Analytics has recent ingestion; false if any has none (an idle resource included) or is unknown; true when none exports to Log Analytics
+    - all_log_analytics_resources_ingesting — True if every log-producing resource exporting to Log Analytics has recent ingestion; false if any has none (an idle resource included) or is unknown; null when none exports to Log Analytics
 
     Do logs go to an approved workspace?
     - approved_workspaces_configured — True if an approved workspace list (approved_log_workspaces) was set; false if not. A resource id on the list matches exactly; a bare name matches a workspace of that name in any subscription

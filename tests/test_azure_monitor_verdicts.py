@@ -694,6 +694,16 @@ def test_ingestion_summary_without_an_approved_list_leaves_approval_unknown():
             summary["resources_sending_to_approved_workspace"]) == (False, None, None)
 
 
+def test_all_ingesting_is_unknown_when_nothing_exports_to_log_analytics():
+    to_storage = rds.resource_record(BASE, rds.STATUS_ASSESSED, LOGS, [
+        {**setting(workspace=None, group="allLogs"), "storage_account_id": f"{RG}/providers/Microsoft.Storage/storageAccounts/sa"}])
+    summary = rds.summarize_ingestion([rds.with_ingestion(to_storage, {}, [])], [], 7, 0, [])
+    assert (summary["resources_with_recent_ingestion"], summary["all_log_analytics_resources_ingesting"]) == (0, None)
+    workspaces = {rds.workspace_key(LAW_A): queried(**{VAULT.lower(): seen()})}
+    summary = rds.summarize_ingestion([rds.with_ingestion(exporting(LAW_A), workspaces, [])], [], 7, 0, [])
+    assert summary["all_log_analytics_resources_ingesting"] is True
+
+
 def test_approval_is_unknown_for_a_metrics_only_resource_and_false_for_a_storage_only_exporter():
     metrics_only = rds.resource_record(BASE, rds.STATUS_ASSESSED, [LOGS[2]])
     to_storage = rds.resource_record(BASE, rds.STATUS_ASSESSED, LOGS, [

@@ -463,7 +463,7 @@ def summarize_ingestion(
         "resources_ingestion_unknown": len(sending) - len(recent) - len(stale),
         "recent_ingestion_percentage": coverage_percentage(len(recent), len(sending)),
         "no_recent_ingestion_by_type": sorted_counts(Counter(r["type"] or "unknown" for r in stale)),
-        "all_log_analytics_resources_ingesting": len(recent) == len(sending),
+        "all_log_analytics_resources_ingesting": len(recent) == len(sending) if sending else None,
         "approved_workspaces_configured": bool(approved),
         "settings_exporting_to_unapproved_workspace": (
             sum(1 for s in exporting if s["workspace_approved"] is False) if approved else None
