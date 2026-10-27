@@ -6,7 +6,7 @@ statement: >
   At least one public zone record carries a zone-level delegation_signer_records count immediately
   followed by its dnssec_enabled flag, so a zero count in azure_dns_signed_zones_have_ds_records
   reflects posture rather than a renamed or reordered field. Fails on a subscription with no public
-  DNS zones. Supports Coverage row 15 (Authorized Cryptographic Modules / KSI-SVC-VCM).
+  DNS zones.
 
 regex: '"delegation_signer_records":\s*\d+\s*,\s*"dnssec_enabled":'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

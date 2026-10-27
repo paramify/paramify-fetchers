@@ -6,7 +6,7 @@ statement: >-
   In the latest completed cycle of every active Entra ID access review series, every decision recorded
   as Deny was applied, so the access was removed (or was already gone), and every series, run and
   decision was read. Substantiates that access-review removal decisions are applied and recorded
-  (KSI-IAM-AAM, KSI-IAM-ELP, KSI-MLA-ALA). Only decisions recorded as Deny are checked: Microsoft
+  (KSI-IAM-AAM, KSI-IAM-ELP). Only decisions recorded as Deny are checked: Microsoft
   Graph does not document whether an unanswered review that the default decision removes is recorded
   as Deny or left NotReviewed, so such removals may not be checked here (the default-deny and
   auto-apply settings are entra_access_reviews_monthly_auto_removal's). A cycle that has just ended

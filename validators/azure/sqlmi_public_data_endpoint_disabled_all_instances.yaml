@@ -6,7 +6,7 @@ statement: >
   Every SQL Managed Instance has its public data endpoint disabled, leaving its
   virtual network and private endpoints as the only paths in; enabled or an unread
   setting fails. Substantiates "backends are reachable only through approved paths"
-  for SQL MI (KSI-SVC-VCM). Does not prove the subnet's NSG rules, VNet peering, or
+  for SQL MI. Does not prove the subnet's NSG rules, VNet peering, or
   which private endpoints are approved, and has no list of approved exceptions.
   Other backends are not covered here: storage accounts are
   storage_accounts_public_network_restricted, App Service is not in this evidence.

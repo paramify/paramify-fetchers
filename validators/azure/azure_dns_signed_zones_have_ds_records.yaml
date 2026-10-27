@@ -8,8 +8,7 @@ statement: >
   resolvers validate its answers. Counts zones where delegation_signer_records is 0 and
   dnssec_enabled is true. Does NOT assert that the registrar actually publishes the DS records at
   the parent, and passes trivially when no zone is signed (azure_dns_public_zones_dnssec_coverage
-  fails in that case). Paired with azure_dns_ds_record_count_present. Supports Coverage row 15
-  (Authorized Cryptographic Modules / KSI-SVC-VCM).
+  fails in that case). Paired with azure_dns_ds_record_count_present.
 
 regex: '"delegation_signer_records":\s*0\s*,\s*"dnssec_enabled":\s*true'
 rules_summary: MATCH_COUNT EQUALS 0

@@ -6,7 +6,7 @@ statement: >-
   Every active recurring Entra ID access review series has completed at least one cycle, and none last
   completed one more than 35 days ago (a monthly series plus a few days' slack), so the reviews are
   current; every series and run was read. Substantiates that access reviews are current (KSI-IAM-ELP,
-  KSI-IAM-AAM, KSI-MLA-ALA). 35 days is a placeholder for the organization's review frequency. Fails
+  KSI-IAM-AAM). 35 days is a placeholder for the organization's review frequency. Fails
   when no recurring series has completed a cycle. Does NOT prove one-time reviews, how many reviewers
   answered, or that the cycle reviewed the right groups.
 

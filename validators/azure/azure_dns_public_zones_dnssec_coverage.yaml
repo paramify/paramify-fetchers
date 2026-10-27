@@ -9,7 +9,7 @@ statement: >
   summary rollups dnssec_enabled_public_zones = total_public_zones and dnssec_unknown_public_zones =
   0. Does NOT assert that the parent zone or registrar publishes the DS records, does not cover
   private zones (Azure does not sign them) or application traffic, and does not show FIPS
-  validation. Supports Coverage row 15 (Authorized Cryptographic Modules / KSI-SVC-VCM).
+  validation.
 
 regex: '"dnssec_enabled_public_zones":\s*(?<dnssec_enabled_public_zones>\d+)[\s\S]*?"dnssec_unknown_public_zones":\s*0\s*[,}][\s\S]*?"total_public_zones":\s*(?<total_public_zones>[1-9]\d*)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]

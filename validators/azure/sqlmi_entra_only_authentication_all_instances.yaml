@@ -6,7 +6,7 @@ statement: >
   Every SQL Managed Instance enforces Microsoft Entra-only authentication, so SQL
   logins (shared passwords) are refused and every connection authenticates through
   Entra; false or an unread setting fails. Substantiates "SQL MI uses Entra
-  authentication" (KSI-SVC-VCM). Does not prove which identities connect, that
+  authentication". Does not prove which identities connect, that
   applications use managed identities, or anything about network paths.
 
 # Counts violations; sqlmi_configuration_fields_present proves the key was there.

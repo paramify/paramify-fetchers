@@ -8,7 +8,7 @@ statement: >-
   its decisions automatically (all_active_definitions_auto_removal), so unconfirmed access is removed
   without an admin; at least one active series reviews group membership; and every review series, run
   and latest-cycle decision was read. Substantiates monthly access certification of Entra groups with
-  automatic removal (KSI-IAM-AAM, KSI-IAM-ELP, KSI-MLA-ALA). The 31 days is a placeholder for the
+  automatic removal (KSI-IAM-AAM, KSI-IAM-ELP). The 31 days is a placeholder for the
   organization's review period. Fails when no series is active, when any active series lacks default
   deny or automatic apply, when any active series recurs less often or is one-time (no period), or when
   the tenant has no Entra ID P2 or ID Governance licence. Does NOT prove which groups are reviewed, that
