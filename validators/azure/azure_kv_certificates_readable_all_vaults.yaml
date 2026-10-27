@@ -1,0 +1,21 @@
+key: azure_kv_certificates_readable_all_vaults
+name: Key Vault Certificates Readable In Every Vault
+type: AUTOMATED
+role: integrity
+statement: >
+  The certificate list was readable in every key vault (certificate_accessible_vaults
+  equals a non-zero total_key_vaults) and every listed certificate's policy was
+  readable. Without it, a vault that answered 403 reads as holding no expired
+  certificates and no weak certificate keys. Integrity partner for
+  azure_kv_no_expired_certificates and azure_kv_no_weak_key_sizes.
+
+# Two backreferences: accessible vaults = total vaults (non-zero), readable policies = total certificates.
+regex: '^\s*\{(?=[\s\S]*?"total_key_vaults":\s*(?<total_key_vaults>[1-9]\d*)\b)(?=[\s\S]*?"certificate_accessible_vaults":\s*\k<total_key_vaults>(?!\d))(?=[\s\S]*?"total_certificates":\s*(?<total_certificates>\d+)\b)(?=[\s\S]*?"certificates_with_readable_policy":\s*\k<total_certificates>(?!\d))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-KEYVAULT-ROTATION

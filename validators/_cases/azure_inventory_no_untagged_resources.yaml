@@ -1,0 +1,46 @@
+validator: azure_inventory_no_untagged_resources
+cases:
+  - name: all_tagged
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"resources_by_location": {"eastus": 6, "global": 2, "westus2": 2}, "tagged_resources": 10, "total_resources": 10, "untagged_resources": 0}}}'
+
+  - name: all_tagged_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "partial_failure": false
+          },
+          "summary": {
+            "resources_by_location": {
+              "eastus": 6,
+              "global": 2,
+              "westus2": 2
+            },
+            "tagged_resources": 10,
+            "total_resources": 10,
+            "untagged_resources": 0
+          }
+        }
+      }
+
+  - name: three_untagged
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"resources_by_location": {"eastus": 6, "global": 2, "westus2": 2}, "tagged_resources": 7, "total_resources": 10, "untagged_resources": 3}}}'
+
+  - name: empty_inventory
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"resources_by_location": {"eastus": 6, "global": 2, "westus2": 2}, "tagged_resources": 0, "total_resources": 0, "untagged_resources": 0}}}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": true}, "summary": {"resources_by_location": {"eastus": 6, "global": 2, "westus2": 2}, "tagged_resources": 10, "total_resources": 10, "untagged_resources": 0}}}'
+
+  - name: untagged_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"resources_by_location": {"eastus": 6, "global": 2, "westus2": 2}, "resources_without_tags": 0, "tagged_resources": 10, "total_resources": 10}}}'

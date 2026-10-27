@@ -1,0 +1,19 @@
+key: azure_kv_network_fields_present
+name: Key Vault Network Exposure Fields Present
+type: AUTOMATED
+role: integrity
+statement: >
+  There is at least one key vault and its derived network_acl_default_deny and
+  public_network_access_disabled flags are present as booleans. Without it, a
+  renamed flag reads as no vault open to all networks. Integrity partner for
+  azure_kv_no_vault_open_to_all_networks.
+
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_key_vaults":\s*[1-9])(?=[\s\S]*?"network_acl_default_deny":\s*(?:true|false))(?=[\s\S]*?"public_network_access_disabled":\s*(?:true|false))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-KEYVAULT-CFG

@@ -1,0 +1,24 @@
+key: checkov_tfvc_latest_changeset_scanned
+name: Checkov Scanned The Latest TFVC Changeset's ARM Templates
+type: AUTOMATED
+role: configuration
+statement: >
+  The Checkov scan read a TFVC source at the newest changeset (tfvc_version
+  latest, with the changeset number recorded), found at least one ARM template,
+  and finished with status success: at least one check ran and every file
+  parsed. Substantiates "the newest TFVC changeset's ARM templates were scanned"
+  (KSI-CMT-VTD). "Newest" is the project's newest changeset, which may touch
+  another folder. It does not assert freshness within the collection window
+  (Paramify's evidence frequency covers that), that failed checks were fixed or
+  excepted, or the Azure Policy half of the bullet.
+
+# Positive lookaheads; "status": "success" followed by "message" is the payload's own status, not the envelope's.
+regex: '^\s*\{(?=[\s\S]*?"source_type":\s*"tfvc")(?=[\s\S]*?"requested_version":\s*"latest")(?=[\s\S]*?"changeset":\s*[1-9])(?=[\s\S]*?"arm_templates":\s*[1-9])(?=[\s\S]*?"status":\s*"success",\s*"message":)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-CHECKOV-BICEP

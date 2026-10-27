@@ -1,0 +1,50 @@
+evidence_set: EVD-CHECKOV-BICEP
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: |
+      {
+        "schema_version": "1.0",
+        "metadata": {
+          "fetcher_name": "checkov_bicep",
+          "target": {
+            "repo_url": "https://dev.azure.com/org/project",
+            "source_type": "tfvc"
+          },
+          "status": "success",
+          "exit_code": 0
+        },
+        "payload": {
+          "metadata": {
+            "source_type": "tfvc",
+            "repo_url": "https://dev.azure.com/org/project",
+            "tfvc_path": "$/project/infra",
+            "requested_version": "latest",
+            "changeset": 4321,
+            "changeset_date": "2026-10-20T10:00:00Z",
+            "scan_timestamp": "2026-10-26T00:00:00Z",
+            "partial_failure": false,
+            "api_failures": []
+          },
+          "framework": "bicep,arm",
+          "scan_timestamp": "2026-10-26T00:00:00Z",
+          "source_type": "tfvc",
+          "source": "https://dev.azure.com/org/project",
+          "file_counts": {
+            "bicep": 0,
+            "arm_templates": 3
+          },
+          "status": "success",
+          "message": "",
+          "summary": {
+            "passed_checks": 10,
+            "failed_checks": 2,
+            "skipped_checks": 0,
+            "total_checks": 12
+          }
+        }
+      }
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 1, "status": "failed"}, "payload": {}}'

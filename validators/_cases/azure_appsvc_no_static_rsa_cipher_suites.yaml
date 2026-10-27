@@ -1,0 +1,107 @@
+validator: azure_appsvc_no_static_rsa_cipher_suites
+cases:
+  - name: no_static_rsa
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"web_apps": [{"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/a", "name": "a"}, {"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "Disabled", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/b", "name": "b"}, {"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/c", "name": "c"}]}, "summary": {"cbc_cipher_suites_allowed_apps": 0, "ftp_encrypted_or_disabled_apps": 3, "https_only_apps": 3, "non_forward_secret_cipher_suites_allowed_apps": 0, "total_web_apps": 3}}}'
+
+  - name: no_static_rsa_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "partial_failure": false
+          },
+          "results": {
+            "web_apps": [
+              {
+                "configuration": {
+                  "allows_cbc_cipher_suites": false,
+                  "allows_non_forward_secret_cipher_suites": false,
+                  "ftps_state": "FtpsOnly",
+                  "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+                  "min_tls_version": "1.2"
+                },
+                "https_only": true,
+                "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/a",
+                "name": "a"
+              },
+              {
+                "configuration": {
+                  "allows_cbc_cipher_suites": false,
+                  "allows_non_forward_secret_cipher_suites": false,
+                  "ftps_state": "Disabled",
+                  "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+                  "min_tls_version": "1.2"
+                },
+                "https_only": true,
+                "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/b",
+                "name": "b"
+              },
+              {
+                "configuration": {
+                  "allows_cbc_cipher_suites": false,
+                  "allows_non_forward_secret_cipher_suites": false,
+                  "ftps_state": "FtpsOnly",
+                  "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+                  "min_tls_version": "1.2"
+                },
+                "https_only": true,
+                "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/c",
+                "name": "c"
+              }
+            ]
+          },
+          "summary": {
+            "cbc_cipher_suites_allowed_apps": 0,
+            "ftp_encrypted_or_disabled_apps": 3,
+            "https_only_apps": 3,
+            "non_forward_secret_cipher_suites_allowed_apps": 0,
+            "total_web_apps": 3
+          }
+        }
+      }
+
+  - name: cbc_allowed_not_judged
+    expect: PASS
+    note: >
+      CBC suites are out of scope: an RSA-certificate app at a TLS 1.2 floor allows them.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"web_apps": [{"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/a", "name": "a"}, {"configuration": {"allows_cbc_cipher_suites": true, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/b", "name": "b"}, {"configuration": {"allows_cbc_cipher_suites": true, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/c", "name": "c"}]}, "summary": {"cbc_cipher_suites_allowed_apps": 2, "ftp_encrypted_or_disabled_apps": 3, "https_only_apps": 3, "non_forward_secret_cipher_suites_allowed_apps": 0, "total_web_apps": 3}}}'
+
+  - name: one_app_allows_static_rsa
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"web_apps": [{"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/a", "name": "a"}, {"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": true, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/b", "name": "b"}, {"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/c", "name": "c"}]}, "summary": {"cbc_cipher_suites_allowed_apps": 0, "ftp_encrypted_or_disabled_apps": 3, "https_only_apps": 3, "non_forward_secret_cipher_suites_allowed_apps": 1, "total_web_apps": 3}}}'
+
+  - name: one_app_configuration_not_read
+    expect: FAIL
+    note: >
+      The rollup reads 0 because a null configuration is not counted.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"web_apps": [{"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/a", "name": "a"}, {"configuration": null, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/b", "name": "b"}, {"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/c", "name": "c"}]}, "summary": {"cbc_cipher_suites_allowed_apps": 0, "ftp_encrypted_or_disabled_apps": 2, "https_only_apps": 3, "non_forward_secret_cipher_suites_allowed_apps": 0, "total_web_apps": 3}}}'
+
+  - name: one_app_cipher_minimum_unknown
+    expect: FAIL
+    note: >
+      A minimum outside the known order leaves the verdict null and uncounted.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"web_apps": [{"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/a", "name": "a"}, {"configuration": {"allows_cbc_cipher_suites": null, "allows_non_forward_secret_cipher_suites": null, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/b", "name": "b"}, {"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/c", "name": "c"}]}, "summary": {"cbc_cipher_suites_allowed_apps": 0, "ftp_encrypted_or_disabled_apps": 3, "https_only_apps": 3, "non_forward_secret_cipher_suites_allowed_apps": 0, "total_web_apps": 3}}}'
+
+  - name: per_app_verdict_renamed
+    expect: FAIL
+    note: >
+      Summary still reads 0; the per-app verdict the rule needs is gone.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"web_apps": [{"configuration": {"allows_cbc_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2", "static_rsa_allowed": false}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/a", "name": "a"}, {"configuration": {"allows_cbc_cipher_suites": false, "ftps_state": "Disabled", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2", "static_rsa_allowed": false}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/b", "name": "b"}, {"configuration": {"allows_cbc_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2", "static_rsa_allowed": false}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/c", "name": "c"}]}, "summary": {"cbc_cipher_suites_allowed_apps": 0, "ftp_encrypted_or_disabled_apps": 3, "https_only_apps": 3, "non_forward_secret_cipher_suites_allowed_apps": 0, "total_web_apps": 3}}}'
+
+  - name: summary_rollup_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"web_apps": [{"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/a", "name": "a"}, {"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "Disabled", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/b", "name": "b"}, {"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/c", "name": "c"}]}, "summary": {"apps_allowing_static_rsa": 0, "cbc_cipher_suites_allowed_apps": 0, "ftp_encrypted_or_disabled_apps": 3, "https_only_apps": 3, "total_web_apps": 3}}}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": true}, "results": {"web_apps": [{"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/a", "name": "a"}, {"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "Disabled", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/b", "name": "b"}, {"configuration": {"allows_cbc_cipher_suites": false, "allows_non_forward_secret_cipher_suites": false, "ftps_state": "FtpsOnly", "min_tls_cipher_suite": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "min_tls_version": "1.2"}, "https_only": true, "id": "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Web/sites/c", "name": "c"}]}, "summary": {"cbc_cipher_suites_allowed_apps": 0, "ftp_encrypted_or_disabled_apps": 3, "https_only_apps": 3, "non_forward_secret_cipher_suites_allowed_apps": 0, "total_web_apps": 3}}}'
+
+  - name: no_web_apps
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"web_apps": []}, "summary": {"cbc_cipher_suites_allowed_apps": 0, "ftp_encrypted_or_disabled_apps": 0, "https_only_apps": 0, "non_forward_secret_cipher_suites_allowed_apps": 0, "total_web_apps": 0}}}'

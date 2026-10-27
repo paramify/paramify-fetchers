@@ -1,0 +1,24 @@
+key: azure_residual_no_orphans
+name: Azure No Orphaned Resources Or Assignments
+type: AUTOMATED
+role: configuration
+statement: >
+  The subscription has no orphaned resources (unattached disks, NICs, NSGs,
+  public IPs and NAT gateways, disconnected private endpoints, empty App Service
+  plans and resource groups, unused user-assigned identities, stale deployment
+  slots) and no role assignments to
+  deleted principals, and the principal lookup completed. The "orphaned" part of
+  "Fail unowned, untagged, orphaned, out-of-region or unapproved resources"
+  (KSI-CNA-MAT). It does not assert ownership, tags, or approval of resources
+  that are in use.
+
+# principal_check "complete" keeps an unrun lookup from reading as zero deleted-principal assignments.
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"principal_check":\s*"complete")(?=[\s\S]*?"total_orphans":\s*0\b)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-RESIDUAL-RESOURCES

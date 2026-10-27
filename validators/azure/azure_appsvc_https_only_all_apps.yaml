@@ -1,0 +1,22 @@
+key: azure_appsvc_https_only_all_apps
+name: App Service Web Apps Refuse Plain HTTP
+type: AUTOMATED
+role: configuration
+statement: >
+  Every App Service web app in the subscription has HTTPS Only set, so plain
+  HTTP requests are redirected rather than served, and there is at least one web
+  app. The "Fail HTTP" part of "Fail HTTP, weak TLS/ciphers, expired
+  certificates or public bypass paths" for App Service (KSI-SVC-SIN). It does
+  not assert the TLS floor (azure_appsvc_min_tls_12_all_apps), cipher suites,
+  FTP, the SCM site, function apps, or Front Door routes that accept HTTP.
+
+# Backreference: https_only_apps must equal a non-zero total_web_apps.
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_web_apps":\s*(?<total_web_apps>[1-9]\d*)\b)(?=[\s\S]*?"https_only_apps":\s*\k<total_web_apps>(?!\d))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-APPSVC-CONFIG

@@ -1,0 +1,155 @@
+validator: azure_kv_key_sizes_present
+cases:
+  - name: sizes_present
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"app_service_certificates": [], "key_vaults": [{"certificates": [{"expired": false, "name": "c1", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_size": 4096, "key_type": "RSA", "reuse_key": false}, "policy_readable": true}, {"expired": false, "name": "c2", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": "P-384", "key_size": 256, "key_type": "EC", "reuse_key": false}, "policy_readable": true}, {"expired": false, "name": "c3", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_size": 2048, "key_type": "RSA", "reuse_key": false}, "policy_readable": true}], "certificates_status": "accessible", "keys": [{"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k1", "key_size": 2048, "key_type": "RSA", "location": "westus", "name": "k1"}, {"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k2", "key_size": 3072, "key_type": "RSA-HSM", "location": "westus", "name": "k2"}, {"created": "2026-01-01T00:00:00Z", "curve_name": "P-256", "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k3", "key_size": null, "key_type": "EC", "location": "westus", "name": "k3"}], "name": "kv1"}, {"certificates": [], "certificates_status": "accessible", "keys": [], "name": "kv2"}]}, "summary": {"certificate_accessible_vaults": 2, "certificate_not_authorized_vaults": 0, "certificates_with_readable_policy": 3, "expired_app_service_certificates": 0, "expired_certificates": 0, "total_certificates": 3, "total_key_vaults": 2, "total_keys": 3}}}'
+
+  - name: sizes_present_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "partial_failure": false
+          },
+          "results": {
+            "app_service_certificates": [],
+            "key_vaults": [
+              {
+                "certificates": [
+                  {
+                    "expired": false,
+                    "name": "c1",
+                    "policy": {
+                      "content_type": "application/x-pkcs12",
+                      "exportable": true,
+                      "issuer_name": "Self",
+                      "key_curve_name": null,
+                      "key_size": 4096,
+                      "key_type": "RSA",
+                      "reuse_key": false
+                    },
+                    "policy_readable": true
+                  },
+                  {
+                    "expired": false,
+                    "name": "c2",
+                    "policy": {
+                      "content_type": "application/x-pkcs12",
+                      "exportable": true,
+                      "issuer_name": "Self",
+                      "key_curve_name": "P-384",
+                      "key_size": 256,
+                      "key_type": "EC",
+                      "reuse_key": false
+                    },
+                    "policy_readable": true
+                  },
+                  {
+                    "expired": false,
+                    "name": "c3",
+                    "policy": {
+                      "content_type": "application/x-pkcs12",
+                      "exportable": true,
+                      "issuer_name": "Self",
+                      "key_curve_name": null,
+                      "key_size": 2048,
+                      "key_type": "RSA",
+                      "reuse_key": false
+                    },
+                    "policy_readable": true
+                  }
+                ],
+                "certificates_status": "accessible",
+                "keys": [
+                  {
+                    "created": "2026-01-01T00:00:00Z",
+                    "curve_name": null,
+                    "enabled": true,
+                    "expiration_set": true,
+                    "expires": "2027-01-01T00:00:00Z",
+                    "id": "https://kv1.vault.azure.net/keys/k1",
+                    "key_size": 2048,
+                    "key_type": "RSA",
+                    "location": "westus",
+                    "name": "k1"
+                  },
+                  {
+                    "created": "2026-01-01T00:00:00Z",
+                    "curve_name": null,
+                    "enabled": true,
+                    "expiration_set": true,
+                    "expires": "2027-01-01T00:00:00Z",
+                    "id": "https://kv1.vault.azure.net/keys/k2",
+                    "key_size": 3072,
+                    "key_type": "RSA-HSM",
+                    "location": "westus",
+                    "name": "k2"
+                  },
+                  {
+                    "created": "2026-01-01T00:00:00Z",
+                    "curve_name": "P-256",
+                    "enabled": true,
+                    "expiration_set": true,
+                    "expires": "2027-01-01T00:00:00Z",
+                    "id": "https://kv1.vault.azure.net/keys/k3",
+                    "key_size": null,
+                    "key_type": "EC",
+                    "location": "westus",
+                    "name": "k3"
+                  }
+                ],
+                "name": "kv1"
+              },
+              {
+                "certificates": [],
+                "certificates_status": "accessible",
+                "keys": [],
+                "name": "kv2"
+              }
+            ]
+          },
+          "summary": {
+            "certificate_accessible_vaults": 2,
+            "certificate_not_authorized_vaults": 0,
+            "certificates_with_readable_policy": 3,
+            "expired_app_service_certificates": 0,
+            "expired_certificates": 0,
+            "total_certificates": 3,
+            "total_key_vaults": 2,
+            "total_keys": 3
+          }
+        }
+      }
+
+  - name: no_keys
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"app_service_certificates": [], "key_vaults": [{"certificates": [{"expired": false, "name": "c1", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_size": 4096, "key_type": "RSA", "reuse_key": false}, "policy_readable": true}, {"expired": false, "name": "c2", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": "P-384", "key_size": 256, "key_type": "EC", "reuse_key": false}, "policy_readable": true}, {"expired": false, "name": "c3", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_size": 2048, "key_type": "RSA", "reuse_key": false}, "policy_readable": true}], "certificates_status": "accessible", "keys": [], "name": "kv1"}, {"certificates": [], "certificates_status": "accessible", "keys": [], "name": "kv2"}]}, "summary": {"certificate_accessible_vaults": 2, "certificate_not_authorized_vaults": 0, "certificates_with_readable_policy": 3, "expired_app_service_certificates": 0, "expired_certificates": 0, "total_certificates": 3, "total_key_vaults": 2, "total_keys": 0}}}'
+
+  - name: rsa_key_without_size
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"app_service_certificates": [], "key_vaults": [{"certificates": [{"expired": false, "name": "c1", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_size": 4096, "key_type": "RSA", "reuse_key": false}, "policy_readable": true}, {"expired": false, "name": "c2", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": "P-384", "key_size": 256, "key_type": "EC", "reuse_key": false}, "policy_readable": true}, {"expired": false, "name": "c3", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_size": 2048, "key_type": "RSA", "reuse_key": false}, "policy_readable": true}], "certificates_status": "accessible", "keys": [{"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k1", "key_size": 2048, "key_type": "RSA", "location": "westus", "name": "k1"}, {"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k2", "key_size": 3072, "key_type": "RSA-HSM", "location": "westus", "name": "k2"}, {"created": "2026-01-01T00:00:00Z", "curve_name": "P-256", "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k3", "key_size": null, "key_type": "EC", "location": "westus", "name": "k3"}, {"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k4", "key_size": null, "key_type": "RSA", "location": "westus", "name": "k4"}], "name": "kv1"}, {"certificates": [], "certificates_status": "accessible", "keys": [], "name": "kv2"}]}, "summary": {"certificate_accessible_vaults": 2, "certificate_not_authorized_vaults": 0, "certificates_with_readable_policy": 3, "expired_app_service_certificates": 0, "expired_certificates": 0, "total_certificates": 3, "total_key_vaults": 2, "total_keys": 4}}}'
+
+  - name: key_without_type
+    expect: FAIL
+    note: >
+      A key known only from the data plane has no type or size.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"app_service_certificates": [], "key_vaults": [{"certificates": [{"expired": false, "name": "c1", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_size": 4096, "key_type": "RSA", "reuse_key": false}, "policy_readable": true}, {"expired": false, "name": "c2", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": "P-384", "key_size": 256, "key_type": "EC", "reuse_key": false}, "policy_readable": true}, {"expired": false, "name": "c3", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_size": 2048, "key_type": "RSA", "reuse_key": false}, "policy_readable": true}], "certificates_status": "accessible", "keys": [{"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k1", "key_size": 2048, "key_type": "RSA", "location": "westus", "name": "k1"}, {"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k2", "key_size": 3072, "key_type": "RSA-HSM", "location": "westus", "name": "k2"}, {"created": "2026-01-01T00:00:00Z", "curve_name": "P-256", "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k3", "key_size": null, "key_type": "EC", "location": "westus", "name": "k3"}, {"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k4", "key_size": null, "key_type": null, "location": "westus", "name": "k4"}], "name": "kv1"}, {"certificates": [], "certificates_status": "accessible", "keys": [], "name": "kv2"}]}, "summary": {"certificate_accessible_vaults": 2, "certificate_not_authorized_vaults": 0, "certificates_with_readable_policy": 3, "expired_app_service_certificates": 0, "expired_certificates": 0, "total_certificates": 3, "total_key_vaults": 2, "total_keys": 4}}}'
+
+  - name: key_size_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"app_service_certificates": [], "key_vaults": [{"certificates": [{"expired": false, "name": "c1", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_type": "RSA", "reuse_key": false, "size": 4096}, "policy_readable": true}, {"expired": false, "name": "c2", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": "P-384", "key_type": "EC", "reuse_key": false, "size": 256}, "policy_readable": true}, {"expired": false, "name": "c3", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_type": "RSA", "reuse_key": false, "size": 2048}, "policy_readable": true}], "certificates_status": "accessible", "keys": [{"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k1", "key_type": "RSA", "location": "westus", "name": "k1", "size": 2048}, {"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k2", "key_type": "RSA-HSM", "location": "westus", "name": "k2", "size": 3072}, {"created": "2026-01-01T00:00:00Z", "curve_name": "P-256", "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k3", "key_type": "EC", "location": "westus", "name": "k3", "size": null}], "name": "kv1"}, {"certificates": [], "certificates_status": "accessible", "keys": [], "name": "kv2"}]}, "summary": {"certificate_accessible_vaults": 2, "certificate_not_authorized_vaults": 0, "certificates_with_readable_policy": 3, "expired_app_service_certificates": 0, "expired_certificates": 0, "total_certificates": 3, "total_key_vaults": 2, "total_keys": 3}}}'
+
+  - name: field_between_size_and_type
+    expect: FAIL
+    note: >
+      key_strength sorts between key_size and key_type, so the pair the violation regex reads is gone.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"app_service_certificates": [], "key_vaults": [{"certificates": [], "certificates_status": "accessible", "keys": [{"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k1", "key_size": 2048, "key_strength": "x", "key_type": "RSA", "location": "westus", "name": "k1"}, {"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k2", "key_size": 3072, "key_strength": "x", "key_type": "RSA-HSM", "location": "westus", "name": "k2"}, {"created": "2026-01-01T00:00:00Z", "curve_name": "P-256", "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k3", "key_size": null, "key_strength": "x", "key_type": "EC", "location": "westus", "name": "k3"}], "name": "kv1"}, {"certificates": [], "certificates_status": "accessible", "keys": [], "name": "kv2"}]}, "summary": {"certificate_accessible_vaults": 2, "certificate_not_authorized_vaults": 0, "certificates_with_readable_policy": 3, "expired_app_service_certificates": 0, "expired_certificates": 0, "total_certificates": 3, "total_key_vaults": 2, "total_keys": 3}}}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": true}, "results": {"app_service_certificates": [], "key_vaults": [{"certificates": [{"expired": false, "name": "c1", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_size": 4096, "key_type": "RSA", "reuse_key": false}, "policy_readable": true}, {"expired": false, "name": "c2", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": "P-384", "key_size": 256, "key_type": "EC", "reuse_key": false}, "policy_readable": true}, {"expired": false, "name": "c3", "policy": {"content_type": "application/x-pkcs12", "exportable": true, "issuer_name": "Self", "key_curve_name": null, "key_size": 2048, "key_type": "RSA", "reuse_key": false}, "policy_readable": true}], "certificates_status": "accessible", "keys": [{"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k1", "key_size": 2048, "key_type": "RSA", "location": "westus", "name": "k1"}, {"created": "2026-01-01T00:00:00Z", "curve_name": null, "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k2", "key_size": 3072, "key_type": "RSA-HSM", "location": "westus", "name": "k2"}, {"created": "2026-01-01T00:00:00Z", "curve_name": "P-256", "enabled": true, "expiration_set": true, "expires": "2027-01-01T00:00:00Z", "id": "https://kv1.vault.azure.net/keys/k3", "key_size": null, "key_type": "EC", "location": "westus", "name": "k3"}], "name": "kv1"}, {"certificates": [], "certificates_status": "accessible", "keys": [], "name": "kv2"}]}, "summary": {"certificate_accessible_vaults": 2, "certificate_not_authorized_vaults": 0, "certificates_with_readable_policy": 3, "expired_app_service_certificates": 0, "expired_certificates": 0, "total_certificates": 3, "total_key_vaults": 2, "total_keys": 3}}}'

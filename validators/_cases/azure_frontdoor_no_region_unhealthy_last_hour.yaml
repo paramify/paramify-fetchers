@@ -1,0 +1,23 @@
+validator: azure_frontdoor_no_region_unhealthy_last_hour
+cases:
+  - name: no_unhealthy_region
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"production_web_apps": 5, "production_web_apps_regional_twin_ready": 5, "production_web_apps_twin_capacity_short": 0, "production_web_apps_twin_capacity_unknown": 0, "production_web_apps_without_regional_twin": 0, "serving_groups_multi_region_active_active": 3, "serving_groups_multi_region_failover": 3, "serving_groups_region_unhealthy_last_hour": 0, "serving_groups_region_unresolved": 0, "serving_groups_with_health_data": 3, "serving_groups_without_enabled_origin": 0, "serving_origin_groups": 3, "serving_regions": ["eastus", "westus"]}}}'
+
+  - name: one_group_region_unhealthy
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"production_web_apps": 5, "production_web_apps_regional_twin_ready": 5, "production_web_apps_twin_capacity_short": 0, "production_web_apps_twin_capacity_unknown": 0, "production_web_apps_without_regional_twin": 0, "serving_groups_multi_region_active_active": 3, "serving_groups_multi_region_failover": 3, "serving_groups_region_unhealthy_last_hour": 1, "serving_groups_region_unresolved": 0, "serving_groups_with_health_data": 3, "serving_groups_without_enabled_origin": 0, "serving_origin_groups": 3, "serving_regions": ["eastus", "westus"]}}}'
+
+  - name: no_health_data_read
+    expect: FAIL
+    note: >
+      Metrics not read: unhealthy reads 0 but nothing was measured.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"production_web_apps": 5, "production_web_apps_regional_twin_ready": 5, "production_web_apps_twin_capacity_short": 0, "production_web_apps_twin_capacity_unknown": 0, "production_web_apps_without_regional_twin": 0, "serving_groups_multi_region_active_active": 3, "serving_groups_multi_region_failover": 3, "serving_groups_region_unhealthy_last_hour": 0, "serving_groups_region_unresolved": 0, "serving_groups_with_health_data": 0, "serving_groups_without_enabled_origin": 0, "serving_origin_groups": 3, "serving_regions": ["eastus", "westus"]}}}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": true}, "summary": {"production_web_apps": 5, "production_web_apps_regional_twin_ready": 5, "production_web_apps_twin_capacity_short": 0, "production_web_apps_twin_capacity_unknown": 0, "production_web_apps_without_regional_twin": 0, "serving_groups_multi_region_active_active": 3, "serving_groups_multi_region_failover": 3, "serving_groups_region_unhealthy_last_hour": 0, "serving_groups_region_unresolved": 0, "serving_groups_with_health_data": 3, "serving_groups_without_enabled_origin": 0, "serving_origin_groups": 3, "serving_regions": ["eastus", "westus"]}}}'
+
+  - name: unhealthy_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"production_web_apps": 5, "production_web_apps_regional_twin_ready": 5, "production_web_apps_twin_capacity_short": 0, "production_web_apps_twin_capacity_unknown": 0, "production_web_apps_without_regional_twin": 0, "serving_groups_multi_region_active_active": 3, "serving_groups_multi_region_failover": 3, "serving_groups_region_unresolved": 0, "serving_groups_unhealthy_last_hour": 0, "serving_groups_with_health_data": 3, "serving_groups_without_enabled_origin": 0, "serving_origin_groups": 3, "serving_regions": ["eastus", "westus"]}}}'
