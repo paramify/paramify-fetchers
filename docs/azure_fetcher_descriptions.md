@@ -11,6 +11,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Identity and access | [azure_entra_authentication_policy](#azure_entra_authentication_policy) | `EVD-AZURE-ENTRA-AUTH-METHODS-POLICY` |
 | Identity and access | [azure_entra_conditional_access_policies](#azure_entra_conditional_access_policies) | `EVD-AZURE-ENTRA-CA-POLICIES` |
 | Identity and access | [azure_entra_dormant_identities](#azure_entra_dormant_identities) | `EVD-AZURE-ENTRA-DORMANT-IDENTITIES` |
+| Identity and access | [azure_entra_emergency_accounts](#azure_entra_emergency_accounts) | `EVD-AZURE-ENTRA-EMERGENCY-ACCOUNTS` |
 | Identity and access | [azure_entra_groups](#azure_entra_groups) | `EVD-AZURE-ENTRA-GROUPS` |
 | Identity and access | [azure_entra_mfa_status](#azure_entra_mfa_status) | `EVD-AZURE-ENTRA-MFA` |
 | Identity and access | [azure_entra_pim_assignments](#azure_entra_pim_assignments) | `EVD-AZURE-ENTRA-PIM-ASSIGNMENTS` |
@@ -358,6 +359,62 @@ Summary fields:
 - `deleted_principals_holding_azure_roles` — Number of principals an Azure role assignment still names that the directory no longer has (deleted users, groups or apps); partner-tenant groups aren't checked; null if the Azure roles or the lookup weren't read
 - `azure_role_assignments_to_deleted_principals` — Number of Azure role assignments that name a deleted principal; null if the Azure roles or the lookup weren't read
 - `no_dormant_guest_or_deleted_identity_holds_a_role` — True if no dormant user, never-signed-in user (enabled and created more than `dormant_after_days` days ago; disabled accounts are counted apart in `disabled_users_holding_roles`), guest user, dormant service principal or deleted principal holds a role; false if any does; null if none was found but sign-in activity, the roles or the lookup couldn't be read, or a role-holding service principal's dormancy is unknown. Only active assignments are judged: an identity eligible (PIM) for a role, holding a role scoped to an administrative unit, or holding one through a partner-tenant group isn't checked
+
+
+### azure_entra_emergency_accounts
+Short Description: Shows whether the only enabled users that Conditional Access excludes from MFA are named emergency accounts, and whether an enabled alert rule watches each one.
+
+Script: fetchers/azure/entra_emergency_accounts/fetcher.py (uses the shared REST client fetchers/azure/_shared/azure_rest.py)
+
+Access: Microsoft Graph Policy.Read.All, Directory.Read.All (or User.Read.All, GroupMember.Read.All and RoleManagement.Read.Directory) and AuditLog.Read.All, with an Entra ID P1 or P2 licence, and Reader on the subscription. Without AuditLog.Read.All or the licence, the emergency accounts' last sign-in and registered methods read null and the exclusions are still judged. The credential must sign in to the subscription's own tenant; if Microsoft Graph answers for another tenant, the run fails without reading the directory. Emergency accounts are named in `ENTRA_EMERGENCY_ACCOUNTS`; without it, the enabled users excluded from every enforced MFA policy are reported as candidates and none counts as approved.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET /subscriptions/{id}` — the subscription's tenant
+- Microsoft Graph `GET /organization` — the tenant Microsoft Graph is signed in to, which must be the subscription's
+- Microsoft Graph `GET /identity/conditionalAccess/policies` — the enforced policies that require MFA or an authentication strength, and who each one excludes
+- Microsoft Graph `GET /users/{id}` (per directly excluded user) — the excluded user's sign-in name, type and enabled state
+- Microsoft Graph `GET /groups/{id}/transitiveMembers/microsoft.graph.user` (per excluded group) — the users excluded through the group, nested groups included
+- Microsoft Graph `GET /directoryRoles` and `GET /directoryRoles/{id}/members` (per excluded role) — the users holding an excluded role now, directly or through a role-assignable group; PIM-eligible holders aren't read
+- Microsoft Graph `GET /users` filtered to guests (only when a policy excludes guests or external users) — every guest user, all treated as excluded by that policy
+- Microsoft Graph `GET /users/{id or user principal name}` (per named emergency account) — the account, or that the directory has no such user
+- Microsoft Graph `GET /users/{id}` with sign-in activity (per emergency account) — when it last signed in
+- Microsoft Graph `GET /reports/authenticationMethods/userRegistrationDetails/{id}` (per emergency account) — the sign-in methods it has registered
+- `GET Microsoft.OperationalInsights/workspaces` and `GET Microsoft.SecurityInsights/onboardingStates` — the subscription's Microsoft Sentinel workspaces
+- `GET Microsoft.SecurityInsights/alertRules` (per Sentinel workspace, at the stable and preview versions) — analytics rules and their queries; a failed preview read is logged, and near-real-time rules may then be missed
+- `GET Microsoft.Insights/scheduledQueryRules` — Azure Monitor log search alert rules and their queries
+
+Output: `azure_entra_emergency_accounts_<subscription>.json` — each emergency account (or candidate) with its MFA policy exclusions, last sign-in, registered methods and the enabled alert rules that name it, each other user excluded from an MFA policy, each enforced MFA policy with its exclusions, and any named account the directory doesn't have.
+
+Summary fields:
+
+**What was checked?**
+- `emergency_accounts_source` — Whether the emergency accounts were named or are candidates:
+  - configured (named in `ENTRA_EMERGENCY_ACCOUNTS`)
+  - candidates (none named: the enabled users excluded from every enforced MFA policy)
+- `emergency_accounts_named` — Number of accounts named in `ENTRA_EMERGENCY_ACCOUNTS`; 0 when none are
+- `conditional_access_readable` — True if the Conditional Access policies were read; false if not, and the exclusion figures read null
+- `exclusions_readable` — True if every user, group and role an MFA policy excludes, and every named account, was read; false if any read failed, and the exclusion figures read null
+- `alert_rules_readable` — True if every Sentinel workspace's analytics rules and the subscription's log search alert rules were read; false if not, and the monitoring figures read null
+- `user_sign_in_activity` — Whether the emergency accounts' sign-in activity was read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused or failed)
+- `registration_details` — Whether the emergency accounts' registered methods were read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused or failed)
+- `enforced_mfa_policies` — Number of enabled (not report-only) Conditional Access policies that require MFA or an authentication strength; null if the policies weren't read
+- `sentinel_workspaces_checked` — Number of Microsoft Sentinel workspaces in the subscription whose analytics rules were read; null if the rules weren't all read
+- `alert_rules_checked` — Number of Sentinel analytics rules and log search alert rules read; null if the rules weren't all read
+
+**Which emergency accounts are there?**
+- `emergency_accounts` — Number of emergency accounts found, or of candidates when none are named; null if a named account couldn't be read
+- `emergency_accounts_not_found` — Number of accounts named in `ENTRA_EMERGENCY_ACCOUNTS` that the directory has no user for; null if a named account couldn't be read
+- `emergency_accounts_enabled` — Number of emergency accounts whose account is enabled; null if a named account couldn't be read
+- `emergency_accounts_excluded_from_every_mfa_policy` — Number of emergency accounts excluded from every enforced MFA policy; null if the exclusions weren't read
+- `emergency_accounts_with_phishing_resistant_method` — Number of emergency accounts with a phishing-resistant method registered: a FIDO2 security key, a passkey, Windows Hello for Business or a macOS platform credential; null if the registration report wasn't read
+- `emergency_accounts_monitored` — Number of emergency accounts that are monitored: named, by sign-in name or object id, in the query of at least one enabled Sentinel analytics rule or log search alert rule in the subscription. A rule that finds the accounts through a watchlist, a group or a display name doesn't count, and whether the rule notifies anyone isn't checked; null if the rules weren't all read
+
+**Is anyone excluded from MFA who shouldn't be?**
+- `users_excluded_from_mfa` — Number of enabled users an enforced MFA policy excludes, directly, through a group or role, or as a guest. A policy that excludes guests or external users counts every guest user (user type Guest); external users who are members aren't counted; null if the exclusions weren't read
+- `excluded_users_not_emergency_accounts` — Number of enabled users excluded from an enforced MFA policy who aren't named in `ENTRA_EMERGENCY_ACCOUNTS`; with no accounts named, every enabled excluded user; null if the exclusions weren't read
+- `emergency_accounts_excluded_without_alert` — Number of enabled emergency accounts excluded from an enforced MFA policy that aren't monitored; null if the exclusions or the rules weren't read
+- `excluded_users_not_monitored_emergency_accounts` — Number of enabled users excluded from an enforced MFA policy who aren't both named in `ENTRA_EMERGENCY_ACCOUNTS` and monitored: `excluded_users_not_emergency_accounts` plus, when accounts are named, `emergency_accounts_excluded_without_alert`. 0 means every MFA exclusion is a named, monitored emergency account; null if the exclusions or the rules weren't read
 
 
 ### azure_entra_groups
