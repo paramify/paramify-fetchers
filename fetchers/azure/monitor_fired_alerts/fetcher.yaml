@@ -66,7 +66,7 @@ evidence_set:
     - alerts_summary_total — Number of alerts in the window by Azure's own alert summary; null if it couldn't be read or Microsoft.AlertsManagement isn't registered
     - all_alerts_listed — True if at least alerts_summary_total alerts were listed; false if fewer were; null if the summary or the alert list couldn't be read, or Microsoft.AlertsManagement isn't registered
     - alert_histories_read — Number of alerts whose state history was read; null if the alert list wasn't read
-    - alert_histories_unread — Number of alerts whose state history couldn't be read (deleted or refused), so who acknowledged or closed them is unknown; null if the alert list wasn't read
+    - alert_histories_unread — Number of alerts whose state history couldn't be read (deleted, refused or failed), so who acknowledged or closed them is unknown; null if the alert list wasn't read
     - provider_registration_status — Whether Microsoft.AlertsManagement and Microsoft.Insights are registered on the subscription: registered, not_registered or unknown for each
 
     What fired?
@@ -84,9 +84,9 @@ evidence_set:
     - alerts_acknowledged — Number of alerts someone acknowledged, now or earlier in their history; null while any alert's history is unread (alert_histories_unread above 0), never a partial count; null if the alert list wasn't read
     - alerts_closed — Number of alerts in the Closed state; null if the alert list wasn't read
     - alerts_closed_by_person — Number of closed alerts whose closing change (the last change to Closed; an earlier close on an alert that was reopened doesn't count) was made by any actor other than System, which includes service principals and automation acting through the API as well as people; null while any alert's history is unread (alert_histories_unread above 0), never a partial count; null if the alert list wasn't read
-    - median_hours_to_close — Number of hours from an alert firing to its closing change, the median across closed alerts with a readable history; null if none; null if the alert list wasn't read
-    - max_hours_to_close — Number of hours from an alert firing to its closing change, the longest across closed alerts with a readable history; null if none; null if the alert list wasn't read
-    - oldest_open_alert_fired_at — Time of firing of the oldest alert not in the Closed state; null if every alert is closed; null if the alert list wasn't read
+    - median_hours_to_close — Number of hours from an alert firing to its closing change, the median across closed alerts whose history shows the closing change; null if no closed alert's history shows one, or the alert list wasn't read
+    - max_hours_to_close — Number of hours from an alert firing to its closing change, the longest across closed alerts whose history shows the closing change; null if no closed alert's history shows one, or the alert list wasn't read
+    - oldest_open_alert_fired_at — Time of firing of the oldest alert not in the Closed state; null if no alert is open, or the alert list wasn't read
 
     Does every rule fire?
     - alert_rules_listed — Number of listed alert rules: metric, log search, smart detector and activity log alert rules the subscription's rule lists return; null if a rule list failed, never a partial count
