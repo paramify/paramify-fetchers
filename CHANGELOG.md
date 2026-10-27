@@ -148,7 +148,9 @@ schemas and the `paramify` CLI — not the internal code.
   least one connection, their own or a linked one such as Defender XDR, but
   received no data in the window and aren't quiet: unlike
   `connectors_not_connected`, it leaves out connectors installed from Content Hub
-  with no connection, so a validator can require it to be 0. Workspaces also gain
+  with no connection, so a validator can require it to be 0, and the summary
+  reads null if any workspace's connectors couldn't all be listed and measured,
+  not just when none could. Workspaces also gain
   `connectors_total`, `connectors_connected`, `connectors_not_connected`,
   `connectors_quiet`, `connectors_configured_without_data`,
   `connectors_unhealthy`, `health_monitoring` and `notes`. The summary gains

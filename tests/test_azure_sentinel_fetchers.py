@@ -455,17 +455,41 @@ def test_data_sources_alert_only_connectors_read_quiet(azure, tmp_path):
 
 def test_data_sources_configured_without_data_leaves_out_unconnected_and_quiet(azure, tmp_path):
     alert_only_workspace(azure, "Disabled")
-    # Installed from Content Hub with no connection, and not alert-only.
-    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"].append(
-        ui_connector("AzureActiveDirectory", [("AuditLogs", "AuditLogs")]))
+    # Installed from Content Hub with no connection, and not alert-only; and one connected to a Basic-plan table.
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"] += [
+        ui_connector("AzureActiveDirectory", [("AuditLogs", "AuditLogs")]),
+        ui_connector("AzureStorage", [("StorageBlobLogs", "StorageBlobLogs")])]
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-09-01")]["value"].append(
+        {"id": f"{SI_A}/dataConnectors/storage", "name": "storage", "kind": "AzureStorage", "properties": {}})
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
     by_id = {c["id"]: c for c in ws["connectors"]}
     assert code == 0 and (by_id["AzureActiveDirectory"]["connections"], by_id["AzureActiveDirectory"]["connected"]) == ([], False)
+    # Configured but unmeasured isn't listed.
+    assert (by_id["AzureStorage"]["connections"], by_id["AzureStorage"]["connected"]) == (["storage"], None)
     assert {"AzureActiveDirectory", "AzureSecurityCenter"} <= set(ws["connectors_not_connected"])
     # OfficeATP's connection has alerts Disabled; AATP (via Defender XDR) and MCAS are quiet.
     assert ws["connectors_configured_without_data"] == ["MicrosoftThreatProtection", "Office365", "OfficeATP"]
     assert ev["summary"]["connectors_configured_without_data"] == 3
+
+
+def test_data_sources_configured_without_data_reads_null_when_any_workspace_is_unmeasured(azure, tmp_path):
+    onboard_second_workspace(azure)
+    si_b = f"{WS_B}/providers/Microsoft.SecurityInsights"
+    for api in ("2025-09-01", "2025-10-01-preview"):
+        azure.arm[(f"{si_b}/dataConnectors", api)] = {"value": []}
+    azure.arm[(f"{si_b}/dataConnectorDefinitions", "2025-09-01")] = {"value": []}
+    azure.arm[(f"{WS_B}/tables", "2023-09-01")] = law_tables(["AzureActivity", "SecurityAlert", "Usage", "Heartbeat"])
+    # A failed preview listing is only a note, so the run still exits 0.
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = Resp(
+        400, {"error": {"code": "InvalidApiVersionParameter", "message": "retired"}})
+    code, ev = run("sentinel_data_sources", tmp_path)
+    by_name = {w["name"]: w for w in ev["results"]["workspaces"]}
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    assert (by_name["law-sentinel"]["connectors_configured_without_data"],
+            by_name["law-plain"]["connectors_configured_without_data"]) == (None, [])
+    # The siblings still sum the measured workspaces.
+    assert (ev["summary"]["connectors_configured_without_data"], ev["summary"]["connectors_not_connected"]) == (None, 0)
 
 
 def test_data_sources_mcas_with_cloud_discovery_on_isnt_alert_only(azure, tmp_path):

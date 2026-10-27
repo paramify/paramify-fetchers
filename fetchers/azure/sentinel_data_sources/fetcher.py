@@ -462,6 +462,12 @@ def _total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]:
     return sum(len(v) if isinstance(v, list) else v for v in values) if values else None
 
 
+def _strict_total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]:
+    """Sum over every workspace; None when any lacks the field, so an unmeasured workspace never hides behind a 0."""
+    values = [w.get(field) for w in workspaces]
+    return sum(len(v) if isinstance(v, list) else v for v in values) if values and None not in values else None
+
+
 def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
     counts = [w.get("sources_ingesting") for w in workspaces if w.get("sources_ingesting") is not None]
     return {
@@ -472,7 +478,7 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
         "connectors_connected": _total(workspaces, "connectors_connected"),
         "connectors_not_connected": _total(workspaces, "connectors_not_connected"),
         "connectors_quiet": _total(workspaces, "connectors_quiet"),
-        "connectors_configured_without_data": _total(workspaces, "connectors_configured_without_data"),
+        "connectors_configured_without_data": _strict_total(workspaces, "connectors_configured_without_data"),
         "workspaces_with_health_monitoring": sum(1 for w in workspaces if w.get("health_monitoring") is True),
         "connectors_unhealthy": _total(workspaces, "connectors_unhealthy"),
     }
