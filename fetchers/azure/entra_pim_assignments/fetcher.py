@@ -158,17 +158,20 @@ def role_index(definitions: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return index
 
 
-def role_fields(index: Dict[str, Dict[str, Any]], role_definition_id: Optional[str]) -> Dict[str, Any]:
-    d = index.get(str(role_definition_id or "").lower()) or {}
+def role_fields(index: Optional[Dict[str, Dict[str, Any]]], role_definition_id: Optional[str]) -> Dict[str, Any]:
+    """With no role definitions read (index None), whether a role is privileged is unknown, not false."""
+    d = (index or {}).get(str(role_definition_id or "").lower()) or {}
     role = {"display_name": d.get("display_name"), "role_template_id": d.get("template_id") or role_definition_id}
     return {
         "role_name": d.get("display_name"),
         "role_definition_id": role_definition_id,
         "role_template_id": role["role_template_id"],
         "is_built_in": d.get("is_built_in"),
-        "is_privileged": is_privileged_role(role),
-        "is_global_administrator": role["display_name"] == GLOBAL_ADMINISTRATOR
-        or str(role["role_template_id"] or "").lower() == GLOBAL_ADMINISTRATOR_TEMPLATE_ID,
+        "is_privileged": None if index is None else is_privileged_role(role),
+        "is_global_administrator": None if index is None else (
+            role["display_name"] == GLOBAL_ADMINISTRATOR
+            or str(role["role_template_id"] or "").lower() == GLOBAL_ADMINISTRATOR_TEMPLATE_ID
+        ),
     }
 
 
@@ -178,7 +181,7 @@ def standing(instance: Dict[str, Any]) -> str:
     return "permanent" if not instance.get("end_date_time") else "time_bound"
 
 
-def assignment_record(instance: Dict[str, Any], index: Dict[str, Dict[str, Any]], active: bool) -> Dict[str, Any]:
+def assignment_record(instance: Dict[str, Any], index: Optional[Dict[str, Dict[str, Any]]], active: bool) -> Dict[str, Any]:
     record = {
         **{k: v for k, v in instance.items() if active or k != "assignment_type"},
         **role_fields(index, instance.get("role_definition_id")),
@@ -200,7 +203,7 @@ def _allows_permanent(rules: Dict[str, Dict[str, Any]], rule_id: str) -> Optiona
     return None if required is None else not required
 
 
-def policy_record(assignment: Dict[str, Any], index: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+def policy_record(assignment: Dict[str, Any], index: Optional[Dict[str, Dict[str, Any]]]) -> Dict[str, Any]:
     rules = {r.get("id"): r for r in assignment["rules"]}
     activation = rules.get("Expiration_EndUser_Assignment") or {}
     approval = (rules.get("Approval_EndUser_Assignment") or {}).get("approval") or {}
@@ -397,7 +400,7 @@ async def _collect(collector: Collector, cred) -> tuple:
 
 
 def build(definitions, eligible, active, policies, unlicensed) -> tuple:
-    index = role_index(definitions or [])
+    index = None if definitions is None else role_index(definitions)
     eligible_records = None if eligible is None else sorted((assignment_record(i, index, False) for i in eligible), key=_sort_key)
     active_records = None if active is None else sorted((assignment_record(i, index, True) for i in active), key=_sort_key)
     assigned = {r["role_definition_id"] for r in (eligible_records or []) + (active_records or [])}

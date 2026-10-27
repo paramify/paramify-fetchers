@@ -416,6 +416,14 @@ def test_a_graph_403_is_recorded_and_classified_not_authorized():
     assert pim.classify_failure_code(collector.failures) == "not_authorized"
 
 
+def test_failed_role_definitions_leave_privilege_unknown():
+    results, summary = pim.build(None, [_instance(PRA, "u-pra")], [_instance(GA, "u-ga")], [_policy(GA)], [])
+    assert summary == {"pim_available": None, "collection_complete": False}
+    for record in results["eligible_assignments"] + results["active_assignments"] + results["role_policies"]:
+        assert record["is_privileged"] is None
+        assert record["is_global_administrator"] is None
+
+
 def test_a_failed_read_gives_no_figures():
     results, summary = pim.build(DEFINITIONS, None, [_instance(GA, "u1")], [_policy(GA)], [])
     assert summary == {"pim_available": None, "collection_complete": False}
