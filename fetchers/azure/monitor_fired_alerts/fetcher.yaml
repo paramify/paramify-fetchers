@@ -56,7 +56,7 @@ evidence_set:
     - GET Microsoft.AlertsManagement/smartDetectorAlertRules — smart detector alert rules, to count their fires
     - GET Microsoft.Insights/activityLogAlerts — activity log alert rules, to count their fires
 
-    Output: azure_monitor_fired_alerts_<subscription>.json — each fired alert with its rule, severity, state, times and history, and each alert rule with how often and when it last fired.
+    Output: azure_monitor_fired_alerts_<subscription>.json — each fired alert with its rule, severity, state, times and history, and each alert rule with how often and when it last fired. Descriptions and comments past 500 characters are cut and marked as truncated.
 
     Summary fields:
 

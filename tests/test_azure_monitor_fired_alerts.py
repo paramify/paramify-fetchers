@@ -385,3 +385,13 @@ def test_an_unparsable_change_time_is_not_reported_as_a_time():
         "acknowledged_at": None, "acknowledged_by": "a@example.com", "closed_at": None, "closed_by": "b@example.com",
         "hours_to_close": None}
     assert fa.summarize([record], [], 1)["alerts_acknowledged"] == 1
+
+
+def test_free_text_is_capped_and_marked():
+    long = "x" * 5000
+    record = alert(description=long, mods=[{**mod("StateChange", "2026-10-10T11:00:00Z", new="Acknowledged"),
+                                            "comments": long, "description": long}])
+    [change] = record["history"]
+    for text in (record["description"], change["comments"], change["description"]):
+        assert text.startswith("x" * fa.MAX_TEXT) and len(text) < fa.MAX_TEXT + 40 and "truncated" in text
+    assert alert(description="short")["description"] == "short"

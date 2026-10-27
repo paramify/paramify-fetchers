@@ -39,6 +39,8 @@ TIME_RANGE = "30d"
 WINDOW_DAYS = 30
 PAGE_COUNT = "250"
 WORKERS = 4
+# Descriptions and comments are free text copied from Azure; a noisy tenant's run to megabytes.
+MAX_TEXT = 500
 
 RULE_SOURCES = (
     ("metric", "Microsoft.Insights", "Microsoft.Insights/metricAlerts", "2018-03-01"),
@@ -73,6 +75,12 @@ RULE_COUNTS = (
 
 
 # --- pure transforms ---
+
+def capped(text):
+    if not isinstance(text, str) or len(text) <= MAX_TEXT:
+        return text or None
+    return f"{text[:MAX_TEXT]}… [truncated from {len(text)} characters]"
+
 
 def rule_type_of(rule_id):
     """metric / log_search / smart_detector / activity_log from the rule id's provider type; None without a rule."""
@@ -111,7 +119,7 @@ def alert_record(raw: dict) -> dict:
         "last_modified_at": e.get("lastModifiedDateTime"),
         "last_modified_by": e.get("lastModifiedUserName"),
         "actions_suppressed": (e.get("actionStatus") or {}).get("isSuppressed"),
-        "description": e.get("description") or None,
+        "description": capped(e.get("description")),
     }
 
 
@@ -122,8 +130,8 @@ def modification(raw: dict) -> dict:
         "new_value": raw.get("newValue") or None,
         "at": raw.get("modifiedAt"),
         "by": raw.get("modifiedBy") or None,
-        "comments": raw.get("comments") or None,
-        "description": raw.get("description") or None,
+        "comments": capped(raw.get("comments")),
+        "description": capped(raw.get("description")),
     }
 
 
