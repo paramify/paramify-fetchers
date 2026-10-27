@@ -33,8 +33,8 @@ NON_SOURCE_TABLES = frozenset({
 })
 # SecurityAlert holds both other products' alerts (each a source) and Sentinel's own analytics alerts (not one).
 ALERTS_TABLE = "SecurityAlert"
-# Cloud Discovery logs are an opt-in extra on the Defender for Cloud Apps connector, which otherwise sends only alerts.
-ALERT_ONLY_EXTRAS = frozenset({"McasShadowItReporting"})
+# Cloud Discovery logs are an opt-in extra on the Defender for Cloud Apps connector: table and the connection data type that turns it on.
+ALERT_ONLY_EXTRAS = {"McasShadowItReporting": "discoveryLogs"}
 SENTINEL_PRODUCTS = frozenset({"azure sentinel", "microsoft sentinel"})
 HEALTH_TABLE = "SentinelHealth"
 # Worst first for a connector fed by several connections; any other status, null included, sits between Warning and Success.
@@ -195,6 +195,10 @@ def definition_data_types(ui: Dict[str, Any]) -> List[Tuple[str, str]]:
     return out
 
 
+def sends_alerts(conn: Dict[str, Any]) -> bool:
+    return "alerts" in conn["enabled_data_types"]
+
+
 def link(definition: Dict[str, Any], conns: List[Dict[str, Any]]) -> List[str]:
     """Connections that feed a definition: one of its kind, one built from it, or Defender XDR carrying its alerts."""
     name = (definition.get("name") or "").lower()
@@ -207,7 +211,7 @@ def link(definition: Dict[str, Any], conns: List[Dict[str, Any]]) -> List[str]:
         if (
             (definition_of(c["kind"]) or "").lower() == name
             or (props.get("connectorDefinitionName") or "").lower() == name
-            or (mtp_alerts and c["kind"] == "MicrosoftThreatProtection" and "alerts" in c["enabled_data_types"])
+            or (mtp_alerts and c["kind"] == "MicrosoftThreatProtection" and sends_alerts(c))
         ):
             linked.append(c["name"])
     return sorted(linked)
@@ -298,6 +302,7 @@ def run_last_data(client, customer_id: str, pending: Pending, days: int, notes: 
 
 def finish_catalog(catalog: List[Dict[str, Any]], answers: Optional[Dict[Tuple[int, int], Any]], health: Dict[str, Dict[str, Any]], conns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ids = {c["name"]: (c["_raw"].get("id") or "").lower() for c in conns}
+    by_name = {c["name"]: c for c in conns}
     out = []
     for ci, c in enumerate(catalog):
         data_types = [
@@ -313,11 +318,13 @@ def finish_catalog(catalog: List[Dict[str, Any]], answers: Optional[Dict[Tuple[i
         unmeasured = answers is None or any((ci, di) not in answers for di in range(len(data_types)))
         rows = [health[ids[n]] for n in c["connections"] if ids.get(n) and ids[n] in health]
         worst = max(rows, key=lambda r: HEALTH_RANK.get((r["status"] or "").lower(), 1), default=None)
+        turned_on = {t for n in c["connections"] for t in by_name[n]["enabled_data_types"]}
+        extras = {t for t, data_type in ALERT_ONLY_EXTRAS.items() if data_type not in turned_on}
         out.append({
             **{k: v for k, v in c.items() if not k.startswith("_")},
             "data_types": data_types,
-            # No alert in the window is normal for these, so they read as quiet rather than not connected.
-            "alert_only": ALERTS_TABLE in tables and tables <= {ALERTS_TABLE} | ALERT_ONLY_EXTRAS,
+            # No alert in the window is normal for these, so one fed by a connection sending alerts reads as quiet.
+            "alert_only": ALERTS_TABLE in tables and tables <= {ALERTS_TABLE} | extras,
             "last_data_received": max(times) if times else None,
             "connected": True if times else (None if unmeasured or not data_types else False),
             "health_status": worst["status"] if worst else None,
@@ -415,6 +422,9 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     health = project_health(health_rows) if health_rows is not None else None
     by_id = {(h["resource_id"] or "").lower(): h for h in health or []}
     finished = finish_catalog(catalog, answers, by_id, conns)
+    # Quiet needs a linked connection sending alerts; an alert-only connector without one isn't wired at all.
+    alerting = {c["name"] for c in conns if sends_alerts(c)}
+    quiet = [c["connected"] is False and c["alert_only"] and bool(alerting.intersection(c["connections"])) for c in finished]
     projected = [{k: v for k, v in c.items() if k != "_raw"} for c in conns]
     return {
         "ingestion_window_days": days,
@@ -424,9 +434,9 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         "connectors_total": len(finished) if complete else None,
         "connectors_connected": sum(1 for c in finished if c["connected"] is True) if measured else None,
         "connectors_not_connected": (
-            [c["id"] for c in finished if c["connected"] is False and not c["alert_only"]] if measured else None
+            [c["id"] for c, q in zip(finished, quiet) if c["connected"] is False and not q] if measured else None
         ),
-        "connectors_quiet": [c["id"] for c in finished if c["connected"] is False and c["alert_only"]] if measured else None,
+        "connectors_quiet": [c["id"] for c, q in zip(finished, quiet) if q] if measured else None,
         "health_monitoring": health_on,
         "connector_health": health,
         "connectors_unhealthy": (

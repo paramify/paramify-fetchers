@@ -410,22 +410,55 @@ def test_data_sources_last_data_per_connector(azure, tmp_path):
         "workspaces_with_health_monitoring": 1, "connectors_unhealthy": 1}
 
 
-def test_data_sources_alert_only_connectors_read_quiet(azure, tmp_path):
+def alert_only_workspace(azure, discovery_logs):
+    """Alert-only connectors fed by their own connection, by Defender XDR, by a connection with alerts off, and by nothing."""
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-09-01")] = {"value": [
+        {"id": f"{SI_A}/dataConnectors/mcas", "name": "mcas", "kind": "MicrosoftCloudAppSecurity", "properties": {
+            "dataTypes": {"alerts": {"state": "Enabled"}, "discoveryLogs": {"state": discovery_logs}}}},
+        {"id": f"{SI_A}/dataConnectors/oatp", "name": "oatp", "kind": "OfficeATP",
+         "properties": {"dataTypes": {"alerts": {"state": "Disabled"}}}},
+        {"id": f"{SI_A}/dataConnectors/o365", "name": "o365", "kind": "Office365",
+         "properties": {"dataTypes": {"exchange": {"state": "Enabled"}}}}]}
     azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [
         ui_connector("MicrosoftCloudAppSecurity", [
             ("SecurityAlert (MCAS)", 'SecurityAlert | where ProductName == "Microsoft Cloud App Security"'),
             ("McasShadowItReporting", "McasShadowItReporting")]),
-        ui_connector("Office365", [("OfficeActivity (Exchange)", 'OfficeActivity | where OfficeWorkload == "Exchange"')])]}
+        ui_connector("AzureAdvancedThreatProtection",
+                     [("SecurityAlert (AATP)", 'SecurityAlert | where ProductName == "Azure Advanced Threat Protection"')],
+                     [{"type": "MtpAlerts", "value": ["AzureAdvancedThreatProtection"]}]),
+        ui_connector("AzureSecurityCenter", [("SecurityAlert (ASC)", 'SecurityAlert | where ProductName == "Azure Security Center"')]),
+        ui_connector("Office365", [("OfficeActivity (Exchange)", 'OfficeActivity | where OfficeWorkload == "Exchange"')]),
+        {"id": f"{SI_A}/dataConnectors/mtp", "name": "mtp", "kind": "MicrosoftThreatProtection",
+         "properties": {"dataTypes": {"alerts": {"state": "enabled"}, "incidents": {"state": "enabled"}}}}]}
+
+
+def test_data_sources_alert_only_connectors_read_quiet(azure, tmp_path):
+    alert_only_workspace(azure, "Disabled")
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
     by_id = {c["id"]: c for c in ws["connectors"]}
-    # No alert in the window is normal for an alert-only connector; Cloud Discovery logs are an opt-in extra on MCAS.
-    assert code == 0 and [by_id[i]["alert_only"] for i in ("AzureSecurityCenter", "MicrosoftCloudAppSecurity", "Office365")] == [
-        True, True, False]
+    assert code == 0 and {i: c["alert_only"] for i, c in by_id.items()} == {
+        "AzureAdvancedThreatProtection": True, "AzureSecurityCenter": True, "MicrosoftCloudAppSecurity": True,
+        "MicrosoftThreatProtection": False, "Office365": False, "OfficeATP": True}
+    # Quiet needs a linked connection sending alerts, its own or Defender XDR's; Cloud Discovery logs are off on MCAS.
+    assert ws["connectors_quiet"] == ["AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity"]
+    assert by_id["AzureAdvancedThreatProtection"]["connections"] == ["mtp"]
     assert by_id["MicrosoftCloudAppSecurity"]["connected"] is False
-    assert ws["connectors_quiet"] == ["AzureSecurityCenter", "MicrosoftCloudAppSecurity"]
-    assert ws["connectors_not_connected"] == ["Office365"] and ws["connectors_connected"] == 0
-    assert (ev["summary"]["connectors_quiet"], ev["summary"]["connectors_not_connected"]) == (2, 1)
+    # Never connected, or its connection's alerts are Disabled: not connected.
+    assert (by_id["AzureSecurityCenter"]["connections"], by_id["OfficeATP"]["connections"]) == ([], ["oatp"])
+    assert ws["connectors_not_connected"] == ["AzureSecurityCenter", "MicrosoftThreatProtection", "Office365", "OfficeATP"]
+    assert ws["connectors_connected"] == 0
+    assert (ev["summary"]["connectors_quiet"], ev["summary"]["connectors_not_connected"]) == (2, 4)
+
+
+def test_data_sources_mcas_with_cloud_discovery_on_isnt_alert_only(azure, tmp_path):
+    alert_only_workspace(azure, "Enabled")
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    mcas = next(c for c in ws["connectors"] if c["id"] == "MicrosoftCloudAppSecurity")
+    assert code == 0 and mcas["alert_only"] is False and mcas["connected"] is False
+    assert ws["connectors_quiet"] == ["AzureAdvancedThreatProtection"]
+    assert "MicrosoftCloudAppSecurity" in ws["connectors_not_connected"]
 
 
 def test_data_sources_bad_connector_query_is_isolated(azure, tmp_path):

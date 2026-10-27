@@ -131,8 +131,14 @@ schemas and the `paramify` CLI — not the internal code.
   type received data, and lists the connections that feed it, including the
   Defender XDR connection for alert products it carries. An `alert_only`
   connector, whose data types are all SecurityAlert queries (Defender for
-  Identity, Defender for Cloud Apps, Defender for Cloud, Entra ID Protection),
-  is quiet rather than not connected when no alert fired in the window. Where
+  Endpoint, Defender for Office 365, Defender for Identity, Defender for Cloud,
+  Defender for Cloud Apps, Defender for IoT, Entra ID Protection and Insider
+  Risk Management), is quiet rather than not connected when no alert fired in
+  the window and a linked connection, its own or Defender XDR's, has alerts
+  enabled. One never connected, or whose connection has alerts Disabled, stays
+  not connected. A quiet connector still reads `connected: false`. The Cloud
+  Discovery table counts against Defender for Cloud Apps only when its
+  connection turns Cloud Discovery logs on. Where
   Sentinel health monitoring is on, `connector_health` holds each connection's
   latest SentinelHealth status and reason, and each connector shows the worst of
   its connections. `data_connectors` now also lists kinds only the preview
