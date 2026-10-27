@@ -424,7 +424,7 @@ def build(definitions, eligible, active, policies, unlicensed) -> tuple:
     if unlicensed:
         results["notes"] = ["PIM is not available in this tenant (Entra ID P2 or ID Governance is required)", *unlicensed]
     # A failed read would turn into zero standing admins, so no figures are given unless every read succeeded.
-    if not complete:
+    if not complete or eligible_records is None or active_records is None or policy_records is None:
         return results, {"pim_available": available, "collection_complete": False}
     return results, {"collection_complete": True, **summarize(eligible_records, active_records, policy_records)}
 
