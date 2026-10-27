@@ -116,15 +116,20 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_app_service_deployments`** (`EVD-AZURE-APPSVC-DEPLOYMENTS`) — how each App
   Service web app and slot is deployed. Kudu's deployment records (id or commit, status,
   author, deployer, message, times, the active deployment), counted separately so an empty
-  Kudu history is not read as "no deployments". From the Activity Log (Microsoft.Web over
-  `activity_log_days`, 90 by default, explicit start and end, paged to the end): slot
-  swaps, publish-profile downloads, publishing-credential reads and package deployments
-  through Resource Manager, one per request with who asked and when. A failed read leaves
-  those counts null rather than zero; a read cut at 200,000 events keeps the newest and
-  says so. Requests on sites not listed (deleted apps, function apps and other sites that
-  aren't web apps) are counted apart. Also where each app deploys from (credentials in the
-  URL removed, a failed read counted as unknown) and each slot's configuration compared
-  with production field by field.
+  Kudu history is not read as "no deployments"; an author or message past 500 characters
+  is cut and marked. From the Activity Log (Microsoft.Web over `activity_log_days`, 90 by
+  default, explicit start and end, paged to the end): slot swaps, publish-profile
+  downloads, publishing-credential reads and package deployments through Resource
+  Manager, one per request (correlation id, kept on each record) on the site of the event
+  that names the requester, with who asked and when. A request that finished keeps its
+  own status, so a callerless platform row can't flip it. A failed read leaves those
+  counts null rather than zero; a read cut at 200,000 events keeps the newest and says
+  so. Requests on sites not listed (deleted apps, function apps and other sites that
+  aren't web apps) are counted apart. Apps with, without and of unknown deployment
+  evidence add up to every web app. Also where each app deploys from (credentials and
+  query tokens in the URL removed, a failed read counted as unknown) and each slot's
+  configuration compared with production field by field, an unset FTPS state or default
+  action reading as what App Service applies.
   `results.limitations` says what it cannot attribute: the content or commit a Web Deploy
   or FTP push shipped, who used shared publishing credentials, and anything older than the
   window. Reader only.
