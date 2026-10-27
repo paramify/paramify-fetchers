@@ -275,6 +275,7 @@ def rules(default="Deny", ip=(), ipv6=None, vnet=()):
     ("Disabled", rules(default="Allow"), False),
     ("Disabled", None, False),
     ("SecuredByPerimeter", None, True),
+    ("SecuredByPerimeter", rules(), True),
     ("Enabled", rules(), False),
     ("Enabled", rules(ipv6=()), False),
     ("Enabled", rules(ip=("203.0.113.0/24",)), True),

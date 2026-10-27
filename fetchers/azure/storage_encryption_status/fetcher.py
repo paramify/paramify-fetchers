@@ -324,9 +324,13 @@ def geo_replication_stats_record(
 
 def internet_blocked(account: dict) -> bool:
     """True when the projected account turns internet clients away: public network access Disabled, or
-    a Deny default with no IP or virtual network rule. Rule lists the API didn't return can't show that."""
-    if str(account.get("public_network_access") or "").lower() == "disabled":
+    a Deny default with no IP or virtual network rule. Rule lists the API didn't return can't show that,
+    and under SecuredByPerimeter a network security perimeter's rules govern instead of the firewall."""
+    access = str(account.get("public_network_access") or "").lower()
+    if access == "disabled":
         return True
+    if access == "securedbyperimeter":
+        return False
     rules = account.get("network_rule_set") or {}
     if str(rules.get("default_action") or "").lower() != "deny":
         return False

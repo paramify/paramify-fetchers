@@ -227,9 +227,9 @@ schemas and the `paramify` CLI — not the internal code.
   geo-redundant account's lag is unknown. Every blob container is listed with its
   public access level, `anonymous_access_effective` (the account must not forbid
   it: an unset `allowBlobPublicAccess` allows it, as Azure documents; and its
-  network must admit public clients, which public network access Disabled, or a
-  firewall that denies by default with no IP or virtual network rule, does not),
-  metadata keys (never values) and its immutability and legal-hold flags. The account's
+  network must admit public clients, which public network access Disabled does
+  not, nor, outside `SecuredByPerimeter`, a firewall that denies by default with
+  no IP or virtual network rule), metadata keys (never values) and its immutability and legal-hold flags. The account's
   tags are recorded with `owner_tag` and `classification_tag`, taken from tag keys
   set by the new `owner_tag_keys` and `classification_tag_keys` config. Summary
   adds geo-replication, key-age, container and tag counts. Any other error reading
