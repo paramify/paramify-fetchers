@@ -123,7 +123,8 @@ schemas and the `paramify` CLI — not the internal code.
   query names, in code, bracket-quoted (`['T']`) or as a string passed to
   `table()` or to a function the query defines (`tables_from: query`), else the
   data types its template lists (`tables_from: template`). Templates are listed
-  at the stable and the preview api-version, so NRT rules have one too. A name
+  at the stable api-version; a template a rule uses that only the preview
+  api-version has (an NRT rule's) is read from it by name. A name
   that is also a column, such as `Operation`, or that the query assigns
   (`extend Event = …`, `datatable(Event:string)`), counts only where a table can
   stand; names the query binds (`mv-expand`, `mv-apply`, `as`, `withsource=`),
@@ -147,7 +148,7 @@ schemas and the `paramify` CLI — not the internal code.
   `enabled_rules_suppressed`, `ingestion_window_days` and
   `workspace_tables_listed`. The summary's counts are null, not 0, when no
   workspace could be checked. `templates_available` and `templates_in_use` now
-  count templates that only the preview api-version lists. The ingestion query
+  also count the preview-only templates rules use. The ingestion query
   needs Log Analytics Reader as well as Microsoft Sentinel Reader. Also mapped
   to `KSI-IAM-SUS`.
 - **`azure_app_service_configuration` 0.3.0: cipher suites, basic-auth publishing, Key Vault

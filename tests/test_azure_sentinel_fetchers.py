@@ -129,6 +129,9 @@ class FakeAzure:
                 {"name": "f71aba3d-28fb-450b-b192-4e76a83015c8", "kind": "Fusion"},
                 {"name": "tpl-nrt", "kind": "NRT", "properties": {"requiredDataConnectors": [
                     {"connectorId": "AzureActivity", "dataTypes": ["AzureActivity"]}]}}]},
+            (f"{SI_A}/alertRuleTemplates/tpl-nrt", "2025-10-01-preview"): {
+                "name": "tpl-nrt", "kind": "NRT", "properties": {"requiredDataConnectors": [
+                    {"connectorId": "AzureActivity", "dataTypes": ["AzureActivity"]}]}},
             (f"{WS_A}/tables", "2023-09-01"): {"value": WORKSPACE_TABLES},
             (f"{WS_A}/savedSearches", "2023-09-01"): {"value": [
                 {"name": "parser", "properties": {"category": "Security", "functionAlias": "CiscoASA", "query": "Syslog"}},
@@ -340,7 +343,9 @@ def test_analytics_rules_merge_preview_kinds(azure, tmp_path):
     assert ws["enabled_rules"] == 3 and ws["disabled_rules"] == 1
     assert ws["enabled_by_kind"] == {"Fusion": 1, "NRT": 1, "Scheduled": 1}
     assert ws["fusion_enabled"] is True and ws["rules_only_in_preview"] == 1
-    assert ws["templates_available"] == 4 and ws["templates_in_use"] == 2
+    # No rule uses a template only the preview API has, so none is read from it.
+    assert ws["templates_available"] == 3 and ws["templates_in_use"] == 2
+    assert not any(c[1].startswith(f"{SI_A}/alertRuleTemplates") and c[2] == "2025-10-01-preview" for c in azure.calls)
 
 
 def test_analytics_rules_nrt_rule_falls_back_to_a_preview_only_template(azure, tmp_path):
@@ -350,16 +355,31 @@ def test_analytics_rules_nrt_rule_falls_back_to_a_preview_only_template(azure, t
     nrt = next(r for r in ws_a(ev)["rules"] if r["name"] == "nrt")
     assert code == 0 and ws_a(ev)["notes"] == []
     assert (nrt["tables_read"], nrt["tables_from"], nrt["tables_without_data"]) == (["AzureActivity"], "template", [])
+    preview = [c[1] for c in azure.calls if c[1].startswith(f"{SI_A}/alertRuleTemplates") and c[2] == "2025-10-01-preview"]
+    assert preview == [f"{SI_A}/alertRuleTemplates/tpl-nrt"]
+    assert ws_a(ev)["templates_available"] == 4 and ws_a(ev)["templates_in_use"] == 3
+
+
+@pytest.mark.parametrize("status, notes", [(404, 0), (403, 1)])
+def test_analytics_rules_preview_template_lookup(azure, tmp_path, status, notes):
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": [
+        rule("nrt", "NRT", True, "tpl-nrt", query="_ASim_AuditEvent | take 1")]}
+    azure.arm[(f"{SI_A}/alertRuleTemplates/tpl-nrt", "2025-10-01-preview")] = Resp(
+        status, {"error": {"code": "NotFound" if status == 404 else "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    nrt = next(r for r in ws["rules"] if r["name"] == "nrt")
+    assert code == 0 and nrt["tables_read"] is None and ws["templates_available"] == 3
+    assert len(ws["notes"]) == notes and all("tpl-nrt" in n for n in ws["notes"])
 
 
 def test_analytics_rules_preview_failure_is_a_note(azure, tmp_path):
     azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = Resp(
         400, {"error": {"code": "InvalidApiVersionParameter", "message": "retired"}})
-    azure.arm[(f"{SI_A}/alertRuleTemplates", "2025-10-01-preview")] = azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")]
     code, ev = run("sentinel_analytics_rules", tmp_path)
     ws = ws_a(ev)
     assert code == 0 and ws["enabled_rules"] == 2 and ws["templates_available"] == 3
-    assert len(ws["notes"]) == 2 and all("NRT" in n for n in ws["notes"])
+    assert len(ws["notes"]) == 1 and "NRT" in ws["notes"][0]
 
 
 def test_analytics_rules_forbidden_fails_the_run(azure, tmp_path):

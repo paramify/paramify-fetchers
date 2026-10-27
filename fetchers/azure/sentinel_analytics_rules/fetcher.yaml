@@ -71,7 +71,8 @@ evidence_set:
     - GET Microsoft.OperationalInsights/workspaces — the subscription's Log Analytics workspaces
     - GET Microsoft.SecurityInsights/onboardingStates (per workspace) — finds the Sentinel workspaces
     - GET Microsoft.SecurityInsights/alertRules (per workspace; stable and preview APIs) — every analytics rule with its query and suppression, including kinds only the preview returns, such as NRT
-    - GET Microsoft.SecurityInsights/alertRuleTemplates (per workspace; stable and preview APIs) — templates available and in use, and the data types each template lists
+    - GET Microsoft.SecurityInsights/alertRuleTemplates (per workspace, stable API) — templates available and in use, and the data types each template lists
+    - GET Microsoft.SecurityInsights/alertRuleTemplates/{name} (preview API, only for a template a rule uses that the stable listing lacks, such as an NRT rule's) — that template's data types
     - GET Microsoft.OperationalInsights/workspaces/tables (per workspace) — the workspace's table and column names, to find the tables each query reads
     - GET Microsoft.OperationalInsights/workspaces/savedSearches (per workspace) — the workspace's function names (parsers), so a name a query reads that is neither a listed table nor a function counts as a table the workspace never provisioned
     - KQL union * summarized by table (per workspace) — each table's last ingestion time in the window

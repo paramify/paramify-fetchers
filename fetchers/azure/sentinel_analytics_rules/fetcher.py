@@ -334,6 +334,22 @@ def table_vocabulary(listed: List[Dict[str, Any]]) -> Tuple[Set[str], Set[str]]:
     return names, names & columns
 
 
+def preview_templates(
+    client, path: str, rules: List[Dict[str, Any]], templates: List[Dict[str, Any]], notes: List[str]
+) -> List[Dict[str, Any]]:
+    """Templates the stable listing lacks (NRT), read one by one at the preview api-version for the rules using them."""
+    listed = {t.get("name") for t in templates}
+    wanted = sorted({r["alert_rule_template_name"] for r in rules if r.get("alert_rule_template_name")} - listed)
+    found: List[Dict[str, Any]] = []
+    for name in wanted:
+        try:
+            found.append(client.get(f"{path}/alertRuleTemplates/{name}", SI_PREVIEW_API))
+        except Exception as exc:  # noqa: BLE001 — a template only adds data types to fall back on
+            if getattr(exc, "status", None) != 404:  # a deleted template has nothing to read
+                notes.append(f"template {name} at {SI_PREVIEW_API} failed, so rules using it have no template to fall back on: {exc}")
+    return found
+
+
 def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     days = int_config(WINDOW_ENV, DEFAULT_WINDOW_DAYS)
     path = f"{ws['id']}/providers/Microsoft.SecurityInsights"
@@ -347,14 +363,6 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     templates = collector.guard(
         f"securityinsights.alertRuleTemplates.list({ws['name']})", lambda: client.list(f"{path}/alertRuleTemplates", SI_API)
     )
-    try:
-        preview_templates = client.list(f"{path}/alertRuleTemplates", SI_PREVIEW_API)
-    except Exception as exc:  # noqa: BLE001 — as with rules, the preview listing only adds kinds the stable one omits
-        preview_templates = []
-        notes.append(f"preview template listing at {SI_PREVIEW_API} failed, so NRT rules may have no template to fall back on: {exc}")
-    if templates is not None:
-        stable_names = {t.get("name") for t in templates}
-        templates = templates + [t for t in preview_templates if t.get("name") not in stable_names]
     listed_tables = collector.guard(
         f"operationalinsights.tables.list({ws['name']})", lambda: client.list(f"{ws['id']}/tables", LAW_API)
     )
@@ -378,6 +386,8 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     ingested = {r["ParamifySourceTable"]: r.get("LastIngested") for r in rows if r.get("ParamifySourceTable")} if rows is not None else None
 
     rules = merge_rules(stable, preview) if stable is not None else None
+    if rules is not None and templates is not None:
+        templates = templates + preview_templates(client, path, rules, templates, notes)
     if rules is not None:
         names, columns = table_vocabulary(listed_tables) if listed_tables is not None else (None, set())
         by_template = {t.get("name"): t for t in templates or []}
