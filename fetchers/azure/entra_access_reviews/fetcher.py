@@ -271,7 +271,8 @@ def definition_record(definition: Dict[str, Any], read_instances: Optional[List[
     default_deny = settings.get("default_decision_enabled") is True and settings.get("default_decision") == "Deny"
     auto_apply = settings.get("auto_apply_decisions_enabled") is True
     cycle = last_cycle(instances)
-    latest = max(cycle, key=lambda i: _parse(i["end_date_time"]), default=None)
+    # last_cycle keeps only runs whose end time parses; `or now` is for the type checker.
+    latest = max(cycle, key=lambda i: _parse(i["end_date_time"]) or now, default=None)
     cycle_end = None if latest is None else _parse(latest["end_date_time"])
     # None where an instance's decisions weren't read: an ended series' are skipped, a failed read is unknown.
     read = [decisions.get(i["id"]) for i in cycle]
@@ -357,7 +358,7 @@ def build(definitions, instances, decisions, unlicensed, now: datetime) -> tuple
     if unlicensed:
         results["notes"] = ["Access reviews are not available in this tenant (Entra ID P2 or ID Governance is required)", *unlicensed]
     # A failed read would turn into reviews that never ran, so no figures are given unless every read succeeded.
-    if not complete:
+    if not complete or records is None:
         return results, {"access_reviews_available": available, "collection_complete": False}
     return results, {"collection_complete": True, **summarize(records)}
 
