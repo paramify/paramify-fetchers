@@ -83,7 +83,7 @@ evidence_set:
   reference_id: EVD-GITHUB-DEPLOYMENT-CONTROLS
   name: GitHub Deployment Controls
   instructions: >-
-    Per repository, every environment with its required reviewers, self-review
+    Script: github/deployment_controls/fetcher.py. Per repository, every environment with its required reviewers, self-review
     prevention, wait timer, deployment branch policy and allowed refs, custom
     protection rules and admin bypass; for production environments (by name),
     the deployments in the window with ref, commit, creator, whether GitHub

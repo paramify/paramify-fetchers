@@ -66,7 +66,7 @@ evidence_set:
   reference_id: EVD-GITHUB-CODE-SCANNING
   name: GitHub Code Scanning Alerts
   instructions: >-
-    Per repository, code scanning analyses on the default branch (any tool,
+    Script: github/code_scanning_alerts/fetcher.py. Per repository, code scanning analyses on the default branch (any tool,
     default setup or uploaded SARIF), the latest analysis time, and every
     alert with security severity, age while open and days to close.
     Repositories never analysed are in repositories_not_analysed; those whose

@@ -67,7 +67,7 @@ evidence_set:
   reference_id: EVD-GITHUB-DEPENDABOT-ALERTS
   name: GitHub Dependabot Alerts
   instructions: >-
-    Per repository, every Dependabot alert (open, fixed, dismissed) with
+    Script: github/dependabot_alerts/fetcher.py. Per repository, every Dependabot alert (open, fixed, dismissed) with
     severity, CVE, package, age in days while open and days to close, and
     whether its CVE is in the CISA KEV catalog. Scanning coverage is reported
     beside it: alerts_enabled, dependency_graph_packages (0 means alerts are on

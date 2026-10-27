@@ -57,7 +57,7 @@ evidence_set:
   reference_id: EVD-GITHUB-BRANCH-PROTECTION
   name: GitHub Default Branch Protection
   instructions: >-
-    Per repository, the rules GitHub enforces on the default branch
+    Script: github/branch_protection/fetcher.py. Per repository, the rules GitHub enforces on the default branch
     (rules/branches) merged with classic branch protection: `requires_approval`,
     `requires_status_checks` and the check names, signed commits, force-push
     and deletion blocks. Rulesets that exist but enforce nothing (disabled or

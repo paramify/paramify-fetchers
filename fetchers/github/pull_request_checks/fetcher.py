@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""How changes reached each default branch in a window: merged pull requests with their reviews and checks, and direct pushes.
-
-Pull requests and commits are read over GraphQL: about 2 points per 50 pull requests with their reviews and checks,
-where REST costs three calls per pull request and one per commit (measured on microsoft/vscode: ~8400 REST calls for
-30 days). Each node is converted to the REST shape the rest of this file reads. A pull request whose reviews or checks
-do not fit in one GraphQL page is read over REST, as is a commit whose associated pull requests do not.
-"""
+"""How changes reached each default branch in a window: merged pull requests with their reviews and checks, and direct pushes."""
 
 import sys
 from datetime import datetime, timedelta, timezone
@@ -171,8 +165,7 @@ def pr_record(client, base, pr, required):
         runs, statuses = pr["checks"]
     else:
         runs = client.paginate_required(f"{base}/commits/{head_sha}/check-runs", {"filter": "latest"}, key="check_runs")
-        status = client.get(f"{base}/commits/{head_sha}/status")
-        statuses = None if status is None else status.get("statuses") or []
+        statuses = client.paginate_required(f"{base}/commits/{head_sha}/status", key="statuses")
     labels = pr.get("labels")
     if labels is None:
         labels = client.paginate_required(f"{base}/issues/{number}/labels")

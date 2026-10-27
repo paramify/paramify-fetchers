@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Who and what may deploy to production, and what was deployed: each environment's required reviewers, wait timer,
-branch policy and admin bypass, then the deployments to production environments in the window with their ref,
-creator, the app that made them and their latest status.
-
-Production is decided by name (GITHUB_PRODUCTION_ENVIRONMENTS, globs), because GitHub has no such flag on an
-environment; the deployment's own production_environment flag is set by whoever creates it and is reported as is.
-"""
+"""Who may deploy to production, and what was deployed: environment reviewers, wait timers, branch policies and production deployments."""
 
 import fnmatch
 import sys
@@ -94,8 +88,9 @@ def on_default_branch(client, org, repo, shas):
     """
     out = {}
     branch = repo.get("default_branch")
-    for i in range(0, len(shas), SHA_BATCH):
-        chunk = shas[i:i + SHA_BATCH]
+    i, batch = 0, SHA_BATCH
+    while i < len(shas):
+        chunk = shas[i:i + batch]
         params = ", ".join(f"$s{k}: String!, $o{k}: GitObjectID!" for k in range(len(chunk)))
         body = " ".join(f"o{k}: object(oid: $o{k}) {{ oid }} c{k}: ref(qualifiedName: $ref) "
                         f"{{ compare(headRef: $s{k}) {{ aheadBy }} }}" for k in range(len(chunk)))
@@ -105,12 +100,19 @@ def on_default_branch(client, org, repo, shas):
             f"repository(owner: $owner, name: $name) {{ {body} }} }}",
             {"owner": org, "name": repo["name"], "ref": f"refs/heads/{branch}",
              **{f"s{k}": sha for k, sha in enumerate(chunk)}, **{f"o{k}": sha for k, sha in enumerate(chunk)}})
+        if state == "timeout" and batch > 1:
+            batch = max(1, batch // 2)
+            continue
+        if state == "timeout":
+            client.fail(f"GraphQL compare repos/{org}/{repo['name']}", "GraphQLTimeout",
+                        f"timed out on {chunk[0]} alone", "target_unreachable")
         if state != "ok":
             return None
         found = data.get("repository") or {}
         for k, sha in enumerate(chunk):
             ahead = ((found.get(f"c{k}") or {}).get("compare") or {}).get("aheadBy")
             out[sha] = None if not found.get(f"o{k}") or ahead is None else ahead == 0
+        i += len(chunk)
     return out
 
 

@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""The organization's audit log for the window: how many events of each action, and every event that changes who
-has access, how code is protected, or whether a control is on, with who did it and from where.
-
-The organization audit log API is GitHub Enterprise Cloud only (a Free or Team organization answers 404). Events
-are paged newest first by cursor and bounded by a `created:>=` search phrase; more than max_events fails the run
-rather than reporting part of the window as the whole.
-"""
+"""The organization audit log for the window: event counts, and every access, protection or control change (Enterprise Cloud only)."""
 
 import sys
 from datetime import datetime, timezone

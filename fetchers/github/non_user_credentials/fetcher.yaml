@@ -71,7 +71,7 @@ evidence_set:
   reference_id: EVD-GITHUB-NON-USER-CREDENTIALS
   name: GitHub Non-User Credentials
   instructions: >-
-    Deploy keys per repository (read-only or write, age, last use), installed
+    Script: github/non_user_credentials/fetcher.py. Deploy keys per repository (read-only or write, age, last use), installed
     apps with the permissions they hold and on how many repositories, approved
     fine-grained tokens with expiry and last use (GitHub App tokens only;
     null otherwise), Actions secrets by name and

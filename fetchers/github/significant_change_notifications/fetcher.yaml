@@ -5,8 +5,9 @@ description: >-
   significant changes (a ticked "Significant Change — SCN required" checkbox
   or a configured label). Each flagged pull request's Significant Change
   section becomes one SCN object, validated against FedRAMP's SCN schema
-  2026-06-24 and against SCN-CSO-INF. Parsed by the GitLab fetcher's parser,
-  so one template yields the same notification on either platform.
+  2026-06-24 and against SCN-CSO-INF. Uses the same parser as
+  gitlab_significant_change_notifications, so one template yields the same
+  notification on either platform.
 category: github
 
 supports_targets: true
@@ -124,7 +125,7 @@ evidence_set:
   reference_id: EVD-GITHUB-SCN
   name: GitHub FedRAMP Significant Change Notifications
   instructions: >-
-    Pull requests updated in the window, per repository, newest first over
+    Script: github/significant_change_notifications/fetcher.py. Pull requests updated in the window, per repository, newest first over
     GraphQL; those with a ticked "Significant Change — SCN required" checkbox
     or the marker label have their Significant Change section parsed into a
     FedRAMP SCN, validated against schema 2026-06-24 and checked against

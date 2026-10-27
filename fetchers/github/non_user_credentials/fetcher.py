@@ -3,6 +3,7 @@
 
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
 from github_client import iso, now_epoch, run, to_epoch  # noqa: E402
@@ -28,7 +29,8 @@ def secret_rows(items, now, max_age):
 def hook_row(hook):
     cfg = hook.get("config") or {}
     return {"id": hook.get("id"), "active": hook.get("active"), "events": hook.get("events"),
-            "url_host": (cfg.get("url") or "").split("/")[2] if "://" in (cfg.get("url") or "") else None,
+            # hostname, not netloc: a URL can carry user:password@ before the host.
+            "url_host": urlparse(cfg.get("url") or "").hostname,
             # "1" skips TLS verification, "0" verifies; missing is unknown, never verified.
             "insecure_ssl": {"1": True, "0": False}.get(str(cfg.get("insecure_ssl"))),
             # GitHub masks a configured secret as ********; absent means payloads are unsigned.

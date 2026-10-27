@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Whether released software can be verified and cannot be swapped: build provenance on release assets, immutable
-releases, and tag rulesets that stop a release tag being moved or deleted.
-
-Each asset's sha256 digest (GitHub computes it on upload) is looked up in the repository's build provenance
-attestations, filtered by GitHub (predicate_type=provenance). Where GitHub returns the Sigstore bundle inline, its
-in-toto statement is checked to name the digest; a large bundle is served from blob storage instead and is not
-fetched. Signatures are not verified: GitHub stores the bundles, `gh attestation verify` checks them.
-"""
+"""Whether releases can be verified and cannot be swapped: build provenance per asset, immutable releases and tag rulesets."""
 
 import base64
 import json

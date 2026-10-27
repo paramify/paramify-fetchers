@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Every repository in the organization as one Inventory record, with its visibility, state and security features.
-
-An inventory: all or nothing (docs/inventory_fetchers_guide.md). Records come from the repository listing the client
-already pages and checks against the organization's own count, plus one paged call for custom property values.
-"""
+"""Every repository in the organization as one Inventory record, with its visibility, state and security features."""
 
 import sys
 from pathlib import Path

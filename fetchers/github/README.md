@@ -19,7 +19,7 @@ organization, each with its own token and API host.
 | `github_code_scanning_alerts` | Whether each default branch is analysed, by which tools, how recently; every alert | SVC-EIS, MLA-EVC |
 | `github_secret_scanning` | Scanning and push protection per repository, every alert (never the secret), push-protection bypasses | SVC-ASM |
 | `github_org_security_settings` | Two-factor requirement and members without it, member defaults, Actions token rights, security configuration coverage | IAM-APM, IAM-ELP, CNA-EIS |
-| `github_access_review` | Owners, members, outside collaborators, invitations, teams and their repository grants, direct admins | IAM-ELP, IAM-AAM |
+| `github_access_review` | Owners, members, outside collaborators, invitations, teams and their repository grants, repository admins | IAM-ELP, IAM-AAM |
 | `github_non_user_credentials` | Deploy keys, installed apps, fine-grained tokens, Actions secrets by age, webhook TLS and signing | IAM-SNU, SVC-ASM |
 | `github_repository_inventory` | **Inventory** (`kind: inventory`): one record per repository with visibility, state, security features and custom property values; all or nothing | PIY-GIV |
 | `github_actions_security` | Allowed actions and SHA pinning policy, the workflow token's default, fork PR approval, self-hosted runners, and what each workflow file does (unpinned actions, permissions blocks, privileged triggers checking out PR code, untrusted input in scripts, OIDC) | SCR-MIT, CMT-VTD, IAM-SNU, CNA-MAT |
@@ -241,9 +241,9 @@ events.
 ## Significant change notifications
 
 `github_significant_change_notifications` is the GitHub side of
-`gitlab_significant_change_notifications` and uses that fetcher's parser and
-FedRAMP schema validator directly, so one template yields the same notification
-on both platforms. Install its template,
+`gitlab_significant_change_notifications`. Both use one parser and FedRAMP
+schema validator (`fetchers/_lib/fedramp_scn.py`), so one template yields the
+same notification on both platforms. Install its template,
 [`significant_change.md`](../gitlab/significant_change_notifications/templates/significant_change.md),
 as `.github/pull_request_template.md` (or under `.github/PULL_REQUEST_TEMPLATE/`).
 A pull request is flagged by ticking `Significant Change — SCN required`, or by

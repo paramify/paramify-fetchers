@@ -5,14 +5,21 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
-from github_client import days_between, iso, now_epoch, run, to_epoch  # noqa: E402
+from github_client import (  # noqa: E402
+    by_severity,
+    days_between,
+    iso,
+    median_days,
+    now_epoch,
+    open_older_than,
+    run,
+    to_epoch,
+)
 
 NAME = "github_code_scanning_alerts"
 CONFIG = {
     "max_analysis_age_days": ("GITHUB_CODE_SCANNING_MAX_AGE_DAYS", 7),
 }
-SEVERITIES = ("critical", "high", "medium", "low")
-AGE_BUCKETS = (7, 30, 90, 180)
 
 
 def severity(rule):
@@ -71,8 +78,7 @@ def repo_record(client, org, repo, now, max_age):
         "last_analysis_at": iso(latest),
         "last_analysis_age_days": days_between(latest, now),
         "analysis_current": latest is not None and (now - latest) <= max_age * 86400,
-        "open_by_security_severity": {s: len([a for a in open_alerts if a["security_severity"] == s])
-                                      for s in SEVERITIES},
+        "open_by_security_severity": by_severity(open_alerts, "security_severity"),
         "alerts": alerts,
     })
     return record
@@ -89,14 +95,11 @@ def summarize(records):
         "repositories_analysis_stale": [r["repository"] for r in done if r["analysed"] and not r["analysis_current"]],
         "tools": sorted({t for r in done for t in r["tools"]}),
         "open_total": len(open_alerts),
-        "open_by_security_severity": {s: len([a for a in open_alerts if a["security_severity"] == s])
-                                      for s in SEVERITIES},
+        "open_by_security_severity": by_severity(open_alerts, "security_severity"),
         "open_without_security_severity": len([a for a in open_alerts if a["security_severity"] is None]),
-        "open_older_than_days": {str(d): {s: len([a for a in open_alerts if a["security_severity"] == s
-                                                   and (a["age_days"] or 0) > d]) for s in SEVERITIES}
-                                 for d in AGE_BUCKETS},
+        "open_older_than_days": open_older_than(open_alerts, "security_severity"),
         "fixed_total": len(closed),
-        "median_days_to_fix": sorted(a["days_to_close"] for a in closed)[len(closed) // 2] if closed else None,
+        "median_days_to_fix": median_days(closed, "days_to_close"),
         "dismissed_total": len([a for r in done for a in r["alerts"] if a["state"] == "dismissed"]),
         # GitHub's schema allows a null alert state; such an alert is in no count above, so count it here.
         "state_unknown_total": len([a for r in done for a in r["alerts"] if a["state"] is None]),

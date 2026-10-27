@@ -418,6 +418,7 @@ def test_rate_limit_fails_rather_than_outsleeping_the_runner(fake):
                                      {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(int(time.time()) + 3600)})})
     assert client.read("x")[0] == "failed"
     assert "slept" not in fake.holder
+    assert client.codes == ["rate_limited"]  # a 403, but not a missing permission
 
 
 def test_a_listing_smaller_than_the_orgs_count_is_partial(fake):
@@ -1165,7 +1166,7 @@ def test_access_review_verdicts(fake, monkeypatch, tmp_path):
     s = ev["summary"]
     assert s["owners"] == ["boss"] and s["members_total"] == 2
     assert s["outside_collaborators_with_write"] == ["contractor"]  # write on app, read-only on infra
-    assert s["repositories_with_direct_admins"] == ["app"]  # owners are excluded
+    assert s["repositories_with_non_owner_admins"] == ["app"]  # owners are excluded
     assert s["teams_with_admin"] == ["platform"] and ev["teams"][0]["write_on"] == ["infra"]
     assert ev["pending_invitations"][0]["email_domain"] == "example.com"
     assert "new.hire" not in json.dumps(ev)  # the address itself is never stored
@@ -1263,7 +1264,7 @@ def test_an_unreadable_org_section_is_null_and_the_rest_is_kept(fake, monkeypatc
     assert s["write_deploy_keys"] == ["app:deploy-rw"] and s["apps_with_write"] == ["ci-bot"]
 
 
-# --- found by tools/github_null_sweep.py: optional or nullable fields --------------------
+# --- optional or nullable fields --------------------
 
 def test_a_ruleset_without_conditions_is_unknown_not_elsewhere():
     t = MODS["branch_protection"].ruleset_targets_branch
@@ -1424,6 +1425,26 @@ def test_per_repository_alert_fields(fake, monkeypatch, tmp_path):
     assert fixed["age_days"] is None and fixed["days_to_close"] == 10.0
 
 
+def test_non_provider_secret_alerts_are_requested_by_name(fake, monkeypatch, tmp_path):
+    # GitHub returns provider patterns only unless secret_type names the generic ones.
+    routes = ss_routes()
+    generic = dict(ss_alert(4), secret_type="rsa_private_key")
+    routes[f"repos/{ORG}/clean/secret-scanning/alerts"] = lambda q: (
+        [generic] if "rsa_private_key" in q.get("secret_type", "") else [ss_alert(1, "resolved", resolution="revoked")])
+    fake(routes)
+    _, ev, _ = run_fetcher("secret_scanning", monkeypatch, tmp_path)
+    clean = {r["repository"]: r for r in ev["repositories"]}["clean"]
+    assert sorted(a["number"] for a in clean["alerts"]) == [1, 4] and clean["open_alerts"] == 1
+
+
+def test_a_plan_without_secret_scanning_is_not_scanning(fake, monkeypatch, tmp_path):
+    routes = ss_routes()
+    routes[f"repos/{ORG}/clean/secret-scanning/alerts"] = (403, {"message": "Upgrade to GitHub Team to enable this feature."})
+    fake(routes)
+    _, ev, _ = run_fetcher("secret_scanning", monkeypatch, tmp_path)
+    assert {r["repository"]: r for r in ev["repositories"]}["clean"]["scanning_enabled"] is False
+
+
 def test_per_repository_secret_fields(fake, monkeypatch, tmp_path):
     fake(ss_routes())
     _, ev, _ = run_fetcher("secret_scanning", monkeypatch, tmp_path)
@@ -1443,6 +1464,16 @@ def test_credential_record_fields(fake, monkeypatch, tmp_path):
     assert hooks["app"]["insecure_ssl"] is True and hooks["app"]["has_secret"] is False
     assert ev["apps"][0]["write_permissions"] == ["contents"] and ev["fine_grained_tokens"][0]["owner"] == "dev"
     assert ev["summary"]["deploy_keys_allowed"] is True
+
+
+def test_webhook_host_drops_credentials_in_the_url(fake, monkeypatch, tmp_path):
+    routes = credential_routes()
+    hook = routes[f"orgs/{ORG}/hooks"][0]
+    hook["config"]["url"] = "https://user:s3cret@hooks.example.com:8443/path"
+    fake(routes)
+    _, ev, _ = run_fetcher("non_user_credentials", monkeypatch, tmp_path)
+    assert "s3cret" not in json.dumps(ev)
+    assert {h["scope"]: h for h in ev["webhooks"]}["organization"]["url_host"] == "hooks.example.com"
 
 
 def test_access_record_fields(fake, monkeypatch, tmp_path):
@@ -2302,6 +2333,23 @@ def deploy_routes(envs, deploys=None, statuses=None, ahead=None):
             routes[f"{b}/deployments/{d['id']}/statuses"] = [{"state": (statuses or {}).get(d["id"], "success"),
                                                               "created_at": d["created_at"]}]
     return routes
+
+
+def test_a_compare_that_times_out_halves_then_fails_loudly(fake, monkeypatch, tmp_path):
+    envs = [environment("production", ["ops"])]
+    deploys = {"production": [deployment(2, "main", 1), deployment(1, "main", 2)]}
+    routes = deploy_routes(envs, deploys)
+    answer = routes["graphql"]
+    routes["graphql"] = lambda q, v: answer(q, v) if len([k for k in v if k.startswith("s")]) == 1 else (502, {})
+    fake(routes)
+    code, ev, _ = run_fetcher("deployment_controls", monkeypatch, tmp_path)
+    assert code == 0 and ev["summary"]["not_collected"] == []
+
+    routes["graphql"] = lambda q, v: (502, {})
+    fake(routes)
+    code, ev, _ = run_fetcher("deployment_controls", monkeypatch, tmp_path)
+    assert code != 0 and ev["summary"]["not_collected"] == ["app"]
+    assert any(f["type"] == "GraphQLTimeout" for f in ev["metadata"]["api_failures"])
 
 
 def test_deployment_verdicts(fake, monkeypatch, tmp_path):

@@ -8,10 +8,12 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
 from github_client import (  # noqa: E402
-    FEATURE_OFF,
+    by_severity,
     days_between,
     iso,
+    median_days,
     now_epoch,
+    open_older_than,
     run,
     to_epoch,
 )
@@ -21,8 +23,6 @@ CONFIG = {
     "check_kev": ("GITHUB_CHECK_KEV", True),
 }
 KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-SEVERITIES = ("critical", "high", "medium", "low")
-AGE_BUCKETS = (7, 30, 90, 180)
 
 
 def known_exploited(client):
@@ -74,7 +74,7 @@ def repo_record(client, org, repo, now, kev):
     state, alerts = client.paginate(f"{base}/dependabot/alerts", {"state": "open,fixed,dismissed,auto_dismissed"})
     if state == "failed":
         return {**record, "collected": False}
-    record["alerts_enabled"] = state != FEATURE_OFF
+    record["alerts_enabled"] = state is None  # disabled, or not on this plan
     found, sbom = client.lookup(f"{base}/dependency-graph/sbom")
     # The graph only parses manifests on a push; alerts can be on while it holds nothing but the repository itself.
     packages = [p for p in ((sbom or {}).get("sbom") or {}).get("packages") or []
@@ -88,7 +88,7 @@ def repo_record(client, org, repo, now, kev):
         "dependency_graph_enabled": found,
         "dependency_graph_packages": None if packages is None else len(packages),
         "security_updates_enabled": None if fixes is None else bool(fixes.get("enabled")) and not fixes.get("paused"),
-        "open_by_severity": {s: len([a for a in open_alerts if a["severity"] == s]) for s in SEVERITIES},
+        "open_by_severity": by_severity(open_alerts, "severity"),
         "open_known_exploited": [a["number"] for a in open_alerts if a["known_exploited"]],
         "oldest_open_days": max((a["age_days"] for a in open_alerts if a["age_days"] is not None), default=None),
         "alerts": alerts,
@@ -113,14 +113,12 @@ def summarize(records, kev):
         "repositories_dependency_graph_empty": [r["repository"] for r in done if r["dependency_graph_packages"] == 0],
         "repositories_without_security_updates": [r["repository"] for r in done if r["security_updates_enabled"] is False],
         "open_total": len(open_alerts),
-        "open_by_severity": {s: len([a for a in open_alerts if a["severity"] == s]) for s in SEVERITIES},
-        "open_older_than_days": {str(d): {s: len([a for a in open_alerts if a["severity"] == s
-                                                   and (a["age_days"] or 0) > d]) for s in SEVERITIES}
-                                 for d in AGE_BUCKETS},
+        "open_by_severity": by_severity(open_alerts, "severity"),
+        "open_older_than_days": open_older_than(open_alerts, "severity"),
         "open_known_exploited": len([a for a in open_alerts if a["known_exploited"]]),
         "known_exploited_checked": kev is not None,
         "fixed_total": len(fixed),
-        "median_days_to_fix": sorted(a["days_to_close"] for a in fixed)[len(fixed) // 2] if fixed else None,
+        "median_days_to_fix": median_days(fixed, "days_to_close"),
         "dismissed_total": len(dismissed),
         "dismissed_by_reason": reasons,
     }

@@ -4,7 +4,7 @@ description: >-
   Who can reach an organization's code and with what rights: owners, members,
   outside collaborators, pending invitations, teams and the repositories they
   administer or write to, organization roles and who holds them, and each
-  repository's direct admins.
+  repository's admins other than owners.
 category: github
 
 supports_targets: true
@@ -69,8 +69,8 @@ evidence_set:
   reference_id: EVD-GITHUB-ACCESS-REVIEW
   name: GitHub Organization Access Review
   instructions: >-
-    Owners, members, outside collaborators (with the repositories and roles
+    Script: github/access_review/fetcher.py. Owners, members, outside collaborators (with the repositories and roles
     they hold), pending invitations (email domain only), every team with its
     members and the repositories it administers or writes to, organization
-    roles with their holders, and per repository the direct admins (owners
-    excluded), writers and team grants.
+    roles with their holders, and per repository the admins (owners
+    excluded; directly or through a team), writers and team grants.

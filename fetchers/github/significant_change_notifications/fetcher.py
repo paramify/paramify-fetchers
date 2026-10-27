@@ -1,28 +1,14 @@
 #!/usr/bin/env python3
-"""FedRAMP Significant Change Notifications from GitHub pull requests flagged as significant changes.
+"""FedRAMP significant change notifications from GitHub pull requests flagged as significant changes."""
 
-The GitHub side of gitlab_significant_change_notifications. A pull request is flagged by a ticked
-`- [x] Significant Change — SCN required` checkbox in its description, or by a configured label. Its
-"Significant Change" section becomes one SCN object, validated against FedRAMP's schema and against what
-SCN-CSO-INF asks for.
-
-The markdown is read by the GitLab fetcher's own parser and validator, imported below rather than copied: the
-same template must produce the same notification on either platform, and one parser cannot drift from itself.
-Only finding the pull requests is GitHub's.
-"""
-
-import importlib.util
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
+import fedramp_scn as scn  # noqa: E402  (shared with gitlab_significant_change_notifications)
 from github_client import iso, now_epoch, run, to_epoch  # noqa: E402
-
-_GITLAB = Path(__file__).resolve().parents[2] / "gitlab" / "significant_change_notifications" / "fetcher.py"
-_spec = importlib.util.spec_from_file_location("gitlab_scn_parser", _GITLAB)
-scn = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
-_spec.loader.exec_module(scn)  # type: ignore[union-attr]
 
 NAME = "github_significant_change_notifications"
 CONFIG = {

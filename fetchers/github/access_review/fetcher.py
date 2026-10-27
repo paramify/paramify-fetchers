@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Who can reach an organization's code and with what rights: owners, members, outside collaborators, invitations,
-teams, organization roles (security manager, all-repository admin and custom roles), and each repository's admins."""
+"""Who can reach the organization's code and with what rights: owners, members, outside collaborators, invitations, teams, roles and repository admins."""
 
 import sys
 from pathlib import Path
@@ -119,7 +118,7 @@ def collect(client, org, repos, config):
             "pending_invitations": None if pending is None else len(pending),
             "teams_total": len(team_rows),
             "teams_with_admin": sorted(t["team"] for t in team_rows if t["admin_on"]),
-            "repositories_with_direct_admins": sorted(r["repository"] for r in done if r["admins"]),
+            "repositories_with_non_owner_admins": sorted(r["repository"] for r in done if r["admins"]),
             # Users holding a role, directly or through a team, by role name; null when roles were not read.
             "organization_role_holders": None if held is None else {
                 r["role"]: sorted(u["login"] for u in r["users"]) for r in held},

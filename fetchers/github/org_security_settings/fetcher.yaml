@@ -58,7 +58,7 @@ evidence_set:
   reference_id: EVD-GITHUB-ORG-SECURITY
   name: GitHub Organization Security Settings
   instructions: >-
-    The organization's two-factor requirement and the members without two-factor
+    Script: github/org_security_settings/fetcher.py. The organization's two-factor requirement and the members without two-factor
     (owners only; null otherwise), default repository permission and member
     creation rights, Actions token default permissions and whether workflows may
     approve pull requests, and every code security configuration with the

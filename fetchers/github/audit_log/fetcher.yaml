@@ -76,7 +76,7 @@ evidence_set:
   reference_id: EVD-GITHUB-AUDIT-LOG
   name: GitHub Organization Audit Log
   instructions: >-
-    Web (non-Git) audit log events since the window start, newest first: a
+    Script: github/audit_log/fetcher.py. Web (non-Git) audit log events since the window start, newest first: a
     count per action and per family, and each event in the access,
     protection and security-control families with time, action, actor,
     country, user, repository, team and visibility change. Requires GitHub

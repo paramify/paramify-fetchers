@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""How GitHub Actions is locked down: which actions may run, pinning, the workflow token, fork pull requests,
-self-hosted runners, and what each workflow file on the default branch actually does.
-
-Settings come from the Actions permissions endpoints. Workflow files are read over GraphQL, ten repositories to a
-query, and parsed here: a setting says what GitHub allows, the files say what runs.
-"""
+"""How GitHub Actions is locked down, from the Actions settings and from every workflow file on the default branch."""
 
 import re
 import sys

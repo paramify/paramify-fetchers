@@ -1,38 +1,8 @@
 """The shared client and entry point for every GitHub fetcher.
 
-A fetcher is a `collect(client, org, repos, config)` function that returns
-`{"summary": {...}, "<records>": [...]}`, plus a line that hands it to `run`:
-
-    if __name__ == "__main__":
-        sys.exit(run(NAME, collect, CONFIG))
-
-`run` reads the target from the environment, lists the organization's
-repositories, calls `collect`, writes the evidence file, and reports any
-failure to the runner.
-
-Failure handling, in two rules:
-  - A call that fails returns None and is recorded on the client. A fetcher
-    that needs it returns None, and the evidence carries no records.
-  - A completeness check that fails keeps the records and marks the evidence
-    partial. Either way the run exits non-zero and says why.
-
-GitHub returns partial or misleading data without an error in several ways.
-Each is handled here, once, so no fetcher has to:
-  - Lists default to 30 items. paginate() asks for 100 and follows every
-    `Link: rel="next"`, for page-number and cursor endpoints alike, and fails
-    on a page cap or a repeated page.
-  - A feature that is switched off answers 403 or 404 with a message, and so
-    does a token that may not read it. read() maps the known messages to a
-    state ("disabled", "not_protected", "plan_unavailable") and records
-    everything else as a failure, naming the permission GitHub says is missing.
-  - A fine-grained token restricted to some repositories lists only those.
-    list_repos() compares the listing with the organization's own counts.
-  - GraphQL answers 200 with an `errors` list, and a heavy page times out
-    (502) instead of failing. graphql_nodes() treats any error as a failure
-    and halves the page on a timeout.
-
-Every REST call is a GET. GraphQL is a POST, so graphql() refuses any document
-that is not a query before it is sent.
+A fetcher is a `collect(client, org, repos, config)` function handed to `run`, which reads the target, lists the
+repositories, writes the evidence and reports failure. A failed call returns None and is recorded on the client; any
+recorded failure makes the run exit non-zero. What GitHub gets wrong, and how this handles it, is in the README.
 """
 
 from __future__ import annotations
@@ -119,6 +89,24 @@ def to_epoch(value: Any) -> Optional[float]:
 
 def days_between(start: Optional[float], end: Optional[float]) -> Optional[float]:
     return None if start is None or end is None else round((end - start) / 86400, 1)
+
+
+SEVERITIES = ("critical", "high", "medium", "low")
+AGE_BUCKETS = (7, 30, 90, 180)
+
+
+def by_severity(alerts: List[dict], field: str) -> Dict[str, int]:
+    return {s: len([a for a in alerts if a[field] == s]) for s in SEVERITIES}
+
+
+def open_older_than(alerts: List[dict], field: str) -> Dict[str, Dict[str, int]]:
+    """Open alerts per severity older than each of AGE_BUCKETS days."""
+    return {str(d): by_severity([a for a in alerts if (a["age_days"] or 0) > d], field) for d in AGE_BUCKETS}
+
+
+def median_days(alerts: List[dict], field: str) -> Optional[float]:
+    values = sorted(a[field] for a in alerts)
+    return values[len(values) // 2] if values else None
 
 
 def as_bool(value: Any) -> Optional[bool]:
@@ -423,8 +411,7 @@ class GitHubClient:
         for status, fragment, state in KNOWN_STATES:
             if resp.status_code == status and fragment in folded:
                 return state, message
-        self.fail(f"GET {path}", f"HTTP {resp.status_code}", _explain(resp, message),
-                  HTTP_CODES.get(resp.status_code, "internal_error"))
+        self.fail(f"GET {path}", f"HTTP {resp.status_code}", _explain(resp, message), _failure_code(resp))
         return "failed", message
 
     def graphql_url(self) -> str:
@@ -442,8 +429,7 @@ class GitHubClient:
         if resp.status_code in GRAPHQL_TIMEOUT:
             return "timeout", None
         if resp.status_code >= 300:
-            self.fail(operation, f"HTTP {resp.status_code}", _explain(resp, _message(resp)),
-                      HTTP_CODES.get(resp.status_code, "internal_error"))
+            self.fail(operation, f"HTTP {resp.status_code}", _explain(resp, _message(resp)), _failure_code(resp))
             return "failed", None
         if not resp.content.strip():
             # Measured on microsoft/vscode: a heavy page can come back as an empty 200 instead of a 502.
@@ -552,12 +538,20 @@ def _int(value: Any) -> Optional[int]:
         return None
 
 
+def _rate_limited(resp: requests.Response) -> bool:
+    return resp.status_code == 429 or (
+        resp.status_code == 403 and bool(resp.headers.get("Retry-After") or resp.headers.get("X-RateLimit-Remaining") == "0"
+                                         or "rate limit" in _message(resp).lower()))
+
+
+def _failure_code(resp: requests.Response) -> str:
+    """A 403 is a missing permission unless GitHub says it is a rate limit."""
+    return "rate_limited" if _rate_limited(resp) else HTTP_CODES.get(resp.status_code, "internal_error")
+
+
 def _retry_wait(resp: requests.Response, attempt: int) -> Optional[float]:
     """Seconds before a retry, or None when final. Waits beyond MAX_WAIT_SECONDS fail as rate_limited instead."""
-    limited = resp.status_code == 429 or (
-        resp.status_code == 403 and (resp.headers.get("Retry-After") or resp.headers.get("X-RateLimit-Remaining") == "0"
-                                     or "rate limit" in _message(resp).lower()))
-    if limited:
+    if _rate_limited(resp):
         retry_after = _int(resp.headers.get("Retry-After"))
         if retry_after is None and resp.headers.get("X-RateLimit-Remaining") == "0":
             reset = _int(resp.headers.get("X-RateLimit-Reset"))

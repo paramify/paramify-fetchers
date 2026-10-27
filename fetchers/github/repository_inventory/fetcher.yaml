@@ -68,9 +68,9 @@ evidence_set:
   reference_id: EVD-GITHUB-REPOSITORY-INVENTORY
   name: GitHub Repository Inventory
   instructions: >-
-    Script: fetcher.py. Lists the organization's repositories (checked against
+    Script: github/repository_inventory/fetcher.py. Lists the organization's repositories (checked against
     the organization's own count) and its custom property values; one record
-    per repository, keyed by its API URL by numeric id. Archived repositories
+    per repository, keyed by its numeric-id API URL. Archived repositories
     are left out unless include_archived is true. A run that could not collect
     every repository writes no records, and the uploader does not send it.
   description: >-

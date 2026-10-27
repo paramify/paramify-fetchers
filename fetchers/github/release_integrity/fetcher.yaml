@@ -67,7 +67,7 @@ evidence_set:
   reference_id: EVD-GITHUB-RELEASE-INTEGRITY
   name: GitHub Release Integrity
   instructions: >-
-    Per repository, the newest releases with each asset's sha256 digest and
+    Script: github/release_integrity/fetcher.py. Per repository, the newest releases with each asset's sha256 digest and
     the attestations GitHub holds for it (count, predicate types, whether the
     statement names the digest; signatures are not verified), whether each
     release is immutable, and whether active tag rulesets block deleting and

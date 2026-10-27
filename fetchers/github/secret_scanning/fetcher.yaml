@@ -55,7 +55,7 @@ evidence_set:
   reference_id: EVD-GITHUB-SECRET-SCANNING
   name: GitHub Secret Scanning
   instructions: >-
-    Per repository, the secret scanning and push protection settings, every
+    Script: github/secret_scanning/fetcher.py. Per repository, the secret scanning and push protection settings, every
     alert (requested with hide_secret; the secret value is never collected)
     with type, validity (active, inactive, unknown), resolution and age, and
     every alert whose push bypassed push protection. Settings are null when

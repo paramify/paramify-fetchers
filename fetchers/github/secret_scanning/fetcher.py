@@ -6,7 +6,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
 from github_client import (  # noqa: E402
-    FEATURE_OFF,
     days_between,
     iso,
     now_epoch,
@@ -17,6 +16,10 @@ from github_client import (  # noqa: E402
 NAME = "github_secret_scanning"
 SETTINGS = ("secret_scanning", "secret_scanning_push_protection", "secret_scanning_non_provider_patterns",
             "secret_scanning_validity_checks")
+GENERIC_TYPES = ",".join(("ec_private_key", "generic_private_key", "http_basic_authentication_header",
+                          "http_bearer_authentication_header", "mongodb_connection_string", "mysql_connection_url",
+                          "openssh_private_key", "pgp_private_key", "postgres_connection_string", "rsa_private_key",
+                          "password"))
 
 
 def alert_record(alert, now):
@@ -50,11 +53,16 @@ def repo_record(client, org, repo, now):
     # Only an admin or security manager sees security_and_analysis; absent means unreadable, never "disabled".
     settings = None if sa is None else {k: (sa.get(k) or {}).get("status") for k in SETTINGS}
     state, alerts = client.paginate(f"{base}/secret-scanning/alerts", {"hide_secret": "true"})
+    if state is None:
+        # Without secret_type GitHub returns provider patterns only; non-provider and generic ones must be named.
+        state, generic = client.paginate(f"{base}/secret-scanning/alerts",
+                                         {"hide_secret": "true", "secret_type": GENERIC_TYPES})
+        alerts = list({a.get("number"): a for a in (alerts or []) + (generic or [])}.values())
     if state == "failed":
         return {**record, "collected": False, "settings": settings}
     alerts = [alert_record(a, now) for a in alerts or []]
     open_alerts = [a for a in alerts if a["state"] == "open"]
-    enabled = state != FEATURE_OFF
+    enabled = state is None  # disabled, or not on this plan: not scanning either way
     record.update({
         "collected": True,
         "settings": settings,

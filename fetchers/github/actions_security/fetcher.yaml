@@ -73,7 +73,7 @@ evidence_set:
   reference_id: EVD-GITHUB-ACTIONS-SECURITY
   name: GitHub Actions Security
   instructions: >-
-    Organization and repository Actions policy (allowed actions, SHA pinning
+    Script: github/actions_security/fetcher.py. Organization and repository Actions policy (allowed actions, SHA pinning
     required, workflow token default and PR approval, fork PR approval,
     retention, self-hosted runners), and per workflow file on the default
     branch: action references not pinned to a full commit SHA, permissions

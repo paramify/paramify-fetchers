@@ -79,10 +79,11 @@ evidence_set:
   reference_id: EVD-GITHUB-PR-CHECKS
   name: GitHub Pull Request Reviews and Checks
   instructions: >-
-    Per repository, pull requests merged into the default branch within
-    days_back, each with approvals (latest review per reviewer before the
-    merge, author excluded, bots marked), who merged it, labels, and the outcome of every check and
-    commit status on the merged head, and which failed or missing checks the
-    branch requires at collection time. `direct_pushes` lists default-branch
-    commits no merged pull request brought in. A window larger than the
-    configured maximums fails as truncated instead of publishing part of it.
+    Script: github/pull_request_checks/fetcher.py. Per repository, pull
+    requests merged into the default branch within days_back, each with
+    approvals (latest review per reviewer before the merge, author excluded,
+    bots marked), who merged it, labels, the outcome of every check and commit
+    status on the merged head, and which failed or missing checks the branch
+    requires at collection time. `direct_pushes` lists default-branch commits
+    no merged pull request brought in. A window larger than the configured
+    maximums fails as truncated.
