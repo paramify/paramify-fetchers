@@ -7,7 +7,7 @@ statement: >-
   authentication context), someone's approval and a justification, and no privileged role can be
   activated for more than 8 hours; every privileged role's tenant-wide policy stated each rule.
   Substantiates that activation requires MFA, approval, justification and a bounded duration
-  (KSI-IAM-JIT, KSI-MLA-ALA). 8 hours is a placeholder for the organization's maximum. Relies on
+  (KSI-IAM-JIT). 8 hours is a placeholder for the organization's maximum. Relies on
   entra_pim_privileged_role_policies_read. Does NOT prove MFA that Conditional Access requires at
   sign-in, who the approvers are, ticket numbers, or policies scoped below the tenant.
 
