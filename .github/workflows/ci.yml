@@ -66,9 +66,11 @@ jobs:
       # the CLI must stay clean with textual installed.
       - run: python -m pip install -e ".[dev,tui]"
       # Includes tests/test_contracts.py — the schema contract gate over every
-      # fetcher.yaml and _categories/*.yaml.
+      # fetcher.yaml and _categories/*.yaml. `-n auto` (pytest-xdist) spreads the
+      # suite over the runner's cores: serial it took over 4 minutes. A test that
+      # fails here but passes alone shares state with another test; fix the test.
       - name: pytest
-        run: pytest -q
+        run: pytest -q -n auto
 
   azure-sdk:
     name: azure-sdk (surface)
