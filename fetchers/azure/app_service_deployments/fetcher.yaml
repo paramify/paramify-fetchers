@@ -46,8 +46,7 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-CMT-RMV   # how each app is deployed: Kudu records, swaps, publishing-credential use, source control
-  - KSI-RPL-ARP   # slots and production compared setting by setting before a swap or a swap back
+  - KSI-CMT-RMV   # how each app is deployed: Kudu records, swaps, publishing-credential use, source control, slot drift
 
 evidence_set:
   reference_id: EVD-AZURE-APPSVC-DEPLOYMENTS
