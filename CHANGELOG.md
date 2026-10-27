@@ -267,6 +267,37 @@ schemas and the `paramify` CLI — not the internal code.
     written only when it is a version number) to runtime support; without it, a Windows
     app on the default .NET Framework v4.0 reads as unknown rather than supported.
     Production sites only; deployment slots are not read.
+- **`azure_storage_encryption_status` 0.2.0 adds geo-replication, access-key age
+  and containers.** Each account now carries its primary and secondary region and
+  their status, and a geo-redundant account its replication health from
+  `get_properties(expand=geoReplicationStats)`: status, last sync time,
+  `sync_lag_minutes` (measured when each answer arrives, never below 0) and
+  whether it can fail over. A `LastSyncTimeUnavailable` answer reads
+  `stats_status: unavailable` rather than failing the run. Both access keys get an
+  age from `keyCreationTime`, judged to the moment against the key expiry policy
+  (`access_keys_within_expiration_period`); `listKeys` is never called. A key with
+  no `keyCreationTime` (an older account whose keys were never rotated since Azure
+  began recording it) has an unknown age, so the account's and the summary's
+  maximum age and the 90-day and beyond-policy counts read null rather than
+  leaving it out; the longest sync lag is null the same way while any
+  geo-redundant account's lag is unknown. Every blob container is listed with its
+  public access level, `anonymous_access_effective` (the account must not forbid
+  it: an unset `allowBlobPublicAccess` allows it, as Azure documents; and its
+  network must admit public clients, which public network access Disabled does
+  not, nor, outside `SecuredByPerimeter`, a firewall that denies by default with
+  no IP or virtual network rule), metadata keys (never values) and its immutability and legal-hold flags. The account's
+  tags are recorded with `owner_tag` and `classification_tag`, taken from tag keys
+  set by the new `owner_tag_keys` and `classification_tag_keys` config. Summary
+  adds geo-replication, key-age, container and tag counts. Any other error reading
+  geo stats or listing containers fails the run. Also maps to `KSI-CNA-OFA`,
+  `KSI-RPL-ABO` and `KSI-PIY-GIV`. One existing field changes:
+  `allow_blob_public_access` reads an unset `allowBlobPublicAccess` as true, as
+  Azure treats it (the same rule as shared-key and cross-tenant access), so
+  `public_blob_access_accounts` now counts those accounts.
+  A read-only run on a real subscription with Reader exercised geo stats, key ages
+  and container listing; `LastSyncTimeUnavailable`, key expiry policies,
+  immutability policies, legal holds and container metadata are proven by
+  synthetic tests only.
 - **`azure_front_door_origins` 0.5.0: Kudu and silent regions.** An app whose
   Kudu (scm) site has its own access restrictions
   (`scmIpSecurityRestrictionsUseMain` off) that let every public caller in is no

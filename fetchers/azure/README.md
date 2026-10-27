@@ -232,7 +232,7 @@ Data, storage and keys:
 
 | Fetcher | Evidence |
 |---|---|
-| `azure_storage_encryption_status` | Storage accounts: customer- or platform-managed key, infrastructure encryption, HTTPS and TLS, public access, network rules, shared-key access |
+| `azure_storage_encryption_status` | Storage accounts: customer- or platform-managed key, infrastructure encryption, HTTPS and TLS, public access, network rules, shared-key access, access-key age (never the keys), geo-replication health, each blob container's anonymous access and immutability, owner and classification tags |
 | `azure_disk_encryption_status` | Managed disks: platform key, customer-managed key or double encryption, Azure Disk Encryption, export exposure |
 | `azure_key_vault_configuration` | Key vaults: RBAC or access policies, soft delete and purge protection, network exposure, and whether audit events are exported |
 | `azure_key_vault_key_rotation` | Every key's rotation policy and expiry, and every secret's expiry. No key material or secret value is read |
