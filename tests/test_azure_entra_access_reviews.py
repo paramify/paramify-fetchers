@@ -132,6 +132,28 @@ def test_no_active_review_is_not_compliance():
     assert summary["monthly_auto_removal_percentage"] == 0
     assert summary["all_active_definitions_monthly_auto_removal"] is False
     assert summary["max_days_since_last_completed_cycle"] is None
+    assert summary["all_active_definitions_auto_removal"] is False
+    assert summary["max_active_recurrence_period_days"] is None
+
+
+def test_a_validator_can_set_its_own_cadence():
+    # Graph's own doc example: quarterly, Recommendation default.
+    docs_example = _definition("d-docs", "Guests quarterly", interval=3, default="Recommendation")
+    quarterly = _definition("d-quarterly", "Quarterly deny", interval=3)
+    weekly = _definition("d-weekly", "Admins weekly", pattern="weekly")
+    results, summary = ar.build([quarterly, weekly], {"d-quarterly": [], "d-weekly": []}, {}, [], NOW)
+    assert summary["all_active_definitions_monthly_auto_removal"] is False
+    assert summary["all_active_definitions_auto_removal"] is True
+    assert summary["max_active_recurrence_period_days"] == 90
+    assert {r["id"]: r["auto_removal"] for r in results["review_definitions"]} == {"d-quarterly": True, "d-weekly": True}
+
+    _, summary = ar.build([quarterly, docs_example], {"d-quarterly": [], "d-docs": []}, {}, [], NOW)
+    assert summary["all_active_definitions_auto_removal"] is False
+    assert summary["max_active_recurrence_period_days"] == 90
+
+    one_time = _definition("d-once", "One time", pattern=None)
+    _, summary = ar.build([quarterly, one_time], {"d-quarterly": [], "d-once": []}, {}, [], NOW)
+    assert summary["max_active_recurrence_period_days"] is None
 
 
 def test_what_is_reviewed_is_read_from_the_scope():

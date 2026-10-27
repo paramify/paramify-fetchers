@@ -92,6 +92,8 @@ evidence_set:
     - monthly_auto_removal_percentage — Percentage of active review series with monthly auto-removal = active_definitions_monthly_auto_removal / active_review_definitions × 100 (a whole number, 0–100); 0 when active_review_definitions is 0
     - active_definitions_without_monthly_auto_removal — List of active review series names without monthly auto-removal
     - all_active_definitions_monthly_auto_removal — True if every active review series has monthly auto-removal; false if any doesn't, or none is active
+    - all_active_definitions_auto_removal — True if every active review series denies unanswered reviews and applies decisions automatically, however often it recurs; false if any doesn't, or none is active
+    - max_active_recurrence_period_days — Days: the longest recurrence period of any active review series (daily 1, weekly 7, monthly 30, yearly 365, times the interval), for a validator that sets its own cadence; null if none is active or any active series is one-time or has a pattern not listed here
     - active_self_review_definitions — List of active review series names where users review their own access (no reviewers named on the series; for a multi-stage series, none named on any of its stages, since Graph then ignores the series' own list)
 
     Are the reviews running on schedule?

@@ -277,6 +277,7 @@ def definition_record(definition: Dict[str, Any], read_instances: Optional[List[
         "recurs_at_least_monthly": at_least_monthly,
         "default_decision_deny": default_deny,
         "auto_applies_decisions": auto_apply,
+        "auto_removal": default_deny and auto_apply,
         "monthly_auto_removal": at_least_monthly and default_deny and auto_apply,
         # Graph ignores the top-level reviewers once a series has stages; each stage names its own.
         "self_review": not any(st["reviewers"] for st in stages) if stages else not definition.get("reviewers"),
@@ -293,6 +294,7 @@ def summarize(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     active = [r for r in records if r["active"]]
     recurring = [r for r in active if r["recurring"]]
     meeting = [r for r in active if r["monthly_auto_removal"]]
+    periods = [r["recurrence_period_days"] for r in active]
     by_result = {d: 0 for d in DECISIONS}
     for r in active:
         for key, n in r["last_cycle"]["decisions_by_result"].items():
@@ -313,6 +315,9 @@ def summarize(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         "monthly_auto_removal_percentage": coverage_percentage(len(meeting), len(active)),
         "active_definitions_without_monthly_auto_removal": names(r for r in active if not r["monthly_auto_removal"]),
         "all_active_definitions_monthly_auto_removal": bool(active) and len(meeting) == len(active),
+        # The KSIs set no cadence: these two let a validator choose its own bar instead of monthly.
+        "all_active_definitions_auto_removal": bool(active) and all(r["auto_removal"] for r in active),
+        "max_active_recurrence_period_days": None if not active or None in periods else max(periods),
         "active_self_review_definitions": names(r for r in active if r["self_review"]),
         "active_recurring_definitions_without_completed_cycle": names(
             r for r in recurring if r["last_completed_cycle_end"] is None
