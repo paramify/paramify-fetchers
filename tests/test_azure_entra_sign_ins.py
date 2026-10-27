@@ -390,9 +390,17 @@ def _rest_client(session, monkeypatch):
 
 
 def test_a_read_timeout_on_a_graph_page_is_retried(monkeypatch):
-    session = TimingOutSession(timeouts=2)
+    session = TimingOutSession(timeouts=1)
     assert _rest_client(session, monkeypatch).graph_list("/auditLogs/signIns", "beta") == [{"id": "s1"}]
-    assert session.calls == 3
+    assert session.calls == 2
+
+
+def test_a_get_that_keeps_timing_out_is_tried_twice_then_raises(monkeypatch):
+    # Five 60 s tries would outlast the runner's 600 s default for most fetchers.
+    session = TimingOutSession(timeouts=10)
+    with pytest.raises(requests.ReadTimeout):
+        _rest_client(session, monkeypatch).graph_list("/auditLogs/signIns", "beta")
+    assert session.calls == 2
 
 
 def test_a_read_timeout_on_a_post_is_not_resent(monkeypatch):

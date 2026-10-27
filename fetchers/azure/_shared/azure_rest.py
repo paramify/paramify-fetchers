@@ -36,6 +36,8 @@ QUERY_TIMEOUT = 600
 RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 MAX_RETRIES = 4
 MAX_RETRY_WAIT = 120
+# Each timed-out try costs HTTP_TIMEOUT, and most fetchers run inside the runner's 600 s default.
+MAX_TIMEOUT_RETRIES = 1
 # Sent as x-ms-app so LAQueryLogs can tell this collector's queries from people's.
 CLIENT_APP = "paramify-fetchers"
 WORKSPACES_ENV = "SENTINEL_WORKSPACES"
@@ -123,6 +125,7 @@ class AzureRestClient:
         """One request, retried on throttling, transient 5xx and dropped connections, and a GET on a timeout."""
         import requests  # lazy
 
+        timeouts = 0
         for attempt in range(MAX_RETRIES + 1):
             sent = {"Authorization": f"Bearer {self._token(resource)}", **(headers or {})}
             try:
@@ -134,8 +137,9 @@ class AzureRestClient:
                 continue
             except requests.Timeout:
                 # A read timeout may come after the server acted, so only an idempotent GET is resent.
-                if method != "get" or attempt == MAX_RETRIES:
+                if method != "get" or timeouts == MAX_TIMEOUT_RETRIES or attempt == MAX_RETRIES:
                     raise
+                timeouts += 1
                 _LOGGER.warning("%s %s timed out; retrying", method.upper(), url.split("?")[0])
                 time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
                 continue
