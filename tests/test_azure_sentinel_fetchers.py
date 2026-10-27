@@ -560,6 +560,12 @@ def test_analytics_rules_tables_and_data(azure, tmp_path):
         ("SecurityAlert", 2, True), ("SigninLogs", 1, False), ("Syslog", 1, True)]
     assert ws["workspace_tables_listed"] == len(WORKSPACE_TABLES) and ws["ingestion_window_days"] == 14
     assert ev["summary"]["enabled_rules_missing_data"] == 4 and ev["summary"]["ingesting_tables_not_read"] == 1
+    # A template's data types are what the rule may read, so tables read only that way are labelled.
+    assert {t["table"]: t["enabled_rules_by_template"] for t in ws["tables_read_by_enabled_rules"]} == {
+        "AzureActivity": 0, "CommonSecurityLog": 2, "Event": 1, "MyApp_CL": 0, "SecurityAlert": 0, "SigninLogs": 0,
+        "Syslog": 1}
+    assert ws["ingesting_tables_read_only_by_templates"] == ["Syslog"]
+    assert ev["summary"]["ingesting_tables_read_only_by_templates"] == 1
 
 
 def test_analytics_rules_disabled_incident_rule_still_gets_its_product_checked(azure, tmp_path):

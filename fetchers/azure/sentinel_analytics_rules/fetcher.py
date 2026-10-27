@@ -287,17 +287,26 @@ def coverage(rules: List[Dict[str, Any]], ingested: Optional[Dict[str, Any]]) ->
     """Which ingesting tables enabled rules read, which they don't, and which enabled rules read tables with no data."""
     enabled = [r for r in rules if r.get("enabled") is True]
     readers: Dict[str, int] = {}
+    # A template's data types are the sources a rule may read, not ones its query is known to read.
+    by_template: Dict[str, int] = {}
     for r in enabled:
         for t in r.get("tables_read") or []:
             readers[t] = readers.get(t, 0) + 1
+            if r.get("tables_from") == "template":
+                by_template[t] = by_template.get(t, 0) + 1
+    sources = [t for t in ingested or {} if t not in NON_SOURCE_TABLES | {ALERTS_TABLE}]
     return {
         "enabled_rules_tables_unknown": sum(1 for r in enabled if r.get("tables_read") is None),
         "tables_read_by_enabled_rules": [
-            {"table": t, "enabled_rules": n, "last_ingested": ingested.get(t) if ingested is not None else None}
+            {"table": t, "enabled_rules": n, "enabled_rules_by_template": by_template.get(t, 0),
+             "last_ingested": ingested.get(t) if ingested is not None else None}
             for t, n in sorted(readers.items(), key=lambda kv: kv[0].lower())
         ],
         "ingesting_tables_not_read": (
-            sorted((t for t in ingested if t not in NON_SOURCE_TABLES | {ALERTS_TABLE} and t not in readers), key=str.lower)
+            sorted((t for t in sources if t not in readers), key=str.lower) if ingested is not None else None
+        ),
+        "ingesting_tables_read_only_by_templates": (
+            sorted((t for t in sources if t in readers and readers[t] == by_template.get(t, 0)), key=str.lower)
             if ingested is not None else None
         ),
         "enabled_rules_missing_data": (
@@ -412,6 +421,7 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
         "workspaces_with_fusion_enabled": sum(1 for w in collected if w.get("fusion_enabled") is True),
         "enabled_rules_missing_data": _total(collected, "enabled_rules_missing_data"),
         "ingesting_tables_not_read": _total(collected, "ingesting_tables_not_read"),
+        "ingesting_tables_read_only_by_templates": _total(collected, "ingesting_tables_read_only_by_templates"),
         "enabled_rules_tables_unknown": _total(collected, "enabled_rules_tables_unknown"),
     }
 
