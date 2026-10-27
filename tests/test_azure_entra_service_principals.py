@@ -600,7 +600,7 @@ def test_denied_app_role_assignments_fail_the_run_with_null_permission_figures(m
 
 def test_denied_grants_leave_delegated_figures_null_without_failing(monkeypatch, tmp_path):
     graph = FakeGraph(**_tenant())
-    graph.oauth2_permission_grants.error = DENIED
+    graph.oauth2_permission_grants.error = _api_error(403, "Insufficient privileges to complete the operation.")
     code, evidence, _ = _run(monkeypatch, tmp_path, graph)
 
     assert code == 0
@@ -624,6 +624,24 @@ def test_grants_status_follows_the_status_code_not_the_message(monkeypatch, tmp_
     graph = FakeGraph(**_tenant())
     graph.oauth2_permission_grants.error = _api_error(502, "Forbidden by upstream proxy")
     code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+    assert code == 1
+    assert evidence["summary"]["delegated_grants_status"] == "failed"
+    assert evidence["metadata"]["api_failures"]
+
+    # Graph's own error code counts, read from the error object rather than the text.
+    graph = FakeGraph(**_tenant())
+    denied = Exception("Access denied")
+    denied.error = ns(code="Authorization_RequestDenied", message="Access denied")
+    graph.oauth2_permission_grants.error = denied
+    code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+    assert code == 0
+    assert evidence["summary"]["delegated_grants_status"] == "not_authorized"
+
+
+def test_a_server_error_that_mentions_privileges_is_not_a_denial(monkeypatch, tmp_path):
+    graph = FakeGraph(**_tenant())
+    graph.oauth2_permission_grants.error = _api_error(500, "Insufficient privileges to complete the operation.")
+    code, evidence, status = _run(monkeypatch, tmp_path, graph)
     assert code == 1
     assert evidence["summary"]["delegated_grants_status"] == "failed"
     assert evidence["metadata"]["api_failures"]

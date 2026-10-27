@@ -64,7 +64,6 @@ from entra_graph import (  # noqa: E402
     aguard,
     graph_attr,
     graph_list,
-    is_denied,
     is_graph_resource,
     is_privileged_graph_permission,
     paginate,
@@ -852,6 +851,13 @@ async def _expanded(
     return related if len(collector.failures) == before else None
 
 
+def _grants_denied(exc: BaseException) -> bool:
+    """A 401 or 403, or Graph's Authorization_RequestDenied code on the error object; never the message text."""
+    if getattr(exc, "response_status_code", None) in (401, 403):
+        return True
+    return getattr(getattr(exc, "error", None), "code", None) == "Authorization_RequestDenied"
+
+
 async def _reread(collector, operation, builder, request_configuration=None) -> list | None:
     """One object's whole related list; None if the object was deleted since the collection read (404)."""
     try:
@@ -994,7 +1000,7 @@ async def _access(collector: Collector, client, service_principals: list[dict]) 
         grants = {}
         for g in (project_permission_grant(m) for m in grant_models):
             grants.setdefault(g["client_id"], []).append(g)
-    elif all(is_denied(exc) for _, exc in deferred.calls):
+    elif all(_grants_denied(exc) for _, exc in deferred.calls):
         grants_status = "not_authorized"
         logger.warning(
             "Delegated permission grants are unreadable without DelegatedPermissionGrant.Read.All "
