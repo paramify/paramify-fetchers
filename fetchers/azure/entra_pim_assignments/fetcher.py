@@ -185,7 +185,8 @@ def assignment_record(instance: Dict[str, Any], index: Optional[Dict[str, Dict[s
     record = {
         **{k: v for k, v in instance.items() if active or k != "assignment_type"},
         **role_fields(index, instance.get("role_definition_id")),
-        "tenant_wide": (instance.get("directory_scope_id") or "/") == "/",
+        # A missing scope isn't assumed to be the tenant.
+        "tenant_wide": instance.get("directory_scope_id") == "/",
         "is_permanent": not instance.get("end_date_time"),
     }
     if active:
@@ -194,8 +195,9 @@ def assignment_record(instance: Dict[str, Any], index: Optional[Dict[str, Dict[s
 
 
 def _enabled(rules: Dict[str, Dict[str, Any]], rule_id: str, value: str) -> Optional[bool]:
-    rule = rules.get(rule_id)
-    return None if rule is None else value in (rule.get("enabled_rules") or [])
+    # Graph sends [] when nothing is enabled, so a rule without the list is unknown.
+    enabled = (rules.get(rule_id) or {}).get("enabled_rules")
+    return None if enabled is None else value in enabled
 
 
 def _allows_permanent(rules: Dict[str, Dict[str, Any]], rule_id: str) -> Optional[bool]:
@@ -298,7 +300,7 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
         "permanent_active_privileged_user_assignments": permanent_users,
         "principals_with_permanent_privileged_access": len({a["principal_id"] for a in priv_permanent}),
         "privileged_roles_with_permanent_active_holders": names(priv_permanent),
-        "global_administrator_eligible": sum(1 for e in eligible if e["is_global_administrator"]),
+        "global_administrator_eligible": sum(1 for e in priv_eligible if e["is_global_administrator"]),
         "global_administrator_permanent_active": sum(1 for a in priv_permanent if a["is_global_administrator"]),
         "privileged_assignments_scoped_below_tenant": len(below_tenant),
         "privileged_role_policies": len(priv_policies),

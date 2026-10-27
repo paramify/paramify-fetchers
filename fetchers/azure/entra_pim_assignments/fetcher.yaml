@@ -89,7 +89,7 @@ evidence_set:
     - permanently_eligible_privileged_assignments — Number of eligible assignments to privileged roles with no end date
     - principals_eligible_for_privileged_roles — Number of distinct users, groups and apps eligible for at least one privileged role
     - privileged_roles_with_eligible_holders — List of privileged role names with at least one eligible assignment
-    - global_administrator_eligible — Number of eligible assignments to Global Administrator
+    - global_administrator_eligible — Number of eligible assignments to Global Administrator, held tenant-wide as global_administrator_permanent_active counts them (Entra can't scope Global Administrator below the tenant, so this leaves nothing out)
 
     Who holds a privileged role right now, and for how long?
     - active_assignments — Number of active assignments (a role held now) across all directory roles, including activations of an eligible assignment

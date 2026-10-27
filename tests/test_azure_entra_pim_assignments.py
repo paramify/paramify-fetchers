@@ -264,6 +264,33 @@ def test_privileged_counts_take_only_tenant_wide_direct_grants():
     assert summary["privileged_assignments_scoped_below_tenant"] == 2
 
 
+def test_a_missing_scope_is_not_tenant_wide():
+    results, summary = pim.build(DEFINITIONS, [], [_instance(GA, "u-ga", scope=None)], [_policy(GA)], [])
+    assert results["active_assignments"][0]["tenant_wide"] is False
+    assert summary["permanent_active_privileged_assignments"] == 0
+    assert summary["privileged_assignments_scoped_below_tenant"] == 1
+
+
+def test_a_rule_without_its_enabled_list_is_unknown():
+    policy = _policy(GA)
+    for rule in policy["rules"]:
+        if rule["id"] == "Enablement_EndUser_Assignment":
+            del rule["enabled_rules"]
+    record = pim.policy_record(policy, pim.role_index(DEFINITIONS))
+    assert record["activation_requires_mfa"] is None
+    assert record["activation_requires_justification"] is None
+    assert record["active_assignment_requires_mfa"] is True
+
+    nothing_enabled = pim.policy_record(_policy(GA, mfa=False, justification=False), pim.role_index(DEFINITIONS))
+    assert nothing_enabled["activation_requires_mfa"] is False
+
+
+def test_global_administrator_eligible_counts_tenant_wide_grants_like_permanent_active():
+    eligible = [_instance(GA, "u-ga"), _instance(GA, "u-scoped", scope="/administrativeUnits/au-1")]
+    _, summary = pim.build(DEFINITIONS, eligible, [], [_policy(GA)], [])
+    assert summary["global_administrator_eligible"] == 1
+
+
 def test_member_type_is_compared_without_case():
     assert pim.counted({"member_type": "direct"}) and pim.counted({"member_type": None})
     assert not pim.counted({"member_type": "group"})
