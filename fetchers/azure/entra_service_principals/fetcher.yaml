@@ -72,7 +72,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_service_principals/fetcher.py
 
-    Access: Microsoft Graph Application.Read.All, or the Directory Readers role. Optional: DelegatedPermissionGrant.Read.All (or Directory.Read.All; the Directory Readers role covers both); without it, the delegated grant fields read null. Optional: User.Read.All (or Directory.Read.All; the Directory Readers role covers it); without it, user owners come back as an id only, so their names and account state read null and service_principals_with_only_disabled_owners reads null.
+    Access: Microsoft Graph Application.Read.All, or the Directory Readers role. Optional: DelegatedPermissionGrant.Read.All (or Directory.Read.All; the Directory Readers role covers both); without it, the delegated grant fields read null. Optional: User.Read.All (or Directory.Read.All; the Directory Readers role covers it); without it, user owners come back as an id only, so their names and account state read null and service_principals_with_only_disabled_owners reads null. Optional: Organization.Read.All; without it, the tenant's name and domain read null.
 
     Commands Executed:
     - Microsoft Graph GET /organization — the tenant's name and domain
@@ -92,7 +92,7 @@ evidence_set:
     - total_service_principals — Number of service principals (apps, managed identities and other non-user accounts) in the tenant
     - disabled_service_principals — Number of service principals that are disabled
     - owners_readable — True if the owners (the users or service principals listed as able to manage an app registration or service principal) of every app registration and service principal were read; false if any owner read failed, and every count that needs owners reads null
-    - owner_details_readable — True if owners were read and every owner of a service principal that can have one (any service principal except Microsoft's own apps and managed identities), or of an app registration with no service principal, came back with its account state (enabled or disabled); false if not, and service_principals_with_only_disabled_owners reads null
+    - owner_details_readable — True if owners were read and every service principal that can have one (any service principal except Microsoft's own apps and managed identities), and every app registration with no service principal, either has an owner known to be enabled or has every owner's account state (enabled or disabled); false if not, and service_principals_with_only_disabled_owners reads null
     - application_permissions_readable — True if every service principal's application permissions (app roles on an API, used with no user signed in) and their names were read; false if any read failed, and the application permission fields read null
     - delegated_grants_readable — True if the delegated grants (permissions to call an API on behalf of a signed-in user) were read; false if they couldn't be (usually DelegatedPermissionGrant.Read.All isn't granted), and the delegated grant fields read null
 
