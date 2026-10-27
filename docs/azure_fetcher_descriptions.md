@@ -4880,13 +4880,14 @@ Short Description: Shows which identities and groups hold which Azure DevOps per
 
 Script: fetchers/azure/devops_permissions/fetcher.py (uses the shared Azure DevOps client fetchers/azure/_shared/devops_rest.py)
 
-Access: A personal access token for the organization with Security (Manage), Identity (Read) and Project and Team (Read), since Azure DevOps has no read-only scope for permissions and the fetcher only reads; or an Entra identity in the organization that can view permissions in each namespace.
+Access: A personal access token for the organization with Security (Manage), Identity (Read), Code (Read) and Project and Team (Read), since Azure DevOps has no read-only scope for permissions and the fetcher only reads; or an Entra identity in the organization that can view permissions in each namespace and read every Git repository, since repositories it can't read aren't counted.
 
 Commands Executed:
 - `GET _apis/connectionData` — identifies the signed-in user
 - `GET _apis/projects` — lists projects, to name them in each entry
 - `GET _apis/securitynamespaces` — the security namespaces and the name of each permission bit
 - `GET _apis/accesscontrollists/{namespace}` (per namespace) — every permission entry, with inherited and effective rights
+- `GET _apis/git/repositories` — counts Git repositories, since branch policies exist only in Git
 - `GET _apis/identities` (in batches) — the user, group or service account behind each entry
 
 Output: `azure_devops_permissions_<organization>.json` — every explicit permission entry in the organization's delivery-related namespaces (organization, project, Git and TFVC, build, release, environments, service connections, library and audit streams), with who it applies to, the scope it applies at, and the actions it allows, denies and inherits, plus the high-impact rights held outside the admin groups.
@@ -4895,27 +4896,33 @@ Summary fields:
 
 **What was read?**
 - `namespaces_collected` — Number of security namespaces whose permission entries were read
-- `namespaces_not_found` — List of expected namespaces the organization doesn't have (for example VersionControlPrivileges when TFVC isn't used)
-- `acls_total` — Number of permission lists, one per secured object such as a project, repository, pipeline or service connection
-- `acls_with_inheritance_off` — Number of permission lists that don't inherit from their parent object
-- `entries_total` — Number of permission entries that allow or deny at least one action
-- `entries_by_scope` — Number of permission entries at each scope: organization, project, repository, branch (Git), path (TFVC), folder, pipeline (build), release_stage (classic release), environment, service_connection, variable_group or secure_file
-- `entries_with_deny` — Number of permission entries that deny at least one action
+- `namespaces_not_found` — List of expected namespaces missing from the organization's list of security namespaces; null if that list couldn't be read
+- `namespaces_not_read` — List of namespaces whose permission entries couldn't be read; null if the list of security namespaces couldn't be read
+- `acls_total` — Number of permission lists, one per secured object such as a project, repository, pipeline or service connection; null if a namespace couldn't be read
+- `acls_with_inheritance_off` — Number of permission lists that don't inherit from their parent object; null if a namespace couldn't be read
+- `entries_total` — Number of permission entries that allow or deny at least one action; null if a namespace couldn't be read
+- `entries_by_scope` — Number of permission entries at each scope: organization, project, repository, branch (Git), path (TFVC), folder, pipeline (build), release_stage (classic release), environment, service_connection, variable_group, secure_file or library_item (any other library item); null if a namespace couldn't be read
+- `entries_with_deny` — Number of permission entries that deny at least one action; null if a namespace couldn't be read
+- `git_repositories` — Number of Git repositories in the projects collected (every project, or only the ones the `projects` setting names); 0 when the organization uses only TFVC; null if they couldn't be listed
 
 **Who holds permissions?**
-- `identities_with_explicit_entries` — Number of users, groups and service accounts named in at least one permission entry
-- `unresolved_identities` — Number of identities in permission entries that couldn't be looked up, so their name and type are unknown
-- `users_with_direct_entries` — List of people granted or denied permissions directly rather than through a group
+- `identities_with_explicit_entries` — Number of users, groups and service accounts named in at least one permission entry; null if a namespace couldn't be read
+- `unresolved_identities` — Number of identities in permission entries that couldn't be looked up, so their name and type are unknown; null if a namespace couldn't be read
+- `users_with_direct_entries` — List of people granted or denied permissions directly rather than through a group; null if a namespace couldn't be read
 
 **Are high-impact rights limited to the admin groups?**
-- `high_impact_grants` — Number of permission entries that allow, and don't also deny, a high-impact action, meaning managing permissions or enterprise policies, deleting a project or changing its visibility, editing or bypassing branch policies, deleting a repository or force-pushing, administering TFVC or checking in other users' changes, editing, deleting or administering build and release pipelines, overriding check-in validation, managing release approvers, administering service connections, environments or the library, and managing or deleting audit streams
-- `high_impact_grants_outside_admin_groups` — Number of permission entries that allow a high-impact action to anyone other than the admin groups, meaning the built-in Project Collection Administrators, Project Collection Service Accounts, Project Collection Build Administrators, and each project's Project Administrators, Build Administrators, Release Administrators and Endpoint Administrators
-- `identities_with_high_impact_rights_outside_admin_groups` — List of users, groups and service accounts outside the admin groups that hold a high-impact action
-- `high_impact_rights_outside_admin_groups_by_right` — Number of permission entries outside the admin groups for each high-impact action, as namespace: action
-- `branch_policy_bypass_holders` — List of identities allowed to bypass Git branch policies (exempt from policy enforcement, or bypass policies when completing a pull request)
+- `high_impact_grants` — Number of permission entries that allow, and don't also deny, a high-impact action, meaning managing permissions or enterprise policies, deleting a project or changing its visibility, editing or bypassing branch policies, deleting a repository or force-pushing, administering TFVC or checking in other users' changes, editing, deleting or administering build and release pipelines, overriding check-in validation, managing release approvers, administering service connections, environments or the library, and managing or deleting audit streams; null if a namespace couldn't be read
+- `high_impact_grants_outside_admin_groups` — Number of permission entries that allow a high-impact action to anyone other than the admin groups, meaning the groups named Project Collection Administrators, Project Collection Service Accounts, Project Collection Build Administrators, and each project's Project Administrators, Build Administrators, Release Administrators and Endpoint Administrators; null if a namespace couldn't be read or an identity couldn't be looked up. Expect it above 0 even on an organization left at its defaults, since project Contributors may edit and delete build and release pipelines and manage release approvers, whoever creates a Git branch gets Force push and Manage permissions on it, and whoever creates an environment, service connection or variable group gets the Administrator role on it
+- `identities_with_high_impact_rights_outside_admin_groups` — List of users, groups and service accounts outside the admin groups that hold a high-impact action; null if a namespace couldn't be read or an identity couldn't be looked up
+- `high_impact_rights_outside_admin_groups_by_right` — Number of permission entries outside the admin groups for each high-impact action, as namespace: action; null if a namespace couldn't be read or an identity couldn't be looked up
+- `branch_policy_bypass_holders` — List of identities allowed to bypass Git branch policies (exempt from policy enforcement, or bypass policies when completing a pull request); null if the organization has no Git repositories, as when it uses only TFVC, or if the Git permissions or repositories couldn't be read
 
 **What isn't collected?**
-- `not_collected` — What the fetcher deliberately doesn't collect, by area: who is in each group (see the identities evidence); resource names (repositories, pipelines, environments and connections appear by id); namespaces outside the delivery platform (work items, boards, wiki, dashboards, analytics, agent pools); and rights only inherited from a parent object, which are flagged on that parent
+- `not_collected` — What the fetcher deliberately doesn't collect, with a note for each area:
+  - group_membership (who is in each group; see the identities evidence)
+  - resource_names (repositories, pipelines, environments, service connections and library items appear by id)
+  - other_namespaces (namespaces outside the delivery platform: work items, boards, wiki, dashboards, analytics, agent pools)
+  - inherited_grants (a high-impact right only inherited from a parent object is flagged on that parent)
 
 
 ### azure_devops_pipelines
