@@ -370,7 +370,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-20`, `ra-3.1`, `sa-9`, `sa-10`, `sa-11`, `sa-15.3`, `sa-22`, `si-7.1`, `sr-5`, `sr-6`, `ca-7.4`, `sc-18`
 
-*1 fetcher:* [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities)
+*3 fetchers:* `fedramp_marketplace_vendor_certification_status`, `fedramp_marketplace_workspace_vendor_certification_status`, [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities)
 
 #### `KSI-SCR-MON` — Monitoring Supply Chain Risk
 
@@ -378,7 +378,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-20`, `ca-3`, `ir-6.3`, `ps-7`, `ra-5`, `sa-9`, `si-5`, `sr-5`, `sr-6`, `sr-8`
 
-*3 fetchers:* [`aws_ecr_image_scanning`](../fetchers/aws/ecr_image_scanning), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities)
+*5 fetchers:* [`aws_ecr_image_scanning`](../fetchers/aws/ecr_image_scanning), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), `fedramp_marketplace_vendor_certification_status`, `fedramp_marketplace_workspace_vendor_certification_status`, [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities)
 
 ### CED — Cybersecurity Education  (1/1)
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-273 of 284 fetchers carry a mapping.
+275 of 286 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -639,6 +639,13 @@ python tools/gen_ksi_mapping.py
 | [`datadog_siem_configuration`](../fetchers/datadog/siem_configuration) | `KSI-MLA-OSM` |
 | [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules) | `KSI-MLA-OSM`, `KSI-MLA-RVL` |
 | [`datadog_siem_signals`](../fetchers/datadog/siem_signals) | `KSI-MLA-RVL` |
+
+### fedramp  (2)
+
+| Fetcher | Indicators |
+|---|---|
+| `fedramp_marketplace_vendor_certification_status` | `KSI-SCR-MIT`, `KSI-SCR-MON` |
+| `fedramp_marketplace_workspace_vendor_certification_status` | `KSI-SCR-MIT`, `KSI-SCR-MON` |
 
 ### gcp  (19)
 
