@@ -157,6 +157,9 @@ class AzureRestClient:
             items.extend(body.get("value") or [])
         return items
 
+    def graph_get(self, path: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        return self._get(f"{self.graph}/v1.0{path}", params, self.graph)
+
     def graph_pages(self, path: str, version: str = "v1.0") -> Iterator[List[Dict[str, Any]]]:
         """Each page of a Microsoft Graph collection in turn, following @odata.nextLink."""
         body = self._get(f"{self.graph}/{version}{path}", resource=self.graph)
@@ -167,9 +170,6 @@ class AzureRestClient:
 
     def graph_list(self, path: str, version: str = "v1.0") -> List[Dict[str, Any]]:
         return [item for page in self.graph_pages(path, version) for item in page]
-
-    def graph_get(self, path: str, version: str = "v1.0") -> Dict[str, Any]:
-        return self._get(f"{self.graph}/{version}{path}", resource=self.graph)
 
     def graph_post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         response = self._send("post", f"{self.graph}/v1.0{path}", self.graph, json=body, timeout=HTTP_TIMEOUT)
