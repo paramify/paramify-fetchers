@@ -52,6 +52,7 @@ permissions:
 ## Write fetchers
 
 - [Write a new evidence fetcher](authoring_fetcher_guide.md)
+- [Port an existing fetcher](porting_guide.md)
 - [Examine a fetcher against the contract](fetcher_contract_guide.md)
 - [Onboard a new platform](platform_onboarding_guide.md)
 - [Write an issue-report fetcher](issue_report_fetchers_guide.md), and the
