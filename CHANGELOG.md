@@ -14,14 +14,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`azure_service_log_records`** (`EVD-AZURE-SERVICE-LOG-RECORDS`) — whether App
   Service HTTP logs and SQL Managed Instance audit events actually reach Log
-  Analytics, read from the records: per app and slot, the AppServiceHTTPLogs records
-  over the lookback, the last one, status classes, hosts and top client IPs; per
-  managed instance, the SQLSecurityAuditEvents that arrived, actions, events per
-  database, and the connecting principals split into Entra principals and SQL
-  logins; per app role, its AppDependencies targets; and each table's interactive and
-  total retention.
+  Analytics, read from the records: per app and slot, its state, the
+  AppServiceHTTPLogs records over the lookback, the last one, status classes, hosts
+  and top client IPs; per managed instance, the SQLSecurityAuditEvents that arrived,
+  actions, events per database, and the principals that signed in, split into Entra
+  principals and SQL logins, with names seen only in failed logins counted but not
+  listed; per app role, its AppDependencies targets; and each table's interactive
+  and total retention. Stopped apps are left out of the arrival percentage.
   Basic and Auxiliary tables are not queried, and a refused or deleted workspace
-  reads unknown or false without failing the run.
+  reads unknown or false without failing the run. Each query is guarded alone, so a
+  failed one leaves only its table unread; the dependency query is best-effort.
+  Counts that couldn't be read are null, and client-supplied text (hosts, methods,
+  principal and database names) is emitted only when it is a plain name.
 - **`azure_entra_groups`** (`EVD-AZURE-ENTRA-GROUPS`) — every Entra ID group with
   its members and owners, its kind, whether it can hold directory roles, and
   whether membership is set by a rule (dynamic, with paused rules flagged), by hand
