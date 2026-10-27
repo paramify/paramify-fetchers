@@ -148,6 +148,16 @@ def test_a_certificate_beside_a_reused_factor_is_not_phishing_resistant():
     assert alone["phishing_resistant"] is True
 
 
+def test_a_phishing_resistant_single_factor_sign_in_has_its_own_reason():
+    passkey = sign_ins.sign_in_record(_sign_in("s", "u", requirement="singleFactorAuthentication",
+                                               steps=[_step("FIDO2 security key")]))
+    assert passkey["phishing_resistant"] is True
+    assert passkey["exception_reasons"] == ["single_factor_phishing_resistant"]
+    password = sign_ins.sign_in_record(_sign_in("s", "u", requirement="singleFactorAuthentication",
+                                                steps=[_step("Password")]))
+    assert password["exception_reasons"] == ["single_factor"]
+
+
 def test_unread_policies_are_null_not_none_applied():
     record = _sign_in("s", "u")
     del record["appliedConditionalAccessPolicies"]

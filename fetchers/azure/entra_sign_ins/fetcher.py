@@ -88,7 +88,8 @@ def sign_in_record(s: Dict[str, Any]) -> Dict[str, Any]:
     policies = s.get("appliedConditionalAccessPolicies")
     reasons = []
     if succeeded and requirement == SINGLE_FACTOR:
-        reasons.append("single_factor")
+        # No policy required MFA either way, but a passkey alone isn't a password alone.
+        reasons.append("single_factor_phishing_resistant" if phishing_resistant else "single_factor")
     if succeeded and s.get("conditionalAccessStatus") == CA_NOT_APPLIED:
         reasons.append("no_conditional_access")
     if level in RISK_LEVELS or state in RISKY_STATES:
