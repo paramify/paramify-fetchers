@@ -537,6 +537,29 @@ def test_a_callerless_failure_under_a_reused_correlation_id_does_not_flip_a_fini
     assert [apps[a]["activity"]["publish_profile_downloads"]["count"] for a in ("web-a", "web-b")] == [1, 1]
 
 
+def test_one_correlation_id_across_apps_stays_one_request_per_app(monkeypatch):
+    # An ARM template deployment or a Terraform run logs every resource it touches under one correlation id.
+    listing = "Microsoft.Web/sites/config/list/action"
+    events = [
+        event("Microsoft.Web/sites/extensions/write", "web-a/extensions/MSDeploy", caller="pipeline-sp", idtyp="app",
+              correlation="run-1"),
+        event("Microsoft.Web/sites/extensions/write", "web-b/extensions/MSDeploy", caller="pipeline-sp", idtyp="app",
+              correlation="run-1"),
+        event(listing, "web-a/config/publishingcredentials", correlation="run-1"),
+        event(listing, "web-b/config/publishingcredentials", correlation="run-1"),
+        event(SWAP, "web-a/slots/staging", correlation="run-1"),
+        event("Microsoft.Web/sites/slotsSwap/action", "web-b", correlation="run-1"),
+    ]
+    apps, _, _ = collect(monkeypatch, web_client(), events=events)
+    staging = next(s for s in apps["web-a"]["slots"] if s["name"] == "staging")
+    assert [apps[a]["activity"][c]["count"] for a in ("web-a", "web-b")
+            for c in ("package_deployments", "publishing_credential_reads")] == [1, 1, 1, 1]
+    assert (staging["activity"]["slot_swaps"]["count"], apps["web-b"]["activity"]["slot_swaps"]["count"]) == (1, 1)
+    summary = summary_of(apps)
+    assert (summary["package_deployments"], summary["publishing_credential_reads"], summary["slot_swaps"]) == (2, 2, 2)
+    assert summary["apps_deployment_evidence_unknown"] == 0 and summary["apps_without_deployment_evidence"] == 0
+
+
 def test_kudu_author_and_message_are_capped_and_marked():
     long = "m" * 20_000
     record = deploys.deployment_record({"status": 4, "author": long, "message": long})

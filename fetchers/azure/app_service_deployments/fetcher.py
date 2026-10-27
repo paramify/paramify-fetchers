@@ -351,14 +351,20 @@ def _requester(events: list[dict]) -> tuple:
 
 
 def _requests(events: list[dict]) -> list[tuple]:
-    """(category, every event, the events naming the requester) per request: one correlation id, any site."""
+    """(category, every event, the events naming the requester) per request: one correlation id on one site.
+
+    A swap is logged on the slot and on production, so its key is the app; one template deployment or Terraform
+    run shares a correlation id across apps, so nothing is keyed wider than that.
+    """
     grouped: dict = defaultdict(list)
     for event in events:
         category = activity_category(event)
-        if category and site_of(event.get("resource_id"))[0]:
-            grouped[(category, event.get("correlation_id") or event.get("event_id"))].append(event)
+        site, slot, _ = site_of(event.get("resource_id"))
+        if category and site:
+            where = (site,) if category == "slot_swaps" else (site, slot)
+            grouped[(category, where, event.get("correlation_id") or event.get("event_id"))].append(event)
     requests = []
-    for (category, _), group in grouped.items():
+    for (category, _, _), group in grouped.items():
         group.sort(key=lambda e: e.get("time") or "")
         named = [e for e in group if _named(e)]
         if named:
