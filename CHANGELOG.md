@@ -144,13 +144,19 @@ schemas and the `paramify` CLI — not the internal code.
   its connections. `data_connectors` now also lists kinds only the preview
   listing returns, such as Defender XDR (`MicrosoftThreatProtection`), with
   `seen_in` saying which listing returned each, so `data_connectors_total` can
-  rise. Workspaces also gain `connectors_total`, `connectors_connected`,
-  `connectors_not_connected`, `connectors_quiet`, `connectors_unhealthy`,
-  `health_monitoring` and `notes`. The summary gains `connectors_connected`,
-  `connectors_not_connected`, `connectors_quiet`,
-  `workspaces_with_health_monitoring` and `connectors_unhealthy`, each null when
-  nothing could be measured, and `data_connectors_total` is now null rather than
-  0 in that case. The description and instructions use the plain-text layout.
+  rise. `connectors_configured_without_data` lists the connectors that have at
+  least one connection, their own or a linked one such as Defender XDR, but
+  received no data in the window and aren't quiet: unlike
+  `connectors_not_connected`, it leaves out connectors installed from Content Hub
+  with no connection, so a validator can require it to be 0. Workspaces also gain
+  `connectors_total`, `connectors_connected`, `connectors_not_connected`,
+  `connectors_quiet`, `connectors_configured_without_data`,
+  `connectors_unhealthy`, `health_monitoring` and `notes`. The summary gains
+  `connectors_connected`, `connectors_not_connected`, `connectors_quiet`,
+  `connectors_configured_without_data`, `workspaces_with_health_monitoring` and
+  `connectors_unhealthy`, each null when nothing could be measured, and
+  `data_connectors_total` is now null rather than 0 in that case. The
+  description and instructions use the plain-text layout.
 - **`azure_app_service_configuration` 0.3.0: cipher suites, basic-auth publishing, Key Vault
   references and runtime end of support.** Each web app now reports its minimum TLS cipher
   suite and the suites still allowed (whether CBC or static-RSA suites remain), the SCM site's

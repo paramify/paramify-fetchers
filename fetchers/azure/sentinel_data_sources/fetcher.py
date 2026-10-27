@@ -437,6 +437,10 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             [c["id"] for c, q in zip(finished, quiet) if c["connected"] is False and not q] if measured else None
         ),
         "connectors_quiet": [c["id"] for c, q in zip(finished, quiet) if q] if measured else None,
+        "connectors_configured_without_data": (
+            [c["id"] for c, q in zip(finished, quiet) if c["connected"] is False and c["connections"] and not q]
+            if measured else None
+        ),
         "health_monitoring": health_on,
         "connector_health": health,
         "connectors_unhealthy": (
@@ -468,6 +472,7 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
         "connectors_connected": _total(workspaces, "connectors_connected"),
         "connectors_not_connected": _total(workspaces, "connectors_not_connected"),
         "connectors_quiet": _total(workspaces, "connectors_quiet"),
+        "connectors_configured_without_data": _total(workspaces, "connectors_configured_without_data"),
         "workspaces_with_health_monitoring": sum(1 for w in workspaces if w.get("health_monitoring") is True),
         "connectors_unhealthy": _total(workspaces, "connectors_unhealthy"),
     }

@@ -403,11 +403,13 @@ def test_data_sources_last_data_per_connector(azure, tmp_path):
     assert [d["last_data_received"] is not None for d in office["data_types"]] == [True, False]
     assert ws["connectors_connected"] == 4 and ws["connectors_not_connected"] == ["MyCcp"]
     assert ws["connectors_quiet"] == ["AzureSecurityCenter"]
+    assert ws["connectors_configured_without_data"] == ["MyCcp"]
     assert ws["health_monitoring"] is True and ws["connector_health"][0]["reason"] == "Unauthorized"
     assert {k: ev["summary"][k] for k in ("connectors_connected", "connectors_not_connected", "connectors_quiet",
-                                          "workspaces_with_health_monitoring", "connectors_unhealthy")} == {
+                                          "connectors_configured_without_data", "workspaces_with_health_monitoring",
+                                          "connectors_unhealthy")} == {
         "connectors_connected": 4, "connectors_not_connected": 1, "connectors_quiet": 1,
-        "workspaces_with_health_monitoring": 1, "connectors_unhealthy": 1}
+        "connectors_configured_without_data": 1, "workspaces_with_health_monitoring": 1, "connectors_unhealthy": 1}
 
 
 def alert_only_workspace(azure, discovery_logs):
@@ -449,6 +451,21 @@ def test_data_sources_alert_only_connectors_read_quiet(azure, tmp_path):
     assert ws["connectors_not_connected"] == ["AzureSecurityCenter", "MicrosoftThreatProtection", "Office365", "OfficeATP"]
     assert ws["connectors_connected"] == 0
     assert (ev["summary"]["connectors_quiet"], ev["summary"]["connectors_not_connected"]) == (2, 4)
+
+
+def test_data_sources_configured_without_data_leaves_out_unconnected_and_quiet(azure, tmp_path):
+    alert_only_workspace(azure, "Disabled")
+    # Installed from Content Hub with no connection, and not alert-only.
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"].append(
+        ui_connector("AzureActiveDirectory", [("AuditLogs", "AuditLogs")]))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert code == 0 and (by_id["AzureActiveDirectory"]["connections"], by_id["AzureActiveDirectory"]["connected"]) == ([], False)
+    assert {"AzureActiveDirectory", "AzureSecurityCenter"} <= set(ws["connectors_not_connected"])
+    # OfficeATP's connection has alerts Disabled; AATP (via Defender XDR) and MCAS are quiet.
+    assert ws["connectors_configured_without_data"] == ["MicrosoftThreatProtection", "Office365", "OfficeATP"]
+    assert ev["summary"]["connectors_configured_without_data"] == 3
 
 
 def test_data_sources_mcas_with_cloud_discovery_on_isnt_alert_only(azure, tmp_path):
@@ -568,7 +585,8 @@ def test_data_sources_failed_last_data_query_keeps_ingestion_answers(azure, tmp_
     assert by_id["AzureSecurityCenter"]["connected"] is None
     # The counts are unknown, not partial.
     for counts in (ws_a(ev), ev["summary"]):
-        assert [counts[k] for k in ("connectors_connected", "connectors_not_connected", "connectors_quiet")] == [None] * 3
+        assert [counts[k] for k in ("connectors_connected", "connectors_not_connected", "connectors_quiet",
+                                    "connectors_configured_without_data")] == [None] * 4
 
 
 def test_data_sources_incomplete_listings_read_null(azure, tmp_path):
@@ -578,14 +596,15 @@ def test_data_sources_incomplete_listings_read_null(azure, tmp_path):
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
     assert code == 1 and ws["notes"][0].startswith("preview listing")
-    assert (ws["connectors_total"], ws["connectors_connected"], ws["connectors_not_connected"], ws["connectors_quiet"]) == (
-        None, None, None, None)
+    assert (ws["connectors_total"], ws["connectors_connected"], ws["connectors_not_connected"], ws["connectors_quiet"],
+            ws["connectors_configured_without_data"]) == (None, None, None, None, None)
     assert ws["data_connectors_total"] is None and ws["tables_not_measured"] is None
     # Without the table plans, no data can't be told from a Basic table.
     assert all(c["connected"] is None for c in ws["connectors"])
     assert {k: ev["summary"][k] for k in ("data_connectors_total", "connectors_connected", "connectors_not_connected",
-                                          "connectors_quiet")} == {
-        "data_connectors_total": None, "connectors_connected": None, "connectors_not_connected": None, "connectors_quiet": None}
+                                          "connectors_quiet", "connectors_configured_without_data")} == {
+        "data_connectors_total": None, "connectors_connected": None, "connectors_not_connected": None, "connectors_quiet": None,
+        "connectors_configured_without_data": None}
 
 
 def test_data_sources_unknown_ingestion_reads_null(azure, tmp_path):
@@ -594,8 +613,9 @@ def test_data_sources_unknown_ingestion_reads_null(azure, tmp_path):
     ws = ws_a(ev)
     assert code == 1 and ws["health_monitoring"] is None and ws["connectors_unhealthy"] is None
     assert {k: ev["summary"][k] for k in ("connectors_connected", "connectors_not_connected", "connectors_quiet",
-                                          "connectors_unhealthy")} == {
-        "connectors_connected": None, "connectors_not_connected": None, "connectors_quiet": None, "connectors_unhealthy": None}
+                                          "connectors_configured_without_data", "connectors_unhealthy")} == {
+        "connectors_connected": None, "connectors_not_connected": None, "connectors_quiet": None,
+        "connectors_configured_without_data": None, "connectors_unhealthy": None}
 
 
 def test_analytics_rules_merge_preview_kinds(azure, tmp_path):
