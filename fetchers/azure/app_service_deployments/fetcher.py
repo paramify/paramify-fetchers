@@ -70,6 +70,7 @@ SITE_RESOURCE = re.compile(
 )
 # A swap logs the request (the caller's) and the platform's own events under one correlation id.
 STATUS_PRECEDENCE = ("Failed", "Succeeded", "Accepted", "Started")
+FINAL_STATUSES = {"Failed", "Succeeded"}
 
 # config/web fields compared slot to production, plus the Site fields after them.
 COMPARED_CONFIG_FIELDS = (
@@ -291,34 +292,59 @@ def activity_category(event: dict):
     return category
 
 
-def _caller(events: list[dict]):
-    """The requester: an event with an identity type, else one whose caller is a user name."""
+def _named(event: dict) -> bool:
+    """The event names who made the request: an identity type, or a user name as the caller."""
+    return bool(event.get("caller_type")) or "@" in str(event.get("caller") or "")
+
+
+def _requester(events: list[dict]) -> tuple:
+    """The request's own event and identity type: one with an identity type, else one whose caller is a user name."""
     for event in events:
         if event.get("caller_type"):
-            return event.get("caller"), event["caller_type"]
+            return event, event["caller_type"]
     for event in events:
         if "@" in str(event.get("caller") or ""):
-            return event["caller"], "user"
-    return next((e.get("caller") for e in events if e.get("caller")), None), "unknown"
+            return event, "user"
+    return next((e for e in events if e.get("caller")), events[0]), "unknown"
 
 
-def activity_records(events: list[dict]) -> dict:
-    """{(site key, slot): {category: [records]}} with one record per request (correlation id)."""
+def _requests(events: list[dict]) -> list[tuple]:
+    """(category, every event, the events naming the requester) per request: one correlation id, any site."""
     grouped: dict = defaultdict(list)
     for event in events:
         category = activity_category(event)
-        site, slot, _ = site_of(event.get("resource_id"))
-        if category and site:
-            grouped[(site, slot, category, event.get("correlation_id") or event.get("event_id"))].append(event)
+        if category and site_of(event.get("resource_id"))[0]:
+            grouped[(category, event.get("correlation_id") or event.get("event_id"))].append(event)
+    requests = []
+    for (category, _), group in grouped.items():
+        group.sort(key=lambda e: e.get("time") or "")
+        named = [e for e in group if _named(e)]
+        if named:
+            requests.append((category, group, named))
+            continue
+        # Unnamed platform rows reuse unrelated correlation ids, so on their own they stay with their site.
+        by_site: dict = defaultdict(list)
+        for event in group:
+            by_site[site_of(event.get("resource_id"))[:2]].append(event)
+        requests.extend((category, rows, rows) for rows in by_site.values())
+    return requests
+
+
+def activity_records(events: list[dict]) -> dict:
+    """{(site key, slot): {category: [records]}}, one record per request, on the site of the event naming the requester."""
     by_site: dict = defaultdict(lambda: {c: [] for c in ACTIVITY_CATEGORIES})
-    for (site, slot, category, _), group in grouped.items():
-        statuses = {e.get("status") for e in group}
-        caller, caller_type = _caller(group)
+    for category, group, named in _requests(events):
+        requester, caller_type = _requester(named)
+        own = {e.get("status") for e in named}
+        # A request that finished keeps its own status; a platform row sharing its correlation id can't flip it.
+        statuses = own if own & FINAL_STATUSES else {e.get("status") for e in group}
+        site, slot, _ = site_of(requester.get("resource_id"))
         by_site[(site, slot)][category].append({
-            "time": min((e["time"] for e in group if e.get("time")), default=None),
+            "time": min((e["time"] for e in named if e.get("time")), default=None),
             "status": next((s for s in STATUS_PRECEDENCE if s in statuses), None),
-            "caller": caller,
+            "caller": requester.get("caller"),
             "caller_type": caller_type,
+            "correlation_id": requester.get("correlation_id"),
         })
     return by_site
 

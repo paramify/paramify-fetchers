@@ -223,9 +223,9 @@ def test_swap_is_one_record_with_the_requester_and_final_status(monkeypatch):
     swaps = staging["activity"]["slot_swaps"]
     assert swaps["count"] == 2 and swaps["failed"] == 1
     assert swaps["latest"] == {"time": at(12).isoformat(), "status": "Failed", "caller": "ci@example.com",
-                               "caller_type": "app"}
+                               "caller_type": "app", "correlation_id": "corr-2"}
     assert swaps["records"][1] == {"time": at(10, 9).isoformat(), "status": "Succeeded",
-                                   "caller": "releaser@example.com", "caller_type": "user"}
+                                   "caller": "releaser@example.com", "caller_type": "user", "correlation_id": "corr-1"}
 
 
 def test_publish_profile_downloads_land_on_the_app_or_slot(monkeypatch):
@@ -506,3 +506,31 @@ def test_the_activity_log_read_asks_only_for_documented_properties(monkeypatch):
     events, _ = deploys.read_activity_log(SUB, object(), deploys.Collector(logging.getLogger("t")), 90, NOW)
     assert seen["select"] is None or set(seen["select"].split(",")) <= SELECTABLE
     assert events[0]["caller"] == "releaser@example.com"
+
+
+def test_a_swap_logged_on_the_slot_and_production_counts_once_on_the_requesters_site(monkeypatch):
+    events = [event(SWAP, "web-a/slots/staging", "Started", correlation="w1", when=at(16)),
+              event(SWAP, "web-a/slots/staging", "Succeeded", correlation="w1", when=at(16, 1)),
+              event("Microsoft.Web/sites/slotsSwap/action", "web-a", "Succeeded", idtyp=None, correlation="w1",
+                    when=at(16, 1))]
+    apps, _, _ = collect(monkeypatch, web_client(), events=events)
+    staging = next(s for s in apps["web-a"]["slots"] if s["name"] == "staging")
+    assert apps["web-a"]["activity"]["slot_swaps"]["count"] == 0
+    assert staging["activity"]["slot_swaps"]["latest"] == {
+        "time": at(16).isoformat(), "status": "Succeeded", "caller": "releaser@example.com", "caller_type": "user",
+        "correlation_id": "w1"}
+    assert summary_of(apps)["slot_swaps"] == 1
+
+
+def test_a_callerless_failure_under_a_reused_correlation_id_does_not_flip_a_finished_request(monkeypatch):
+    events = [event(SWAP, "web-a/slots/staging", "Started", correlation="r1"),
+              event(SWAP, "web-a/slots/staging", "Succeeded", correlation="r1"),
+              event(SWAP, "web-a/slots/staging", "Failed", caller=None, idtyp=None, correlation="r1"),
+              event(PUBLISH, "web-a", "Succeeded", caller=None, idtyp=None, correlation="r2"),
+              event(PUBLISH, "web-b", "Succeeded", caller=None, idtyp=None, correlation="r2")]
+    apps, _, _ = collect(monkeypatch, web_client(), events=events)
+    staging = next(s for s in apps["web-a"]["slots"] if s["name"] == "staging")
+    swaps = staging["activity"]["slot_swaps"]
+    assert (swaps["count"], swaps["failed"], swaps["latest"]["status"]) == (1, 0, "Succeeded")
+    # Callerless rows alone stay with their own site rather than merging across sites.
+    assert [apps[a]["activity"]["publish_profile_downloads"]["count"] for a in ("web-a", "web-b")] == [1, 1]

@@ -67,7 +67,7 @@ evidence_set:
     - web_apps.get_configuration() and get_configuration_slot() (per app with slots, and per slot) — the settings compared between each slot and production
     - activity_logs.list() (Microsoft.Web events over the last activity_log_days, 90 by default) — slot swaps, publishing-credential retrievals and package deployments, with who requested each
 
-    Output: azure_app_service_deployments_<subscription>.json — each web app's and slot's recorded deployments and deployment events with who and when, its deployment source, how each slot differs from production, and what the evidence cannot attribute; all times are ISO 8601 UTC.
+    Output: azure_app_service_deployments_<subscription>.json — each web app's and slot's recorded deployments and deployment events with who and when, its deployment source, how each slot differs from production, and what the evidence cannot attribute; each deployment event carries its Activity Log correlation id to trace it back; all times are ISO 8601 UTC.
 
     Summary fields:
 
@@ -97,8 +97,8 @@ evidence_set:
     - latest_kudu_deployment_time — Time of the newest Kudu deployment record across all web apps and slots; null if there is none
 
     Who released what, and when (Activity Log)?
-    - slot_swaps — Number of slot swap requests in the window on a listed web app or slot, the events sharing one correlation id counted once; null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false
-    - failed_slot_swaps — Number of slot swap requests in the window where any event under the request's correlation id has status Failed; null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false
+    - slot_swaps — Number of slot swap requests in the window on a listed web app or slot, the events sharing one correlation id counted once even when logged on both the slot and production, on the site of the event that names the requester; null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false
+    - failed_slot_swaps — Number of slot swap requests in the window that failed: the events naming the requester end Failed, or, when they never reach Succeeded or Failed, any event under the request's correlation id has status Failed (a platform row with no requester can reuse an unrelated correlation id, so it can't turn a request that succeeded into a failure); null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false
     - apps_with_slot_swaps — Number of web apps with at least one slot swap request in the window, on the app or a slot; null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false
     - latest_slot_swap_time — Time of the newest slot swap request in the window (ISO 8601 UTC); null if there is none or the Activity Log couldn't be read
     - publish_profile_downloads — Number of publish profile download requests (publishxml, the Web Deploy and FTP credentials Visual Studio uses) in the window on a listed web app or slot, one per correlation id; null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false
