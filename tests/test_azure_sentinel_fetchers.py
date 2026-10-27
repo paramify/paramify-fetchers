@@ -492,6 +492,14 @@ def test_data_sources_configured_without_data_reads_null_when_any_workspace_is_u
     assert (ev["summary"]["connectors_configured_without_data"], ev["summary"]["connectors_not_connected"]) == (None, 0)
 
 
+def test_data_sources_configured_without_data_is_null_without_a_sentinel_workspace(azure, tmp_path):
+    azure.arm[(f"{SI_A}/onboardingStates", "2025-09-01")] = {"value": []}
+    code, ev = run("sentinel_data_sources", tmp_path)
+    # Nothing measured can't read as none configured without data.
+    assert code == 0 and ev["summary"]["workspaces_without_sentinel"] == 2
+    assert ev["summary"]["connectors_configured_without_data"] is None
+
+
 def test_data_sources_mcas_with_cloud_discovery_on_isnt_alert_only(azure, tmp_path):
     alert_only_workspace(azure, "Enabled")
     code, ev = run("sentinel_data_sources", tmp_path)

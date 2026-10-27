@@ -464,7 +464,7 @@ def _total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]:
 
 def _strict_total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]:
     """Sum over every workspace; None when any lacks the field, so an unmeasured workspace never hides behind a 0."""
-    values = [w.get(field) for w in workspaces]
+    values: List[Any] = [w.get(field) for w in workspaces]
     return sum(len(v) if isinstance(v, list) else v for v in values) if values and None not in values else None
 
 
