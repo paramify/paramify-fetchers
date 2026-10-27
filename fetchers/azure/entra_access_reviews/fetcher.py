@@ -38,7 +38,8 @@ NAME = "azure_entra_access_reviews"
 LICENCE_ERROR_CODE = "AadPremiumLicenseRequired"
 LICENCE_STATUSES = (400, 403)
 ENDED_DEFINITION = {"Completed", "AutoReviewed", "Applied"}
-ENDED_INSTANCE = {"Completed", "AutoReviewed", "Applying", "Applied"}
+# Completing and AutoReviewing follow the end of a run's review period, so a run in either has ended.
+ENDED_INSTANCE = {"Completing", "Completed", "AutoReviewing", "AutoReviewed", "Applying", "Applied"}
 PERIOD_DAYS = {"daily": 1, "weekly": 7, "absoluteMonthly": 30, "relativeMonthly": 30, "absoluteYearly": 365, "relativeYearly": 365}
 APPLIED = {"AppliedSuccessfully", "AppliedSuccessfullyButObjectNotFound"}
 DECISIONS = ("Approve", "Deny", "NotReviewed", "DontKnow")
@@ -222,14 +223,14 @@ def _parse(value: Optional[str]) -> Optional[datetime]:
 
 
 def last_cycle(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """The latest cycle whose runs have all ended; a cycle is the runs that started the same day, one per group."""
-    cycles: Dict[Any, List[Dict[str, Any]]] = {}
+    """The latest cycle whose runs have all ended; a cycle is the runs that started at the same time, one per group."""
+    cycles: Dict[datetime, List[Dict[str, Any]]] = {}
     for instance in instances:
         start = _parse(instance.get("start_date_time"))
         if start is not None:
-            cycles.setdefault(start.date(), []).append(instance)
-    for day in sorted(cycles, reverse=True):
-        runs = cycles[day]
+            cycles.setdefault(start, []).append(instance)
+    for start in sorted(cycles, reverse=True):
+        runs = cycles[start]
         if all(i.get("status") in ENDED_INSTANCE and _parse(i.get("end_date_time")) for i in runs):
             return sorted(runs, key=lambda i: i.get("id") or "")
     return []
@@ -280,7 +281,7 @@ def definition_record(definition: Dict[str, Any], read_instances: Optional[List[
         # Graph ignores the top-level reviewers once a series has stages; each stage names its own.
         "self_review": not any(st["reviewers"] for st in stages) if stages else not definition.get("reviewers"),
         "instances_read": None if read_instances is None else len(instances),
-        "instances_in_progress": sum(1 for i in instances if i.get("status") not in ENDED_INSTANCE),
+        "instances_in_progress": sum(1 for i in instances if i.get("status") not in ENDED_INSTANCE | {"NotStarted"}),
         "last_completed_cycle_end": None if latest is None else latest["end_date_time"],
         "days_since_last_completed_cycle": None if cycle_end is None else max(0, (now - cycle_end).days),
         "last_cycle": None if None in read else decision_counts([d for items in read for d in items or []]),

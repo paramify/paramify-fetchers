@@ -66,7 +66,7 @@ evidence_set:
     - Microsoft Graph GET /organization — the tenant's name and domain
     - Microsoft Graph GET /identityGovernance/accessReviews/definitions — every review series and its settings
     - Microsoft Graph GET /identityGovernance/accessReviews/definitions/{id}/instances (per series) — each run of the series and its status
-    - Microsoft Graph GET /identityGovernance/accessReviews/definitions/{id}/instances/{id}/decisions (per run in each active series' latest completed cycle; active means the series' status is not Completed, AutoReviewed or Applied, and the latest completed cycle is the most recent set of runs that started on the same day and have all ended, one run per group for a series over many groups) — what reviewers decided and whether it was applied
+    - Microsoft Graph GET /identityGovernance/accessReviews/definitions/{id}/instances/{id}/decisions (per run in each active series' latest completed cycle; active means the series' status is not Completed, AutoReviewed or Applied, and the latest completed cycle is the most recent set of runs that started at the same time and have all ended, one run per group for a series over many groups) — what reviewers decided and whether it was applied
 
     Output: azure_entra_access_reviews_<tenant>.json — every access review series with what it reviews, its schedule, default decision, auto-apply setting and reviewers, and the decisions of its latest completed cycle. Reviews of Azure resource roles aren't read: Azure Resource Manager keeps them, not Graph.
 
@@ -95,7 +95,7 @@ evidence_set:
     - active_self_review_definitions — List of active review series names where users review their own access (no reviewers named on the series; for a multi-stage series, none named on any of its stages, since Graph then ignores the series' own list)
 
     Are the reviews running on schedule?
-    - active_recurring_definitions_without_completed_cycle — List of active recurring review series names with no completed cycle yet (a cycle is completed when every run that started that day has ended: status Completed, AutoReviewed, Applying or Applied, with an end time)
+    - active_recurring_definitions_without_completed_cycle — List of active recurring review series names with no completed cycle yet (a cycle is completed when every run that started at the same time has ended: status Completing, Completed, AutoReviewing, AutoReviewed, Applying or Applied, with an end time)
     - max_days_since_last_completed_cycle — Days: the longest time since any active recurring review series' latest completed cycle ended; null if none has completed a cycle
 
     What did the last cycle decide, and was it applied?

@@ -184,11 +184,40 @@ def test_the_last_cycle_is_the_latest_start_whose_runs_all_ended():
     instances = [
         _instance("i-aug", "Applied", AUG),
         _instance("i-sep-a", "Applied", SEPT),
-        _instance("i-sep-b", "Completed", SEPT + timedelta(minutes=5)),
+        _instance("i-sep-b", "Completed", SEPT + timedelta(minutes=5), start=SEPT - timedelta(days=7)),
         _instance("i-oct", "InProgress", NOW + timedelta(days=5)),
     ]
     assert [i["id"] for i in ar.last_cycle(instances)] == ["i-sep-a", "i-sep-b"]
     assert ar.last_cycle([_instance("i-oct", "InProgress", NOW + timedelta(days=5))]) == []
+
+
+def test_a_run_still_completing_or_auto_reviewing_has_ended():
+    instances = [
+        _instance("aug", "Applied", AUG),
+        _instance("sep-a", "Completing", SEPT),
+        _instance("sep-b", "AutoReviewing", SEPT),
+    ]
+    assert [i["id"] for i in ar.last_cycle(instances)] == ["sep-a", "sep-b"]
+
+
+def test_a_cycle_is_the_runs_that_started_at_the_same_time():
+    october = datetime(2026, 10, 1, 0, 0, tzinfo=timezone.utc)
+    instances = [
+        _instance("sep", "Applied", SEPT),
+        _instance("oct-1", "Applied", october + timedelta(days=7), start=october),
+        _instance("oct-1-late", "InProgress", NOW + timedelta(days=5), start=october + timedelta(hours=12)),
+    ]
+    assert [i["id"] for i in ar.last_cycle(instances)] == ["oct-1"]
+
+
+def test_a_run_not_started_yet_is_not_in_progress():
+    instances = {"d-good": [
+        _instance("i-sep", "Applied", SEPT),
+        _instance("i-oct", "InProgress", NOW + timedelta(days=5)),
+        _instance("i-nov", "NotStarted", NOW + timedelta(days=40)),
+    ]}
+    results, _ = ar.build([_definition("d-good", "Finance monthly")], instances, {"i-sep": []}, [], NOW)
+    assert results["review_definitions"][0]["instances_in_progress"] == 1
 
 
 def test_a_run_stopped_early_does_not_make_a_cycle_on_its_own():
