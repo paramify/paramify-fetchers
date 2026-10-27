@@ -526,13 +526,15 @@ def test_a_swap_logged_on_the_slot_and_production_counts_once_on_the_requesters_
 def test_a_callerless_failure_under_a_reused_correlation_id_does_not_flip_a_finished_request(monkeypatch):
     events = [event(SWAP, "web-a/slots/staging", "Started", correlation="r1"),
               event(SWAP, "web-a/slots/staging", "Succeeded", correlation="r1"),
-              event(SWAP, "web-a/slots/staging", "Failed", caller=None, idtyp=None, correlation="r1"),
+              event(SWAP, "web-a/slots/staging", "Failed", caller=None, idtyp=None, correlation="r1", when=at(9)),
               event(PUBLISH, "web-a", "Succeeded", caller=None, idtyp=None, correlation="r2"),
               event(PUBLISH, "web-b", "Succeeded", caller=None, idtyp=None, correlation="r2")]
     apps, _, _ = collect(monkeypatch, web_client(), events=events)
     staging = next(s for s in apps["web-a"]["slots"] if s["name"] == "staging")
     swaps = staging["activity"]["slot_swaps"]
     assert (swaps["count"], swaps["failed"], swaps["latest"]["status"]) == (1, 0, "Succeeded")
+    # The request's time is its own, not an earlier callerless row's.
+    assert swaps["latest"]["time"] == at(10).isoformat()
     # Callerless rows alone stay with their own site rather than merging across sites.
     assert [apps[a]["activity"]["publish_profile_downloads"]["count"] for a in ("web-a", "web-b")] == [1, 1]
 
