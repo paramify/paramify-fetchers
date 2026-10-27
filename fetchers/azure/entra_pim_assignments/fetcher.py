@@ -43,6 +43,23 @@ POLICY_FILTER = "scopeId eq '/' and scopeType eq 'DirectoryRole'"
 LICENCE_ERROR_CODE = "AadPremiumLicenseRequired"
 LICENCE_STATUSES = (400, 403)
 MFA, JUSTIFICATION, TICKETING = "MultiFactorAuthentication", "Justification", "Ticketing"
+# Summary fields that turn on whether a privileged grant is tenant-wide, by the kind of grant.
+ELIGIBLE_SCOPED = (
+    "eligible_privileged_assignments",
+    "permanently_eligible_privileged_assignments",
+    "principals_eligible_for_privileged_roles",
+    "privileged_roles_with_eligible_holders",
+    "global_administrator_eligible",
+)
+ACTIVE_SCOPED = (
+    "active_privileged_assignments",
+    "active_privileged_by_standing",
+    "permanent_active_privileged_assignments",
+    "permanent_active_privileged_user_assignments",
+    "principals_with_permanent_privileged_access",
+    "privileged_roles_with_permanent_active_holders",
+    "global_administrator_permanent_active",
+)
 
 logger = logging.getLogger(NAME)
 
@@ -181,12 +198,19 @@ def standing(instance: Dict[str, Any]) -> str:
     return "permanent" if not instance.get("end_date_time") else "time_bound"
 
 
+def tenant_wide(instance: Dict[str, Any]) -> Optional[bool]:
+    """'/' is the tenant; another directory scope or an app scope isn't; with neither, it's unknown, never assumed."""
+    scope = instance.get("directory_scope_id")
+    if scope == "/":
+        return True
+    return False if scope or instance.get("app_scope_id") else None
+
+
 def assignment_record(instance: Dict[str, Any], index: Optional[Dict[str, Dict[str, Any]]], active: bool) -> Dict[str, Any]:
     record = {
         **{k: v for k, v in instance.items() if active or k != "assignment_type"},
         **role_fields(index, instance.get("role_definition_id")),
-        # A missing scope isn't assumed to be the tenant.
-        "tenant_wide": instance.get("directory_scope_id") == "/",
+        "tenant_wide": tenant_wide(instance),
         "is_permanent": not instance.get("end_date_time"),
     }
     if active:
@@ -265,7 +289,10 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
     priv_eligible = [e for e in eligible if privileged(e)]
     priv_active = [a for a in active if privileged(a)]
     priv_permanent = [a for a in priv_active if a["standing"] == "permanent"]
-    below_tenant = [r for r in eligible + active if r["is_privileged"] and not r["tenant_wide"]]
+    below_tenant = [r for r in eligible + active if r["is_privileged"] and r["tenant_wide"] is False]
+    # A privileged grant with no scope at all could be tenant-wide, so the counts it could change read null.
+    eligible_unknown = any(e["is_privileged"] and e["tenant_wide"] is None for e in eligible)
+    active_unknown = any(a["is_privileged"] and a["tenant_wide"] is None for a in active)
     priv_policies = [p for p in policies if p["is_privileged"]]
 
     def names(records, pred=lambda r: True):
@@ -284,7 +311,7 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
         1 for a in priv_permanent if a["principal_type"] == "User"
     )
 
-    return {
+    summary = {
         "pim_available": True,
         "eligible_assignments": len(eligible),
         "eligible_privileged_assignments": len(priv_eligible),
@@ -316,6 +343,12 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
         ),
         "max_privileged_activation_hours": None if without_policy or None in hours else max(hours, default=None),
     }
+    unknown = {
+        **dict.fromkeys(ELIGIBLE_SCOPED, eligible_unknown),
+        **dict.fromkeys(ACTIVE_SCOPED, active_unknown),
+        "privileged_assignments_scoped_below_tenant": eligible_unknown or active_unknown,
+    }
+    return {k: None if unknown.get(k) else v for k, v in summary.items()}
 
 
 # --- collection (lazy msgraph imports) ---

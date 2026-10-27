@@ -84,7 +84,7 @@ evidence_set:
     - privileged_roles_without_policy — List of privileged role names held by someone (eligible or active, at any scope, directly or through a group) whose tenant-wide PIM policy didn't come back; when it isn't empty, the activation and assignment rule lists below and max_privileged_activation_hours read null, so a missing policy never reads as clean
 
     Who can activate a privileged role on demand?
-    - eligible_assignments — Number of eligible assignments (a user, group or app that can activate a role when needed) across all directory roles. This and every assignment count below takes direct assignments only (memberType Direct), so a role held through a group counts once, as the group's; an assignment counts as privileged only when the privileged role is held tenant-wide, not scoped to an administrative unit or a single object
+    - eligible_assignments — Number of eligible assignments (a user, group or app that can activate a role when needed) across all directory roles. This and every assignment count below takes direct assignments only (memberType Direct), so a role held through a group counts once, as the group's; an assignment counts as privileged only when the privileged role is held tenant-wide, not scoped to an administrative unit, a single object or an app. A direct privileged assignment that comes back with no scope at all could be tenant-wide, so it makes the privileged counts of its kind null (eligible ones the five below; active ones the seven in the next section), and privileged_assignments_scoped_below_tenant null
     - eligible_privileged_assignments — Number of eligible assignments to privileged roles
     - permanently_eligible_privileged_assignments — Number of eligible assignments to privileged roles with no end date
     - principals_eligible_for_privileged_roles — Number of distinct users, groups and apps eligible for at least one privileged role
@@ -103,7 +103,7 @@ evidence_set:
     - principals_with_permanent_privileged_access — Number of distinct users, groups and apps holding a privileged role permanently
     - privileged_roles_with_permanent_active_holders — List of privileged role names held permanently by at least one user, group or app
     - global_administrator_permanent_active — Number of permanent active Global Administrator assignments
-    - privileged_assignments_scoped_below_tenant — Number of eligible and active assignments of privileged roles scoped to an administrative unit or a single object, which the privileged counts leave out
+    - privileged_assignments_scoped_below_tenant — Number of eligible and active assignments of privileged roles scoped to an administrative unit, a single object or an app, which the privileged counts leave out; null if one came back with no scope at all
 
     Does activating a privileged role require MFA, a reason, approval and a time limit?
     - privileged_roles_activation_without_mfa_or_auth_context — List of privileged role names whose activation needs neither MFA nor a Conditional Access authentication context; null if privileged_roles_without_policy isn't empty or a privileged role's policy didn't say whether activation needs MFA

@@ -264,10 +264,30 @@ def test_privileged_counts_take_only_tenant_wide_direct_grants():
     assert summary["privileged_assignments_scoped_below_tenant"] == 2
 
 
-def test_a_missing_scope_is_not_tenant_wide():
-    results, summary = pim.build(DEFINITIONS, [], [_instance(GA, "u-ga", scope=None)], [_policy(GA)], [])
-    assert results["active_assignments"][0]["tenant_wide"] is False
+def test_a_grant_with_no_scope_at_all_makes_the_privileged_counts_unknown():
+    eligible = [_instance(PRA, "u-pra")]
+    results, summary = pim.build(DEFINITIONS, eligible, [_instance(GA, "u-ga", scope=None)], [_policy(GA), _policy(PRA)], [])
+    assert results["active_assignments"][0]["tenant_wide"] is None
+    for field in pim.ACTIVE_SCOPED + ("privileged_assignments_scoped_below_tenant",):
+        assert summary[field] is None, field
+    assert summary["eligible_privileged_assignments"] == 1
+    assert summary["active_assignments"] == 1
+
+    results, summary = pim.build(DEFINITIONS, [_instance(GA, "u-ga", scope=None)], [], [_policy(GA)], [])
+    for field in pim.ELIGIBLE_SCOPED:
+        assert summary[field] is None, field
     assert summary["permanent_active_privileged_assignments"] == 0
+
+
+def test_an_app_scope_or_another_directory_scope_is_not_tenant_wide():
+    assert pim.tenant_wide({"directory_scope_id": "/"}) is True
+    assert pim.tenant_wide({"directory_scope_id": "/administrativeUnits/au-1"}) is False
+    assert pim.tenant_wide({"directory_scope_id": None, "app_scope_id": "/"}) is False
+    assert pim.tenant_wide({"directory_scope_id": None, "app_scope_id": None}) is None
+
+    active = [_instance(GA, "u-ga"), _instance(PRA, "u-au", scope="/administrativeUnits/au-1")]
+    _, summary = pim.build(DEFINITIONS, [], active, [_policy(GA), _policy(PRA)], [])
+    assert summary["permanent_active_privileged_assignments"] == 1
     assert summary["privileged_assignments_scoped_below_tenant"] == 1
 
 
