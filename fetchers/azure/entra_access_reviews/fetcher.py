@@ -48,6 +48,8 @@ READ_CONCURRENCY = 8
 # Graph pages these lists 100 at a time and documents $top/$skip; a full page with no nextLink means ask for more.
 PAGE_SIZE = 100
 PAGE_LIMIT = 1000
+# A reviewer's justification is free text with no limit; longer ones are cut, and the cut is marked.
+JUSTIFICATION_CHARS = 500
 # Graph's reviewedBy/appliedBy on a decision no one reviewed or applied.
 NOBODY = "00000000-0000-0000-0000-000000000000"
 
@@ -160,13 +162,19 @@ def _identity(model) -> Optional[Dict[str, Any]]:
     return {k: v for k, v in projected.items() if v is not None}
 
 
+def _capped(text: Optional[str]) -> Optional[str]:
+    if not text or len(text) <= JUSTIFICATION_CHARS:
+        return text
+    return f"{text[:JUSTIFICATION_CHARS]} …[truncated, {len(text)} characters]"
+
+
 def project_decision(item) -> Dict[str, Any]:
     resource = getattr(item, "resource", None)
     return {
         "id": graph_attr(item, "id"),
         "decision": graph_attr(item, "decision"),
         "recommendation": graph_attr(item, "recommendation"),
-        "justification": graph_attr(item, "justification"),
+        "justification": _capped(graph_attr(item, "justification")),
         "reviewed_by": _identity(getattr(item, "reviewed_by", None)),
         "reviewed_date_time": graph_attr(item, "reviewed_date_time"),
         "apply_result": graph_attr(item, "apply_result"),

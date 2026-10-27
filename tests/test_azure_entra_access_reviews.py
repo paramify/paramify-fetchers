@@ -466,6 +466,19 @@ def test_an_inactive_users_duration_renders_as_iso_days():
     assert scope["type"] == "accessReviewInactiveUsersQueryScope"
 
 
+def test_a_long_justification_is_cut_and_marked():
+    item = ar.project_decision(ns(id="1", decision="Approve", justification="x" * 5000))
+    assert len(item["justification"]) < 600
+    assert item["justification"].startswith("x" * ar.JUSTIFICATION_CHARS)
+    assert item["justification"].endswith("…[truncated, 5000 characters]")
+    assert ar.project_decision(ns(id="2", decision="Approve", justification="Still needed"))["justification"] == "Still needed"
+
+
+def test_an_undocumented_decision_is_counted_under_its_own_key():
+    counts = ar.decision_counts([{"decision": "NotNotified"}, {"decision": "Approve"}])
+    assert counts["decisions_by_result"] == {"Approve": 1, "Deny": 0, "NotReviewed": 0, "DontKnow": 0, "NotNotified": 1}
+
+
 def test_graphs_nobody_identity_reads_as_no_reviewer():
     nobody = ns(odata_type=None, id=ar.NOBODY, display_name="", user_principal_name="")
     item = ar.project_decision(ns(

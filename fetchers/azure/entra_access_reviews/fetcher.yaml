@@ -107,5 +107,6 @@ evidence_set:
       - Deny (the reviewer, or the default decision, chose to remove the access)
       - NotReviewed (no one answered and no default decision was applied)
       - DontKnow (the reviewer answered that they don't know)
+      - any other value Graph sends, such as NotNotified (not in Graph's documented list), is counted under its own key, which is present only then
     - last_cycle_denied_decisions_applied — Number of latest-cycle Deny decisions whose removal was applied (apply result AppliedSuccessfully, or AppliedSuccessfullyButObjectNotFound when the access was already gone)
     - last_cycle_denied_decisions_not_applied — Number of latest-cycle Deny decisions not applied, either not yet or because applying failed (any other apply result, such as New, ApplyNotSupported or AppliedWithUnknownFailure)
