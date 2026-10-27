@@ -557,3 +557,21 @@ def test_source_control_url_tokens_are_stripped():
         "https://git.example.com/team/app.git")
     assert deploys.redact_url("https://u:p@git.example.com/app.git?access_token=s3cret#x") == "https://git.example.com/app.git"
     assert deploys.redact_url("https://git.example.com/app.git") == "https://git.example.com/app.git"
+
+
+def test_an_unset_default_action_or_ftps_state_reads_as_its_effective_value(monkeypatch):
+    allow_all = [rule(2147483647, "Any", name="Allow all")]
+    prod = config(ip_security_restrictions=allow_all, ip_security_restrictions_default_action=None, ftps_state=None,
+                  scm_ip_security_restrictions_default_action=None)
+    same = config(ip_security_restrictions=allow_all, ip_security_restrictions_default_action="Allow",
+                  ftps_state="AllAllowed", scm_ip_security_restrictions_default_action="Allow")
+    # With a rule of its own, an unset default action denies the rest, so an explicit Allow is drift.
+    restricted = config(ip_security_restrictions_default_action=None)
+    opened = config(ip_security_restrictions_default_action="Allow")
+    client = web_client(configs={"web-a": prod, "web-b": restricted},
+                        slots={"web-a": [slot("web-a", "staging")], "web-b": [slot("web-b", "staging")]},
+                        slot_configs={"web-a/staging": same, "web-b/staging": opened})
+    apps, _, _ = collect(monkeypatch, client, events=[])
+    assert apps["web-a"]["slots"][0]["configuration_differences"] == []
+    assert apps["web-b"]["slots"][0]["configuration_differences"] == [
+        {"field": "ip_security_restrictions_default_action", "production": "Deny", "slot": "Allow"}]

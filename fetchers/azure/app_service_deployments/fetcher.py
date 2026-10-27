@@ -101,6 +101,13 @@ BOOLEAN_FIELDS = ("http20_enabled", "remote_debugging_enabled", "scm_ip_security
                   "https_only", "client_cert_enabled")
 COMPARED_SITE_FIELDS = ("https_only", "client_cert_enabled", "public_network_access")
 RULE_FIELDS = ("action", "priority", "ip_address", "subnet_mask", "vnet_subnet_resource_id", "tag", "headers")
+# An unset field reads as what App Service applies, so unset and its explicit value aren't drift.
+UNSET_DEFAULTS = {"ftps_state": "AllAllowed"}
+DEFAULT_ACTION_RULES = {
+    "ip_security_restrictions_default_action": "ip_security_restrictions",
+    "scm_ip_security_restrictions_default_action": "scm_ip_security_restrictions",
+}
+ALL_ADDRESSES = ("any", "*", "0.0.0.0/0", "::/0", "internet")
 
 LIMITATIONS = [
     "Kudu deployment records (GET sites/{name}/deployments) exist for zip deploy, OneDeploy, local Git "
@@ -271,10 +278,33 @@ def _comparable(field, value):
     return value or None
 
 
+def _allows_everyone(rule: dict) -> bool:
+    return (str(rule.get("ip_address") or "").strip().lower() in ALL_ADDRESSES
+            and not rule.get("vnet_subnet_resource_id") and not rule.get("headers")
+            and str(rule.get("action") or "Allow").lower() == "allow")
+
+
+def effective_default_action(action, rules):
+    """ARM leaves the default action unset on most apps: then no rules allows all, and any rule denies the rest."""
+    if action:
+        return action
+    return "Deny" if any(not _allows_everyone(r) for r in rules or []) else "Allow"
+
+
+def _effective(config: dict) -> dict:
+    out = dict(config)
+    for field, rules_field in DEFAULT_ACTION_RULES.items():
+        out[field] = effective_default_action(config.get(field), config.get(rules_field))
+    for field, default in UNSET_DEFAULTS.items():
+        out[field] = config.get(field) or default
+    return out
+
+
 def configuration_differences(prod_site: dict, prod_config, slot_site: dict, slot_config) -> list | None:
     """Fields where the slot differs from production; None when either config/web read failed."""
     if prod_config is None or slot_config is None:
         return None
+    prod_config, slot_config = _effective(prod_config), _effective(slot_config)
     differences = []
     pairs = [(f, prod_config.get(f), slot_config.get(f)) for f in COMPARED_CONFIG_FIELDS]
     pairs += [(f, prod_site.get(f), slot_site.get(f)) for f in COMPARED_SITE_FIELDS]
