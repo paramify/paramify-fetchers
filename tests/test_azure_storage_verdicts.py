@@ -37,10 +37,10 @@ def collector():
 
 
 def account(name="sa1", sku="Standard_LRS", key1=None, key2=None, policy_days=None, tags=None,
-            allow_public=False, **extra):
+            allow_public=False, network_rule_set=None, **extra):
     return ns(
         id=f"{RG}/providers/Microsoft.Storage/storageAccounts/{name}", name=name, location="eastus",
-        encryption=None, network_rule_set=None, sku=ns(name=sku), tags=tags,
+        encryption=None, network_rule_set=network_rule_set, sku=ns(name=sku), tags=tags,
         key_policy=ns(key_expiration_period_in_days=policy_days) if policy_days is not None else None,
         key_creation_time=ns(key1=key1, key2=key2), allow_blob_public_access=allow_public,
         primary_location="eastus", secondary_location="westus" if "GRS" in sku else None,
@@ -261,6 +261,37 @@ def test_public_container_is_effective_when_the_account_setting_was_never_set(mo
     (r,), _ = collect(monkeypatch, account(allow_public=None), containers=[container("c", public="Blob")])
     assert r["containers"][0]["anonymous_access_effective"] is True
     assert st.summarize([r])["anonymously_accessible_containers"] == 1
+
+
+def rules(default="Deny", ip=(), ipv6=None, vnet=()):
+    listed = lambda xs: None if xs is None else [ns(value=x) for x in xs]  # noqa: E731
+    return ns(bypass="AzureServices", default_action=default, ip_rules=listed(ip), ipv6_rules=listed(ipv6),
+              virtual_network_rules=listed(vnet))
+
+
+@pytest.mark.parametrize("public_network, rule_set, effective", [
+    (None, None, True),
+    ("Enabled", rules(default="Allow"), True),
+    ("Disabled", rules(default="Allow"), False),
+    ("Disabled", None, False),
+    ("SecuredByPerimeter", None, True),
+    ("Enabled", rules(), False),
+    ("Enabled", rules(ipv6=()), False),
+    ("Enabled", rules(ip=("203.0.113.0/24",)), True),
+    ("Enabled", rules(ipv6=("2001:db8::/32",)), True),
+    ("Enabled", rules(vnet=("subnet-a",)), True),
+    ("Enabled", rules(ip=None), True),
+    ("Enabled", rules(vnet=None), True),
+])
+def test_network_settings_that_turn_internet_clients_away_block_anonymous_access(
+    monkeypatch, public_network, rule_set, effective
+):
+    model = account(allow_public=True, public_network_access=public_network, network_rule_set=rule_set)
+    (r,), _ = collect(monkeypatch, model, containers=[container("c", public="Blob")])
+    assert r["containers"][0]["anonymous_access_effective"] is effective
+    assert st.summarize([r])["anonymously_accessible_containers"] == int(effective)
+    # The rule counts decide the verdict only; the account's rule set keeps its two keys.
+    assert sorted(r["network_rule_set"]) == ["bypass", "default_action"]
 
 
 @pytest.mark.parametrize("setting, allowed", [(None, True), (True, True), (False, False)])

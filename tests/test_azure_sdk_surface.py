@@ -1669,6 +1669,13 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "container as private",
     ),
     (
+        "azure.mgmt.storage.models",
+        "NetworkRuleSet",
+        ["default_action", "ip_rules", "ipv6_rules", "virtual_network_rules"],
+        "azure/storage_encryption_status — a renamed ipv6_rules reads an account "
+        "that admits IPv6 clients as closed to the internet",
+    ),
+    (
         "azure.mgmt.keyvault.models",
         "Vault",
         ["properties"],

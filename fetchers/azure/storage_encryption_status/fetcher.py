@@ -39,6 +39,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from azure_rest import parse_time  # noqa: E402
 
 logger = logging.getLogger("azure_storage_encryption_status")
 
@@ -116,6 +117,10 @@ def project_storage_account(account) -> dict:
         "network_rule_set": {
             "bypass": model_attr(network_rule_set, "bypass"),
             "default_action": model_attr(network_rule_set, "default_action"),
+            # Counted only to tell whether internet clients are turned away; None when not returned.
+            "ip_rules": _count(model_attr(network_rule_set, "ip_rules")),
+            "ipv6_rules": _count(model_attr(network_rule_set, "ipv6_rules")),
+            "virtual_network_rules": _count(model_attr(network_rule_set, "virtual_network_rules")),
         },
         "private_endpoint_connections": [
             {
@@ -234,19 +239,12 @@ def _semicolon_list(value) -> list:
     return str(value).rstrip(";").split(";")
 
 
-def _as_datetime(value) -> datetime | None:
-    if isinstance(value, str):
-        try:
-            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    if not isinstance(value, datetime):
-        return None
-    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+def _count(value) -> int | None:
+    return len(value) if isinstance(value, list) else None
 
 
 def _iso_utc(value) -> str | None:
-    moment = _as_datetime(value)
+    moment = parse_time(value)
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if moment else None
 
 
@@ -278,7 +276,7 @@ def access_key_records(created: dict | None, expiration_days: int | None, now: d
     """Age of key1 and key2 from keyCreationTime, against keyPolicy.keyExpirationPeriodInDays."""
     records = []
     for name in ACCESS_KEY_NAMES:
-        moment = _as_datetime((created or {}).get(name))
+        moment = parse_time((created or {}).get(name))
         age = now - moment if moment else None
         records.append({
             "name": name,
@@ -309,7 +307,7 @@ def geo_replication_stats_record(
 ) -> dict:
     """Secondary-region health; `sync_lag_minutes` is how far the secondary trails the primary."""
     stats = stats or {}
-    last_sync = _as_datetime(stats.get("last_sync_time"))
+    last_sync = parse_time(stats.get("last_sync_time"))
     return {
         "stats_status": stats_status,
         "status": stats.get("status"),
@@ -324,8 +322,20 @@ def geo_replication_stats_record(
     }
 
 
-def container_record(container: dict, allow_blob_public_access: bool | None) -> dict:
-    """One blob container; anonymous access needs a container level and an account that doesn't forbid it.
+def internet_blocked(account: dict) -> bool:
+    """True when the projected account turns internet clients away: public network access Disabled, or
+    a Deny default with no IP or virtual network rule. Rule lists the API didn't return can't show that."""
+    if str(account.get("public_network_access") or "").lower() == "disabled":
+        return True
+    rules = account.get("network_rule_set") or {}
+    if str(rules.get("default_action") or "").lower() != "deny":
+        return False
+    return rules.get("ip_rules") == 0 and rules.get("virtual_network_rules") == 0 and not rules.get("ipv6_rules")
+
+
+def container_record(container: dict, allow_blob_public_access: bool | None, blocked: bool = False) -> dict:
+    """One blob container; anonymous access needs a container level, an account that doesn't forbid it and
+    an account network that lets internet clients in (`blocked` from internet_blocked()).
 
     `allow_blob_public_access` is the account's raw setting: Azure permits anonymous access when it
     is true or unset (older accounts), so only an explicit false blocks it.
@@ -336,7 +346,7 @@ def container_record(container: dict, allow_blob_public_access: bool | None) -> 
         "id": container.get("id"),
         "name": container.get("name"),
         "public_access": public_access,
-        "anonymous_access_effective": has_level and allow_blob_public_access is not False,
+        "anonymous_access_effective": has_level and allow_blob_public_access is not False and not blocked,
         "metadata_keys": container.get("metadata_keys"),
         "has_immutability_policy": bool(container.get("has_immutability_policy") or False),
         "has_legal_hold": bool(container.get("has_legal_hold") or False),
@@ -642,7 +652,8 @@ def collect_storage_accounts(
         if account["geo_redundant"]:
             account["geo_replication_stats"] = _geo_replication_stats(client, collector, group, name, now)
         _collect_containers(
-            client, collector, account, group, name, projected.get("allow_blob_public_access")
+            client, collector, account, group, name, projected.get("allow_blob_public_access"),
+            internet_blocked(projected),
         )
 
     return sorted((account for _, account in listed), key=lambda r: r.get("id") or "")
@@ -672,7 +683,8 @@ def _geo_replication_stats(client, collector: Collector, group: str, name: str, 
 
 
 def _collect_containers(
-    client, collector: Collector, account: dict, group: str, name: str, allow_blob_public_access: bool | None
+    client, collector: Collector, account: dict, group: str, name: str, allow_blob_public_access: bool | None,
+    blocked: bool = False,
 ) -> None:
     """blob_containers.list(): every container's access level and immutability flags."""
     try:
@@ -686,7 +698,7 @@ def _collect_containers(
         return
     account["containers_status"] = CONTAINERS_COLLECTED
     account["containers"] = sorted(
-        (container_record(c, allow_blob_public_access) for c in listed), key=lambda r: r.get("name") or ""
+        (container_record(c, allow_blob_public_access, blocked) for c in listed), key=lambda r: r.get("name") or ""
     )
 
 
