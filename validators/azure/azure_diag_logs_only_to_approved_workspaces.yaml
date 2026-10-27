@@ -1,0 +1,23 @@
+key: azure_diag_logs_only_to_approved_workspaces
+name: Azure Resource Logs Only Sent to Approved Workspaces
+type: AUTOMATED
+role: configuration
+statement: >
+  An approved Log Analytics workspace list is configured on the fetcher (APPROVED_LOG_WORKSPACES), no
+  diagnostic setting and no resource exports logs to a workspace off that list, at least one resource
+  sends to an approved workspace, and the collection had no partial failure. Substantiates KSI-MLA-OSM
+  (Audit Log Collection and Alerts; Continuous Monitoring Strategy): "Fail inventory resources with ...
+  wrong destination" and "sends required logs to the approved workspace". The approved ids live in the
+  fetcher's configuration, not here, so it fails until they are set. Does not prove every resource has a
+  setting (azure_diag_log_analytics_coverage_complete) or that the logs arrive
+  (azure_diag_all_resources_ingesting_recently).
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"approved_workspaces_configured":\s*true,[\s\S]*?"resources_exporting_to_unapproved_workspace":\s*0,[\s\S]*?"resources_sending_to_approved_workspace":\s*[1-9]\d*,[\s\S]*?"settings_exporting_to_unapproved_workspace":\s*0\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-RESOURCE-DIAG-SETTINGS

@@ -1,0 +1,24 @@
+key: sentinel_analytics_rules_read_required_tables
+name: Azure Sentinel Enabled Rules Read Required Log Sources
+type: AUTOMATED
+role: configuration
+statement: >
+  One Sentinel workspace has, for each required table, at least one enabled analytics rule that reads it
+  and data in that table within the ingestion window (a non-null last_ingested in
+  tables_read_by_enabled_rules), and the collection had no partial failure. The required tables are a
+  placeholder baseline for an Azure and Entra ID estate: Entra ID audit logs (AuditLogs) and sign-in logs
+  (SigninLogs), and the Azure activity log (AzureActivity); the organization adds or removes tables. Each
+  table is a lookahead inside one workspace's list, so order does not matter. Substantiates KSI-MLA-RVL
+  (Continuous Monitoring; Continuous Monitoring Strategy; Security Event Notifications): "enabled
+  analytics rules cover the required log sources". Does not prove what the rules detect, or tables read
+  only through parser functions, which the fetcher cannot see.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"tables_read_by_enabled_rules":\s*\[(?=[^\]]*"enabled_rules":\s*[1-9]\d*,\s*"last_ingested":\s*"[^"]+",\s*"table":\s*"AuditLogs")(?=[^\]]*"enabled_rules":\s*[1-9]\d*,\s*"last_ingested":\s*"[^"]+",\s*"table":\s*"AzureActivity")(?=[^\]]*"enabled_rules":\s*[1-9]\d*,\s*"last_ingested":\s*"[^"]+",\s*"table":\s*"SigninLogs")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-ANALYTICS-RULES

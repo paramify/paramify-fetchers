@@ -1,0 +1,24 @@
+key: sentinel_analytics_rules_read_every_arriving_table
+name: Azure Sentinel Enabled Rules Read Every Arriving Table With Data
+type: AUTOMATED
+role: configuration
+statement: >
+  Across every Sentinel workspace, each table that received data in the ingestion window is read by at
+  least one enabled analytics rule (ingesting_tables_not_read is 0), no enabled rule reads a table that
+  got nothing (enabled_rules_missing_data is 0), at least one rule is enabled, and the collection had no
+  partial failure. Both counts are null, and fail, when no workspace could be checked. Stricter than
+  sentinel_analytics_rules_read_required_tables: every arriving source, not a required list.
+  Substantiates KSI-MLA-RVL (Continuous Monitoring; Continuous Monitoring Strategy; Security Event
+  Notifications): "enabled analytics rules cover the required log sources". Does not count rules whose
+  tables cannot be worked out (Fusion, ML and threat intelligence rules, parser-only queries), which are
+  neither covering nor missing data here, or Basic and Auxiliary tables, which the window query skips.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"enabled_rules_missing_data":\s*0,\s*"enabled_rules_tables_unknown":\s*\d+,\s*"enabled_rules_total":\s*[1-9]\d*,\s*"ingesting_tables_not_read":\s*0\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-ANALYTICS-RULES

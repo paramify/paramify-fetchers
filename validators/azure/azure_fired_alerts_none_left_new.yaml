@@ -1,0 +1,22 @@
+key: azure_fired_alerts_none_left_new
+name: Azure Monitor Fired Alerts None Left New
+type: AUTOMATED
+role: configuration
+statement: >
+  No Azure Monitor alert fired in the 30-day window is still in the New state, or has no state: every one
+  was acknowledged or closed. alerts_by_state holds no New or unknown key, every fired alert was listed,
+  and the collection had no partial failure; no alert fired reads as an empty tally and passes.
+  Substantiates KSI-MLA-RVL (Audit Log Collection and Alerts; Continuous Monitoring; Continuous Monitoring
+  Strategy; Security Event Notifications): "every alert ... is assigned and reviewed within the required
+  timeframe", the alert half. Has no grace period, so an alert that fired minutes before collection fails
+  it. Does not prove who reviewed an alert, when, or that acknowledgement means review.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"alerts_by_state":\s*\{(?![^{}]*"(?:New|unknown)")[^{}]*\}[\s\S]*?"all_alerts_listed":\s*true'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-MONITOR-FIRED-ALERTS
