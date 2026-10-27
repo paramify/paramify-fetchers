@@ -25,4 +25,4 @@ ksis:
 evidence_set:
   reference_id: EVD-EKS-MICROSERVICE-SEG
   name: EKS Microservice Segmentation
-  instructions: 'Script: eks_microservice_segmentation.sh. Commands executed: kubectl get networkpolicies, kubectl describe daemonset aws-node, aws ec2 describe-instances'
+  instructions: 'Script: k8s/eks_microservice_segmentation/fetcher.sh. Commands executed: kubectl get networkpolicies, kubectl describe daemonset aws-node, aws ec2 describe-instances'

@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paramify-fetchers"
-version = "0.5.1"
+version = "0.6.0"
 description = "Paramify evidence fetcher framework — discover, build, run, and inspect evidence fetchers."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "GPL-3.0-only" }
 classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
@@ -31,7 +31,7 @@ dependencies = [
 # same app on 1.x.
 tui = ["textual>=8,<9"]
 checkov = ["checkov"]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "pytest-xdist", "ruff", "mypy"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every
 # one producing wrong or empty evidence rather than an error. Keep the two files
@@ -58,11 +58,20 @@ azure = [
     "azure-mgmt-redis>=14.5.0,<15",
     "azure-mgmt-dns>=9.0.0,<10",
     "azure-mgmt-privatedns>=2.0.0,<3",
+    "azure-mgmt-cognitiveservices>=14.1.0,<15",
+    "azure-mgmt-msi>=7.1.0,<8",
+    "azure-mgmt-apimanagement>=5.0.0,<6",
+    "azure-mgmt-appcontainers>=5.1.0,<6",
+    "azure-mgmt-containerinstance>=10.1.0,<11",
+    "azure-mgmt-mongocluster>=1.2.0,<2",
+    "azure-mgmt-kusto>=4.0.0,<5",
+    "azure-mgmt-eventhub>=12.0.0,<13",
     "azure-mgmt-compute>=38.2.0,<39",
     "azure-mgmt-containerservice>=41.5.0,<42",
     "azure-mgmt-containerregistry>=15.0.0,<16",
     "azure-mgmt-keyvault>=14.0.1,<15",
     "azure-keyvault-keys>=4.11.1,<5",
+    "azure-keyvault-certificates>=4.11.3,<5",
     # <7 is load-bearing: 7.0.0 ships no diagnostic_settings operations at all.
     "azure-mgmt-monitor>=6.0.2,<7",
     "azure-mgmt-loganalytics>=14.0.0,<15",
@@ -96,6 +105,16 @@ gcp = [
     "google-cloud-kms",
     "google-cloud-api-keys",
 ]
+# OCI category (fetchers/oci/*). One distribution covers every OCI service: the
+# SDK is generated from a single spec and ships all clients in the `oci` package,
+# so there is no per-service list to keep in step. Major is left open — the SDK is
+# generated and additive, and the fetchers read generated models whose field names
+# tools/oci_schema_check.py verifies against the installed version.
+#
+# Unlike the gcp extra, this one carries test signal: every tests/test_oci_*.py
+# opens with pytest.importorskip("oci"), so without it installed they SKIP rather
+# than fail. Out of `all` for the same reason as Azure and GCP.
+oci = ["oci"]
 # Convenience: every front-end + dev tooling in one install.
 all = ["textual>=8,<9", "checkov", "pytest", "ruff", "mypy"]
 
@@ -131,7 +150,7 @@ addopts = "--import-mode=importlib"
 # fetchers/ are held to the schema contract (tests/test_contracts.py), not lint
 # rules (CLAUDE.md); CI runs `ruff check framework/` so only that tree is gated.
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 extend-exclude = ["fetchers", ".venv"]
 
 [tool.ruff.lint]
@@ -145,7 +164,7 @@ select = ["E4", "E7", "E9", "F", "I"]
 # pass, so it's suppressed here rather than gating CI. Third-party libs ship no
 # stubs, hence ignore_missing_imports.
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -1,18 +1,7 @@
 name: azure_app_service_configuration
-version: 0.2.0
-description: >
-  For each App Service web app in the subscription, reports the transport and
-  identity posture — HTTPS-only, minimum TLS version, HTTP/2, FTP/FTPS deployment
-  state, client certificate mode (the effective mode, not the stale raw field),
-  App Service Authentication ("Easy Auth") and whether unauthenticated callers are
-  rejected, managed identity, VNet integration and public network access — together
-  with the declared language runtime versions (linux_fx_version, windows_fx_version,
-  java / php / python / node / .NET), which is what a supported-runtime control is
-  evidenced from. Also the access restrictions on the main site and the SCM
-  (deployment) site — every rule, the default action, whether SCM inherits the main
-  site's rules, and whether each site lets every caller through — and each app's
-  diagnostic settings (which log categories are exported, and where). Function apps are excluded; they are collected by
-  azure_function_app_configuration, whose calls need more than Reader.
+version: 0.3.0
+description: >-
+  Shows how each App Service web app is hardened: TLS and cipher suites, basic-auth publishing, identity, access restrictions, logging, Key Vault references, runtime support and, opt-in, literal secrets.
 category: azure
 
 supports_targets: true
@@ -25,6 +14,22 @@ output:
   type: json
   path: azure_app_service_configuration.json
   aggregation: per_target
+
+config_schema:
+  scan_literal_secrets:
+    type: boolean
+    required: false
+    default: false
+    env: AZURE_APP_SERVICE_SCAN_LITERAL_SECRETS
+    description: >
+      Opt-in. When true, reads each web app's app settings and connection strings
+      (config/list, which needs Microsoft.Web/sites/config/list/action) to find the
+      ones holding a literal secret: a credential typed into the setting instead of a
+      Key Vault or App Configuration reference. Values are classified in memory and
+      never written; only setting names and why each was flagged are. The same read
+      gives a Windows Node app's version (WEBSITE_NODE_DEFAULT_VERSION) for runtime
+      support, the one value written, and only when it is a version number. Off by
+      default, so plain Reader is enough.
 
 target_schema:
   subscription_id:
@@ -46,23 +51,100 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-SVC-SIN   # HTTPS-only, minimum TLS version, FTP/FTPS state
+  - KSI-SVC-SIN   # HTTPS-only, minimum TLS version and cipher suites, FTP/FTPS state
   - KSI-CNA-MAT   # public network access and VNet integration
   - KSI-IAM-SNU   # managed identity
   - KSI-SVC-EIS   # declared runtime versions — the supported-runtime control
   - KSI-CNA-RNT   # access restrictions on the main and SCM sites
   - KSI-CNA-ULN   # VNet-scoped access-restriction rules and VNet integration
   - KSI-MLA-LET   # per-app diagnostic settings: which log categories are exported
-
-  # No SVC-VCM: client certificate mode is mTLS-adjacent, but this reports the
-  # setting, not automated validation of communications. Left an honest gap.
+  - KSI-SVC-ASM   # app settings and connection strings resolved from Key Vault
+  - KSI-CNA-DFP   # basic-auth publishing on the SCM and FTP endpoints
+  - KSI-SVC-PRR   # runtimes past end of support left enabled
+  - KSI-SVC-VCM   # client certificate mode and managed identity
 
 evidence_set:
   reference_id: EVD-AZURE-APPSVC-CONFIG
   name: Azure App Service Configuration
-  instructions: >
-    Script: fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Web"), then
-    azure-mgmt-web WebSiteManagementClient web_apps.list(), get_configuration() and
-    get_auth_settings_v2_without_secrets() per web app (access restrictions come from
-    get_configuration()), and azure-mgmt-monitor MonitorManagementClient
-    diagnostic_settings.list(resource_uri) per web app. Reader is sufficient — all GETs.
+  instructions: |
+    Script: azure/app_service_configuration/fetcher.py
+
+    Access: Reader on the subscription. Optional: Microsoft.Web/sites/config/list/action, used only when scan_literal_secrets is on to look for literal secrets (credentials typed into app settings or connection strings instead of Key Vault or App Configuration references); without it, each app's literal-secret scan reads not_authorized, the scan counts leave those apps out, and a Windows app's Node version stays unread.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Web") — tells "App Service not in use" from "no apps"
+    - web_apps.list() — every web app's production site (function apps and deployment slots, which carry their own TLS, basic-auth and settings, are left out)
+    - web_apps.get_configuration() (per app) — TLS, FTP, runtime versions and access restrictions
+    - web_apps.get_auth_settings_v2_without_secrets() (per app) — App Service Authentication (Easy Auth)
+    - web_apps.get_scm_allowed() and get_ftp_allowed() (per app) — whether basic-auth publishing is allowed
+    - web_apps.get_app_settings_key_vault_references() and get_site_connection_string_key_vault_references() (per app) — which settings resolve from Key Vault, without reading values
+    - web_apps.list_application_settings() and list_connection_strings() (per app, only when scan_literal_secrets is on) — finds settings holding a literal secret, and a Windows app's Node version; no other value is written, and the Node version only when it is a version number
+    - provider.get_web_app_stacks() — App Service's runtime list with end-of-life dates
+    - diagnostic_settings.list() (per app) — which log categories are exported
+
+    Output: azure_app_service_configuration_<subscription>.json — each web app's transport, publishing, identity, network, logging, Key Vault and runtime settings, with a verdict on whether its runtimes are still supported and, when the scan is on, the names of settings holding a literal secret.
+
+    Summary fields:
+
+    Which web apps were checked?
+    - total_web_apps — Number of web apps checked (function apps are left out)
+    - provider_registration_status — Whether the App Service provider (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown
+
+    Is traffic encrypted with modern TLS?
+    - https_only_apps — Number of web apps that redirect HTTP to HTTPS
+    - https_only_percentage — Percentage of web apps that are HTTPS-only = https_only_apps / total_web_apps × 100 (a whole number, 0–100); 0 when total_web_apps is 0
+    - minimum_tls_1_2_apps — Number of web apps whose minimum TLS version is 1.2 or 1.3
+    - scm_minimum_tls_1_2_apps — Number of web apps whose deployment (SCM) site's minimum TLS version is 1.2 or 1.3
+    - min_tls_cipher_suite_set_apps — Number of web apps with a minimum TLS cipher suite set (without one, every suite App Service offers stays allowed)
+    - cbc_cipher_suites_allowed_apps — Number of web apps that still allow a CBC-mode cipher suite, read from App Service's fixed suite order cut at the app's minimum
+    - non_forward_secret_cipher_suites_allowed_apps — Number of web apps that still allow a static-RSA (TLS_RSA_*) cipher suite, which has no forward secrecy
+    - http2_enabled_apps — Number of web apps with HTTP/2 switched on
+
+    Are deployment endpoints locked down?
+    - ftp_deployment_disabled_apps — Number of web apps with FTP and FTPS deployment switched off
+    - ftp_encrypted_or_disabled_apps — Number of web apps that allow only FTPS, or no FTP at all
+    - scm_basic_auth_allowed_apps — Number of web apps that accept a publishing user name and password (basic auth) on the deployment (SCM) site
+    - ftp_basic_auth_allowed_apps — Number of web apps that accept basic auth on the FTP endpoint
+    - basic_auth_publishing_disabled_apps — Number of web apps where basic auth is switched off on both the SCM site and FTP
+    - basic_auth_publishing_unknown_apps — Number of web apps where a policy read failed and neither read showed basic auth switched on
+    - remote_debugging_enabled_apps — Number of web apps with remote debugging switched on
+
+    Who can call the app, and as whom does it run?
+    - auth_enabled_apps — Number of web apps with App Service Authentication (Easy Auth) switched on
+    - client_cert_required_apps — Number of web apps that require a client certificate, using the mode the portal shows rather than the stale raw field
+    - managed_identity_apps — Number of web apps with a system- or user-assigned managed identity
+    - managed_identity_percentage — Percentage of web apps with a managed identity = managed_identity_apps / total_web_apps × 100 (a whole number, 0–100); 0 when total_web_apps is 0
+
+    Is the app reachable only from where it should be?
+    - vnet_integrated_apps — Number of web apps with outbound VNet integration
+    - public_network_access_disabled_apps — Number of web apps with public network access switched off
+    - main_site_allows_all_traffic_apps — Number of web apps whose main site's access restrictions let every caller through (rules are read in priority order, and the default action applies when no rule matches everyone)
+    - scm_site_allows_all_traffic_apps — Number of web apps whose deployment (SCM) site's access restrictions let every caller through, using the main site's rules when the SCM site inherits them
+    - any_site_allows_all_traffic_apps — Number of web apps where the main site or the SCM site lets every caller through
+    - scm_uses_main_site_restrictions_apps — Number of web apps whose SCM site uses the main site's access restrictions
+
+    Are secrets kept in Key Vault?
+    - apps_with_key_vault_references — Number of web apps with at least one app setting or connection string that is a Key Vault reference
+    - key_vault_references — Number of Key Vault references across all web apps' app settings and connection strings
+    - unresolved_key_vault_references — Number of Key Vault references whose status is anything other than Resolved
+    - apps_with_unresolved_key_vault_references — Number of web apps with at least one Key Vault reference that doesn't resolve
+
+    Do any settings hold a literal secret (opt-in scan)?
+    - literal_secret_scan_enabled — True if scan_literal_secrets is on; false if it is off
+    - apps_scanned_for_literal_secrets — Number of web apps whose app settings and connection strings were read; null if the scan is off
+    - apps_literal_secret_scan_not_authorized — Number of web apps whose settings could not be read because Microsoft.Web/sites/config/list/action is not granted; null if the scan is off
+    - apps_literal_secret_scan_not_read — Number of web apps the scan skipped without a failure: a ReadOnly lock refused config/list (409 ScopeLocked), or the app's id has no resource group; null if the scan is off
+    - apps_with_literal_secrets — Number of scanned web apps with at least one setting holding a literal secret; null if the scan is off, or if there are web apps and none could be scanned. A setting counts when it is not a Key Vault or App Configuration reference and either its value carries a credential (a key ending in Password, Pwd, AccountKey, SharedAccessKey, SharedAccessSignature, AccessKey, Secret, ApiKey or SubscriptionKey followed by = and a value other than true or false, such as ClientSecret= or DbPassword=; a SAS sig= parameter; a private key; or a password in a URL), or it is an app setting whose name contains password, passwd, secret, API key, access key, account key, private key or credential, or has the word key, token, pwd or sas, unless the name also has id, name, uri, url, endpoint, vault, version, header, enabled, path, file, lifetime, expiry, expiration or type, and whose value is a single word of 8 or more characters that is not a URL, a boolean or made wholly of key=value; pairs. Application Insights' instrumentation key and connection string never count. This is a heuristic, so 0 doesn't prove there are no literal secrets
+    - literal_secret_settings — Number of app settings and connection strings holding a literal secret across the scanned web apps; null if the scan is off, or if there are web apps and none could be scanned
+
+    Are the runtimes still supported?
+    - apps_with_declared_runtime — Number of web apps whose configuration names at least one language runtime version
+    - apps_with_runtime_past_end_of_support — Number of web apps with at least one declared runtime past end of support (matched by its spelling to App Service's runtime list, and marked deprecated there or past its end-of-life date). On Windows a Node app's version is the WEBSITE_NODE_DEFAULT_VERSION app setting, read only when scan_literal_secrets is on and matched to the Node stack only, as written or as ~major or major.minor; without it, the .NET Framework v4.0 every such Windows app carries reads as unknown rather than as its runtime. The portal and Visual Studio templates long added that setting to every Windows app, so it may be a stale default on a non-Node app; both runtimes are then judged
+    - apps_with_runtime_support_unknown — Number of web apps with no runtime past end of support where support is unknown: nothing declared, a custom container, a runtime not in App Service's list, a Windows app on .NET Framework v4.0 whose Node setting wasn't read, or a failed read
+
+    Is the app logging?
+    - always_on_apps — Number of web apps with Always On switched on
+    - http_logging_enabled_apps — Number of web apps writing web server (HTTP) logs
+    - apps_with_diagnostic_settings — Number of web apps with at least one diagnostic setting
+    - apps_with_enabled_logs — Number of web apps exporting at least one switched-on log category

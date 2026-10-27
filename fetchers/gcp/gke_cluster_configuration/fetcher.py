@@ -39,7 +39,28 @@ from gcp_common import (  # noqa: E402
 logger = logging.getLogger("gcp_gke_cluster_configuration")
 
 
+# Binary Authorization evaluation modes that leave enforcement to the deprecated
+# `enabled` flag (unspecified) or switch it off (DISABLED). Every other mode —
+# PROJECT_SINGLETON_POLICY_ENFORCE today — enforces a policy.
+_BINAUTHZ_UNSPECIFIED = "EVALUATION_MODE_UNSPECIFIED"
+_BINAUTHZ_DISABLED = "DISABLED"
+
+
 # --- pure transforms ---
+
+def binary_authorization_enabled(binary_authorization: dict | None) -> bool:
+    """Whether the cluster evaluates images against a Binary Authorization policy.
+
+    `evaluation_mode` is the current setting; `enabled` is deprecated and, per the
+    API, ignored once a mode other than EVALUATION_MODE_UNSPECIFIED is set. So the
+    legacy flag decides only when the mode is unset or unspecified, and DISABLED
+    is off even if a stale `enabled: true` is still on the resource.
+    """
+    mode = dig_any(binary_authorization, "evaluation_mode") or None
+    if mode in (None, _BINAUTHZ_UNSPECIFIED):
+        return bool(dig_any(binary_authorization, "enabled"))
+    return mode != _BINAUTHZ_DISABLED
+
 
 def node_pool_record(pool: dict) -> dict:
     """Normalize one node pool into an evidence record.
@@ -135,9 +156,15 @@ def cluster_record(cluster: dict) -> dict:
         # --- host / workload hardening ---
         "shielded_nodes_enabled": bool(dig_any(cluster, "shielded_nodes", "enabled")),
         "confidential_nodes_enabled": bool(dig_any(cluster, "confidential_nodes", "enabled")),
-        "binary_authorization_enabled": bool(dig_any(cluster, "binary_authorization", "enabled")),
+        "binary_authorization_enabled": binary_authorization_enabled(
+            dig_any(cluster, "binary_authorization")
+        ),
         "binary_authorization_mode": (
             dig_any(cluster, "binary_authorization", "evaluation_mode") or None
+        ),
+        # The deprecated flag as the API returns it; see binary_authorization_enabled().
+        "binary_authorization_legacy_enabled": bool(
+            dig_any(cluster, "binary_authorization", "enabled")
         ),
         # --- control-plane logging / monitoring ---
         "logging_service": dig_any(cluster, "logging_service") or None,

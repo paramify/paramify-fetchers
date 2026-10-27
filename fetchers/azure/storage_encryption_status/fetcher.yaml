@@ -1,15 +1,7 @@
 name: azure_storage_encryption_status
-version: 0.1.0
-description: >
-  For each storage account in the subscription, reports whether the encryption key
-  is customer-managed (Key Vault) or platform-managed, whether infrastructure
-  (double) encryption is on, and the posture around it: HTTPS-only and minimum TLS
-  version, blob public access, public network access and network rule set, private
-  endpoint connections, access-key expiration policy, shared-key vs Entra
-  authorization, replication SKU, cross-tenant replication, plus blob versioning /
-  container soft delete and file share soft delete / SMB channel encryption. Azure
-  Storage is always encrypted at rest, so the evidence that varies is CMK vs
-  Microsoft-managed, not "encrypted: true/false".
+version: 0.2.0
+description: >-
+  Shows how each storage account is encrypted and exposed, how old its access keys are, whether it replicates to a healthy second region, which containers are public, and its owner.
 category: azure
 
 supports_targets: true
@@ -22,6 +14,25 @@ output:
   type: json
   path: azure_storage_encryption_status.json
   aggregation: per_target
+
+config_schema:
+  owner_tag_keys:
+    type: string
+    required: false
+    default: Owner,OwnerEmail,TechnicalOwner,BusinessOwner,DataOwner
+    env: AZURE_STORAGE_OWNER_TAG_KEYS
+    description: >
+      Comma-separated tag keys that name an account's owner, tried in order. Matched
+      without case or punctuation, so "data-owner" matches DataOwner. The first one
+      present fills owner_tag.
+  classification_tag_keys:
+    type: string
+    required: false
+    default: Classification,DataClassification,DataSensitivity,Sensitivity,Confidentiality
+    env: AZURE_STORAGE_CLASSIFICATION_TAG_KEYS
+    description: >
+      Comma-separated tag keys that give an account's data classification, tried in
+      order and matched the same way. The first one present fills classification_tag.
 
 target_schema:
   subscription_id:
@@ -45,11 +56,79 @@ ksis:
   - KSI-SVC-SIN
   - KSI-SVC-ASM
   - KSI-CNA-RNT
+  - KSI-CNA-OFA   # secondary region, replication health and failover readiness
+  - KSI-RPL-ABO   # geo-replicated copy and its last sync time
+  - KSI-PIY-GIV   # containers with owner and classification tags
 
 evidence_set:
   reference_id: EVD-AZURE-STORAGE-ENC
   name: Azure Storage Encryption
-  instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-storage StorageManagementClient):
-    storage_accounts.list(), blob_services.get_service_properties(),
-    file_services.get_service_properties().
+  instructions: |
+    Script: azure/storage_encryption_status/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Storage") — tells "storage not in use" from "no accounts"
+    - storage_accounts.list() — every account with its encryption, network, key policy, key creation times, regions and tags; access keys are never listed (no listKeys or SAS calls)
+    - blob_services.get_service_properties() and file_services.get_service_properties() (per account) — versioning and soft delete
+    - storage_accounts.get_properties(expand="geoReplicationStats") (per geo-redundant account) — replication health and last sync time; LastSyncTimeUnavailable reads as unavailable, any other error fails the run
+    - blob_containers.list() (per account) — each container's access level and immutability; an account kind with no Blob service reads not_supported, any other error fails the run
+
+    Output: azure_storage_encryption_status_<subscription>.json — every storage account's encryption, network exposure, access-key age, replication to a second region, blob containers (with metadata keys only, never values, and null when the list returns no metadata) and tags.
+
+    Summary fields:
+
+    What was checked?
+    - total_storage_accounts — Number of storage accounts in the subscription
+    - provider_registration_status — Whether Azure Storage (Microsoft.Storage) is registered on the subscription: registered, not_registered or unknown
+
+    Who holds the encryption keys?
+    - customer_managed_key_storage — Number of storage accounts encrypted with a customer-managed key held in Key Vault
+    - platform_managed_key_storage — Number of storage accounts encrypted with Microsoft's platform-managed key
+    - cmk_percentage — Percentage of storage accounts using a customer-managed key = customer_managed_key_storage / total_storage_accounts × 100 (a whole number, 0–100); 0 when total_storage_accounts is 0
+    - infrastructure_encryption_accounts — Number of storage accounts with infrastructure (double) encryption on
+
+    Is data encrypted in transit?
+    - https_only_accounts — Number of storage accounts that accept HTTPS only
+    - minimum_tls_1_2_accounts — Number of storage accounts whose minimum TLS version is 1.2 or 1.3
+
+    Is storage reachable from the network?
+    - public_blob_access_accounts — Number of storage accounts that allow anonymous (public) access to blobs; an account that omits the setting allows it
+    - private_endpoint_accounts — Number of storage accounts with at least one private endpoint connection
+
+    Are access keys controlled?
+    - shared_key_access_accounts — Number of storage accounts that accept access-key (shared key) authorization; an account that omits the setting allows it
+    - key_expiration_policy_accounts — Number of storage accounts with an access-key expiry policy (a maximum key age in days)
+    - access_key_age_known_accounts — Number of storage accounts whose two access keys both have a known creation time
+    - access_key_max_age_days — Days since the oldest access key in the subscription was created or last rotated; null when there are no storage accounts or any key's creation time is unknown (older accounts whose keys have not been rotated since Azure began recording it)
+    - accounts_with_access_key_older_than_90_days — Number of storage accounts with an access key created or last rotated more than 90 days ago; null when a key whose creation time is unknown leaves an account undecided
+    - accounts_with_access_key_beyond_expiration_period — Number of storage accounts with an access key older than the account's own key expiry policy; accounts with no policy are never counted; null when an account with a policy has a key whose creation time is unknown
+
+    Is data replicated to a healthy second region?
+    - geo_redundant_accounts — Number of storage accounts that replicate to a second region (GRS, RA-GRS, GZRS or RA-GZRS)
+    - read_access_geo_redundant_accounts — Number of storage accounts whose second-region copy can be read (RA-GRS or RA-GZRS)
+    - geo_replication_stats_collected_accounts — Number of geo-redundant storage accounts whose replication status was read
+    - geo_replication_live_accounts — Number of geo-redundant storage accounts whose replication status is Live (replicating normally)
+    - geo_replication_max_sync_lag_minutes — Number of minutes the second-region copy furthest behind trails its primary: the time since it last synced, measured when its replication status was read; null when there is no geo-redundant account or any one's last sync time is unknown
+    - geo_failover_ready_accounts — Number of geo-redundant storage accounts that Azure reports can fail over to the second region now
+    - secondary_unavailable_accounts — Number of geo-redundant storage accounts whose second region is reported unavailable
+    - geo_failed_over_accounts — Number of storage accounts that have failed over to their second region at least once
+
+    Can deleted or changed data be recovered?
+    - blob_versioning_accounts — Number of storage accounts with blob versioning on
+    - container_soft_delete_accounts — Number of storage accounts that keep deleted blob containers for a retention period (container soft delete)
+    - share_soft_delete_accounts — Number of storage accounts that keep deleted file shares for a retention period (share soft delete)
+    - containers_with_immutability_policy — Number of blob containers with a time-based retention (immutability) policy
+    - containers_with_legal_hold — Number of blob containers under a legal hold
+
+    Which containers can be read anonymously?
+    - total_containers — Number of blob containers across all storage accounts whose containers were listed
+    - containers_with_public_access_level — Number of blob containers set to the Blob or Container public access level
+    - anonymously_accessible_containers — Number of blob containers that can be read without signing in through the account's public endpoint: the container has a public access level, its account does not forbid public blob access (Azure allows it when the setting is on or was never set), and the account's network admits public clients. It doesn't when public network access is Disabled, or when public network access isn't SecuredByPerimeter and the firewall's default action is Deny with no IP (IPv4 or IPv6) or virtual network rule; a Deny whose IPv4 or virtual network rule list the API didn't return counts as admitting them, and a missing IPv6 list counts as none. Not evaluated: which addresses or subnets a rule admits; a network security perimeter, whose inbound rules replace public network access and the firewall for an account associated with one (SecuredByPerimeter counts as admitting); the trusted-services bypass and resource instance rules, which admit Azure services; and private endpoint connections (anonymous reads through one aren't counted)
+    - accounts_with_containers_not_collected — Number of storage accounts whose container list failed; their containers are missing from the counts
+
+    Is each account owned and classified?
+    - accounts_with_owner_tag — Number of storage accounts with an owner tag (the first configured owner tag key present, such as Owner)
+    - accounts_with_classification_tag — Number of storage accounts with a data classification tag (the first configured classification tag key present, such as DataClassification)

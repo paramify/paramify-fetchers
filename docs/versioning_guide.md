@@ -66,7 +66,7 @@ paramify validate manifests/<your manifest>.yaml
 </details>
 
 Set what it names as the entry says
-([manifest commands](../README.md#building-a-manifest)), then validate again.
+([manifest commands](cli_guide.md#building-a-manifest)), then validate again.
 
 ---
 

@@ -1,0 +1,17 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them. Enabled, and nothing allows the internet as a source.
+evidence_set: EVD-OCI-ZPR
+cases:
+  - name: enabled_with_no_internet_source
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"zpr_enabled": true, "statements_allowing_internet_source": 0}}}'
+
+  - name: never_enabled
+    expect: FAIL
+    note: >
+      Zero statements because there is no ZPR; oci_zpr_enabled is what fails.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"zpr_enabled": false, "statements_allowing_internet_source": 0}}}'
+
+  - name: a_statement_admitting_the_internet
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"zpr_enabled": true, "statements_allowing_internet_source": 1}}}'

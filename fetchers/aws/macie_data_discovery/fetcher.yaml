@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-MACIE
   name: Macie Data Discovery
-  instructions: 'Script: fetcher.sh. Commands executed: aws macie2 get-macie-session, aws macie2 get-automated-discovery-configuration, aws macie2 list-classification-jobs, aws macie2 get-finding-statistics.'
+  instructions: 'Script: aws/macie_data_discovery/fetcher.sh. Commands executed: aws macie2 get-macie-session, aws macie2 get-automated-discovery-configuration, aws macie2 list-classification-jobs, aws macie2 get-finding-statistics.'

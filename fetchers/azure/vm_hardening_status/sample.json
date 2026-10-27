@@ -1,0 +1,119 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_vm_hardening_status",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.virtual_machines[]",
+      "records": 1,
+      "fields": {
+        "extensions": 0,
+        "id": 1,
+        "linux_configuration": 1,
+        "location": 1,
+        "managed_disks_only": 1,
+        "name": 1,
+        "password_authentication_disabled": 1,
+        "provisioning_state": 1,
+        "resource_group": 1,
+        "security_profile": 1,
+        "storage_profile": 1,
+        "trusted_launch_enabled": 1,
+        "virtual_machine_scale_set_id": 0,
+        "vm_size": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:11:04Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "provider_registration_status": "registered",
+      "virtual_machine_scale_sets": [],
+      "virtual_machines": [
+        {
+          "extensions": [],
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/RG-example-example-profile/providers/Microsoft.Compute/virtualMachines/vm-pf-test",
+          "linux_configuration": {
+            "disable_password_authentication": true,
+            "provision_vm_agent": true
+          },
+          "location": "centralus",
+          "managed_disks_only": true,
+          "name": "vm-pf-test",
+          "password_authentication_disabled": true,
+          "provisioning_state": "Succeeded",
+          "resource_group": "RG-example-example-profile",
+          "security_profile": {
+            "encryption_at_host": false,
+            "security_type": "Standard",
+            "uefi_settings": {
+              "secure_boot_enabled": false,
+              "v_tpm_enabled": false
+            }
+          },
+          "storage_profile": {
+            "data_disks": [],
+            "image_reference": {
+              "community_gallery_image_id": null,
+              "exact_version": "24.04.202608070",
+              "id": null,
+              "offer": "ubuntu-24_04-lts",
+              "publisher": "Canonical",
+              "shared_gallery_image_id": null,
+              "sku": "server-arm64",
+              "version": "latest"
+            },
+            "os_disk": {
+              "disk_size_gb": 30,
+              "managed": true,
+              "managed_disk": {
+                "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Compute/disks/vm-pf-test_OsDisk_1_c6a6482d3e8d4546be93525dafa96079",
+                "storage_account_type": "Standard_LRS"
+              },
+              "name": "vm-pf-test_OsDisk_1_c6a6482d3e8d4546be93525dafa96079",
+              "operating_system_type": "Linux",
+              "vhd_uri": null
+            }
+          },
+          "trusted_launch_enabled": false,
+          "virtual_machine_scale_set_id": null,
+          "vm_size": "Standard_B2pts_v2"
+        }
+      ]
+    },
+    "summary": {
+      "confidential_vms": 0,
+      "empty_scale_sets": 0,
+      "encryption_at_host_vms": 0,
+      "linux_ssh_key_only_percentage": 100,
+      "linux_ssh_key_only_vms": 1,
+      "linux_vms": 1,
+      "managed_disk_percentage": 100,
+      "managed_disk_vms": 1,
+      "provider_registration_status": "registered",
+      "scale_sets_with_load_balancer": 0,
+      "secure_boot_vms": 0,
+      "total_extensions": 0,
+      "total_scale_set_instances": 0,
+      "total_scale_sets": 0,
+      "total_virtual_machines": 1,
+      "trusted_launch_percentage": 0,
+      "trusted_launch_scale_sets": 0,
+      "trusted_launch_vms": 0,
+      "unmanaged_disk_vms": 0,
+      "vms_in_scale_sets": 0,
+      "vms_with_extensions": 0,
+      "vtpm_vms": 0
+    }
+  }
+}

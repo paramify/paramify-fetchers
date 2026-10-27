@@ -46,7 +46,7 @@ evidence_set:
   reference_id: EVD-GCP-LOGGING-CONFIG
   name: Cloud Logging Configuration
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls: logging
+    Script: gcp/cloud_logging_configuration/fetcher.py. Google Cloud client library calls: logging
     sinks.list(), buckets.list(), settings.get(), metrics.list(); monitoring
     alertPolicies.list(); cloudresourcemanager projects.get() and
     folders.get() to walk ancestry for org and folder sinks. One evidence

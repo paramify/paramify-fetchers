@@ -46,5 +46,5 @@ evidence_set:
   reference_id: EVD-GCP-STORAGE-ENC
   name: Cloud Storage Encryption
   instructions: >
-    Script: fetcher.py. Google Cloud client library call: storage
+    Script: gcp/cloud_storage_encryption_status/fetcher.py. Google Cloud client library call: storage
     buckets.list(). One evidence file per project.
