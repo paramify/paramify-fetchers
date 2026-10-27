@@ -207,17 +207,34 @@ def _latest(times):
     return max(parsed)[1] if parsed else None
 
 
+def _answered(wids: list[str], workspaces: dict, table: str) -> bool:
+    """Every workspace answered every query on the table, or no longer exists."""
+    for wid in wids:
+        ws = workspaces.get(id_key(wid)) or {}
+        if ws.get("status") != WS_NOT_FOUND and table not in ws.get("read_tables", ()):
+            return False
+    return True
+
+
 def _arriving(records, destinations: list[str], workspaces: dict, table: str):
     """True once records arrived; False only when every destination's table was read (or the destination is gone)."""
     if not destinations:
         return None
     if records:
         return True
-    for wid in destinations:
-        ws = workspaces.get(id_key(wid)) or {}
-        if ws.get("status") != WS_NOT_FOUND and table not in ws.get("read_tables", ()):
-            return None
-    return False
+    return False if _answered(destinations, workspaces, table) else None
+
+
+def _known(settings, destinations: list[str], counted: list[str], arriving, workspaces: dict, table: str) -> bool:
+    """Counts stand once the settings were read and the copy they come from answered every query on the table."""
+    if settings is None:
+        return False
+    return not destinations or (arriving is not None and _answered(counted, workspaces, table))
+
+
+def _total(values) -> int:
+    """Resources whose counts are null (records not readable) are left out."""
+    return sum(v for v in values if v is not None)
 
 
 def _rows_for(rid: str, destinations: list[str], workspaces: dict, key: str, nested: str = "") -> list[dict]:
@@ -245,9 +262,11 @@ def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
     rid = (site.get("id") or "").lower()
     counted = _fullest(rid, destinations, workspaces, "http")
     summary = _rows_for(rid, counted, workspaces, "http")
-    latest = _rows_for(rid, destinations, workspaces, "http_latest")
+    latest = _rows_for(rid, counted, workspaces, "http_latest")
     clients = _rows_for(rid, counted, workspaces, "http_clients")
     records = sum(r.get("Records") or 0 for r in summary)
+    arriving = _arriving(records, destinations, workspaces, HTTP_TABLE)
+    known = _known(settings, destinations, counted, arriving, workspaces, HTTP_TABLE)
     newest_time = _latest(r.get("TimeGenerated") for r in latest)
     newest = next((r for r in latest if r.get("TimeGenerated") == newest_time), None)
     return {
@@ -259,10 +278,12 @@ def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
         "diagnostic_settings_read": settings is not None,
         "http_logs_exported": bool(destinations) if settings is not None else None,
         "http_log_workspaces": destinations,
-        "http_log_records": records,
-        "last_http_log": _latest(r.get("LastRecord") for r in _rows_for(rid, destinations, workspaces, "http")),
-        "distinct_client_ips": max((r.get("ClientIps") or 0 for r in summary), default=0),
-        "status_classes": {k: sum(r.get(f"Status{k}") or 0 for r in summary) for k in ("2xx", "3xx", "4xx", "5xx")},
+        "http_log_records": records if known else None,
+        "last_http_log": _latest(r.get("LastRecord") for r in summary),
+        "distinct_client_ips": max((r.get("ClientIps") or 0 for r in summary), default=0) if known else None,
+        "status_classes": {
+            k: sum(r.get(f"Status{k}") or 0 for r in summary) for k in ("2xx", "3xx", "4xx", "5xx")
+        } if known else None,
         "hosts": sorted({h for r in summary for h in dynamic_list(r.get("Hosts")) if host_name(h)})[:sample],
         "top_clients": sorted(
             ({"client_ip": c.get("CIp"), "requests": c.get("Requests")} for c in clients),
@@ -272,7 +293,7 @@ def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
             "time": newest.get("TimeGenerated"), "client_ip": newest.get("CIp"), "host": host_name(newest.get("CsHost")),
             "method": http_method(newest.get("CsMethod")), "status": newest.get("ScStatus"),
         } if newest else None,
-        "http_logs_arriving": _arriving(records, destinations, workspaces, HTTP_TABLE),
+        "http_logs_arriving": arriving,
     }
 
 
@@ -284,6 +305,8 @@ def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int
     rows = _rows_for(rid, counted, workspaces, "audit", "databases")
     principal_rows = _rows_for(rid, counted, workspaces, "principals", "databases")
     records = sum(r.get("Records") or 0 for r in rows)
+    arriving = _arriving(records, destinations, workspaces, AUDIT_TABLE)
+    known = _known(settings, destinations, counted, arriving, workspaces, AUDIT_TABLE)
     listed = {(d.get("name") or "").lower(): d["name"] for d in databases or [] if d.get("name")}
     dbs: dict = {}
     for r in rows:
@@ -301,7 +324,8 @@ def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int
     # A database the instance doesn't list is named by the events alone, so it shows only once one succeeded.
     db_records = [
         {"name": db["name"] if key in listed else plain_name(db["name"]), "listed": key in listed,
-         "audit_records": db["records"], "failed_events": db["failed"], "last_audit_record": _latest(db["times"])}
+         "audit_records": db["records"] if known else None, "failed_events": db["failed"] if known else None,
+         "last_audit_record": _latest(db["times"])}
         for key, db in sorted(dbs.items()) if key in listed or db["succeeded"]
     ]
     principals: dict = {}
@@ -326,27 +350,39 @@ def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int
     actions: Counter = Counter()
     for r in rows:
         actions[r.get("Action") or "unknown"] += r.get("Records") or 0
-    return {
-        "id": mi.get("id"),
-        "name": mi.get("name"),
-        "diagnostic_settings_read": settings is not None,
-        "audit_exported": bool(destinations) if settings is not None else None,
-        "audit_workspaces": destinations,
+    counts = {
         "audit_records": records,
         "failed_audit_events": sum(r.get("Failed") or 0 for r in rows),
-        "last_audit_record": _latest(
-            r.get("LastRecord") for r in _rows_for(rid, destinations, workspaces, "audit", "databases")),
-        "audit_actions": sorted_counts(actions),
-        "databases": db_records,
         "audit_records_without_database": sum(r.get("Records") or 0 for r in rows if not r.get("Database")),
-        "principals": principal_records[:sample],
         "principals_total": sum(1 for p in principal_records if p["kind"]),
         "entra_principals": kinds[ENTRA],
         "sql_login_principals": kinds[SQL_LOGIN],
         "failed_only_principals": sum(1 for name, p in principals.items() if name and not p["succeeded"]),
         "unnamed_principal_events": sum(p["events"] for p in principal_records if p["kind"] is None),
         "failed_only_database_names": sum(1 for key, db in dbs.items() if key not in listed and not db["succeeded"]),
-        "audit_arriving": _arriving(records, destinations, workspaces, AUDIT_TABLE),
+    }
+    if not known:
+        counts = dict.fromkeys(counts)
+    return {
+        "id": mi.get("id"),
+        "name": mi.get("name"),
+        "diagnostic_settings_read": settings is not None,
+        "audit_exported": bool(destinations) if settings is not None else None,
+        "audit_workspaces": destinations,
+        "audit_records": counts["audit_records"],
+        "failed_audit_events": counts["failed_audit_events"],
+        "last_audit_record": _latest(r.get("LastRecord") for r in rows),
+        "audit_actions": sorted_counts(actions),
+        "databases": db_records,
+        "audit_records_without_database": counts["audit_records_without_database"],
+        "principals": principal_records[:sample],
+        "principals_total": counts["principals_total"],
+        "entra_principals": counts["entra_principals"],
+        "sql_login_principals": counts["sql_login_principals"],
+        "failed_only_principals": counts["failed_only_principals"],
+        "unnamed_principal_events": counts["unnamed_principal_events"],
+        "failed_only_database_names": counts["failed_only_database_names"],
+        "audit_arriving": arriving,
     }
 
 
@@ -412,20 +448,20 @@ def summarize(apps: list[dict], instances: list[dict], dependencies: list[dict],
         "stopped_apps_exporting_http_logs": len(exporting_apps) - len(running),
         "http_log_arrival_percentage": coverage_percentage(
             sum(1 for a in running if a["http_logs_arriving"] is True), len(running)),
-        "http_log_records": sum(a["http_log_records"] for a in apps),
+        "http_log_records": _total(a["http_log_records"] for a in apps),
         "managed_instances": len(instances),
         "instances_exporting_audit": len(exporting_mis),
         "instances_with_audit_records": with_audit,
         "instances_without_audit_records": sum(1 for m in exporting_mis if m["audit_arriving"] is False),
         "instances_audit_unknown": sum(1 for m in exporting_mis if m["audit_arriving"] is None),
-        "audit_records": sum(m["audit_records"] for m in instances),
-        "failed_audit_events": sum(m["failed_audit_events"] for m in instances),
+        "audit_records": _total(m["audit_records"] for m in instances),
+        "failed_audit_events": _total(m["failed_audit_events"] for m in instances),
         "audit_actions": sorted_counts(sum((Counter(m["audit_actions"]) for m in instances), Counter())),
-        "audit_principals": sum(m["principals_total"] for m in instances),
-        "entra_principals": sum(m["entra_principals"] for m in instances),
-        "sql_login_principals": sum(m["sql_login_principals"] for m in instances),
-        "failed_only_principals": sum(m["failed_only_principals"] for m in instances),
-        "unnamed_principal_events": sum(m["unnamed_principal_events"] for m in instances),
+        "audit_principals": _total(m["principals_total"] for m in instances),
+        "entra_principals": _total(m["entra_principals"] for m in instances),
+        "sql_login_principals": _total(m["sql_login_principals"] for m in instances),
+        "failed_only_principals": _total(m["failed_only_principals"] for m in instances),
+        "unnamed_principal_events": _total(m["unnamed_principal_events"] for m in instances),
         "managed_databases": len(databases),
         "managed_databases_with_audit_records": sum(1 for d in databases if d["audit_records"]),
         "app_roles_with_dependencies": len(dependencies),

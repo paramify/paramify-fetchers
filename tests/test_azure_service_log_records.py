@@ -129,16 +129,58 @@ def test_logs_sent_to_two_workspaces_count_once():
     def two(category):
         return [setting(category=category), setting(workspace=LAW_FAR, category=category)]
 
-    http = both(http=[http_row()], http_clients=[{"ResourceId": SITE.lower(), "CIp": "203.0.113.5", "Requests": 6}])
-    http[slr.id_key(LAW_FAR)]["http"] = [http_row(records=4, last="2026-10-12T12:00:00Z")]
+    def latest(time, method):
+        return [{"ResourceId": SITE.lower(), "TimeGenerated": time, "CsMethod": method}]
+
+    http = both(http=[http_row()], http_clients=[{"ResourceId": SITE.lower(), "CIp": "203.0.113.5", "Requests": 6}],
+                http_latest=latest("2026-10-12T10:00:00Z", "GET"))
+    http[slr.id_key(LAW_FAR)].update(http=[http_row(records=4, last="2026-10-12T12:00:00Z")],
+                                     http_latest=latest("2026-10-12T12:00:00Z", "POST"))
     app = slr.app_record({"id": SITE}, two("AppServiceHTTPLogs"), http, 10)
-    assert (app["http_log_records"], app["status_classes"]["2xx"], app["top_clients"], app["last_http_log"]) == (
-        10, 7, [{"client_ip": "203.0.113.5", "requests": 6}], "2026-10-12T12:00:00Z")
+    assert (app["http_log_records"], app["status_classes"]["2xx"], app["top_clients"], app["last_http_log"],
+            app["latest_request"]["method"]) == (
+        10, 7, [{"client_ip": "203.0.113.5", "requests": 6}], "2026-10-12T10:00:00Z", "GET")
 
     audit = both(audit=[audit_row("Orders")], principals=[principal_row("ops@example.com", 5, 0)])
+    audit[slr.id_key(LAW_FAR)]["audit"] = [audit_row("Orders", records=2, failed=2, last="2026-10-12T12:00:00Z")]
     mi = slr.instance_record({"id": MI}, two("SQLSecurityAuditEvents"), [{"name": "Orders"}], audit, 10)
     assert (mi["audit_records"], mi["failed_audit_events"], mi["databases"][0]["audit_records"],
-            mi["principals"][0]["events"]) == (5, 5, 5, 5)
+            mi["principals"][0]["events"], mi["last_audit_record"]) == (5, 5, 5, 5, "2026-10-12T09:00:00Z")
+
+
+def test_counts_read_null_when_the_records_could_not_be_read():
+    refused = {slr.id_key(LAW): ws(status=slr.WS_NOT_AUTHORIZED, read=()),
+               slr.id_key(LAW_FAR): ws(http=[http_row(SLOT, records=3)], audit=[])}
+    unknown = slr.app_record({"id": SITE}, [setting(category="AppServiceHTTPLogs")], refused, 10)
+    unread = slr.app_record({"id": SITE + "2"}, None, refused, 10)
+    known = slr.app_record({"id": SLOT}, [setting(workspace=LAW_FAR, category="AppServiceHTTPLogs")], refused, 10)
+    quiet = slr.app_record({"id": SITE + "3"}, [], refused, 10)
+    assert [(a["http_log_records"], a["distinct_client_ips"], a["status_classes"]) for a in (unknown, unread)] == [
+        (None, None, None), (None, None, None)]
+    assert (known["http_log_records"], quiet["http_log_records"]) == (3, 0)
+
+    mi = slr.instance_record({"id": MI}, [setting(group="audit")], [{"name": "Orders"}], refused, 10)
+    assert {k: mi[k] for k in ("audit_records", "failed_audit_events", "audit_records_without_database",
+                               "principals_total", "entra_principals", "sql_login_principals",
+                               "failed_only_principals", "unnamed_principal_events", "failed_only_database_names",
+                               "audit_arriving")} == dict.fromkeys(
+        ("audit_records", "failed_audit_events", "audit_records_without_database", "principals_total",
+         "entra_principals", "sql_login_principals", "failed_only_principals", "unnamed_principal_events",
+         "failed_only_database_names", "audit_arriving"))
+    assert mi["databases"] == [{"name": "Orders", "listed": True, "audit_records": None, "failed_events": None,
+                                "last_audit_record": None}]
+
+    summary = slr.summarize([unknown, unread, known, quiet], [mi], [], [], 7)
+    assert {k: summary[k] for k in ("http_log_records", "apps_http_logs_unknown", "audit_records",
+                                    "instances_audit_unknown", "audit_principals")} == {
+        "http_log_records": 3, "apps_http_logs_unknown": 1, "audit_records": 0, "instances_audit_unknown": 1,
+        "audit_principals": 0}
+
+
+def test_a_copy_with_a_failed_query_leaves_the_counts_null_but_still_shows_arrival():
+    workspaces = {slr.id_key(LAW): ws(read=("AzureDiagnostics",), http=[http_row()])}
+    app = slr.app_record({"id": SITE}, [setting(category="AppServiceHTTPLogs")], workspaces, 10)
+    assert (app["http_logs_arriving"], app["http_log_records"]) == (True, None)
 
 
 @pytest.mark.parametrize("workspace, arriving", [
@@ -153,7 +195,7 @@ def test_app_without_records(workspace, arriving):
     record = slr.app_record({"id": SLOT, "name": "app1/staging"}, [setting(category="AppServiceHTTPLogs")],
                             {slr.id_key(LAW): workspace}, 10)
     assert (record["http_log_records"], record["http_logs_arriving"], record["latest_request"], record["is_slot"]) == (
-        0, arriving, None, True)
+        None if arriving is None else 0, arriving, None, True)
 
 
 def test_app_that_exports_nothing_or_whose_settings_failed():
