@@ -4776,7 +4776,7 @@ Summary fields:
 - `read_access_geo_redundant_accounts` — Number of storage accounts whose second-region copy can be read (RA-GRS or RA-GZRS)
 - `geo_replication_stats_collected_accounts` — Number of geo-redundant storage accounts whose replication status was read
 - `geo_replication_live_accounts` — Number of geo-redundant storage accounts whose replication status is Live (replicating normally)
-- `geo_replication_max_sync_lag_minutes` — Longest time, in minutes, since a second-region copy last synced with its primary, each measured when its replication status was read; null when there is no geo-redundant account or any one's last sync time is unknown
+- `geo_replication_max_sync_lag_minutes` — Number of minutes the second-region copy furthest behind trails its primary: the time since it last synced, measured when its replication status was read; null when there is no geo-redundant account or any one's last sync time is unknown
 - `geo_failover_ready_accounts` — Number of geo-redundant storage accounts that Azure reports can fail over to the second region now
 - `secondary_unavailable_accounts` — Number of geo-redundant storage accounts whose second region is reported unavailable
 - `geo_failed_over_accounts` — Number of storage accounts that have failed over to their second region at least once
@@ -4791,7 +4791,7 @@ Summary fields:
 **Which containers can be read anonymously?**
 - `total_containers` — Number of blob containers across all storage accounts whose containers were listed
 - `containers_with_public_access_level` — Number of blob containers set to the Blob or Container public access level
-- `anonymously_accessible_containers` — Number of blob containers anyone can read without signing in: the container has a public access level and its account does not forbid public blob access (Azure allows it when the setting is on or was never set)
+- `anonymously_accessible_containers` — Number of blob containers that can be read without signing in through the account's public endpoint: the container has a public access level, its account does not forbid public blob access (Azure allows it when the setting is on or was never set), and the account's network admits public clients. It doesn't when public network access is Disabled, or when the firewall's default action is Deny with no IP (IPv4 or IPv6) or virtual network rule; a Deny whose rule lists the API didn't return counts as admitting them. Not evaluated: which addresses or subnets a rule admits, a network security perimeter (SecuredByPerimeter counts as admitting), the trusted-services bypass and resource instance rules (which admit Azure services), and private endpoint connections (anonymous reads through one aren't counted)
 - `accounts_with_containers_not_collected` — Number of storage accounts whose container list failed; their containers are missing from the counts
 
 **Is each account owned and classified?**

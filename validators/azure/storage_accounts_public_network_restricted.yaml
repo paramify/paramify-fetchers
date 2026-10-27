@@ -8,8 +8,8 @@ statement: >
   reached only through private endpoints or the networks it allows. An account whose
   public network access is Enabled, SecuredByPerimeter or unset, with firewall default
   Allow, fails. Unset reads as Azure's default (Enabled), so it passes only on Deny.
-  Substantiates "backends are reachable only through approved paths" for storage
-  (KSI-SVC-VCM). Does not prove which IP or virtual network rules are allowed or that
+  Substantiates "backends are reachable only through approved paths" for storage.
+  Does not prove which IP or virtual network rules are allowed or that
   they are approved, the trusted-services bypass, or SQL MI and App Service paths.
 
 # Counts violations; storage_network_access_fields_present proves this layout was there.

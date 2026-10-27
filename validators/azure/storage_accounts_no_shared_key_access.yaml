@@ -6,7 +6,7 @@ statement: >
   Every storage account disallows Shared Key authorization, so account keys and
   the SAS tokens signed with them cannot be used and every request authenticates
   through Entra; an account that allows it (Azure's default when unset) fails.
-  Substantiates "fail shared secrets" for storage (KSI-SVC-VCM). Does not prove
+  Substantiates "fail shared secrets" for storage. Does not prove
   Front Door origin authentication or certificate-name validation, key age or
   rotation, or that clients use managed identities.
 
