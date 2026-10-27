@@ -37,7 +37,8 @@ ALERTS_TABLE = "SecurityAlert"
 ALERT_ONLY_EXTRAS = {"McasShadowItReporting": "discoveryLogs"}
 SENTINEL_PRODUCTS = frozenset({"azure sentinel", "microsoft sentinel"})
 HEALTH_TABLE = "SentinelHealth"
-# Worst first for a connector fed by several connections; any other status, null included, sits between Warning and Success.
+# Worst first for a connector fed by several connections; any other status, Informational and null included, sits between
+# Warning and Success. Only Warning and Failure count as unhealthy.
 HEALTH_RANK = {"failure": 3, "warning": 2, "success": 0}
 
 INGESTION_QUERY = (
@@ -70,6 +71,8 @@ _KQL_OPENERS = frozenset({
     "externaldata", "external_table",
 })
 QUERY_BATCH = 100
+# A let statement can't sit inside a parenthesised union operand, so these queries run alone.
+_LET = re.compile(r"\s*let\b")
 # Basic and Auxiliary tables answer only /search: union * on /query skips them, and naming one fails to resolve.
 QUERYABLE_PLAN = "Analytics"
 
@@ -279,7 +282,7 @@ def last_data_queries(
 
 
 def run_last_data(client, customer_id: str, pending: Pending, days: int, notes: List[str]) -> Dict[Tuple[int, int], Any]:
-    """One union per batch; a 400 means a definition's query is malformed, so that batch is retried one query at a time."""
+    """One union per batch; let queries, and each query of a batch that answers 400, run alone and as written."""
     found: Dict[Tuple[int, int], Any] = {key: None for key, _, _ in pending}
 
     def union(batch):
@@ -288,22 +291,35 @@ def run_last_data(client, customer_id: str, pending: Pending, days: int, notes: 
         for row in rows:
             found[batch[int(row["ParamifyIndex"])][0]] = row.get("Time")
 
-    for start in range(0, len(pending), QUERY_BATCH):
-        batch = pending[start:start + QUERY_BATCH]
+    def alone(item):
+        try:
+            rows = client.query(customer_id, item[1], iso_duration_days(days))
+        except QueryError as exc:
+            if not exc.code.startswith("(400)"):
+                raise
+            found.pop(item[0])
+            notes.append(f"last-data query for {item[2]} failed, so it reads as unmeasured: {exc}")
+            return
+        found[item[0]] = max((row["Time"] for row in rows if row.get("Time")), default=None)
+
+    for item in pending:
+        if _LET.match(item[1]):
+            alone(item)
+    unioned = [item for item in pending if not _LET.match(item[1])]
+    for start in range(0, len(unioned), QUERY_BATCH):
+        batch = unioned[start:start + QUERY_BATCH]
         try:
             union(batch)
         except QueryError as exc:
             if not exc.code.startswith("(400)"):
                 raise
             for item in batch:
-                try:
-                    union([item])
-                except QueryError as one:
-                    if not one.code.startswith("(400)"):
-                        raise
-                    found.pop(item[0])
-                    notes.append(f"last-data query for {item[2]} failed, so it reads as unmeasured: {one}")
+                alone(item)
     return found
+
+
+def health_rank(status: Optional[str]) -> int:
+    return HEALTH_RANK.get((status or "").lower(), 1)
 
 
 def finish_catalog(catalog: List[Dict[str, Any]], answers: Optional[Dict[Tuple[int, int], Any]], health: Dict[str, Dict[str, Any]], conns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -323,7 +339,7 @@ def finish_catalog(catalog: List[Dict[str, Any]], answers: Optional[Dict[Tuple[i
         tables = {d["table"] for d in data_types}
         unmeasured = answers is None or any((ci, di) not in answers for di in range(len(data_types)))
         rows = [health[ids[n]] for n in c["connections"] if ids.get(n) and ids[n] in health]
-        worst = max(rows, key=lambda r: HEALTH_RANK.get((r["status"] or "").lower(), 1), default=None)
+        worst = max(rows, key=lambda r: health_rank(r["status"]), default=None)
         turned_on = {t for n in c["connections"] for t in by_name[n]["enabled_data_types"]}
         extras = {t for t, data_type in ALERT_ONLY_EXTRAS.items() if data_type not in turned_on}
         out.append({
@@ -450,7 +466,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         "health_monitoring": health_on,
         "connector_health": health,
         "connectors_unhealthy": (
-            sum(1 for h in health if (h["status"] or "").lower() != "success") if health is not None else None
+            sum(1 for h in health if health_rank(h["status"]) >= HEALTH_RANK["warning"]) if health is not None else None
         ),
         "tables": tables,
         "tables_not_measured": sorted(n for n, p in plans.items() if p != QUERYABLE_PLAN) if plans is not None else None,

@@ -565,15 +565,34 @@ def test_data_sources_mcas_with_cloud_discovery_on_isnt_alert_only(azure, tmp_pa
 def test_data_sources_bad_connector_query_is_isolated(azure, tmp_path):
     connectors_workspace(azure)
     bad = Resp(400, {"error": {"code": "BadArgumentError", "innererror": {"message": "Syntax error"}}})
-    # The batch fails, then each data type runs alone: ASC answers, MDATP is malformed, Exchange and Teams are empty.
-    azure.queries.insert(0, ("ParamifyIndex", [bad, table(["Time", "ParamifyIndex"], [[iso(NOW), 0]]), bad,
-                                               table(["Time", "ParamifyIndex"], [])]))
+    # The batch fails, then each data type runs alone, as written: ASC answers, MDATP is malformed, the rest are empty.
+    azure.queries[:0] = [("ParamifyIndex", bad), ('"Azure Security Center"', table(["Time"], [[iso(NOW)]])),
+                         ('"MDATP"', bad), ("Time = max(TimeGenerated)", table(["Time"], []))]
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
     by_id = {c["id"]: c for c in ws["connectors"]}
+    alone = [q for _, _, q in azure.calls if q and "Time = max(TimeGenerated)" in q and "ParamifyIndex" not in q]
+    assert len(alone) == 5 and not any(q.startswith("union") for q in alone)
     assert code == 0 and by_id["AzureSecurityCenter"]["connected"] is True
     assert by_id["MicrosoftDefenderAdvancedThreatProtection"]["connected"] is None
     assert "MicrosoftDefenderAdvancedThreatProtection: SecurityAlert (MDATP)" in ws["notes"][0]
+
+
+def test_data_sources_let_query_runs_alone(azure, tmp_path):
+    connectors_workspace(azure)
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"].append(
+        ui_connector("Okta", [("Okta_CL", 'let events = Okta_CL;\nevents | where eventType_s != ""')]))
+    # As in Log Analytics, a let statement inside a union operand is a syntax error.
+    bad = Resp(400, {"error": {"code": "BadArgumentError", "innererror": {"message": "Syntax error"}}})
+    azure.queries[:0] = [("(let ", bad), ("let events", table(["Time"], [[iso(NOW)]]))]
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    okta = next(c for c in ws["connectors"] if c["id"] == "Okta")
+    assert code == 0 and okta["connected"] is True and okta["last_data_received"] == iso(NOW)
+    assert not ws["notes"]
+    # The let query stays out of the union, so the rest still run as one batch.
+    unions = [q for _, _, q in azure.calls if q and "ParamifyIndex" in q]
+    assert len(unions) == 1 and "let " not in unions[0] and unions[0].count("ParamifyIndex =") == 5
 
 
 def test_data_sources_without_health_monitoring(azure, tmp_path):
@@ -630,17 +649,19 @@ def test_data_sources_health_shows_the_worst_connection(azure, tmp_path):
     connectors_workspace(azure)
     azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"] += [
         {"id": f"{SI_A}/dataConnectors/{n}", "name": n, "kind": "RestApiPoller", "properties": {"connectorDefinitionName": "MyCcp"}}
-        for n in ("ccp2", "ccp3")]
+        for n in ("ccp2", "ccp3", "ccp4")]
     # A Warning listed first doesn't hide a Failure.
     azure.queries.insert(0, ("SentinelResourceType", table(
         ["SentinelResourceId", "TimeGenerated", "Status", "Reason", "Description", "SentinelResourceKind", "SentinelResourceName"],
         [[f"{SI_A}/dataConnectors/ccp1", iso(NOW), "Success", None, None, "RestApiPoller", "ccp1"],
          [f"{SI_A}/dataConnectors/ccp2", iso(NOW), "Warning", "Throttled", "slow", "RestApiPoller", "ccp2"],
-         [f"{SI_A}/dataConnectors/ccp3", iso(NOW), "Failure", "Unauthorized", "token expired", "RestApiPoller", "ccp3"]])))
+         [f"{SI_A}/dataConnectors/ccp3", iso(NOW), "Failure", "Unauthorized", "token expired", "RestApiPoller", "ccp3"],
+         [f"{SI_A}/dataConnectors/ccp4", iso(NOW), "Informational", None, "data fetched", "RestApiPoller", "ccp4"]])))
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
     ccp = next(c for c in ws["connectors"] if c["id"] == "MyCcp")
-    assert ccp["connections"] == ["ccp1", "ccp2", "ccp3"] and ccp["health_status"] == "Failure"
+    assert ccp["connections"] == ["ccp1", "ccp2", "ccp3", "ccp4"] and ccp["health_status"] == "Failure"
+    # Informational is a normal event, so only the Warning and the Failure count.
     assert ws["connectors_unhealthy"] == 2 and ev["summary"]["connectors_unhealthy"] == 2
 
 
