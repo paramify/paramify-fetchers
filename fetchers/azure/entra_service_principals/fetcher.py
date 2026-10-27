@@ -363,7 +363,7 @@ def ownership(sp: dict, tenant_id: str | None, tenant_app_ids: set) -> str:
     return OWNER_UNKNOWN
 
 
-def managed_identity_details(alternative_names: list) -> tuple[str | None, str | None]:
+def managed_identity_details(alternative_names: list | None) -> tuple[str | None, str | None]:
     """(kind, ARM resource id) for a managed identity, from `alternativeNames`.
 
     Graph encodes both there: an `isExplicit=True|False` entry (user- vs
