@@ -56,7 +56,6 @@ secrets: []          # DefaultAzureCredential only — see _categories/azure.yam
 ksis:
   - KSI-IAM-JIT
   - KSI-IAM-ELP
-  - KSI-MLA-ALA
 
 evidence_set:
   reference_id: EVD-AZURE-ENTRA-PIM-ASSIGNMENTS
