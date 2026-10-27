@@ -12,6 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+import requests
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER = REPO_ROOT / "fetchers" / "azure" / "entra_sign_ins" / "fetcher.py"
 sys.path.insert(0, str(REPO_ROOT / "fetchers" / "_lib"))
@@ -19,6 +22,7 @@ sys.path.insert(0, str(REPO_ROOT / "fetchers" / "_lib"))
 spec = importlib.util.spec_from_file_location("azure_entra_sign_ins_under_test", FETCHER)
 sign_ins = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sign_ins)
+azure_rest = sys.modules["azure_rest"]
 
 TENANT = "00000000-0000-0000-0000-0000000000aa"
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
@@ -303,6 +307,44 @@ def test_graph_pages_follow_next_links_on_the_requested_version(monkeypatch):
     client = sign_ins.AzureRestClient(SimpleNamespace(get_token=lambda scope: token), Session())
     assert list(client.graph_pages("/things?$top=2", "beta")) == [[1, 2], [3]]
     assert client.graph_list("/things?$top=2", "beta") == [1, 2, 3]
+
+
+class TimingOutSession:
+    """Times out the first `timeouts` requests, then answers one page."""
+
+    def __init__(self, timeouts):
+        self.timeouts, self.calls = timeouts, 0
+
+    def _answer(self):
+        self.calls += 1
+        if self.calls <= self.timeouts:
+            raise requests.ReadTimeout("Read timed out. (read timeout=60)")
+        return SimpleNamespace(status_code=200, headers={}, json=lambda: {"value": [{"id": "s1"}]})
+
+    def get(self, url, headers=None, params=None, timeout=None):
+        return self._answer()
+
+    def post(self, url, headers=None, json=None, timeout=None):
+        return self._answer()
+
+
+def _rest_client(session, monkeypatch):
+    monkeypatch.setattr(azure_rest.time, "sleep", lambda seconds: None)
+    token = SimpleNamespace(token="t", expires_on=9_999_999_999)
+    return azure_rest.AzureRestClient(SimpleNamespace(get_token=lambda scope: token), session)
+
+
+def test_a_read_timeout_on_a_graph_page_is_retried(monkeypatch):
+    session = TimingOutSession(timeouts=2)
+    assert _rest_client(session, monkeypatch).graph_list("/auditLogs/signIns", "beta") == [{"id": "s1"}]
+    assert session.calls == 3
+
+
+def test_a_read_timeout_on_a_post_is_not_resent(monkeypatch):
+    session = TimingOutSession(timeouts=1)
+    with pytest.raises(requests.ReadTimeout):
+        _rest_client(session, monkeypatch).graph_post("/things", {})
+    assert session.calls == 1
 
 
 def test_no_credential_writes_evidence_and_fails(monkeypatch, tmp_path):

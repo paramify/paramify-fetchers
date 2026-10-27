@@ -120,7 +120,7 @@ class AzureRestClient:
         return cached.token
 
     def _send(self, method: str, url: str, resource: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any):
-        """One request, retried on throttling, transient 5xx and dropped connections."""
+        """One request, retried on throttling, transient 5xx and dropped connections, and a GET on a timeout."""
         import requests  # lazy
 
         for attempt in range(MAX_RETRIES + 1):
@@ -130,6 +130,13 @@ class AzureRestClient:
             except requests.ConnectionError:
                 if attempt == MAX_RETRIES:
                     raise
+                time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
+                continue
+            except requests.Timeout:
+                # A read timeout may come after the server acted, so only an idempotent GET is resent.
+                if method != "get" or attempt == MAX_RETRIES:
+                    raise
+                _LOGGER.warning("%s %s timed out; retrying", method.upper(), url.split("?")[0])
                 time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
                 continue
             if response.status_code not in RETRY_STATUSES or attempt == MAX_RETRIES:
