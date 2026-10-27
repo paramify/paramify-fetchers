@@ -39,8 +39,9 @@ from entra_graph import (  # noqa: E402
 
 NAME = "azure_entra_pim_assignments"
 POLICY_FILTER = "scopeId eq '/' and scopeType eq 'DirectoryRole'"
-# Without Entra ID P2 (or ID Governance) PIM refuses with a licence error, a state not a failure; the recorded text is the message only.
-UNLICENSED_MARKERS = ("licens", "not onboarded")
+# Without Entra ID P2 (or ID Governance) Graph refuses with this code, a state not a failure; reported on a 400 as well as a 403.
+LICENCE_ERROR_CODE = "AadPremiumLicenseRequired"
+LICENCE_STATUSES = (400, 403)
 MFA, JUSTIFICATION, TICKETING = "MultiFactorAuthentication", "Justification", "Ticketing"
 
 logger = logging.getLogger(NAME)
@@ -319,16 +320,25 @@ def _each(project, items: Optional[List[Any]]) -> Optional[List[Dict[str, Any]]]
     return None if items is None else [project(i) for i in items]
 
 
-async def _read(collector: Collector, unlicensed: List[str], operation: str, builder, config=None,
-                pim: bool = True) -> Optional[List[Any]]:
-    """`paginate`, with a PIM read's licence refusal noted rather than recorded; None when the read failed or was refused."""
+def licence_refused(exc: BaseException) -> bool:
+    """Graph's licence refusal, told by its error code; a permission failure never counts, whatever its text."""
+    code = getattr(getattr(exc, "error", None), "code", None)
+    return getattr(exc, "response_status_code", None) in LICENCE_STATUSES and code == LICENCE_ERROR_CODE
+
+
+async def _read(collector: Collector, operation: str, builder, config=None,
+                unlicensed: Optional[List[str]] = None) -> Optional[List[Any]]:
+    """`paginate`; None when the read failed. Only a read given `unlicensed` notes a licence refusal there instead of failing."""
     probe = Collector(logger)
-    items = await paginate(probe, operation, builder, config)
-    for failure in probe.failures:
-        if pim and any(m in (failure.get("message") or "").lower() for m in UNLICENSED_MARKERS):
-            unlicensed.append(f"{operation}: {failure.get('message')}")
-        else:
-            collector.failures.append(failure)
+    try:
+        items = await paginate(probe, operation, builder, config, raise_on_error=True)
+    except Exception as exc:  # noqa: BLE001 — boundary: a licence refusal or a failure, never a crash
+        if unlicensed is not None and licence_refused(exc):
+            unlicensed.append(f"{operation}: {exc}")
+            logger.info("PIM unavailable: %s (%s)", operation, exc)
+            return None
+        probe.record(operation, exc)
+    collector.failures.extend(probe.failures)
     return None if probe.failures else items
 
 
@@ -338,24 +348,29 @@ async def _collect(collector: Collector, cred) -> tuple:
         directory = client.role_management.directory
         unlicensed: List[str] = []
 
-        async def read(operation: str, builder, project, pim: bool = True, **params):
+        async def read(operation: str, builder, project, licence_gate: bool = False, **params):
             config = _query(builder, **params) if params else None
-            return _each(project, await _read(collector, unlicensed, f"graph.{operation}.get", builder, config, pim))
+            gate = unlicensed if licence_gate else None
+            return _each(project, await _read(collector, f"graph.{operation}.get", builder, config, gate))
 
-        # Role definitions need no P2, so a licence-worded refusal there is a failure like any other.
+        # Role definitions need no P2, so any refusal there is a failure.
         definitions = await read(
-            "roleManagement.directory.roleDefinitions", directory.role_definitions, project_role_definition, pim=False
+            "roleManagement.directory.roleDefinitions", directory.role_definitions, project_role_definition
         )
         if definitions == []:
             # Every tenant has built-in directory roles, so an empty list is a bad read, not a fact.
             collector.record("graph.roleManagement.directory.roleDefinitions.get", RuntimeError("no role definitions returned"))
             definitions = None
+        # Only the first PIM read can show the tenant is unlicensed; the rest are then skipped, and a refusal of them is a failure.
         eligible = await read(
             "roleManagement.directory.roleEligibilityScheduleInstances",
             directory.role_eligibility_schedule_instances,
             project_instance,
+            licence_gate=True,
             expand=["principal"],
         )
+        if unlicensed:
+            return tenant, definitions, None, None, None, unlicensed
         active = await read(
             "roleManagement.directory.roleAssignmentScheduleInstances",
             directory.role_assignment_schedule_instances,
@@ -384,7 +399,7 @@ def build(definitions, eligible, active, policies, unlicensed) -> tuple:
         (p for p in (policy_record(a, index) for a in policies) if p["is_privileged"] or p["role_definition_id"] in assigned),
         key=lambda p: (p["role_name"] or "", p["role_definition_id"] or ""),
     )
-    # A licence refusal keeps the reads that succeeded; the refused ones read None.
+    # A licence refusal keeps the role definitions; the PIM reads read None.
     complete = not unlicensed and None not in (definitions, eligible_records, active_records, policy_records)
     available = False if unlicensed else (True if complete else None)
     results = {

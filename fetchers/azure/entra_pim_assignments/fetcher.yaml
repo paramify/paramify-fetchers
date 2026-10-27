@@ -44,7 +44,11 @@ secrets: []          # DefaultAzureCredential only — see _categories/azure.yam
 # (role definitions, eligibility and assignment schedule instances, role management
 # policies). Organization.Read.All is optional, for the tenant name. The tenant needs
 # Entra ID P2 or ID Governance; without it PIM is reported unavailable and the run
-# still succeeds. A denied read is recorded and the run exits non-zero (not_authorized).
+# still succeeds. The licence refusal is recognised only on the first PIM read (the
+# eligibility instances), by Graph's error code AadPremiumLicenseRequired on a 400 or
+# 403; the message text is never read, and the other PIM reads are then skipped. A
+# denied read, including a licence refusal of any later read, is recorded and the run
+# exits non-zero (not_authorized for a 403).
 # Not yet verified on a P2 tenant: whether $expand=principal returns names and UPNs with
 # RoleManagement.Read.Directory alone, and whether Graph lists a role-assignable group's
 # members as separate memberType Group instances (the summary counts Direct grants only).
@@ -74,7 +78,7 @@ evidence_set:
     Summary fields:
 
     What was checked?
-    - pim_available — True if the tenant has Privileged Identity Management; false if Graph refused a read because the tenant has no Entra ID P2 or ID Governance licence (the reads that succeeded stay in the results); null if a read failed (false wins when both happen)
+    - pim_available — True if the tenant has Privileged Identity Management; false if Graph refused the first PIM read (the eligible assignments) because the tenant has no Entra ID P2 or ID Governance licence (error code AadPremiumLicenseRequired; the role names stay in the results and the other PIM reads are skipped); null if a read failed, including a licence refusal of a later read (false wins when both happen)
     - collection_complete — True if role names, eligible and active assignments and role policies were all read; false if any read failed or was refused for the licence, and every other field except pim_available is left out
     - privileged_role_policies — Number of privileged roles whose tenant-wide PIM policy was read
 

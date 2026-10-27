@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace as ns
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER = REPO_ROOT / "fetchers" / "azure" / "entra_pim_assignments" / "fetcher.py"
 
@@ -239,11 +241,9 @@ def test_member_type_is_compared_without_case():
     assert not pim.counted({"member_type": "group"})
 
 
-def test_a_licence_worded_refusal_of_role_definitions_is_a_failure():
-    collector, unlicensed = pim.Collector(logging.getLogger("test")), []
-    refused = _Builder(_ODataError("The tenant has not onboarded to PIM. (status 400)"))
-    assert asyncio.run(pim._read(collector, unlicensed, "graph.roleDefinitions", refused, pim=False)) is None
-    assert unlicensed == []
+def test_a_licence_refusal_of_role_definitions_is_a_failure():
+    collector = pim.Collector(logging.getLogger("test"))
+    assert asyncio.run(pim._read(collector, "graph.roleDefinitions", _Builder(_unlicensed()))) is None
     assert not collector.ok
 
 
@@ -263,19 +263,27 @@ class _Builder:
 
 
 class _ODataError(Exception):
-    """Stands in for msgraph's ODataError, whose str() is '<message> (status <code>)'."""
+    """Stands in for msgraph's ODataError: str() is '<message> (status <code>)', the error code is on .error."""
+
+    def __init__(self, message, status=403, code="Authorization_RequestDenied"):
+        super().__init__(f"{message} (status {status})")
+        self.response_status_code, self.error = status, ns(code=code, message=message)
+
+
+def _unlicensed(status=400):
+    return _ODataError("The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license.",
+                       status, "AadPremiumLicenseRequired")
 
 
 def _read(builder):
     collector, unlicensed = pim.Collector(logging.getLogger("test")), []
-    items = asyncio.run(pim._read(collector, unlicensed, "graph.op", builder))
+    items = asyncio.run(pim._read(collector, "graph.op", builder, unlicensed=unlicensed))
     return items, collector, unlicensed
 
 
-def test_a_licence_refusal_is_a_state_not_a_failure():
-    items, collector, unlicensed = _read(_Builder(_ODataError(
-        "The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license. (status 400)"
-    )))
+@pytest.mark.parametrize("status", [400, 403])
+def test_a_licence_refusal_is_a_state_not_a_failure(status):
+    items, collector, unlicensed = _read(_Builder(_unlicensed(status)))
     assert collector.ok
     assert items is None
     assert len(unlicensed) == 1
@@ -291,10 +299,9 @@ def test_a_licence_refusal_is_a_state_not_a_failure():
 
 def test_a_licence_refusal_and_a_403_elsewhere_keep_both_outcomes():
     collector, unlicensed = pim.Collector(logging.getLogger("test")), []
-    licence = _Builder(_ODataError("The tenant has not onboarded to PIM. (status 400)"))
-    denied = _Builder(_ODataError("Insufficient privileges to complete the operation. (status 403)"))
-    assert asyncio.run(pim._read(collector, unlicensed, "graph.eligible", licence)) is None
-    assert asyncio.run(pim._read(collector, unlicensed, "graph.policies", denied)) is None
+    denied = _Builder(_ODataError("Insufficient privileges to complete the operation."))
+    assert asyncio.run(pim._read(collector, "graph.eligible", _Builder(_unlicensed()), unlicensed=unlicensed)) is None
+    assert asyncio.run(pim._read(collector, "graph.policies", denied)) is None
     assert len(unlicensed) == 1
     assert pim.classify_failure_code(collector.failures) == "not_authorized"
 
@@ -302,10 +309,68 @@ def test_a_licence_refusal_and_a_403_elsewhere_keep_both_outcomes():
     assert summary == {"pim_available": False, "collection_complete": False}
 
 
+@pytest.mark.parametrize("error", [
+    _ODataError("Insufficient privileges to complete the operation: no license for this feature."),
+    _ODataError("This tenant isn't licensed for this feature.", 403, "Forbidden"),
+    _ODataError("Too many requests; licensed tenants get a higher limit.", 429, "TooManyRequests"),
+    _ODataError("The tenant has not onboarded to PIM.", 400, "BadRequest"),
+], ids=["permission-403", "forbidden-403", "throttled-429", "not-onboarded-400"])
+def test_licence_wording_without_the_licence_code_is_a_failure(error):
+    items, collector, unlicensed = _read(_Builder(error))
+    assert items is None
+    assert unlicensed == []
+    assert len(collector.failures) == 1
+
+
+def _client(monkeypatch, eligible, active):
+    roles = ns(
+        role_definitions=_Builder(items=[ns(id=GA, template_id=GA, display_name="Global Administrator",
+                                            is_built_in=True, is_enabled=True)]),
+        role_eligibility_schedule_instances=eligible,
+        role_assignment_schedule_instances=active,
+    )
+    policies = _Builder(items=[])
+    client = ns(role_management=ns(directory=roles), policies=ns(role_management_policy_assignments=policies))
+
+    async def fake_with_graph_client(collector, cred, work, default=None):
+        return await work(client)
+
+    async def fake_tenant(collector, client):
+        return {"tenant_id": "t-1", "tenant_source": "env"}
+
+    monkeypatch.setattr(pim, "with_graph_client", fake_with_graph_client)
+    monkeypatch.setattr(pim, "resolve_tenant", fake_tenant)
+    monkeypatch.setattr(pim, "_query", lambda builder, **params: None)
+    return policies
+
+
+def test_an_unlicensed_tenant_skips_the_other_pim_reads(monkeypatch):
+    active = _Builder(_unlicensed())
+    _client(monkeypatch, _Builder(_unlicensed()), active)
+    collector = pim.Collector(logging.getLogger("test"))
+    _, definitions, eligible, active_read, policies, unlicensed = asyncio.run(pim._collect(collector, object()))
+    assert collector.ok
+    assert len(unlicensed) == 1 and unlicensed[0].startswith("graph.roleManagement.directory.roleEligibilityScheduleInstances")
+    assert definitions and eligible is None and active_read is None and policies is None
+    _, summary = pim.build(definitions, eligible, active_read, policies, unlicensed)
+    assert summary == {"pim_available": False, "collection_complete": False}
+
+
+def test_a_licence_refusal_after_the_first_pim_read_is_a_failure(monkeypatch):
+    _client(monkeypatch, _Builder(items=[]), _Builder(_unlicensed()))
+    collector = pim.Collector(logging.getLogger("test"))
+    _, definitions, eligible, active, policies, unlicensed = asyncio.run(pim._collect(collector, object()))
+    assert unlicensed == []
+    assert eligible == [] and active is None
+    assert len(collector.failures) == 1
+    _, summary = pim.build(definitions, eligible, active, policies, unlicensed)
+    assert summary == {"pim_available": None, "collection_complete": False}
+
+
 def test_a_failure_on_a_later_page_fails_the_read():
     first = ns(value=[ns(id="d1")], odata_next_link="https://graph.microsoft.com/next")
     builder = _Builder(pages=[first])
-    builder.with_url = lambda url: _Builder(_ODataError("Too many requests (status 429)"))
+    builder.with_url = lambda url: _Builder(_ODataError("Too many requests", 429, "TooManyRequests"))
     items, collector, unlicensed = _read(builder)
     assert items is None
     assert unlicensed == []
@@ -315,7 +380,7 @@ def test_a_failure_on_a_later_page_fails_the_read():
 def test_a_graph_403_is_recorded_and_classified_not_authorized():
     items, collector, unlicensed = _read(_Builder(_ODataError(
         '{"errorCode":"PermissionScopeNotGranted","message":"Authorization failed due to missing permission '
-        'scope RoleManagement.Read.Directory."} (status 403)'
+        'scope RoleManagement.Read.Directory."}', 403, "UnknownError"
     )))
     assert items is None
     assert unlicensed == []
