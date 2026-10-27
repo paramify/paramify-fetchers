@@ -170,7 +170,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `si-11`
 
-*4 fetchers:* [`azure_entra_access_reviews`](../fetchers/azure/entra_access_reviews), [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`splunk_role_index_access`](../fetchers/splunk/role_index_access)
+*3 fetchers:* [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`splunk_role_index_access`](../fetchers/splunk/role_index_access)
 
 #### `KSI-MLA-EVC` — Evaluating Configurations
 
@@ -537,7 +537,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings) | `KSI-CMT-LMC`, `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_disk_encryption_status`](../fetchers/azure/disk_encryption_status) | `KSI-SVC-SIN` |
 | [`azure_dns_configuration`](../fetchers/azure/dns_configuration) | `KSI-CNA-MAT`, `KSI-RPL-ABO`, `KSI-RPL-TRC`, `KSI-SVC-SIN` |
-| [`azure_entra_access_reviews`](../fetchers/azure/entra_access_reviews) | `KSI-IAM-AAM`, `KSI-IAM-ELP`, `KSI-MLA-ALA` |
+| [`azure_entra_access_reviews`](../fetchers/azure/entra_access_reviews) | `KSI-IAM-AAM`, `KSI-IAM-ELP` |
 | [`azure_entra_app_registrations`](../fetchers/azure/entra_app_registrations) | `KSI-IAM-SNU`, `KSI-SVC-ASM` |
 | [`azure_entra_authentication_policy`](../fetchers/azure/entra_authentication_policy) | `KSI-IAM-APM` |
 | [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies) | `KSI-IAM-ELP`, `KSI-IAM-JIT`, `KSI-IAM-SUS` |
