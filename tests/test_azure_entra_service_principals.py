@@ -325,9 +325,12 @@ def test_permissions_on_other_apis_leave_the_flag_unknown(monkeypatch, tmp_path)
         _sp("sp-exchange", EXCHANGE_APP_ID, "Office 365 Exchange Online", owner_org=MICROSOFT_TENANT,
             app_roles=[ns(id=ROLE_FULL_ACCESS, value="full_access_as_app")]),
         _sp("sp-daemon", "app-id-daemon", "Mail daemon", owner_org=VENDOR_TENANT),
+        _sp("sp-ews", "app-id-ews", "EWS client", owner_org=VENDOR_TENANT),
     ]
     tenant["assignments"]["sp-daemon"] = [_assignment(ROLE_FULL_ACCESS, "sp-exchange", "Office 365 Exchange Online")]
     tenant["grants"].append(_grant("sp-daemon", "EWS.AccessAsUser.All", resource_id="sp-exchange"))
+    # Its only permission on another API is a delegated grant.
+    tenant["grants"].append(_grant("sp-ews", "EWS.AccessAsUser.All", resource_id="sp-exchange"))
     code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
 
     assert code == 0
@@ -341,6 +344,9 @@ def test_permissions_on_other_apis_leave_the_flag_unknown(monkeypatch, tmp_path)
     # Not "checked, not privileged": Exchange and SharePoint permissions are never judged.
     assert daemon["has_privileged_permission"] is None
     assert daemon["privileged_application_permissions"] == daemon["privileged_delegated_permissions"] == []
+    ews = by_id["sp-ews"]
+    assert ews["application_permissions"] == []
+    assert ews["has_privileged_permission"] is None
     graph_perm = {p["permission"]: p for p in by_id["sp-owned"]["application_permissions"]}["User.Read.All"]
     assert (graph_perm["privileged"], graph_perm["judged"]) == (False, True)
     assert evidence["summary"]["unnamed_other_application_permissions"] == 0
