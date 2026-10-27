@@ -66,9 +66,11 @@ jobs:
       # the CLI must stay clean with textual installed.
       - run: python -m pip install -e ".[dev,tui]"
       # Includes tests/test_contracts.py — the schema contract gate over every
-      # fetcher.yaml and _categories/*.yaml.
+      # fetcher.yaml and _categories/*.yaml. `-n auto` (pytest-xdist) spreads the
+      # suite over the runner's cores: serial it took over 4 minutes. A test that
+      # fails here but passes alone shares state with another test; fix the test.
       - name: pytest
-        run: pytest -q
+        run: pytest -q -n auto
 
   azure-sdk:
     name: azure-sdk (surface)
@@ -142,16 +144,40 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install -e .
-      - name: paramify list / catalog / ksi + describe every fetcher
+      - name: paramify list / catalog / ksi
         run: |
           set -euo pipefail
-          paramify list --json > /dev/null
+          paramify list --json > "$RUNNER_TEMP/fetchers.json"
           paramify catalog --json > /dev/null
           paramify ksi --json > /dev/null
-          for f in $(paramify list --json | python -c "import sys, json; [print(x['name']) for x in json.load(sys.stdin)]"); do
-            paramify describe "$f" --json > /dev/null
-          done
-          echo "smoke ok: described all discovered fetchers"
+      # One process for every describe. A `paramify` process per fetcher took
+      # over 2 minutes, nearly all of it Python start-up. CliRunner drives the
+      # same Typer app as the `paramify` entry point, which the step above
+      # already proves works.
+      - name: paramify describe every fetcher
+        run: |
+          python - "$RUNNER_TEMP/fetchers.json" <<'EOF'
+          import json, sys
+          from typer.testing import CliRunner
+          from framework.cli import app
+
+          runner = CliRunner()
+          with open(sys.argv[1]) as fh:
+              names = [f["name"] for f in json.load(fh)]
+          failed = []
+          for name in names:
+              result = runner.invoke(app, ["describe", name, "--json"])
+              try:
+                  assert result.exit_code == 0, f"exit {result.exit_code}: {result.output}"
+                  assert json.loads(result.stdout)["name"] == name, "described another fetcher"
+              except (AssertionError, ValueError) as exc:
+                  failed.append(f"{name}: {exc}")
+          for line in failed:
+              print(line, file=sys.stderr)
+          if failed:
+              sys.exit(f"smoke FAILED: {len(failed)} of {len(names)} fetchers did not describe")
+          print(f"smoke ok: described all {len(names)} discovered fetchers")
+          EOF
 
   secrets:
     name: secrets (gitleaks full history)
