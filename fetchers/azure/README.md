@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 77 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 78 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -104,11 +104,14 @@ each call's Microsoft Graph reference page lists them.
 |---|---|
 | Build, Code, Test Management, Project and Team, Release (all Read), and Environment (Read & manage, as there is no read-only Environment scope) | `azure_devops_pipelines` |
 | Read Audit Log (`vso.auditlog`), from a user with View audit log | `azure_devops_audit_streams` |
+| Graph, Member Entitlement Management (both Read) | `azure_devops_identities` |
 
 The PAT is optional. Without one, the fetchers sign in as the ambient Entra identity,
 which must be added to the organization: project Reader for pipelines, View audit log
-for audit streams. Only the Entra sign-in can read the Log Audit Events policy; with a
-PAT, `azure_devops_audit_streams` judges auditing from the audit log instead.
+for audit streams, and organization membership for identities (the least privilege
+that reads last-access dates is not yet measured). Only the Entra sign-in can read
+the Log Audit Events policy; with a PAT, `azure_devops_audit_streams` judges auditing
+from the audit log instead.
 
 ## Wiring into a manifest
 
@@ -302,6 +305,7 @@ Azure DevOps:
 |---|---|
 | `azure_devops_pipelines` | Pipelines and what their YAML tests, scans and deploys, whether a failing test stops each deploy, runs, test results, environment checks and branch policies |
 | `azure_devops_audit_streams` | Whether auditing is on, every audit stream and its status, and whether Azure Monitor Logs streams are receiving events |
+| `azure_devops_identities` | Every user's access level, groups and last access, inactive users, and who holds privileged Azure DevOps groups, directly or through Entra groups |
 
 ## Notes
 

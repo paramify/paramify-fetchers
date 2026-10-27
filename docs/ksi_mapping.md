@@ -212,7 +212,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2.2`, `ac-2.3`, `ac-2.13`, `ac-6.7`, `ia-4.4`, `ia-12`, `ia-12.2`, `ia-12.3`, `ia-12.5`
 
-*6 fetchers:* [`aws_iam_identity_center`](../fetchers/aws/iam_identity_center), [`azure_entra_dormant_identities`](../fetchers/azure/entra_dormant_identities), [`azure_entra_groups`](../fetchers/azure/entra_groups), [`okta_automated_account_management`](../fetchers/okta/automated_account_management), [`rippling_all_employees`](../fetchers/rippling/all_employees), [`rippling_current_employees`](../fetchers/rippling/current_employees)
+*7 fetchers:* [`aws_iam_identity_center`](../fetchers/aws/iam_identity_center), [`azure_devops_identities`](../fetchers/azure/devops_identities), [`azure_entra_dormant_identities`](../fetchers/azure/entra_dormant_identities), [`azure_entra_groups`](../fetchers/azure/entra_groups), [`okta_automated_account_management`](../fetchers/okta/automated_account_management), [`rippling_all_employees`](../fetchers/rippling/all_employees), [`rippling_current_employees`](../fetchers/rippling/current_employees)
 
 #### `KSI-IAM-APM` — Adopting Passwordless Methods
 
@@ -236,7 +236,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2`, `ac-2.1`, `ac-2.2`, `ac-2.3`, `ac-2.4`, `ac-2.6`, `ac-3`, `ac-4`, `ac-5`, `ac-6`, `ac-6.1`, `ac-6.2`, `ac-6.5`, `ac-6.7`, `ac-6.9`, `ac-6.10`, `ac-7`, `ac-20.1`, `ac-17`, `au-9.4`, `cm-5`, `cm-7`, `cm-7.2`, `cm-7.5`, `cm-9`, `ia-4`, `ia-4.4`, `ia-7`, `ps-2`, `ps-3`, `ps-4`, `ps-5`, `ps-6`, `ps-9`, `ra-5.5`, `sc-2`, `sc-23`, `sc-39`
 
-*5 fetchers:* [`aws_iam_identity_center`](../fetchers/aws/iam_identity_center), [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`oci_bastion_sessions`](../fetchers/oci/bastion_sessions), [`okta_just_in_time_authorization`](../fetchers/okta/just_in_time_authorization)
+*6 fetchers:* [`aws_iam_identity_center`](../fetchers/aws/iam_identity_center), [`azure_devops_identities`](../fetchers/azure/devops_identities), [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`oci_bastion_sessions`](../fetchers/oci/bastion_sessions), [`okta_just_in_time_authorization`](../fetchers/okta/just_in_time_authorization)
 
 #### `KSI-IAM-SNU` — Securing Non-User Authentication
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-275 of 286 fetchers carry a mapping.
+276 of 287 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -505,7 +505,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (77)
+### azure  (78)
 
 | Fetcher | Indicators |
 |---|---|
@@ -533,6 +533,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_defender_plans`](../fetchers/azure/defender_plans) | `KSI-CNA-EIS`, `KSI-SVC-EIS` |
 | [`azure_defender_regulatory_compliance`](../fetchers/azure/defender_regulatory_compliance) | `KSI-CNA-IBP` |
 | [`azure_devops_audit_streams`](../fetchers/azure/devops_audit_streams) | `KSI-MLA-LET` |
+| [`azure_devops_identities`](../fetchers/azure/devops_identities) | `KSI-IAM-AAM`, `KSI-IAM-JIT` |
 | [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines) | `KSI-CMT-RMV`, `KSI-CMT-VTD`, `KSI-SVC-VRI` |
 | [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings) | `KSI-CMT-LMC`, `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_disk_encryption_status`](../fetchers/azure/disk_encryption_status) | `KSI-SVC-SIN` |
