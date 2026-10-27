@@ -441,6 +441,10 @@ def summarize(apps: list[dict], excluded_function_apps: int, window: dict) -> di
     read = activity_read(window)
     unlisted = window.get("requests_on_unlisted_sites")
     no_kudu = [a for a in apps if not any(h["count"] for h in all_histories(a))]
+    with_evidence = sum(1 for a in apps if has_deployment_evidence(a))
+    without_evidence = sum(
+        1 for a in apps if not has_deployment_evidence(a) and history_read(a)
+    ) if complete else None
 
     def if_read(value):
         return value if read else None
@@ -490,10 +494,10 @@ def summarize(apps: list[dict], excluded_function_apps: int, window: dict) -> di
         "deployment_activity_by_caller_type": if_read(sorted_counts(caller_types)),
         "deployment_activity_on_unlisted_sites": sum(unlisted.values()) if read and unlisted is not None else None,
         # --- any deployment evidence ---
-        "apps_with_deployment_evidence": sum(1 for a in apps if has_deployment_evidence(a)),
-        "apps_without_deployment_evidence": sum(
-            1 for a in apps if not has_deployment_evidence(a) and history_read(a)
-        ) if complete else None,
+        "apps_with_deployment_evidence": with_evidence,
+        "apps_without_deployment_evidence": without_evidence,
+        # The rest, so with + without + unknown is every web app.
+        "apps_deployment_evidence_unknown": len(apps) - with_evidence - (without_evidence or 0),
         # --- slots vs production ---
         "slots_matching_production": sum(1 for s in slots if s.get("matches_production") is True),
         "slots_differing_from_production": sum(1 for s in slots if s.get("matches_production") is False),

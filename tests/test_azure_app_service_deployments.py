@@ -542,3 +542,11 @@ def test_kudu_author_and_message_are_capped_and_marked():
     for text in (record["author"], record["message"]):
         assert text.startswith("m" * deploys.MAX_TEXT) and len(text) < deploys.MAX_TEXT + 40 and "truncated" in text
     assert deploys.deployment_record({"author": "dev@example.com", "message": "fix"})["message"] == "fix"
+
+
+def test_deployment_evidence_counts_add_up_to_the_apps(monkeypatch):
+    apps, _, _ = collect(monkeypatch, web_client(deployments={"web-a": DENIED}), events=[])
+    keys = ("apps_with_deployment_evidence", "apps_without_deployment_evidence", "apps_deployment_evidence_unknown")
+    assert [summary_of(apps)[k] for k in keys] == [0, 1, 1]
+    unread = summary_of(apps, {"days": 90, "complete": False, "cut_reason": "read_failed"})
+    assert [unread[k] for k in keys] == [0, None, 2]
