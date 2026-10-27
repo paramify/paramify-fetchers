@@ -56,6 +56,8 @@ def alert(n=1, status=fa.HISTORY_READ, mods=(), **kwargs):
     (SMART_RULE, "smart_detector"),
     (ACTIVITY_RULE, "activity_log"),
     (f"{RG}/providers/Microsoft.AlertsManagement/prometheusRuleGroups/g", "other"),
+    ("Backup", "builtin"),
+    ("ServiceHealth", "builtin"),
     (None, None),
     ("", None),
 ])
@@ -336,3 +338,24 @@ def test_alert_counts_are_unknown_when_the_alert_list_was_not_read(summary_total
     read = fa.summarize([], [], 0)
     assert (read["alerts_fired"], read["all_alerts_listed"], read["alerts_by_state"], read["alerts_acknowledged"]) == (
         0, True, {}, 0)
+
+
+def listed_metric_rule():
+    return fa.rule_record("metric", {"id": METRIC_RULE, "properties": {"enabled": True}})
+
+
+@pytest.mark.parametrize("rule_id", ["Backup", "ServiceHealth"])
+def test_a_built_in_rule_name_is_not_an_unlisted_rule(rule_id):
+    alerts = [alert(1, rule=rule_id), alert(2)]
+    rules = fa.rule_activity([listed_metric_rule()], alerts)
+    assert [(r["name"], r["listed"]) for r in rules] == [("cpu-high", True)]
+    summary = fa.summarize(alerts, rules, 2)
+    assert (summary["rules_fired_not_listed"], summary["rules_that_fired"], summary["alerts_by_rule_type"]) == (
+        0, 1, {"builtin": 1, "metric": 1})
+
+
+def test_a_trailing_slash_or_other_case_on_the_alert_rule_is_the_same_rule():
+    alerts = [alert(1, rule=f"{METRIC_RULE}/"), alert(2, rule=METRIC_RULE.upper())]
+    assert alerts[0]["alert_rule_id"] == METRIC_RULE
+    [rule] = fa.rule_activity([listed_metric_rule()], alerts)
+    assert (rule["listed"], rule["fire_count"]) == (True, 2)

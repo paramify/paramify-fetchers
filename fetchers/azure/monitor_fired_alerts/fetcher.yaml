@@ -72,7 +72,7 @@ evidence_set:
     What fired?
     - alerts_by_severity — Number of alerts for each severity (Sev0 most severe to Sev4), or unknown when an alert has none; null if the alert list wasn't read
     - alerts_by_monitor_service — Number of alerts for each source that raised them, such as Platform (metric alerts), Log Analytics or Azure Backup, or unknown when an alert has none; null if the alert list wasn't read
-    - alerts_by_rule_type — Number of alerts for each kind of rule that fired them (metric, log_search, smart_detector, activity_log, other); none for built-in alerts that have no rule, such as Azure Backup's; null if the alert list wasn't read
+    - alerts_by_rule_type — Number of alerts for each kind of rule that fired them (metric, log_search, smart_detector, activity_log, other); builtin for alerts raised by a built-in rule that has no rule resource, such as Azure Backup's and Service Health's; none for alerts with no rule; null if the alert list wasn't read
     - alerts_by_monitor_condition — Number of alerts for each monitor condition: Fired (the condition still holds), Resolved (it cleared), or unknown when an alert has none; null if the alert list wasn't read
 
     Was each alert notified, reviewed and closed?
@@ -92,6 +92,6 @@ evidence_set:
     - alert_rules_listed — Number of listed alert rules: metric, log search, smart detector and activity log alert rules the subscription's rule lists return; null if a rule list failed, never a partial count
     - alert_rules_by_type — Number of listed alert rules of each kind (metric, log_search, smart_detector, activity_log); null if a rule list failed
     - enabled_alert_rules — Number of listed alert rules that are enabled; null if a rule list failed
-    - rules_that_fired — Number of alert rules, listed or not, with at least one alert in the window; null if the alert list wasn't read (Microsoft.AlertsManagement not registered, or the list failed)
+    - rules_that_fired — Number of alert rules, listed or not, with at least one alert in the window; built-in rules (rule type builtin) aren't counted; null if the alert list wasn't read (Microsoft.AlertsManagement not registered, or the list failed)
     - enabled_rules_never_fired — Number of enabled listed alert rules with no alert in the window; null if the alert list wasn't read or a rule list failed
-    - rules_fired_not_listed — Number of alert rules that fired an alert in the window but aren't in the subscription's rule lists: in another subscription, deleted, a kind the fetcher doesn't list (such as Prometheus rule groups or classic alert rules), or its provider isn't registered; null if the alert list wasn't read or a rule list failed
+    - rules_fired_not_listed — Number of alert rules that fired an alert in the window but aren't in the subscription's rule lists: in another subscription, deleted, a kind the fetcher doesn't list (such as Prometheus rule groups or classic alert rules), or its provider isn't registered; built-in rules (rule type builtin) aren't counted; null if the alert list wasn't read or a rule list failed

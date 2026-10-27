@@ -17,6 +17,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_id_key,
     basename,
     build_payload,
     classify_failure_code,
@@ -46,6 +47,8 @@ RULE_SOURCES = (
     ("activity_log", "Microsoft.Insights", "Microsoft.Insights/activityLogAlerts", "2020-10-01"),
 )
 RULE_TYPE_BY_PROVIDER = {path.lower(): rule_type for rule_type, _, path, _ in RULE_SOURCES}
+# Backup and Service Health alerts name a built-in rule ("Backup"), not a rule resource.
+RULE_BUILTIN = "builtin"
 
 HISTORY_READ = "read"
 HISTORY_NOT_FOUND = "not_found"
@@ -75,6 +78,8 @@ def rule_type_of(rule_id):
     """metric / log_search / smart_detector / activity_log from the rule id's provider type; None without a rule."""
     if not rule_id:
         return None
+    if not arm_id_key(rule_id).startswith("/subscriptions/"):
+        return RULE_BUILTIN
     parts = rule_id.split("/")
     lowered = [p.lower() for p in parts]
     if "providers" not in lowered:
@@ -85,7 +90,7 @@ def rule_type_of(rule_id):
 
 def alert_record(raw: dict) -> dict:
     e = (raw.get("properties") or {}).get("essentials") or {}
-    rule_id = e.get("alertRule") or None
+    rule_id = (e.get("alertRule") or "").rstrip("/") or None
     return {
         "id": raw.get("id"),
         "name": raw.get("name"),
@@ -200,11 +205,11 @@ def rule_activity(rules: list[dict], alerts: list[dict], alerts_read: bool = Tru
     """Every listed rule with its fires, plus rules that fired but are not in the subscription's lists."""
     fired: dict = {}
     for a in alerts:
-        if a["alert_rule_id"]:
-            fired.setdefault(a["alert_rule_id"].lower(), []).append(a)
+        if a["alert_rule_id"] and a["rule_type"] != RULE_BUILTIN:
+            fired.setdefault(arm_id_key(a["alert_rule_id"]), []).append(a)
     out, listed = [], set()
     for rule in rules:
-        key = (rule["id"] or "").lower()
+        key = arm_id_key(rule["id"])
         listed.add(key)
         out.append({**rule, "listed": True, **_fires(fired.get(key, []), alerts_read)})
     for key, group in fired.items():
@@ -214,7 +219,7 @@ def rule_activity(rules: list[dict], alerts: list[dict], alerts_read: bool = Tru
                 "id": first["alert_rule_id"], "name": first["alert_rule_name"], "rule_type": first["rule_type"],
                 "enabled": None, "listed": False, **_fires(group),
             })
-    return sorted(out, key=lambda r: (r["id"] or "").lower())
+    return sorted(out, key=lambda r: arm_id_key(r["id"]))
 
 
 def summarize(
