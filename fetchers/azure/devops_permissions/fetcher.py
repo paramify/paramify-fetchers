@@ -212,12 +212,16 @@ def identity_record(descriptor: str, row: Optional[Dict[str, Any]], looked_up: b
     }
 
 
-def contributor_default(namespace: str, project: Optional[str], who: Optional[Dict[str, Any]], high: List[str]) -> bool:
-    """A project's own Contributors group holding only the high-impact rights it has by default."""
+def contributor_default(namespace: str, pid: Optional[str], project: Optional[str], who: Optional[Dict[str, Any]],
+                        high: List[str]) -> Optional[bool]:
+    """A project's own Contributors group holding only its default high-impact rights; None if the project is unnamed."""
     name = str((who or {}).get("name") or "").lower()
-    return (bool(high and project) and (who or {}).get("kind") == "group"
-            and name == f"[{project}]\\contributors".lower()
-            and all((namespace, a.lower()) in CONTRIBUTOR_DEFAULTS for a in high))
+    if not high or (who or {}).get("kind") != "group" or not name.endswith("\\contributors") \
+            or not all((namespace, a.lower()) in CONTRIBUTOR_DEFAULTS for a in high):
+        return False
+    if project:
+        return name == f"[{project}]\\contributors".lower()
+    return None if pid else False
 
 
 def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -286,7 +290,7 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         who = identities.get(str(ace.get("descriptor")))
         admin = (who or {}).get("admin_group")
         project = project_names.get(pid or "") if pid else None
-        default = contributor_default(key, project, who, high)
+        default = contributor_default(key, pid, project, who, high)
         entries.append({
             "namespace": ns.get("name"),
             "token": token,
@@ -304,7 +308,8 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
             "effective_deny": bits(extended.get("effectiveDeny"), actions),
             "high_impact_allowed": high,
             "high_impact_from_defaults": default,
-            "high_impact_outside_admin_groups": (None if admin is None else not admin) if high and not default else False,
+            "high_impact_outside_admin_groups": ((None if admin is None or default is None else not admin)
+                                                 if high and not default else False),
         })
     entries.sort(key=lambda e: (str(e["namespace"]).lower(), e["token"], str((e["identity"] or {}).get("name") or "")))
     git = [n for n in namespace_records if str(n["name"]).lower() == "git repositories"]

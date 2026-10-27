@@ -355,15 +355,31 @@ def test_project_contributors_default_rights_are_counted_apart(tmp_path):
     assert s["high_impact_rights_outside_admin_groups_by_right"]["Build: EditBuildDefinition"] == 1
 
 
+def test_an_unread_project_list_leaves_the_defaults_split_unknown(tmp_path):
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/projects")] = err(500, "boom")
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = contributors_build_acls(
+        ace(CONTRIB, bit("Build", "EditBuildDefinition")))
+    code, evidence, _, _ = run(tmp_path, fake)
+    contrib = entry(evidence, "Build", WEB, CONTRIB)
+    assert code == 1 and contrib["high_impact_from_defaults"] is None
+    assert contrib["high_impact_outside_admin_groups"] is None
+    s = evidence["summary"]
+    assert s["high_impact_grants_from_defaults"] is None and s["high_impact_grants_outside_admin_groups"] is None
+
+
 OPS_CONTRIB = "Microsoft.TeamFoundation.Identity;S-1-9-3-1-1"
+NAMED_LIKE_CONTRIB = "Microsoft.IdentityModel.Claims.ClaimsIdentity;tenant\\contributors@example.com"
 
 
 @pytest.mark.parametrize("who, rights", [
     (CONTRIB, ("EditBuildDefinition", "AdministerBuildPermissions")),  # a right beyond the defaults
     (OPS_CONTRIB, ("EditBuildDefinition",)),  # another project's Contributors
-], ids=["beyond-defaults", "other-project"])
+    (NAMED_LIKE_CONTRIB, ("EditBuildDefinition",)),  # a user, not the group
+], ids=["beyond-defaults", "other-project", "user-named-like-the-group"])
 def test_other_contributors_grants_still_count_outside_the_admin_groups(tmp_path, monkeypatch, who, rights):
     monkeypatch.setitem(IDENTITIES, OPS_CONTRIB, ("[Ops]\\Contributors", "vssgp.oc", True))
+    monkeypatch.setitem(IDENTITIES, NAMED_LIKE_CONTRIB, ("[Web]\\Contributors", "aad.named", False))
     fake = FakeADO()
     mask = 0
     for right in rights:
@@ -417,6 +433,7 @@ def test_refused_identity_lookup_leaves_the_admin_split_unknown(tmp_path):
     assert s["high_impact_grants_outside_admin_groups"] is None
     assert s["identities_with_high_impact_rights_outside_admin_groups"] is None
     assert s["high_impact_grants_from_defaults"] is None
+    assert s["identities_with_high_impact_rights_from_defaults"] is None
     pca = entry(evidence, "AuditLog", "AllPermissions", PCA)
     assert pca["identity"]["kind"] == "group" and pca["identity"]["admin_group"] is None
     assert pca["high_impact_outside_admin_groups"] is None
