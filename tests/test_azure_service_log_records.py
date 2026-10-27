@@ -177,6 +177,18 @@ def test_counts_read_null_when_the_records_could_not_be_read():
         "audit_principals": 0}
 
 
+def test_audit_actions_follow_the_other_counts_when_they_cannot_be_read():
+    workspaces = {slr.id_key(LAW): ws(read=("AppServiceHTTPLogs",), audit=[audit_row("Orders")]),
+                  slr.id_key(LAW_FAR): ws(audit=[audit_row("Orders", action="LOGIN SUCCEEDED", records=2, failed=0)])}
+    unknown = slr.instance_record({"id": MI}, [setting(group="audit")], [], workspaces, 10)
+    known = slr.instance_record({"id": MI + "2"}, [setting(workspace=LAW_FAR, group="audit")], [],
+                                {slr.id_key(LAW_FAR): ws(audit=[audit_row("Orders", action="LOGIN SUCCEEDED", records=2,
+                                                                          failed=0, rid=MI + "2")])}, 10)
+    assert (unknown["audit_records"], unknown["audit_actions"]) == (None, None)
+    summary = slr.summarize([], [unknown, known], [], [], 7)
+    assert (summary["audit_records"], summary["audit_actions"]) == (2, {"LOGIN SUCCEEDED": 2})
+
+
 def test_a_copy_with_a_failed_query_leaves_the_counts_null_but_still_shows_arrival():
     workspaces = {slr.id_key(LAW): ws(read=("AzureDiagnostics",), http=[http_row()])}
     app = slr.app_record({"id": SITE}, [setting(category="AppServiceHTTPLogs")], workspaces, 10)
@@ -268,6 +280,12 @@ def test_names_seen_only_in_failed_events_are_counted_not_emitted():
     assert [d["name"] for d in record["databases"]] == ["master", "Orders"]
     summary = slr.summarize([], [record], [], [], 7)
     assert (summary["audit_principals"], summary["failed_only_principals"]) == (2, 2)
+
+
+def test_an_unlisted_database_with_a_succeeded_event_and_no_plain_name_is_emitted_without_it():
+    workspaces = {slr.id_key(LAW): ws(audit=[audit_row("x<y", action="SCHEMA_OBJECT_ACCESS_GROUP", records=2, failed=0)])}
+    record = slr.instance_record({"id": MI}, [setting(group="audit")], [], workspaces, 10)
+    assert [(d["name"], d["listed"], d["audit_records"]) for d in record["databases"]] == [(None, False, 2)]
 
 
 def test_a_signed_in_principal_whose_name_is_not_a_plain_name_is_emitted_without_it():
@@ -485,6 +503,14 @@ def test_a_failed_dependency_query_is_best_effort():
     assert (out["status"], out["failed_queries"], collector.ok) == (slr.WS_QUERIED, ["dependencies"], True)
     assert out["read_tables"] == ["AppServiceHTTPLogs", "AzureDiagnostics"]
     assert out["http"] and out["audit"] and out["dependencies"] == []
+
+
+def test_a_refused_dependency_query_is_best_effort_too():
+    collector = Collector(slr.logger)
+    client = _OneQueryFails("AppDependencies |", azure_rest.QueryError("(403) InsufficientAccessError", "no"))
+    out = slr.read_workspace(client, LAW, "s1", 7, 10, collector)
+    assert (out["status"], out["failed_queries"], collector.ok) == (slr.WS_QUERIED, ["dependencies"], True)
+    assert out["read_tables"] == ["AppServiceHTTPLogs", "AzureDiagnostics"]
 
 
 def test_a_failed_query_leaves_the_other_tables_read():

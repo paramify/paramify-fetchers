@@ -372,7 +372,7 @@ def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int
         "audit_records": counts["audit_records"],
         "failed_audit_events": counts["failed_audit_events"],
         "last_audit_record": _latest(r.get("LastRecord") for r in rows),
-        "audit_actions": sorted_counts(actions),
+        "audit_actions": sorted_counts(actions) if known else None,
         "databases": db_records,
         "audit_records_without_database": counts["audit_records_without_database"],
         "principals": principal_records[:sample],
@@ -456,7 +456,7 @@ def summarize(apps: list[dict], instances: list[dict], dependencies: list[dict],
         "instances_audit_unknown": sum(1 for m in exporting_mis if m["audit_arriving"] is None),
         "audit_records": _total(m["audit_records"] for m in instances),
         "failed_audit_events": _total(m["failed_audit_events"] for m in instances),
-        "audit_actions": sorted_counts(sum((Counter(m["audit_actions"]) for m in instances), Counter())),
+        "audit_actions": sorted_counts(sum((Counter(m["audit_actions"] or {}) for m in instances), Counter())),
         "audit_principals": _total(m["principals_total"] for m in instances),
         "entra_principals": _total(m["entra_principals"] for m in instances),
         "sql_login_principals": _total(m["sql_login_principals"] for m in instances),
@@ -538,7 +538,8 @@ def read_workspace(client, workspace_id: str, subscription_id: str, days: int, s
         try:
             out[key] = _query(client, customer_id, table, kql[key], timespan)
         except Exception as exc:  # noqa: BLE001 — a refusal covers the workspace; anything else only this query
-            if ws_status(exc) != WS_ERROR:
+            # A best-effort query runs last, so even a refusal there (table-level access) leaves the rest read.
+            if ws_status(exc) != WS_ERROR and key not in BEST_EFFORT:
                 return _unread(out, workspace_id, exc, collector)
             unread.add(table)
             out["failed_queries"].append(key)
