@@ -252,6 +252,9 @@ def privileged(record: Dict[str, Any]) -> bool:
 
 
 def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], policies: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # Any holder, direct or through a group, at any scope: its role's activation rules are in the tenant-wide policy.
+    held = [r for r in eligible + active if r["is_privileged"]]
+    with_policy = {str(p["role_template_id"] or "").lower() for p in policies}
     eligible = [e for e in eligible if counted(e)]
     active = [a for a in active if counted(a)]
     priv_eligible = [e for e in eligible if privileged(e)]
@@ -263,9 +266,11 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
     def names(records, pred=lambda r: True):
         return sorted({r["role_name"] or r["role_definition_id"] or "" for r in records if pred(r)})
 
+    without_policy = names(held, lambda r: str(r["role_template_id"] or "").lower() not in with_policy)
+
     def policy_names(field, flagged, pred=lambda p: True):
-        """Null if any privileged policy left the rule unknown, so a missing rule never reads as clean."""
-        if any(p[field] is None and pred(p) for p in priv_policies):
+        """Null if a held privileged role's policy is missing or left the rule unknown, so neither reads as clean."""
+        if without_policy or any(p[field] is None and pred(p) for p in priv_policies):
             return None
         return names(priv_policies, lambda p: p[field] is flagged and pred(p))
 
@@ -294,6 +299,7 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
         "global_administrator_permanent_active": sum(1 for a in priv_permanent if a["is_global_administrator"]),
         "privileged_assignments_scoped_below_tenant": len(below_tenant),
         "privileged_role_policies": len(priv_policies),
+        "privileged_roles_without_policy": without_policy,
         "privileged_roles_activation_without_mfa_or_auth_context": policy_names(
             "activation_requires_mfa", False, lambda p: not p["activation_authentication_context"]
         ),
@@ -303,7 +309,7 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
         "privileged_roles_allowing_permanent_eligible_assignment": policy_names(
             "permanent_eligible_assignment_allowed", True
         ),
-        "max_privileged_activation_hours": None if None in hours else max(hours, default=None),
+        "max_privileged_activation_hours": None if without_policy or None in hours else max(hours, default=None),
     }
 
 

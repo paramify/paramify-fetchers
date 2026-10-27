@@ -204,6 +204,34 @@ def test_a_privileged_policy_missing_a_rule_makes_its_lists_unknown():
     assert summary["privileged_roles_allowing_permanent_active_assignment"] == []
 
 
+POLICY_LISTS = (
+    "privileged_roles_activation_without_mfa_or_auth_context",
+    "privileged_roles_activation_without_justification",
+    "privileged_roles_activation_without_approval",
+    "privileged_roles_allowing_permanent_active_assignment",
+    "privileged_roles_allowing_permanent_eligible_assignment",
+)
+
+
+def test_a_held_privileged_role_without_a_policy_makes_the_policy_fields_unknown():
+    active = [_instance(GA, "u-ga"), _instance(PRA, "u-pra")]
+    _, summary = pim.build(DEFINITIONS, [], active, [_policy(GA)], [])
+    assert summary["privileged_roles_without_policy"] == ["Privileged Role Administrator"]
+    for field in POLICY_LISTS:
+        assert summary[field] is None, field
+    assert summary["max_privileged_activation_hours"] is None
+
+    # Held through a group or below the tenant still counts: the role's rules are in its tenant-wide policy.
+    eligible = [_instance(PRA, "u-in-group", member_type="Group", scope="/administrativeUnits/au-1")]
+    _, summary = pim.build(DEFINITIONS, eligible, [_instance(GA, "u-ga")], [_policy(GA)], [])
+    assert summary["privileged_roles_without_policy"] == ["Privileged Role Administrator"]
+
+    _, summary = pim.build(DEFINITIONS, [], active, [_policy(GA), _policy(PRA)], [])
+    assert summary["privileged_roles_without_policy"] == []
+    assert all(summary[field] is not None for field in POLICY_LISTS)
+    assert summary["max_privileged_activation_hours"] == 8
+
+
 def test_an_untyped_permanent_holder_makes_the_user_count_unknown():
     active = [_instance(GA, "u-ga"), _instance(GA, "p-untyped", odata=None)]
     _, summary = pim.build(DEFINITIONS, [], active, [_policy(GA)], [])
