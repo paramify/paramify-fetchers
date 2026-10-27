@@ -544,6 +544,12 @@ def test_analytics_rules_unprovisioned_tables_read_as_missing_data(azure, tmp_pa
     assert sorted(r["name"] for r in ws["enabled_rules_missing_data"]) == ["aws", "gcp"]
 
 
+def test_analytics_rules_template_parsers_are_not_tables():
+    template = {"properties": {"requiredDataConnectors": [
+        {"connectorId": "DNS", "dataTypes": ["_Im_Dns"]}, {"connectorId": "SyslogAma", "dataTypes": ["Syslog"]}]}}
+    assert MODS["sentinel_analytics_rules"].template_tables(template) == ["Syslog"]
+
+
 def test_analytics_rules_without_the_workspace_functions_unlisted_names_stay_unknown(azure, tmp_path):
     azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
         rule("aws", "Scheduled", True, query="AWSCloudTrail | where EventName == 'ConsoleLogin'")]}

@@ -230,10 +230,12 @@ def query_tables(
 
 def template_tables(template: Optional[Dict[str, Any]], workspace_functions: Optional[Set[str]] = None) -> List[str]:
     """The template's requiredDataConnectors dataTypes, `SecurityAlert (ASC)` read as SecurityAlert. They name
-    tables, so one the workspace doesn't list is a table it never provisioned."""
+    tables, so one the workspace doesn't list is a table it never provisioned; `_`-prefixed parsers aren't tables."""
     connectors = ((template or {}).get("properties") or {}).get("requiredDataConnectors") or []
     names = {dt.split(" (")[0].strip() for c in connectors for dt in c.get("dataTypes") or [] if isinstance(dt, str)}
-    return sorted(n for n in names if _IDENTIFIER.match(n) and n not in (workspace_functions or set()))
+    return sorted(
+        n for n in names if _IDENTIFIER.match(n) and not n.startswith("_") and n not in (workspace_functions or set())
+    )
 
 
 def rule_tables(

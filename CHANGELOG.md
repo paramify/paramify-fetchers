@@ -134,7 +134,8 @@ schemas and the `paramify` CLI — not the internal code.
   unions don't count. A name the workspace doesn't list counts as a table it
   never provisioned where only a table can stand, unless it is one of the
   workspace's functions (read from saved searches); a template's data types
-  count whether or not the workspace lists them. When included, the `query` is
+  count whether or not the workspace lists them, except `_`-prefixed parsers.
+  When included, the `query` is
   the rule's full KQL as written, so it can hold the user names, IP addresses
   and file paths the rule names. Incident-creation rules read `SecurityAlert` and
   have data only when their own product sent an alert. Each workspace lists the
