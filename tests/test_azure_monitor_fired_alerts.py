@@ -367,3 +367,21 @@ def test_close_times_are_unknown_while_any_history_is_unread():
     summary = fa.summarize(alerts, [], 2)
     assert (summary["median_hours_to_close"], summary["max_hours_to_close"], summary["alerts_closed_by_person"]) == (
         None, None, None)
+
+
+def test_a_change_logged_before_the_alert_fired_has_no_hours():
+    record = alert(state="Closed", mods=[
+        mod("StateChange", "2026-10-10T09:59:00Z", by="a@example.com", new="Acknowledged"),
+        mod("StateChange", "2026-10-10T09:59:30Z", by="a@example.com", new="Closed")])
+    assert (record["hours_to_acknowledge"], record["hours_to_close"], record["closed_at"]) == (
+        None, None, "2026-10-10T09:59:30Z")
+    assert fa.summarize([record], [], 1)["median_hours_to_close"] is None
+
+
+def test_an_unparsable_change_time_is_not_reported_as_a_time():
+    record = alert(state="Closed", mods=[mod("StateChange", "yesterday", by="a@example.com", new="Acknowledged"),
+                                         mod("StateChange", "not a time", by="b@example.com", new="Closed")])
+    assert {k: record[k] for k in ("acknowledged_at", "acknowledged_by", "closed_at", "closed_by", "hours_to_close")} == {
+        "acknowledged_at": None, "acknowledged_by": "a@example.com", "closed_at": None, "closed_by": "b@example.com",
+        "hours_to_close": None}
+    assert fa.summarize([record], [], 1)["alerts_acknowledged"] == 1

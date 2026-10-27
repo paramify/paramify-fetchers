@@ -129,7 +129,12 @@ def modification(raw: dict) -> dict:
 
 def _hours(start, end):
     a, b = parse_time(start), parse_time(end)
-    return round((b - a).total_seconds() / 3600, 2) if a and b else None
+    # A change logged before the alert fired is clock skew, not a negative wait.
+    return round((b - a).total_seconds() / 3600, 2) if a and b and b >= a else None
+
+
+def _when(change):
+    return change["at"] if change and parse_time(change["at"]) else None
 
 
 def _by_person(actor):
@@ -159,9 +164,9 @@ def with_history(alert: dict, status: str, raw_mods=None) -> dict:
         **alert,
         "history_status": status,
         "history": mods,
-        "acknowledged_at": ack["at"] if ack else None,
+        "acknowledged_at": _when(ack),
         "acknowledged_by": ack["by"] if ack else None,
-        "closed_at": close["at"] if close else None,
+        "closed_at": _when(close),
         "closed_by": close["by"] if close else None,
         "closed_by_person": _by_person(close["by"]) if close else None,
         "hours_to_acknowledge": _hours(alert["fired_at"], ack["at"]) if ack else None,
@@ -247,7 +252,9 @@ def summarize(
         "alerts_by_rule_type": sorted_counts(Counter(a["rule_type"] or "none" for a in alerts)),
         "alerts_open": len(open_alerts),
         "alerts_acknowledged": from_histories(sum(
-            1 for a in alerts if a["acknowledged_at"] or (a["alert_state"] or "").lower() == STATE_ACKNOWLEDGED
+            1 for a in alerts
+            if _state_changes(a["history"] or [], STATE_ACKNOWLEDGED)
+            or (a["alert_state"] or "").lower() == STATE_ACKNOWLEDGED
         )),
         "alerts_closed": len(closed),
         "alerts_closed_by_person": from_histories(sum(1 for a in closed if a["closed_by_person"])),
