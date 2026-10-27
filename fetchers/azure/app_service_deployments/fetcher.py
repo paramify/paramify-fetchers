@@ -221,11 +221,14 @@ def redact_url(url):
     return urlunsplit(parts._replace(netloc=parts.netloc.rsplit("@", 1)[-1], query="", fragment=""))
 
 
+def _status_name(status) -> str | None:
+    return None if status is None else DEPLOY_STATUS.get(status) or str(status)
+
+
 def deployment_record(deployment: dict) -> dict:
-    status = deployment.get("status")
     return {
         "deployment_id": basename(deployment.get("name") or deployment.get("id")),
-        "status": DEPLOY_STATUS.get(status, None if status is None else str(status)),
+        "status": _status_name(deployment.get("status")),
         "active": bool(deployment.get("active") or False),
         "author": capped(deployment.get("author")),
         "deployer": deployment.get("deployer"),
@@ -644,7 +647,7 @@ def read_activity_log(subscription_id, cred, collector: Collector, days: int, no
     events is None when any page fails: a partial read would count as fewer deployments, not unknown ones.
     """
     start = now - min(timedelta(days=days), timedelta(days=ACTIVITY_LOG_MAX_DAYS) - ACTIVITY_LOG_RETENTION_MARGIN)
-    window = {
+    window: dict = {
         "start_time": start.isoformat(),
         "end_time": now.isoformat(),
         "days": days,
