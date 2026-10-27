@@ -4748,7 +4748,7 @@ Summary fields:
 - `access_key_age_known_accounts` — Number of storage accounts whose two access keys both have a known creation time
 - `access_key_max_age_days` — Days since the oldest access key in the subscription was created or last rotated; null when there are no storage accounts or any key's creation time is unknown (older accounts whose keys have not been rotated since Azure began recording it)
 - `accounts_with_access_key_older_than_90_days` — Number of storage accounts with an access key created or last rotated more than 90 days ago; null when a key whose creation time is unknown leaves an account undecided
-- `accounts_with_access_key_beyond_expiration_period` — Number of storage accounts with an access key older than the account's own key expiry policy; accounts with no policy are never counted; null when an account with a policy has a key whose creation time is unknown
+- `accounts_with_access_key_beyond_expiration_period` — Number of storage accounts with an access key older than the account's own key expiry policy; accounts with no policy are never counted; null when an account with a policy has a key of unknown age and no key known to be past it
 
 **Is data replicated to a healthy second region?**
 - `geo_redundant_accounts` — Number of storage accounts that replicate to a second region (GRS, RA-GRS, GZRS or RA-GZRS)
