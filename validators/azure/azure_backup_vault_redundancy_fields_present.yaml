@@ -3,14 +3,17 @@ name: Recovery Services Vault Redundancy Fields Present
 type: AUTOMATED
 role: integrity
 statement: >
-  There is at least one Recovery Services vault, and a vault record carries the
-  cross_region_restore_enabled flag followed by its total_protected_items count,
-  the path azure_backup_vaults_cross_region_restore reads. Without it, a renamed
-  flag reads as no vault without Cross Region Restore. Integrity partner for
-  azure_backup_vaults_cross_region_restore.
+  There is at least one Recovery Services vault, a vault record carries the
+  cross_region_restore_enabled flag followed by its total_protected_items count
+  (the path azure_backup_vaults_cross_region_restore reads), and every vault's
+  redundancy settings were read: no vault has a null or empty
+  cross_region_restore or standard_tier_storage_redundancy. The fetcher coerces
+  an unread cross_region_restore to false, so without this an unread setting
+  reads as Cross Region Restore off, and a renamed flag reads as no vault
+  without it. Integrity partner for azure_backup_vaults_cross_region_restore.
 
-# Same tempered path as the violation regex, any values.
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_recovery_services_vaults":\s*[1-9])(?=[\s\S]*?"cross_region_restore_enabled":\s*(?:true|false),(?:(?!"cross_region_restore_(?:enabled|vaults)")[\s\S])*?"total_protected_items":\s*\d)'
+# Same tempered path as the violation regex, any values; plus no vault whose raw redundancy settings are null or empty.
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_recovery_services_vaults":\s*[1-9])(?=[\s\S]*?"cross_region_restore_enabled":\s*(?:true|false),(?:(?!"cross_region_restore_(?:enabled|vaults)")[\s\S])*?"total_protected_items":\s*\d)(?=[\s\S]*?"cross_region_restore":\s*"[^"]+")(?![\s\S]*?"(?:cross_region_restore|standard_tier_storage_redundancy)":\s*(?:null|""))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
