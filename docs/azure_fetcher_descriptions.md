@@ -3722,7 +3722,7 @@ Access: Reader on the subscription.
 Commands Executed:
 - `subscriptions.list()` — picks a subscription when none is set
 - `providers.get("Microsoft.Web")` — tells "App Service not in use" from "no apps"
-- `web_apps.list()` — every web app (function apps are left out)
+- `web_apps.list()` — every web app (function apps and other sites that aren't web apps are left out)
 - `web_apps.list_deployments()` and `list_deployments_slot()` (per app and slot) — the deployments App Service (Kudu) records
 - `web_apps.get_source_control()` and `get_source_control_slot()` (per app and slot) — the repository and branch it deploys from
 - `web_apps.list_slots()` (per app) — its deployment slots
@@ -3773,7 +3773,7 @@ Summary fields:
   - user (a person: the token's identity type is user, or the caller is a user name containing @)
   - app (a service principal or managed identity: the token's identity type is app)
   - unknown (the log names neither)
-- `deployment_activity_on_unlisted_sites` — Number of slot swap, publish profile download, publishing credential read and package deployment requests on a site this run didn't list (a deleted app or slot, a function app, or a slot whose list couldn't be read), counted here instead of on an app; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
+- `deployment_activity_on_unlisted_sites` — Number of slot swap, publish profile download, publishing credential read and package deployment requests on a site this run didn't list (a deleted app or slot, a function app or other site that isn't a web app, or a slot whose list couldn't be read), counted here instead of on an app; null if the Activity Log couldn't be read, a lower bound if `activity_log_complete` is false
 
 **Is there any trace of how each app is deployed?**
 - `apps_with_deployment_evidence` — Number of web apps with deployment evidence: a Kudu deployment record, slot swap, publish profile download, publishing credential read or package deployment on the app or a slot. When the Activity Log couldn't be read, only Kudu records count
