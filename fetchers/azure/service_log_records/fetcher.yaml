@@ -51,12 +51,9 @@ config_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-CNA-ULN
   - KSI-IAM-SNU
   - KSI-MLA-LET
   - KSI-MLA-OSM
-  - KSI-PIY-GIV
-  - KSI-SVC-VCM
 
 evidence_set:
   reference_id: EVD-AZURE-SERVICE-LOG-RECORDS
