@@ -389,8 +389,9 @@ def test_a_licence_refusal_and_a_403_elsewhere_keep_both_outcomes():
     _ODataError("This tenant isn't licensed for this feature.", 403, "Forbidden"),
     _ODataError("Too many requests; licensed tenants get a higher limit.", 429, "TooManyRequests"),
     _ODataError("The tenant has not onboarded to PIM.", 400, "BadRequest"),
-], ids=["permission-403", "forbidden-403", "throttled-429", "not-onboarded-400"])
-def test_licence_wording_without_the_licence_code_is_a_failure(error):
+    _ODataError("The tenant needs a license.", 500, "AadPremiumLicenseRequired"),
+], ids=["permission-403", "forbidden-403", "throttled-429", "not-onboarded-400", "code-on-500"])
+def test_licence_wording_without_the_licence_code_and_status_is_a_failure(error):
     items, collector, unlicensed = _read(_Builder(error))
     assert items is None
     assert unlicensed == []
