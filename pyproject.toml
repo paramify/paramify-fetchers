@@ -31,7 +31,7 @@ dependencies = [
 # same app on 1.x.
 tui = ["textual>=8,<9"]
 checkov = ["checkov"]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "pytest-xdist", "ruff", "mypy"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every
 # one producing wrong or empty evidence rather than an error. Keep the two files
@@ -71,6 +71,7 @@ azure = [
     "azure-mgmt-containerregistry>=15.0.0,<16",
     "azure-mgmt-keyvault>=14.0.1,<15",
     "azure-keyvault-keys>=4.11.1,<5",
+    "azure-keyvault-certificates>=4.11.3,<5",
     # <7 is load-bearing: 7.0.0 ships no diagnostic_settings operations at all.
     "azure-mgmt-monitor>=6.0.2,<7",
     "azure-mgmt-loganalytics>=14.0.0,<15",
