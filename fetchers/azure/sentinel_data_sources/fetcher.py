@@ -230,7 +230,7 @@ def connector_catalog(
     preview: Optional[List[Dict[str, Any]]], definitions: List[Dict[str, Any]], conns: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """Every installed connector definition, plus each built-in connection whose definition isn't installed."""
-    catalog = []
+    catalog: List[Dict[str, Any]] = []
     for source, raw in (("content_hub", [c for c in preview or [] if c.get("kind") in UI_KINDS]), ("codeless", definitions)):
         for d in raw:
             ui = (d.get("properties") or {}).get("connectorUiConfig") or {}
