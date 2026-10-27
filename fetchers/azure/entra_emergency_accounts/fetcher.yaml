@@ -87,11 +87,11 @@ evidence_set:
     Summary fields:
 
     What was checked?
-    - emergency_accounts_source — Where the emergency accounts came from:
+    - emergency_accounts_source — Whether the emergency accounts were named or are candidates:
       - configured (named in ENTRA_EMERGENCY_ACCOUNTS)
       - candidates (none named: the enabled users excluded from every enforced MFA policy)
     - emergency_accounts_named — Number of accounts named in ENTRA_EMERGENCY_ACCOUNTS; 0 when none are
-    - conditional_access_readable — True if the Conditional Access policies were read
+    - conditional_access_readable — True if the Conditional Access policies were read; false if not, and the exclusion figures read null
     - exclusions_readable — True if every user, group and role an MFA policy excludes, and every named account, was read; false if any read failed, and the exclusion figures read null
     - alert_rules_readable — True if every Sentinel workspace's analytics rules and the subscription's log search alert rules were read; false if not, and the monitoring figures read null
     - user_sign_in_activity — Whether the emergency accounts' sign-in activity was read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused or failed)
