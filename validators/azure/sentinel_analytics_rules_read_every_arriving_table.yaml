@@ -11,8 +11,9 @@ statement: >
   alert in the window, and a data connection that sends its alerts (its own, or Defender XDR's) has
   alerts enabled: no alert is normal for these. A rule whose product has no connection with alerts
   enabled is not quiet and fails, since nothing will send its alerts, as does any rule reading another
-  table that got nothing. The counts are null, and fail, when no workspace could be checked or a
-  workspace's data connectors could not be read. Stricter than
+  table that got nothing. The counts are null, and fail, when no workspace could be checked, or when a
+  workspace's data connectors could not be read and a rule there is not quiet through the connections
+  that were. Stricter than
   sentinel_analytics_rules_read_required_tables: every arriving source, not a required list.
   Substantiates KSI-MLA-RVL (Continuous Monitoring; Continuous Monitoring Strategy; Security Event
   Notifications): "enabled analytics rules cover the required log sources". Does not count rules whose
