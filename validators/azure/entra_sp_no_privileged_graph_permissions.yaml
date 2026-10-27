@@ -4,14 +4,18 @@ type: AUTOMATED
 role: configuration
 statement: >-
   No service principal other than Microsoft's own apps holds a privileged Microsoft Graph application
-  permission or a delegated grant that includes a privileged Graph permission (the fetcher's lists:
-  rights to grant itself more access, take over sign-in, change security controls, or read or write
-  tenant-wide data), no Graph application permission is left unnamed, and both application permissions
-  and delegated grants were read. Substantiates workload identities holding only approved,
-  non-privileged API access (KSI-IAM-ELP). An approved integration that needs one of these permissions
-  still fails here and must be justified outside this evidence. Does NOT prove permissions on APIs
-  other than Microsoft Graph, Azure or directory roles held by service principals, or Microsoft's own
-  apps.
+  permission or a delegated grant that includes a privileged Graph permission, no application
+  permission on Graph or on an API the fetcher couldn't identify is left unnamed, and both application
+  permissions and delegated grants were read. Privileged is the fetcher's judgment. As an application
+  permission: any on its lists (rights to grant itself more access, take over users' sign-in, change
+  the controls that protect the tenant, or read tenant-wide data such as mail, files, calendars and
+  chats), and any whose name contains ReadWrite or FullControl, since as an app role a write permission
+  reaches the whole tenant. As a delegated grant: the first three kinds only, Directory.AccessAsUser.All
+  included, since delegated access reaches only what the signed-in user can open. Substantiates
+  workload identities holding only approved, non-privileged API access (KSI-IAM-ELP). An approved
+  integration that needs one of these permissions still fails here and must be justified outside this
+  evidence. Does NOT prove permissions on APIs other than Microsoft Graph (not judged), Azure or
+  directory roles held by service principals, or Microsoft's own apps.
 
 # delegated_grants_readable guards the swallowed delegated-grant 403: the run still exits 0 then.
 regex: '"partial_failure":\s*false[\s\S]*?"application_permissions_readable":\s*(?<application_permissions_readable>true|false)[\s\S]*?"delegated_grants_readable":\s*(?<delegated_grants_readable>true|false)[\s\S]*?"service_principals_with_privileged_application_permissions":\s*(?<service_principals_with_privileged_application_permissions>\d+|null)[\s\S]*?"service_principals_with_privileged_delegated_grants":\s*(?<service_principals_with_privileged_delegated_grants>\d+|null)[\s\S]*?"unnamed_graph_application_permissions":\s*(?<unnamed_graph_application_permissions>\d+|null)'
