@@ -240,6 +240,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list_by_subscription_id"],
         "azure/activity_log_alerts",
     ),
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
+        "metrics",
+        ["list"],
+        "azure/front_door_origins — hourly origin health and request counts",
+    ),
     # --- network: PR #57 widens this to <33 ---------------------------------
     (
         "azure.mgmt.network",
@@ -584,6 +591,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure/dns_configuration",
     ),
     (
+        "azure.mgmt.dns",
+        "DnsManagementClient",
+        "record_sets",
+        ["list_all_by_dns_zone"],
+        "azure/dns_configuration — every public record set with its targets and alias",
+    ),
+    (
         "azure.mgmt.privatedns",
         "PrivateDnsManagementClient",
         None,
@@ -673,7 +687,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "NetworkManagementClient",
         "private_dns_zone_groups",
         ["list"],
-        "azure/private_endpoint_configuration — which private DNS zones publish each endpoint",
+        "azure/private_endpoint_configuration — which private DNS zones publish each endpoint; "
+        "azure/private_dns_zone_configuration — the zone-group proof that backs a record",
     ),
     # --- private DNS ---------------------------------------------------------
     (
@@ -1141,9 +1156,37 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
     (
         "azure.mgmt.web",
         "WebSiteManagementClient",
+        "web_apps",
+        ["get_configuration", "get_configuration_slot"],
+        "azure/front_door_origins — access restrictions on each App Service origin, slots included",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
         "app_service_plans",
         ["list"],
         "azure/app_service_plans",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "web_apps",
+        [
+            "get_scm_allowed",
+            "get_ftp_allowed",
+            "get_app_settings_key_vault_references",
+            "get_site_connection_string_key_vault_references",
+            "list_connection_strings",
+        ],
+        "azure/app_service_configuration — basic-auth publishing, Key Vault references and the "
+        "opt-in literal-secret scan",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "provider",
+        ["get_web_app_stacks"],
+        "azure/app_service_configuration — runtime end of support",
     ),
     (
         "azure.mgmt.databricks",
@@ -1212,8 +1255,9 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure.mgmt.cdn",
         "CdnManagementClient",
         "profiles",
-        ["list"],
-        "azure/front_door_waf_coverage",
+        ["list", "get"],
+        "azure/front_door_waf_coverage, azure/front_door_origins — get reads the frontDoorId each App Service "
+        "origin's X-Azure-FDID rule must name",
     ),
     (
         "azure.mgmt.cdn",
@@ -1234,7 +1278,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "CdnManagementClient",
         "afd_custom_domains",
         ["list_by_profile"],
-        "azure/front_door_waf_coverage",
+        "azure/front_door_waf_coverage, azure/front_door_tls, azure/front_door_origins (scope exclusions)",
     ),
     (
         "azure.mgmt.cdn",
@@ -1707,6 +1751,79 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/dns_configuration",
     ),
     (
+        "azure.mgmt.dns.models",
+        "RecordSet",
+        ["ttl", "fqdn", "target_resource", "a_records", "aaaa_records", "cname_record", "mx_records",
+         "ns_records", "ptr_records", "srv_records", "txt_records", "caa_records", "soa_record"],
+        "azure/dns_configuration — a renamed record list reads that type's records as empty",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "SubResource",
+        ["id"],
+        "azure/dns_configuration — an alias record's target",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "ARecord",
+        ["ipv4_address"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "AaaaRecord",
+        ["ipv6_address"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "CnameRecord",
+        ["cname"],
+        "azure/dns_configuration — a renamed cname reads every CNAME as empty and its failover method is lost",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "MxRecord",
+        ["preference", "exchange"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "NsRecord",
+        ["nsdname"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "PtrRecord",
+        ["ptrdname"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "TxtRecord",
+        ["value"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "SrvRecord",
+        ["priority", "weight", "port", "target"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "CaaRecord",
+        ["flags", "tag", "value"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "SoaRecord",
+        ["host", "email"],
+        "azure/dns_configuration",
+    ),
+    (
         "azure.mgmt.privatedns.models",
         "VirtualNetworkLinkProperties",
         ["virtual_network", "registration_enabled", "resolution_policy"],
@@ -1788,6 +1905,99 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "IpSecurityRestriction",
         ["ip_address", "action", "priority", "vnet_subnet_resource_id", "headers"],
         "azure/app_service_configuration — access-restriction rule evaluation",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
+        ["min_tls_cipher_suite", "scm_min_tls_version", "java_container", "java_container_version"],
+        "azure/app_service_configuration — a renamed min_tls_cipher_suite reads as 'no minimum set'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "CsmPublishingCredentialsPoliciesEntityProperties",
+        ["allow"],
+        "azure/app_service_configuration — a renamed allow reads as 'basic auth off'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "ApiKVReferenceProperties",
+        ["status", "source", "vault_name", "secret_name", "secret_version", "identity_type", "details"],
+        "azure/app_service_configuration — Key Vault reference status",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "StringDictionary",
+        ["properties"],
+        "azure/app_service_configuration — a renamed properties reads every scanned app as holding no settings",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "ConnectionStringDictionary",
+        ["properties"],
+        "azure/app_service_configuration — a renamed properties reads every app as holding no connection strings",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "ConnStringValueTypePair",
+        ["value"],
+        "azure/app_service_configuration — a renamed value reads every connection string as empty",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppStackProperties",
+        ["major_versions"],
+        "azure/app_service_configuration — runtime end of support (a rename reads every runtime unknown)",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppMajorVersion",
+        ["minor_versions"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppMinorVersion",
+        ["value", "stack_settings"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppRuntimeSettings",
+        ["runtime_version", "end_of_life_date", "is_deprecated"],
+        "azure/app_service_configuration — a renamed end_of_life_date reads as 'supported'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppRuntimes",
+        ["linux_runtime_settings", "windows_runtime_settings", "linux_container_settings",
+         "windows_container_settings"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WindowsJavaContainerSettings",
+        ["java_container", "java_container_version", "end_of_life_date", "is_deprecated"],
+        "azure/app_service_configuration — Windows Java container end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "LinuxJavaContainerSettings",
+        ["end_of_life_date", "is_deprecated"],
+        "azure/app_service_configuration — Linux Java container end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
+        ["public_network_access", "ip_security_restrictions", "ip_security_restrictions_default_action",
+         "scm_ip_security_restrictions", "scm_ip_security_restrictions_default_action",
+         "scm_ip_security_restrictions_use_main"],
+        "azure/front_door_origins — a renamed field reads as 'no rules', so a locked origin reads as open",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "IpSecurityRestriction",
+        ["name", "tag", "ip_address", "headers"],
+        "azure/front_door_origins — the AzureFrontDoor.Backend service tag and its X-Azure-FDID header",
     ),
     (
         "azure.mgmt.web.models",
@@ -2286,6 +2496,44 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/entra_service_principals — federated credentials arrive only via $expand",
     ),
     (
+        "msgraph.generated.models.group",
+        "Group",
+        [
+            "group_types",
+            "security_enabled",
+            "mail_enabled",
+            "is_assignable_to_role",
+            "membership_rule",
+            "membership_rule_processing_state",
+            "on_premises_sync_enabled",
+            "visibility",
+            "members",
+            "owners",
+        ],
+        "azure/entra_groups — a missing field reads as None, so every group would look "
+        "assigned, cloud-only and not role-assignable, or empty and ownerless",
+    ),
+    (
+        "msgraph.generated.groups.groups_request_builder",
+        "GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters",
+        ["select", "expand"],
+        "azure/entra_groups — members and owners arrive via $expand",
+    ),
+    (
+        "msgraph.generated.models.user",
+        "User",
+        ["odata_type", "user_principal_name", "user_type", "account_enabled"],
+        "azure/entra_groups — a missing field reads as None, so guest and disabled-user "
+        "figures read unknown; without odata_type no member is a user and they read 0",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["odata_type", "account_enabled"],
+        "azure/entra_groups — service principal members and owners; without account_enabled "
+        "groups_with_only_disabled_owners reads unknown",
+    ),
+    (
         "msgraph.generated.models.authentication_methods_policy",
         "AuthenticationMethodsPolicy",
         ["authentication_method_configurations", "policy_migration_state", "registration_enforcement"],
@@ -2391,6 +2639,30 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     ),
     (
         "azure.mgmt.monitor.models",
+        "Response",
+        ["value"],
+        "azure/front_door_origins — origin health and traffic metrics",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "TimeSeriesElement",
+        ["metadatavalues", "data"],
+        "azure/front_door_origins — a renamed field reads as no metric data, so every origin looks idle",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "MetadataValue",
+        ["name", "value"],
+        "azure/front_door_origins — the Origin and OriginGroup dimensions that tie a series to an origin",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "MetricValue",
+        ["time_stamp", "average", "minimum", "total"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.monitor.models",
         "DiagnosticSettingsResource",
         ["storage_account_id", "workspace_id", "event_hub_authorization_rule_id", "event_hub_name", "logs"],
         "azure/key_vault_configuration, azure/diagnostic_settings, "
@@ -2485,6 +2757,12 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "Profile",
         ["properties", "sku"],
         "azure/front_door_waf_coverage — sku separates Front Door from classic CDN",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ProfileProperties",
+        ["front_door_id"],
+        "azure/front_door_origins — without it no App Service origin can be proven locked to its profile",
     ),
     (
         "azure.mgmt.cdn.models",
@@ -2852,7 +3130,14 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure.mgmt.network.models",
         "PrivateDnsZonePropertiesFormat",
         ["private_dns_zone_id", "record_sets"],
-        "azure/private_endpoint_configuration",
+        "azure/private_endpoint_configuration, azure/private_dns_zone_configuration",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RecordSet",
+        ["fqdn", "ip_addresses", "record_type"],
+        "azure/private_dns_zone_configuration — a rename leaves every zone-group proof false, "
+        "so zone-group-backed records drop to the network match",
     ),
     # --- private DNS ---------------------------------------------------------
     (
@@ -3512,6 +3797,20 @@ def test_graph_admin_membership_builders_present() -> None:
     assert getattr(group, "transitive_members", None) is not None, (
         "groups.by_group_id(...).transitive_members is gone.\n"
         "  affected fetchers: azure/entra_mfa_status — admins via a group would be missed"
+    )
+
+
+def test_graph_group_member_builders_present() -> None:
+    """The per-group builders azure/entra_groups reads past the $expand limit."""
+    client = _build("msgraph", "GraphServiceClient")
+    group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
+    assert callable(getattr(group.owners, "with_url", None)), (
+        "groups.by_group_id(...).owners.with_url is gone; the beta owner read needs it.\n"
+        "  affected fetchers: azure/entra_groups"
+    )
+    assert callable(getattr(group.members, "with_url", None)), (
+        "groups.by_group_id(...).members.with_url is gone; the beta member read needs it.\n"
+        "  affected fetchers: azure/entra_groups"
     )
 
 

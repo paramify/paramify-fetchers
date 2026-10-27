@@ -41,6 +41,8 @@ from framework import yaml_io
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
     ConfigField,
+    ManifestEntry,
+    PlatformConfig,
     Secret,
     TargetField,
     config_hint,
@@ -70,6 +72,11 @@ from framework.paramify_auth import (
 )
 from framework.probe import probe_categories
 from framework.runner import dependency_graph, manifest_loader
+from framework.secret_resolver import (
+    is_env_ref_attempt,
+    is_partial_env_ref,
+    view_runtime_value,
+)
 
 
 def _missing_token_error() -> str:
@@ -923,6 +930,11 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     may be passed pre-discovered (e.g. when validating many manifests in a loop)
     to avoid re-scanning the fetcher tree each call.
     """
+    from framework.runner.executor import (  # lazy: import cycle
+        merged_config,
+        secret_env_vars,
+    )
+
     errors = manifest_loader.schema_errors(manifest, root)
     if errors:
         return errors  # can't do semantic checks on a structurally-broken manifest
@@ -934,6 +946,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     parsed = manifest_loader.parse_manifest(manifest)
     in_manifest = {e.use for e in parsed.entries}
     problems = dependency_graph.problems(fetchers)
+    secret_vars = secret_env_vars(fetchers.values(), platforms.values(), parsed.entries)
 
     for i, entry in enumerate(parsed.entries):
         if entry.use not in fetchers:
@@ -976,16 +989,27 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             if not (in_platform or in_entry):
                 errors.append(f"{entry.use}: required config '{name}' not set ({config_hint(fetcher, name)})")
 
+        # The references the runner would refuse, so a hand edit fails here rather than at run time.
+        merged = merged_config(fetcher, spec, platform_cfg, entry, secret_vars)
+        errors += [f"{entry.use}: {problem}" for problem in merged.errors.values()]
+        for j, t in enumerate(entry.targets):
+            errors += [f"{entry.use} target[{j}]: {k} is {v!r}, but target fields aren't resolved, so ${{env:}} "
+                       f"references don't work there" for k, v in t.values.items() if is_env_ref_attempt(v) or is_partial_env_ref(v)]
+
         # An issue report with no assessment collects fine but can never be
         # intaken, so the gap is reported here rather than at upload time — after
         # someone has already paid for a scan. It is deliberately NOT a required
         # config field: making it one would block collecting without a Paramify
         # connection, which the framework is supposed to allow (docs/architecture_guide.md, step 3).
         if fetcher.is_issue_report:
-            from framework.runner.executor import merged_config  # lazy: import cycle
-
-            _, values = merged_config(fetcher, spec, platform_cfg, entry)
-            if not values.get(ASSESSMENT_ID_FIELD):
+            values = merged.values
+            # A reference unset in this shell may well be set where the run happens, so it is named, not "not set".
+            first_unset = {name: var for name, var in reversed(merged.unset)}
+            unset = {name for name in (ASSESSMENT_ID_FIELD, CLOSE_CYCLE_FIELD)
+                     if values.get(name) is None and name in first_unset}
+            errors += [f"{entry.use}: {name} reads ${{env:{first_unset[name]}}}, a reference unset in this environment"
+                       for name in sorted(unset)]
+            if not values.get(ASSESSMENT_ID_FIELD) and ASSESSMENT_ID_FIELD not in unset:
                 errors.append(
                     f"{entry.use}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
                     f"sent to Paramify (fix: paramify assessments select {entry.use})"
@@ -994,12 +1018,13 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             # needs no Paramify decision), but the uploader will not guess it.
             close_cycle = values.get(CLOSE_CYCLE_FIELD)
             if close_cycle is None:
-                errors.append(
-                    f"{entry.use}: no {CLOSE_CYCLE_FIELD} set — say whether the "
-                    f"assessment's cycle closes after each run "
-                    f"({' or '.join(CLOSE_CYCLE_VALUES)}; fix: paramify assessments "
-                    f"select {entry.use} --close-cycle after_run|never)"
-                )
+                if CLOSE_CYCLE_FIELD not in unset:
+                    errors.append(
+                        f"{entry.use}: no {CLOSE_CYCLE_FIELD} set — say whether the "
+                        f"assessment's cycle closes after each run "
+                        f"({' or '.join(CLOSE_CYCLE_VALUES)}; fix: paramify assessments "
+                        f"select {entry.use} --close-cycle after_run|never)"
+                    )
             elif close_cycle not in CLOSE_CYCLE_VALUES:
                 errors.append(
                     f"{entry.use}: {CLOSE_CYCLE_FIELD} is {close_cycle!r}; expected "
@@ -1147,6 +1172,7 @@ def run(
     from framework.runner.executor import (  # lazy: avoid import cycle
         merged_config,
         run_entry,
+        secret_env_vars,
     )
 
     errs = manifest_loader.schema_errors(manifest, root)
@@ -1156,6 +1182,7 @@ def run(
     fetchers = discover_fetchers(root)
     platforms = discover_platforms(root)
     parsed = manifest_loader.parse_manifest(manifest)
+    secret_vars = secret_env_vars(fetchers.values(), platforms.values(), parsed.entries)
 
     def emit(event: dict) -> None:
         if on_event is not None:
@@ -1221,7 +1248,7 @@ def run(
         # can't drift.
         assessment = None
         if fetcher.is_issue_report:
-            _, values = merged_config(fetcher, spec, platform_cfg, entry)
+            values = merged_config(fetcher, spec, platform_cfg, entry, secret_vars).values
             assessment = {
                 ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
                 ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
@@ -1238,6 +1265,7 @@ def run(
                 on_line=on_line,
                 on_note=on_note,
                 inputs_index=inputs_index,
+                secret_vars=secret_vars,
             )
         except (RuntimeError, ValueError) as e:
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
@@ -1574,9 +1602,7 @@ def _with_manifest_close_cycles(run_dir: Path, root: Path, config: dict, index: 
         return config
     overrides = {k: dict(v or {}) for k, v in (config.get("overrides") or {}).items()}
     for name in unset:
-        value = next(
-            (d["value"] for d in view.get(name, []) if d["name"] == CLOSE_CYCLE_FIELD), None
-        )
+        value = view_runtime_value(next((d for d in view.get(name, []) if d["name"] == CLOSE_CYCLE_FIELD), None))
         if value is not None:
             overrides.setdefault(name, {}).setdefault(CLOSE_CYCLE_FIELD, value)
     return {**config, "overrides": overrides}
@@ -3000,23 +3026,38 @@ def effective_config(
     platforms: Optional[dict] = None,
 ) -> Dict[str, List[dict]]:
     """Per entry, every config field that applies to it, with its value and where
-    that value comes from — the merge the runner actually performs:
+    that value comes from — the runner's own merge (executor.merged_config):
 
         platform defaults <- platform values <- per-fetcher values
 
     Returns {use: [descriptor + {"value", "source"}]}, where source is "entry",
-    "platforms.<category>", "default", or None when nothing supplies it. A field
-    the category declares (and the fetcher doesn't) is included too, since it is
-    injected into that fetcher's environment just the same.
+    "platforms.<category>", "default", or None when nothing supplies it. When the
+    value as written is a ${env:} reference, "reference" holds it and
+    "reference_state" says "set", "unset" (value and source are then the next
+    value down, as at run time) or "invalid". "value" is what the runner injects,
+    except that a value read from a reference is shown as the reference, never
+    what it resolves to, and "value_from_env" is then True (see
+    secret_resolver.view_runtime_value for the value itself). A field the category
+    declares (and the fetcher doesn't) is included too, since it is injected into
+    that fetcher's environment just the same.
 
     Front-ends need this to render config honestly: reading only the entry's own
     `config` block reports a value set once at the category level as unset on
     every entry that inherits it. Batched over `uses` so a caller redrawing a
     table scans the fetcher tree once, not once per row.
     """
+    from framework.runner.executor import (  # lazy: import cycle
+        merged_config,
+        secret_env_vars,
+    )
+
     discovered = fetchers if fetchers is not None else discover_fetchers(root)
     specs = platforms if platforms is not None else discover_platforms(root)
-    all_platforms = _run(m).get("platforms") or {}
+    run = _run(m)
+    parsed = manifest_loader.parse_manifest({"run": {**run, "fetchers": run.get("fetchers") or []}})
+    entries = {e.use: e for e in parsed.entries}
+    # The whole manifest's secrets, so a config reference reading one shows as invalid, as at run time.
+    secret_vars = secret_env_vars(discovered.values(), specs.values(), parsed.entries)
 
     out: Dict[str, List[dict]] = {}
     for use in uses:
@@ -3025,26 +3066,30 @@ def effective_config(
             out[use] = []
             continue
         spec = platform_for(f, specs)
-        schema: Dict[str, ConfigField] = {}
-        if spec:
-            schema.update(spec.config_schema)
-        schema.update(f.config_schema)  # fetcher overrides platform on a name clash
-
-        platform_values = (platform_for(f, all_platforms) or {}).get("config") or {}
-        entry_values = (_find_entry(m, use) or {}).get("config") or {}
+        platform_cfg = platform_for(f, parsed.platforms) or PlatformConfig()
+        entry = entries.get(use) or ManifestEntry(use=use)
+        platform_values, entry_values = platform_cfg.config, entry.config
+        merged = merged_config(f, spec, platform_cfg, entry, secret_vars)
+        labels = {"entry": "entry", "platform": f"platforms.{f.category}", "default": "default"}
 
         fields: List[dict] = []
-        for name, fdef in schema.items():
+        for name, fdef in merged.schema.items():
             d = _config_descriptor(fdef)
             d["category"] = f.category
-            if name in entry_values:
-                d["value"], d["source"] = entry_values[name], "entry"
-            elif name in platform_values:
-                d["value"], d["source"] = platform_values[name], f"platforms.{f.category}"
-            elif fdef.default is not None:
-                d["value"], d["source"] = fdef.default, "default"
-            else:
-                d["value"], d["source"] = None, None
+            d["value"] = merged.referenced.get(name, merged.values.get(name))
+            if name in merged.referenced:
+                d["value_from_env"] = True
+            d["source"] = labels.get(merged.sources.get(name, ""))
+            # The value as written, when it is a reference: "set" when the runner resolves it,
+            # "unset" when the next value down applies, "invalid" when the runner refuses it.
+            top_source, top = next(((label, v) for label, v in (("entry", entry_values.get(name)),
+                                                                ("platform", platform_values.get(name)),
+                                                                ("default", fdef.default)) if v is not None),
+                                   (None, None))
+            if is_env_ref_attempt(top) or is_partial_env_ref(top):
+                d["reference"] = top
+                d["reference_state"] = ("invalid" if name in merged.errors
+                                        else "set" if merged.sources.get(name) == top_source else "unset")
             fields.append(d)
         out[use] = fields
     return out
@@ -3057,11 +3102,12 @@ def shared_config_state(
     `uses` — the kind set once per category rather than per entry:
 
         categories  every category among `uses` that accepts `field_name`
-        value       the value they all resolve to today, or None when nothing
-                    supplies one or the entries disagree
+        value       the value they all resolve to today, as written (a reference
+                    stays one), or None when nothing supplies one or the entries
+                    disagree
         sources     where those values come from ("entry", "platforms.<cat>",
                     "default"), distinct, in the order met
-        conflict    True when the entries resolve to different values
+        conflict    True when the entries resolve to different values at run time
         missing     categories where nothing supplies a required value
 
     A view over effective_config() rather than a second merge, so "is it set"
@@ -3073,6 +3119,7 @@ def shared_config_state(
     categories: List[str] = []
     missing: List[str] = []
     values: List[Any] = []
+    runtime: List[Any] = []
     sources: List[str] = []
     for fields in effective_config(m, uses, root, fetchers, platforms).values():
         for d in fields:
@@ -3084,14 +3131,17 @@ def shared_config_state(
                 missing.append(d["category"])
             if d["source"] is None:
                 continue
-            if d["value"] not in values:
+            # Compared as the runner sees them, so ${env:TAG} and the literal it reads agree.
+            now = view_runtime_value(d)
+            if now not in runtime:
+                runtime.append(now)
                 values.append(d["value"])
             if d["source"] not in sources:
                 sources.append(d["source"])
     return {
         "categories": categories,
-        "value": values[0] if len(values) == 1 else None,
+        "value": values[0] if len(runtime) == 1 else None,
         "sources": sources,
-        "conflict": len(values) > 1,
+        "conflict": len(runtime) > 1,
         "missing": missing,
     }

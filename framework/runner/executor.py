@@ -24,7 +24,16 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import (
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+)
 
 from framework.contract import (
     ConfigField,
@@ -38,8 +47,20 @@ from framework.contract import (
     effective_secrets,
 )
 from framework.discovery import DISCOVERY_DIR
-from framework.issue_reports import ISSUE_REPORTS_DIR
-from framework.secret_resolver import SecretResolutionError, UnsetSecretError, resolve
+from framework.issue_reports import (
+    ASSESSMENT_ID_FIELD,
+    ASSESSMENT_NAME_FIELD,
+    CLOSE_CYCLE_FIELD,
+    ISSUE_REPORTS_DIR,
+)
+from framework.secret_resolver import (
+    SecretResolutionError,
+    UnsetSecretError,
+    env_var_name,
+    is_env_ref_attempt,
+    is_partial_env_ref,
+    resolve,
+)
 
 _INHERITED_ENV_VARS = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "USER", "TZ")
 
@@ -140,6 +161,21 @@ def _is_sensitive_env_name(name: str) -> bool:
     return any(part in up for part in _SENSITIVE_NAME_PARTS)
 
 
+# Config references only: broader than _is_sensitive_env_name, which drives output masking and must leave
+# selectors such as AWS_ACCESS_KEY_ID unmasked, while a config value never needs to read a key.
+_CREDENTIAL_NAME_WORDS = {"KEY", "KEYS", "APIKEY", "PAT", "PASS", "PWD", "SAS"}
+
+
+def is_credential_env_name(name: str) -> bool:
+    """Does this env var NAME look like it holds a credential, for a config ${env:} reference to be refused?"""
+    up = name.upper()
+    if _is_sensitive_env_name(up):
+        return True
+    if up.endswith("_FILE") or up.endswith("_URI"):
+        return False
+    return bool(_CREDENTIAL_NAME_WORDS & set(up.split("_"))) or "CONNECTION_STRING" in up
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -152,32 +188,95 @@ def _coerce_env(value) -> str:
     return str(value)
 
 
+# Issue-report keys the manifest carries without any schema declaring them.
+UNDECLARED_KEYS = (ASSESSMENT_ID_FIELD, ASSESSMENT_NAME_FIELD, CLOSE_CYCLE_FIELD)
+
+
+class MergedConfig(NamedTuple):
+    schema: Dict[str, ConfigField]
+    values: Dict[str, object]       # what the runner injects, references resolved
+    sources: Dict[str, str]         # per value: "entry", "platform" or "default"
+    unset: List[Tuple[str, str]]    # (field, VAR) for every reference whose variable was unset or empty
+    errors: Dict[str, str]          # per field: a reference the runner refuses
+    referenced: Dict[str, str]      # per value read from a reference: the reference as written
+
+
+def secret_env_vars(fetchers: Iterable[Fetcher], platform_specs: Iterable[PlatformSpec],
+                    entries: Iterable[ManifestEntry]) -> FrozenSet[str]:
+    """Every env var that may hold a secret: each fetcher's and category's declared secrets and static credentials,
+    and each variable a secret reference in the manifest reads. No config reference may read one."""
+    names = {s.env for f in fetchers for s in f.secrets if s.env}
+    for spec in platform_specs:
+        names |= {s.env for s in spec.secrets if s.env} | set(spec.credential_env)
+    refs = [v for e in entries for v in (*e.secrets.values(), *(x for t in e.targets for x in t.secrets.values()))]
+    return frozenset(names | {var for var in map(env_var_name, refs) if var})
+
+
 def merged_config(
     fetcher: Fetcher,
     platform_spec: Optional[PlatformSpec],
     platform_cfg: Optional[PlatformConfig],
     entry: ManifestEntry,
-) -> Tuple[Dict[str, ConfigField], Dict[str, object]]:
-    """Resolve a fetcher's effective config. Returns (schema, values).
+    secret_vars: FrozenSet[str] = frozenset(),
+) -> MergedConfig:
+    """Resolve a fetcher's effective config.
 
     The precedence ladder, lowest to highest: schema defaults, platform values,
-    per-fetcher values. Extracted from _apply_config so callers that need a
-    resolved value the fetcher never sees can read it without re-implementing the
-    ladder — `api.run()` does this for the issue-report `assessment_id`, which is
-    resolved from the manifest but injected into no env var.
+    per-fetcher values. A string field's value may be a ${env:VAR} reference; one
+    whose variable is unset or empty gives way to the next value down, as if it
+    had not been set. These are errors for that field, and the text as written
+    stays the value so a view can show it: a reference on an integer or boolean
+    field, a malformed one, one that is only part of the value, and one reading a
+    variable whose name looks like a credential's or that holds a secret (this
+    fetcher's, or any in `secret_vars`, see secret_env_vars), which is never resolved.
+    Only this fetcher's fields and the issue-report keys the manifest
+    carries undeclared are resolved; any other key (a sibling fetcher's, or a
+    stale one) passes through as written. Extracted from _apply_config so callers that need a resolved value
+    the fetcher never sees can read it without re-implementing the ladder —
+    `api.run()` does this for the issue-report `assessment_id`, which is resolved
+    from the manifest but injected into no env var.
     """
     schema: Dict[str, ConfigField] = {}
     if platform_spec:
         schema.update(platform_spec.config_schema)
     schema.update(fetcher.config_schema)  # per-fetcher overrides platform on name clash
 
-    values: Dict[str, object] = {
-        name: f.default for name, f in schema.items() if f.default is not None
-    }
-    if platform_cfg:
-        values.update({k: v for k, v in platform_cfg.config.items() if v is not None})
-    values.update({k: v for k, v in entry.config.items() if v is not None})
-    return schema, values
+    platform_values = platform_cfg.config if platform_cfg else {}
+    secret_vars = secret_env_vars([fetcher], [platform_spec] if platform_spec else [], [entry]) | secret_vars
+    values: Dict[str, object] = {}
+    sources: Dict[str, str] = {}
+    unset: List[Tuple[str, str]] = []
+    errors: Dict[str, str] = {}
+    referenced: Dict[str, str] = {}
+    for name in dict.fromkeys([*schema, *platform_values, *entry.config]):
+        fdef = schema.get(name) or ConfigField(name=name)
+        resolved = name in schema or name in UNDECLARED_KEYS
+        layers = (("entry", entry.config.get(name)), ("platform", platform_values.get(name)),
+                  ("default", fdef.default))
+        for source, value in layers:
+            if value is None:
+                continue
+            var = env_var_name(value)
+            if resolved and is_partial_env_ref(value):
+                errors[name] = f"config '{name}': a ${{env:}} reference must be the whole value, not part of it"
+            elif resolved and var and (var in secret_vars or is_credential_env_name(var)):
+                errors[name] = (f"config '{name}' reads ${{env:{var}}}, which holds a secret; "
+                                f"config references can't read secrets")
+            elif resolved and is_env_ref_attempt(value):
+                if fdef.type != "string":
+                    errors[name] = (f"config '{name}' is {fdef.type}; ${{env:}} references work on "
+                                    f"string config fields only")
+                else:
+                    try:
+                        referenced[name], value = value, resolve(value)
+                    except UnsetSecretError as e:
+                        unset.append((name, e.env_var))
+                        continue
+                    except SecretResolutionError as e:
+                        errors[name] = f"config '{name}': {e}"
+            values[name], sources[name] = value, source
+            break
+    return MergedConfig(schema, values, sources, unset, errors, referenced)
 
 
 def _apply_config(
@@ -187,22 +286,35 @@ def _apply_config(
     platform_cfg: Optional[PlatformConfig],
     entry: ManifestEntry,
     secret_sink: Optional[set] = None,
+    merged: Optional[MergedConfig] = None,
 ) -> None:
-    """Merge config and inject each field that declares an `env` mapping. Also
-    lets the platform's auth passthrough_env vars through the whitelist."""
-    schema, values = merged_config(fetcher, platform_spec, platform_cfg, entry)
+    """Inject each merged config field (see merged_config) that declares an `env`
+    mapping. Also lets the platform's auth passthrough_env vars through the
+    whitelist."""
+    if merged is None:
+        merged = merged_config(fetcher, platform_spec, platform_cfg, entry)
+    if merged.errors:
+        raise RuntimeError(f"{fetcher.name}: {next(iter(merged.errors.values()))}")
 
-    for name, fdef in schema.items():
+    for name, fdef in merged.schema.items():
         if not fdef.env:
             continue
-        val = values.get(name)
-        if val is None:
+        if name not in merged.values:
             if fdef.required:
+                refs = ", ".join(f"${{env:{var}}}" for field, var in merged.unset if field == name)
+                if refs:
+                    raise RuntimeError(
+                        f"{fetcher.name}: required config '{name}' reads {refs}, "
+                        f"unset or empty in the runner's environment"
+                    )
                 raise RuntimeError(
                     f"{fetcher.name}: required config '{name}' has no value ({config_hint(fetcher, name)})"
                 )
             continue
-        env[fdef.env] = _coerce_env(val)
+        env[fdef.env] = _coerce_env(merged.values[name])
+    # A value read from a reference is masked out of captured output like a secret; the evidence is the fetcher's own.
+    if secret_sink is not None:
+        secret_sink.update(str(merged.values[name]) for name in merged.referenced)
 
     passthrough = set(platform_spec.passthrough_env if platform_spec else [])
     if platform_cfg:
@@ -303,6 +415,7 @@ def _build_env(
     secret_sink: Optional[set] = None,
     note_sink: Optional[List[Tuple[str, str]]] = None,
     shadow_sink: Optional[List[Tuple[str, str]]] = None,
+    merged: Optional[MergedConfig] = None,
 ) -> Dict[str, str]:
     """Build the env dict to pass to a single fetcher invocation.
 
@@ -315,7 +428,7 @@ def _build_env(
     env["PYTHONUNBUFFERED"] = "1"
     env["EVIDENCE_DIR"] = str(output_dir.resolve())
 
-    _apply_config(env, fetcher, platform_spec, platform_cfg, entry, secret_sink)
+    _apply_config(env, fetcher, platform_spec, platform_cfg, entry, secret_sink, merged)
 
     # An optional secret the manifest omits is simply not injected: the fetcher's
     # credential chain falls through to ambient identity (IRSA, workload identity,
@@ -591,6 +704,20 @@ def _emit_notes(
     )
 
 
+def _emit_config_notes(merged: MergedConfig, on_note: Optional[Callable[[str], None]]) -> None:
+    """Say which config ${env:} references were unset and what applied instead."""
+    if on_note is None or not merged.unset:
+        return
+    refs: Dict[str, List[str]] = {}
+    for name, var in merged.unset:
+        refs.setdefault(name, []).append(f"${{env:{var}}}")
+    applied = {"platform": "the platform value", "default": "the default"}
+    fields = "; ".join(f"{name} ({', '.join(r)}) uses {applied.get(merged.sources.get(name, ''), 'no value')}"
+                       for name, r in refs.items())
+    plural = "s" if len(merged.unset) > 1 else ""
+    on_note(f"{len(merged.unset)} config reference{plural} unset: {fields}.")
+
+
 def run_entry(
     fetcher: Fetcher,
     entry: ManifestEntry,
@@ -600,18 +727,23 @@ def run_entry(
     on_line: Optional[Callable[[str], None]] = None,
     on_note: Optional[Callable[[str], None]] = None,
     inputs_index: Optional[dict] = None,
+    secret_vars: FrozenSet[str] = frozenset(),
 ) -> List[InvocationResult]:
     """Run one manifest entry: single invocation, or one per target for fanout.
 
     Per-target failures are isolated — they don't abort sibling targets.
     When on_line is provided, each invocation streams its stdout lines to it.
     on_note reports how the invocation was assembled — an optional secret
-    dropped because its reference could not be resolved, and a static credential
-    ignored because the target named an identity that supersedes it.
+    dropped because its reference could not be resolved, a config reference
+    that was unset, and a static credential ignored because the target named an
+    identity that supersedes it.
 
     `output_dir` is the run directory. An issue-report fetcher is pointed at its
     issue-reports/ subdirectory instead, and reports its outputs relative to the
     run dir either way (see invocation_dir / _invoke).
+
+    `secret_vars` are the secret variables of the whole catalog and manifest
+    (secret_env_vars), which no config reference may read.
 
     A comparator gets `inputs_index` as $COMPARATOR_INPUTS. Callers pick the
     category blocks with contract.platform_for, which gives a comparator none: no
@@ -620,12 +752,15 @@ def run_entry(
     output_dir.mkdir(parents=True, exist_ok=True)
     inv_dir = invocation_dir(fetcher, output_dir)
     inv_dir.mkdir(parents=True, exist_ok=True)
+    # Config is per entry: merged once, and its notes given once, whatever the number of targets.
+    merged = merged_config(fetcher, platform_spec, platform_cfg, entry, secret_vars)
+    _emit_config_notes(merged, on_note)
 
     if not fetcher.supports_targets:
         secrets_seen: set = set()
         notes: List[Tuple[str, str]] = []
         env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
-                         secrets_seen, notes)
+                         secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir,
                         inputs_index)]
@@ -642,7 +777,7 @@ def run_entry(
         secrets_seen = set()
         notes = []
         env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
-                         secrets_seen, notes)
+                         secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
 
@@ -653,7 +788,7 @@ def run_entry(
             notes = []
             shadowed: List[Tuple[str, str]] = []
             env = _build_env(fetcher, entry, target, inv_dir, platform_spec, platform_cfg,
-                             secrets_seen, notes, shadowed)
+                             secrets_seen, notes, shadowed, merged)
             _emit_notes(notes, on_note)
             _emit_shadowed(shadowed, on_note)
             results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir))

@@ -323,7 +323,7 @@ def test_python_fetcher_reports_why_it_failed(path):
         "metadata.error, so if your last log line is an INFO message, that is what "
         "an operator sees as the failure reason (issue #24). Log the reason at "
         "error level AFTER any 'Evidence saved' line, and write it to "
-        "$FETCHER_STATUS_FILE. See docs/porting_playbook.md § 'Say why you failed'."
+        "$FETCHER_STATUS_FILE. See docs/fetcher_contract_guide.md, step 6."
     )
 
 
@@ -334,7 +334,7 @@ def test_bash_fetcher_reports_why_it_failed(path):
     assert not silent, (
         f"{path.relative_to(REPO_ROOT)} exits non-zero at line(s) {silent} without "
         "writing to stderr. Use the log_error helper and report_failure — see "
-        "docs/porting_playbook.md § 'Say why you failed'."
+        "docs/fetcher_contract_guide.md, step 6."
     )
 
 
