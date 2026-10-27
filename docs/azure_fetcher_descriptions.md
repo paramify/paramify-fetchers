@@ -1686,7 +1686,7 @@ Summary fields:
 
 
 ### azure_sentinel_data_sources
-Short Description: Shows which log sources and data connectors actually sent data to each Sentinel workspace in the last 14 days, with each connector's last data received.
+Short Description: Shows which log sources and data connectors sent data to each Sentinel workspace in the ingestion window (14 days by default), with each connector's last data received.
 
 Script: fetchers/azure/sentinel_data_sources/fetcher.py
 
@@ -1697,12 +1697,13 @@ Commands Executed:
 - `GET Microsoft.OperationalInsights/workspaces` and `onboardingStates` (per workspace) — finds the Sentinel workspaces
 - `GET Microsoft.SecurityInsights/dataConnectors` (stable and preview APIs) — connections and their states, and the connector definitions installed from Content Hub
 - `GET Microsoft.SecurityInsights/dataConnectorDefinitions` — codeless connector definitions
+- `GET Microsoft.OperationalInsights/workspaces/tables` — each table's plan, since the query API can't read tables on the Basic or Auxiliary plan
 - KQL `union *` summarized by table — each table's last ingestion time and record count
 - KQL on `SecurityAlert` by product — which alert products feed the workspace
 - KQL `union` of each connector data type's `lastDataReceivedQuery` — last data received per connector data type, as the Sentinel portal measures it
 - KQL on `SentinelHealth` — each connector's latest health status (only when health monitoring sends data)
 
-Output: `azure_sentinel_data_sources_<subscription>.json` — for each Sentinel workspace, its connectors with when each last received data, and every table with when it last received data.
+Output: `azure_sentinel_data_sources_<subscription>.json` — for each Sentinel workspace, its connectors with when each last received data, whether it sends only alerts and its latest health status, every table with when it last received data, and the Basic and Auxiliary tables that weren't measured.
 
 Summary fields:
 
@@ -1711,16 +1712,17 @@ Summary fields:
 - `workspaces_without_sentinel` — Number of workspaces skipped because Sentinel isn't turned on
 
 **Is Sentinel receiving data from enough sources?**
-- `min_sources_ingesting` — Number of data sources sending data to the Sentinel workspace with the fewest, in the window (default 14 days); null if no workspace's ingestion could be read. A source is a table that received data, other than workspace and Sentinel telemetry (Usage, Operation, LAQueryLogs, SentinelHealth, SentinelAudit, SecurityIncident, watchlists, UEBA tables and Heartbeat), or a product other than Sentinel sending alerts to `SecurityAlert`
+- `min_sources_ingesting` — Number of data sources sending data to the Sentinel workspace with the fewest, in the window (default 14 days); null if no workspace's ingestion could be read. A source is a table that received data, other than workspace and Sentinel telemetry (Usage, Operation, LAQueryLogs, SentinelHealth, SentinelAudit, SecurityIncident, watchlists, UEBA tables and Heartbeat), or a product other than Sentinel sending alerts to `SecurityAlert`. Tables on the Basic or Auxiliary plan aren't counted
 - `workspaces_with_2plus_sources` — Number of Sentinel workspaces receiving data from at least two sources
 - `workspaces_with_no_sources` — Number of Sentinel workspaces receiving data from no source
-- `data_connectors_total` — Number of configured data connections across all Sentinel workspaces, including kinds only the preview API lists, such as Defender XDR
+- `data_connectors_total` — Number of configured data connections across all Sentinel workspaces, including kinds only the preview API lists, such as Defender XDR; null if no workspace's connections could all be listed
 
 **Is each connector actually delivering data?**
-- `connectors_connected` — Number of connectors, across all Sentinel workspaces, that are connected. A connector is every connector definition installed in the workspace plus each built-in connection with no installed definition; it is connected when at least one of its data types received data in the window, measured with the definition's own last-data query
-- `connectors_not_connected` — Number of connectors, across all Sentinel workspaces, none of whose data types received data in the window; connectors whose data couldn't be measured, or that define no data types, aren't counted
+- `connectors_connected` — Number of connectors, across all Sentinel workspaces, that are connected. A connector is every connector definition installed in the workspace plus each built-in connection kind with no installed definition; it is connected when at least one of its data types received data in the window, measured with the definition's own last-data query (for a built-in connection kind, the fetcher's own query for it). Null if no workspace's connectors could all be listed and measured
+- `connectors_not_connected` — Number of connectors, across all Sentinel workspaces, none of whose data types received data in the window. This includes an alert-only connector with no linked connection sending alerts (never connected, or its alerts turned off); a quiet one is counted under `connectors_quiet` instead. Connectors whose data couldn't be measured (such as a table on the Basic or Auxiliary plan), or that define no data types, aren't counted. Null if no workspace's connectors could all be listed and measured
+- `connectors_quiet` — Number of alert-only connectors, across all Sentinel workspaces, that received no alert in the window although a linked connection (their own, or Defender XDR's) has alerts enabled, which is normal for them. A quiet connector still reads connected: false. A connector is alert-only when all its data types are `SecurityAlert` queries, as for Defender for Endpoint, Defender for Office 365, Defender for Identity, Defender for Cloud, Defender for Cloud Apps (whose Cloud Discovery logs count only when its connection turns them on), Defender for IoT, Entra ID Protection and Insider Risk Management. Null if no workspace's connectors could all be listed and measured
 - `workspaces_with_health_monitoring` — Number of Sentinel workspaces where Sentinel health monitoring sent data to the `SentinelHealth` table in the window
-- `connectors_unhealthy` — Number of connectors, across all Sentinel workspaces, whose latest `SentinelHealth` status isn't Success
+- `connectors_unhealthy` — Number of data connections, across all Sentinel workspaces, whose latest `SentinelHealth` status isn't Success; null if no workspace's `SentinelHealth` data was read (health monitoring off, or the query failed)
 
 
 ### azure_sentinel_incidents
