@@ -135,7 +135,7 @@ def test_logs_sent_to_two_workspaces_count_once():
     assert (app["http_log_records"], app["status_classes"]["2xx"], app["top_clients"], app["last_http_log"]) == (
         10, 7, [{"client_ip": "203.0.113.5", "requests": 6}], "2026-10-12T12:00:00Z")
 
-    audit = both(audit=[audit_row("Orders")], principals=[principal_row("ops@example.com", 5, 5)])
+    audit = both(audit=[audit_row("Orders")], principals=[principal_row("ops@example.com", 5, 0)])
     mi = slr.instance_record({"id": MI}, two("SQLSecurityAuditEvents"), [{"name": "Orders"}], audit, 10)
     assert (mi["audit_records"], mi["failed_audit_events"], mi["databases"][0]["audit_records"],
             mi["principals"][0]["events"]) == (5, 5, 5, 5)
@@ -169,14 +169,14 @@ def test_records_only_count_from_the_apps_own_destinations():
     assert (record["http_log_records"], record["http_logs_arriving"]) == (0, False)
 
 
-def audit_row(database, action="LOGIN FAILED", records=5, failed=5, last="2026-10-12T09:00:00Z"):
-    return {"ResourceId": MI.lower(), "Database": database, "Action": action, "Records": records, "Failed": failed,
-            "LastRecord": last}
+def audit_row(database, action="LOGIN FAILED", records=5, failed=5, last="2026-10-12T09:00:00Z", rid=MI):
+    return {"ResourceId": rid.lower(), "Database": database, "Action": action, "Records": records, "Failed": failed,
+            "SucceededEvents": records - failed, "LastRecord": last}
 
 
 def principal_row(name, records, failed, ips=("10.0.0.4",), last="2026-10-12T09:00:00Z"):
-    return {"ResourceId": MI.lower(), "Principal": name, "Records": records, "Failed": failed, "LastSeen": last,
-            "ClientIps": list(ips)}
+    return {"ResourceId": MI.lower(), "Principal": name, "Records": records, "Failed": failed,
+            "SucceededEvents": records - failed, "LastSeen": last, "ClientIps": list(ips)}
 
 
 def test_instance_audit_folds_databases_actions_and_principals():
@@ -204,6 +204,51 @@ def test_instance_audit_folds_databases_actions_and_principals():
                                      "last_seen": "2026-10-12T09:00:00Z", "client_ips": ["10.0.0.4"]}]
     wide = slr.instance_record({"id": MI}, [setting(group="audit")], databases, workspaces, 10)
     assert [p["client_ips"] for p in wide["principals"] if p["principal"] == "app_login"] == [["10.0.0.5", "10.0.0.6"]]
+
+
+ATTACK = "'; unset $(id) --"
+
+
+def test_names_seen_only_in_failed_events_are_counted_not_emitted():
+    workspaces = {slr.id_key(LAW): ws(
+        audit=[audit_row(ATTACK, records=3, failed=3), audit_row("guess_db", records=1, failed=1),
+               audit_row("master", action="LOGIN SUCCEEDED", records=2, failed=0)],
+        principals=[principal_row("ops@example.com", 3, 1), principal_row("app_login", 2, 0),
+                    principal_row(ATTACK, 4, 4), principal_row("sa", 1, 1), principal_row("", 5, 5)],
+    )}
+    record = slr.instance_record({"id": MI}, [setting(group="audit")], [{"name": "Orders"}], workspaces, 10)
+    assert {k: record[k] for k in ("principals_total", "entra_principals", "sql_login_principals",
+                                   "failed_only_principals", "unnamed_principal_events",
+                                   "failed_only_database_names", "audit_records")} == {
+        "principals_total": 2, "entra_principals": 1, "sql_login_principals": 1, "failed_only_principals": 2,
+        "unnamed_principal_events": 5, "failed_only_database_names": 2, "audit_records": 6}
+    assert [p["principal"] for p in record["principals"]] == [None, "ops@example.com", "app_login"]
+    assert [d["name"] for d in record["databases"]] == ["master", "Orders"]
+    summary = slr.summarize([], [record], [], [], 7)
+    assert (summary["audit_principals"], summary["failed_only_principals"]) == (2, 2)
+
+
+def test_a_signed_in_principal_whose_name_is_not_a_plain_name_is_emitted_without_it():
+    workspaces = {slr.id_key(LAW): ws(principals=[principal_row("x<script>", 1, 0), principal_row("CORP\\svc sql", 1, 0)])}
+    record = slr.instance_record({"id": MI}, [setting(group="audit")], [], workspaces, 10)
+    assert sorted((p["principal"] or "", p["kind"]) for p in record["principals"]) == [
+        ("", slr.SQL_LOGIN), ("CORP\\svc sql", slr.SQL_LOGIN)]
+    assert record["sql_login_principals"] == 2
+
+
+@pytest.mark.parametrize("method, expected", [("GET", "GET"), ("PROPFIND", "PROPFIND"), ("'; unset $(id)", None),
+                                              ("get", None), (None, None)])
+def test_latest_request_method_is_validated(method, expected):
+    workspaces = {slr.id_key(LAW): ws(http=[http_row()], http_latest=[
+        {"ResourceId": SITE.lower(), "TimeGenerated": "2026-10-12T10:00:00Z", "CIp": "203.0.113.5",
+         "CsHost": "app1.example.net", "CsMethod": method, "ScStatus": 200}])}
+    record = slr.app_record({"id": SITE}, [setting(group="allLogs")], workspaces, 10)
+    assert record["latest_request"]["method"] == expected
+
+
+def test_succeeded_events_are_counted_in_the_queries():
+    assert "SucceededEvents = countif(Succeeded =~ 'true')" in slr.AUDIT_QUERY
+    assert "SucceededEvents = countif(Succeeded =~ 'true')" in slr.PRINCIPAL_QUERY
 
 
 def test_instance_whose_workspace_lacks_the_table_reads_not_arriving():

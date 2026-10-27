@@ -109,14 +109,15 @@ evidence_set:
     - audit_records — Number of audit events that arrived for the subscription's managed instances in the lookback, counted once when an instance sends them to more than one workspace
     - failed_audit_events — Number of audit events recording an action that failed, such as a failed login
     - audit_actions — Number of audit events for each action, such as LOGIN SUCCEEDED or LOGIN FAILED
-    - managed_databases_with_audit_records — Number of listed databases named in at least one audit event; events that name no database, such as server logins, don't count
+    - managed_databases_with_audit_records — Number of listed databases named in at least one audit event; events that name no database, such as server logins, don't count. A database name the instance doesn't list appears in the evidence only once an event on it succeeded, since a failed login names whatever database the client asked for
     - audit_log_retention_days — Number of days the AzureDiagnostics table keeps audit events for queries (interactive retention), the shortest across the workspaces instances send audit events to that have the table; null if none has it
     - audit_log_total_retention_days — Number of days the AzureDiagnostics table keeps audit events in all, including long-term (archive) retention, the shortest across the workspaces instances send audit events to that have the table; null if none has it
 
     Who connects to the managed instances?
-    - audit_principals — Number of named principals (users, apps, managed identities and SQL logins) in audit events, counted once per instance
-    - entra_principals — Number of Entra principals in audit events, counted once per instance: names containing @, since Entra users sign in by user principal name and apps and managed identities as client id@tenant id
-    - sql_login_principals — Number of SQL logins in audit events, counted once per instance: principal names without @, which includes Windows-style DOMAIN\name logins
+    - audit_principals — Number of named principals (users, apps, managed identities and SQL logins) with at least one succeeded audit event, counted once per instance; a failed login carries whatever name the client sent, so names seen only in failed events are counted in failed_only_principals instead
+    - entra_principals — Number of Entra principals with at least one succeeded audit event, counted once per instance: names containing @, since Entra users sign in by user principal name and apps and managed identities as client id@tenant id
+    - sql_login_principals — Number of SQL logins with at least one succeeded audit event, counted once per instance: principal names without @, which includes Windows-style DOMAIN\name logins
+    - failed_only_principals — Number of principal names seen only in failed audit events, such as logins tried with a guessed or wrong user name, counted once per instance; their names are not listed
     - unnamed_principal_events — Number of audit events with no principal name, such as failed logins that never identified a login
 
     What does each app call?

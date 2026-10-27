@@ -66,11 +66,12 @@ _AUDIT = (
     "ClientIp = tostring(column_ifexists('client_ip_s', '')) "
 )
 AUDIT_QUERY = (
-    _AUDIT + "| summarize Records = count(), LastRecord = max(TimeGenerated), Failed = countif(Succeeded =~ 'false') "
-    "by ResourceId = tolower(_ResourceId), Database, Action"
+    _AUDIT + "| summarize Records = count(), LastRecord = max(TimeGenerated), Failed = countif(Succeeded =~ 'false'), "
+    "SucceededEvents = countif(Succeeded =~ 'true') by ResourceId = tolower(_ResourceId), Database, Action"
 )
 PRINCIPAL_QUERY = (
-    _AUDIT + "| summarize Records = count(), Failed = countif(Succeeded =~ 'false'), LastSeen = max(TimeGenerated), "
+    _AUDIT + "| summarize Records = count(), Failed = countif(Succeeded =~ 'false'), "
+    "SucceededEvents = countif(Succeeded =~ 'true'), LastSeen = max(TimeGenerated), "
     "ClientIps = make_set(ClientIp, {sample}) by ResourceId = tolower(_ResourceId), Principal"
 )
 DEPENDENCY_QUERY = (
@@ -89,6 +90,9 @@ BEST_EFFORT = frozenset({"dependencies"})
 # The Host header is the client's to set; a probe's text there can make the evidence upload refuse the file.
 HOST_NAME = re.compile(r"^[A-Za-z0-9.-]+(:[0-9]+)?$")
 QUERY_CODE = re.compile(r"^\((\d{3})\)\s*(\S*)")
+# A failed login carries whatever principal and database the client sent, and CsMethod is the client's too.
+PLAIN_NAME = re.compile(r"^[\w .@\\$#-]{1,128}$")
+HTTP_METHOD = re.compile(r"^[A-Z]{1,20}$")
 
 WS_QUERIED = "queried"
 WS_NOT_AUTHORIZED = "not_authorized"
@@ -155,6 +159,14 @@ def ws_status(exc: BaseException) -> str:
 
 def host_name(value):
     return value if isinstance(value, str) and HOST_NAME.match(value) else None
+
+
+def plain_name(value):
+    return value if isinstance(value, str) and PLAIN_NAME.match(value) else None
+
+
+def http_method(value):
+    return value if isinstance(value, str) and HTTP_METHOD.match(value) else None
 
 
 def filled_queries(subscription_id: str, days: int, sample: int) -> dict:
@@ -250,7 +262,7 @@ def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
         )[:sample],
         "latest_request": {
             "time": newest.get("TimeGenerated"), "client_ip": newest.get("CIp"), "host": host_name(newest.get("CsHost")),
-            "method": newest.get("CsMethod"), "status": newest.get("ScStatus"),
+            "method": http_method(newest.get("CsMethod")), "status": newest.get("ScStatus"),
         } if newest else None,
         "http_logs_arriving": _arriving(records, destinations, workspaces, HTTP_TABLE),
     }
@@ -269,35 +281,40 @@ def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int
         name = r.get("Database")
         if not name:
             continue
-        db = dbs.setdefault(name.lower(), {"name": listed.get(name.lower(), name), "times": [], "records": 0, "failed": 0})
+        db = dbs.setdefault(name.lower(), {"name": listed.get(name.lower(), name), "times": [], "records": 0, "failed": 0,
+                                           "succeeded": 0})
         db["records"] += r.get("Records") or 0
         db["failed"] += r.get("Failed") or 0
+        db["succeeded"] += r.get("SucceededEvents") or 0
         db["times"].append(r.get("LastRecord"))
     for key, name in listed.items():
-        dbs.setdefault(key, {"name": name, "times": [], "records": 0, "failed": 0})
+        dbs.setdefault(key, {"name": name, "times": [], "records": 0, "failed": 0, "succeeded": 0})
+    # A database the instance doesn't list is named by the events alone, so it shows only once one succeeded.
     db_records = [
-        {"name": db["name"], "listed": key in listed, "audit_records": db["records"], "failed_events": db["failed"],
-         "last_audit_record": _latest(db["times"])}
-        for key, db in sorted(dbs.items())
+        {"name": db["name"] if key in listed else plain_name(db["name"]), "listed": key in listed,
+         "audit_records": db["records"], "failed_events": db["failed"], "last_audit_record": _latest(db["times"])}
+        for key, db in sorted(dbs.items()) if key in listed or db["succeeded"]
     ]
-    principals = {}
+    principals: dict = {}
     for r in principal_rows:
         name = r.get("Principal") or ""
-        p = principals.setdefault(name, {"records": 0, "failed": 0, "times": [], "ips": set()})
+        p = principals.setdefault(name, {"records": 0, "failed": 0, "succeeded": 0, "times": [], "ips": set()})
         p["records"] += r.get("Records") or 0
         p["failed"] += r.get("Failed") or 0
+        p["succeeded"] += r.get("SucceededEvents") or 0
         p["times"].append(r.get("LastSeen"))
         p["ips"].update(dynamic_list(r.get("ClientIps")))
+    # A principal counts once it has signed in; a name seen only in failed events counts as a number.
     principal_records = sorted(
         (
-            {"principal": name or None, "kind": principal_kind(name), "events": p["records"], "failed_events": p["failed"],
-             "last_seen": _latest(p["times"]), "client_ips": sorted(p["ips"])[:sample]}
-            for name, p in principals.items()
+            {"principal": plain_name(name), "kind": principal_kind(name), "events": p["records"],
+             "failed_events": p["failed"], "last_seen": _latest(p["times"]), "client_ips": sorted(p["ips"])[:sample]}
+            for name, p in principals.items() if not name or p["succeeded"]
         ),
         key=lambda p: (-p["events"], p["principal"] or ""),
     )
     kinds = Counter(p["kind"] for p in principal_records)
-    actions = Counter()
+    actions: Counter = Counter()
     for r in rows:
         actions[r.get("Action") or "unknown"] += r.get("Records") or 0
     return {
@@ -316,7 +333,9 @@ def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int
         "principals_total": sum(1 for p in principal_records if p["kind"]),
         "entra_principals": kinds[ENTRA],
         "sql_login_principals": kinds[SQL_LOGIN],
+        "failed_only_principals": sum(1 for name, p in principals.items() if name and not p["succeeded"]),
         "unnamed_principal_events": sum(p["events"] for p in principal_records if p["kind"] is None),
+        "failed_only_database_names": sum(1 for key, db in dbs.items() if key not in listed and not db["succeeded"]),
         "audit_arriving": _arriving(records, destinations, workspaces, AUDIT_TABLE),
     }
 
@@ -391,6 +410,7 @@ def summarize(apps: list[dict], instances: list[dict], dependencies: list[dict],
         "audit_principals": sum(m["principals_total"] for m in instances),
         "entra_principals": sum(m["entra_principals"] for m in instances),
         "sql_login_principals": sum(m["sql_login_principals"] for m in instances),
+        "failed_only_principals": sum(m["failed_only_principals"] for m in instances),
         "unnamed_principal_events": sum(m["unnamed_principal_events"] for m in instances),
         "managed_databases": len(databases),
         "managed_databases_with_audit_records": sum(1 for d in databases if d["audit_records"]),
