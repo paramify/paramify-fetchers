@@ -12,6 +12,39 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_dormant_identities`** (`EVD-AZURE-ENTRA-DORMANT-IDENTITIES`) —
+  whether any dormant, never-used, guest or deleted user or service principal still
+  holds an Entra directory role or an Azure role in the subscription. Lists each
+  user holding a role, each dormant user and each guest with its creation date,
+  last successful sign-in and roles (direct or through a group); the user counts
+  come from every user. Also lists every role-holding service principal with its
+  last sign-in as a client, and every deleted principal (a deleted group
+  included) an Azure role assignment still names. Dormant is no successful
+  sign-in in `ENTRA_DORMANT_DAYS` days (90 by default); an account or app created
+  within that many days isn't dormant yet. Only this tenant's own apps read
+  dormant with no sign-in as a client on record; managed identities and other
+  tenants' apps without one read unknown, or not dormant if they are disabled.
+  Without sign-in activity the users holding a role and the guests are still
+  listed and the dormancy figures read null, and every count reads null when a
+  read it needs was refused. If Microsoft Graph answers for another tenant than
+  the subscription's, the run fails without reading the directory.
+  `_shared/azure_rest.py` gains `graph_pages` and `graph_list` for paged Graph
+  reads on v1.0 or beta.
+- **FedRAMP Marketplace category: third-party vendor certification status.**
+  Two credential-free-for-FedRAMP fetchers read FedRAMP's published
+  marketplace data (data.json, the status changelog and the 20x CSO-PKG
+  overviews) and report, per vendor package, whether it is certified, in
+  process, ready, in remediation, delisted or unknown, its certification class
+  (A–D, with where the class came from), impact level, latest status change and
+  marketplace link. `fedramp_marketplace_vendor_certification_status` checks a
+  configured `Vendor Name=PACKAGE_ID` list;
+  `fedramp_marketplace_workspace_vendor_certification_status` checks the
+  `COM_FEDRAMP_SYSTEM` elements in the Paramify workspace, matching them to
+  listings by name. Both map to KSI-SCR-MIT and KSI-SCR-MON and write one
+  combined file or one file per vendor (`output_mode`). Six validators ship
+  with them: certified, certified-or-in-process, not delisted, not in
+  remediation, package ID resolves, and feed fresh.
+
 - **`azure_entra_groups`** (`EVD-AZURE-ENTRA-GROUPS`) — every Entra ID group with
   its members and owners, its kind, whether it can hold directory roles, and
   whether membership is set by a rule (dynamic, with paused rules flagged), by hand
@@ -144,6 +177,47 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_key_vault_key_rotation` 0.2.0 covers certificates.** Each vault now
+  lists its certificates with their expiry (`expired`, `days_until_expiry`),
+  thumbprint and policy: issuer, validity, key shape and lifetime actions, read as
+  `auto_renew_enabled`. A vault whose certificate list answers 401 or 403 reads
+  `certificates_status: not_authorized` instead of looking like a vault with no
+  certificates, and any other error fails the run. New
+  `results.app_service_certificates` lists every App Service certificate with its
+  expiry and `source`: `key_vault`, `managed` or `uploaded`. A Key Vault-backed one
+  says whether its last sync succeeded and, where the vault was readable, whether
+  the certificate behind it auto-renews. The PFX, certificate blob and password are
+  never read. `web_provider_registration_status` in results and summary tells "App
+  Service not in use" from "no certificates"; a failing `certificates.list()` or
+  Microsoft.Web `providers.get()` fails the run. Summary adds certificate and App
+  Service certificate counts, expired and expiring-within-30-days counts, and
+  `certificate_auto_renew_percentage` over readable policies. Adds the
+  `azure-keyvault-certificates` dependency to the `azure` extra. Also mapped to
+  `KSI-SVC-SIN`. Existing fields are unchanged. A read-only production run with Reader exercised the `not_authorized`
+  path and the App Service list; readable vault certificates and managed or uploaded
+  App Service certificates are proven by synthetic tests only.
+- **`azure_rbac_role_assignments` 0.3.0: PIM eligibility, standing and activation
+  rules.** Every active grant, at every scope, now carries `standing`:
+  `permanent`, `time_bound` or `pim_activated`, read from its PIM schedule
+  instance. PIM lists most grants, including ones made outside it, as assigned
+  with no end date; a grant it lists no schedule for also reads permanent and is
+  counted in `assignments_without_pim_schedule`. PIM-eligible assignments are
+  listed in `eligible_role_assignments`. The over-broad roles' subscription-scope
+  PIM settings are in `pim_role_policies`: MFA or authentication context,
+  justification, approval, maximum activation hours, and whether permanent
+  eligible or active assignments are allowed; `over_broad_role_policies_read`
+  names the roles read. The policy lists read null unless all four were read
+  and each has the rule the list depends on, so an unread setting never reads
+  as compliant. A role with no authentication-context rule doesn't make the MFA
+  list null: it is judged on MFA alone, and listed when MFA is off. The summary
+  adds the standing, eligibility (`total_eligible_role_assignments` and others)
+  and policy keys; each reads null
+  when the PIM read it depends on fails. Without Entra ID P2 or ID Governance,
+  `pim_available` is false, the PIM reads that succeeded are kept, and the run
+  succeeds. Any other PIM refusal now fails the run with `not_authorized` where
+  0.2.0 succeeded; the role-assignment evidence is still written. Every existing
+  field and summary key is unchanged. Reader is enough; a custom role also needs
+  the three `Microsoft.Authorization` PIM read actions.
 - **`azure_app_service_configuration` 0.3.0: cipher suites, basic-auth publishing, Key Vault
   references and runtime end of support.** Each web app now reports its minimum TLS cipher
   suite and the suites still allowed (whether CBC or static-RSA suites remain), the SCM site's
