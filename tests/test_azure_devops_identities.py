@@ -343,6 +343,14 @@ def test_entitlement_pages_also_read_the_older_members_shape(tmp_path):
     assert identity(evidence, "dave@example.com")["access_level"] == "Basic"
 
 
+def test_a_malformed_entitlement_item_is_skipped(tmp_path):
+    fake = FakeADO()
+    route = fake.routes[("vsaex.dev.azure.com", "/contoso/_apis/userentitlements")]
+    route["e2"] = Resp(body={"items": ["not-an-entitlement", *route["e2"]._body["items"]]})
+    code, evidence, _, _ = run(tmp_path, fake)
+    assert code == 0 and identity(evidence, "dave@example.com")["access_level"] == "Basic"
+
+
 def test_refused_entitlements_name_the_scope_and_leave_the_rest(tmp_path):
     fake = FakeADO()
     fake.routes[("vsaex.dev.azure.com", "/contoso/_apis/userentitlements")] = err(

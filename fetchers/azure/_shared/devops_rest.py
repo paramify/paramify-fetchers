@@ -227,8 +227,7 @@ class DevOpsClient:
 
     def iter(self, path: str, api_version: str = API_VERSION, params: Optional[Dict[str, Any]] = None,
              service: Optional[str] = None, item_key: Union[str, Sequence[str]] = "value") -> Iterator[Dict[str, Any]]:
-        """Every item across pages: x-ms-continuationtoken or a body continuationToken, else a same-host nextLink.
-        With several item keys, each page is read from the first one it fills."""
+        """Every item across pages (header or body continuation token, else a same-host nextLink), from the first item key a page fills."""
         keys = (item_key,) if isinstance(item_key, str) else tuple(item_key)
         url: Optional[str] = self.url(path, service)
         base_params = {**(params or {}), "api-version": api_version}

@@ -265,7 +265,7 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
             "groups": groups_raw is not None, "entitlements": entitled is not None}
 
     by_descriptor = {e["user"]["descriptor"]: e for e in entitled or []
-                     if isinstance(e.get("user"), dict) and e["user"].get("descriptor")}
+                     if isinstance(e, dict) and isinstance(e.get("user"), dict) and e["user"].get("descriptor")}
     subjects = {s["descriptor"]: s for s in (users or []) + (principals or [])
                 if isinstance(s, dict) and s.get("descriptor")}
     # An entitled member the graph list did not return is still a member.
