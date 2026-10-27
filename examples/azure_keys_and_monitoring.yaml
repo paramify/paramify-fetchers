@@ -12,14 +12,16 @@
 #
 # Read-only access needed: the built-in **Reader** role on each subscription in
 # `targets` covers everything except one thing — azure_key_vault_key_rotation also
-# reads each vault's DATA plane to get the key rotation policies, and Reader conveys
-# no Key Vault data actions. Add **Key Vault Reader** (RBAC vaults) or a
-# get/list-keys access policy (non-RBAC vaults) to see them. Without it the fetcher
-# still succeeds: each vault is reported with `data_plane_status: inaccessible`, which
-# is itself accurate evidence about what the collector can see.
+# reads each vault's DATA plane to get the key rotation policies and the certificates,
+# and Reader conveys no Key Vault data actions. Add **Key Vault Reader** (RBAC vaults)
+# or an access policy with key get/list and certificate get/list (non-RBAC vaults) to
+# see them. Without it the fetcher still succeeds: each vault is reported with
+# `data_plane_status: inaccessible` and `certificates_status: not_authorized`, which
+# is itself accurate evidence about what the collector can see. Reader also covers
+# the App Service certificates (Microsoft.Web/certificates) it lists.
 #
-# Nothing here writes, and no key material or secret value is ever read — key names,
-# dates, public parameters and rotation policies only.
+# Nothing here writes, and no key material, secret value or certificate body is ever
+# read — names, dates, public parameters, rotation and certificate policies only.
 #
 # Fanout is per SUBSCRIPTION. Each fetcher lists one target per subscription;
 # `environment` labels that subscription's evidence (prod / preprod) and is written
