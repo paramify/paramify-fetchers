@@ -326,11 +326,11 @@ def coverage(rules: List[Dict[str, Any]], ingested: Optional[Dict[str, Any]]) ->
 
 def table_vocabulary(listed: List[Dict[str, Any]]) -> Tuple[Set[str], Set[str]]:
     """Table names, and the names that are also some table's column."""
-    names = {t.get("name") for t in listed if t.get("name")}
-    columns = set()
+    names: Set[str] = {t["name"] for t in listed if t.get("name")}
+    columns: Set[str] = set()
     for t in listed:
         schema = (t.get("properties") or {}).get("schema") or {}
-        columns.update(c.get("name") for c in (schema.get("standardColumns") or []) + (schema.get("columns") or []))
+        columns.update(c["name"] for c in (schema.get("standardColumns") or []) + (schema.get("columns") or []) if c.get("name"))
     return names, names & columns
 
 
