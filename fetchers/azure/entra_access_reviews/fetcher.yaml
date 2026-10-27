@@ -93,7 +93,7 @@ evidence_set:
     - active_self_review_definitions — List of active review series names where users review their own access (no reviewers named on the series; for a multi-stage series, none named on any of its stages, since Graph then ignores the series' own list)
 
     Are the reviews running on schedule?
-    - active_recurring_definitions_without_completed_cycle — List of active recurring review series names with no completed run yet (a run is completed when its status is Completed, AutoReviewed, Applying or Applied)
+    - active_recurring_definitions_without_completed_cycle — List of active recurring review series names with no completed cycle yet (a cycle is completed when every run that started that day has ended: status Completed, AutoReviewed, Applying or Applied, with an end time)
     - max_days_since_last_completed_cycle — Days: the longest time since any active recurring review series' latest completed cycle ended; null if none has completed a cycle
 
     What did the last cycle decide, and was it applied?
