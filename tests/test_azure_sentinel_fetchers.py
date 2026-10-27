@@ -636,6 +636,133 @@ def test_analytics_rules_disabled_incident_rule_still_gets_its_product_checked(a
     assert ws["ingesting_tables_not_read"] == ["AzureActivity"]
 
 
+def connection(name, kind, alerts="Enabled"):
+    return {"id": f"{SI_A}/dataConnectors/{name}", "name": name, "kind": kind,
+            "properties": {"tenantId": "t", "dataTypes": {"alerts": {"state": alerts}}}}
+
+
+def incident_rule(name, product, enabled=True):
+    return rule(name, "MicrosoftSecurityIncidentCreation", enabled, productFilter=product)
+
+
+def alert_only_workspace(azure, rules, stable=(), preview=()):
+    """Incident-creation rules for products that sent no alert (the products query finds only Defender for Endpoint)."""
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": list(rules)}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-09-01")] = stable if isinstance(stable, Resp) else {"value": list(stable)}
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = (
+        preview if isinstance(preview, Resp) else {"value": list(preview)})
+
+
+def test_analytics_rules_alert_only_rule_is_quiet_through_its_own_connection(azure, tmp_path):
+    alert_only_workspace(azure, [incident_rule("ipc", "Azure Active Directory Identity Protection")],
+                         stable=[connection("aad", "AzureActiveDirectory")])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["notes"] == []
+    assert [r["name"] for r in ws["enabled_rules_missing_data"]] == ["ipc"]
+    assert ws["enabled_rules_quiet"] == [{
+        "name": "ipc", "display_name": "ipc", "product_filter": "Azure Active Directory Identity Protection",
+        "alerts_enabled_on": ["AzureActiveDirectory"],
+        "reason": "its product sent no alert in the window, and its own connection has alerts enabled"}]
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (1, 1)
+
+
+def test_analytics_rules_alert_only_rule_is_quiet_through_defender_xdr(azure, tmp_path):
+    # Only the preview listing returns the Defender XDR connection.
+    alert_only_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
+                         stable=[connection("o365", "Office365")],
+                         preview=[connection("o365", "Office365"), connection("xdr", "MicrosoftThreatProtection")])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    [quiet] = ws_a(ev)["enabled_rules_quiet"]
+    assert code == 0 and quiet["alerts_enabled_on"] == ["MicrosoftThreatProtection"]
+    assert "Defender XDR, which carries that product's alerts," in quiet["reason"]
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (1, 1)
+
+
+def test_analytics_rules_alert_only_rules_not_wired_are_not_quiet(azure, tmp_path):
+    # Defender for Office 365's alerts are Disabled on its own connection and on Defender XDR's; Defender for Cloud
+    # was never connected, and Defender XDR doesn't carry its alerts.
+    alert_only_workspace(
+        azure,
+        [incident_rule("mdo", "Office 365 Advanced Threat Protection"), incident_rule("mdc", "Azure Security Center"),
+         incident_rule("off", "Azure Advanced Threat Protection", enabled=False)],
+        stable=[connection("atp", "OfficeATP", "Disabled")],
+        preview=[connection("atp", "OfficeATP", "Disabled"), connection("xdr", "MicrosoftThreatProtection", "Disabled")])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["enabled_rules_quiet"] == []
+    assert sorted(r["name"] for r in ws["enabled_rules_missing_data"]) == ["mdc", "mdo"]
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (2, 0)
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [connection("xdr", "MicrosoftThreatProtection")]}
+    for f in tmp_path.glob("azure_sentinel_analytics_rules_*.json"):
+        f.unlink()
+    _, ev = run("sentinel_analytics_rules", tmp_path)
+    assert [r["name"] for r in ws_a(ev)["enabled_rules_quiet"]] == ["mdo"]  # Defender XDR now sends alerts; not for mdc
+
+
+def test_analytics_rules_only_incident_rules_read_quiet(azure, tmp_path):
+    # SecurityAlert got nothing at all; a scheduled rule reading it and SigninLogs stays missing data.
+    alert_only_workspace(
+        azure,
+        [incident_rule("mdi", "Azure Advanced Threat Protection"),
+         rule("mixed", "Scheduled", True, query="SecurityAlert | join (SigninLogs) on $left.CompromisedEntity == $right.UserPrincipalName")],
+        preview=[connection("xdr", "MicrosoftThreatProtection")])
+    azure.queries.insert(0, ("union withsource=ParamifySourceTable", table(
+        ["ParamifySourceTable", "LastIngested", "Records"], [["AzureActivity", iso(NOW), 10]])))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and [r["name"] for r in ws["enabled_rules_quiet"]] == ["mdi"]
+    assert {r["name"]: r["tables_without_data"] for r in ws["enabled_rules_missing_data"]} == {
+        "mdi": ["SecurityAlert"], "mixed": ["SecurityAlert", "SigninLogs"]}
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (2, 1)
+    assert not any(c[0] == "POST" and "by ProductName" in c[2] for c in azure.calls)
+
+
+def test_analytics_rules_unreadable_connector_listing_leaves_quiet_unknown(azure, tmp_path):
+    alert_only_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
+                         stable=Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}}),
+                         preview=[connection("o365", "Office365")])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert ws_a(ev)["enabled_rules_quiet"] is None
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (1, None)
+
+
+def test_analytics_rules_failed_preview_connector_listing_is_a_note(azure, tmp_path):
+    retired = Resp(400, {"error": {"code": "InvalidApiVersionParameter", "message": "retired"}})
+    alert_only_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")], preview=retired)
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["enabled_rules_quiet"] is None and ev["summary"]["enabled_rules_quiet"] is None
+    assert len(ws["notes"]) == 1 and "Defender XDR" in ws["notes"][0]
+    # A rule its own stable-listed connection makes quiet stays quiet without the preview listing.
+    alert_only_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
+                         stable=[connection("aatp", "AzureAdvancedThreatProtection")], preview=retired)
+    for f in tmp_path.glob("azure_sentinel_analytics_rules_*.json"):
+        f.unlink()
+    _, ev = run("sentinel_analytics_rules", tmp_path)
+    assert [r["name"] for r in ws_a(ev)["enabled_rules_quiet"]] == ["mdi"] and ev["summary"]["enabled_rules_quiet"] == 1
+
+
+def test_analytics_rules_without_alert_only_rules_missing_data_skip_the_connector_listing(azure, tmp_path):
+    alert_only_workspace(azure, [incident_rule("mde", "Microsoft Defender Advanced Threat Protection")])
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    assert code == 0 and ws_a(ev)["enabled_rules_quiet"] == [] and ev["summary"]["enabled_rules_quiet"] == 0
+    assert not any(c[1] == f"{SI_A}/dataConnectors" for c in azure.calls)
+
+
+def test_analytics_rules_quiet_total_is_null_if_any_measured_workspace_is_unknown():
+    summarize = MODS["sentinel_analytics_rules"].summarize
+    quiet = [{"name": "mdi"}]
+    known = {"rules": [], "enabled_rules_missing_data": quiet, "enabled_rules_quiet": quiet}
+    unknown = {"rules": [], "enabled_rules_missing_data": quiet, "enabled_rules_quiet": None}
+    unmeasured = {"rules": [], "enabled_rules_missing_data": None, "enabled_rules_quiet": None}
+    assert summarize([known, unmeasured])["enabled_rules_quiet"] == 1
+    assert summarize([known, unknown])["enabled_rules_quiet"] is None
+    assert summarize([unmeasured])["enabled_rules_quiet"] is None
+
+
 def test_analytics_rules_workspace_without_customer_id(azure, tmp_path):
     workspaces = azure.arm[(f"/subscriptions/{SUB}/providers/Microsoft.OperationalInsights/workspaces", "2023-09-01")]
     del workspaces["value"][0]["properties"]["customerId"]

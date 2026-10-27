@@ -36,6 +36,22 @@ FUSION_TEMPLATE = "f71aba3d-28fb-450b-b192-4e76a83015c8"
 INCIDENT_CREATION = "MicrosoftSecurityIncidentCreation"
 # Kinds with no query of their own: their template's connectors are optional signals, not tables the rule needs.
 NO_QUERY_KINDS = frozenset({"Fusion", "MLBehaviorAnalytics", "ThreatIntelligence"})
+# Each product an incident-creation rule can filter on, and the kind of the connection that sends its alerts.
+ALERT_PRODUCT_KINDS = {
+    "azure active directory identity protection": "AzureActiveDirectory",
+    "azure advanced threat protection": "AzureAdvancedThreatProtection",
+    "azure security center": "AzureSecurityCenter",
+    "azure security center for iot": "IOT",
+    "microsoft cloud app security": "MicrosoftCloudAppSecurity",
+    "microsoft defender advanced threat protection": "MicrosoftDefenderAdvancedThreatProtection",
+    "office 365 advanced threat protection": "OfficeATP",
+}
+# Defender XDR's connection (only the preview listing returns it) carries these kinds' alerts, not Defender for Cloud's or IoT's.
+DEFENDER_XDR = "MicrosoftThreatProtection"
+DEFENDER_XDR_CARRIES = frozenset({
+    "AzureActiveDirectory", "AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity",
+    "MicrosoftDefenderAdvancedThreatProtection", "OfficeATP",
+})
 
 # Verbatim strings (@"…") escape only a doubled quote, so a trailing backslash still closes them.
 _KQL_TOKEN = re.compile(
@@ -272,6 +288,55 @@ def tables_without_data(
     return [t for t in read if t not in ingested]
 
 
+def sends_alerts(connection: Dict[str, Any]) -> bool:
+    alerts = ((connection.get("properties") or {}).get("dataTypes") or {}).get("alerts") or {}
+    return (alerts.get("state") or "").lower() == "enabled"
+
+
+def alert_connections(product: Optional[str], connections: List[Dict[str, Any]]) -> List[str]:
+    """Kinds of the connections with alerts enabled that send a product's alerts: its own, or Defender XDR's."""
+    kind = ALERT_PRODUCT_KINDS.get((product or "").lower())
+    feeds = {kind, DEFENDER_XDR} if kind in DEFENDER_XDR_CARRIES else {kind}
+    return sorted({c["kind"] for c in connections if kind and c.get("kind") in feeds and sends_alerts(c)})
+
+
+def quiet_rules(client, path: str, ws: Dict[str, Any], rules: List[Dict[str, Any]], collector, notes: List[str]) -> Optional[List[Dict[str, Any]]]:
+    """Enabled incident-creation rules whose product sent no alert while a connection sending its alerts has them
+    enabled: no alert is normal for these. None when a rule isn't quiet by the connections read and a listing failed."""
+    missing = [
+        r for r in rules
+        if r.get("enabled") is True and r.get("kind") == INCIDENT_CREATION and r.get("tables_without_data")
+    ]
+    if not missing:
+        return []
+    stable = collector.guard(
+        f"securityinsights.dataConnectors.list({ws['name']})", lambda: client.list(f"{path}/dataConnectors", SI_API)
+    )
+    preview = None
+    try:
+        preview = client.list(f"{path}/dataConnectors", SI_PREVIEW_API)
+    except Exception as exc:  # noqa: BLE001 — only the preview lists Defender XDR, so a rule it may feed stays unknown
+        notes.append(
+            f"data connector listing at {SI_PREVIEW_API} failed, so an incident-creation rule Defender XDR may feed "
+            f"reads as unknown rather than quiet: {exc}"
+        )
+    quiet = []
+    for r in missing:
+        through = alert_connections(r.get("product_filter"), (stable or []) + (preview or []))
+        if through:
+            own = ALERT_PRODUCT_KINDS[(r.get("product_filter") or "").lower()] in through
+            quiet.append({
+                "name": r["name"], "display_name": r["display_name"], "product_filter": r.get("product_filter"),
+                "alerts_enabled_on": through,
+                "reason": "its product sent no alert in the window, and "
+                + ("its own connection" if own else "Defender XDR, which carries that product's alerts,")
+                + " has alerts enabled",
+            })
+        elif stable is None or preview is None:
+            return None
+    return quiet
+
+
 def include_query_text() -> bool:
     return os.environ.get(QUERY_TEXT_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -414,6 +479,9 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             products = {(p.get("ProductName") or "").lower(): p.get("LastIngested") for p in alert_rows} if alert_rows is not None else None
         for r in rules:
             r["tables_without_data"] = tables_without_data(r, ingested, products)
+    quiet = None
+    if rules is not None and listed_tables is not None and ingested is not None:
+        quiet = quiet_rules(client, path, ws, rules, collector, notes)
 
     with_text = include_query_text()
     for r in rules or []:
@@ -428,6 +496,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         "rules": rules,
         **(rule_summary(rules) if rules is not None else {}),
         **(coverage(rules, ingested) if rules is not None and listed_tables is not None else {}),
+        **({"enabled_rules_quiet": quiet} if rules is not None and listed_tables is not None else {}),
         "workspace_tables_listed": len(listed_tables) if listed_tables is not None else None,
         "templates_available": len(template_names) if templates is not None else None,
         "templates_in_use": len(used & template_names) if templates is not None else None,
@@ -441,6 +510,14 @@ def _total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]:
     return sum(len(v) if isinstance(v, list) else v for v in values) if values else None
 
 
+def _paired_total(workspaces: List[Dict[str, Any]], field: str, pair: str) -> Optional[int]:
+    """Count over the workspaces where `pair` is known; None if any of them lacks `field`, so the two compare."""
+    known = [w for w in workspaces if w.get(pair) is not None]
+    if not known or any(w.get(field) is None for w in known):
+        return None
+    return sum(len(w[field]) for w in known)
+
+
 def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
     collected = [w for w in workspaces if w.get("rules") is not None]
     enabled = [w.get("enabled_rules") or 0 for w in collected]
@@ -450,6 +527,7 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
         "workspaces_with_no_enabled_rules": sum(1 for e in enabled if e == 0),
         "workspaces_with_fusion_enabled": sum(1 for w in collected if w.get("fusion_enabled") is True),
         "enabled_rules_missing_data": _total(collected, "enabled_rules_missing_data"),
+        "enabled_rules_quiet": _paired_total(collected, "enabled_rules_quiet", "enabled_rules_missing_data"),
         "ingesting_tables_not_read": _total(collected, "ingesting_tables_not_read"),
         "ingesting_tables_read_only_by_templates": _total(collected, "ingesting_tables_read_only_by_templates"),
         "enabled_rules_tables_unknown": _total(collected, "enabled_rules_tables_unknown"),

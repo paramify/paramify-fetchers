@@ -116,6 +116,26 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_sentinel_analytics_rules` 0.2.1: quiet incident-creation rules.** An
+  enabled incident-creation rule whose product sent no alert in the window is
+  still in `enabled_rules_missing_data`, unchanged. Each workspace now also
+  lists it in `enabled_rules_quiet`, with the connection kinds that have its
+  alerts enabled and the reason, when a data connection that sends that
+  product's alerts has alerts enabled: the product's own connection, or Defender
+  XDR's for Entra ID Protection and Defender for Identity, Endpoint, Office 365
+  and Cloud Apps. Defender XDR doesn't carry Defender for Cloud or Defender for
+  IoT alerts. No alert in the window is normal for these rules, so a summary
+  `enabled_rules_missing_data` equal to the new `enabled_rules_quiet` means
+  every rule missing data is quiet. A rule whose product has no connection with
+  alerts enabled, a scheduled rule reading `SecurityAlert`, and a rule reading
+  another table with no data are never quiet. The data connectors are listed
+  (stable and preview api-versions; only the preview returns Defender XDR's
+  connection) only when such a rule exists. A failed stable listing is an API
+  failure, a failed preview listing is a note, and either leaves
+  `enabled_rules_quiet` null unless each rule is quiet through a connection
+  that was read. The summary count is null if any workspace with a known
+  `enabled_rules_missing_data` has an unknown `enabled_rules_quiet`. Access is
+  unchanged.
 - **`azure_sentinel_analytics_rules` 0.2.0: rule queries, suppression and the
   tables each rule reads.** Each rule now carries its KQL query's
   `query_sha256` and `query_length` (the `query` text itself only with
