@@ -19,4 +19,4 @@ cases:
 
   - name: collection_failed
     expect: FAIL
-    artifact: '{"metadata": {"exit_code": 1,"status": "failed"},"payload": {"metadata": {"partial_failure": false},"summary": {"enabled_rules_missing_data": 0,"enabled_rules_tables_unknown": 0,"ingesting_tables_not_read": 0}}}'
+    artifact: '{"metadata": {"exit_code": 1,"status": "failed"},"payload": {"metadata": {"partial_failure": true},"summary": {"enabled_rules_missing_data": 0,"enabled_rules_tables_unknown": 0,"ingesting_tables_not_read": 0}}}'
