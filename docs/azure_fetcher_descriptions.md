@@ -1716,7 +1716,7 @@ Commands Executed:
 - `GET Microsoft.OperationalInsights/workspaces/tables` — each table's plan, since the query API can't read tables on the Basic or Auxiliary plan
 - KQL `union *` summarized by table — each table's last ingestion time and record count
 - KQL on `SecurityAlert` by product — which alert products feed the workspace
-- KQL `union` of each connector data type's `lastDataReceivedQuery` — last data received per connector data type, as the Sentinel portal measures it
+- KQL `union` of each connector data type's `lastDataReceivedQuery`, with any that starts with `let` run on its own — last data received per connector data type, as the Sentinel portal measures it
 - KQL on `SentinelHealth` — each connector's latest health status (only when health monitoring sends data)
 
 Output: `azure_sentinel_data_sources_<subscription>.json` — for each Sentinel workspace, its connectors with when each last received data, whether it sends only alerts and its latest health status, every table with when it last received data, and the Basic and Auxiliary tables that weren't measured.
@@ -1739,7 +1739,7 @@ Summary fields:
 - `connectors_quiet` — Number of alert-only connectors, across all Sentinel workspaces, that received no alert in the window although a linked connection (their own, or Defender XDR's for the products whose alerts it carries, which leaves out Defender for Cloud and Defender for IoT) has alerts enabled, which is normal for them. A quiet connector still reads connected: false. A connector is alert-only when all its data types are `SecurityAlert` queries, as for Defender for Endpoint, Defender for Office 365, Defender for Identity, Defender for Cloud, Defender for Cloud Apps (whose Cloud Discovery logs count only when its connection turns them on), Defender for IoT, Entra ID Protection and Insider Risk Management. Null if no workspace's connectors could all be listed and measured
 - `connectors_configured_without_data` — Number of connectors, across all Sentinel workspaces, that have at least one connection (their own, or a linked one such as Defender XDR) but none of whose data types received data in the window, not counting quiet ones. An alert-only connector whose connection has alerts turned off is counted; a connector installed from Content Hub with no connection, which `connectors_not_connected` counts, isn't. Connectors whose data couldn't be measured, or that define no data types, aren't counted. Null if any workspace's connectors couldn't all be listed and measured, or there is no Sentinel workspace
 - `workspaces_with_health_monitoring` — Number of Sentinel workspaces where Sentinel health monitoring sent data to the `SentinelHealth` table in the window
-- `connectors_unhealthy` — Number of data connections, across all Sentinel workspaces, whose latest `SentinelHealth` status isn't Success; null if no workspace's `SentinelHealth` data was read (health monitoring off, or the query failed)
+- `connectors_unhealthy` — Number of data connections, across all Sentinel workspaces, whose latest `SentinelHealth` status is Failure or Warning (Informational is a normal event, so it counts as healthy, as does Success); null if no workspace's `SentinelHealth` data was read (health monitoring off, or the query failed)
 
 
 ### azure_sentinel_incidents
