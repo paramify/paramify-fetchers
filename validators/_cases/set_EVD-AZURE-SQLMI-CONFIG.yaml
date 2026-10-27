@@ -31,4 +31,4 @@ cases:
 
   - name: collection_failed
     expect: FAIL
-    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"AuthorizationFailed"},"payload":{"metadata":{"partial_failure":false},"summary":{"instances_audit_logs_exported":0,"total_managed_instances":0}}}'
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"AuthorizationFailed"},"payload":{"metadata":{"partial_failure":true},"summary":{"instances_audit_logs_exported":0,"total_managed_instances":0}}}'
