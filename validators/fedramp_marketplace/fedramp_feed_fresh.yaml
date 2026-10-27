@@ -1,0 +1,21 @@
+key: fedramp_feed_fresh
+name: FedRAMP Marketplace Data Is Current
+type: AUTOMATED
+role: configuration
+statement: The FedRAMP Marketplace data the vendor statuses were read from is less than 72 hours old.
+
+# Optional. FedRAMP refreshes data.json daily and the changelog daily;
+# feed_age_hours is the age of the OLDER of the two at collection time, as a
+# whole number of hours. The threshold lives in the regex (0-71) rather than in
+# a GREATER_THAN rule, whose numeric semantics are undocumented. A null age
+# (a timestamp FedRAMP stopped publishing) does not match, so it fails.
+regex: '"feed_age_hours":\s*(?<feed_age_hours>[0-9]|[1-6][0-9]|7[01])(?![0-9])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-FEDRAMP-VENDOR-CERTIFICATION
+  - EVD-FEDRAMP-WORKSPACE-VENDOR-CERTIFICATION
