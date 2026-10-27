@@ -39,8 +39,8 @@ MAX_LOOKBACK_DAYS = 30
 # A runaway guard: the figures stay exact up to here and the run says it stopped.
 SIGN_IN_LIMIT = 200_000
 EXCEPTION_LIMIT = 1000
-# The 403 Graph sends a tenant with no Entra ID P1/P2 for sign-in logs.
-NOT_LICENSED_MARKER = "nonpremiumtenant"
+# The error code of the 403 Graph sends a tenant with no Entra ID P1/P2 for sign-in logs.
+NOT_LICENSED_CODE = "Authentication_RequestFromNonPremiumTenantOrB2CTenant"
 
 SINGLE_FACTOR = "singleFactorAuthentication"
 MULTI_FACTOR = "multiFactorAuthentication"
@@ -302,8 +302,10 @@ def collect(client: AzureRestClient, collector: Collector, window: Dict[str, Any
     # beta: v1.0 has no authenticationRequirement or authenticationDetails. Interactive sign-ins only.
     path = f"/auditLogs/signIns?$filter=createdDateTime ge {start}&$top=1000"
     tally, complete, truncated, status = Tally(), True, False, "read"
+    pages = 0
     try:
         for page in client.graph_pages(path, "beta"):
+            pages += 1
             for s in page:
                 tally.add(sign_in_record(s))
             if tally.total >= SIGN_IN_LIMIT:
@@ -312,7 +314,7 @@ def collect(client: AzureRestClient, collector: Collector, window: Dict[str, Any
     except Exception as exc:  # noqa: BLE001 — boundary: record, keep the pages read
         complete = False
         # No P1/P2 is the tenant's state, not a failed read: the figures stay null and the run succeeds.
-        if NOT_LICENSED_MARKER in str(exc).lower():
+        if pages == 0 and getattr(exc, "status", None) == 403 and getattr(exc, "code", None) == NOT_LICENSED_CODE:
             logger.warning("Sign-in logs need Entra ID P1 or P2: %s", exc)
             status = "not_licensed"
         else:

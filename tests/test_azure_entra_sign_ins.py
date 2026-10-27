@@ -27,8 +27,8 @@ azure_rest = sys.modules["azure_rest"]
 TENANT = "00000000-0000-0000-0000-0000000000aa"
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
 DENIED = Exception("(403) Authorization_RequestDenied: Insufficient privileges to complete the operation.")
-NOT_LICENSED = Exception(
-    "(403) Authentication_RequestFromNonPremiumTenantOrB2CTenant: Neither tenant is B2C or tenant doesn't have premium license"
+NOT_LICENSED = azure_rest.ArmError(
+    403, "Authentication_RequestFromNonPremiumTenantOrB2CTenant", "Neither tenant is B2C or tenant doesn't have premium license"
 )
 
 
@@ -186,6 +186,22 @@ def test_unlicensed_tenant_reads_not_licensed_and_is_not_a_failure(monkeypatch):
     assert s["sign_ins_complete"] is False
     assert s["total_sign_ins"] is None and s["risky_sign_ins"] is None
     assert collector.ok
+
+
+def test_not_licensed_only_from_the_first_page_and_the_exact_403(monkeypatch):
+    # Licensing can't change part-way through a read: a later page saying so is a failure.
+    collector = _collector()
+    _, s = sign_ins.collect(FakeClient([SIGN_INS[:4], SIGN_INS[4:]], error=NOT_LICENSED, error_after=1),
+                            collector, _window(monkeypatch))
+    assert not collector.ok
+    assert s["sign_in_logs"] == "read" and s["total_sign_ins"] == 4
+    # Another status, or a message that only mentions the code, is a failure too.
+    for error in (azure_rest.ArmError(400, NOT_LICENSED.code, "bad request"),
+                  Exception("(403) Authentication_RequestFromNonPremiumTenantOrB2CTenant: from a proxy")):
+        collector = _collector()
+        _, s = sign_ins.collect(FakeClient([SIGN_INS], error=error), collector, _window(monkeypatch))
+        assert not collector.ok, error
+        assert s["sign_in_logs"] == "not_read"
 
 
 def test_a_failed_later_page_keeps_the_read_pages_and_fails_the_run(monkeypatch):
