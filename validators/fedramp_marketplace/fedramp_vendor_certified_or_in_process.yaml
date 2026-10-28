@@ -1,0 +1,25 @@
+key: fedramp_vendor_certified_or_in_process
+name: Third-Party Vendors Are FedRAMP Certified or In Process
+type: AUTOMATED
+role: configuration
+statement: Every third-party vendor package checked is FedRAMP certified, FedRAMP Ready or In Process on the FedRAMP Marketplace.
+
+# Lenient option: Ready and In Process pass; In Remediation, delisted, not-listed and unknown-status vendors fail. Attach this OR fedramp_vendor_certified to a set, not both: a set passes only when all its validators pass, so the strict one would decide.
+#
+# Reads the fetcher's own count in `summary`, which is written ahead of the
+# vendor list, so MATCH_GROUP's first match is always the summary. The
+# presence rule makes a missing summary (failed run, renamed key) fail rather
+# than pass vacuously.
+regex: '"vendors_not_certified_or_in_process":\s*(?<vendors_not_certified_or_in_process>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # vendors_not_certified_or_in_process
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-FEDRAMP-VENDOR-CERTIFICATION
+  - EVD-FEDRAMP-WORKSPACE-VENDOR-CERTIFICATION

@@ -7,7 +7,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from azure_common import (
     Collector,
@@ -157,6 +157,17 @@ class AzureRestClient:
             items.extend(body.get("value") or [])
         return items
 
+    def graph_pages(self, path: str, version: str = "v1.0") -> Iterator[List[Dict[str, Any]]]:
+        """Each page of a Microsoft Graph collection in turn, following @odata.nextLink."""
+        body = self._get(f"{self.graph}/{version}{path}", resource=self.graph)
+        yield list(body.get("value") or [])
+        while body.get("@odata.nextLink"):
+            body = self._get(body["@odata.nextLink"], resource=self.graph)
+            yield list(body.get("value") or [])
+
+    def graph_list(self, path: str, version: str = "v1.0") -> List[Dict[str, Any]]:
+        return [item for page in self.graph_pages(path, version) for item in page]
+
     def graph_post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         response = self._send("post", f"{self.graph}/v1.0{path}", self.graph, json=body, timeout=HTTP_TIMEOUT)
         if response.status_code >= 400:
@@ -165,13 +176,20 @@ class AzureRestClient:
 
     def query(self, customer_id: str, kql: str, timespan: str) -> List[Dict[str, Any]]:
         """Rows of the primary table; a partial result raises rather than returning short."""
+        return self._logs_rows(f"{customer_id}/query", json={"query": kql, "timespan": timespan})
+
+    def search(self, customer_id: str, kql: str, timespan: str) -> List[Dict[str, Any]]:
+        """query() for Basic and Auxiliary tables, which /query refuses; /search takes the timespan in the URL."""
+        return self._logs_rows(f"{customer_id}/search", json={"query": kql}, params={"timespan": timespan})
+
+    def _logs_rows(self, path: str, **kwargs: Any) -> List[Dict[str, Any]]:
         response = self._send(
             "post",
-            f"{self.logs}/v1/workspaces/{customer_id}/query",
+            f"{self.logs}/v1/workspaces/{path}",
             self.logs,
             headers={"Prefer": f"wait={QUERY_TIMEOUT}", "x-ms-app": CLIENT_APP},
-            json={"query": kql, "timespan": timespan},
             timeout=QUERY_TIMEOUT + 30,
+            **kwargs,
         )
         if response.status_code >= 400:
             code, message = _error_parts(response)
