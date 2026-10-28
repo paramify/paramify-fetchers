@@ -3,18 +3,22 @@ name: Entra CA Enforces MFA For All Users And All Apps
 type: AUTOMATED
 role: configuration
 statement: >-
-  At least one enabled (not report-only) Conditional Access policy targets All users
-  and All cloud apps with no app excluded, makes MFA mandatory (MFA alone, an
-  authentication strength alone, or MFA under AND), and is not narrowed by sign-in or
-  user risk, device platform, excluded locations, or client app type (all clients, or
-  both modern client types). Substantiates that every enabled account is covered by an
-  enforced policy requiring MFA (KSI-IAM-APM). Does not judge the policy's excluded
-  users, groups or roles, guest type exclusions or device filters (the last two are
-  not collected), and does not credit Security Defaults.
+  Enabled (not report-only) Conditional Access policies that include All users and All
+  cloud apps with no app excluded, and have no sign-in or user risk, device platform or
+  location condition, together require MFA from both modern client app types: browsers
+  and mobile and desktop apps. One policy can cover every client, or two policies can
+  split the client types. A policy counts only when MFA is mandatory: MFA alone, an
+  authentication strength that satisfies MFA alone, or MFA under AND, with no terms of
+  use or other grant control as an alternative. Substantiates that every enabled account
+  is covered by an enforced policy requiring MFA (KSI-IAM-APM). Does not judge excluded
+  users, groups or roles, guest type exclusions, device filters or authentication flows,
+  and does not credit Security Defaults. Legacy clients are judged by
+  entra_ca_legacy_auth_blocked. Needs azure_entra_conditional_access_policies 0.2.0 or
+  later; earlier evidence lacks the list and fails.
 
-# Matches one policy record. Tokens skip JSON strings whole, so a brace in a display
-# name cannot end the record early, and each lookahead stays inside its own object.
-regex: '\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"is_enforced":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"requires_mfa":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"targets_all_users":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"targets_all_applications":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"access_controls":\s*\{(?:(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"operator":\s*"(?:AND|and)")|(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"grant":\s*\[\s*"mfa"\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"authentication_strength":\s*null)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"terms_of_use":\s*\[\s*\])|(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"grant":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"authentication_strength":\s*")(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"terms_of_use":\s*\[\s*\])))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"conditions":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"client_app_types":\s*\[\s*(?:"all"\s*|"browser"\s*,\s*"mobileAppsAndDesktopClients"\s*|"mobileAppsAndDesktopClients"\s*,\s*"browser"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude_locations":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude_platforms":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"include_locations":\s*\[\s*(?:"All"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"include_platforms":\s*\[\s*(?:"all"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"sign_in_risk_levels":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"user_risk_levels":\s*\[\s*\]))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"target_resources":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude":\s*\[\s*\]))'
+# Reads the fetcher's list of client app types that the qualifying policies cover
+# together; it reads null when the policies weren't read, so that can't match.
+regex: '"mfa_client_app_types_for_all_users_and_apps":\s*\[(?=[^\]]*"browser")(?=[^\]]*"mobileAppsAndDesktopClients")'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

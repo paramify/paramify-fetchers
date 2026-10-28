@@ -270,18 +270,18 @@ Output: `azure_entra_conditional_access_policies_<tenant>.json` — each Conditi
 Summary fields:
 
 **What policies exist, and which are enforced?**
-- `total_policies` — Number of Conditional Access policies in the tenant; also 0 when the tenant has no Entra ID P1 or P2 licence, since Graph then returns an empty list
-- `enabled_policies` — Number of enforced policies: state enabled, so they apply at sign-in (report-only policies aren't counted). Every count named `enforced_policies_…` or `enforced_mfa_…` counts only enforced policies
-- `disabled_policies` — Number of policies switched off; a policy whose state couldn't be read counts here
-- `report_only_policies` — Number of report-only policies, which log what they would have done but enforce nothing
-- `enforced_percentage` — Percentage of policies that are enforced = `enabled_policies` / `total_policies` × 100 (a whole number, 0–100); 0 when `total_policies` is 0. Disabled and report-only policies count in the total but not as enforced
+- `total_policies` — Number of Conditional Access policies in the tenant; also 0 when the tenant has no Entra ID P1 or P2 licence, since Graph then returns an empty list; null if the policies couldn't be read
+- `enabled_policies` — Number of enforced policies: state enabled, so they apply at sign-in (report-only policies aren't counted); null if the policies couldn't be read. Every count named `enforced_policies_…` or `enforced_mfa_…` counts only enforced policies
+- `disabled_policies` — Number of policies switched off; a policy whose state couldn't be read counts here; null if the policies couldn't be read
+- `report_only_policies` — Number of report-only policies, which log what they would have done but enforce nothing; null if the policies couldn't be read
+- `enforced_percentage` — Percentage of policies that are enforced = `enabled_policies` / `total_policies` × 100 (a whole number, 0–100); 0 when `total_policies` is 0; null if the policies couldn't be read. Disabled and report-only policies count in the total but not as enforced
 
 **What do enforced policies require?**
-- `enforced_policies_requiring_mfa` — Number of enforced policies that require MFA: the MFA grant control, or an authentication strength that satisfies MFA (a custom strength that allows a password alone doesn't count), is among their grant controls, even when the policy lets the user meet a different control instead
-- `enforced_policies_blocking_access` — Number of enforced policies that block access
-- `enforced_policies_requiring_compliant_device` — Number of enforced policies whose grant controls include a compliant device or a hybrid-joined device, even when the policy lets the user meet a different control instead
-- `enforced_policies_with_authentication_strength` — Number of enforced policies that require an authentication strength (a named set of allowed sign-in methods, such as phishing-resistant MFA)
-- `enforced_policies_with_session_controls` — Number of enforced policies with at least one session control: sign-in frequency, persistent browser session, app-enforced restrictions or Defender for Cloud Apps session control
+- `enforced_policies_requiring_mfa` — Number of enforced policies that require MFA: the MFA grant control, or an authentication strength that satisfies MFA (a custom strength that allows a password alone doesn't count), is among their grant controls, even when the policy lets the user meet a different control instead; null if the policies couldn't be read
+- `enforced_policies_blocking_access` — Number of enforced policies that block access; null if the policies couldn't be read
+- `enforced_policies_requiring_compliant_device` — Number of enforced policies whose grant controls include a compliant device or a hybrid-joined device, even when the policy lets the user meet a different control instead; null if the policies couldn't be read
+- `enforced_policies_with_authentication_strength` — Number of enforced policies that require an authentication strength (a named set of allowed sign-in methods, such as phishing-resistant MFA); null if the policies couldn't be read
+- `enforced_policies_with_session_controls` — Number of enforced policies with at least one session control: sign-in frequency, persistent browser session, app-enforced restrictions or Defender for Cloud Apps session control; null if the policies couldn't be read
 
 **Do enforced policies require phishing-resistant MFA?**
 - `authentication_strengths_readable` — True if the authentication strengths the policies use were read with their allowed combinations, or no policy uses one; false if the read failed, and the phishing-resistant figures read null
@@ -290,18 +290,19 @@ Summary fields:
 - `phishing_resistant_mfa_role_template_ids` — List of directory role template ids (Global Administrator is 62e90394-69f5-4237-9190-012177145e10) that an enforced policy requiring phishing-resistant MFA on all cloud apps includes; excluded users and groups aren't checked; null if the policies or a policy's strength couldn't be read
 
 **How widely do enforced policies apply?**
-- `enforced_policies_targeting_all_users` — Number of enforced policies that include all users; a policy can still exclude users, groups or roles
-- `enforced_policies_targeting_all_applications` — Number of enforced policies that include all cloud apps; a policy can still exclude apps
-- `enforced_mfa_for_all_users_and_apps` — Number of enforced policies that require MFA for all users on all cloud apps, before any exclusions
-- `enforced_policies_targeting_legacy_authentication` — Number of enforced policies whose conditions include legacy clients (Exchange ActiveSync or other older clients, which can't prompt for MFA), whether the policy blocks them or requires something else
+- `enforced_policies_targeting_all_users` — Number of enforced policies that include all users; a policy can still exclude users, groups or roles; null if the policies couldn't be read
+- `enforced_policies_targeting_all_applications` — Number of enforced policies that include all cloud apps; a policy can still exclude apps; null if the policies couldn't be read
+- `enforced_mfa_for_all_users_and_apps` — Number of enforced policies that require MFA for all users on all cloud apps, before any exclusions; null if the policies couldn't be read
+- `mfa_client_app_types_for_all_users_and_apps` — List of client app types (browser, mobileAppsAndDesktopClients, exchangeActiveSync, other) on which enforced policies, taken together, require MFA for all users on all cloud apps. A policy counts when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no risk, platform or location condition; a policy for all client app types adds all four. Excluded users, groups and roles, device filters and authentication flows aren't checked; null if the policies couldn't be read
+- `enforced_policies_targeting_legacy_authentication` — Number of enforced policies whose conditions include legacy clients (Exchange ActiveSync or other older clients, which can't prompt for MFA), whether the policy blocks them or requires something else; null if the policies couldn't be read
 
 **Do admin portals and Azure management require MFA?**
-- `mfa_required_for_admin_portals` — True if at least one enforced policy requires MFA for all users on Microsoft Admin Portals (the Microsoft admin centers) or on all cloud apps; false if no enforced policy does. Excluded users, groups, roles and apps aren't checked
-- `mfa_required_for_azure_management_api` — True if at least one enforced policy requires MFA for all users on Windows Azure Service Management API (the Azure portal, CLI and PowerShell) or on all cloud apps; false if no enforced policy does. Excluded users, groups, roles and apps aren't checked
+- `mfa_required_for_admin_portals` — True if at least one enforced policy requires MFA for all users on Microsoft Admin Portals (the Microsoft admin centers) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. Excluded users, groups, roles and apps aren't checked
+- `mfa_required_for_azure_management_api` — True if at least one enforced policy requires MFA for all users on Windows Azure Service Management API (the Azure portal, CLI and PowerShell) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. Excluded users, groups, roles and apps aren't checked
 
 **Who is left out?**
-- `enforced_policies_with_exclusions` — Number of enforced policies that exclude at least one user, group or directory role
-- `distinct_excluded_principals` — Number of distinct users, groups and directory roles excluded by at least one enforced policy
+- `enforced_policies_with_exclusions` — Number of enforced policies that exclude at least one user, group or directory role; null if the policies couldn't be read
+- `distinct_excluded_principals` — Number of distinct users, groups and directory roles excluded by at least one enforced policy; null if the policies couldn't be read
 
 
 ### azure_entra_dormant_identities
