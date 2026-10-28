@@ -110,7 +110,6 @@ def test_tag_prefixes_split_by_version():
     tags = {"values": [{"name": "AzureCloud", "properties": {"addressPrefixes": ["1.0.0.0/8"]}},
                        {"name": nta.FRONT_DOOR_TAG, "properties": {"addressPrefixes": ["147.243.0.0/16", "2a01:111:2050::/44", "bad"]}}]}
     assert nta.split_prefixes(nta.tag_prefixes(tags, nta.FRONT_DOOR_TAG)) == (["147.243.0.0/16"], ["2a01:111:2050::/44"])
-    assert nta.tag_prefixes(tags, nta.PLATFORM_TAG) == []
     assert nta.tag_prefixes({}, nta.FRONT_DOOR_TAG) == []
 
 
@@ -318,13 +317,12 @@ def test_origin_bypass_counts_public_requests():
                                 "origin_sources": [
                                     {"ResourceId": rid, "Source": "front_door", "Requests": 900, "Served": 880, "ClientIps": 30},
                                     {"ResourceId": rid, "Source": "internal", "Requests": 20, "Served": 20, "ClientIps": 1},
-                                    {"ResourceId": rid, "Source": "platform", "Requests": 40, "Served": 40, "ClientIps": 1},
                                     {"ResourceId": rid, "Source": "public", "Requests": 12, "Served": 2, "ClientIps": 3,
                                      "LastRequest": "2026-01-09T00:00:00Z"}],
                                 "origin_public_clients": [{"ResourceId": rid, "Ip": "198.51.100.2", "Requests": 10, "Served": 2},
                                                           {"ResourceId": rid, "Ip": "x", "Requests": 2, "Served": 0}]}}
     rec = nta.origin_app_record(app_entry(), [setting(category="AppServiceHTTPLogs")], workspaces, True, sample=5)
-    assert rec["requests_by_source"] == {"front_door": 900, "internal": 20, "platform": 40, "public": 12, "unknown": 0}
+    assert rec["requests_by_source"] == {"front_door": 900, "internal": 20, "public": 12, "unknown": 0}
     assert rec["front_door_connection"] == "private_link"
     assert (rec["requests_outside_front_door"], rec["requests_outside_front_door_served"]) == (12, 2)
     assert rec["top_clients_outside_front_door"] == [{"client_ip": "198.51.100.2", "requests": 10, "served": 2}]
@@ -349,7 +347,7 @@ def test_a_caller_that_is_not_an_address_is_unknown_not_public():
     assert "isnotnull(parse_ipv4(Ip)), 'public'" in nta._HTTP
     assert "isnotnull(parse_ipv6(Ip)), 'public', 'unknown')" in nta._HTTP
     unclassified = {"http_logs_exported": True, "front_door_connection": "public",
-                    "requests_by_source": {"front_door": 5, "internal": 0, "platform": 0, "public": 0, "unknown": 2},
+                    "requests_by_source": {"front_door": 5, "internal": 0, "public": 0, "unknown": 2},
                     "requests_outside_front_door": 0, "requests_outside_front_door_served": 0}
     summary = nta.summarize([], nta.traffic_record([], 7, [], 3, 5), [], [], [unclassified], [], 7, [443])
     assert summary["origin_apps_bypass_unknown"] == 1
@@ -470,8 +468,7 @@ def test_a_refused_workspace_get_reads_not_authorized():
 def _arm(**extra):
     base = {
         f"{SUB}/providers/Microsoft.Network/locations/eastus/serviceTags": {"values": [
-            {"name": nta.FRONT_DOOR_TAG, "properties": {"addressPrefixes": ["147.243.0.0/16", "2a01:111:2050::/44"]}},
-            {"name": nta.PLATFORM_TAG, "properties": {"addressPrefixes": ["203.0.113.0/24"]}}]},
+            {"name": nta.FRONT_DOOR_TAG, "properties": {"addressPrefixes": ["147.243.0.0/16", "2a01:111:2050::/44"]}}]},
     }
     base.update(extra)
     return base
@@ -505,7 +502,7 @@ def test_collect_wires_flows_front_door_and_origins(monkeypatch):
     assert [(t["table"], t["status"]) for t in results["traffic_tables"]] == [
         (nta.NSG_TABLE, nta.WS_QUERIED), (nta.VNET_TABLE, "not_present")]
     assert summary["front_door_profiles"] == 1 and summary["origin_apps"] == 1
-    assert results["front_door_backend_prefixes"] == 2 and results["app_service_platform_prefixes"] == 1
+    assert results["front_door_backend_prefixes"] == 2
     assert results["origin_apps"][0]["front_door_connection"] == "private_link" and summary["origin_apps_private_link"] == 1
     kql = [q[1] for q in client.queries]
     flow_kql = [k for k in kql if k.startswith(nta.NSG_TABLE)]
@@ -513,7 +510,7 @@ def test_collect_wires_flows_front_door_and_origins(monkeypatch):
     assert all("ago(10d)" in k and "ago(5d)" in k and f"'{SUB_ID}'" in k for k in flow_kql)
     http_kql = [k for k in kql if k.startswith(nta.HTTP_TABLE)]
     assert len(http_kql) == 2 and all(f"'{SITE.lower()}'" in k and "147.243.0.0/16" in k and "2a01:111:2050::/44" in k
-                                      and "203.0.113.0/24" in k for k in http_kql)
+                                      for k in http_kql)
     for k in kql:
         assert not re.search(r"\{[a-z_0-9]+\}", k), k
     assert {q[2] for q in client.queries} == {"P10D", "P5D"}
@@ -545,4 +542,4 @@ def test_filled_queries_have_no_stray_placeholders():
     fmt = {"days": 7, "span": 14, "subscription_id": SUB_ID, "sample": 10}
     for key, kql in nta.filled_queries(fmt).items():
         left = set(re.findall(r"\{([a-z_0-9]+)\}", kql))
-        assert left <= {"app_ids", "fd_v4_test", "fd_v6_test", "platform_v4_test", "platform_v6_test"}, (key, left)
+        assert left <= {"app_ids", "fd_v4_test", "fd_v6_test"}, (key, left)

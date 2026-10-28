@@ -52,13 +52,11 @@ HTTP_CATEGORY = "AppServiceHTTPLogs"
 LOG_GROUPS = frozenset({"alllogs"})
 FRONT_DOOR_SKUS = frozenset({"standard_azurefrontdoor", "premium_azurefrontdoor"})
 FRONT_DOOR_TAG = "AzureFrontDoor.Backend"
-# App Service's own management plane calls apps from these addresses, not through Front Door.
-PLATFORM_TAG = "AppServiceManagement"
 INTERNET_FLOW_TYPES = ("ExternalPublic", "MaliciousFlow")
 MALICIOUS = "MaliciousFlow"
 INTERNAL_V4 = ("127.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16")
 INTERNAL_V6 = ("::1/128", "fc00::/7", "fe80::/10")
-SOURCES = ("front_door", "internal", "platform", "public", "unknown")
+SOURCES = ("front_door", "internal", "public", "unknown")
 
 TARGET_TYPES = (
     ("/networksecuritygroups/", "network_security_group"),
@@ -133,11 +131,9 @@ FLOW_QUERIES = {
 }
 FLOW_BASES = {NSG_TABLE: _NSG_FLOWS, VNET_TABLE: _VNET_FLOWS}
 
-# Records the log marks as not received from the client (origin shield copies) are left out, where the log has the column.
 _FD = (
     f"{FD_TABLE} | where TimeGenerated > ago({{days}}d) | where Category == '{FD_CATEGORY}' "
     "| where _ResourceId startswith '/subscriptions/{subscription_id}/' "
-    "| where tostring(column_ifexists('isReceivedFromClient_b', '')) !~ 'false' "
     "| extend ResourceId = tolower(_ResourceId), Host = tostring(column_ifexists('hostName_s', '')), "
     "Status = coalesce(toint(column_ifexists('httpStatusCode_d', real(null))), toint(column_ifexists('httpStatusCode_s', ''))), "
     "Origin = tostring(column_ifexists('originName_s', '')), ClientIp = tostring(column_ifexists('clientIp_s', '')) "
@@ -162,7 +158,6 @@ _HTTP = (
     "| extend V6 = Ip contains ':' "
     "| extend Source = case(isempty(Ip), 'unknown', "
     "V6 and {fd_v6_test}, 'front_door', not(V6) and {fd_v4_test}, 'front_door', "
-    "V6 and {platform_v6_test}, 'platform', not(V6) and {platform_v4_test}, 'platform', "
     f"not(V6) and (ipv4_is_private(Ip) or ipv4_is_in_any_range(Ip, dynamic({json.dumps(list(INTERNAL_V4))}))), 'internal', "
     f"V6 and ipv6_is_in_any_range(Ip, dynamic({json.dumps(list(INTERNAL_V6))})), 'internal', "
     "not(V6) and isnotnull(parse_ipv4(Ip)), 'public', V6 and isnotnull(parse_ipv6(Ip)), 'public', 'unknown') "
@@ -847,13 +842,9 @@ def collect(client, subscription_id: str, collector) -> tuple:
         ranges_known = bool(fd_v4 or fd_v6)
         if read is not None and not ranges_known:
             collector.record("network.serviceTags.list", LookupError(f"no {FRONT_DOOR_TAG} prefixes in the service tags"))
-    # Without the platform ranges, App Service's own calls read as public: a stricter verdict, not a gap.
-    platform_v4, platform_v6 = split_prefixes(tag_prefixes(tags, PLATFORM_TAG))
     range_tests = {
         "fd_v4_test": range_test("ipv4_is_in_any_range", fd_v4),
         "fd_v6_test": range_test("ipv6_is_in_any_range", fd_v6),
-        "platform_v4_test": range_test("ipv4_is_in_any_range", platform_v4),
-        "platform_v6_test": range_test("ipv6_is_in_any_range", platform_v6),
     }
 
     jobs: dict = defaultdict(list)
@@ -922,7 +913,6 @@ def collect(client, subscription_id: str, collector) -> tuple:
         "front_door_profiles": profile_records,
         "origin_apps": app_records,
         "front_door_backend_prefixes": len(fd_v4) + len(fd_v6),
-        "app_service_platform_prefixes": len(platform_v4) + len(platform_v6),
         "workspaces": workspace_records,
         "queries": filled_queries(fmt),
     }
@@ -937,7 +927,7 @@ def filled_queries(fmt: dict) -> dict:
         for key, tail in FLOW_QUERIES.items():
             out[f"{table}:{key}"] = (base + _PEERS + tail).format(**fmt)
     out.update({key: (_FD + tail).format(**fmt) for key, tail in FD_QUERIES.items()})
-    holders = {k: "{" + k + "}" for k in ("app_ids", "fd_v4_test", "fd_v6_test", "platform_v4_test", "platform_v6_test")}
+    holders = {k: "{" + k + "}" for k in ("app_ids", "fd_v4_test", "fd_v6_test")}
     out.update({key: (_HTTP + tail).format(**holders, **fmt) for key, tail in HTTP_QUERIES.items()})
     return out
 
