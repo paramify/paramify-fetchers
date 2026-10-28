@@ -332,8 +332,8 @@ def _collect_roles(monkeypatch, graph):
     monkeypatch.setattr(privileged_roles, "with_graph_client", fake_with_graph_client)
     monkeypatch.setattr(privileged_roles, "resolve_tenant", fake_tenant)
     collector = privileged_roles.Collector(logging.getLogger("test_entra_privileged_roles"))
-    roles, _ = asyncio.run(privileged_roles._collect(collector, object()))
-    return collector, {r["display_name"]: r for r in roles}, privileged_roles.summarize(roles)
+    roles, _, roles_read = asyncio.run(privileged_roles._collect(collector, object()))
+    return collector, {r["display_name"]: r for r in roles}, privileged_roles.summarize(roles, roles_read)
 
 
 def test_service_principals_the_members_list_leaves_out_are_read_from_the_cast(monkeypatch):
@@ -341,7 +341,9 @@ def test_service_principals_the_members_list_leaves_out_are_read_from_the_cast(m
     graph = _roles_graph(
         members={"r-sr": [_obj("g-sec", "group"), _obj("sp-listed", "servicePrincipal")],
                  "r-dr": [_obj("g-sec", "group")]},
-        service_principals={"r-sr": [ns(id="sp-listed", odata_type=None), ns(id="sp-hidden", odata_type=None)],
+        # The cast repeating an id still lists it once.
+        service_principals={"r-sr": [ns(id="sp-listed", odata_type=None), ns(id="sp-hidden", odata_type=None),
+                                     ns(id="sp-hidden", odata_type=None)],
                             "r-dr": [ns(id="sp-hidden", odata_type=None)]},
     )
     collector, roles, summary = _collect_roles(monkeypatch, graph)
@@ -363,3 +365,33 @@ def test_a_failed_cast_leaves_the_service_principal_count_unknown(monkeypatch):
     assert roles["Security Reader"]["service_principal_members_read"] is False
     assert summary["service_principals_in_privileged_roles"] is None
     assert summary["groups_in_privileged_roles"] == 1
+
+
+def test_a_failed_members_read_leaves_the_figures_it_feeds_unknown(monkeypatch):
+    graph = _roles_graph(members={"r-sr": [_obj("g-sec", "group")], "r-dr": [_obj("u-1", "user")]},
+                         service_principals={})
+    graph.role_members["r-sr"].error = DENIED
+    collector, roles, summary = _collect_roles(monkeypatch, graph)
+
+    assert not collector.ok and roles["Security Reader"]["members_read"] is False
+    assert summary["privileged_role_assignments"] is None and summary["groups_in_privileged_roles"] is None
+    assert summary["total_role_assignments"] is None and summary["privileged_assignment_percentage"] is None
+    # The cast was read, so the service principal count still stands.
+    assert summary["service_principals_in_privileged_roles"] == 0
+    assert summary["total_directory_roles_activated"] == 2 and summary["privileged_roles_activated"] == 1
+
+    # A role outside the privileged list leaves the privileged figures known.
+    graph = _roles_graph(members={"r-sr": [_obj("g-sec", "group")], "r-dr": [_obj("u-1", "user")]},
+                         service_principals={})
+    graph.role_members["r-dr"].error = DENIED
+    _, _, summary = _collect_roles(monkeypatch, graph)
+    assert summary["privileged_role_assignments"] == 1 and summary["total_role_assignments"] is None
+
+
+def test_a_failed_role_list_leaves_every_figure_unknown(monkeypatch):
+    graph = _roles_graph(members={}, service_principals={})
+    graph.directory_roles.error = DENIED
+    collector, roles, summary = _collect_roles(monkeypatch, graph)
+
+    assert not collector.ok and roles == {}
+    assert set(summary.values()) == {None}

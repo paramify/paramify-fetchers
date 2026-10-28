@@ -446,7 +446,10 @@ schemas and the `paramify` CLI — not the internal code.
   and added to its members, once each; the assignment and principal counts include
   them. If the cast read fails, the run fails and
   `service_principals_in_privileged_roles` reads null; each role records
-  `service_principal_members_read`.
+  `service_principal_members_read`. A failed read no longer reads as 0 either: a
+  failed role list leaves every figure null, and a failed members read leaves
+  null each figure over that role (the Global Administrator count when it is that
+  role); each role records `members_read`.
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
   collection as a success.** A 200 response that is not JSON, for example a
   single sign-on or instance hibernation page, and a response whose
