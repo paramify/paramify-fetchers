@@ -1,5 +1,5 @@
 name: azure_defender_assessments
-version: 0.2.0
+version: 0.3.0
 description: >
   Every Microsoft Defender for Cloud security assessment result on the
   subscription — one record per (resource, check) pair, each with its
@@ -27,6 +27,27 @@ output:
   type: json
   path: azure_defender_assessments.json
   aggregation: per_target
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. An assessment follows the resource it is about: one whose
+      resource_id is in a matching resource group or is, or sits under, a matching
+      id is listed under excluded with the pattern and left out of every count and
+      percentage. An assessment carries no region, so location: patterns never
+      match one, and assessments of the subscription itself stay in scope. A
+      pattern without one of these prefixes fails the run. Set it once for every
+      Azure fetcher under platforms.azure.config. Can be ${env:VAR}. Empty: every
+      resource is in scope.
 
 target_schema:
   subscription_id:
@@ -73,4 +94,11 @@ evidence_set:
     severity_source is "assessment" or "catalogue" (null when neither has one),
     and the summary gives severity_from_catalogue_count and severity_unknown_count,
     and unhealthy_severity_from_catalogue_count and
-    unhealthy_severity_unknown_count for Unhealthy records only.
+    unhealthy_severity_unknown_count for Unhealthy records only. Assessments about
+    a resource the resource_exclusions patterns take out are listed under
+    results.excluded instead (the entry's id is that resource's id); the summary
+    gives resource_exclusion_patterns (the configured patterns, empty when none are
+    set), resource_exclusion_patterns_unmatched (patterns that matched no
+    assessment, such as a mistyped name), excluded_assessments (how many the
+    patterns took out; no other count includes them) and in_scope_assessments (how
+    many stayed, the same as total_assessments).

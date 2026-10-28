@@ -1,5 +1,5 @@
 name: azure_policy_compliance
-version: 0.2.0
+version: 0.3.0
 description: >
   Reads what Azure Policy found on the subscription: the service's counts of
   non-compliant resources and policies, overall and per assignment, and a bounded
@@ -69,6 +69,30 @@ config_schema:
       How many remediation deployments to itemize across all remediation tasks;
       remediation_deployments_truncated says when there were more. 0 skips them.
       Azure deletes a task 60 days after its last change, so older ones are gone.
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a record with no region
+      never matches one) or id:<resource id> (also matches that resource's child
+      resources). * matches any run of characters and ? one character. A
+      non-compliant state or remediation deployment follows the resource it is
+      about, matched by that resource's id, group and region; a policy assignment
+      or remediation task follows the scope it was made at, so one made at the
+      subscription or a management group stays. Each match is listed under
+      excluded with the pattern and left out of every itemized count; an excluded
+      state is not read for evaluation details, nor an excluded task for its
+      deployments. 30-day history pairs follow
+      their resource too and are dropped before recurrence is read; they carry no
+      region, so only rg: and id: patterns reach them. The service's
+      subscription-wide and per-assignment counts cannot be split by resource and
+      still include excluded resources. A pattern without one of these prefixes
+      fails the run. Set it once for every Azure fetcher under
+      platforms.azure.config. Can be ${env:VAR}. Empty: every resource is in scope.
 
 target_schema:
   subscription_id:
@@ -117,3 +141,17 @@ evidence_set:
     Reader on the subscription. A per-resource details read refused with a 403 or an
     AuthorizationFailed error code is retried once (at most 3 retries a run), then
     marks that resource's states not_authorized instead of failing the run.
+    Assignments, non-compliant states, remediation tasks and remediation
+    deployments the resource_exclusions patterns take out are listed under
+    results.excluded instead (a state's or deployment's entry carries its
+    resource's id); the summary gives resource_exclusion_patterns (the configured
+    patterns, empty when none are set), resource_exclusion_patterns_unmatched
+    (patterns that matched nothing, such as a mistyped name),
+    excluded_policy_assignments, excluded_policy_states, excluded_remediation_tasks
+    and excluded_remediation_deployments (how many the patterns took out; no
+    itemized count includes them), and in_scope_policy_assignments,
+    in_scope_policy_states, in_scope_remediation_tasks and
+    in_scope_remediation_deployments (how many stayed). non_compliant_resources,
+    non_compliant_policies, compliant_resources, resources_evaluated,
+    resource_compliance_percentage and the by-state maps are the service's own
+    subscription-wide counts and still include excluded resources.

@@ -62,6 +62,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
     report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_policy_compliance")
 
@@ -769,7 +770,11 @@ def empty_collection() -> dict:
                        "history_truncated": False, "pairs_truncated": False},
         "deployments": [],
         "deployments_truncated": False,
+        "excluded": [],
     }
+
+
+EXCLUDED_KINDS = ("policy_assignment", "policy_state", "remediation_task", "remediation_deployment")
 
 
 def collect_evaluation_details(client, states: list[dict], limit: int, collector: Collector) -> dict:
@@ -815,7 +820,8 @@ def collect_evaluation_details(client, states: list[dict], limit: int, collector
             "truncated": limit > 0 and len(eligible) > limit, "not_authorized": len(refused)}
 
 
-def collect_recurrence(client, subscription_id, limit: int, collector: Collector, now=None) -> dict:
+def collect_recurrence(client, subscription_id, limit: int, collector: Collector, now=None,
+                       exclusions: ResourceExclusions | None = None) -> dict:
     """30 days of history grouped per (resource, policy, state), then each flipping pair's order."""
     from azure.mgmt.policyinsights.models import QueryOptions  # lazy
 
@@ -868,6 +874,9 @@ def collect_recurrence(client, subscription_id, limit: int, collector: Collector
         logger.warning("history query returned %d of %d groups", len(rows), expected)
         truncated = True
     pairs = history_pairs(rows)
+    if exclusions:
+        # A pair follows its resource; history rows carry no region, so only rg: and id: patterns reach them.
+        pairs = {key: pair for key, pair in pairs.items() if not exclusions.match(pair.get("resource_id"))}
     flipping = intermittent_pairs(pairs)
     records = []
     for pair in flipping[:limit]:
@@ -984,7 +993,8 @@ def collect_remediation_deployments(
                                               d.get("remediated_resource_id") or "")), truncated
 
 
-def collect_compliance(subscription_id, cred, collector: Collector, limits: dict) -> dict:
+def collect_compliance(subscription_id, cred, collector: Collector, limits: dict,
+                       exclusions: ResourceExclusions | None = None) -> dict:
     """The policyinsights reads, each guarded on its own.
 
     A failure in one still leaves the others in the evidence, and still fails the run.
@@ -992,6 +1002,7 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
     from azure.mgmt.policyinsights import PolicyInsightsClient  # lazy
     from azure.mgmt.policyinsights.models import QueryOptions  # lazy
 
+    exclusions = exclusions if exclusions is not None else ResourceExclusions()
     collected = empty_collection()
     client = collector.guard(
         "policyinsights.PolicyInsightsClient (init)",
@@ -1017,6 +1028,10 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
 
     summarized = collector.guard("policyinsights.policy_states.summarize_for_subscription", _summarize)
     subscription_results, assignments = summarized or (collected["subscription_results"], [])
+    # Only assignments made inside an excluded group or resource go; the service's counts can't be split by resource.
+    assignments, excluded = exclusions.split(
+        assignments, "policy_assignment", resource_id=lambda a: a["policy_assignment_id"],
+        name=lambda a: a["policy_assignment_name"])
 
     limit = limits["non_compliant"]
     states: list[dict] = []
@@ -1037,16 +1052,25 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
 
         collector.guard("policyinsights.policy_states.list_query_results_for_subscription", _states)
 
+    # States, history and deployments follow the resource they are about; tasks follow their own scope.
+    states, excluded_states = exclusions.split(
+        states, "policy_state", resource_id=lambda s: s["resource_id"], location=lambda s: s["resource_location"],
+        name=lambda s: s["policy_definition_name"])
     remediations = collector.guard(
         "policyinsights.remediations.list_for_subscription",
         lambda: [project_remediation(r) for r in client.remediations.list_for_subscription()],
         default=[],
     )
+    remediations, excluded_tasks = exclusions.split(remediations, "remediation_task")
     details = collect_evaluation_details(client, states, limits["detail_resources"], collector)
-    recurrence = collect_recurrence(client, subscription_id, limits["recurrence_pairs"], collector)
+    recurrence = collect_recurrence(client, subscription_id, limits["recurrence_pairs"], collector,
+                                    exclusions=exclusions)
     deployments, deployments_truncated = collect_remediation_deployments(
         client, subscription_id, remediations, limits["remediation_deployments"], collector
     )
+    deployments, excluded_deployments = exclusions.split(
+        deployments, "remediation_deployment", resource_id=lambda d: d["remediated_resource_id"],
+        location=lambda d: d["resource_location"], name=lambda d: basename(d["remediation_task_id"]))
 
     logger.info(
         "Summarized %d assignment(s): %s non-compliant resource(s); itemized %d state(s)%s, "
@@ -1078,6 +1102,7 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
         "recurrence": recurrence,
         "deployments": deployments,
         "deployments_truncated": deployments_truncated,
+        "excluded": excluded + excluded_states + excluded_tasks + excluded_deployments,
     }
 
 
@@ -1105,6 +1130,8 @@ def main() -> int:
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
 
     collected = empty_collection()
     registration = REGISTRATION_UNKNOWN
@@ -1121,7 +1148,7 @@ def main() -> int:
                 subscription_id,
             )
         else:
-            collected = collect_compliance(subscription_id, cred, collector, limits)
+            collected = collect_compliance(subscription_id, cred, collector, limits, exclusions)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -1131,6 +1158,8 @@ def main() -> int:
                 "that can list subscriptions)"
             ),
         )
+
+    exclusions.warn_unmatched(logger)
 
     subscription_results = collected["subscription_results"]
     recurrence = collected["recurrence"]
@@ -1153,6 +1182,7 @@ def main() -> int:
             "non_compliance_recurrence": recurrence["records"],
             "recurrence_pair_limit": limits["recurrence_pairs"],
             "provider_registration_status": registration,
+            "excluded": collected["excluded"],
         },
         summary={
             **summarize(
@@ -1171,6 +1201,10 @@ def main() -> int:
                 collected["deployments"], collected["deployments_truncated"]
             ),
             "provider_registration_status": registration,
+            **exclusions.summary(collected["excluded"], EXCLUDED_KINDS, {
+                "policy_assignments": len(collected["assignments"]), "policy_states": len(collected["states"]),
+                "remediation_tasks": len(collected["remediations"]),
+                "remediation_deployments": len(collected["deployments"])}),
         },
     )
 

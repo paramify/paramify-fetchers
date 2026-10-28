@@ -422,7 +422,7 @@ def test_main_exit_code_for_a_refused_or_failed_detail_read(monkeypatch, tmp_pat
     def refused_read(resource, resource_id, query_options):
         raise queued.pop(0)
 
-    def collect(subscription_id, cred, collector, limits):
+    def collect(subscription_id, cred, collector, limits, exclusions=None):
         collected = fx.empty_collection()
         collected["states"] = [state(APP)]
         collected["details"] = fx.collect_evaluation_details(
@@ -766,7 +766,7 @@ def test_main_writes_the_new_results_and_summary(monkeypatch, tmp_path):
     monkeypatch.setattr(fx, "provider_registration_status", lambda *a: "registered")
     seen = {}
 
-    def collect(subscription_id, cred, collector, limits):
+    def collect(subscription_id, cred, collector, limits, exclusions=None):
         seen.update(limits)
         return fx.empty_collection()
 

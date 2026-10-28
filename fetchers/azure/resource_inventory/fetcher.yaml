@@ -1,5 +1,5 @@
 name: azure_resource_inventory
-version: 0.2.0
+version: 0.3.0
 description: >
   An automatically generated inventory of every resource in the subscription, read
   from Azure Resource Graph's `Resources` table rather than service by service: each
@@ -45,6 +45,28 @@ output:
   type: json
   path: azure_resource_inventory.json
   aggregation: per_target
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching resource is listed under excluded with the pattern
+      and left out of every count, the by-type and by-location tallies and both
+      coverage verdicts. Defender assessments and policy states are still joined
+      against the whole inventory, then those about an excluded resource or its
+      children, or about anything else a pattern names (such as an excluded
+      resource group), are left out of every Defender and Policy count, including
+      the outside-inventory ones. A pattern without one of these prefixes fails
+      the run. Set it once for every Azure fetcher under platforms.azure.config.
+      Can be ${env:VAR}. Empty: every resource is in scope.
 
 target_schema:
   subscription_id:
@@ -102,4 +124,10 @@ evidence_set:
     long will usually hit the runner's default 600-second timeout first (exit 124,
     no evidence file). KSI-CNA-EIS and KSI-SVC-EIS are supporting evidence:
     Defender's coverage and unhealthy findings, not the enforcement or remediation
-    itself.
+    itself. Resources the resource_exclusions patterns take out are listed under
+    results.excluded instead, each with the pattern that matched; the summary gives
+    resource_exclusion_patterns (the configured patterns, empty when none are set),
+    resource_exclusion_patterns_unmatched (patterns that matched no resource, such
+    as a mistyped name), excluded_resources (how many the patterns took out; no
+    other count includes them) and in_scope_resources (how many stayed; 0 means
+    none was read or the patterns took out every resource).
