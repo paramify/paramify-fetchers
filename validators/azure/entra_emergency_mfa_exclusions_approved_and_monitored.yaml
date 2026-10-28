@@ -11,7 +11,10 @@ statement: >-
   desktop apps are each covered by a policy that targets all cloud apps, applies to that client app
   type, has no other narrowing condition (risk, platforms, locations, device filter or authentication
   flows), includes the user (all users, the user, a group or role they're in, or every guest) and
-  doesn't exclude them; one policy can cover both client types, or two policies one each. At least one enforced MFA policy exists, and the policies, their
+  doesn't exclude them; one policy can cover both client types, or two policies one each. A policy
+  covers only when MFA is mandatory: the MFA control or an authentication strength that satisfies
+  MFA, with no compliant device, terms of use or other non-MFA control as an alternative (an
+  exclusion from such a policy still counts). At least one enforced MFA policy exists, and the policies, their
   includes and exclusions, the named accounts and the alert rules were all read without a failure.
   Substantiates that enabled accounts are left without MFA by an exclusion only as approved, monitored
   emergency accounts (KSI-IAM-APM). With no accounts named, any uncovered exclusion fails. Does NOT
