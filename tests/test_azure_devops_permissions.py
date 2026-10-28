@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import pytest
 
@@ -288,6 +288,26 @@ def test_identities_are_resolved_in_batches(tmp_path, monkeypatch):
     assert [len(b) for b in batches] == [3, 3, 1]
     assert all(p["queryMembership"] == "None" for _, _, path, p in fake.calls if path.endswith("/_apis/identities"))
     assert evidence["summary"]["unresolved_identities"] == 1
+
+
+def test_identity_batches_keep_the_query_short(tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "IDENTITY_QUERY_CHARS", 120)
+    _, evidence, _, fake = run(tmp_path)
+    queries = [p["descriptors"] for _, _, path, p in fake.calls if path.endswith("/_apis/identities")]
+    assert len(queries) > 1 and all(len(quote(q, safe="")) <= 120 for q in queries if "," in q)
+    assert evidence["summary"]["unresolved_identities"] == 1
+
+
+def test_a_404_batch_is_split_and_an_unknown_descriptor_is_not_a_failure(tmp_path):
+    # Azure DevOps answers 404 to a descriptors query that is too long; here, to more than two descriptors.
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = lambda params: (
+        err(404, "Not Found") if params["descriptors"].count(",") > 1
+        or params["descriptors"] not in IDENTITIES and "," not in params["descriptors"] else identities(params))
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 0 and status is None and evidence["metadata"]["api_failures"] == []
+    s = evidence["summary"]
+    assert s["unresolved_identities"] == 1 and s["high_impact_grants_outside_admin_groups"] is not None
 
 
 def test_a_project_filter_drops_other_projects_entries(tmp_path, monkeypatch):

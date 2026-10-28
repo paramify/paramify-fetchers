@@ -1,5 +1,5 @@
 name: azure_devops_permissions
-version: 0.1.0
+version: 0.1.1
 description: >-
   Shows which identities and groups hold which Azure DevOps permissions at each
   scope, allowed or denied, and flags high-impact rights held outside the admin
