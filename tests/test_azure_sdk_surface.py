@@ -4040,6 +4040,8 @@ def test_graph_service_principal_access_builders_present() -> None:
         "applications.by_application_id(...).owners is gone.\n"
         "  affected fetchers: azure/entra_service_principals"
     )
+
+
 def test_graph_access_review_builders_present() -> None:
     """azure/entra_access_reviews walks definitions → instances → decisions by id."""
     builder: object = _build("msgraph", "GraphServiceClient")
