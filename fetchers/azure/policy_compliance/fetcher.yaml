@@ -37,6 +37,9 @@ config_schema:
       How many non-compliant (resource, policy) records to itemize. The summary
       counts are complete regardless; this bounds only the list, and
       non_compliant_states_truncated says when it was reached. 0 skips the list.
+      With resource_exclusions set, excluded states don't count toward it, and the
+      non-compliant counts are recounted from this list, so they are null when it
+      is truncated or skipped.
   max_evaluation_detail_resources:
     type: integer
     required: false
@@ -69,6 +72,9 @@ config_schema:
       How many remediation deployments to itemize across all remediation tasks;
       remediation_deployments_truncated says when there were more. 0 skips them.
       Deployments the resource_exclusions patterns take out don't count toward it.
+      With patterns set, remediation_failed_deployments and
+      remediation_successful_deployments are counted from this list, so they are
+      null when it is truncated or skipped.
       Azure deletes a task 60 days after its last change, so older ones are gone.
   resource_exclusions:
     type: string
@@ -90,8 +96,15 @@ config_schema:
       its deployments, and an excluded deployment's resource is not read for its
       latest state. 30-day history pairs follow their resource too, by its id,
       group and region, and are dropped before recurrence is read. The service's
-      subscription-wide and per-assignment counts cannot be split by resource and
-      still include excluded resources. A pattern without one of these prefixes
+      counts cannot be split by resource, so with patterns set the non-compliant
+      side (the non-compliant resource and policy counts, their by-state entries,
+      each assignment's non-compliant counts, is_compliant and failing members) is
+      recounted from the in-scope listed states, and the failed and successful
+      deployment totals from the in-scope listed deployments; each is null when its
+      list is truncated. The compliant side (compliant_resources,
+      resources_evaluated, the percentages and the other by-state entries) and
+      remediation_tasks_by_provisioning_state still come from the service and
+      include excluded resources. A pattern without one of these prefixes
       fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in scope.
 
@@ -128,7 +141,8 @@ evidence_set:
     PolicyInsightsClient): resource.providers.get("Microsoft.PolicyInsights"), then
     policy_states.summarize_for_subscription("latest", <subscription_id>),
     policy_states.list_query_results_for_subscription("latest", <subscription_id>,
-    query_options=QueryOptions(filter="complianceState eq 'NonCompliant'", top=N+1)),
+    query_options=QueryOptions(filter="complianceState eq 'NonCompliant'", top=N+1);
+    no top when resource_exclusions is set, the limit then counting in-scope states only),
     per listed resource policy_states.list_query_results_for_resource("latest",
     <resource_id>, query_options=QueryOptions(filter="ComplianceState eq
     'NonCompliant'", expand="PolicyEvaluationDetails")),
@@ -152,7 +166,18 @@ evidence_set:
     and excluded_remediation_deployments (how many the patterns took out; no
     itemized count includes them), and in_scope_policy_assignments,
     in_scope_policy_states, in_scope_remediation_tasks and
-    in_scope_remediation_deployments (how many stayed). non_compliant_resources,
-    non_compliant_policies, compliant_resources, resources_evaluated,
-    resource_compliance_percentage and the by-state maps are the service's own
-    subscription-wide counts and still include excluded resources.
+    in_scope_remediation_deployments (how many stayed). With patterns set,
+    non_compliant_resources (distinct resources), non_compliant_policies (distinct
+    assignment and policy pairs), the NonCompliant entries of
+    resources_by_compliance_state and policies_by_compliance_state,
+    non_compliant_assignments, compliant_assignments, the same figures in
+    results.subscription_compliance and results.assignment_compliance, and
+    remediation_failed_deployments and remediation_successful_deployments are
+    recounted over the in-scope itemized records, and are null when the list they
+    come from is truncated or skipped. A failing member the service did not list
+    takes the effect its evaluation ran under. service_counts_include_excluded_resources
+    is true when any pattern is set: compliant_resources, resources_evaluated,
+    resource_compliance_percentage, each assignment's compliant_resources and
+    compliance_percentage, the other by-state entries, policy_group_details and
+    remediation_tasks_by_provisioning_state are still the service's and include
+    excluded resources. Without patterns every count is the service's own.

@@ -754,6 +754,37 @@ def test_collect_remediation_deployments_at_management_group_and_resource():
     assert truncated is False and collector.ok
 
 
+# --- in-scope recount ---
+
+def test_in_scope_compliance_recounts_initiative_members_and_falls_back_to_the_evaluated_effect():
+    record = fx.assignment_record({
+        "policy_assignment_id": ASSIGN, "policy_set_definition_id": "/providers/x/policySetDefinitions/s1",
+        "results": {"non_compliant_resources": 3, "non_compliant_policies": 2,
+                    "resource_details": {"NonCompliant": 3, "Compliant": 1}},
+        "policy_definitions": [
+            {"policy_definition_id": DEF, "policy_definition_reference_id": "R1", "effect": "deny",
+             "results": {"non_compliant_resources": 3}},
+            {"policy_definition_id": DEF, "policy_definition_reference_id": "r2", "effect": "audit",
+             "results": {"non_compliant_resources": 1}},
+        ],
+    })
+    rows = [{**state(VM, assignment=ASSIGN.upper()), "policy_definition_action": "deny"},
+            {**state(NSG), "policy_definition_action": "deny"},
+            {**state(NSG, ref="r3"), "policy_definition_action": "modify"}]
+    service = {"non_compliant_resources": 3, "non_compliant_policies": 2, "resource_details": {"NonCompliant": 3}}
+    results, (rebuilt,) = fx.in_scope_compliance(service, [record], rows, known=True)
+    # r2's only non-compliant resource is out of scope; r3 is not in the service's list, so its evaluated effect is used.
+    assert [(m["policy_definition_reference_id"], m["effect"], m["non_compliant_resources"])
+            for m in rebuilt["non_compliant_member_policies"]] == [("R1", "deny", 2), ("r3", "modify", 1)]
+    assert (rebuilt["non_compliant_resources"], rebuilt["non_compliant_policies"], rebuilt["is_compliant"],
+            rebuilt["member_policy_count"], rebuilt["compliance_percentage"]) == (2, 2, False, 2, 25)
+    assert (results["non_compliant_resources"], results["non_compliant_policies"], results["resource_details"]) == (
+        2, 2, {"NonCompliant": 2})
+    results, (unknown,) = fx.in_scope_compliance(service, [record], rows, known=False)
+    assert (results["non_compliant_resources"], unknown["is_compliant"], unknown["non_compliant_member_policies"]) == (
+        None, None, None)
+
+
 # --- wiring ---
 
 def test_main_writes_the_new_results_and_summary(monkeypatch, tmp_path):

@@ -371,25 +371,35 @@ VM_IN = f"{IN_RG}/providers/Microsoft.Compute/virtualMachines/vm-in"
 VM_OUT = f"{OUT_RG}/providers/Microsoft.Compute/virtualMachines/vm-out"
 VM_EAST2 = f"{IN_RG}/providers/Microsoft.Compute/virtualMachines/vm-east"
 ASSIGN_SUB = f"{SUB}/providers/Microsoft.Authorization/policyAssignments/a-sub"
+ASSIGN_DENY = f"{SUB}/providers/Microsoft.Authorization/policyAssignments/a-deny"
 ASSIGN_OUT = f"{OUT_RG}/providers/Microsoft.Authorization/policyAssignments/a-out"
 DEF = "/providers/Microsoft.Authorization/policyDefinitions/d1"
+DEF_DENY = "/providers/Microsoft.Authorization/policyDefinitions/d2"
 WHEN = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
-def _results(non_compliant):
-    return NS(query_results_uri=None, non_compliant_resources=non_compliant, non_compliant_policies=1,
+def _results(non_compliant, policies=1):
+    return NS(query_results_uri=None, non_compliant_resources=non_compliant, non_compliant_policies=policies,
               resource_details=[NS(compliance_state="NonCompliant", count=non_compliant),
                                 NS(compliance_state="Compliant", count=2)],
-              policy_details=[], policy_group_details=[])
+              policy_details=[NS(compliance_state="NonCompliant", count=policies),
+                              NS(compliance_state="Compliant", count=5)],
+              policy_group_details=[])
 
 
-def _policy_state(resource, location="regionwest", assignment=ASSIGN_SUB):
+def _policy_state(resource, location="regionwest", assignment=ASSIGN_SUB, definition=DEF, action="audit"):
     return NS(resource_id=resource, resource_type="t", resource_location=location, compliance_state="NonCompliant",
               policy_assignment_id=assignment, policy_assignment_name=assignment.rsplit("/", 1)[-1],
-              policy_assignment_scope=None, policy_definition_id=DEF, policy_definition_name="d1",
-              policy_definition_reference_id=None, policy_definition_action="audit", policy_set_definition_id=None,
-              policy_set_definition_name=None, timestamp=WHEN)
+              policy_assignment_scope=None, policy_definition_id=definition,
+              policy_definition_name=definition.rsplit("/", 1)[-1], policy_definition_reference_id=None,
+              policy_definition_action=action, policy_set_definition_id=None, policy_set_definition_name=None,
+              timestamp=WHEN)
 
+
+# a-deny is a subscription-scope deny assignment whose only non-compliant resource sits in the excluded group.
+POLICY_STATES = (_policy_state(VM_IN), _policy_state(VM_OUT), _policy_state(VM_EAST2, "regioneast"),
+                 _policy_state(SUB, None), _policy_state(VM_OUT, assignment=ASSIGN_DENY, definition=DEF_DENY,
+                                                         action="deny"))
 
 HISTORY_GROUPS = ((VM_IN, "NonCompliant", "regionwest"), (VM_IN, "Compliant", "regionwest"),
                   (VM_OUT, "NonCompliant", "regionwest"), (VM_OUT, "Compliant", "regionwest"),
@@ -420,12 +430,17 @@ def _deployment(resource, location, status="Succeeded"):
 def _policy_client(calls, refuse=()):
     timeline = [NS(timestamp=datetime(2026, 10, d, tzinfo=timezone.utc), compliance_state=s)
                 for d, s in ((1, "NonCompliant"), (2, "Compliant"), (3, "NonCompliant"))]
-    member = NS(policy_definition_id=DEF, policy_definition_reference_id=None, effect="deny", results=_results(3))
+
+    def member(definition, effect, non_compliant):
+        return NS(policy_definition_id=definition, policy_definition_reference_id=None, effect=effect,
+                  results=_results(non_compliant))
 
     def summarize_for_subscription(resource, sub):
-        return NS(value=[NS(results=_results(3), policy_assignments=[
+        return NS(value=[NS(results=_results(3, policies=2), policy_assignments=[
             NS(policy_assignment_id=ASSIGN_SUB, policy_set_definition_id=None, results=_results(3),
-               policy_definitions=[member]),
+               policy_definitions=[member(DEF, "audit", 3)]),
+            NS(policy_assignment_id=ASSIGN_DENY, policy_set_definition_id=None, results=_results(1),
+               policy_definitions=[member(DEF_DENY, "deny", 1)]),
             NS(policy_assignment_id=ASSIGN_OUT, policy_set_definition_id=None, results=_results(1),
                policy_definitions=[])])])
 
@@ -443,8 +458,9 @@ def _policy_client(calls, refuse=()):
             if any(r.lower() in query_options.filter for r in refuse):
                 raise RuntimeError("403 Forbidden")
             return []
-        return [_policy_state(VM_IN), _policy_state(VM_OUT), _policy_state(VM_EAST2, "regioneast"),
-                _policy_state(SUB, None)]
+        top = getattr(query_options, "top", None)
+        calls.append(("states", top))
+        return list(POLICY_STATES[:top] if top else POLICY_STATES)
 
     def for_resource(resource, resource_id, query_options):
         calls.append(("details", "/" + resource_id))
@@ -452,7 +468,8 @@ def _policy_client(calls, refuse=()):
 
     def at_subscription(name):
         calls.append(("deployments", name))
-        return [_deployment(VM_EAST2, "regioneast", "Failed"), _deployment(VM_IN, "regionwest")]
+        return [_deployment(VM_EAST2, "regioneast", "Failed"), _deployment(VM_IN, "regionwest"),
+                _deployment(VNET_IN, "regionwest")]
 
     def at_resource_group(rg, name):
         calls.append(("deployments", name))
@@ -461,7 +478,8 @@ def _policy_client(calls, refuse=()):
     return NS(policy_states=NS(summarize_for_subscription=summarize_for_subscription,
                                list_query_results_for_subscription=for_subscription,
                                list_query_results_for_resource=for_resource),
-              remediations=NS(list_for_subscription=lambda: [_task(SUB, "t-sub", failed=1), _task(OUT_RG, "t-out")],
+              remediations=NS(list_for_subscription=lambda: [_task(SUB, "t-sub", failed=1, total=3),
+                                                             _task(OUT_RG, "t-out")],
                               list_deployments_at_subscription=at_subscription,
                               list_deployments_at_resource_group=at_resource_group))
 
@@ -475,17 +493,25 @@ def _stub_policyinsights(monkeypatch, client):
     monkeypatch.setitem(sys.modules, "azure.mgmt.policyinsights.models", models)
 
 
-def run_policy(monkeypatch, tmp_path, patterns, refuse=()):
+def run_policy(monkeypatch, tmp_path, patterns, refuse=(), env=None):
     _env(monkeypatch, tmp_path, pc, patterns)
     calls: list = []
     _stub_policyinsights(monkeypatch, _policy_client(calls, refuse))
     monkeypatch.setattr(pc, "credential", lambda: object())
     monkeypatch.setattr(pc, "provider_registration_status", lambda *a: "registered")
-    for env in (pc.MAX_NON_COMPLIANT_ENV, pc.MAX_DETAIL_RESOURCES_ENV, pc.MAX_RECURRENCE_PAIRS_ENV,
-                pc.MAX_REMEDIATION_DEPLOYMENTS_ENV):
-        monkeypatch.delenv(env, raising=False)
+    for name in (pc.MAX_NON_COMPLIANT_ENV, pc.MAX_DETAIL_RESOURCES_ENV, pc.MAX_RECURRENCE_PAIRS_ENV,
+                 pc.MAX_REMEDIATION_DEPLOYMENTS_ENV):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in (env or {}).items():
+        monkeypatch.setenv(name, value)
     code = pc.main()
     return code, json.loads((tmp_path / "azure_policy_compliance_s1.json").read_text()), calls
+
+
+def _members(assignment):
+    members = assignment["non_compliant_member_policies"]
+    return None if members is None else [(m["policy_definition_name"], m["effect"], m["non_compliant_resources"])
+                                         for m in members]
 
 
 def test_policy_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
@@ -493,29 +519,39 @@ def test_policy_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, t
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0 and results["excluded"] == []
     assert summary["resource_exclusion_patterns"] == summary["resource_exclusion_patterns_unmatched"] == []
+    assert summary["service_counts_include_excluded_resources"] is False
     assert (summary["assignments_evaluated"], summary["listed_non_compliant_states"], summary["remediation_tasks"],
             summary["remediation_deployments_listed"], summary["history_non_compliant_pairs"],
-            summary["recurrence_pairs_read"]) == (2, 4, 2, 3, 3, 2)
-    for kind, plural, total in (("policy_assignment", "policy_assignments", 2), ("policy_state", "policy_states", 4),
+            summary["recurrence_pairs_read"]) == (3, 5, 2, 4, 3, 2)
+    for kind, plural, total in (("policy_assignment", "policy_assignments", 3), ("policy_state", "policy_states", 5),
                                 ("remediation_task", "remediation_tasks", 2),
-                                ("remediation_deployment", "remediation_deployments", 3)):
+                                ("remediation_deployment", "remediation_deployments", 4)):
         assert (summary[f"excluded_{kind}s"], summary[f"in_scope_{plural}"]) == (0, total)
     assert sorted(c for c in calls if c[0] == "details") == [("details", VM_EAST2), ("details", VM_IN),
                                                               ("details", VM_OUT)]
+    # The service's own counts pass through, and the list is capped by the service.
+    assert [c for c in calls if c[0] == "states"] == [("states", pc.DEFAULT_MAX_NON_COMPLIANT + 1)]
+    assert results["subscription_compliance"] == pc.project_summary_results(_results(3, policies=2))
+    assert (summary["non_compliant_resources"], summary["non_compliant_policies"], summary["non_compliant_assignments"],
+            summary["compliant_assignments"]) == (3, 2, 3, 0)
+    assert summary["resources_by_compliance_state"] == {"Compliant": 2, "NonCompliant": 3}
+    assert [_members(a) for a in results["assignment_compliance"]] == [[("d2", "deny", 1)], [("d1", "audit", 3)], []]
+    assert (summary["remediation_failed_deployments"], summary["remediation_successful_deployments"]) == (1, 4)
 
 
 def test_policy_records_follow_their_resource_and_tasks_their_scope(monkeypatch, tmp_path):
     code, evidence, calls = run_policy(monkeypatch, tmp_path, PATTERNS)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0
-    assert [a["policy_assignment_name"] for a in results["assignment_compliance"]] == ["a-sub"]
+    assert [a["policy_assignment_name"] for a in results["assignment_compliance"]] == ["a-deny", "a-sub"]
     assert [s["resource_id"] for s in results["non_compliant_states"]] == [SUB, VM_IN]
     assert [t["name"] for t in results["remediation_tasks"]] == ["t-sub"]
-    assert [d["remediated_resource_id"] for d in results["remediation_deployments"]] == [VM_IN]
+    assert [d["remediated_resource_id"] for d in results["remediation_deployments"]] == [VM_IN, VNET_IN]
     assert _entries(results) == [
         ("policy_assignment", "a-out", "rg:rg-out"),
         ("policy_state", "d1", "location:regioneast"),
         ("policy_state", "d1", "rg:rg-out"),
+        ("policy_state", "d2", "rg:rg-out"),
         ("remediation_deployment", "t-sub", "location:regioneast"),
         ("remediation_task", "t-out", "rg:rg-out"),
     ]
@@ -529,33 +565,79 @@ def test_policy_records_follow_their_resource_and_tasks_their_scope(monkeypatch,
     assert [c for c in calls if c[0] == "state" and VM_EAST2.lower() in c[1]] == []
     assert (summary["assignments_evaluated"], summary["listed_non_compliant_states"],
             summary["listed_distinct_non_compliant_resources"], summary["remediation_tasks"],
-            summary["remediation_deployments_listed"]) == (1, 2, 2, 1, 1)
-    # The service's subscription-wide, per-assignment and task-level counts cannot be split by resource, so they
-    # still include excluded resources: the only failed deployment is the excluded east one.
-    assert (summary["non_compliant_resources"], summary["resource_compliance_percentage"]) == (3, 40)
-    assert (summary["non_compliant_assignments"], summary["compliant_assignments"]) == (1, 0)
-    assert [(m["effect"], m["non_compliant_resources"])
-            for m in results["assignment_compliance"][0]["non_compliant_member_policies"]] == [("deny", 3)]
-    assert summary["remediation_failed_deployments"] == 1
-    assert summary["remediation_deployments_by_status"] == {"Succeeded": 1}
+            summary["remediation_deployments_listed"]) == (2, 2, 2, 1, 2)
     assert (summary["excluded_policy_assignments"], summary["excluded_policy_states"],
-            summary["excluded_remediation_tasks"], summary["excluded_remediation_deployments"]) == (1, 2, 1, 1)
+            summary["excluded_remediation_tasks"], summary["excluded_remediation_deployments"]) == (1, 3, 1, 1)
     assert (summary["in_scope_policy_assignments"], summary["in_scope_policy_states"],
-            summary["in_scope_remediation_tasks"], summary["in_scope_remediation_deployments"]) == (1, 2, 1, 1)
+            summary["in_scope_remediation_tasks"], summary["in_scope_remediation_deployments"]) == (2, 2, 1, 2)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
+
+
+def test_policy_non_compliant_side_is_recounted_over_in_scope_states(monkeypatch, tmp_path):
+    _, evidence, calls = run_policy(monkeypatch, tmp_path, PATTERNS)
+    summary, results = evidence["summary"], evidence["results"]
+    assert summary["service_counts_include_excluded_resources"] is True
+    # With patterns set the service can't cap the list, which counts in-scope states only.
+    assert [c for c in calls if c[0] == "states"] == [("states", None)]
+    deny, sub = results["assignment_compliance"]
+    # The deny assignment's only non-compliant resource is excluded, so it reads compliant.
+    assert (deny["is_compliant"], deny["non_compliant_resources"], deny["non_compliant_policies"], _members(deny)) == (
+        True, 0, 0, [])
+    assert (sub["is_compliant"], sub["non_compliant_resources"], _members(sub)) == (False, 2, [("d1", "audit", 2)])
+    assert deny["resource_details"] == {"Compliant": 2, "NonCompliant": 0}
+    assert (summary["non_compliant_assignments"], summary["compliant_assignments"]) == (1, 1)
+    assert (summary["non_compliant_resources"], summary["non_compliant_policies"]) == (2, 1)
+    assert summary["resources_by_compliance_state"] == {"Compliant": 2, "NonCompliant": 2}
+    assert summary["policies_by_compliance_state"] == {"Compliant": 5, "NonCompliant": 1}
+    compliance = results["subscription_compliance"]
+    assert (compliance["non_compliant_resources"], compliance["non_compliant_policies"],
+            compliance["resource_details"]) == (2, 1, {"Compliant": 2, "NonCompliant": 2})
+    # The compliant side is still the service's, as are the percentages.
+    assert (summary["compliant_resources"], summary["resources_evaluated"],
+            summary["resource_compliance_percentage"], deny["compliance_percentage"]) == (2, 5, 40, 66)
+    # The only failed deployment is on the excluded east VM.
+    assert (summary["remediation_failed_deployments"], summary["remediation_successful_deployments"]) == (0, 2)
+    assert summary["remediation_tasks_by_provisioning_state"] == {"Succeeded": 1}
+
+
+def test_policy_excluded_states_do_not_use_up_the_list_limit(monkeypatch, tmp_path):
+    _, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, env={pc.MAX_NON_COMPLIANT_ENV: "2"})
+    summary = evidence["summary"]
+    assert [s["resource_id"] for s in evidence["results"]["non_compliant_states"]] == [SUB, VM_IN]
+    assert summary["non_compliant_states_truncated"] is False and summary["non_compliant_resources"] == 2
+
+
+def test_policy_recounts_are_null_when_a_list_is_cut_short(monkeypatch, tmp_path):
+    _, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, env={pc.MAX_NON_COMPLIANT_ENV: "1",
+                                                                       pc.MAX_REMEDIATION_DEPLOYMENTS_ENV: "1"})
+    summary, results = evidence["summary"], evidence["results"]
+    assert (summary["non_compliant_states_truncated"], summary["remediation_deployments_truncated"]) == (True, True)
+    for key in ("non_compliant_resources", "non_compliant_policies", "non_compliant_assignments",
+                "compliant_assignments", "remediation_failed_deployments", "remediation_successful_deployments"):
+        assert summary[key] is None, key
+    assert summary["resources_by_compliance_state"] == {"Compliant": 2, "NonCompliant": None}
+    for assignment in results["assignment_compliance"]:
+        assert (assignment["is_compliant"], assignment["non_compliant_resources"],
+                assignment["non_compliant_member_policies"]) == (None, None, None)
+    assert results["subscription_compliance"]["non_compliant_resources"] is None
+    # 0 skips the deployments, which leaves their totals unknown too.
+    _, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, env={pc.MAX_REMEDIATION_DEPLOYMENTS_ENV: "0"})
+    assert evidence["summary"]["remediation_failed_deployments"] is None
+    assert evidence["summary"]["non_compliant_resources"] == 2
 
 
 def test_policy_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence, _ = run_policy(monkeypatch, tmp_path, "rg-out")
     assert code == 1
-    assert evidence["summary"]["listed_non_compliant_states"] == 4
+    assert evidence["summary"]["listed_non_compliant_states"] == 5
 
 
 def test_policy_failed_state_read_on_an_excluded_deployment_leaves_the_run_ok(monkeypatch, tmp_path):
     code, evidence, calls = run_policy(monkeypatch, tmp_path, PATTERNS, refuse=(VM_EAST2,))
     assert code == 0
     assert [c for c in calls if c[0] == "state"] == [
-        ("state", f"PolicyAssignmentId eq '{ASSIGN_SUB.lower()}' and (ResourceId eq '{VM_IN.lower()}')")]
+        ("state", f"PolicyAssignmentId eq '{ASSIGN_SUB.lower()}' and (ResourceId eq '{VM_IN.lower()}' "
+                  f"or ResourceId eq '{VNET_IN.lower()}')")]
     # Without the pattern the same read fails the run.
     assert run_policy(monkeypatch, tmp_path, None, refuse=(VM_EAST2,))[0] == 1
 

@@ -379,11 +379,12 @@ def assignment_record(summary: dict) -> dict:
         "compliance_percentage": coverage_percentage(compliant, compliant + non_compliant),
         "is_compliant": (results.get("non_compliant_resources") or 0) == 0,
         "member_policy_count": len(members),
-        "non_compliant_member_policies": sorted(
-            failing,
-            key=lambda m: (-m["non_compliant_resources"], m.get("policy_definition_reference_id") or ""),
-        ),
+        "non_compliant_member_policies": sorted(failing, key=_member_order),
     }
+
+
+def _member_order(member: dict) -> tuple:
+    return -member["non_compliant_resources"], member.get("policy_definition_reference_id") or ""
 
 
 def state_record(state: dict) -> dict:
@@ -676,6 +677,74 @@ def summarize(
     }
 
 
+def _member_key(record: dict) -> tuple:
+    return arm_id_key(record.get("policy_definition_id")), arm_id_key(record.get("policy_definition_reference_id"))
+
+
+def _with_non_compliant(details: dict | None, count) -> dict:
+    """A {state: count} map with only its NonCompliant entry replaced."""
+    return {state: count if str(state).lower() == NON_COMPLIANT else n for state, n in (details or {}).items()}
+
+
+def in_scope_assignment(record: dict, states: list[dict], known: bool) -> dict:
+    """An assignment's non-compliant side recounted over its in-scope listed states; None throughout when unknown."""
+    if not known:
+        return {**record, "non_compliant_resources": None, "non_compliant_policies": None, "is_compliant": None,
+                "resource_details": _with_non_compliant(record["resource_details"], None),
+                "non_compliant_member_policies": None}
+    service = {_member_key(m): m for m in record["non_compliant_member_policies"]}
+    by_member: dict[tuple, tuple[dict, set]] = {}
+    for state in states:
+        by_member.setdefault(_member_key(state), (state, set()))[1].add(arm_id_key(state.get("resource_id")))
+    members = [
+        {**(service.get(key) or {
+            "policy_definition_id": state.get("policy_definition_id"),
+            "policy_definition_name": basename(state.get("policy_definition_id")),
+            "policy_definition_reference_id": state.get("policy_definition_reference_id"),
+            # A member the service didn't list as failing: the effect its evaluation ran under.
+            "effect": state.get("policy_definition_action"),
+        }), "non_compliant_resources": len(ids)}
+        for key, (state, ids) in by_member.items()
+    ]
+    resources = len({arm_id_key(s.get("resource_id")) for s in states})
+    return {**record, "non_compliant_resources": resources, "non_compliant_policies": len(by_member),
+            "resource_details": _with_non_compliant(record["resource_details"], resources),
+            "is_compliant": resources == 0, "non_compliant_member_policies": sorted(members, key=_member_order)}
+
+
+def in_scope_compliance(results: dict, assignments: list[dict], states: list[dict], known: bool) -> tuple:
+    """(results, assignments) with the non-compliant side recounted over the in-scope listed states; None if unknown."""
+    resources = len({arm_id_key(s.get("resource_id")) for s in states}) if known else None
+    # A policy per assignment, as the service counts them.
+    policies = len({(arm_id_key(s.get("policy_assignment_id")), *_member_key(s)) for s in states}) if known else None
+    by_assignment: dict[str, list[dict]] = {}
+    for state in states:
+        by_assignment.setdefault(arm_id_key(state.get("policy_assignment_id")), []).append(state)
+    return (
+        {**results, "non_compliant_resources": resources, "non_compliant_policies": policies,
+         "resource_details": _with_non_compliant(results.get("resource_details"), resources),
+         "policy_details": _with_non_compliant(results.get("policy_details"), policies)},
+        [in_scope_assignment(a, by_assignment.get(arm_id_key(a["policy_assignment_id"]), []), known)
+         for a in assignments],
+    )
+
+
+def in_scope_summary(results: dict, assignments: list[dict], deployments: list[dict] | None) -> dict:
+    """The summary fields recounted over in-scope records; deployments is None when that list is incomplete."""
+    known = results.get("non_compliant_resources") is not None
+    statuses = Counter(str(d.get("status") or "").lower() for d in deployments or [])
+    return {
+        "non_compliant_resources": results.get("non_compliant_resources"),
+        "non_compliant_policies": results.get("non_compliant_policies"),
+        "resources_by_compliance_state": results.get("resource_details") or {},
+        "policies_by_compliance_state": results.get("policy_details") or {},
+        "non_compliant_assignments": sum(1 for a in assignments if a["is_compliant"] is False) if known else None,
+        "compliant_assignments": sum(1 for a in assignments if a["is_compliant"]) if known else None,
+        "remediation_failed_deployments": statuses["failed"] if deployments is not None else None,
+        "remediation_successful_deployments": statuses["succeeded"] if deployments is not None else None,
+    }
+
+
 def summarize_evaluation_details(states: list[dict], details: dict) -> dict:
     by_status = Counter(s.get("evaluation_details_status") or DETAILS_NOT_REQUESTED for s in states)
     return {
@@ -777,6 +846,12 @@ def empty_collection() -> dict:
 
 
 EXCLUDED_KINDS = ("policy_assignment", "policy_state", "remediation_task", "remediation_deployment")
+
+
+def excluded_entry(exclusions: ResourceExclusions, record: dict, kind: str, **accessors) -> dict | None:
+    """The record's excluded entry when a pattern matches it, else None."""
+    _, entries = exclusions.split([record], kind, **accessors)
+    return entries[0] if entries else None
 
 
 def collect_evaluation_details(client, states: list[dict], limit: int, collector: Collector) -> dict:
@@ -973,11 +1048,11 @@ def collect_remediation_deployments(
             rows = []
             for deployment in listers[kind](name, scope):
                 row = project_remediation_deployment(deployment)
-                _, out = exclusions.split(
-                    [row], "remediation_deployment", resource_id=lambda d: d["remediated_resource_id"],
+                entry = excluded_entry(
+                    exclusions, row, "remediation_deployment", resource_id=lambda d: d["remediated_resource_id"],
                     location=lambda d: d["resource_location"], name=lambda d: basename(task_id))
-                if out:
-                    excluded.append((task_id or "", row["remediated_resource_id"] or "", out[0]))
+                if entry:
+                    excluded.append((task_id or "", row["remediated_resource_id"] or "", entry))
                     continue
                 if len(rows) >= remaining:
                     truncated = True
@@ -1051,27 +1126,31 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
 
     limit = limits["non_compliant"]
     states: list[dict] = []
+    excluded_states: list[dict] = []
     truncated = False
     if limit > 0:
         def _states():
             nonlocal truncated
-            # top = limit + 1: the one extra row is how truncation is detected
-            # without a second count query. ItemPaged follows nextLink.
-            options = QueryOptions(filter="complianceState eq 'NonCompliant'", top=limit + 1)
+            # top = limit + 1 detects truncation without a count query; with patterns the limit counts in-scope only.
+            options = QueryOptions(filter="complianceState eq 'NonCompliant'", top=None if exclusions else limit + 1)
             for state in client.policy_states.list_query_results_for_subscription(
                 LATEST, subscription_id, query_options=options
             ):
+                record = state_record(project_policy_state(state))
+                # States, history and deployments follow the resource they are about; tasks follow their own scope.
+                entry = excluded_entry(exclusions, record, "policy_state", resource_id=lambda s: s["resource_id"],
+                                       location=lambda s: s["resource_location"],
+                                       name=lambda s: s["policy_definition_name"])
+                if entry:
+                    excluded_states.append(entry)
+                    continue
                 if len(states) >= limit:
                     truncated = True
                     break
-                states.append(state_record(project_policy_state(state)))
+                states.append(record)
 
         collector.guard("policyinsights.policy_states.list_query_results_for_subscription", _states)
 
-    # States, history and deployments follow the resource they are about; tasks follow their own scope.
-    states, excluded_states = exclusions.split(
-        states, "policy_state", resource_id=lambda s: s["resource_id"], location=lambda s: s["resource_location"],
-        name=lambda s: s["policy_definition_name"])
     remediations = collector.guard(
         "policyinsights.remediations.list_for_subscription",
         lambda: [project_remediation(r) for r in client.remediations.list_for_subscription()],
@@ -1174,7 +1253,26 @@ def main() -> int:
 
     exclusions.warn_unmatched(logger)
 
-    subscription_results = collected["subscription_results"]
+    service_results = collected["subscription_results"]
+    subscription_results, assignments = service_results, collected["assignments"]
+    summary = {
+        **summarize(
+            service_results,
+            collected["assignments"],
+            collected["states"],
+            collected["states_truncated"],
+            collected["remediations"],
+        ),
+        **summarize_evaluation_details(collected["states"], collected["details"]),
+    }
+    if exclusions:
+        # The service's counts can't be split by resource: recount over the in-scope lists, null where one is cut.
+        subscription_results, assignments = in_scope_compliance(
+            service_results, assignments, collected["states"],
+            known=limits["non_compliant"] > 0 and not collected["states_truncated"])
+        deployments_known = limits["remediation_deployments"] > 0 and not collected["deployments_truncated"]
+        summary.update(in_scope_summary(subscription_results, assignments,
+                                        collected["deployments"] if deployments_known else None))
     recurrence = collected["recurrence"]
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -1182,9 +1280,9 @@ def main() -> int:
         collector=collector,
         results={
             "subscription_compliance": subscription_results,
-            "evaluation_window": evaluation_window(subscription_results.get("query_results_uri")),
+            "evaluation_window": evaluation_window(service_results.get("query_results_uri")),
             "policy_states_resource": LATEST,
-            "assignment_compliance": collected["assignments"],
+            "assignment_compliance": assignments,
             "non_compliant_states": collected["states"],
             "non_compliant_states_limit": limits["non_compliant"],
             "evaluation_details_resource_limit": limits["detail_resources"],
@@ -1198,14 +1296,7 @@ def main() -> int:
             "excluded": collected["excluded"],
         },
         summary={
-            **summarize(
-                subscription_results,
-                collected["assignments"],
-                collected["states"],
-                collected["states_truncated"],
-                collected["remediations"],
-            ),
-            **summarize_evaluation_details(collected["states"], collected["details"]),
+            **summary,
             **summarize_recurrence(
                 recurrence["pairs"], recurrence["records"], recurrence["history_truncated"],
                 recurrence["pairs_truncated"], recurrence["history_collected"],
@@ -1218,6 +1309,8 @@ def main() -> int:
                 "policy_assignments": len(collected["assignments"]), "policy_states": len(collected["states"]),
                 "remediation_tasks": len(collected["remediations"]),
                 "remediation_deployments": len(collected["deployments"])}),
+            # The compliant side (compliant_resources, resources_evaluated, the percentages) is still the service's.
+            "service_counts_include_excluded_resources": bool(exclusions),
         },
     )
 
