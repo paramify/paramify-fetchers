@@ -90,10 +90,10 @@ evidence_set:
 
     Commands Executed:
     - GET networkWatchers, then GET flowLogs (per watcher) — each flow log, its target and whether Traffic Analytics sends it to a workspace
-    - GET Microsoft.Cdn/profiles, then GET originGroups and GET origins (per profile) — Front Door Standard and Premium profiles and the host each origin points at
+    - GET Microsoft.Cdn/profiles, then GET originGroups and GET origins (per profile) — Front Door Standard and Premium profiles, the host each origin points at, and whether it connects over Private Link
     - GET Microsoft.Web/sites (and GET slots per app, only when an origin names an App Service host no app claims) — which App Service app each origin is
     - GET diagnosticSettings (per profile and per origin app) — which workspaces receive the Front Door access log and the App Service HTTP log
-    - GET Microsoft.Network/locations/<region>/serviceTags — Front Door's back-end address ranges (AzureFrontDoor.Backend)
+    - GET Microsoft.Network/locations/<region>/serviceTags — Front Door's back-end address ranges (AzureFrontDoor.Backend) and App Service's own management addresses (AppServiceManagement)
     - GET the workspace and GET tables/<table> (per workspace) — the workspace's query id, and each table's plan and retention
     - KQL on AzureNetworkAnalytics_CL (NSG flow logs) and NTANetAnalytics (VNet flow logs), over twice the window — flows per day, allowed ports, outbound destinations and the top flows, now and in the prior window
     - KQL on AzureDiagnostics (category FrontDoorAccessLog) — requests, status classes, hosts, origins and client IPs per profile
@@ -147,8 +147,9 @@ evidence_set:
     - origin_apps — Number of App Service apps or slots that a Front Door origin points at, matched by the origin's Azure resource or its host name
     - origin_apps_exporting_http_logs — Number of origin apps that send AppServiceHTTPLogs to a workspace, by name or through allLogs
     - origin_apps_without_http_log_export — Number of origin apps that send no AppServiceHTTPLogs to a workspace, so whether they were reached directly is unknown
+    - origin_apps_private_link — Number of origin apps that every Front Door origin naming them reaches over Private Link; Front Door's requests to these apps arrive from private addresses
     - origin_apps_bypass_unknown — Number of origin apps that export HTTP logs but whose records couldn't be read or classified (a workspace refused the read, or Front Door's address ranges couldn't be read)
-    - origin_apps_reached_outside_front_door — Number of origin apps that export HTTP logs and received at least one request from outside Front Door: from a public address outside the AzureFrontDoor.Backend ranges (private, loopback, link-local and shared addresses count as internal, not outside)
+    - origin_apps_reached_outside_front_door — Number of origin apps that export HTTP logs and received at least one request from outside Front Door: from a public address outside the AzureFrontDoor.Backend ranges. Private, loopback, link-local and shared addresses count as internal, not outside, and so do Front Door's requests over Private Link. App Service's own management addresses (AppServiceManagement) count as the platform, not outside
     - origin_apps_served_outside_front_door — Number of origin apps that export HTTP logs and served (status under 400) at least one request from outside Front Door
     - origin_requests_outside_front_door — Number of requests from outside Front Door across the origin apps that export HTTP logs; null when any of these apps' records are unknown
     - origin_requests_outside_front_door_served — Number of requests from outside Front Door that the origin apps exporting HTTP logs served with a status under 400; null when any of these apps' records are unknown

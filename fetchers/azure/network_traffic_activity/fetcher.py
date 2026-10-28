@@ -52,11 +52,13 @@ HTTP_CATEGORY = "AppServiceHTTPLogs"
 LOG_GROUPS = frozenset({"alllogs"})
 FRONT_DOOR_SKUS = frozenset({"standard_azurefrontdoor", "premium_azurefrontdoor"})
 FRONT_DOOR_TAG = "AzureFrontDoor.Backend"
+# App Service's own management plane calls apps from these addresses, not through Front Door.
+PLATFORM_TAG = "AppServiceManagement"
 INTERNET_FLOW_TYPES = ("ExternalPublic", "MaliciousFlow")
 MALICIOUS = "MaliciousFlow"
 INTERNAL_V4 = ("127.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16")
 INTERNAL_V6 = ("::1/128", "fc00::/7", "fe80::/10")
-SOURCES = ("front_door", "internal", "public", "unknown")
+SOURCES = ("front_door", "internal", "platform", "public", "unknown")
 
 TARGET_TYPES = (
     ("/networksecuritygroups/", "network_security_group"),
@@ -152,7 +154,7 @@ FD_QUERIES = {
     "fd_clients": "| summarize Requests = count() by ResourceId, ClientIp | order by ResourceId asc, Requests desc " + _RANKED,
 }
 
-# CIp is the address that connected to the app: Front Door's back end when a request came through it.
+# CIp is the address that connected to the app: Front Door's back end over the internet, a private address over Private Link.
 _HTTP = (
     f"{HTTP_TABLE} | where TimeGenerated > ago({{days}}d) | where tolower(_ResourceId) in ({{app_ids}}) "
     "| extend ResourceId = tolower(_ResourceId), "
@@ -160,6 +162,7 @@ _HTTP = (
     "| extend V6 = Ip contains ':' "
     "| extend Source = case(isempty(Ip), 'unknown', "
     "V6 and {fd_v6_test}, 'front_door', not(V6) and {fd_v4_test}, 'front_door', "
+    "V6 and {platform_v6_test}, 'platform', not(V6) and {platform_v4_test}, 'platform', "
     f"not(V6) and (ipv4_is_private(Ip) or ipv4_is_in_any_range(Ip, dynamic({json.dumps(list(INTERNAL_V4))}))), 'internal', "
     f"V6 and ipv6_is_in_any_range(Ip, dynamic({json.dumps(list(INTERNAL_V6))})), 'internal', 'public') "
 )
@@ -289,9 +292,9 @@ def split_prefixes(prefixes) -> tuple[list[str], list[str]]:
     return v4, v6
 
 
-def front_door_prefixes(tags: dict) -> list[str]:
+def tag_prefixes(tags: dict, name: str) -> list[str]:
     for tag in tags.get("values") or []:
-        if tag.get("name") == FRONT_DOOR_TAG:
+        if tag.get("name") == name:
             return list(dig(tag, "properties", "addressPrefixes") or [])
     return []
 
@@ -545,10 +548,19 @@ def match_origin_apps(origins: list[dict], sites: list[dict]) -> dict:
     for origin in origins:
         site = by_id.get(id_key(origin.get("azure_origin_id"))) or by_host.get((origin.get("host_name") or "").lower())
         if site:
-            entry = matched.setdefault(id_key(site.get("id")), {"site": site, "origins": [], "profiles": set()})
+            entry = matched.setdefault(id_key(site.get("id")),
+                                       {"site": site, "origins": [], "profiles": set(), "private_link": set()})
             entry["origins"].append(origin.get("host_name"))
             entry["profiles"].add(origin.get("profile"))
+            entry["private_link"].add(bool(origin.get("private_link")))
     return matched
+
+
+def connection(private_link: set) -> str:
+    """How Front Door reaches an app: private_link, public, or mixed when its origins differ."""
+    if private_link == {True}:
+        return "private_link"
+    return "public" if private_link == {False} else "mixed"
 
 
 def origin_app_record(entry: dict, settings, workspaces: dict, ranges_known: bool, sample: int) -> dict:
@@ -574,6 +586,7 @@ def origin_app_record(entry: dict, settings, workspaces: dict, ranges_known: boo
         "name": site.get("name"),
         "state": dig(site, "properties", "state"),
         "front_door_profiles": sorted(p for p in entry["profiles"] if p),
+        "front_door_connection": connection(entry["private_link"]),
         "origin_host_names": sorted({h for h in entry["origins"] if host_name(h)}),
         "diagnostic_settings_read": settings is not None,
         "http_logs_exported": bool(wids) if settings is not None else None,
@@ -644,6 +657,7 @@ def summarize(flow_logs: list[dict], traffic: dict, flow_tables: list[dict], pro
         "origin_apps": len(apps),
         "origin_apps_exporting_http_logs": len(exporting_apps),
         "origin_apps_without_http_log_export": sum(1 for a in apps if a["http_logs_exported"] is False),
+        "origin_apps_private_link": sum(1 for a in apps if a["front_door_connection"] == "private_link"),
         "origin_apps_bypass_unknown": sum(1 for a in exporting_apps if a["requests_by_source"] is None),
         "origin_apps_reached_outside_front_door": sum(1 for a in exporting_apps if (a["requests_outside_front_door"] or 0) > 0),
         "origin_apps_served_outside_front_door": sum(1 for a in exporting_apps
@@ -776,7 +790,8 @@ def collect_front_door(client, subscription_id: str, collector) -> tuple:
             for o in collector.guard(f"cdn.origins.list({g.get('name')})",
                                      lambda g=g: client.list(f"{g['id']}/origins", CDN_API)) or []:
                 found.append({"profile": p.get("name"), "host_name": dig(o, "properties", "hostName"),
-                              "azure_origin_id": dig(o, "properties", "azureOrigin", "id")})
+                              "azure_origin_id": dig(o, "properties", "azureOrigin", "id"),
+                              "private_link": bool(dig(o, "properties", "sharedPrivateLinkResource"))})
         origins[id_key(p.get("id"))] = found
     return profiles, origins
 
@@ -814,19 +829,29 @@ def collect(client, subscription_id: str, collector) -> tuple:
 
     fd_v4: list[str] = []
     fd_v6: list[str] = []
+    tags: dict = {}
     ranges_known = True
     http_apps = {k for k, s in app_settings.items() if exporting_workspaces(s, HTTP_CATEGORY)}
     if http_apps:
         location = region_name(dig(matched[sorted(http_apps)[0]], "site", "location"))
-        tags = collector.guard(
+        read = collector.guard(
             "network.serviceTags.list",
             lambda: client.get(f"/subscriptions/{subscription_id}/providers/Microsoft.Network/locations/{location}/serviceTags",
                                NETWORK_API),
         )
-        fd_v4, fd_v6 = split_prefixes(front_door_prefixes(tags or {}))
+        tags = read or {}
+        fd_v4, fd_v6 = split_prefixes(tag_prefixes(tags, FRONT_DOOR_TAG))
         ranges_known = bool(fd_v4 or fd_v6)
-        if tags is not None and not ranges_known:
+        if read is not None and not ranges_known:
             collector.record("network.serviceTags.list", LookupError(f"no {FRONT_DOOR_TAG} prefixes in the service tags"))
+    # Without the platform ranges, App Service's own calls read as public: a stricter verdict, not a gap.
+    platform_v4, platform_v6 = split_prefixes(tag_prefixes(tags, PLATFORM_TAG))
+    range_tests = {
+        "fd_v4_test": range_test("ipv4_is_in_any_range", fd_v4),
+        "fd_v6_test": range_test("ipv6_is_in_any_range", fd_v6),
+        "platform_v4_test": range_test("ipv4_is_in_any_range", platform_v4),
+        "platform_v6_test": range_test("ipv6_is_in_any_range", platform_v6),
+    }
 
     jobs: dict = defaultdict(list)
     workspace_ids: dict = {}
@@ -852,9 +877,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
         for wkey, ids in app_ids.items():
             ids_kql = ", ".join(f"'{i}'" for i in ids)
             for key, tail in HTTP_QUERIES.items():
-                kql = (_HTTP + tail).format(app_ids=ids_kql, fd_v4_test=range_test("ipv4_is_in_any_range", fd_v4),
-                                            fd_v6_test=range_test("ipv6_is_in_any_range", fd_v6), **fmt)
-                jobs[wkey].append((HTTP_TABLE, key, kql, days))
+                jobs[wkey].append((HTTP_TABLE, key, (_HTTP + tail).format(app_ids=ids_kql, **range_tests, **fmt), days))
 
     workspaces = {k: read_workspace(client, workspace_ids[k], jobs[k], basic, collector) for k in sorted(jobs)}
 
@@ -896,6 +919,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
         "front_door_profiles": profile_records,
         "origin_apps": app_records,
         "front_door_backend_prefixes": len(fd_v4) + len(fd_v6),
+        "app_service_platform_prefixes": len(platform_v4) + len(platform_v6),
         "workspaces": workspace_records,
         "queries": filled_queries(fmt),
     }
@@ -904,14 +928,14 @@ def collect(client, subscription_id: str, collector) -> tuple:
 
 
 def filled_queries(fmt: dict) -> dict:
-    """The KQL as run; the App Service query's id and Front Door range lists are left as placeholders."""
+    """The KQL as run; the App Service query's ids and address range lists are left as placeholders."""
     out = {}
     for table, base in FLOW_BASES.items():
         for key, tail in FLOW_QUERIES.items():
             out[f"{table}:{key}"] = (base + _PEERS + tail).format(**fmt)
     out.update({key: (_FD + tail).format(**fmt) for key, tail in FD_QUERIES.items()})
-    out.update({key: (_HTTP + tail).format(app_ids="{app_ids}", fd_v4_test="{fd_v4_test}", fd_v6_test="{fd_v6_test}", **fmt)
-                for key, tail in HTTP_QUERIES.items()})
+    holders = {k: "{" + k + "}" for k in ("app_ids", "fd_v4_test", "fd_v6_test", "platform_v4_test", "platform_v6_test")}
+    out.update({key: (_HTTP + tail).format(**holders, **fmt) for key, tail in HTTP_QUERIES.items()})
     return out
 
 
