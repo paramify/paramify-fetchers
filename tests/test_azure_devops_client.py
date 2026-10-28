@@ -93,6 +93,16 @@ def test_body_continuation_token_stops_on_has_more_false():
     assert len(s.calls) == 2
 
 
+def test_each_page_is_read_from_the_first_item_key_it_fills():
+    path = "vsaex.dev.azure.com/contoso/_apis/userentitlements"
+    c, _ = client({
+        (path, None): Resp(body={"items": [{"id": 1}], "members": [{"id": 9}], "continuationToken": "p2"}),
+        (path, "p2"): Resp(body={"items": [], "members": [{"id": 2}]}),
+    })
+    items = c.list("_apis/userentitlements", service="vsaex", item_key=("items", "members"))
+    assert [i["id"] for i in items] == [1, 2]
+
+
 def test_iter_lets_a_caller_stop_before_the_next_page():
     path = "dev.azure.com/contoso/_apis/projects"
     c, s = client({(path, None): Resp(body={"value": [{"id": 1}, {"id": 2}]}, headers={"x-ms-continuationtoken": "t2"})})
