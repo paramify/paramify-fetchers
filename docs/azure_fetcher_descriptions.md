@@ -4762,21 +4762,25 @@ Summary fields:
 
 
 ### azure_sql_managed_instance_configuration
-Short Description: Shows whether each SQL Managed Instance is closed to the public internet, requires TLS 1.2, uses Entra ID sign-in, and has a diagnostic setting exporting SQL audit events.
+Short Description: Shows how each SQL Managed Instance is reached, signed in to and audited, its subnet's NSG rules and routes, its maintenance window and its sensitivity-labeled database columns.
 
 Script: fetchers/azure/sql_managed_instance_configuration/fetcher.py (shared helper: fetchers/azure/_shared/sql_managed_instance.py)
 
-Access: Reader on the subscription.
+Access: Reader on the subscription. Reader also reads the current sensitivity labels (Microsoft lists Reader among the roles that can read a database's data classification) and the public maintenance configurations.
 
 Commands Executed:
 - `subscriptions.list()` — picks a subscription when none is set
 - `providers.get()` for Microsoft.Sql — tells “not registered” apart from “no instances”
-- `managed_instances.list()` — every managed instance with its public data endpoint, connection type, minimum TLS version and private endpoints
+- `managed_instances.list()` — every managed instance with its public data endpoint, connection type, minimum TLS version, private endpoints, subnet and maintenance configuration
 - `managed_instance_administrators.list_by_instance()` (per instance) — the Entra ID administrator
 - `managed_instance_azure_ad_only_authentications.list_by_instance()` (per instance) — whether only Entra ID sign-in is allowed
 - `diagnostic_settings.list()` (per instance) — where the instance's logs are exported, and which log categories
+- `subnets.get()`, `network_security_groups.get()` and `route_tables.get()` (per instance) — the instance's subnet, its NSG's custom and default rules, and its route table's routes
+- `GET Microsoft.Maintenance/publicMaintenanceConfigurations/{name}` (per maintenance configuration in use) — the maintenance window's schedule
+- `managed_databases.list_by_instance()` (per instance) — its databases
+- `managed_database_sensitivity_labels.list_current_by_database()` (per user database) — the columns classified with a sensitivity label or information type
 
-Output: `azure_sql_managed_instance_configuration_<subscription>.json` — each SQL Managed Instance with its public data endpoint, connection type, minimum TLS version, private endpoints, Entra administrators, Entra-only setting and diagnostic settings; an exported audit log shows a route out of the instance, not that auditing is switched on inside it.
+Output: `azure_sql_managed_instance_configuration_<subscription>.json` — each SQL Managed Instance with its public data endpoint, connection type, minimum TLS version, private endpoints, Entra administrators, Entra-only setting, diagnostic settings, subnet NSG rules and routes (rules and routes Azure adds to the subnet for the instance marked service_aided), maintenance window, and per user database the count of classified columns by label and information type; an exported audit log shows a route out of the instance, not that auditing is switched on inside it, and a read that failed leaves the fields built from it null, never false.
 
 Summary fields:
 
@@ -4798,6 +4802,26 @@ Summary fields:
 
 **Are SQL audit events exported?**
 - `instances_audit_logs_exported` — Number of instances with a diagnostic setting that sends the SQLSecurityAuditEvents log, on its own or through the audit or allLogs category group, to a Log Analytics workspace, storage account or event hub; an instance whose diagnostic settings couldn't be read doesn't count. This proves a route out, not that auditing is on: Managed Instance auditing is started in T-SQL, which no Azure management call can read
+
+**What traffic do the instance's subnet rules and routes allow?**
+- `instances_subnet_unknown` — Number of instances whose subnet couldn't be read, so none of the subnet fields below count them
+- `instances_subnet_rules_unknown` — Number of instances whose subnet NSG rules couldn't be judged because the subnet or its NSG couldn't be read; `instances_subnet_allow_any_to_any_rule`, `instances_subnet_unrestricted_internet_outbound`, `instances_subnet_smb_outbound_allow_rule` and `instances_subnet_public_all_ports_inbound_allow_rule` don't count these instances, so a 0 in any of the four means none only when `instances_subnet_rules_unknown` is 0
+- `instances_subnet_network_security_group` — Number of instances whose subnet has a network security group (NSG)
+- `instances_subnet_allow_any_to_any_rule` — Number of instances whose subnet NSG has a custom rule that allows every protocol and port from any address (*, 0.0.0.0/0, Any or Internet) to any address; an instance whose NSG couldn't be read doesn't count
+- `instances_subnet_unrestricted_internet_outbound` — Number of instances whose subnet lets traffic out to the Internet on every port: the subnet has no NSG, or the first outbound rule by priority, custom or default, that covers every port and protocol to the Internet is an Allow (the default AllowInternetOutBound, unless a custom rule overrides it); routes are not considered, so traffic a route sends to a firewall still counts. An instance whose NSG couldn't be read doesn't count
+- `instances_subnet_smb_outbound_allow_rule` — Number of instances whose subnet NSG has a custom rule, other than one Azure adds for the instance (service-aided), that allows SMB out: TCP or any protocol, on a port range that includes 445, to any address (*, 0.0.0.0/0, Any or Internet). Each rule is judged on its own, so it counts even if a higher-priority Deny blocks it. An instance whose NSG couldn't be read doesn't count
+- `instances_subnet_public_all_ports_inbound_allow_rule` — Number of instances whose subnet NSG has a custom rule, other than a service-aided one, that allows traffic in on every port (port ranges merged; port 0 not needed), whatever its protocol, from a source list that includes public addresses: *, Any, Internet, 0.0.0.0/0, AzureCloud or `AzureCloud.<region>` (every Azure datacenter public address, other customers' VMs included), or an address range reaching past private, shared (100.64.0.0/10), loopback and link-local space. Other service tags, such as Storage, don't count as public. Each rule is judged on its own, so it counts even if a higher-priority Deny blocks it. An instance whose NSG couldn't be read doesn't count
+- `instances_subnet_route_table` — Number of instances whose subnet has a route table
+
+**When does Azure apply updates?**
+- `instances_custom_maintenance_window` — Number of instances on a maintenance window other than the system default (SQL_Default, which keeps most updates to 5 PM to 8 AM local time but lets urgent ones through at any hour); the weekday and weekend windows run 10 PM to 6 AM local time
+
+**Are database columns classified?**
+- `total_user_databases` — Number of user databases (master, model, msdb and tempdb left out) on all instances; null if any instance's database list couldn't be read
+- `user_databases_with_sensitivity_labels` — Number of user databases with at least one column classified with a sensitivity label or information type
+- `user_databases_without_sensitivity_labels` — Number of user databases with no classified column
+- `user_databases_sensitivity_labels_unknown` — Number of user databases whose classifications couldn't be read; a database on an instance whose database list couldn't be read isn't counted here or in `total_user_databases`
+- `sensitivity_labeled_columns` — Number of classified columns across all user databases; null if any database's classifications or any instance's database list couldn't be read
 
 
 ### azure_sql_managed_instance_encryption
