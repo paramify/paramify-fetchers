@@ -62,10 +62,14 @@ USERS = {
 }
 
 
+PHISHING_RESISTANT = {"id": "s", "requirementsSatisfied": "mfa"}
+PASSWORD_ONLY = {"id": "s-weak", "requirementsSatisfied": "none"}
+
+
 def _policy(pid, name, state="enabled", controls=("mfa",), strength=None, users=None, apps=("All",),
-            client_apps=("all",), locations=None):
+            client_apps=("all",), locations=None, operator="OR"):
     return {"id": pid, "displayName": name, "state": state,
-            "grantControls": {"builtInControls": list(controls), "authenticationStrength": strength},
+            "grantControls": {"operator": operator, "builtInControls": list(controls), "authenticationStrength": strength},
             "conditions": {"users": users if users is not None else {"includeUsers": ["All"]},
                            "applications": {"includeApplications": list(apps)},
                            "clientAppTypes": list(client_apps), "locations": locations,
@@ -89,7 +93,7 @@ def _tenant():
         "/identity/conditionalAccess/policies": [
             _policy("p-all", "MFA for everyone",
                     users={"includeUsers": ["All"], "excludeGroups": ["g-bg"], "excludeUsers": [SVC, OFF]}),
-            _policy("p-admins", "Phishing-resistant MFA for admins", controls=(), strength={"id": "s"},
+            _policy("p-admins", "Phishing-resistant MFA for admins", controls=(), strength=PHISHING_RESISTANT,
                     users={"includeRoles": [ADMIN_ROLE], "excludeGroups": ["g-bg"]}),
             # Neither counts: report-only, and no MFA grant.
             _policy("p-pilot", "Pilot", state="enabledForReportingButNotEnforced", users={"excludeUsers": [OUTSIDER]}),
@@ -304,6 +308,34 @@ def test_policies_split_by_client_type_cover_together(monkeypatch):
     results, s, collector = _collect(monkeypatch, FakeClient(graph, arm), BG1)
     svc = next(u for u in results["other_users_excluded_from_mfa"] if u["id"] == SVC)
     assert svc["covered_by_an_mfa_policy"] is False and svc["excluded_from_mfa"] is True
+
+
+def test_mfa_that_can_be_skipped_does_not_cover(monkeypatch):
+    graph, arm = _tenant()
+    graph["/identity/conditionalAccess/policies"] += [
+        _policy("p-or-device", "MFA or compliant device", controls=("mfa", "compliantDevice")),
+        _policy("p-weak", "Password-only strength", controls=(), strength=PASSWORD_ONLY),
+        _policy("p-or-weak", "MFA or password-only strength", strength=PASSWORD_ONLY),
+    ]
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm), BG1)
+
+    by_id = {p["id"]: p for p in results["mfa_policies"]}
+    for pid in ("p-or-device", "p-weak", "p-or-weak"):
+        # Still MFA policies, so their exclusions count; they just can't cover anyone.
+        assert by_id[pid]["mfa_mandatory"] is False and by_id[pid]["counts_for_coverage"] is False, pid
+    svc = next(u for u in results["other_users_excluded_from_mfa"] if u["id"] == SVC)
+    assert svc["covered_by_an_mfa_policy"] is False and svc["excluded_from_mfa"] is True
+    assert s["users_excluded_from_mfa"] == 3
+
+
+def test_mfa_under_and_covers(monkeypatch):
+    graph, arm = _tenant()
+    graph["/identity/conditionalAccess/policies"].append(
+        _policy("p-and", "MFA and compliant device", controls=("mfa", "compliantDevice"), operator="AND"))
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm), BG1)
+
+    svc = next(u for u in results["other_users_excluded_from_mfa"] if u["id"] == SVC)
+    assert svc["covered_by_an_mfa_policy"] is True and svc["excluded_from_mfa"] is False
 
 
 def test_legacy_authentication_block_for_all_users(monkeypatch):

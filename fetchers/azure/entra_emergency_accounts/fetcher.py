@@ -119,6 +119,21 @@ def _includes_every_guest(users: Dict[str, Any]) -> bool:
     return bool(spec) and GUEST_USER_TYPES <= types and str(tenants).lower() == ALL
 
 
+def mfa_mandatory(grant: Dict[str, Any]) -> bool:
+    """MFA can't be skipped: under OR, every built-in control and the strength must be MFA, with no terms of use."""
+    controls = _lower(grant.get("builtInControls"))
+    strength = grant.get("authenticationStrength") or {}
+    required = strength.get("requirementsSatisfied")
+    # A custom strength can allow a password alone ("none"); only one that satisfies MFA counts.
+    strength_mfa = MFA_CONTROL in {str(r).strip().lower() for r in (
+        required if isinstance(required, list) else str(required or "").split(","))}
+    if MFA_CONTROL not in controls and not strength_mfa:
+        return False
+    if str(grant.get("operator") or "").upper() != "OR":
+        return True
+    return all(c == MFA_CONTROL for c in controls) and not grant.get("termsOfUse") and (not strength or strength_mfa)
+
+
 def mfa_policy(policy: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """An enforced policy that requires MFA or an authentication strength, with who it includes and excludes; else None."""
     grant = policy.get("grantControls") or {}
@@ -132,6 +147,7 @@ def mfa_policy(policy: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     all_apps = ALL in _lower((conditions.get("applications") or {}).get("includeApplications"))
     narrowing = narrowing_conditions(conditions)
     modern = sorted(MODERN_CLIENT_TYPES[t] for t in client_types(conditions) if t in MODERN_CLIENT_TYPES)
+    mandatory = mfa_mandatory(grant)
     return {
         "id": policy.get("id"),
         "display_name": policy.get("displayName"),
@@ -148,7 +164,8 @@ def mfa_policy(policy: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "client_app_types": sorted(conditions.get("clientAppTypes") or []),
         "modern_client_types": modern,
         "narrowing_conditions": narrowing,
-        "counts_for_coverage": all_apps and not narrowing and bool(modern),
+        "mfa_mandatory": mandatory,
+        "counts_for_coverage": all_apps and not narrowing and bool(modern) and mandatory,
     }
 
 

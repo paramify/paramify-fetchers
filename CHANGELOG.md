@@ -19,12 +19,14 @@ schemas and the `paramify` CLI — not the internal code.
   includes and excludes: directly, through a group (nested included), through a
   directory role or as a guest. A user an exclusion names counts as left without
   MFA unless browsers and mobile and desktop apps are each covered by a policy that
-  targets all cloud apps, has no other narrowing condition (risk, platforms,
-  locations, device filter), includes them and doesn't exclude them; one policy
-  can cover both client types, or two policies one each. Each policy records its
-  client app types, and `legacy_authentication_blocked_for_all_users` says whether
-  an enforced policy blocks legacy clients for all users. For each account named in `ENTRA_EMERGENCY_ACCOUNTS` it records its
-  exclusions and coverage, its last successful sign-in, its registered methods
+  makes MFA mandatory (no compliant device, terms of use or password-only strength
+  as an alternative), targets all cloud apps, has no other narrowing condition
+  (risk, platforms, locations, device filter), includes them and doesn't exclude
+  them; one policy can cover both client types, or two policies one each. Each
+  policy records its client app types, and
+  `legacy_authentication_blocked_for_all_users` says whether an enforced policy
+  blocks legacy clients for all users. For each account named in
+  `ENTRA_EMERGENCY_ACCOUNTS` it records its exclusions and coverage, its last successful sign-in, its registered methods
   (phishing-resistant flagged) and the enabled Microsoft Sentinel analytics rules
   and Azure Monitor log search alert rules in the subscription whose query names
   it by whole sign-in name or object id. Every other excluded user is listed too.
