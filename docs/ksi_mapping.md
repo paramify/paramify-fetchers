@@ -86,7 +86,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `sc-5`, `si-8`, `si-8.2`
 
-*8 fetchers:* [`aws_cloudfront_distribution_security`](../fetchers/aws/cloudfront_distribution_security), [`aws_shield_dos_protection`](../fetchers/aws/shield_dos_protection), [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules), [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules), [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf), [`azure_ddos_protection`](../fetchers/azure/ddos_protection), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies)
+*9 fetchers:* [`aws_cloudfront_distribution_security`](../fetchers/aws/cloudfront_distribution_security), [`aws_shield_dos_protection`](../fetchers/aws/shield_dos_protection), [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules), [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules), [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf), [`azure_ddos_protection`](../fetchers/azure/ddos_protection), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies), [`azure_waf_ddos_activity`](../fetchers/azure/waf_ddos_activity)
 
 #### `KSI-CNA-ULN` — Using Logical Networking
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-277 of 288 fetchers carry a mapping.
+278 of 289 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -505,7 +505,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (79)
+### azure  (80)
 
 | Fetcher | Indicators |
 |---|---|
@@ -588,6 +588,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status) | `KSI-CNA-MAT`, `KSI-IAM-APM`, `KSI-SVC-SIN`, `KSI-SVC-VRI` |
 | [`azure_vnet_egress_routing`](../fetchers/azure/vnet_egress_routing) | `KSI-CNA-DFP`, `KSI-CNA-RNT`, `KSI-CNA-ULN` |
 | [`azure_vpn_gateway_configuration`](../fetchers/azure/vpn_gateway_configuration) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-SVC-SIN` |
+| [`azure_waf_ddos_activity`](../fetchers/azure/waf_ddos_activity) | `KSI-CNA-RVP` |
 
 ### betterstack  (1)
 

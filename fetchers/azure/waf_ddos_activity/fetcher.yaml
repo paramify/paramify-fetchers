@@ -1,0 +1,143 @@
+name: azure_waf_ddos_activity
+version: 0.1.0
+description: >-
+  Shows whether DoS protection is watched, not only switched on: what each WAF blocked or only logged over a window, whether WAF and DDoS attack alerts reach someone, and any DDoS mitigations; checks that need DDoS Protection read unknown on an IP without it.
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 30
+    env: WAF_DDOS_LOOKBACK_DAYS
+    description: >
+      Days of WAF and DDoS records and attack metrics to read, from 1 to 90; a
+      larger value is clamped to 90 with a warning. Records older than a table's
+      retention are gone, not absent.
+  sample_size:
+    type: integer
+    required: false
+    default: 10
+    env: WAF_DDOS_SAMPLE_SIZE
+    description: >
+      How many of the most-matched WAF rules to list per WAF. Counts always cover
+      every rule.
+  query_basic_tables:
+    type: boolean
+    required: false
+    default: false
+    env: WAF_DDOS_QUERY_BASIC_TABLES
+    description: >
+      Also query tables on the Basic or Auxiliary plan, which bill per GB scanned.
+      Off: those tables are listed as skipped and their figures read unknown.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_waf_ddos_activity.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-RVP   # DoS protection is reviewed for effectiveness: WAF activity, attack alerts that reach someone, DDoS mitigations
+
+evidence_set:
+  reference_id: EVD-AZURE-WAF-DDOS-ACTIVITY
+  name: Azure WAF and DDoS Activity
+  instructions: |
+    Script: azure/waf_ddos_activity/fetcher.py
+
+    Access: Reader on the subscription, and Log Analytics Reader on the workspaces that receive WAF and DDoS logs. A workspace that refuses the read is listed as not_authorized and its figures read unknown; the run doesn't fail.
+
+    Commands Executed:
+    - GET Microsoft.Cdn/profiles, then securityPolicies (per Front Door Standard or Premium profile) — which WAF policies each profile attaches
+    - GET Microsoft.Network/applicationGateways — gateways on a WAF tier with a WAF policy or the legacy in-gateway WAF configuration
+    - GET FrontDoorWebApplicationFirewallPolicies and ApplicationGatewayWebApplicationFirewallPolicies — each policy's mode (Prevention or Detection) and state
+    - GET Microsoft.Network/publicIPAddresses — every public IP, whether it is attached (internet-facing) and its own DDoS protection mode
+    - GET diagnosticSettings (per WAF resource and per internet-facing public IP) — which workspaces receive the WAF log and the DDoS categories, and whether a gateway writes resource-specific tables
+    - GET metrics IfUnderDDoSAttack, hourly maximum over the lookback (per internet-facing public IP) — hours the IP was under attack
+    - GET metricAlerts and scheduledQueryRules — alert rules on a WAF metric (WebApplicationFirewallRequestCount, Azwaf*, BlockedCount, MatchedCount) or IfUnderDDoSAttack, or whose query reads a WAF log or a DDoS log category
+    - GET actionGroups and actionRules (alert processing rules), and any action group a rule names in another subscription — who each of those alert rules reaches, and whether a processing rule suppresses it
+    - GET workspace and workspace tables (per workspace) — the workspace's query id, and each table's plan and retention
+    - POST /v1/workspaces/<id>/query (/search for Basic and Auxiliary tables, only when query_basic_tables is on) — the queries below, recorded in results.queries
+
+    Queries (each over the lookback, scoped to the subscription):
+    - WAF requests: FrontDoorWebApplicationFirewallLog and ApplicationGatewayFirewallLog in AzureDiagnostics, or AGWFirewallLogs for a gateway whose setting writes resource-specific tables. A request that matched several rules is counted once (by its tracking reference or transaction id): blocked when any of its rows was blocked (Block, Blocked, JSChallengeBlock), logged only when it matched (Log, AnomalyScoring, Detected, Matched) and was neither blocked nor allowed, allowed when a rule allowed it. Per resource, policy and logged mode: events, requests, blocked, logged only, allowed, challenged, first and last event
+    - WAF rules: events and blocked events per rule, the most-matched rules per resource
+    - DDoS: DDoSProtectionNotifications, DDoSMitigationReports and DDoSMitigationFlowLogs per public IP: notifications, mitigations started, reports, flow log records, last event
+
+    Output: azure_waf_ddos_activity_<subscription>.json — each WAF resource with its policies, WAF log export and activity, top rules and covering alert rules; each internet-facing public IP with its protection mode, DDoS log export, attack alert, attack hours and mitigations; the WAF and DDoS alert rules with where they route; and each workspace queried with its status. Request URIs, client addresses and match details from the WAF log are never read into the evidence.
+
+    Without DDoS Protection, Azure records no mitigations and the attack metric stays at 0, and an alert on it can't fire. So for an IP whose protection isn't known to be on (its own mode is Disabled or inherited from its virtual network), attack_alert_can_fire, attack_hours, mitigations_started and mitigation_reports read null (unknown), never false or 0, unless records or attack hours were actually found. Whether an inherited IP's network has a DDoS plan is shown by azure_ddos_protection. Alert presence and log export are configuration and always read true or false.
+
+    Summary fields:
+
+    Which WAFs are there, and do they export their logs?
+    - lookback_days — Days of records and metrics read
+    - waf_resources — Number of Front Door profiles attaching a WAF policy (or whose security policies couldn't be read) and WAF-tier App Gateways with a WAF
+    - front_door_waf_resources — Number of those that are Front Door profiles
+    - app_gateway_waf_resources — Number of those that are App Gateways
+    - front_door_profiles_without_waf — Number of Front Door Standard and Premium profiles that attach no WAF policy
+    - waf_resources_in_detection_mode — Number of WAF resources with a policy in Detection mode, which logs matches without blocking them
+    - waf_resources_exporting_waf_log — Number with a diagnostic setting that sends the WAF log to a workspace, by name or through allLogs
+    - waf_resources_without_waf_log_export — Number that don't
+
+    What did the WAFs do in the window? (null when any exporting resource's records couldn't be read)
+    - waf_resources_with_waf_events — Number of exporting WAF resources with WAF log records in the window
+    - waf_resources_without_waf_events — Number whose workspaces were read and hold none
+    - waf_resources_waf_log_unknown — Number whose records couldn't be read
+    - waf_events — Number of WAF log records (one per rule match)
+    - waf_requests_matched — Number of requests that matched a WAF rule
+    - waf_requests_blocked — Number of those blocked
+    - waf_requests_logged_only — Number that matched but were only logged (Detection mode, or Log and anomaly-scoring rules below the threshold)
+    - last_waf_event — Time of the latest WAF log record across all WAF resources (UTC)
+
+    Do WAF alerts reach someone?
+    - waf_alert_rules — Number of alert rules on a WAF metric or WAF log
+    - waf_alert_rules_enabled — Number of those that are enabled
+    - waf_alert_rules_reaching_person — Number of enabled ones that notify a person (an enabled action group with an email, SMS, voice, push, ARM role or ITSM receiver) and no processing rule always suppresses
+    - waf_resources_with_alert_reaching_person — Number of WAF resources with such a rule scoped to the resource, a parent of it, or (for a log alert) a workspace receiving its WAF log
+    - waf_resources_without_waf_alert — Number of WAF resources with no enabled WAF alert rule on them
+
+    Are DDoS attacks watched on the internet-facing IPs?
+    - public_ips — Number of public IPs in the subscription
+    - internet_facing_public_ips — Number attached to a resource or a NAT gateway; the rest are left out of every DDoS figure
+    - public_ips_with_ip_protection — Number whose own DDoS protection mode is Enabled (IP Protection), the only protection this fetcher reads as known on
+    - public_ips_protection_disabled — Number whose mode is Disabled
+    - public_ips_protection_inherited — Number whose mode is inherited from their virtual network (or unset); see azure_ddos_protection for whether that network has a plan
+    - public_ips_exporting_ddos_logs — Number exporting all three DDoS log categories
+    - public_ips_with_attack_alert — Number with an enabled alert rule on IfUnderDDoSAttack or a DDoS log category covering them
+    - public_ips_with_attack_alert_reaching_person — Number whose attack alert notifies a person
+    - ddos_attack_alert_rules — Number of alert rules on IfUnderDDoSAttack or a DDoS log category
+    - protected_ips_with_attack_alert_reaching_receiver — Number of IPs with IP Protection whose attack alert routes to an enabled receiver; null when no IP has IP Protection
+    - protected_ips_without_attack_alert — Number of IPs with IP Protection and no attack alert; null when no IP has IP Protection
+    - public_ips_attacked — Number of internet-facing IPs with at least one hour under attack; null when no IP has IP Protection and none showed an attack
+    - ddos_mitigations_started — Number of mitigations started on IPs with IP Protection; null when none has it, or when any one's DDoS logs couldn't be read
+
+    Which workspaces were read?
+    - log_workspaces — Number of Log Analytics workspaces queried
+    - log_workspaces_queried — Number read
+    - log_workspaces_not_authorized — Number that refused the read
+    - log_workspaces_not_found — Number that no longer exist

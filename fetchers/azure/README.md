@@ -69,7 +69,8 @@ otherwise.
 | `Microsoft.Web/sites/config/list/action` (optional) | `azure_app_service_backups` | The custom backup configuration reads `not_authorized`; the run succeeds |
 | Key Vault Reader (RBAC vaults), or an access policy with key List and Get Rotation Policy (optional) | `azure_key_vault_key_rotation` | The vault reports `data_plane_status: inaccessible`; rotation policies still come from the management plane |
 | Log Analytics Reader on the workspaces they query | `azure_log_analytics_query_audit`, `azure_sentinel_analytics_rules`, `azure_sentinel_data_sources`, `azure_sentinel_incidents`, `azure_devops_audit_streams` (Azure Monitor Logs streams) | The KQL query fails |
-| Reader on other subscriptions (optional) | `azure_alert_rules` and `azure_activity_log_alerts` (action groups), `azure_app_gateway_waf` (WAF policies), `azure_vnet_egress_routing` (Virtual WAN hubs) | That reference reads unresolved; the run succeeds |
+| Reader on other subscriptions (optional) | `azure_alert_rules`, `azure_activity_log_alerts` and `azure_waf_ddos_activity` (action groups), `azure_app_gateway_waf` (WAF policies), `azure_vnet_egress_routing` (Virtual WAN hubs) | That reference reads unresolved; the run succeeds |
+| Log Analytics Reader on the workspaces that receive their logs | `azure_waf_ddos_activity` | The workspace reads `not_authorized` and its figures unknown; the run succeeds |
 | Reader on the management group (optional) | `azure_policy_assignments` | Management-group custom definitions read `unavailable`; the run succeeds |
 
 Reader also covers the Sentinel fetchers' ARM reads. Microsoft Sentinel Reader on the
@@ -206,6 +207,7 @@ Network and edge:
 | `azure_network_security_groups` | NSG rules (whether admin ports such as 22 and 3389 are reachable from the internet) and each subnet's NSG association |
 | `azure_vnet_egress_routing` | Where each subnet's internet-bound traffic goes: a firewall or appliance, a gateway, a NAT gateway, a black hole, or Azure's default outbound access |
 | `azure_ddos_protection` | Whether every public IP is covered by DDoS Network or IP Protection, and every DDoS protection plan |
+| `azure_waf_ddos_activity` | Whether WAF and DDoS protection are watched: what each WAF blocked or only logged, WAF and DDoS attack alerts and who they reach, and DDoS mitigations |
 | `azure_dns_configuration` | Public zones with DNSSEC state and signing keys; private zones and their virtual network links |
 | `azure_vpn_gateway_configuration` | VPN gateways (SKU, active-active, BGP, point-to-site) and each connection's IKE version and IPsec/IKE policy |
 | `azure_virtual_wan_configuration` | Virtual WANs and hubs: VPN encryption, transit settings, secured hubs, and each hub VPN connection's IKE and IPsec settings |
