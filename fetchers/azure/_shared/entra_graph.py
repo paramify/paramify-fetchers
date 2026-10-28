@@ -190,6 +190,112 @@ def is_privileged_role(role: dict) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# Privileged Microsoft Graph permissions
+# --------------------------------------------------------------------------- #
+# Shared so that azure_entra_service_principals and azure_managed_identity_configuration
+# flag the same app role or delegated scope as privileged.
+
+MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+# An app role assignment with this appRoleId grants access to the resource but no named role.
+DEFAULT_ACCESS_ROLE_ID = "00000000-0000-0000-0000-000000000000"
+
+# Graph permissions, application or delegated, that let the holder grant itself more access,
+# take over users' sign-in, or change the controls that protect the tenant.
+PRIVILEGED_GRAPH_PERMISSIONS = frozenset(
+    {
+        # --- can grant itself or anyone any role or permission ---
+        "RoleManagement.ReadWrite.Directory",
+        "RoleManagement.ReadWrite.Exchange",
+        "AppRoleAssignment.ReadWrite.All",
+        "Application.ReadWrite.All",
+        "Application.ReadWrite.OwnedBy",
+        "DelegatedPermissionGrant.ReadWrite.All",
+        "Directory.ReadWrite.All",
+        "Directory.AccessAsUser.All",
+        "RoleAssignmentSchedule.ReadWrite.Directory",
+        "RoleEligibilitySchedule.ReadWrite.Directory",
+        "RoleManagementPolicy.ReadWrite.Directory",
+        "PrivilegedAccess.ReadWrite.AzureAD",
+        "PrivilegedAccess.ReadWrite.AzureADGroup",
+        "PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup",
+        "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
+        "EntitlementManagement.ReadWrite.All",
+        "DeviceManagementRBAC.ReadWrite.All",
+        # --- can take over users' sign-in ---
+        "User.ReadWrite.All",
+        "User-PasswordProfile.ReadWrite.All",
+        "User.ManageIdentities.All",
+        "UserAuthenticationMethod.ReadWrite.All",
+        "Group.ReadWrite.All",
+        "GroupMember.ReadWrite.All",
+        "Domain.ReadWrite.All",
+        "IdentityProvider.ReadWrite.All",
+        "Organization.ReadWrite.All",
+        "Synchronization.ReadWrite.All",
+        # --- can change the controls that protect the tenant ---
+        "Policy.ReadWrite.ConditionalAccess",
+        "Policy.ReadWrite.AuthenticationMethod",
+        "Policy.ReadWrite.PermissionGrant",
+        "Policy.ReadWrite.Authorization",
+        "Policy.ReadWrite.CrossTenantAccess",
+        "AdministrativeUnit.ReadWrite.All",
+        "DeviceManagementConfiguration.ReadWrite.All",
+    }
+)
+# Tenant-wide data access, privileged only as an application permission: delegated, the same
+# names reach only what the signed-in user can already open.
+TENANT_DATA_GRAPH_PERMISSIONS = frozenset(
+    {
+        "Mail.Read",
+        "Mail.ReadBasic.All",
+        "Mail.ReadWrite",
+        "Mail.Send",
+        "Mail.Send.Shared",
+        "MailboxSettings.ReadWrite",
+        "Files.Read.All",
+        "Files.ReadWrite.All",
+        "Sites.Read.All",
+        "Sites.ReadWrite.All",
+        "Sites.FullControl.All",
+        "Calendars.Read",
+        "Contacts.Read",
+        "Chat.Read.All",
+        "Chat.ReadWrite.All",
+        "ChannelMessage.Read.All",
+        "Notes.Read.All",
+    }
+)
+# Any application permission whose name contains one of these also counts: as an app role,
+# a write permission reaches the whole tenant.
+PRIVILEGED_APPLICATION_GRAPH_SUBSTRINGS = ("FullControl", "ReadWrite")
+_PRIVILEGED_KEYS = frozenset(p.lower() for p in PRIVILEGED_GRAPH_PERMISSIONS)
+_TENANT_DATA_KEYS = frozenset(p.lower() for p in TENANT_DATA_GRAPH_PERMISSIONS)
+
+
+def is_graph_resource(resource_app_id: Any) -> bool:
+    return str(resource_app_id or "").lower() == MICROSOFT_GRAPH_APP_ID
+
+
+def is_privileged_graph_permission(permission: Any, application: bool = True) -> bool:
+    """Whether a Microsoft Graph permission name is privileged, in any case.
+
+    Only for a permission on Graph itself: the caller checks the resource.
+    """
+    key = str(permission or "").lower()
+    if key in _PRIVILEGED_KEYS:
+        return True
+    if not application:
+        return False
+    return key in _TENANT_DATA_KEYS or any(s.lower() in key for s in PRIVILEGED_APPLICATION_GRAPH_SUBSTRINGS)
+
+
+def is_denied(exc: BaseException) -> bool:
+    status = getattr(exc, "response_status_code", None)
+    text = str(exc).lower()
+    return status in (401, 403) or "authorization_requestdenied" in text or "insufficient privileges" in text
+
+
+# --------------------------------------------------------------------------- #
 # Client construction + async failure guarding
 # --------------------------------------------------------------------------- #
 
