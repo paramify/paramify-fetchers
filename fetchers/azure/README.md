@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 81 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 82 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -277,6 +277,7 @@ Logging and monitoring:
 | `azure_network_flow_logs` | Network Watchers and flow logs (target, state, storage, retention, Traffic Analytics), and which virtual networks and subnets an enabled flow log covers |
 | `azure_alert_rules` | Metric, log search and smart detector alert rules, resolved to the receivers they notify and checked against suppression rules |
 | `azure_activity_log_alerts` | Activity log alert rules and which security-relevant control-plane operations they cover |
+| `azure_monitor_fired_alerts` | Alerts fired in the last 30 days, who acknowledged and closed each and when, and how often each alert rule fired |
 
 Microsoft Sentinel:
 

@@ -12,6 +12,24 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_monitor_fired_alerts`** (`EVD-AZURE-MONITOR-FIRED-ALERTS`) — every
+  Azure Monitor alert fired in the last 30 days (the time Azure keeps them): rule,
+  severity, signal type, monitor condition, alert state, and fired, resolved and
+  last-modified times. Each alert's state history gives `acknowledged_at` /
+  `acknowledged_by`, `closed_at` / `closed_by` (with `closed_by_person` false for
+  System), hours to acknowledge and close, and how many times its action groups ran
+  or failed. A history that answers 404 or 403 reads unknown without failing the
+  run, unless every history is refused, which fails it as not authorized. Every
+  metric, log search, smart detector and activity log alert rule is listed with
+  `fire_count`, `last_fired_at` and `open_alerts`, so enabled rules that never
+  fired stand out (`enabled_rules_never_fired`); a rule that fired but is not in the
+  subscription's rule lists is kept with `listed: false`. Built-in rules such as
+  Azure Backup's and Service Health's get rule type `builtin` and are not counted as
+  rules. `max_open_alert_age_hours` gives how long the oldest alert still open (New or
+  Acknowledged) has been open, 0 when none is. The alert list is checked against Alerts Management's own summary total
+  (`all_alerts_listed`). Counts and close times that need an alert list, a rule list
+  or a history that wasn't read are null, never 0 or partial. Descriptions and
+  comments are capped at 500 characters, marked when cut.
 - **`azure_devops_identities`** (`EVD-AZURE-DEVOPS-IDENTITIES`): who can sign in to
   an Azure DevOps organization and who holds its administrative groups. It records:
   - every user, service principal and service identity, with access level,
