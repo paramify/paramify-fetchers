@@ -249,6 +249,28 @@ def test_sql_backups_failover_verdict_still_uses_an_excluded_partners_region(mon
     assert [g["name"] for g in evidence["results"]["instance_failover_groups"]] == ["fog-a", "fog-b"]
 
 
+def test_sql_backups_failed_failover_list_where_every_instance_is_excluded_only_warns(monkeypatch, tmp_path, caplog):
+    failover = {**FAILOVER, ("rg-out", "regionwest"): DENIED}
+    code, evidence = run_sql(monkeypatch, tmp_path, backups, None, failover)
+    assert code == 1 and evidence["summary"]["total_instance_failover_groups"] is None
+    code, evidence = run_sql(monkeypatch, tmp_path, backups, "rg:rg-out", failover)
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0 and evidence["metadata"]["api_failures"] == []
+    assert (summary["total_instance_failover_groups"], summary["failover_groups_manual_policy"]) == (2, 2)
+    assert {i["name"]: i["in_failover_group"] for i in results["managed_instances"]} == {"mi-in": True, "mi-south": True}
+    assert "every instance there is excluded" in caplog.text
+
+
+def test_sql_backups_failed_failover_list_at_an_in_scope_instance_still_fails(monkeypatch, tmp_path):
+    failover = {**FAILOVER, ("rg-in", "regionsouth"): DENIED}
+    code, evidence = run_sql(monkeypatch, tmp_path, backups, "rg:rg-out", failover)
+    summary = evidence["summary"]
+    assert code == 1
+    assert [f["operation"] for f in evidence["metadata"]["api_failures"]] == [
+        "sql.instance_failover_groups.list_by_location (rg-in, regionsouth)"]
+    assert (summary["total_instance_failover_groups"], summary["failover_groups_manual_policy"]) == (None, None)
+
+
 def test_sql_excluded_instances_get_no_per_instance_reads(monkeypatch, tmp_path):
     for module in (configuration, encryption, backups):
         _, _, reads = run_sql_reads(monkeypatch, tmp_path, module, None)

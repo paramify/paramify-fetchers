@@ -258,29 +258,36 @@ def summarize(
 
 # --- collection (lazy azure imports) ---
 
+def list_failover_groups(client, group_name: str, location: str) -> list[dict]:
+    return [project_failover_group(g) for g in client.instance_failover_groups.list_by_location(group_name, location)]
+
+
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
             excluded: list | None = None) -> tuple[list[dict], list[dict], set]:
-    """Failover groups are matched against every instance; excluded instances get no database reads."""
+    """Failover groups are listed and matched across every instance; excluded instances get no database reads."""
     client = sql_client(subscription_id, cred, collector)
     if client is None:
         return [], [], set()
     projected = list_instances(client, collector, project_instance)
+    in_scope, out = exclusions.split(projected, "managed_instance") if exclusions else (projected, [])
+    in_scope_pairs = {(i["resource_group"], i.get("location")) for i in in_scope}
 
     views: dict[tuple, list[dict]] = {}
     unlisted: set = set()
     for group_name, location in sorted({(i["resource_group"], i.get("location")) for i in projected}):
-        if not location:
-            unlisted.add((group_name, location))
-            continue
-        listed = collector.guard(
-            f"sql.instance_failover_groups.list_by_location ({group_name}, {location})",
-            lambda: [
-                project_failover_group(g)
-                for g in client.instance_failover_groups.list_by_location(group_name, location)
-            ],
-        )
+        operation = f"sql.instance_failover_groups.list_by_location ({group_name}, {location})"
+        listed = None
+        if location and (group_name, location) in in_scope_pairs:
+            listed = collector.guard(operation, lambda: list_failover_groups(client, group_name, location))
+        elif location:
+            # Only excluded instances here: a failed list is a warning and leaves no in-scope count unknown.
+            try:
+                listed = list_failover_groups(client, group_name, location)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("%s failed, but every instance there is excluded: %s", operation, exc)
         if listed is None:
-            unlisted.add((group_name, location))
+            if (group_name, location) in in_scope_pairs:
+                unlisted.add((group_name, location))
             continue
         for group in listed:
             key = (lower(group.get("name")), tuple(sorted(instance_ids_in(group))))
@@ -291,7 +298,6 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
         (merge_failover_group_views(v) for v in views.values()), key=lambda g: g.get("id") or ""
     )
 
-    in_scope, out = exclusions.split(projected, "managed_instance") if exclusions else (projected, [])
     instances: list[dict] = []
     for instance in in_scope:
         group_name, name = instance["resource_group"], instance["name"]

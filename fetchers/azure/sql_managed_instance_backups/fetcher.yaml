@@ -117,7 +117,10 @@ evidence_set:
     when any failover group list failed.
     Resources the resource_exclusions patterns take out are listed under `excluded`
     instead, each with the pattern that matched, and every count covers only the
-    instances and failover groups in scope. The summary echoes
+    instances and failover groups in scope. A failed failover group list at a
+    resource group and region holding only excluded instances is logged as a
+    warning: it doesn't fail the run or null `total_instance_failover_groups` and
+    `failover_groups_manual_policy`. The summary echoes
     `resource_exclusion_patterns`, lists `resource_exclusion_patterns_unmatched`
     (patterns that matched no instance or failover group, such as a mistyped name),
     and counts `excluded_managed_instances` and `excluded_instance_failover_groups`
