@@ -254,7 +254,7 @@ Summary fields:
 
 
 ### azure_entra_conditional_access_policies
-Short Description: Lists every Conditional Access policy with whether it's enforced, who and what it covers or excludes, and what it requires or blocks.
+Short Description: Lists every Conditional Access policy with whether it's enforced, who and what it covers or excludes, what it requires or blocks, and whether it requires phishing-resistant MFA.
 
 Script: fetchers/azure/entra_conditional_access_policies/fetcher.py (uses the shared Graph helpers fetchers/azure/_shared/entra_graph.py)
 
@@ -263,8 +263,9 @@ Access: Microsoft Graph application permission Policy.Read.All. Optional: Organi
 Commands Executed:
 - Microsoft Graph `GET /organization` — the tenant's name and domain
 - Microsoft Graph `GET /identity/conditionalAccess/policies` — every policy with its state, conditions, grant controls and session controls
+- Microsoft Graph `GET /policies/authenticationStrengthPolicies` (only when a policy uses an authentication strength) — each strength's allowed sign-in method combinations, read as raw JSON because the SDK drops combinations of two methods such as password and SMS
 
-Output: `azure_entra_conditional_access_policies_<tenant>.json` — each Conditional Access policy with its state, the users, groups, roles and apps it includes and excludes, its other conditions (client apps, risk levels, platforms, locations), what it grants or blocks, and its session controls.
+Output: `azure_entra_conditional_access_policies_<tenant>.json` — each Conditional Access policy with its state, the users, groups, roles and apps it includes and excludes, its other conditions (client apps, risk levels, platforms, locations), what it grants or blocks and its session controls, and each authentication strength the policies use with its allowed method combinations.
 
 Summary fields:
 
@@ -276,11 +277,17 @@ Summary fields:
 - `enforced_percentage` — Percentage of policies that are enforced = `enabled_policies` / `total_policies` × 100 (a whole number, 0–100); 0 when `total_policies` is 0. Disabled and report-only policies count in the total but not as enforced
 
 **What do enforced policies require?**
-- `enforced_policies_requiring_mfa` — Number of enforced policies that require MFA: the MFA grant control or an authentication strength is among their grant controls, even when the policy lets the user meet a different control instead
+- `enforced_policies_requiring_mfa` — Number of enforced policies that require MFA: the MFA grant control, or an authentication strength that satisfies MFA (a custom strength that allows a password alone doesn't count), is among their grant controls, even when the policy lets the user meet a different control instead
 - `enforced_policies_blocking_access` — Number of enforced policies that block access
 - `enforced_policies_requiring_compliant_device` — Number of enforced policies whose grant controls include a compliant device or a hybrid-joined device, even when the policy lets the user meet a different control instead
 - `enforced_policies_with_authentication_strength` — Number of enforced policies that require an authentication strength (a named set of allowed sign-in methods, such as phishing-resistant MFA)
 - `enforced_policies_with_session_controls` — Number of enforced policies with at least one session control: sign-in frequency, persistent browser session, app-enforced restrictions or Defender for Cloud Apps session control
+
+**Do enforced policies require phishing-resistant MFA?**
+- `authentication_strengths_readable` — True if the authentication strengths the policies use were read with their allowed combinations, or no policy uses one; false if the read failed, and the phishing-resistant figures read null
+- `enforced_policies_requiring_phishing_resistant_mfa` — Number of enforced policies that require phishing-resistant MFA: their authentication strength allows only FIDO2 security keys and passkeys, Windows Hello for Business or multi-factor certificate authentication, and the policy doesn't let the user meet another grant control instead; null if the policies or a policy's strength couldn't be read
+- `enforced_phishing_resistant_mfa_for_all_users_and_apps` — Number of enforced policies that require phishing-resistant MFA for all users on all cloud apps, before any exclusions; null if the policies or a policy's strength couldn't be read
+- `phishing_resistant_mfa_role_template_ids` — List of directory role template ids (Global Administrator is 62e90394-69f5-4237-9190-012177145e10) that an enforced policy requiring phishing-resistant MFA on all cloud apps includes; excluded users and groups aren't checked; null if the policies or a policy's strength couldn't be read
 
 **How widely do enforced policies apply?**
 - `enforced_policies_targeting_all_users` — Number of enforced policies that include all users; a policy can still exclude users, groups or roles
