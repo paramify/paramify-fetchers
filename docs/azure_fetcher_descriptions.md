@@ -3148,7 +3148,7 @@ Commands Executed:
 - `GET Microsoft.Cdn/profiles`, then `GET originGroups` and `GET origins` (per profile) — Front Door Standard and Premium profiles, the host each origin points at, and whether it connects over Private Link
 - `GET Microsoft.Web/sites` (and `GET slots` per app, only when an origin names an App Service host no app claims) — which App Service app each origin is
 - `GET diagnosticSettings` (per profile and per origin app) — which workspaces receive the Front Door access log and the App Service HTTP log
-- `GET Microsoft.Network/locations/<region>/serviceTags` — Front Door's back-end address ranges (AzureFrontDoor.Backend) and App Service's own management addresses (AppServiceManagement)
+- `GET Microsoft.Network/locations/<region>/serviceTags` — Front Door's back-end address ranges (AzureFrontDoor.Backend)
 - `GET` the workspace and `GET tables/<table>` (per workspace) — the workspace's query id, and each table's plan and retention
 - KQL on `AzureNetworkAnalytics_CL` (NSG flow logs) and `NTANetAnalytics` (VNet flow logs), over twice the window — flows per day, allowed ports, outbound destinations and the top flows, now and in the prior window
 - KQL on `AzureDiagnostics` (category FrontDoorAccessLog) — requests, status classes, hosts, origins and client IPs per profile
@@ -3195,7 +3195,7 @@ Summary fields:
 - `front_door_profiles_with_requests` — Number of Front Door profiles whose access log has records in the window
 - `front_door_profiles_without_access_log_records` — Number of Front Door profiles that export the access log to workspaces that were read and hold no records in the window
 - `front_door_profiles_access_log_unknown` — Number of Front Door profiles that export the access log to a workspace that couldn't be read
-- `front_door_requests` — Number of client requests across the profiles that export the access log, leaving out records the log marks as not received from the client (origin shield copies), where the log carries that mark; null when any of these profiles' logs couldn't be read
+- `front_door_requests` — Number of client requests across the profiles that export the access log, one per access-log record, so it can include a small share of duplicate copies of a request; null when any of these profiles' logs couldn't be read
 - `front_door_5xx_responses` — Number of client requests answered with a 5xx status across the profiles that export the access log; null when any of these profiles' logs couldn't be read
 
 **Is any origin reached without going through Front Door?**
@@ -3204,7 +3204,7 @@ Summary fields:
 - `origin_apps_without_http_log_export` — Number of origin apps that send no AppServiceHTTPLogs to a workspace, so whether they were reached directly is unknown
 - `origin_apps_private_link` — Number of origin apps that every Front Door origin naming them reaches over Private Link; Front Door's requests to these apps arrive from private addresses
 - `origin_apps_bypass_unknown` — Number of origin apps that export HTTP logs but whose records couldn't be read or classified (a workspace refused the read, Front Door's address ranges couldn't be read, or a request's caller address is empty or not an IP address)
-- `origin_apps_reached_outside_front_door` — Number of origin apps that export HTTP logs and received at least one request from outside Front Door: from a public address outside the AzureFrontDoor.Backend ranges. Private, loopback, link-local and shared addresses count as internal, not outside, and so do Front Door's requests over Private Link. App Service's own management addresses (AppServiceManagement) count as the platform, not outside
+- `origin_apps_reached_outside_front_door` — Number of origin apps that export HTTP logs and received at least one request from outside Front Door: from a public address outside the AzureFrontDoor.Backend ranges. Private, loopback, link-local and shared addresses count as internal, not outside, and so do Front Door's requests over Private Link. Every other public caller counts as outside, including Azure-hosted monitors
 - `origin_apps_served_outside_front_door` — Number of origin apps that export HTTP logs and served (status under 400) at least one request from outside Front Door
 - `origin_requests_outside_front_door` — Number of requests from outside Front Door across the origin apps that export HTTP logs; null when any of these apps' records are unknown
 - `origin_requests_outside_front_door_served` — Number of requests from outside Front Door that the origin apps exporting HTTP logs served with a status under 400; null when any of these apps' records are unknown
@@ -3538,9 +3538,10 @@ Summary fields:
 - `waf_resources_without_waf_events` — Number of WAF resources that export the WAF log to workspaces that were read and hold no records in the window
 - `waf_resources_waf_log_unknown` — Number of WAF resources that export the WAF log to a workspace that couldn't be read, or to a Basic-plan table that wasn't queried
 - `waf_events` — Number of WAF log records in the window (one per rule a request matched); null when any WAF resource's records couldn't be read
-- `waf_requests_matched` — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id; null when any WAF resource's records couldn't be read
-- `waf_requests_blocked` — Number of requests the WAF blocked (Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records); null when any WAF resource's records couldn't be read
-- `waf_requests_logged_only` — Number of requests that matched a rule but were only logged (Log, AnomalyScoring, Detected or Matched, and neither blocked nor allowed), as in Detection mode; null when any WAF resource's records couldn't be read
+- `waf_requests_matched` — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id (a record without one counts as its own request); null when any WAF resource's records couldn't be read
+- `waf_requests_blocked` — Number of requests the WAF blocked: Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records, from a policy in Prevention mode; null when any WAF resource's records couldn't be read
+- `waf_requests_would_block` — Number of requests a policy in Detection mode logged with a blocking action (Block, Redirect or a failed JavaScript challenge); Prevention mode would have blocked them, but Detection mode only logs; null when any WAF resource's records couldn't be read
+- `waf_requests_logged_only` — Number of requests that matched a rule but were only logged (Log, AnomalyScoring, Detected or Matched, and not blocked, would-block or allowed); null when any WAF resource's records couldn't be read
 - `last_waf_event` — Time of the latest WAF log record across all WAF resources (UTC)
 
 **Do WAF alerts reach someone?**
