@@ -49,15 +49,18 @@ secrets:
     required: false
     description: >
       Read-only personal access token with the Read Audit Log scope
-      (vso.auditlog), from a user with the View audit log permission. A scoped
+      (vso.auditlog), from a user with the View audit log and Manage audit
+      streams permissions; listing streams needs Manage audit streams, as no
+      read-only permission exists, and without it the stream fields are null
+      and the run is not_authorized. A scoped
       PAT cannot read the Log Audit Events policy (401 with vso.auditlog and
       every other scope tried), so auditing is judged from the audit log (its
       newest change to that policy, else its newest event) and the run notes
       the 401. Optional: without it the fetcher signs in as the ambient Entra
       identity (az login, managed or workload identity, or the category's
-      service principal added to the organization), which needs View audit log
-      and reads the policy itself. The Azure Monitor ingestion check always
-      uses the ambient Azure credential (see _categories/azure.yaml) and needs
+      service principal added to the organization), which needs the same two
+      permissions and reads the policy itself. The Azure Monitor ingestion
+      check always uses the ambient Azure credential (see _categories/azure.yaml) and needs
       Log Analytics Reader on the stream's workspace.
 
 ksis:
@@ -68,12 +71,12 @@ evidence_set:
   name: Azure DevOps Audit Streams
   instructions: >
     Script: azure/devops_audit_streams/fetcher.py. Azure DevOps REST: OrganizationPolicy
-    Policy.LogAuditEvents (an Entra login reads it, a PAT gets 401; then its
-    newest logged change, else any event in the window; see auditing.source),
-    auditservice _apis/audit/streams and _apis/audit/auditlog, ignoring
-    audit-log reads. consumerInputs keep only URL, host, workspace and tenant
-    identifiers. Azure Monitor Logs streams: this organization's
-    organization-level AzureDevOpsAuditing rows over the window (project rows:
-    project_rows_unattributed), expected only after an organization-level
-    event newer than the stream.
-    Needs: View audit log (PAT: vso.auditlog); Log Analytics Reader.
+    Policy.LogAuditEvents (a PAT gets 401; then its newest logged change, else
+    any event in the window; see auditing.source), auditservice
+    _apis/audit/streams and _apis/audit/auditlog, ignoring audit-log reads.
+    consumerInputs keep only endpoint identifiers. Azure Monitor streams: the
+    organization's own AzureDevOpsAuditing rows, expected after a newer
+    organization-level event.
+    Needs: View audit log (PAT: vso.auditlog); Manage audit streams to list
+    streams, there being no read-only permission (without it, stream fields
+    are null, not_authorized); Log Analytics Reader.

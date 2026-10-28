@@ -443,7 +443,9 @@ schemas and the `paramify` CLI — not the internal code.
   `streams_delivering`, `streams_not_delivering`, `streams_by_target` and the
   two Azure Monitor counts are now null, as `streams` already was. Before, they
   read 0, an empty list and an empty map. The Azure Monitor counts are also
-  null when any Azure Monitor stream's workspace couldn't be checked.
+  null when any Azure Monitor stream's workspace couldn't be checked. The
+  access text now says listing streams needs Manage audit streams, as Azure
+  DevOps has no read-only permission for it.
 
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
   collection as a success.** A 200 response that is not JSON, for example a
