@@ -146,7 +146,7 @@ def test_host_name(value, expected):
 
 def test_traffic_totals_spikes_and_internet_flows():
     daily = [
-        day_row("2026-01-01", "prior", flows=700, allowed=0, denied=700),
+        day_row("2026-01-01", "prior", flows=100, allowed=0, denied=100),
         day_row("2026-01-08", "current", flows=50, allowed=50, denied=0),
         day_row("2026-01-09", "current", flows=400, allowed=0, denied=400),
         day_row("2026-01-09", "current", flows=10, allowed=10, ftype="ExternalPublic"),
@@ -170,6 +170,15 @@ def test_a_quiet_baseline_uses_the_floor():
     assert t["denied_spike_threshold"] == 300
     assert t["denied_spike_days"] == []
 
+
+
+def test_the_baseline_averages_only_prior_days_with_records():
+    daily = [day_row("2026-01-01", "prior", flows=400, denied=400), day_row("2026-01-02", "prior", flows=200, denied=200),
+             day_row("2026-01-09", "current", flows=800, denied=800)]
+    t = nta.traffic_record([{"flow_daily": daily}], days=7, ports_expected=[], spike_factor=3, sample=5)
+    assert t["baseline_daily_denied_flows"] == 300.0
+    assert t["denied_spike_threshold"] == 900
+    assert t["denied_spike_days"] == []
 
 def test_without_a_baseline_new_counts_and_spikes_are_unknown():
     daily = [day_row("2026-01-09", "current", flows=900, denied=900)]
@@ -259,6 +268,17 @@ def test_profile_counts_come_from_the_fuller_copy():
     assert rec["access_logs_arriving"] is True
 
 
+
+def test_profile_lists_are_null_when_the_counts_failed():
+    rid = PROFILE.lower()
+    workspaces = {LAW.lower(): fd_ws(status=nta.WS_ERROR, read=(), fd_hosts=[{"ResourceId": rid, "Host": "www.example.com",
+                                                                               "Requests": 6}],
+                                     fd_clients=[{"ResourceId": rid, "ClientIp": "203.0.113.1", "Requests": 7}])}
+    rec = nta.profile_record({"id": PROFILE, "name": "fd1"}, [setting(category="FrontDoorAccessLog")], [], workspaces, sample=5)
+    assert rec["requests"] is None and rec["access_logs_arriving"] is None
+    assert (rec["top_hosts"], rec["top_origins"], rec["top_clients"]) == (None, None, None)
+    assert (rec["first_request"], rec["last_request"]) == (None, None)
+
 @pytest.mark.parametrize("settings, workspaces, arriving, requests", [
     ([], {}, None, None),
     (None, {}, None, None),
@@ -321,7 +341,18 @@ def test_origin_bypass_unknown_without_logs_or_ranges(settings, ranges_known):
     rec = nta.origin_app_record(app_entry(), settings, workspaces, ranges_known, sample=5)
     assert rec["requests_by_source"] is None
     assert rec["requests_outside_front_door"] is None
+    assert rec["top_clients_outside_front_door"] is None and rec["last_request"] is None
 
+
+
+def test_a_caller_that_is_not_an_address_is_unknown_not_public():
+    assert "isnotnull(parse_ipv4(Ip)), 'public'" in nta._HTTP
+    assert "isnotnull(parse_ipv6(Ip)), 'public', 'unknown')" in nta._HTTP
+    unclassified = {"http_logs_exported": True, "front_door_connection": "public",
+                    "requests_by_source": {"front_door": 5, "internal": 0, "platform": 0, "public": 0, "unknown": 2},
+                    "requests_outside_front_door": 0, "requests_outside_front_door_served": 0}
+    summary = nta.summarize([], nta.traffic_record([], 7, [], 3, 5), [], [], [unclassified], [], 7, [443])
+    assert summary["origin_apps_bypass_unknown"] == 1
 
 def test_summary_totals_are_null_when_any_app_is_unknown():
     known = {"http_logs_exported": True, "front_door_connection": "private_link", "requests_by_source": {},

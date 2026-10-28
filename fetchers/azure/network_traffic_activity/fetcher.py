@@ -133,13 +133,13 @@ FLOW_QUERIES = {
 }
 FLOW_BASES = {NSG_TABLE: _NSG_FLOWS, VNET_TABLE: _VNET_FLOWS}
 
-# Front Door logs each request at the edge and again at the origin shield; only the client-facing copy counts.
+# Records the log marks as not received from the client (origin shield copies) are left out, where the log has the column.
 _FD = (
     f"{FD_TABLE} | where TimeGenerated > ago({{days}}d) | where Category == '{FD_CATEGORY}' "
     "| where _ResourceId startswith '/subscriptions/{subscription_id}/' "
     "| where tostring(column_ifexists('isReceivedFromClient_b', '')) !~ 'false' "
     "| extend ResourceId = tolower(_ResourceId), Host = tostring(column_ifexists('hostName_s', '')), "
-    "Status = coalesce(toint(column_ifexists('httpStatusCode_s', '')), toint(column_ifexists('httpStatusCode_d', real(null)))), "
+    "Status = coalesce(toint(column_ifexists('httpStatusCode_d', real(null))), toint(column_ifexists('httpStatusCode_s', ''))), "
     "Origin = tostring(column_ifexists('originName_s', '')), ClientIp = tostring(column_ifexists('clientIp_s', '')) "
 )
 FD_QUERIES = {
@@ -164,7 +164,8 @@ _HTTP = (
     "V6 and {fd_v6_test}, 'front_door', not(V6) and {fd_v4_test}, 'front_door', "
     "V6 and {platform_v6_test}, 'platform', not(V6) and {platform_v4_test}, 'platform', "
     f"not(V6) and (ipv4_is_private(Ip) or ipv4_is_in_any_range(Ip, dynamic({json.dumps(list(INTERNAL_V4))}))), 'internal', "
-    f"V6 and ipv6_is_in_any_range(Ip, dynamic({json.dumps(list(INTERNAL_V6))})), 'internal', 'public') "
+    f"V6 and ipv6_is_in_any_range(Ip, dynamic({json.dumps(list(INTERNAL_V6))})), 'internal', "
+    "not(V6) and isnotnull(parse_ipv4(Ip)), 'public', V6 and isnotnull(parse_ipv6(Ip)), 'public', 'unknown') "
 )
 HTTP_QUERIES = {
     "origin_sources": "| summarize Requests = count(), Served = countif(ScStatus < 400), ClientIps = dcount(Ip), "
@@ -390,7 +391,8 @@ def traffic_record(flow_reads: list[dict], days: int, ports_expected: list[int],
             if day:
                 prior_days.add(day)
     baseline = bool(prior_days)
-    baseline_daily_denied = round(totals[PRIOR]["denied"] / days, 1) if baseline else None
+    # Averaged over the prior days that hold records, so a log turned on mid-window doesn't dilute the baseline.
+    baseline_daily_denied = round(totals[PRIOR]["denied"] / min(len(prior_days), days), 1) if baseline else None
     threshold = spike_factor * max(baseline_daily_denied or 0, DENIED_SPIKE_FLOOR) if baseline else None
     spikes = sorted(d for d, n in denied_per_day.items() if threshold is not None and n > threshold)
 
@@ -520,18 +522,18 @@ def profile_record(profile: dict, settings, origins: list[dict], workspaces: dic
         "access_log_exported": bool(wids) if settings is not None else None,
         "access_log_workspaces": wids,
         "requests": requests if known else None,
-        "first_request": _earliest(r.get("FirstRequest") for r in rows),
-        "last_request": _latest(r.get("LastRequest") for r in rows),
+        "first_request": _earliest(r.get("FirstRequest") for r in rows) if known else None,
+        "last_request": _latest(r.get("LastRequest") for r in rows) if known else None,
         "status_classes": {k: sum(_num(r.get(f"Status{k}")) for r in rows) for k in ("2xx", "3xx", "4xx", "5xx")}
         if known else None,
         "distinct_client_ips": max((_num(r.get("ClientIps")) for r in rows), default=0) if known else None,
-        "top_hosts": _ranked(_rows(workspaces, counted, "fd_hosts", rid), "Host", host_name, sample),
-        "top_origins": _ranked(_rows(workspaces, counted, "fd_origins", rid), "Origin", host_name, sample),
+        "top_hosts": _ranked(_rows(workspaces, counted, "fd_hosts", rid), "Host", host_name, sample) if known else None,
+        "top_origins": _ranked(_rows(workspaces, counted, "fd_origins", rid), "Origin", host_name, sample) if known else None,
         "top_clients": sorted(
             ({"client_ip": ip_text(c.get("ClientIp")), "requests": _num(c.get("Requests"))} for c in clients
              if ip_text(c.get("ClientIp"))),
             key=lambda c: (-c["requests"], c["client_ip"]),
-        )[:sample],
+        )[:sample] if known else None,
         "access_logs_arriving": arriving,
     }
 
@@ -599,8 +601,8 @@ def origin_app_record(entry: dict, settings, workspaces: dict, ranges_known: boo
             ({"client_ip": ip_text(c.get("Ip")), "requests": _num(c.get("Requests")), "served": _num(c.get("Served"))}
              for c in public_clients if ip_text(c.get("Ip"))),
             key=lambda c: (-c["requests"], c["client_ip"]),
-        )[:sample],
-        "last_request": _latest(r.get("LastRequest") for r in rows),
+        )[:sample] if known else None,
+        "last_request": _latest(r.get("LastRequest") for r in rows) if known else None,
         "http_logs_arriving": arriving,
     }
 
@@ -658,7 +660,8 @@ def summarize(flow_logs: list[dict], traffic: dict, flow_tables: list[dict], pro
         "origin_apps_exporting_http_logs": len(exporting_apps),
         "origin_apps_without_http_log_export": sum(1 for a in apps if a["http_logs_exported"] is False),
         "origin_apps_private_link": sum(1 for a in apps if a["front_door_connection"] == "private_link"),
-        "origin_apps_bypass_unknown": sum(1 for a in exporting_apps if a["requests_by_source"] is None),
+        "origin_apps_bypass_unknown": sum(1 for a in exporting_apps
+                                          if a["requests_by_source"] is None or a["requests_by_source"].get("unknown")),
         "origin_apps_reached_outside_front_door": sum(1 for a in exporting_apps if (a["requests_outside_front_door"] or 0) > 0),
         "origin_apps_served_outside_front_door": sum(1 for a in exporting_apps
                                                      if (a["requests_outside_front_door_served"] or 0) > 0),

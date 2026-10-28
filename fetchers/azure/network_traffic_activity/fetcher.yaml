@@ -29,7 +29,8 @@ config_schema:
     env: NETWORK_TRAFFIC_DENIED_SPIKE_FACTOR
     description: >
       A day in the window is a denied-flow spike when its denied flows exceed this
-      many times the prior window's daily average (or 100 flows, if that is higher).
+      many times the larger of the prior window's daily average and 100 flows
+      (300 at the default factor).
   sample_size:
     type: integer
     required: false
@@ -131,7 +132,7 @@ evidence_set:
     - new_ports_count — Number of direction, protocol and destination port combinations with allowed flows in the window and none in the prior window; null without a baseline
     - outbound_destinations — Number of destination addresses that allowed outbound flows reached in the window, counted once per flow type and Traffic Analytics table; null when no Traffic Analytics table was read
     - new_outbound_destinations — Number of destination addresses that allowed outbound flows reached in the window but not in the prior window, counted once per flow type and Traffic Analytics table; null without a baseline
-    - denied_spike_days — List of days in the window whose denied flows exceed the spike threshold: denied_spike_factor times the prior window's daily average of denied flows, or 100 flows if that is higher; null without a baseline
+    - denied_spike_days — List of days in the window whose denied flows exceed the spike threshold: denied_spike_factor times the larger of the prior window's daily average of denied flows and 100 flows (300 at the default factor), averaged over the prior-window days that hold records; null without a baseline
     - denied_spike_days_count — Number of days in the window whose denied flows exceed the spike threshold; null without a baseline
 
     Do Front Door's access logs show its requests?
@@ -140,7 +141,7 @@ evidence_set:
     - front_door_profiles_with_requests — Number of Front Door profiles whose access log has records in the window
     - front_door_profiles_without_access_log_records — Number of Front Door profiles that export the access log to workspaces that were read and hold no records in the window
     - front_door_profiles_access_log_unknown — Number of Front Door profiles that export the access log to a workspace that couldn't be read
-    - front_door_requests — Number of client requests across the profiles that export the access log, counting the edge's copy of each request and not the origin shield's; null when any of these profiles' logs couldn't be read
+    - front_door_requests — Number of client requests across the profiles that export the access log, leaving out records the log marks as not received from the client (origin shield copies), where the log carries that mark; null when any of these profiles' logs couldn't be read
     - front_door_5xx_responses — Number of client requests answered with a 5xx status across the profiles that export the access log; null when any of these profiles' logs couldn't be read
 
     Is any origin reached without going through Front Door?
@@ -148,7 +149,7 @@ evidence_set:
     - origin_apps_exporting_http_logs — Number of origin apps that send AppServiceHTTPLogs to a workspace, by name or through allLogs
     - origin_apps_without_http_log_export — Number of origin apps that send no AppServiceHTTPLogs to a workspace, so whether they were reached directly is unknown
     - origin_apps_private_link — Number of origin apps that every Front Door origin naming them reaches over Private Link; Front Door's requests to these apps arrive from private addresses
-    - origin_apps_bypass_unknown — Number of origin apps that export HTTP logs but whose records couldn't be read or classified (a workspace refused the read, or Front Door's address ranges couldn't be read)
+    - origin_apps_bypass_unknown — Number of origin apps that export HTTP logs but whose records couldn't be read or classified (a workspace refused the read, Front Door's address ranges couldn't be read, or a request's caller address is empty or not an IP address)
     - origin_apps_reached_outside_front_door — Number of origin apps that export HTTP logs and received at least one request from outside Front Door: from a public address outside the AzureFrontDoor.Backend ranges. Private, loopback, link-local and shared addresses count as internal, not outside, and so do Front Door's requests over Private Link. App Service's own management addresses (AppServiceManagement) count as the platform, not outside
     - origin_apps_served_outside_front_door — Number of origin apps that export HTTP logs and served (status under 400) at least one request from outside Front Door
     - origin_requests_outside_front_door — Number of requests from outside Front Door across the origin apps that export HTTP logs; null when any of these apps' records are unknown
