@@ -49,6 +49,8 @@ READ_CONCURRENCY = 8
 DECISION_CONCURRENCY = 2
 # Seconds before reading a list again while Graph still throttles it after those retries; a longer Retry-After wins.
 THROTTLE_WAITS = (5, 15, 45)
+# The client gives up on a Retry-After of 180s or more; a read asked to wait longer fails at once.
+MAX_THROTTLE_WAIT = 180
 # Graph pages these lists 100 at a time and documents $top/$skip; a full page with no nextLink means ask for more.
 PAGE_SIZE = 100
 PAGE_LIMIT = 1000
@@ -295,11 +297,15 @@ def definition_record(definition: Dict[str, Any], read_instances: Optional[List[
         # Graph ignores the top-level reviewers once a series has stages; each stage names its own.
         "self_review": not any(st["reviewers"] for st in stages) if stages else not definition.get("reviewers"),
         "instances_read": None if read_instances is None else len(instances),
-        "instances_in_progress": sum(1 for i in instances if i.get("status") not in ENDED_INSTANCE | {"NotStarted"}),
+        "instances_in_progress": None if read_instances is None else sum(
+            1 for i in instances if i.get("status") not in ENDED_INSTANCE | {"NotStarted"}
+        ),
         "last_completed_cycle_end": None if latest is None else latest["end_date_time"],
         "days_since_last_completed_cycle": None if cycle_end is None else max(0, (now - cycle_end).days),
-        "last_cycle": None if None in read else decision_counts([d for items in read for d in items or []]),
-        "last_cycle_instances": cycle_records,
+        "last_cycle": None if read_instances is None or None in read else decision_counts(
+            [d for items in read for d in items or []]
+        ),
+        "last_cycle_instances": None if read_instances is None else cycle_records,
     }
 
 
@@ -414,10 +420,7 @@ def retry_after(exc: BaseException) -> float:
 
 
 async def _read(collector: Collector, operation: str, builder, unlicensed: Optional[List[str]] = None) -> Optional[List[Any]]:
-    """`_page`, read again after a wait while Graph throttles it; None when the read failed.
-
-    Only a read given `unlicensed` notes a licence refusal there instead of failing.
-    """
+    """`_page`, read again while Graph throttles it; None when it failed, and a licence refusal noted in `unlicensed` if given."""
     for wait in (*THROTTLE_WAITS, None):
         probe = Collector(_probe_log)
         try:
@@ -429,9 +432,10 @@ async def _read(collector: Collector, operation: str, builder, unlicensed: Optio
                 return None
             if wait is not None and getattr(exc, "response_status_code", None) == 429:
                 seconds = max(float(wait), retry_after(exc))
-                logger.warning("%s throttled (429); reading it again in %.0fs", operation, seconds)
-                await asyncio.sleep(seconds)
-                continue
+                if seconds <= MAX_THROTTLE_WAIT:
+                    logger.warning("%s throttled (429); reading it again in %.0fs", operation, seconds)
+                    await asyncio.sleep(seconds)
+                    continue
             probe.record(operation, exc)
         break
     for failure in probe.failures:

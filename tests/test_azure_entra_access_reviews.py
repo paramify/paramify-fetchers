@@ -39,6 +39,8 @@ def no_throttle_waits(monkeypatch):
 
     monkeypatch.setattr(ar.asyncio, "sleep", sleep)
     return waits
+
+
 GROUP_QUERY = "/groups/g-finance/transitiveMembers"
 
 
@@ -315,7 +317,10 @@ def test_a_failed_read_gives_no_figures():
     results, summary = ar.build([definition], {"d-good": None}, {}, [], NOW)
     assert summary == {"access_reviews_available": None, "collection_complete": False}
     assert results["access_reviews_available"] is None
-    assert results["review_definitions"][0]["instances_read"] is None
+    (record,) = results["review_definitions"]
+    assert record["instances_read"] is None
+    assert record["instances_in_progress"] is None
+    assert record["last_cycle"] is None and record["last_cycle_instances"] is None
 
     _, summary = ar.build([definition], {"d-good": [_instance("i-1", "Applied", SEPT)]}, {"i-1": None}, [], NOW)
     assert summary == {"access_reviews_available": None, "collection_complete": False}
@@ -422,6 +427,13 @@ def test_a_throttled_read_is_read_again_after_a_wait(no_throttle_waits):
 def test_a_longer_retry_after_wins(no_throttle_waits):
     _read(_Throttled(1, items=[ns(id="d1")], retry_after="120"))
     assert no_throttle_waits == [120.0]
+
+
+def test_a_retry_after_past_the_cap_fails_at_once(no_throttle_waits):
+    builder = _Throttled(1, items=[ns(id="d1")], retry_after=str(ar.MAX_THROTTLE_WAIT + 1))
+    items, collector, _ = _read(builder)
+    assert items is None and no_throttle_waits == []
+    assert ar.classify_failure_code(collector.failures) == "rate_limited"
 
 
 def test_a_read_throttled_past_every_wait_fails_rate_limited(no_throttle_waits):

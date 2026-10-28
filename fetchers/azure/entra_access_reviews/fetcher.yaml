@@ -9,7 +9,7 @@ supports_targets: true
 runtime:
   type: python
   entry: fetcher.py
-  timeout: 1800          # throttled reads wait up to 65s each before failing; 600 is too tight for many series
+  timeout: 1800          # throttled reads wait 65s (up to 540s with Retry-After) each before failing; 600 is too tight
 
 output:
   type: json
@@ -50,7 +50,8 @@ secrets: []          # DefaultAzureCredential only — see _categories/azure.yam
 # page documents the code for access reviews (it is the one PIM sends), so it is unconfirmed here; a miss
 # reads as a failed read, not as no reviews. Graph throttles the decision reads hard: they run two at a
 # time, and a list still throttled (429) after the client's own retries is read again after 5, 15 and 45
-# seconds (or Retry-After, when longer) before it counts as failed (rate_limited).
+# seconds (or Retry-After, when longer) before it counts as failed (rate_limited); a Retry-After over 180
+# seconds fails it at once.
 
 ksis:
   - KSI-IAM-AAM
