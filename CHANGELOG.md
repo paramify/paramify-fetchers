@@ -12,6 +12,29 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_devops_work_items`** (`EVD-AZURE-DEVOPS-WORK-ITEMS`): Azure DevOps
+  work items that record changes and security work. The types that record
+  changes (`AZURE_DEVOPS_WORK_ITEM_TYPES`, default `Change Request`) and the
+  tags that mark security work (`AZURE_DEVOPS_WORK_ITEM_TAGS`, default
+  `Security`) are set per manifest. Items changed in the last
+  `AZURE_DEVOPS_LOOKBACK_DAYS` (default 90) are collected, along with every
+  selected item still open. Per item it records:
+  - type, state and its category, priority, severity, tags, owner, and the
+    created, changed, closed and planned dates;
+  - the state history;
+  - when and by whom it was approved: the first move into an
+    `AZURE_DEVOPS_APPROVAL_STATES` state, or the first comment matching
+    `AZURE_DEVOPS_APPROVAL_PATTERN` (default: a comment starting "Approved"),
+    with only the author and time kept;
+  - its linked TFVC changesets, Git commits, pull requests, builds and parent,
+    child and related items.
+
+  Linked changesets are read for their date and author. The summary lists
+  finished change items without approval or a linked change, items changed
+  before approval or approved by the change's author, and open, overdue,
+  high-priority and unassigned security items. A summary field whose read
+  failed is null. Read-only PAT scopes: Work Items, Code, and Project and Team;
+  or an Entra identity that is a reader in each project.
 - **`azure_devops_identities`** (`EVD-AZURE-DEVOPS-IDENTITIES`): who can sign in to
   an Azure DevOps organization and who holds its administrative groups. It records:
   - every user, service principal and service identity, with access level,

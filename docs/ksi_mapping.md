@@ -262,7 +262,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `au-2`, `cm-3`, `cm-3.2`, `cm-4.2`, `cm-6`, `cm-8.3`, `ma-2`
 
-*12 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`crowdstrike_filevantage`](../fetchers/crowdstrike/filevantage), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration), [`gitlab_merge_request_summary`](../fetchers/gitlab/merge_request_summary), [`gitlab_significant_change_notifications`](../fetchers/gitlab/significant_change_notifications), [`jira_audit_records`](../fetchers/jira/audit_records), [`jira_change_requests`](../fetchers/jira/change_requests), [`jira_site_inventory`](../fetchers/jira/site_inventory)
+*13 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_devops_work_items`](../fetchers/azure/devops_work_items), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`crowdstrike_filevantage`](../fetchers/crowdstrike/filevantage), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration), [`gitlab_merge_request_summary`](../fetchers/gitlab/merge_request_summary), [`gitlab_significant_change_notifications`](../fetchers/gitlab/significant_change_notifications), [`jira_audit_records`](../fetchers/jira/audit_records), [`jira_change_requests`](../fetchers/jira/change_requests), [`jira_site_inventory`](../fetchers/jira/site_inventory)
 
 #### `KSI-CMT-RMV` — Redeploying vs Modifying
 
@@ -332,11 +332,11 @@ python tools/gen_ksi_mapping.py
 
 *14 fetchers:* [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`aws_resource_inventory`](../fetchers/aws/resource_inventory), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`crowdstrike_hosts`](../fetchers/crowdstrike/hosts), [`datadog_agent_hosts`](../fetchers/datadog/agent_hosts), [`datadog_apm_services`](../fetchers/datadog/apm_services), [`datadog_containers`](../fetchers/datadog/containers), [`gitlab_project_summary`](../fetchers/gitlab/project_summary), [`k8s_eks_pod_inventory`](../fetchers/k8s/eks_pod_inventory), [`rippling_devices`](../fetchers/rippling/devices), [`sentinelone_agents`](../fetchers/sentinelone/agents), [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets), [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage)
 
-#### ⬜ `KSI-PIY-RES` — Reviewing Executive Support
+#### `KSI-PIY-RES` — Reviewing Executive Support
 
 > Executive support for achieving the provider's security goals is persistently reviewed and demonstrated.
 
-*Organizational — evidenced by HR, training or process, not cloud config.*
+*1 fetcher:* [`azure_devops_work_items`](../fetchers/azure/devops_work_items)
 
 #### ⬜ `KSI-PIY-RIS` — Reviewing Investments in Security
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-277 of 288 fetchers carry a mapping.
+278 of 289 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -505,7 +505,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (79)
+### azure  (80)
 
 | Fetcher | Indicators |
 |---|---|
@@ -536,6 +536,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_devops_identities`](../fetchers/azure/devops_identities) | `KSI-IAM-AAM`, `KSI-IAM-JIT` |
 | [`azure_devops_permissions`](../fetchers/azure/devops_permissions) | `KSI-IAM-ELP` |
 | [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines) | `KSI-CMT-RMV`, `KSI-CMT-VTD`, `KSI-SVC-VRI` |
+| [`azure_devops_work_items`](../fetchers/azure/devops_work_items) | `KSI-CMT-LMC`, `KSI-PIY-RES` |
 | [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings) | `KSI-CMT-LMC`, `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_disk_encryption_status`](../fetchers/azure/disk_encryption_status) | `KSI-SVC-SIN` |
 | [`azure_dns_configuration`](../fetchers/azure/dns_configuration) | `KSI-CNA-MAT`, `KSI-RPL-ABO`, `KSI-RPL-TRC`, `KSI-SVC-SIN` |
