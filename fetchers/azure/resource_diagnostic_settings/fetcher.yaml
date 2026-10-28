@@ -87,7 +87,7 @@ config_schema:
       group) matches only an id: pattern. An in-scope resource's logs are still
       checked at every destination it sends to, an excluded workspace included, so
       its verdict doesn't change. A pattern without one of these prefixes fails the
-      run. Set it once for every Azure fetcher under platforms.azure.config. Can be
+      run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
       ${env:VAR}. Empty: every resource is in scope.
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)

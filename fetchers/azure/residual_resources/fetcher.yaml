@@ -54,8 +54,8 @@ config_schema:
       the subscription itself stay. Orphans and deleted principals are still
       worked out against every resource and role assignment, so an in-scope
       identity used only by an excluded resource still reads as in use. A pattern
-      without one of these prefixes fails the run. Set it once for every Azure
-      fetcher under platforms.azure.config. Can be ${env:VAR}. Empty: every
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
       resource is in scope.
 
 target_schema:

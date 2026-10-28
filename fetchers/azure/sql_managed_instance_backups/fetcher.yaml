@@ -29,8 +29,8 @@ config_schema:
       leaves scope only when every instance it pairs in this subscription is
       excluded; failover groups are still matched against every instance, so an
       in-scope instance's verdict doesn't change when its partner is excluded. A
-      pattern without one of these prefixes fails the run. Set it once for every
-      Azure fetcher under platforms.azure.config. Can be ${env:VAR}. Empty: every
+      pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
       resource is in scope.
 
 supports_targets: true

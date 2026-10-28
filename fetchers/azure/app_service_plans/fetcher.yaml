@@ -36,8 +36,8 @@ config_schema:
       every count and verdict; sites are joined to every plan first, so a site in
       scope on an excluded plan stays on that plan's excluded entry and keeps its
       plan's zone redundancy and instance count. A pattern without one of these
-      prefixes fails the run. Set it once for every Azure fetcher under
-      platforms.azure.config. Can be ${env:VAR}. Empty: every resource is in
+      prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in
       scope.
 
 target_schema:

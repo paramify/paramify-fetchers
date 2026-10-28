@@ -91,8 +91,8 @@ config_schema:
       region, so only rg: and id: patterns reach them. The service's
       subscription-wide and per-assignment counts cannot be split by resource and
       still include excluded resources. A pattern without one of these prefixes
-      fails the run. Set it once for every Azure fetcher under
-      platforms.azure.config. Can be ${env:VAR}. Empty: every resource is in scope.
+      fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in scope.
 
 target_schema:
   subscription_id:

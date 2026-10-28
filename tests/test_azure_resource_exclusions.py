@@ -11,7 +11,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "fetchers" / "azure" / "_shared"))
 
-from azure_common import Collector  # noqa: E402
+from azure_common import Collector, classify_failure_code  # noqa: E402
 from resource_exclusions import ENV, ResourceExclusions  # noqa: E402
 
 SUB = "/subscriptions/00000000-0000-0000-0000-000000000000"
@@ -51,6 +51,7 @@ def test_bare_or_unknown_prefixes_are_invalid_and_fail_the_run(pattern):
     exclusions.record_invalid(collector)
     assert not collector.ok
     assert pattern in collector.failures[0]["message"]
+    assert classify_failure_code(collector.failures) == "bad_config"
 
 
 def test_from_env_reads_comma_or_space_separated_patterns(monkeypatch):

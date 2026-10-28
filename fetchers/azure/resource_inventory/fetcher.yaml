@@ -65,7 +65,7 @@ config_schema:
       children, or about anything else a pattern names (such as an excluded
       resource group), are left out of every Defender and Policy count, including
       the outside-inventory ones. A pattern without one of these prefixes fails
-      the run. Set it once for every Azure fetcher under platforms.azure.config.
+      the run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it.
       Can be ${env:VAR}. Empty: every resource is in scope.
 
 target_schema:

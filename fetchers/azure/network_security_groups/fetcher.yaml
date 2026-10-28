@@ -33,8 +33,8 @@ config_schema:
       the virtual network its subnets sit in. NIC coverage and east-west
       segmentation are still worked out against every NSG and virtual network, so
       an in-scope subnet or NIC whose NSG is excluded keeps its verdict. A pattern
-      without one of these prefixes fails the run. Set it once for every Azure
-      fetcher under platforms.azure.config. Can be ${env:VAR}. Empty: every
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
       resource is in scope.
 
 supports_targets: true

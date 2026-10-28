@@ -47,8 +47,8 @@ config_schema:
       character. A matching storage account or blob container is listed under
       excluded with the pattern and left out of every count and verdict; a
       container takes its account's resource group and region, so it leaves with
-      its account. A pattern without one of these prefixes fails the run. Set it
-      once for every Azure fetcher under platforms.azure.config. Can be
+      its account. A pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be
       ${env:VAR}. Empty: every resource is in scope.
 
 target_schema:

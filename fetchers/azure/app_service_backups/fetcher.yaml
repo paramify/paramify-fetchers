@@ -73,8 +73,8 @@ config_schema:
       calls, and is left out of every count and verdict, the inventory check and
       the exclusions lists; a slot follows its app. A custom backup storage
       account an in-scope app uses is still resolved and listed. A pattern
-      without one of these prefixes fails the run. Set it once for every Azure
-      fetcher under platforms.azure.config. Can be ${env:VAR}. Empty: every
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
       resource is in scope.
 
 target_schema:

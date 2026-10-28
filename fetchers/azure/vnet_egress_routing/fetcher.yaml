@@ -68,8 +68,8 @@ config_schema:
       worked out against every record, so an in-scope subnet routed through an
       excluded firewall, route table or hub keeps its egress path, and an in-scope
       firewall still counts the excluded subnets routed through it. A pattern
-      without one of these prefixes fails the run. Set it once for every Azure
-      fetcher under platforms.azure.config. Can be ${env:VAR}. Empty: every
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
       resource is in scope.
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)

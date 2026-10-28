@@ -21,8 +21,8 @@ config_schema:
       under excluded with the pattern and left out of every count and verdict;
       routing is still worked out against every action group and processing rule,
       so an in-scope rule's verdict doesn't change. A pattern without one of these
-      prefixes fails the run. Set it once for every Azure fetcher under
-      platforms.azure.config. Can be ${env:VAR}. Empty: every resource is in scope.
+      prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true
 

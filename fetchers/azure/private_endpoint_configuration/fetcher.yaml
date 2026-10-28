@@ -27,7 +27,7 @@ config_schema:
       only excluded endpoints connect to. The patterns are matched against the
       endpoints only: an in-scope endpoint whose target resource a pattern would
       match stays in scope with its verdicts, and that target still counts. A
-      pattern without one of these prefixes fails the run. Set it once for every Azure fetcher under platforms.azure.config. Can be
+      pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
       ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true

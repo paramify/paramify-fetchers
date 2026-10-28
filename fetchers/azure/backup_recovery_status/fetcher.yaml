@@ -29,8 +29,8 @@ config_schema:
       matches, or when an rg: or id: pattern matches the resource it protects
       (whose region isn't read), with that resource's id in its entry; a vault
       whose protected items all leave stays in scope and counts as protecting
-      nothing. A pattern without one of these prefixes fails the run. Set it once
-      for every Azure fetcher under platforms.azure.config. Can be ${env:VAR}.
+      nothing. A pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}.
       Empty: every resource is in scope.
 
 supports_targets: true
