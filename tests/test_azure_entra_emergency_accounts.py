@@ -438,9 +438,11 @@ def test_deleted_excluded_group_is_empty_not_a_failure(monkeypatch):
 
 def test_failed_group_read_nulls_the_exclusions(monkeypatch):
     graph, arm = _tenant()
+    graph["/identity/conditionalAccess/policies"].append(
+        _policy("p-bg", "MFA for break-glass group", users={"includeGroups": ["g-bg"]}))
     results, s, collector = _collect(monkeypatch, FakeClient(graph, arm, errors={"/groups/g-bg": DENIED}), BG1)
 
-    assert s["exclusions_readable"] is False
+    assert s["exclusions_readable"] is False and s["coverage_readable"] is False
     assert s["excluded_users_not_monitored_emergency_accounts"] is None
     assert classify_failure_code(collector.failures) == "not_authorized"
 

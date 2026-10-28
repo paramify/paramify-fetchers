@@ -554,9 +554,10 @@ def collect(client, subscription_id: str, collector) -> tuple:
     status["exclusions"] = READ if resolved and status["policies"] == READ else NOT_READ
     exclusions = excluded_by(policies, direct, groups, roles, guests)
     excluded_users = {uid: directory.users[uid] for uid in exclusions if uid in directory.users}
-    before = len(collector.failures)
     included = _resolve_includes(directory, policies) if excluded_users else {}
-    status["coverage"] = READ if len(collector.failures) == before and status["policies"] == READ else NOT_READ
+    # A group the exclusions already failed to read is cached as None and adds no new failure.
+    status["coverage"] = (READ if all(v is not None for v in included.values()) and status["policies"] == READ
+                          else NOT_READ)
 
     def exclusion_fields(user: dict) -> dict:
         if status["exclusions"] != READ:
