@@ -1,5 +1,5 @@
 name: azure_entra_privileged_roles
-version: 0.1.0
+version: 0.2.0
 description: >
   Every activated Microsoft Entra ID directory role and the principals holding it,
   with the Global Administrator count broken out and each role flagged for whether
@@ -60,5 +60,7 @@ evidence_set:
   name: Microsoft Entra ID Privileged Directory Roles
   instructions: >
     Script: azure/entra_privileged_roles/fetcher.py. Microsoft Graph calls: GET /directoryRoles; GET
-    /directoryRoles/{id}/members per role; GET /organization. Both collections paged
-    via @odata.nextLink.
+    /directoryRoles/{id}/members and /directoryRoles/{id}/members/microsoft.graph.servicePrincipal
+    per role (v1.0 members can leave service principals out; the cast lists them); GET
+    /organization. Collections paged via @odata.nextLink. service_principals_in_privileged_roles
+    is null when a privileged role's service principals can't be read.

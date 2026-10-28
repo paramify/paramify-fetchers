@@ -309,3 +309,57 @@ def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, 
     assert user["is_admin"] is True  # the report's flag is still honored
     assert user["privileged_directory_roles"] is None
     assert json.loads(status_file.read_text())["code"] == "not_authorized"
+
+
+# --- azure_entra_privileged_roles: service principals come from the cast ------
+
+def _roles_graph(members, service_principals, cast_error=None):
+    """members/service_principals: role id -> items; the cast is /members/microsoft.graph.servicePrincipal."""
+    graph = FakeGraph(roles=[_role("r-sr", "Security Reader"), _role("r-dr", "Directory Readers")],
+                      role_members=members, group_members={})
+    for rid, builder in graph.role_members.items():
+        builder.graph_service_principal = Builder(service_principals.get(rid, []), error=cast_error)
+    return graph
+
+
+def _collect_roles(monkeypatch, graph):
+    async def fake_with_graph_client(collector, cred, work, default=None):
+        return await work(graph)
+
+    async def fake_tenant(collector, client):
+        return {"tenant_id": "t-1", "tenant_source": "env"}
+
+    monkeypatch.setattr(privileged_roles, "with_graph_client", fake_with_graph_client)
+    monkeypatch.setattr(privileged_roles, "resolve_tenant", fake_tenant)
+    collector = privileged_roles.Collector(logging.getLogger("test_entra_privileged_roles"))
+    roles, _ = asyncio.run(privileged_roles._collect(collector, object()))
+    return collector, {r["display_name"]: r for r in roles}, privileged_roles.summarize(roles)
+
+
+def test_service_principals_the_members_list_leaves_out_are_read_from_the_cast(monkeypatch):
+    # v1.0 members leaves sp-hidden out; the cast's items may carry no @odata.type.
+    graph = _roles_graph(
+        members={"r-sr": [_obj("g-sec", "group"), _obj("sp-listed", "servicePrincipal")],
+                 "r-dr": [_obj("g-sec", "group")]},
+        service_principals={"r-sr": [ns(id="sp-listed", odata_type=None), ns(id="sp-hidden", odata_type=None)],
+                            "r-dr": [ns(id="sp-hidden", odata_type=None)]},
+    )
+    collector, roles, summary = _collect_roles(monkeypatch, graph)
+
+    assert collector.ok
+    reader = roles["Security Reader"]
+    assert sorted(m["id"] for m in reader["members"]) == ["g-sec", "sp-hidden", "sp-listed"]
+    assert reader["service_principal_member_count"] == 2 and reader["service_principal_members_read"] is True
+    assert summary["service_principals_in_privileged_roles"] == 2
+    assert summary["privileged_role_assignments"] == 3 and summary["total_role_assignments"] == 5
+
+
+def test_a_failed_cast_leaves_the_service_principal_count_unknown(monkeypatch):
+    graph = _roles_graph(members={"r-sr": [_obj("g-sec", "group")], "r-dr": []}, service_principals={},
+                         cast_error=DENIED)
+    collector, roles, summary = _collect_roles(monkeypatch, graph)
+
+    assert not collector.ok and privileged_roles.classify_failure_code(collector.failures) == "not_authorized"
+    assert roles["Security Reader"]["service_principal_members_read"] is False
+    assert summary["service_principals_in_privileged_roles"] is None
+    assert summary["groups_in_privileged_roles"] == 1
