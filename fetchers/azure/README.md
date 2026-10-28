@@ -92,8 +92,9 @@ and reads the tenant it belongs to.
 | `AccessReview.Read.All` | `azure_entra_access_reviews` (review series, runs and decisions). The tenant needs Entra ID P2 or ID Governance; without it `access_reviews_available` reads false and the run succeeds |
 | `Directory.Read.All` (optional) | `azure_log_analytics_deletion_rights`: principal names; without it the grants are listed by id |
 | `Application.Read.All` (optional) | `azure_managed_identity_configuration`: each identity's Graph app permissions; without it `graph_access` reads `not_authorized` and the run succeeds. `azure_entra_groups`: the account state of owners that are apps or managed identities; without it `groups_with_only_disabled_owners` reads null when any owner is one |
+| `DelegatedPermissionGrant.Read.All` (optional) | `azure_entra_service_principals`: delegated grants; without it the delegated grant fields read null and the run succeeds |
+| `User.Read.All` (optional) | `azure_entra_groups`: members' and owners' sign-in names, account state and guest status; without it users come back as an id only, so `member_details_readable` and `owner_details_readable` read false, the guest, disabled-user and disabled-owner figures read null, and the run succeeds. `azure_entra_service_principals`: user owners' names and account state; without it they read null, and so does `service_principals_with_only_disabled_owners` |
 | `Policy.Read.ConditionalAccess` or `Policy.Read.All` (optional) | `azure_entra_sign_ins`: the Conditional Access policies applied to each listed sign-in; without it they read null and the run succeeds |
-| `User.Read.All` (optional) | `azure_entra_groups`: members' and owners' sign-in names, account state and guest status; without it users come back as an id only, so `member_details_readable` and `owner_details_readable` read false, the guest, disabled-user and disabled-owner figures read null, and the run succeeds |
 | `Member.Read.Hidden` (optional) | `azure_entra_groups`: members of hidden-membership groups; without it they read unknown and are counted in `hidden_membership_groups_unread`. `Directory.Read.All` doesn't cover it |
 | `Organization.Read.All` (optional) | Every `azure_entra_*` fetcher but `azure_entra_dormant_identities`: tenant name and domain; without it the tenant id comes from `AZURE_TENANT_ID`, and the run fails only if that is unset too |
 
@@ -190,7 +191,7 @@ Identity and access:
 | Fetcher | Evidence |
 |---|---|
 | `azure_entra_app_registrations` | App registrations and each client secret and certificate with its expiry: expired, due within 30 days, or never expiring |
-| `azure_entra_service_principals` | Service principals: type, enabled state, owning tenant, and every secret, certificate and federated credential they can present |
+| `azure_entra_service_principals` | Service principals: type, enabled state, owning tenant, owners, every secret, certificate and federated credential they can present, and the API permissions they hold, with privileged Microsoft Graph permissions flagged |
 | `azure_entra_authentication_policy` | Allowed sign-in methods (weak and phishing-resistant flagged), registration campaign, security defaults, password protection and the Entra ID licence tier |
 | `azure_entra_conditional_access_policies` | Conditional Access policies: state (on, report-only, off), included and excluded users, groups, roles and apps, conditions, grant and session controls |
 | `azure_entra_mfa_status` | Each user's enabled state, last sign-in and MFA capability, with coverage for admins, members and guests |
