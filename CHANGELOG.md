@@ -12,6 +12,87 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Resource exclusions for Azure fetchers.** A shared helper,
+  `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
+  scope for resources outside the authorization boundary. Patterns are
+  case-insensitive globs, comma- or space-separated, each with a prefix:
+  `rg:` (resource group, read from the resource id when a record has no field
+  for it), `location:` (region, compared without case or spaces; a record with no
+  location never matches one) or `id:` (a resource id, which also covers the
+  resource's children). A bare pattern or any other prefix fails the run. An
+  adopter reads them from its `resource_exclusions` config field
+  (`AZURE_RESOURCE_EXCLUSIONS`), which can be set once for every adopter with
+  `platforms.azure.config.resource_exclusions`, as a `${env:VAR}` reference if
+  wanted. Its evidence keeps every excluded item in `results.excluded` with the
+  pattern that matched, echoes the patterns, lists the ones that matched
+  nothing, and counts each excluded kind and what stayed in scope
+  (`in_scope_<kind>s`). Every verdict, count and percentage covers only what
+  remains in scope; cross-references (routing, endpoint targets, failover
+  partners, egress paths) are still worked out against every record, so an
+  in-scope item keeps its verdict. With no patterns set the output is unchanged
+  apart from those empty, zero or total fields. Adopted by:
+  - `azure_resource_inventory` 0.3.0: resources by resource group, region or id.
+    An excluded resource leaves every count, the by-type and by-location tallies
+    (so the approved-regions check) and both coverage verdicts. Defender
+    assessments and policy states are joined against the whole inventory first,
+    then any about an excluded resource or its children leave every Defender and
+    Policy count.
+  - `azure_residual_resources` 0.2.0: orphaned resources (an empty resource group
+    through its own id) and role assignments by their scope. Orphans and deleted
+    principals are still found against every resource and assignment.
+  - `azure_defender_assessments` 0.3.0: each assessment follows the resource it is
+    about, by resource group or id. Assessments carry no region, so `location:`
+    never matches one, and subscription-level ones stay.
+  - `azure_policy_compliance` 0.3.0: non-compliant states and remediation
+    deployments follow their resource, and assignments and remediation tasks their
+    own scope. 30-day history pairs follow their resource (group or id) and are
+    dropped before recurrence is read. Excluded states get no evaluation-details
+    read and excluded tasks no deployment read. The service's subscription-wide
+    and per-assignment counts still include excluded resources.
+  - `azure_key_vault_configuration` 0.3.0: key vaults.
+  - `azure_key_vault_key_rotation` 0.3.0: key vaults and App Service certificates;
+    a vault's keys, secrets and certificates leave with it. App Service
+    certificates still read Key Vault auto-renew from every vault.
+  - `azure_storage_encryption_status` 0.3.0: storage accounts, with their blob
+    containers.
+  - `azure_backup_recovery_status` 0.2.0: Recovery Services vaults (with their
+    backup policies) and protected items; an item also leaves when an `rg:` or
+    `id:` pattern matches the resource it protects. A vault whose items all leave
+    stays in scope. The instructions move to plain lines.
+  - `azure_sql_managed_instance_configuration` 0.2.0 and
+    `azure_sql_managed_instance_encryption` 0.2.0: managed instances, with their
+    databases. An in-scope instance's audit logs still count when their
+    destination is excluded.
+  - `azure_sql_managed_instance_backups` 0.2.0: managed instances and instance
+    failover groups. A group leaves only when every instance it pairs is out, so
+    an in-scope instance's verdict holds when its partner is excluded.
+  - `azure_app_service_configuration` 0.4.0: web apps; an out-of-scope app gets
+    none of the per-app reads.
+  - `azure_app_service_plans` 0.2.0: plans and the web and function apps on them.
+    An in-scope site on an excluded plan stays on that plan's excluded entry and
+    still counts toward `total_sites` and the `sites_on_*` counts.
+  - `azure_app_service_backups` 0.2.0: web apps, function apps and deployment
+    slots (a slot follows its app), taken out before the Resource Graph inventory
+    check and the backup reads.
+  - `azure_network_security_groups` 0.4.0: network security groups, virtual
+    networks (with their subnets) and network interfaces; a NIC also leaves with
+    the virtual network its subnets sit in.
+  - `azure_private_endpoint_configuration` 0.2.0: private endpoints; an in-scope
+    endpoint to an excluded resource keeps its verdicts.
+  - `azure_private_dns_zone_configuration` 0.3.0: private DNS zones (global, so
+    `rg:` and `id:` only) with their links and record sets.
+  - `azure_vnet_egress_routing` 0.2.0: virtual networks, subnets, route tables,
+    network interfaces, Azure Firewalls and Virtual WAN hubs; a subnet leaves with
+    its VNet and a NIC with its subnet.
+  - `azure_log_analytics_workspaces` 0.2.0: workspaces, with their tables, data
+    exports and solutions.
+  - `azure_resource_diagnostic_settings` 0.3.0: every inventoried resource;
+    excluded resources aren't read, and an in-scope resource is still checked at
+    an excluded destination workspace. `resources_enumerated` still counts
+    everything Resource Graph returned.
+  - `azure_alert_rules` 0.2.0: alert rules, action groups and alert processing
+    rules; routing is still worked out against every action group and processing
+    rule.
 - **`azure_service_log_records`** (`EVD-AZURE-SERVICE-LOG-RECORDS`) — whether App
   Service HTTP logs and SQL Managed Instance audit events actually reach Log
   Analytics, read from the records: per app and slot, its state, the
