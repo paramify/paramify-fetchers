@@ -24,7 +24,9 @@ config_schema:
       resource's child resources). * matches any run of characters and ? one
       character. A matching private endpoint is listed under excluded with the
       pattern and left out of every count and verdict, and so is a target resource
-      only excluded endpoints connect to. The patterns are matched against the
+      only excluded endpoints connect to. An excluded endpoint gets none of the
+      per-endpoint reads (zone groups, Resource Graph lookups), so a failure
+      reading it cannot fail the run. The patterns are matched against the
       endpoints only: an in-scope endpoint whose target resource a pattern would
       match stays in scope with its verdicts, and that target still counts. A
       pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
@@ -121,6 +123,9 @@ evidence_set:
     Resources the resource_exclusions patterns take out are listed under excluded
     instead, each with the pattern that matched; every summary count, target
     resources and endpoint subnets included, covers only the in-scope endpoints.
+    total_target_resources and the target_resources_* counts still include a target
+    in an excluded resource group or region when an in-scope endpoint connects to it:
+    they describe what the in-scope endpoints reach.
 
     Which resources are left out of scope?
       - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope

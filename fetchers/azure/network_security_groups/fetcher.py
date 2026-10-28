@@ -600,19 +600,30 @@ def summarize(
     }
 
 
+def subnet_match(nic: dict, exclusions: ResourceExclusions):
+    """(pattern, reason, matched id) for the first pattern naming the NIC's virtual network or one of its subnets."""
+    for subnet_id in nic["subnet_ids"]:
+        vnet_id = subnet_id[: len(vnet_id_of(subnet_id))]
+        for reason, matched_id in (("virtual_network_matched", vnet_id), ("subnet_matched", subnet_id)):
+            pattern = exclusions.match(matched_id) if matched_id else None
+            if pattern:
+                return pattern, reason, matched_id
+    return None
+
+
 def split_network_interfaces(nics: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
-    """A NIC leaves scope when a pattern matches it or the virtual network its subnets sit in."""
+    """A NIC leaves scope when a pattern matches it, the virtual network its subnets sit in, or one of those subnets."""
     kept, excluded = exclusions.split(nics, "network_interface")
     in_scope = []
     for nic in kept:
-        vnet_ids = [s[: len(vnet_id_of(s))] for s in nic["subnet_ids"] if vnet_id_of(s)]
-        pattern = exclusions.match(vnet_ids[0]) if exclusions and vnet_ids else None
-        if pattern is None:
+        match = subnet_match(nic, exclusions) if exclusions else None
+        if match is None:
             in_scope.append(nic)
         else:
+            pattern, reason, matched_id = match
             excluded.append(excluded_item(
-                "network_interface", nic["name"], pattern, "virtual_network_matched", id=nic["id"],
-                resource_group=nic["resource_group"], location=nic["location"], matched_id=vnet_ids[0]))
+                "network_interface", nic["name"], pattern, reason, id=nic["id"],
+                resource_group=nic["resource_group"], location=nic["location"], matched_id=matched_id))
     return in_scope, excluded
 
 

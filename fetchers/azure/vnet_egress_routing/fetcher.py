@@ -537,6 +537,13 @@ def policy_threat_intel_mode(policy_id: str, policies_by_id: dict):
     return (mode if resolved or mode == "Deny" else None), resolved
 
 
+def routed_workload_subnets(firewall_id, subnets: list[dict]) -> int:
+    key = arm_id_key(firewall_id)
+    return sum(
+        1 for s in subnets if not s["platform_subnet"] and key in {arm_id_key(i) for i in s["appliance_firewall_ids"]}
+    )
+
+
 def firewall_record(firewall: dict, policies_by_id: dict, subnets: list[dict]) -> dict:
     policy_id = firewall.get("firewall_policy_id")
     policy = policies_by_id.get(arm_id_key(policy_id)) if policy_id else None
@@ -545,7 +552,6 @@ def firewall_record(firewall: dict, policies_by_id: dict, subnets: list[dict]) -
     ips = {c["private_ip_address"] for c in configs if c.get("private_ip_address")}
     if firewall.get("hub_private_ip_address"):
         ips.add(firewall["hub_private_ip_address"])
-    key = arm_id_key(firewall.get("id"))
     return {
         "id": firewall.get("id"),
         "name": firewall.get("name"),
@@ -566,10 +572,7 @@ def firewall_record(firewall: dict, policies_by_id: dict, subnets: list[dict]) -
         "policy_intrusion_detection_mode": policy.get("intrusion_detection_mode") if policy else None,
         "policy_sku_tier": policy.get("sku_tier") if policy else None,
         "effective_threat_intel_mode": chain_mode if policy_id else firewall.get("threat_intel_mode"),
-        "routed_workload_subnets": sum(
-            1 for s in subnets
-            if not s["platform_subnet"] and key in {arm_id_key(i) for i in s["appliance_firewall_ids"]}
-        ),
+        "routed_workload_subnets": routed_workload_subnets(firewall.get("id"), subnets),
     }
 
 
@@ -694,6 +697,19 @@ def split_network_interfaces(nics: list[dict], exclusions: ResourceExclusions) -
     return in_scope, excluded
 
 
+def recount_in_scope_subnets(vnets, subnets, tables, firewalls, excluded: list[dict]) -> None:
+    """Subnet counts on in-scope records leave excluded subnets out; a route table's subnet_ids still lists them."""
+    out = {arm_id_key(e["id"]) for e in excluded if e["kind"] == "subnet"}
+    if not out:
+        return
+    for vnet in vnets:
+        vnet["subnet_count"] -= sum(1 for s in out if vnet_id_of(s) == arm_id_key(vnet["id"]))
+    for table in tables:
+        table["associated"] = any(arm_id_key(s) not in out for s in table["subnet_ids"])
+    for firewall in firewalls:
+        firewall["routed_workload_subnets"] = routed_workload_subnets(firewall["id"], subnets)
+
+
 def split_records(exclusions: ResourceExclusions, vnets, subnets, tables, nics, firewalls, hubs) -> tuple:
     """Each collection's in-scope records, then every excluded entry; a subnet follows its virtual network's id."""
     kept, excluded = [], []
@@ -704,6 +720,7 @@ def split_records(exclusions: ResourceExclusions, vnets, subnets, tables, nics, 
             records, out = exclusions.split(records, kind)
         kept.append(records)
         excluded += out
+    recount_in_scope_subnets(kept[0], kept[1], kept[2], kept[4], excluded)
     return (*kept, excluded)
 
 
@@ -886,7 +903,7 @@ def main() -> int:
         )
 
     vnets, subnets, tables, nics, firewalls, hubs = build_records(*raw)
-    # Egress paths, appliance owners and firewall routing were resolved against every record, so in-scope verdicts hold.
+    # Egress paths and appliance owners were resolved against every record, so in-scope verdicts hold.
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
     vnets, subnets, tables, nics, firewalls, hubs, excluded = split_records(

@@ -27,7 +27,9 @@ config_schema:
       with it. Records are still matched against every private endpoint and
       virtual network, and duplicate names against every zone, so an in-scope
       zone's verdicts don't change: a name it shares with an excluded zone is
-      still a duplicate. A pattern without one of these prefixes fails the run.
+      still a duplicate. Every zone, excluded ones too, is still read in full (its
+      links and record sets), so a failed read on an excluded zone still fails
+      the run. A pattern without one of these prefixes fails the run.
       Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
       ${env:VAR}. Empty: every resource is in scope.
 

@@ -63,12 +63,15 @@ config_schema:
       character. A matching virtual network, subnet, route table, network
       interface, Azure Firewall or Virtual WAN hub is listed under excluded with
       the pattern and left out of every count and verdict; a subnet leaves with its
-      virtual network, and a network interface with its subnet. Egress paths,
-      appliance owners and the subnets routed through each firewall are still
-      worked out against every record, so an in-scope subnet routed through an
-      excluded firewall, route table or hub keeps its egress path, and an in-scope
-      firewall still counts the excluded subnets routed through it. A pattern
-      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      virtual network, and a network interface with its subnet. Egress paths and
+      appliance owners are still worked out against every record, so an in-scope
+      subnet routed through an excluded firewall, route table or hub keeps its
+      egress path. A firewall's routed_workload_subnets, a route table's
+      associated and a virtual network's subnet_count count only in-scope
+      subnets; a route table's subnet_ids still lists every subnet it is attached
+      to. Peerings are still read for every virtual network, excluded ones too,
+      so a failed read on one still fails the run. A pattern without one of these
+      prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
       resource is in scope.
 
@@ -174,7 +177,9 @@ evidence_set:
 
     Resources the resource_exclusions patterns take out are listed under excluded
     instead, each with the pattern that matched; a network interface taken out with
-    its subnet names that subnet in matched_id.
+    its subnet names that subnet in matched_id. An in-scope firewall that routes only
+    excluded subnets counts in azure_firewalls_with_no_routed_subnet, and an in-scope
+    route table attached only to excluded subnets counts in unassociated_route_tables.
 
     Which resources are left out of scope?
       - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope

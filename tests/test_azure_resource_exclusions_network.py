@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
+from types import ModuleType
+from types import SimpleNamespace as NS
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
 sys.path.insert(0, str(AZURE / "_shared"))
 
+import resource_graph  # noqa: E402
 from resource_exclusions import ENV  # noqa: E402
 
 SUB = "/subscriptions/s1"
@@ -143,6 +147,19 @@ def test_nsg_exclude_by_group_and_region_and_nics_follow_their_virtual_network(m
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
 
 
+def test_nsg_nic_leaves_with_a_subnet_an_id_pattern_names(monkeypatch, tmp_path):
+    app = f"{NET_IN}/virtualNetworks/vnet-in/subnets/app"
+    code, evidence = run_nsg(monkeypatch, tmp_path, f"id:{app}")
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0
+    assert _excluded(evidence) == [("network_interface", "nic-in", f"id:{app}", "subnet_matched")]
+    assert results["excluded"][0]["matched_id"] == app
+    assert [n["name"] for n in results["network_interfaces"]] == ["nic-follow", "nic-out"]
+    # Subnets are not taken out on their own here: the named one still counts with its virtual network.
+    assert (summary["total_subnets"], summary["total_network_interfaces"], summary["excluded_network_interfaces"]) == (3, 2, 1)
+    assert summary["resource_exclusion_patterns_unmatched"] == []
+
+
 def test_nsg_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence = run_nsg(monkeypatch, tmp_path, "rg-out")
     assert code == 1
@@ -153,39 +170,70 @@ def test_nsg_bare_pattern_fails_the_run(monkeypatch, tmp_path):
 
 STORAGE_IN = f"{IN_RG}/providers/Microsoft.Storage/storageAccounts/stin"
 STORAGE_OUT = f"{OUT_RG}/providers/Microsoft.Storage/storageAccounts/stout"
+PUBLIC_ACCESS = {STORAGE_IN.lower(): "Enabled", STORAGE_OUT.lower(): "Disabled"}
+PE_OUT_VNET = f"{NET_OUT}/virtualNetworks/vnet"
+PE_SPECS = (
+    # An in-scope endpoint to a resource in the excluded group.
+    (NET_IN, "pe-in", "regionwest", STORAGE_OUT),
+    (NET_OUT, "pe-out", "regionwest", STORAGE_IN),
+    (NET_IN, "pe-east", "regioneast", STORAGE_IN),
+)
 
 
-def _endpoint(rg_net, name, location, target):
-    conn = {"name": name, "manual": False, "target_resource_id": target, "target_resource_name": target.rsplit("/", 1)[1],
-            "target_resource_type": "Microsoft.Storage/storageAccounts", "group_ids": ["blob"],
-            "checked_resource_id": target, "target_slot": None, "status": "Approved", "status_description": None,
-            "actions_required": None, "provisioning_state": "Succeeded"}
-    subnet = f"{rg_net}/virtualNetworks/vnet/subnets/pe"
-    record = {"id": f"{rg_net}/privateEndpoints/{name}", "name": name, "location": location, "tags": {},
-              "provisioning_state": "Succeeded", "subnet_id": subnet, "virtual_network_id": pe.virtual_network_id(subnet),
-              "virtual_network_name": "vnet", "network_interface_ids": [], "custom_dns_configs": [], "connections": [conn]}
-    lookups = {STORAGE_IN.lower(): {"public_network_access": "Enabled"},
-               STORAGE_OUT.lower(): {"public_network_access": "Disabled"}}
-    return pe.endpoint_record(record, [], lookups, set(), {}, set(), None)
+def _pe_model(rg_net, name, location, target):
+    state = NS(status="Approved", description=None, actions_required=None)
+    conn = NS(name=name, private_link_service_id=target, group_ids=["blob"], provisioning_state="Succeeded",
+              private_link_service_connection_state=state)
+    return NS(id=f"{rg_net}/privateEndpoints/{name}", name=name, location=location, tags={}, provisioning_state="Succeeded",
+              subnet=NS(id=f"{rg_net}/virtualNetworks/vnet/subnets/pe"), private_link_service_connections=[conn])
 
 
 def _pe_records():
-    return [
-        # An in-scope endpoint to a resource in the excluded group.
-        _endpoint(NET_IN, "pe-in", "regionwest", STORAGE_OUT),
-        _endpoint(NET_OUT, "pe-out", "regionwest", STORAGE_IN),
-        _endpoint(NET_IN, "pe-east", "regioneast", STORAGE_IN),
-    ]
+    lookups = {k: {"public_network_access": v} for k, v in PUBLIC_ACCESS.items()}
+    records = [pe.endpoint_record(pe.project_endpoint(_pe_model(*spec)), [], lookups, set(), {}, set(), None)
+               for spec in PE_SPECS]
+    return sorted(records, key=lambda r: r["id"])
 
 
-def run_pe(monkeypatch, tmp_path, patterns):
-    monkeypatch.setattr(pe, "collect_endpoints", lambda sub, cred, collector: _pe_records())
+def _fake_pe_sdk(monkeypatch, reads: list, fail: set):
+    """The network client and Resource Graph over PE_SPECS. Each zone-group list and each id looked up is appended to
+    `reads`; a read naming an endpoint or a lower-cased id in `fail` raises."""
+
+    def zone_groups(name, rg):
+        reads.append(("zone_groups", name))
+        if name in fail:
+            raise RuntimeError("forbidden")
+        return []
+
+    def query_all(graph, scope, query):
+        ids = re.findall(r"@'([^']*)'", query)
+        reads.extend(("graph", i) for i in ids)
+        if fail & set(ids):
+            raise RuntimeError("forbidden")
+        if "mv-expand" in query:
+            return {"rows": []}
+        return {"rows": [{"id": i, "public_network_access": PUBLIC_ACCESS[i]} for i in ids if i in PUBLIC_ACCESS]}
+
+    network = ModuleType("azure.mgmt.network")
+    network.NetworkManagementClient = lambda **kw: NS(
+        private_endpoints=NS(list_by_subscription=lambda: [_pe_model(*spec) for spec in PE_SPECS]),
+        private_dns_zone_groups=NS(list=zone_groups),
+    )
+    monkeypatch.setitem(sys.modules, "azure.mgmt.network", network)
+    monkeypatch.setattr(resource_graph, "query_all", query_all)
+    monkeypatch.setattr(pe, "resource_graph_client", lambda cred: object())
+    monkeypatch.setattr(pe, "readable_scopes", lambda cred, collector: None)
+
+
+def run_pe(monkeypatch, tmp_path, patterns, reads=None, fail=()):
+    _fake_pe_sdk(monkeypatch, [] if reads is None else reads, set(fail))
     return _run(pe, monkeypatch, tmp_path, patterns, "azure_private_endpoint_configuration")
 
 
 def test_private_endpoints_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path):
     code, evidence = run_pe(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert evidence["results"]["private_endpoints"] == _pe_records()
     assert evidence["summary"] == {
         **pe.summarize(_pe_records()), "provider_registration_status": "registered",
         **_added_fields({"private_endpoint": 3}),
@@ -214,6 +262,28 @@ def test_private_endpoints_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence = run_pe(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["summary"]["total_private_endpoints"] == 3
+
+
+def test_excluded_private_endpoints_get_no_per_endpoint_reads(monkeypatch, tmp_path):
+    reads: list = []
+    code, evidence = run_pe(monkeypatch, tmp_path, "rg:rg-out", reads)
+    assert code == 0
+    assert _excluded(evidence) == [("private_endpoint", "pe-out", "rg:rg-out", "resource_matched")]
+    assert sorted(n for kind, n in reads if kind == "zone_groups") == ["pe-east", "pe-in"]
+    graph_ids = {i for kind, i in reads if kind == "graph"}
+    assert PE_OUT_VNET.lower() not in graph_ids and f"{NET_IN}/virtualNetworks/vnet".lower() in graph_ids
+    # The excluded endpoint's target is still read, because an in-scope endpoint connects to it too.
+    assert STORAGE_IN.lower() in graph_ids
+
+
+def test_a_failing_read_of_an_excluded_private_endpoint_does_not_fail_the_run(monkeypatch, tmp_path):
+    fail = {"pe-out", PE_OUT_VNET.lower()}
+    code, evidence = run_pe(monkeypatch, tmp_path, None, fail=fail)
+    assert code == 1 and len(evidence["metadata"]["api_failures"]) == 2
+    code, evidence = run_pe(monkeypatch, tmp_path, "rg:rg-out", fail=fail)
+    assert code == 0 and evidence["metadata"]["api_failures"] == []
+    assert [e["name"] for e in evidence["results"]["private_endpoints"]] == ["pe-east", "pe-in"]
+    assert evidence["summary"]["endpoints_private_dns_zone_group_unknown"] == 0
 
 
 # --- private_dns_zone_configuration ---
@@ -352,10 +422,10 @@ def test_egress_exclude_by_group_and_region_but_keep_routing_through_excluded_re
     ]
     follow = next(e for e in results["excluded"] if e["name"] == "nic-follow")
     assert follow["matched_id"] == f"{VNET_OUT}/subnets/x"
-    # The in-scope subnet keeps the path its excluded route table gives it, and the firewall still counts both subnets.
+    # The in-scope subnet keeps the path its excluded route table gives it; the firewall counts only that subnet.
     app = next(s for s in results["subnets"] if s["name"] == "app")
     assert (app["egress_path"], app["appliance_owner"], app["appliance_firewall_ids"]) == ("appliance", "azure_firewall", [FIREWALL])
-    assert results["azure_firewalls"][0]["routed_workload_subnets"] == 2
+    assert results["azure_firewalls"][0]["routed_workload_subnets"] == 1
     assert [n["name"] for n in results["network_interfaces"]] == ["nic-in"]
     assert (summary["total_virtual_networks"], summary["in_scope_virtual_networks"], summary["excluded_virtual_networks"]) == (1, 1, 2)
     assert (summary["total_subnets"], summary["workload_subnets"], summary["excluded_subnets"]) == (2, 1, 2)
@@ -365,6 +435,29 @@ def test_egress_exclude_by_group_and_region_but_keep_routing_through_excluded_re
     assert (summary["total_azure_firewalls"], summary["azure_firewalls_with_no_routed_subnet"]) == (1, 0)
     assert (summary["in_scope_virtual_hubs"], summary["excluded_virtual_hubs"]) == (0, 0)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
+
+
+def test_egress_firewall_routing_only_excluded_subnets_has_no_routed_subnet(monkeypatch, tmp_path):
+    code, evidence = run_egress(monkeypatch, tmp_path, f"rg:rg-out, id:{VNET_IN}/subnets/app")
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0
+    [firewall] = results["azure_firewalls"]
+    assert firewall["routed_workload_subnets"] == 0
+    assert (summary["total_azure_firewalls"], summary["azure_firewalls_with_no_routed_subnet"]) == (1, 1)
+
+
+def test_egress_route_table_attached_only_to_excluded_subnets_is_unassociated(monkeypatch, tmp_path):
+    code, evidence = run_egress(monkeypatch, tmp_path, f"id:{VNET_IN}/subnets/app, id:{VNET_OUT}")
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0
+    [table] = results["route_tables"]
+    assert table["name"] == "rt-out" and table["associated"] is False
+    assert table["subnet_ids"] == sorted([f"{VNET_IN}/subnets/app", f"{VNET_OUT}/subnets/x"])
+    assert (summary["total_route_tables"], summary["unassociated_route_tables"]) == (1, 1)
+    # A subnet excluded by id: leaves its in-scope virtual network's subnet_count.
+    vnet_in = next(v for v in results["virtual_networks"] if v["name"] == "vnet-in")
+    assert vnet_in["subnet_count"] == 1
+    assert ("subnet", "app", f"id:{VNET_IN}/subnets/app", "resource_matched") in _excluded(evidence)
 
 
 def test_egress_bare_pattern_fails_the_run(monkeypatch, tmp_path):
