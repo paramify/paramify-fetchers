@@ -3496,7 +3496,7 @@ Summary fields:
 
 
 ### azure_waf_ddos_activity
-Short Description: Shows whether DoS protection is watched, not only switched on: what each WAF blocked or only logged, whether WAF and DDoS attack alerts reach someone, and any DDoS mitigations.
+Short Description: Shows whether DoS protection is watched: what each WAF blocked or only logged, whether WAF and DDoS attack alerts reach someone, and DDoS mitigations, which read unknown without DDoS Protection.
 
 Script: fetchers/azure/waf_ddos_activity/fetcher.py (shared helper: fetchers/azure/_shared/alert_routing.py)
 
