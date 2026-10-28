@@ -2653,6 +2653,74 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/entra_service_principals — federated credentials arrive only via $expand",
     ),
     (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["owners", "app_role_assignments", "app_roles"],
+        "azure/entra_service_principals — the $expand targets and the resource's role "
+        "names; without them every principal reads as ownerless and permission-free",
+    ),
+    (
+        "msgraph.generated.models.user",
+        "User",
+        ["odata_type", "display_name", "user_principal_name", "account_enabled"],
+        "azure/entra_service_principals — an owner's name and account state; without "
+        "them owner_details_readable reads false and the disabled-owner count null",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["odata_type", "display_name", "account_enabled"],
+        "azure/entra_service_principals — a service principal owner's name and account state",
+    ),
+    (
+        "msgraph.generated.models.application",
+        "Application",
+        ["owners"],
+        "azure/entra_service_principals — every app registration would read as ownerless",
+    ),
+    (
+        "msgraph.generated.models.app_role_assignment",
+        "AppRoleAssignment",
+        ["app_role_id", "resource_id", "resource_display_name", "created_date_time"],
+        "azure/entra_service_principals — the application permissions a principal holds",
+    ),
+    (
+        "msgraph.generated.models.app_role",
+        "AppRole",
+        ["id", "value"],
+        "azure/entra_service_principals — names each application permission",
+    ),
+    (
+        "msgraph.generated.models.o_auth2_permission_grant",
+        "OAuth2PermissionGrant",
+        ["client_id", "consent_type", "principal_id", "resource_id", "scope"],
+        "azure/entra_service_principals — the delegated grants a principal holds",
+    ),
+    (
+        "msgraph.generated.service_principals.service_principals_request_builder",
+        "ServicePrincipalsRequestBuilder.ServicePrincipalsRequestBuilderGetQueryParameters",
+        ["select", "expand"],
+        "azure/entra_service_principals — owners and app role assignments arrive via $expand",
+    ),
+    (
+        "msgraph.generated.service_principals.item.owners.owners_request_builder",
+        "OwnersRequestBuilder.OwnersRequestBuilderGetQueryParameters",
+        ["select"],
+        "azure/entra_service_principals — owners past the 20-item $expand limit",
+    ),
+    (
+        "msgraph.generated.applications.item.owners.owners_request_builder",
+        "OwnersRequestBuilder.OwnersRequestBuilderGetQueryParameters",
+        ["select"],
+        "azure/entra_service_principals — owners past the 20-item $expand limit",
+    ),
+    (
+        "msgraph.generated.service_principals.item.service_principal_item_request_builder",
+        "ServicePrincipalItemRequestBuilder.ServicePrincipalItemRequestBuilderGetQueryParameters",
+        ["select"],
+        "azure/entra_service_principals — the resource principal's app roles",
+    ),
+    (
         "msgraph.generated.models.group",
         "Group",
         [
@@ -3926,6 +3994,7 @@ GRAPH_BUILDERS = [
     ("group_setting_templates", "azure/entra_authentication_policy"),
     ("subscribed_skus", "azure/entra_authentication_policy"),
     ("directory_objects", "azure/residual_resources — getByIds; without it no deleted principal is found"),
+    ("oauth2_permission_grants", "azure/entra_service_principals — delegated grants"),
 ]
 
 
@@ -3954,6 +4023,22 @@ def test_graph_admin_membership_builders_present() -> None:
     assert getattr(group, "transitive_members", None) is not None, (
         "groups.by_group_id(...).transitive_members is gone.\n"
         "  affected fetchers: azure/entra_mfa_status — admins via a group would be missed"
+    )
+
+
+def test_graph_service_principal_access_builders_present() -> None:
+    """The per-item builders azure/entra_service_principals reads past the $expand limit."""
+    client = _build("msgraph", "GraphServiceClient")
+    oid = "00000000-0000-0000-0000-000000000000"
+    sp = client.service_principals.by_service_principal_id(oid)
+    for name in ("owners", "app_role_assignments"):
+        assert getattr(sp, name, None) is not None, (
+            f"service_principals.by_service_principal_id(...).{name} is gone.\n"
+            "  affected fetchers: azure/entra_service_principals"
+        )
+    assert getattr(client.applications.by_application_id(oid), "owners", None) is not None, (
+        "applications.by_application_id(...).owners is gone.\n"
+        "  affected fetchers: azure/entra_service_principals"
     )
 
 
