@@ -624,21 +624,21 @@ Summary fields:
 
 **What was checked?**
 - `total_directory_roles_activated` — Number of directory roles activated in the tenant (a role is activated the first time anyone is assigned it; a role never assigned isn't listed and has no holders); null if the role list couldn't be read
-- `roles_with_no_members` — Number of activated roles nobody holds now (assigned once, then removed); null if the role list or any role's members couldn't be read
-- `total_role_assignments` — Number of active role assignments across all activated roles, one per role per holder (user, group, app or other account); PIM-eligible holders who haven't activated aren't listed; null if the role list or any role's members couldn't be read
-- `distinct_principals_with_a_directory_role` — Number of distinct users, groups, apps and other accounts holding at least one directory role; null if the role list or any role's members couldn't be read
+- `roles_with_no_members` — Number of activated roles nobody holds now (assigned once, then removed); null if the role list or any role's members or service principals couldn't be read
+- `total_role_assignments` — Number of active role assignments across all activated roles, one per role per holder (user, group, app or other account); PIM-eligible holders who haven't activated aren't listed; null if the role list or any role's members or service principals couldn't be read
+- `distinct_principals_with_a_directory_role` — Number of distinct users, groups, apps and other accounts holding at least one directory role; null if the role list or any role's members or service principals couldn't be read
 
 **How many Global Administrators are there?**
-- `global_administrator_count` — Number of users, groups and apps holding Global Administrator directly; a group counts once, not its members; null if the role list or the Global Administrator role's members couldn't be read
+- `global_administrator_count` — Number of users, groups and apps holding Global Administrator directly; a group counts once, not its members; null if the role list or the Global Administrator role's members or service principals couldn't be read
 - `global_administrator_role_activated` — True if the Global Administrator role is activated in the tenant; false if not, and `global_administrator_count` is 0; null if the role list couldn't be read
 
 **Who holds privileged roles?**
 - `privileged_roles_activated` — Number of activated privileged roles: the 24 built-in roles the fetcher treats as tenant-wide admin power, such as Global Administrator, Privileged Role Administrator, User Administrator, Security Administrator and Global Reader (the full list is in the output); null if the role list couldn't be read
-- `privileged_roles_with_members` — Number of privileged roles at least one user, group or app holds; null if the role list or any privileged role's members couldn't be read
-- `privileged_role_names_assigned` — List of the privileged role names at least one user, group or app holds; null if the role list or any privileged role's members couldn't be read
-- `privileged_role_assignments` — Number of assignments to privileged roles, one per role per holder; null if the role list or any privileged role's members couldn't be read
-- `distinct_privileged_principals` — Number of distinct users, groups, apps and other accounts holding at least one privileged role; null if the role list or any privileged role's members couldn't be read
-- `privileged_assignment_percentage` — Percentage of role assignments that are to privileged roles = `privileged_role_assignments` / `total_role_assignments` × 100 (a whole number, 0–100); 0 when `total_role_assignments` is 0; null if the role list or any role's members couldn't be read
+- `privileged_roles_with_members` — Number of privileged roles at least one user, group or app holds; null if the role list or any privileged role's members or service principals couldn't be read
+- `privileged_role_names_assigned` — List of the privileged role names at least one user, group or app holds; null if the role list or any privileged role's members or service principals couldn't be read
+- `privileged_role_assignments` — Number of assignments to privileged roles, one per role per holder; null if the role list or any privileged role's members or service principals couldn't be read
+- `distinct_privileged_principals` — Number of distinct users, groups, apps and other accounts holding at least one privileged role; null if the role list or any privileged role's members or service principals couldn't be read
+- `privileged_assignment_percentage` — Percentage of role assignments that are to privileged roles = `privileged_role_assignments` / `total_role_assignments` × 100 (a whole number, 0–100); 0 when `total_role_assignments` is 0; null if the role list or any role's members or service principals couldn't be read
 
 **What kind of account holds privileged power?**
 - `users_in_privileged_roles` — Number of privileged-role assignments held by users; a user holding two privileged roles counts twice; null if the role list or any privileged role's members couldn't be read
