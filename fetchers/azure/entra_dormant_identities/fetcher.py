@@ -358,6 +358,21 @@ def _group_members(client, collector, group_ids) -> tuple:
     return out, not_found
 
 
+def _role_members(client, collector, role: dict) -> List[dict]:
+    """A directory role's members, with the service principals v1.0 /members leaves out read from its cast."""
+    path, name = f"/directoryRoles/{role.get('id')}/members", role.get("displayName")
+    members = _graph_list(client, collector, f"graph.directoryRoles({name}).members.get", f"{path}?$select=id") or []
+    cast = _graph_list(client, collector, f"graph.directoryRoles({name}).members.servicePrincipal.get",
+                       f"{path}/microsoft.graph.servicePrincipal?$select=id") or []
+    seen = {(m.get("id") or "").lower() for m in members}
+    for sp in cast:
+        sid = (sp.get("id") or "").lower()
+        if sid and sid not in seen:
+            seen.add(sid)
+            members.append({**sp, "@odata.type": ODATA_SP})
+    return members
+
+
 def _lookup(client, collector, ids: List[str]) -> Optional[Dict[str, dict]]:
     """Directory objects by id, or None if the lookup failed."""
     found: Dict[str, dict] = {}
@@ -419,10 +434,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
     before = len(collector.failures)
     roles = _graph_list(client, collector, "graph.directoryRoles.get", "/directoryRoles") or []
     for role in roles:
-        role["members"] = _graph_list(
-            client, collector, f"graph.directoryRoles({role.get('displayName')}).members.get",
-            f"/directoryRoles/{role.get('id')}/members?$select=id",
-        ) or []
+        role["members"] = _role_members(client, collector, role)
     status["directory_roles"] = READ if len(collector.failures) == before else NOT_READ
 
     before = len(collector.failures)

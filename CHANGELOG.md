@@ -437,6 +437,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_dormant_identities` 0.2.0 finds service principals that hold a
+  directory role.** Microsoft Graph v1.0 `/directoryRoles/{id}/members` can leave
+  out every service principal holding the role, so
+  `service_principals_holding_directory_roles` could read 0 and those service
+  principals were never checked for dormancy as directory role holders. Each
+  role's service principals are now also read through the
+  `/members/microsoft.graph.servicePrincipal` cast and added once each; if that
+  read fails, `directory_roles_readable` is false and the directory counts read
+  null.
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
   collection as a success.** A 200 response that is not JSON, for example a
   single sign-on or instance hibernation page, and a response whose
