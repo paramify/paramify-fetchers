@@ -97,6 +97,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Azure DevOps and code scanning | [azure_devops_permissions](#azure_devops_permissions) | `EVD-AZURE-DEVOPS-PERMISSIONS` |
 | Azure DevOps and code scanning | [azure_devops_pipelines](#azure_devops_pipelines) | `EVD-AZURE-DEVOPS-PIPELINES` |
 | Azure DevOps and code scanning | [azure_devops_service_connections](#azure_devops_service_connections) | `EVD-AZURE-DEVOPS-SERVICE-CONNECTIONS` |
+| Azure DevOps and code scanning | [azure_devops_work_items](#azure_devops_work_items) | `EVD-AZURE-DEVOPS-WORK-ITEMS` |
 | Azure DevOps and code scanning | [checkov_bicep](#checkov_bicep) | `EVD-CHECKOV-BICEP` |
 
 ## Identity and access
@@ -5009,13 +5010,13 @@ Summary fields:
 
 **Are audit events streamed somewhere that keeps them?**
 - `streams` — Number of audit streams (null if the list couldn't be read)
-- `streams_delivering` — Number of audit streams that are enabled or backfilling
-- `streams_not_delivering` — List of audit streams (by name, or id) that are disabled, deleted or otherwise not delivering
-- `streams_by_target` — Number of audit streams for each destination type (Azure Monitor Logs, Splunk, Azure Event Grid)
+- `streams_delivering` — Number of audit streams that are enabled or backfilling; null if the streams couldn't be listed
+- `streams_not_delivering` — List of audit streams (by name, or id) that are disabled, deleted or otherwise not delivering; null if the streams couldn't be listed
+- `streams_by_target` — Number of audit streams for each destination type (Azure Monitor Logs, Splunk, Azure Event Grid); null if the streams couldn't be listed
 
 **Are the streamed events actually arriving?**
-- `azure_monitor_streams_with_rows` — Number of Azure Monitor Logs streams whose workspace has received this organization's audit events in the window
-- `azure_monitor_streams_missing_rows` — Number of delivering Azure Monitor Logs streams whose workspace has none of this organization's events, although an organization-level event newer than the stream and more than an hour old should have arrived
+- `azure_monitor_streams_with_rows` — Number of Azure Monitor Logs streams whose workspace has received this organization's audit events in the window; null if the streams couldn't be listed or an Azure Monitor Logs stream's workspace couldn't be checked
+- `azure_monitor_streams_missing_rows` — Number of delivering Azure Monitor Logs streams whose workspace has none of this organization's events, although an organization-level event newer than the stream and more than an hour old should have arrived; null if the streams couldn't be listed or an Azure Monitor Logs stream's workspace couldn't be checked
 
 
 ### azure_devops_identities
@@ -5337,6 +5338,70 @@ Summary fields:
   - which classic pipelines may use a connection (pipeline permissions limit YAML pipelines only);
   - who holds the User, Creator and Administrator roles on each connection;
   - projects the identity can't see.
+
+
+### azure_devops_work_items
+Short Description: Shows Azure DevOps change and security work items with their state, owner, planned date and approval, the changes linked to them, and which security work is open, overdue or unassigned.
+
+Script: fetchers/azure/devops_work_items/fetcher.py (uses the shared Azure DevOps client fetchers/azure/_shared/devops_rest.py)
+
+Access: A personal access token for the organization with Work Items, Code, and Project and Team (all Read), or an Entra identity that is a reader in each project.
+
+Commands Executed:
+- `GET _apis/connectionData` — identifies the signed-in user (token or Entra ID)
+- `GET _apis/projects` — lists projects
+- `GET _apis/wit/workitemtypes` (per project) — the project's work item types and which of their states are finished
+- `POST _apis/wit/wiql` (per project) — a read-only query for the selected types or tags, changed in the window or still open
+- `POST _apis/wit/workitemsbatch` (200 items at a time) — each item's fields and links
+- `GET _apis/wit/workItems/{id}/updates` (per item) — its state history, to see when and by whom it was approved
+- `GET _apis/wit/workItems/{id}/comments` (per item) — who commented when, and whether a comment matches the approval pattern; the text isn't kept
+- `GET _apis/tfvc/changesets/{id}` (per linked changeset) — when the change was made and by whom
+
+Output: `azure_devops_work_items_<organization>.json` — every selected work item with its state, priority, owner, dates, state history and approval, and the changesets, commits, pull requests and builds linked to it.
+
+Summary fields:
+
+**What was collected?**
+- `lookback_days` — Number of days back that changed items are collected; open items are collected however old
+- `work_item_types` — List of work item types that record changes, as configured (default Change Request)
+- `work_item_tags` — List of tags that mark security work, as configured (default Security)
+- `projects_collected` — Number of projects whose work items were read
+- `work_item_types_missing` — List of configured change types that no project defines; null if a project's items couldn't be listed
+- `work_items_total` — Number of work items collected: items of a configured type or with a configured tag, changed in the window or still open; null if a project's items couldn't be listed
+- `work_items_by_type` — Number of collected work items of each type; null if a project's items couldn't be listed
+- `work_items_by_state_category` — Number of collected work items in each state category; null if a project's items couldn't be listed:
+  - Proposed (not started)
+  - InProgress (being worked on)
+  - Resolved (done, waiting to be closed)
+  - Completed (finished)
+  - Removed (dropped)
+- `work_items_open` — Number of collected work items that are open, meaning their state is in neither the Completed nor the Removed category; null if a project's items couldn't be listed
+- `approval_history_collected` — True if every collected item's state history and comments were read; false if not
+
+**Are changes approved and linked to what they changed?**
+- `change_items` — Number of collected items of a configured change type; null if a project's items couldn't be listed
+- `change_items_finished` — Number of change items in a Completed or Removed state; null if a project's items couldn't be listed
+- `change_items_approved` — Number of change items that were approved, meaning they moved into a configured approval state (default Approved) or got a comment whose text matches the approval pattern (by default, a line starting "Approved"); null if a project's items or a change item's history or comments couldn't be read
+- `finished_change_items_without_approval` — List of finished change items (by id) that were never approved; null if a project's items or a change item's history or comments couldn't be read
+- `change_items_with_linked_changes` — Number of change items linked to a TFVC changeset, Git commit or pull request; null if a project's items couldn't be listed
+- `finished_change_items_without_linked_change` — List of finished change items (by id) linked to no changeset, commit or pull request; null if a project's items couldn't be listed
+- `change_items_changed_before_approval` — List of change items (by id) with a linked TFVC changeset made before the item was approved; null if a project's items, a change item's history or comments, or a linked changeset couldn't be read
+- `change_items_approved_by_change_author` — List of change items (by id) approved by the person who made or checked in one of its linked changesets; null if a project's items, a change item's history or comments, or a linked changeset couldn't be read
+
+**Is security work owned and on time?**
+- `tagged_items_open` — Number of open items with a configured tag; null if a project's items couldn't be listed
+- `tagged_items_open_by_priority` — Number of open tagged items at each priority (1 is highest), with unset for an item with no priority; null if a project's items couldn't be listed
+- `tagged_items_overdue` — List of open tagged items (by id) whose planned date has passed, meaning the first set of their due, target or finish date; null if a project's items couldn't be listed
+- `tagged_items_overdue_high_priority` — List of overdue tagged items (by id) at priority 1 or 2, or severity 1 or 2; null if a project's items couldn't be listed
+- `tagged_items_open_unassigned` — List of open tagged items (by id) assigned to no one; null if a project's items couldn't be listed
+- `tagged_items_open_without_planned_date` — Number of open tagged items with no due, target or finish date; null if a project's items couldn't be listed
+
+**What isn't collected?**
+- `not_collected` — What the fetcher deliberately doesn't collect, by area:
+  - text (descriptions, comment text and attachments; a comment is only checked against the approval pattern);
+  - git_change_dates (linked Git commits and pull requests are kept by id only);
+  - items_outside_selection (other types without a configured tag, and finished items not changed in the window);
+  - projects_not_visible (projects and items the identity can't see).
 
 
 ### checkov_bicep
