@@ -54,9 +54,11 @@ evidence_set:
   reference_id: EVD-AZURE-ENTRA-DIAGNOSTIC-SETTINGS
   name: Azure Entra ID Diagnostic Settings
   instructions: >
-    Script: azure/entra_diagnostic_settings/fetcher.py. ARM REST at tenant scope, api-version 2017-04-01:
-    microsoft.aadiam/diagnosticSettings and diagnosticSettingsCategories. A
-    category counts as exported when a setting lists it enabled. Each destination
+    Script: azure/entra_diagnostic_settings/fetcher.py. ARM REST at tenant scope:
+    microsoft.aadiam/diagnosticSettings (api-version 2017-04-01) and
+    diagnosticSettingsCategories (2017-04-01-preview, the only version it answers). A
+    category counts as exported when a setting lists it enabled; categories_not_exported
+    is null when the category list can't be read. Each destination
     workspace's SecurityInsights onboardingStates decides to_sentinel_workspace
     (null when that workspace isn't readable). Needs an Entra role that reads
     tenant diagnostic settings (Security Reader or Global Reader), plus Microsoft

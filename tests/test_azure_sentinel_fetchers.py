@@ -1757,7 +1757,7 @@ EXTRA_ARM = {
             {"category": "ProvisioningLogs", "enabled": False}]}},
         {"name": "archive", "properties": {"storageAccountId": f"{SA}/starchive", "logs": [
             {"category": "NonInteractiveUserSignInLogs", "enabled": True}]}}]},
-    ("/providers/microsoft.aadiam/diagnosticSettingsCategories", "2017-04-01"): {"value": [
+    ("/providers/microsoft.aadiam/diagnosticSettingsCategories", "2017-04-01-preview"): {"value": [
         {"name": n} for n in ("AuditLogs", "SignInLogs", "NonInteractiveUserSignInLogs", "ProvisioningLogs")]},
     (f"{WS_A}/providers/Microsoft.Authorization/roleAssignments", "2022-04-01"): {"value": [
         assignment("u-purger", "User", "purger", WS_A),
@@ -1824,6 +1824,16 @@ def test_entra_diagnostic_settings(azure, tmp_path):
     coverage = {c["category"]: c for c in ev["results"]["category_coverage"]}
     assert coverage["NonInteractiveUserSignInLogs"]["to_storage"] is True
     assert coverage["NonInteractiveUserSignInLogs"]["to_sentinel_workspace"] is False
+
+
+def test_entra_diagnostic_settings_unread_categories_leave_not_exported_unknown(azure, tmp_path):
+    azure.arm[("/providers/microsoft.aadiam/diagnosticSettingsCategories", "2017-04-01-preview")] = Resp(
+        400, {"Message": "Invalid api-version query string value."})
+    code, ev = run("entra_diagnostic_settings", tmp_path)
+    s = ev["summary"]
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and ev["results"]["categories_available"] is None
+    assert s["categories_not_exported"] is None and s["categories_exported"] == 3
+    assert s["audit_and_signin_logs_to_sentinel"] is True
 
 
 def test_entra_diagnostic_settings_wrong_tenant_fails(azure, tmp_path, monkeypatch):
@@ -1925,6 +1935,17 @@ def test_entra_risky_users_other_account_read_errors_fail(azure, tmp_path):
     azure.arm[("/v1.0/users/u-admin", None)] = Resp(400, {"error": {"code": "BadRequest", "message": "bad"}})
     code, ev = run("entra_risky_users", tmp_path)
     assert code == 1 and ev["metadata"]["partial_failure"] is True
+
+
+def test_entra_risky_users_unread_roles_leave_privileged_figures_unknown(azure, tmp_path):
+    azure.arm[("/v1.0/directoryRoles", None)] = Resp(
+        403, {"error": {"code": "Authorization_RequestDenied", "message": "Insufficient privileges to complete the operation."}})
+    code, ev = run("entra_risky_users", tmp_path)
+    s = ev["summary"]
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and s["open_risk_users"] == 2
+    assert s["privileged_open_risk_users"] is None and s["privileged_open_risk_users_enabled"] is None
+    assert s["privileged_principals"] is None
+    assert all(u["privileged_roles"] is None and "account_enabled" not in u for u in ev["results"]["risky_users"])
 
 
 def test_entra_risky_users_without_p2_is_a_state(azure, tmp_path):

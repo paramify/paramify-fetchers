@@ -45,9 +45,9 @@ def directory_roles(client) -> Dict[str, List[Dict[str, Any]]]:
     return held
 
 
-def project_user(user: Dict[str, Any], roles: Dict[str, List[Dict[str, Any]]], now: datetime) -> Dict[str, Any]:
+def project_user(user: Dict[str, Any], roles: Optional[Dict[str, List[Dict[str, Any]]]], now: datetime) -> Dict[str, Any]:
     updated = parse_time(user.get("riskLastUpdatedDateTime"))
-    held = roles.get(cast(str, user.get("id")), [])
+    held = None if roles is None else roles.get(cast(str, user.get("id")), [])
     return {
         "id": user.get("id"),
         "user_principal_name": user.get("userPrincipalName"),
@@ -58,8 +58,8 @@ def project_user(user: Dict[str, Any], roles: Dict[str, List[Dict[str, Any]]], n
         "risk_last_updated": user.get("riskLastUpdatedDateTime"),
         "days_since_risk_update": round((now - updated).total_seconds() / 86400, 1) if updated else None,
         "is_deleted": user.get("isDeleted"),
-        "directory_roles": sorted(r["name"] for r in held),
-        "privileged_roles": sorted(r["name"] for r in held if r["privileged"]),
+        "directory_roles": None if held is None else sorted(r["name"] for r in held),
+        "privileged_roles": None if held is None else sorted(r["name"] for r in held if r["privileged"]),
     }
 
 
@@ -83,7 +83,8 @@ def collect(client, collector) -> tuple:
             }
         collector.record("graph.identityProtection.riskyUsers.list", exc)
         return {"risky_users": None}, {}
-    roles = collector.guard("graph.directoryRoles.members.list", lambda: directory_roles(client)) or {}
+    # None when the roles can't be read, so the privileged figures read unknown rather than 0.
+    roles = collector.guard("graph.directoryRoles.members.list", lambda: directory_roles(client))
 
     now = datetime.now(timezone.utc)
     users = sorted((project_user(u, roles, now) for u in raw), key=lambda u: (u["user_principal_name"] or "").lower())
@@ -105,10 +106,14 @@ def collect(client, collector) -> tuple:
         "by_risk_state": dict(sorted(by_state.items())),
         "open_risk_users": len(open_),
         "open_high_risk_users": sum(1 for u in open_ if u["risk_level"] == "high"),
-        "privileged_open_risk_users": len(privileged_open),
-        "privileged_open_risk_users_enabled": sum(1 for u in privileged_open if u.get("account_enabled") is not False),
+        "privileged_open_risk_users": None if roles is None else len(privileged_open),
+        "privileged_open_risk_users_enabled": None if roles is None else sum(
+            1 for u in privileged_open if u.get("account_enabled") is not False
+        ),
         "oldest_open_risk_days": max(ages) if ages else None,
-        "privileged_principals": sum(1 for held in roles.values() if any(r["privileged"] for r in held)),
+        "privileged_principals": None if roles is None else sum(
+            1 for held in roles.values() if any(r["privileged"] for r in held)
+        ),
     }
     return {"identity_protection_available": True, "risky_users": users}, summary
 

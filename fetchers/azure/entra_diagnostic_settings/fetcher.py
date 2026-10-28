@@ -12,6 +12,8 @@ from azure_rest import ArmError, run_tenant, sentinel_onboarded  # noqa: E402
 
 NAME = "azure_entra_diagnostic_settings"
 AADIAM_API = "2017-04-01"
+# The categories list answers 400 "Invalid api-version" to 2017-04-01, although the spec lists it there.
+AADIAM_CATEGORIES_API = "2017-04-01-preview"
 # The categories the SIEM needs to see sign-ins and directory changes.
 KEY_CATEGORIES = ("AuditLogs", "SignInLogs")
 
@@ -73,7 +75,7 @@ def collect(client, collector) -> tuple:
     )
     categories = collector.guard(
         "aadiam.diagnosticSettingsCategories.list",
-        lambda: client.list("/providers/microsoft.aadiam/diagnosticSettingsCategories", AADIAM_API),
+        lambda: client.list("/providers/microsoft.aadiam/diagnosticSettingsCategories", AADIAM_CATEGORIES_API),
     )
     if raw is None:
         return {"settings": None}, {}
@@ -100,7 +102,8 @@ def collect(client, collector) -> tuple:
     summary = {
         "settings_total": len(settings),
         "categories_exported": sum(1 for c in coverage if c["exported"]),
-        "categories_not_exported": sorted(c["category"] for c in coverage if not c["exported"]),
+        # Without the category list, the categories no setting names are unknown, not none.
+        "categories_not_exported": None if categories is None else sorted(c["category"] for c in coverage if not c["exported"]),
         "key_categories_to_sentinel": key,
         "audit_and_signin_logs_to_sentinel": False if False in key.values() else (None if None in key.values() else True),
     }

@@ -126,7 +126,10 @@ schemas and the `paramify` CLI — not the internal code.
   `azure_entra_risky_users` joins Identity Protection risky users to privileged
   directory roles; a tenant without Entra ID P2 reports that as a state, not a
   failure. It keys on the privileged-role list in `_shared/entra_graph`, the
-  one `azure_entra_privileged_roles` and `azure_entra_mfa_status` use.
+  one `azure_entra_privileged_roles` and `azure_entra_mfa_status` use. The
+  category list is read at api-version 2017-04-01-preview, the only one it
+  answers; an unread category list leaves `categories_not_exported` null, and
+  unread directory roles leave the risky-user privileged figures null.
 - **Scope exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/scope_exclusions.py`, takes case-insensitive glob
   patterns (comma- or space-separated) and answers whether a name is excluded and
