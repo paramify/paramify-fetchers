@@ -416,8 +416,9 @@ def summarize(vaults: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_key_vaults(subscription_id, cred, collector: Collector) -> list[dict]:
-    """One vaults.list_by_subscription() call."""
+def collect_key_vaults(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+                       excluded: list | None = None) -> list[dict]:
+    """One vaults.list_by_subscription() call; vaults the exclusions take out go to `excluded` unread."""
     from azure.mgmt.keyvault import KeyVaultManagementClient
 
     def _client():
@@ -432,6 +433,10 @@ def collect_key_vaults(subscription_id, cred, collector: Collector) -> list[dict
         return [vault_record(project_vault(v)) for v in client.vaults.list_by_subscription()]
 
     vaults = collector.guard("keyvault.vaults.list_by_subscription", _list, default=[])
+    if exclusions:
+        vaults, out = exclusions.split(vaults, "key_vault")
+        if excluded is not None:
+            excluded += sorted(out, key=lambda e: e["id"] or "")
     if vaults:
         vaults = attach_diagnostic_settings(subscription_id, cred, collector, vaults)
     return sorted(vaults, key=lambda r: r.get("id") or "")
@@ -504,6 +509,8 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     vaults: list[dict] = []
+    excluded: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # ARM returns an empty list, not an error, for an unregistered provider.
@@ -516,7 +523,7 @@ def main() -> int:
                 "vaults in use; reporting status not_registered",
                 subscription_id,
             )
-        vaults = collect_key_vaults(subscription_id, cred, collector)
+        vaults = collect_key_vaults(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -526,9 +533,7 @@ def main() -> int:
             ),
         )
 
-    exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
-    vaults, excluded = exclusions.split(vaults, "key_vault")
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

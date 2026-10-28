@@ -484,11 +484,10 @@ def summarize(vaults: list[dict]) -> dict:
     }
 
 
-def exclude_vaults(exclusions: ResourceExclusions, vaults: list[dict]) -> tuple[list[dict], list[dict]]:
-    """(in-scope vaults holding only their in-scope protected items, excluded entries). An item leaves with its vault
-    (it takes the vault's resource group and region) or when a pattern matches the resource it protects, whose id its
-    entry then carries; a vault whose items all leave stays in scope."""
-    kept, excluded = exclusions.split(vaults, "recovery_services_vault")
+def exclude_protected_items(exclusions: ResourceExclusions, vaults: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(in-scope vaults holding only their in-scope protected items, excluded entries). An item leaves when a pattern
+    matches its id or the resource it protects, whose id its entry then carries; a vault whose items all leave stays
+    in scope. An excluded vault's items are never listed."""
     items = [(vault, item) for vault in vaults for item in vault["backup_protected_items"]]
     items, by_vault = exclusions.split(
         items, "protected_item", resource_id=lambda p: p[1].get("id") or p[0].get("id"),
@@ -497,14 +496,13 @@ def exclude_vaults(exclusions: ResourceExclusions, vaults: list[dict]) -> tuple[
     items, by_source = exclusions.split(
         items, "protected_item", resource_id=lambda p: p[1].get("source_resource_id"), location=lambda p: None,
         resource_group=lambda p: None, name=lambda p: p[1].get("name"))
-    in_scope: dict = {id(vault): [] for vault in kept}
+    in_scope: dict = {id(vault): [] for vault in vaults}
     for vault, item in items:
-        if id(vault) in in_scope:
-            in_scope[id(vault)].append(item)
+        in_scope[id(vault)].append(item)
     copies = [
-        {**v, "backup_protected_items": in_scope[id(v)], "total_protected_items": len(in_scope[id(v)])} for v in kept
+        {**v, "backup_protected_items": in_scope[id(v)], "total_protected_items": len(in_scope[id(v)])} for v in vaults
     ]
-    return copies, excluded + by_vault + by_source
+    return copies, by_vault + by_source
 
 
 # --- collection (lazy azure imports) ---
@@ -527,8 +525,10 @@ def _backup_client(cred, subscription_id):
     return RecoveryServicesBackupClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
 
-def collect_vaults(subscription_id, cred, collector: Collector) -> list[dict]:
-    """vaults.list_by_subscription_id(), then policies + protected items per vault."""
+def collect_vaults(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+                   excluded: list | None = None) -> list[dict]:
+    """vaults.list_by_subscription_id(), then policies + protected items per vault; vaults the exclusions take out go
+    to `excluded` unread."""
     from azure.mgmt.recoveryservices import RecoveryServicesClient
 
     def _client():
@@ -545,6 +545,10 @@ def collect_vaults(subscription_id, cred, collector: Collector) -> list[dict]:
     vaults = collector.guard(
         "recoveryservices.vaults.list_by_subscription_id", _list, default=[]
     )
+    if exclusions:
+        vaults, out = exclusions.split(vaults, "recovery_services_vault")
+        if excluded is not None:
+            excluded += sorted(out, key=lambda e: e["id"] or "")
     if not vaults:
         return []
 
@@ -611,6 +615,8 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     vaults: list[dict] = []
+    excluded: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # ARM returns an empty list, not an error, for an unregistered provider.
@@ -623,7 +629,7 @@ def main() -> int:
                 "no Recovery Services vaults in use; reporting status not_registered",
                 subscription_id,
             )
-        vaults = collect_vaults(subscription_id, cred, collector)
+        vaults = collect_vaults(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -633,9 +639,9 @@ def main() -> int:
             ),
         )
 
-    exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
-    vaults, excluded = exclude_vaults(exclusions, vaults)
+    vaults, out = exclude_protected_items(exclusions, vaults)
+    excluded += out
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

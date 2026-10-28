@@ -24,10 +24,11 @@ config_schema:
       location never matches one) or id:<resource id> (also matches that
       resource's child resources). * matches any run of characters and ? one
       character. A matching Recovery Services vault is listed under excluded with
-      the pattern and left out of every count and verdict, its backup policies
-      with it. A protected item is listed under excluded too when its vault
-      matches, or when an rg: or id: pattern matches the resource it protects
-      (whose region isn't read), with that resource's id in its entry; a vault
+      the pattern and left out of every count and verdict; its backup policies
+      and protected items are not read. In an in-scope vault, a protected item is
+      listed under excluded when an id: pattern matches it, or when an rg: or
+      id: pattern matches the resource it protects (whose region isn't read),
+      with that resource's id in its entry; a vault
       whose protected items all leave stays in scope and counts as protecting
       nothing. A pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}.
@@ -69,14 +70,14 @@ evidence_set:
   reference_id: EVD-AZURE-BACKUP-RECOVERY
   name: Azure Backup and Recovery Status
   instructions: |
-    Script: azure/backup_recovery_status/fetcher.py. Azure SDK calls (azure-mgmt-recoveryservices RecoveryServicesClient): vaults.list_by_subscription_id(); then (azure-mgmt-recoveryservicesbackup RecoveryServicesBackupClient): backup_policies.list(), backup_protected_items.list(). Retention threshold 30 days.
+    Script: azure/backup_recovery_status/fetcher.py. Azure SDK calls (azure-mgmt-recoveryservices RecoveryServicesClient): vaults.list_by_subscription_id(); then per in-scope vault (azure-mgmt-recoveryservicesbackup RecoveryServicesBackupClient): backup_policies.list(), backup_protected_items.list(). Retention threshold 30 days.
 
     Vaults and protected items the resource_exclusions patterns take out are listed under excluded instead.
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no Recovery Services vault, protected item or protected resource, such as a mistyped name
-    - excluded_recovery_services_vaults — Number of Recovery Services vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them, their backup policies or their protected items
-    - excluded_protected_items — Number of protected items left out of scope, those in an excluded vault included, and those whose protected resource a pattern matched by resource group or id (the entry's id is then that resource's); each is listed under excluded
+    - excluded_recovery_services_vaults — Number of Recovery Services vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, no other count includes them, and their backup policies and protected items are never read
+    - excluded_protected_items — Number of protected items in in-scope vaults left out of scope because a pattern matched the item's id, or the protected resource by resource group or id (the entry's id is then that resource's); each is listed under excluded. An excluded vault's items are never read, so they are not counted here
     - in_scope_recovery_services_vaults — Number of Recovery Services vaults read and in scope; 0 means none was read or the patterns took out every vault, which a check can catch by requiring more than 0
     - in_scope_protected_items — Number of protected items read and in scope

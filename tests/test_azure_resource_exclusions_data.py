@@ -1,14 +1,16 @@
 """resource_exclusions in the Azure Key Vault, Storage and Backup fetchers: excluded resources leave every count and
-stay listed under excluded."""
+stay listed under excluded; except in key rotation, nothing past the list call is read for them."""
 
 from __future__ import annotations
 
 import copy
 import importlib.util
 import json
+import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace as ns
 
 import pytest
 
@@ -36,10 +38,21 @@ config = _load("key_vault_configuration")
 rotation = _load("key_vault_key_rotation")
 storage = _load("storage_encryption_status")
 backup = _load("backup_recovery_status")
+Collector = sys.modules["azure_common"].Collector
 
 
 def _json(value):
     return json.loads(json.dumps(value, default=str))
+
+
+def _unfiltered(collect):
+    """What the collection returns when no exclusions are handed to it."""
+    return collect("s1", object(), Collector(logging.getLogger("test_exclusions_data")))
+
+
+def _refuse(name, fail):
+    if name in fail:
+        raise RuntimeError(f"(AuthorizationFailed) no read access to {name}")
 
 
 def _run(module, monkeypatch, tmp_path, patterns, filename, **collectors):
@@ -69,38 +82,49 @@ def _entries(evidence):
 
 # --- azure_key_vault_configuration ---
 
-def _config_vault(rg, name, location):
-    record = config.vault_record({"id": f"{rg}/providers/Microsoft.KeyVault/vaults/{name}", "name": name,
-                                  "location": location, "enable_rbac_authorization": True})
-    return config.with_audit_logging(record, [])
+def _vault_id(rg, name):
+    return f"{rg}/providers/Microsoft.KeyVault/vaults/{name}"
 
 
-CONFIG_VAULTS = [_config_vault(IN_RG, "kv-in", "regionwest"), _config_vault(OUT_RG, "kv-out", "regionwest"),
-                 _config_vault(IN_RG, "kv-east", "Region East")]
+KEY_VAULTS = [(IN_RG, "kv-in", "regionwest"), (OUT_RG, "kv-out", "regionwest"), (IN_RG, "kv-east", "Region East")]
 
 
-def run_config(monkeypatch, tmp_path, patterns):
-    return _run(config, monkeypatch, tmp_path, patterns, "azure_key_vault_configuration",
-                collect_key_vaults=lambda *a: copy.deepcopy(CONFIG_VAULTS))
+def run_config(monkeypatch, tmp_path, patterns, fail=()):
+    read: list = []
+
+    def diagnostic_settings(resource_uri):
+        name = resource_uri.rsplit("/", 1)[-1]
+        read.append(("diagnostic_settings", name))
+        _refuse(name, fail)
+        return []
+
+    vaults = [ns(id=_vault_id(rg, name), name=name, location=location, properties=ns(enable_rbac_authorization=True))
+              for rg, name, location in KEY_VAULTS]
+    keyvault = ns(vaults=ns(list_by_subscription=lambda: iter(vaults)))
+    monitor = ns(diagnostic_settings=ns(list=diagnostic_settings))
+    monkeypatch.setitem(sys.modules, "azure.mgmt.keyvault", ns(KeyVaultManagementClient=lambda **_: keyvault))
+    monkeypatch.setitem(sys.modules, "azure.mgmt.monitor", ns(MonitorManagementClient=lambda **_: monitor))
+    return (*_run(config, monkeypatch, tmp_path, patterns, "azure_key_vault_configuration"), read)
 
 
 def test_key_vault_configuration_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
-    code, evidence = run_config(monkeypatch, tmp_path, None)
-    assert code == 0
-    assert evidence["results"] == _json({"key_vaults": CONFIG_VAULTS, "provider_registration_status": "registered",
+    code, evidence, read = run_config(monkeypatch, tmp_path, None)
+    assert code == 0 and len(read) == 3
+    vaults = _unfiltered(config.collect_key_vaults)
+    assert evidence["results"] == _json({"key_vaults": vaults, "provider_registration_status": "registered",
                                          "excluded": []})
-    assert evidence["summary"] == _json({**config.summarize(CONFIG_VAULTS), "provider_registration_status": "registered",
+    assert evidence["summary"] == _json({**config.summarize(vaults), "provider_registration_status": "registered",
                                          **_no_exclusions(key_vault=3)})
 
 
 def test_key_vault_configuration_excludes_by_group_and_region(monkeypatch, tmp_path):
-    code, evidence = run_config(monkeypatch, tmp_path, PATTERNS)
+    code, evidence, _ = run_config(monkeypatch, tmp_path, PATTERNS)
     summary = evidence["summary"]
     assert code == 0
     assert [v["name"] for v in evidence["results"]["key_vaults"]] == ["kv-in"]
     assert _entries(evidence) == [
-        ("key_vault", "kv-east", "location:regioneast", f"{IN_RG}/providers/Microsoft.KeyVault/vaults/kv-east"),
-        ("key_vault", "kv-out", "rg:rg-out", f"{OUT_RG}/providers/Microsoft.KeyVault/vaults/kv-out"),
+        ("key_vault", "kv-east", "location:regioneast", _vault_id(IN_RG, "kv-east")),
+        ("key_vault", "kv-out", "rg:rg-out", _vault_id(OUT_RG, "kv-out")),
     ]
     assert (summary["total_key_vaults"], summary["rbac_authorization_vaults"], summary["rbac_authorization_percentage"],
             summary["vaults_without_audit_logging"]) == (1, 1, 100, 1)
@@ -109,10 +133,6 @@ def test_key_vault_configuration_excludes_by_group_and_region(monkeypatch, tmp_p
 
 
 # --- azure_key_vault_key_rotation ---
-
-def _vault_id(rg, name):
-    return f"{rg}/providers/Microsoft.KeyVault/vaults/{name}"
-
 
 def _rotation_vault(rg, name, location, cert, auto_renew, extra_keys=()):
     vault_id = _vault_id(rg, name)
@@ -207,50 +227,76 @@ def test_key_vault_key_rotation_id_pattern_takes_the_vaults_data_plane_children(
 
 # --- azure_storage_encryption_status ---
 
-def _account(rg, name, location, containers=("c1",)):
-    account_id = f"{rg}/providers/Microsoft.Storage/storageAccounts/{name}"
-    record = storage.account_record({"id": account_id, "name": name, "location": location,
-                                     "replication_settings": "Standard_LRS", "encryption_type": "Microsoft.Storage"},
-                                    NOW)
-    if containers is not None:
-        record["containers_status"] = "collected"
-        record["containers"] = [storage.container_record(
-            {"id": f"{account_id}/blobServices/default/containers/{c}", "name": c, "public_access": "Blob"}, True)
-            for c in containers]
-    return record
+def _account_id(rg, name):
+    return f"{rg}/providers/Microsoft.Storage/storageAccounts/{name}"
 
 
-ACCOUNTS = [_account(IN_RG, "sa-in", "regionwest", ("c1", "c2")), _account(IN_RG, "sa-files", "regionwest", None),
-            _account(OUT_RG, "sa-out", "regionwest"), _account(IN_RG, "sa-east", "regioneast")]
+# (resource group, name, region, SKU, containers); None: the account has no blob endpoint.
+STORAGE_ACCOUNTS = [
+    (IN_RG, "sa-in", "regionwest", "Standard_RAGRS", ("c1", "c2")),
+    (IN_RG, "sa-files", "regionwest", "Standard_LRS", None),
+    (OUT_RG, "sa-out", "regionwest", "Standard_GRS", ("c1",)),
+    (IN_RG, "sa-east", "regioneast", "Standard_LRS", ("c1",)),
+]
 
 
-def run_storage(monkeypatch, tmp_path, patterns):
-    return _run(storage, monkeypatch, tmp_path, patterns, "azure_storage_encryption_status",
-                collect_storage_accounts=lambda *a: copy.deepcopy(ACCOUNTS))
+def run_storage(monkeypatch, tmp_path, patterns, fail=()):
+    read: list = []
+    groups = {name: (rg, containers) for rg, name, _, _, containers in STORAGE_ACCOUNTS}
+
+    def reader(operation, answer):
+        def call(group, name, **_):
+            read.append((operation, name))
+            _refuse(name, fail)
+            return answer(name)
+        return call
+
+    def containers(name):
+        rg, names = groups[name]
+        if names is None:
+            raise RuntimeError("Blob is not supported for the account.")
+        return [ns(id=f"{_account_id(rg, name)}/blobServices/default/containers/{c}", name=c, public_access="Blob")
+                for c in names]
+
+    accounts = [ns(id=_account_id(rg, name), name=name, location=location, sku=ns(name=sku),
+                   encryption=ns(key_source="Microsoft.Storage")) for rg, name, location, sku, _ in STORAGE_ACCOUNTS]
+    client = ns(
+        storage_accounts=ns(list=lambda: iter(accounts),
+                            get_properties=reader("geo_replication_stats", lambda name: ns(geo_replication_stats=None))),
+        blob_services=ns(get_service_properties=reader("blob_properties", lambda name: ns())),
+        file_services=ns(get_service_properties=reader("file_service_properties", lambda name: ns())),
+        blob_containers=ns(list=reader("containers", containers)),
+    )
+    monkeypatch.setitem(sys.modules, "azure.mgmt.storage", ns(StorageManagementClient=lambda **_: client))
+    return (*_run(storage, monkeypatch, tmp_path, patterns, "azure_storage_encryption_status"), read)
 
 
 def test_storage_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
-    code, evidence = run_storage(monkeypatch, tmp_path, None)
-    assert code == 0
-    assert evidence["results"] == _json({"storage_accounts": ACCOUNTS, "provider_registration_status": "registered",
+    code, evidence, read = run_storage(monkeypatch, tmp_path, None)
+    assert code == 0 and len(read) == 14
+    accounts = _unfiltered(storage.collect_storage_accounts)
+    assert evidence["results"] == _json({"storage_accounts": accounts, "provider_registration_status": "registered",
                                          "excluded": []})
-    assert evidence["summary"] == _json({**storage.summarize(ACCOUNTS), "provider_registration_status": "registered",
+    assert evidence["summary"] == _json({**storage.summarize(accounts), "provider_registration_status": "registered",
                                          **_no_exclusions(storage_account=4, container=4)})
 
 
-def test_storage_containers_leave_with_their_account(monkeypatch, tmp_path):
-    in_id = f"{IN_RG}/providers/Microsoft.Storage/storageAccounts/sa-in"
-    code, evidence = run_storage(monkeypatch, tmp_path, f"{PATTERNS} id:{in_id}/blobServices/default/containers/c2")
+def test_storage_excluded_accounts_take_their_unread_containers_and_an_id_pattern_takes_one(monkeypatch, tmp_path):
+    c2 = f"{_account_id(IN_RG, 'sa-in')}/blobServices/default/containers/c2"
+    code, evidence, _ = run_storage(monkeypatch, tmp_path, f"{PATTERNS} id:{c2}")
     summary, accounts = evidence["summary"], evidence["results"]["storage_accounts"]
     assert code == 0
     assert [(a["name"], a["containers"] and [c["name"] for c in a["containers"]]) for a in accounts] == [
-        ("sa-in", ["c1"]), ("sa-files", None)]
-    assert [(kind, name, pattern.split(":")[0]) for kind, name, pattern, _ in _entries(evidence)] == [
-        ("container", "c1", "location"), ("container", "c1", "rg"), ("container", "c2", "id"),
-        ("storage_account", "sa-east", "location"), ("storage_account", "sa-out", "rg")]
+        ("sa-files", None), ("sa-in", ["c1"])]
+    # An excluded account's containers are never listed, so the id: match is the only container entry.
+    assert _entries(evidence) == [
+        ("container", "c2", f"id:{c2}", c2),
+        ("storage_account", "sa-east", "location:regioneast", _account_id(IN_RG, "sa-east")),
+        ("storage_account", "sa-out", "rg:rg-out", _account_id(OUT_RG, "sa-out")),
+    ]
     assert (summary["total_storage_accounts"], summary["total_containers"],
             summary["containers_with_public_access_level"]) == (2, 1, 1)
-    assert (summary["excluded_storage_accounts"], summary["excluded_containers"]) == (2, 3)
+    assert (summary["excluded_storage_accounts"], summary["excluded_containers"]) == (2, 1)
     assert (summary["in_scope_storage_accounts"], summary["in_scope_containers"]) == (2, 1)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
 
@@ -261,69 +307,99 @@ def _vm_id(rg, name):
     return f"{rg}/providers/Microsoft.Compute/virtualMachines/{name}"
 
 
-def _recovery_vault(rg, name, location, items):
-    vault_id = f"{rg}/providers/Microsoft.RecoveryServices/vaults/{name}"
-    policy = backup.backup_policy_record({
-        "id": f"{vault_id}/backupPolicies/daily", "name": "daily",
-        "retention_policy": {"daily_schedule": {"retention_duration": {"count": 30, "duration_type": "Days"}}}})
-    return backup.vault_record({
-        "id": vault_id, "name": name, "location": location, "soft_delete_state": "Enabled",
-        "backup_policies": [policy],
-        "backup_protected_items": [backup.protected_item_record({
-            "id": f"{vault_id}/backupFabrics/Azure/protectionContainers/c/protectedItems/{vm}", "name": vm,
-            "source_resource_id": _vm_id(source_rg, vm), "backup_policy_id": policy["id"],
-            "protection_state": "Protected", "last_backup_status": "Completed", "workload_type": "VM",
-        }, {policy["id"]: policy}) for vm, source_rg in items],
-    })
+def _recovery_vault_id(rg, name):
+    return f"{rg}/providers/Microsoft.RecoveryServices/vaults/{name}"
 
 
+# (resource group, vault, region, [(protected VM, its resource group)])
 RECOVERY_VAULTS = [
-    _recovery_vault(IN_RG, "rsv-in", "regionwest", [("vm-a", IN_RG), ("vm-b", OUT_RG)]),
+    (IN_RG, "rsv-in", "regionwest", [("vm-a", IN_RG), ("vm-b", OUT_RG)]),
     # Protects only a resource in an excluded group, so it stays in scope protecting nothing.
-    _recovery_vault(IN_RG, "rsv-only-out", "regionwest", [("vm-c", OUT_RG)]),
-    _recovery_vault(OUT_RG, "rsv-out", "regionwest", [("vm-d", IN_RG)]),
-    _recovery_vault(IN_RG, "rsv-east", "regioneast", [("vm-e", IN_RG)]),
+    (IN_RG, "rsv-only-out", "regionwest", [("vm-c", OUT_RG)]),
+    (OUT_RG, "rsv-out", "regionwest", [("vm-d", IN_RG)]),
+    (IN_RG, "rsv-east", "regioneast", [("vm-e", IN_RG)]),
 ]
 
 
-def run_backup(monkeypatch, tmp_path, patterns):
-    return _run(backup, monkeypatch, tmp_path, patterns, "azure_backup_recovery_status",
-                collect_vaults=lambda *a: copy.deepcopy(RECOVERY_VAULTS))
+def run_backup(monkeypatch, tmp_path, patterns, fail=()):
+    read: list = []
+    vault_ids = {name: _recovery_vault_id(rg, name) for rg, name, _, _ in RECOVERY_VAULTS}
+    protects = {name: items for _, name, _, items in RECOVERY_VAULTS}
+
+    def reader(operation, answer):
+        def call(vault_name, resource_group_name):
+            read.append((operation, vault_name))
+            _refuse(vault_name, fail)
+            return answer(vault_ids[vault_name], protects[vault_name])
+        return call
+
+    def policies(vault_id, _):
+        retention = ns(daily_schedule=ns(retention_duration=ns(count=30, duration_type="Days")))
+        return [ns(id=f"{vault_id}/backupPolicies/daily", name="daily", properties=ns(retention_policy=retention))]
+
+    def items(vault_id, protected):
+        return [ns(id=f"{vault_id}/backupFabrics/Azure/protectionContainers/c/protectedItems/{vm}", name=vm,
+                   properties=ns(source_resource_id=_vm_id(rg, vm), policy_id=f"{vault_id}/backupPolicies/daily",
+                                 protection_state="Protected", last_backup_status="Completed", workload_type="VM"))
+                for vm, rg in protected]
+
+    vaults = [ns(id=vault_ids[name], name=name, location=location,
+                 properties=ns(security_settings=ns(soft_delete_settings=ns(soft_delete_state="Enabled"))))
+              for _, name, location, _ in RECOVERY_VAULTS]
+    recovery = ns(vaults=ns(list_by_subscription_id=lambda: iter(vaults)))
+    client = ns(backup_policies=ns(list=reader("backup_policies", policies)),
+                backup_protected_items=ns(list=reader("protected_items", items)))
+    monkeypatch.setitem(sys.modules, "azure.mgmt.recoveryservices", ns(RecoveryServicesClient=lambda **_: recovery))
+    monkeypatch.setitem(sys.modules, "azure.mgmt.recoveryservicesbackup",
+                        ns(RecoveryServicesBackupClient=lambda **_: client))
+    return (*_run(backup, monkeypatch, tmp_path, patterns, "azure_backup_recovery_status"), read)
 
 
 def test_backup_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
-    code, evidence = run_backup(monkeypatch, tmp_path, None)
-    assert code == 0
-    assert evidence["results"] == _json({"recovery_services_vaults": RECOVERY_VAULTS,
+    code, evidence, read = run_backup(monkeypatch, tmp_path, None)
+    assert code == 0 and len(read) == 8
+    vaults = _unfiltered(backup.collect_vaults)
+    assert evidence["results"] == _json({"recovery_services_vaults": vaults,
                                          "provider_registration_status": "registered", "excluded": []})
-    assert evidence["summary"] == _json({**backup.summarize(RECOVERY_VAULTS), "provider_registration_status": "registered",
+    assert evidence["summary"] == _json({**backup.summarize(vaults), "provider_registration_status": "registered",
                                          **_no_exclusions(recovery_services_vault=4, protected_item=5)})
 
 
-def test_backup_items_leave_with_their_vault_or_the_resource_they_protect(monkeypatch, tmp_path):
-    code, evidence = run_backup(monkeypatch, tmp_path, PATTERNS)
+def test_backup_items_leave_with_the_resource_they_protect_and_excluded_vaults_items_are_not_listed(
+        monkeypatch, tmp_path):
+    code, evidence, _ = run_backup(monkeypatch, tmp_path, PATTERNS)
     summary, vaults = evidence["summary"], evidence["results"]["recovery_services_vaults"]
     assert code == 0
     assert [(v["name"], [i["name"] for i in v["backup_protected_items"]], v["total_protected_items"])
             for v in vaults] == [("rsv-in", ["vm-a"], 1), ("rsv-only-out", [], 0)]
-    out_item = f"{OUT_RG}/providers/Microsoft.RecoveryServices/vaults/rsv-out/backupFabrics/Azure/protectionContainers/c"
-    east_vault = f"{IN_RG}/providers/Microsoft.RecoveryServices/vaults/rsv-east"
+    # Matched through the protected resource: the entry carries that resource's id.
     assert _entries(evidence) == [
-        # Matched through the protected resource: the entry carries that resource's id.
         ("protected_item", "vm-b", "rg:rg-out", _vm_id(OUT_RG, "vm-b")),
         ("protected_item", "vm-c", "rg:rg-out", _vm_id(OUT_RG, "vm-c")),
-        ("protected_item", "vm-d", "rg:rg-out", f"{out_item}/protectedItems/vm-d"),
-        ("protected_item", "vm-e", "location:regioneast",
-         f"{east_vault}/backupFabrics/Azure/protectionContainers/c/protectedItems/vm-e"),
-        ("recovery_services_vault", "rsv-east", "location:regioneast", east_vault),
-        ("recovery_services_vault", "rsv-out", "rg:rg-out", f"{OUT_RG}/providers/Microsoft.RecoveryServices/vaults/rsv-out"),
+        ("recovery_services_vault", "rsv-east", "location:regioneast", _recovery_vault_id(IN_RG, "rsv-east")),
+        ("recovery_services_vault", "rsv-out", "rg:rg-out", _recovery_vault_id(OUT_RG, "rsv-out")),
     ]
     assert (summary["total_recovery_services_vaults"], summary["vaults_with_protected_items"],
             summary["vaults_without_protected_items"], summary["total_backup_policies"],
             summary["total_protected_items"], summary["retention_threshold_percentage"]) == (2, 1, 1, 2, 1, 100)
-    assert (summary["excluded_recovery_services_vaults"], summary["excluded_protected_items"]) == (2, 4)
+    assert (summary["excluded_recovery_services_vaults"], summary["excluded_protected_items"]) == (2, 2)
     assert (summary["in_scope_recovery_services_vaults"], summary["in_scope_protected_items"]) == (2, 1)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
+
+
+def test_backup_id_pattern_on_a_protected_resource_takes_only_that_item(monkeypatch, tmp_path):
+    vm = _vm_id(IN_RG, "vm-a")
+    code, evidence, read = run_backup(monkeypatch, tmp_path, f"id:{vm}")
+    summary, vaults = evidence["summary"], evidence["results"]["recovery_services_vaults"]
+    assert code == 0 and len(read) == 8
+    assert [(v["name"], [i["name"] for i in v["backup_protected_items"]]) for v in vaults] == [
+        ("rsv-east", ["vm-e"]), ("rsv-in", ["vm-b"]), ("rsv-only-out", ["vm-c"]), ("rsv-out", ["vm-d"])]
+    assert evidence["results"]["excluded"] == [{
+        "kind": "protected_item", "name": "vm-a", "pattern": f"id:{vm}", "reason": "resource_matched", "id": vm,
+        "resource_group": "rg-in", "location": None}]
+    assert (summary["excluded_recovery_services_vaults"], summary["excluded_protected_items"]) == (0, 1)
+    assert (summary["total_protected_items"], summary["in_scope_protected_items"]) == (4, 4)
+    assert summary["resource_exclusion_patterns_unmatched"] == []
 
 
 # --- every fetcher ---
@@ -333,7 +409,29 @@ def test_backup_items_leave_with_their_vault_or_the_resource_they_protect(monkey
     (run_storage, "total_storage_accounts"), (run_backup, "total_recovery_services_vaults"),
 ])
 def test_bare_pattern_fails_the_run(monkeypatch, tmp_path, run, total):
-    code, evidence = run(monkeypatch, tmp_path, "rg-out")
+    code, evidence = run(monkeypatch, tmp_path, "rg-out")[:2]
     assert code == 1
     assert evidence["results"]["excluded"] == [] and evidence["summary"][total] > 1
     assert any(f["operation"] == f"config {ENV}" for f in evidence["metadata"]["api_failures"])
+
+
+@pytest.mark.parametrize("run, reads", [
+    (run_config, [("diagnostic_settings", "kv-in")]),
+    (run_storage, [(op, "sa-in") for op in ("blob_properties", "file_service_properties", "geo_replication_stats",
+                                            "containers")]
+     + [(op, "sa-files") for op in ("blob_properties", "file_service_properties", "containers")]),
+    (run_backup, [(op, vault) for vault in ("rsv-in", "rsv-only-out") for op in ("backup_policies", "protected_items")]),
+])
+def test_excluded_resources_are_not_read_past_the_list(monkeypatch, tmp_path, run, reads):
+    code, _, read = run(monkeypatch, tmp_path, PATTERNS)
+    assert code == 0 and read == reads
+
+
+@pytest.mark.parametrize("run, refused", [
+    (run_config, ("kv-out", "kv-east")), (run_storage, ("sa-out", "sa-east")), (run_backup, ("rsv-out", "rsv-east")),
+])
+def test_a_refused_read_on_an_excluded_resource_leaves_the_run_passing(monkeypatch, tmp_path, run, refused):
+    # With nothing excluded, the same refusals fail the run.
+    assert run(monkeypatch, tmp_path, None, fail=refused)[0] == 1
+    code, evidence, _ = run(monkeypatch, tmp_path, PATTERNS, fail=refused)
+    assert code == 0 and evidence["metadata"]["api_failures"] == []

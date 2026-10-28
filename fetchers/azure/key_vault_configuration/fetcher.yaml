@@ -30,8 +30,9 @@ config_schema:
       location never matches one) or id:<resource id> (also matches that
       resource's child resources). * matches any run of characters and ? one
       character. A matching key vault is listed under excluded with the pattern
-      and left out of every count and verdict. A pattern without one of these
-      prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      and left out of every count and verdict; its diagnostic settings are not
+      read, so a vault the identity can't read doesn't fail the run. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true
@@ -74,7 +75,7 @@ evidence_set:
   reference_id: EVD-AZURE-KEYVAULT-CFG
   name: Azure Key Vault Configuration
   instructions: |
-    Script: azure/key_vault_configuration/fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient): vaults.list_by_subscription(). Then per vault (azure-mgmt-monitor<7 MonitorManagementClient): diagnostic_settings.list(resource_uri=<vault resource id without the leading slash>). Reader is sufficient — both are GETs. Management plane only.
+    Script: azure/key_vault_configuration/fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient): vaults.list_by_subscription(). Then per in-scope vault (azure-mgmt-monitor<7 MonitorManagementClient): diagnostic_settings.list(resource_uri=<vault resource id without the leading slash>). Reader is sufficient — both are GETs. Management plane only.
 
     Key vaults the resource_exclusions patterns take out are listed under excluded instead of key_vaults.
 
