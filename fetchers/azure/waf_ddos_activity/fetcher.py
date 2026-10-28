@@ -108,17 +108,23 @@ WAF_BASES = {
 _BLOCK = "Action in ({})".format(", ".join(f"'{a}'" for a in BLOCK_ACTIONS))
 _LOG = "Action in ({})".format(", ".join(f"'{a}'" for a in LOG_ACTIONS))
 _ALLOW = "Action in ({})".format(", ".join(f"'{a}'" for a in ALLOW_ACTIONS))
+# A Detection-mode policy logs the action Prevention would take but never blocks.
+_BLOCKED = f"{_BLOCK} and Mode != 'detection'"
+_WOULD_BLOCK = f"{_BLOCK} and Mode == 'detection'"
 # One request can match several rules, so each is folded to one row before it is counted.
 WAF_QUERIES = {
     "requests": "| extend Ref = iff(isempty(Ref), tostring(new_guid()), Ref) "
-                f"| summarize Events = count(), Blocked = countif({_BLOCK}) > 0, Logged = countif({_LOG}) > 0, "
-                f"Allowed = countif({_ALLOW}) > 0, Challenged = countif(Action has 'challenge' and not({_BLOCK})) > 0, "
+                f"| summarize Events = count(), Blocked = countif({_BLOCKED}) > 0, WouldBlock = countif({_WOULD_BLOCK}) > 0, "
+                f"Logged = countif({_LOG}) > 0, Allowed = countif({_ALLOW}) > 0, "
+                f"Challenged = countif(Action has 'challenge' and not({_BLOCK})) > 0, "
                 "First = min(TimeGenerated), Last = max(TimeGenerated) by ResourceId, Policy, Mode, Ref "
                 "| summarize Events = sum(Events), Requests = count(), RequestsBlocked = countif(Blocked), "
-                "RequestsLoggedOnly = countif(Logged and not(Blocked) and not(Allowed)), RequestsAllowed = countif(Allowed and not(Blocked)), "
+                "RequestsWouldBlock = countif(WouldBlock and not(Blocked)), "
+                "RequestsLoggedOnly = countif(Logged and not(Blocked) and not(WouldBlock) and not(Allowed)), "
+                "RequestsAllowed = countif(Allowed and not(Blocked) and not(WouldBlock)), "
                 "RequestsChallenged = countif(Challenged and not(Blocked)), FirstEvent = min(First), LastEvent = max(Last) "
                 "by ResourceId, Policy, Mode",
-    "rules": f"| where isnotempty(Rule) | summarize Events = count(), Blocked = countif({_BLOCK}) by ResourceId, Rule "
+    "rules": f"| where isnotempty(Rule) | summarize Events = count(), Blocked = countif({_BLOCKED}) by ResourceId, Rule "
              "| order by ResourceId asc, Events desc | extend Rank = row_number(1, prev(ResourceId) != ResourceId) "
              "| where Rank <= {sample}",
 }
@@ -400,8 +406,8 @@ def waf_activity(resource: dict, settings, workspaces: dict, policies: dict, ale
     modes: dict = defaultdict(set)
     for r in rows:
         name = policy_name(r.get("Policy")) or "unnamed"
-        per_policy[name].update({k: _num(r.get(k)) for k in ("Events", "Requests", "RequestsBlocked", "RequestsLoggedOnly",
-                                                               "RequestsAllowed", "RequestsChallenged")})
+        per_policy[name].update({k: _num(r.get(k)) for k in ("Events", "Requests", "RequestsBlocked", "RequestsWouldBlock",
+                                                               "RequestsLoggedOnly", "RequestsAllowed", "RequestsChallenged")})
         if r.get("Mode"):
             modes[name].add(r["Mode"])
     attached = [policies.get(id_key(p)) or {"id": p, "name": basename(p), "mode": None, "enabled": None}
@@ -431,12 +437,14 @@ def waf_activity(resource: dict, settings, workspaces: dict, policies: dict, ale
         "waf_events": events if known else None,
         "requests_matched": total["Requests"] if known else None,
         "requests_blocked": total["RequestsBlocked"] if known else None,
+        "requests_would_block": total["RequestsWouldBlock"] if known else None,
         "requests_logged_only": total["RequestsLoggedOnly"] if known else None,
         "requests_allowed": total["RequestsAllowed"] if known else None,
         "requests_challenged": total["RequestsChallenged"] if known else None,
         "activity_by_policy": [
             {"policy": name, "logged_modes": sorted(modes[name]), "events": c["Events"], "requests_matched": c["Requests"],
-             "requests_blocked": c["RequestsBlocked"], "requests_logged_only": c["RequestsLoggedOnly"]}
+             "requests_blocked": c["RequestsBlocked"], "requests_would_block": c["RequestsWouldBlock"],
+             "requests_logged_only": c["RequestsLoggedOnly"]}
             for name, c in sorted(per_policy.items())
         ] if known else None,
         "first_event": _earliest(r.get("FirstEvent") for r in rows) if known else None,
@@ -546,6 +554,7 @@ def summarize(waf: list[dict], ips: list[dict], rules: list[dict] | None, worksp
         "waf_events": _total(w["waf_events"] for w in exporting),
         "waf_requests_matched": _total(w["requests_matched"] for w in exporting),
         "waf_requests_blocked": _total(w["requests_blocked"] for w in exporting),
+        "waf_requests_would_block": _total(w["requests_would_block"] for w in exporting),
         "waf_requests_logged_only": _total(w["requests_logged_only"] for w in exporting),
         "last_waf_event": last,
         "waf_alert_rules": alerts(lambda: sum(1 for r in rules or [] if r["watches_waf"])),

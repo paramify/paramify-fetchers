@@ -152,9 +152,10 @@ def fd_resource(policy_ids=(FD_POLICY,)):
 
 
 def requests_row(rid=PROFILE, policy="wafpolicy1", mode="detection", events=10, requests=6, blocked=0, logged=6,
-                 last="2026-01-09T00:00:00Z"):
+                 last="2026-01-09T00:00:00Z", would_block=0):
     return {"ResourceId": rid.lower(), "Policy": policy, "Mode": mode, "Events": events, "Requests": requests,
-            "RequestsBlocked": blocked, "RequestsLoggedOnly": logged, "RequestsAllowed": 0, "RequestsChallenged": 0,
+            "RequestsBlocked": blocked, "RequestsWouldBlock": would_block, "RequestsLoggedOnly": logged, "RequestsAllowed": 0,
+            "RequestsChallenged": 0,
             "FirstEvent": "2026-01-01T00:00:00Z", "LastEvent": last}
 
 
@@ -241,6 +242,24 @@ def test_policy_state_unset_reads_unknown():
 
 def test_redirect_counts_as_blocked():
     assert "redirect" in wda.BLOCK_ACTIONS
+
+
+def test_detection_mode_block_rows_count_as_would_block():
+    blocked = f"countif({wda._BLOCK} and Mode != 'detection')"
+    would = f"countif({wda._BLOCK} and Mode == 'detection')"
+    assert f"Blocked = {blocked} > 0" in wda.WAF_QUERIES["requests"]
+    assert f"WouldBlock = {would} > 0" in wda.WAF_QUERIES["requests"]
+    assert f"Blocked = {blocked} by ResourceId, Rule" in wda.WAF_QUERIES["rules"]
+    rows = [requests_row(policy="detect", mode="detection", requests=5, blocked=0, would_block=3, logged=2),
+            requests_row(policy="prevent", mode="prevention", requests=4, blocked=4, logged=0)]
+    workspaces = {LAW.lower(): {"status": wda.WS_QUERIED, "read_tables": [wda.DIAG_TABLE], "fd:requests": rows}}
+    rec = wda.waf_activity(fd_resource(), [setting(category="FrontDoorWebApplicationFirewallLog")], workspaces, POLICIES, [],
+                           sample=5)
+    assert (rec["requests_blocked"], rec["requests_would_block"], rec["requests_logged_only"]) == (4, 3, 2)
+    by_policy = {p["policy"]: p for p in rec["activity_by_policy"]}
+    assert (by_policy["detect"]["requests_blocked"], by_policy["detect"]["requests_would_block"]) == (0, 3)
+    summary = wda.summarize([rec], [], [], [], 30, 0, total_ips=0)
+    assert (summary["waf_requests_blocked"], summary["waf_requests_would_block"]) == (4, 3)
 
 def test_gateway_with_dedicated_tables_reads_agw_firewall_logs():
     gateway = wda.gateway_waf_resource({"id": AGW, "name": "agw1", "properties": {

@@ -106,9 +106,10 @@ evidence_set:
     - waf_resources_without_waf_events — Number of WAF resources that export the WAF log to workspaces that were read and hold no records in the window
     - waf_resources_waf_log_unknown — Number of WAF resources that export the WAF log to a workspace that couldn't be read, or to a Basic-plan table that wasn't queried
     - waf_events — Number of WAF log records in the window (one per rule a request matched); null when any WAF resource's records couldn't be read
-    - waf_requests_matched — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id; null when any WAF resource's records couldn't be read
-    - waf_requests_blocked — Number of requests the WAF blocked (Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records); null when any WAF resource's records couldn't be read
-    - waf_requests_logged_only — Number of requests that matched a rule but were only logged (Log, AnomalyScoring, Detected or Matched, and neither blocked nor allowed), as in Detection mode; null when any WAF resource's records couldn't be read
+    - waf_requests_matched — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id (a record without one counts as its own request); null when any WAF resource's records couldn't be read
+    - waf_requests_blocked — Number of requests the WAF blocked: Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records, from a policy in Prevention mode; null when any WAF resource's records couldn't be read
+    - waf_requests_would_block — Number of requests a policy in Detection mode logged with a blocking action (Block, Redirect or a failed JavaScript challenge); Prevention mode would have blocked them, but Detection mode only logs; null when any WAF resource's records couldn't be read
+    - waf_requests_logged_only — Number of requests that matched a rule but were only logged (Log, AnomalyScoring, Detected or Matched, and not blocked, would-block or allowed); null when any WAF resource's records couldn't be read
     - last_waf_event — Time of the latest WAF log record across all WAF resources (UTC)
 
     Do WAF alerts reach someone?
