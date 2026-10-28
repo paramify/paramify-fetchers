@@ -37,8 +37,11 @@ from azure_common import (  # noqa: E402
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
+    vnet_id_of,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_network_security_groups")
 
@@ -597,6 +600,22 @@ def summarize(
     }
 
 
+def split_network_interfaces(nics: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
+    """A NIC leaves scope when a pattern matches it or the virtual network its subnets sit in."""
+    kept, excluded = exclusions.split(nics, "network_interface")
+    in_scope = []
+    for nic in kept:
+        vnet_ids = [s[: len(vnet_id_of(s))] for s in nic["subnet_ids"] if vnet_id_of(s)]
+        pattern = exclusions.match(vnet_ids[0]) if exclusions and vnet_ids else None
+        if pattern is None:
+            in_scope.append(nic)
+        else:
+            excluded.append(excluded_item(
+                "network_interface", nic["name"], pattern, "virtual_network_matched", id=nic["id"],
+                resource_group=nic["resource_group"], location=nic["location"], matched_id=vnet_ids[0]))
+    return in_scope, excluded
+
+
 # --- collection (lazy azure imports) ---
 
 def collect_network(
@@ -696,6 +715,15 @@ def main() -> int:
             ),
         )
 
+    # NIC coverage and east-west verdicts were resolved against every NSG and VNet, so in-scope verdicts don't change.
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    security_groups, excluded = exclusions.split(security_groups, "network_security_group")
+    virtual_networks, excluded_vnets = exclusions.split(virtual_networks, "virtual_network")
+    network_interfaces, excluded_nics = split_network_interfaces(network_interfaces, exclusions)
+    excluded += excluded_vnets + excluded_nics
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -705,10 +733,14 @@ def main() -> int:
             "virtual_networks": virtual_networks,
             "network_interfaces": network_interfaces,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(security_groups, virtual_networks, network_interfaces),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("network_security_group", "virtual_network", "network_interface"), {
+                "network_security_groups": len(security_groups), "virtual_networks": len(virtual_networks),
+                "network_interfaces": len(network_interfaces)}),
         },
     )
 

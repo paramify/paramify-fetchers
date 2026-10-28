@@ -32,6 +32,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from private_dns import project_zone_group  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import (  # noqa: E402
     lookup_by_ids,
     quoted_ids,
@@ -411,12 +412,22 @@ def main() -> int:
             ),
         )
 
+    # Targets were looked up for every endpoint, so an in-scope endpoint to an excluded resource keeps its verdicts.
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    endpoints, excluded = exclusions.split(endpoints, "private_endpoint")
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"private_endpoints": endpoints, "provider_registration_status": registration},
-        summary={**summarize(endpoints), "provider_registration_status": registration},
+        results={"private_endpoints": endpoints, "provider_registration_status": registration, "excluded": excluded},
+        summary={
+            **summarize(endpoints),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("private_endpoint",), {"private_endpoints": len(endpoints)}),
+        },
     )
     filename = f"azure_private_endpoint_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

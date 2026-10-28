@@ -35,6 +35,8 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from azure_rest import int_config  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_vnet_egress_routing")
 
@@ -54,6 +56,7 @@ BYPASSABLE_PATHS = ("appliance", "blackhole", "gateway", "other")
 THREAT_INTEL_STRICTNESS = {"Off": 0, "Alert": 1, "Deny": 2}
 SEARCH_LIMIT_ENV = "VIRTUAL_HUB_SEARCH_MAX_SUBSCRIPTIONS"
 DEFAULT_SEARCH_LIMIT = 50
+EXCLUSION_KINDS = ("virtual_network", "subnet", "route_table", "network_interface", "azure_firewall", "virtual_hub")
 
 
 # --- projection: the only code here that touches an azure-mgmt model ---
@@ -675,6 +678,35 @@ def unresolved_spokes(vnets: list[dict], peers_by_vnet: dict, hubs: list[dict]) 
     return spokes
 
 
+def split_network_interfaces(nics: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
+    """A NIC leaves scope when a pattern matches it or one of its subnets (and so that subnet's virtual network)."""
+    kept, excluded = exclusions.split(nics, "network_interface")
+    in_scope = []
+    for nic in kept:
+        matches = [(pattern, s) for s in nic["subnet_ids"] if exclusions and (pattern := exclusions.match(s))]
+        if not matches:
+            in_scope.append(nic)
+            continue
+        pattern, subnet_id = matches[0]
+        excluded.append(excluded_item(
+            "network_interface", nic["name"], pattern, "subnet_matched", id=nic["id"],
+            resource_group=nic["resource_group"], location=nic["location"], matched_id=subnet_id))
+    return in_scope, excluded
+
+
+def split_records(exclusions: ResourceExclusions, vnets, subnets, tables, nics, firewalls, hubs) -> tuple:
+    """Each collection's in-scope records, then every excluded entry; a subnet follows its virtual network's id."""
+    kept, excluded = [], []
+    for kind, records in zip(EXCLUSION_KINDS, (vnets, subnets, tables, nics, firewalls, hubs)):
+        if kind == "network_interface":
+            records, out = split_network_interfaces(records, exclusions)
+        else:
+            records, out = exclusions.split(records, kind)
+        kept.append(records)
+        excluded += out
+    return (*kept, excluded)
+
+
 # --- collection (lazy azure imports) ---
 
 def new_hub_search() -> dict:
@@ -854,6 +886,13 @@ def main() -> int:
         )
 
     vnets, subnets, tables, nics, firewalls, hubs = build_records(*raw)
+    # Egress paths, appliance owners and firewall routing were resolved against every record, so in-scope verdicts hold.
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    vnets, subnets, tables, nics, firewalls, hubs, excluded = split_records(
+        exclusions, vnets, subnets, tables, nics, firewalls, hubs
+    )
+    exclusions.warn_unmatched(logger)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -867,10 +906,14 @@ def main() -> int:
             "virtual_hubs": hubs,
             "virtual_hub_search": search,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(vnets, subnets, tables, nics, firewalls, hubs),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, EXCLUSION_KINDS, {
+                "virtual_networks": len(vnets), "subnets": len(subnets), "route_tables": len(tables),
+                "network_interfaces": len(nics), "azure_firewalls": len(firewalls), "virtual_hubs": len(hubs)}),
         },
     )
 

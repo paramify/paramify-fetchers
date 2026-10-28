@@ -1,5 +1,5 @@
 name: azure_network_security_groups
-version: 0.3.0
+version: 0.4.0
 description: >
   Every network security group in the subscription with its inline security rules
   (destination port range, protocol, source address prefix, access, direction) —
@@ -14,6 +14,28 @@ description: >
   says which other subnets in its VNet can reach it on every port (east-west
   segmentation), through both subnets' NSGs.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching network security group, virtual network (with its
+      subnets) or network interface is listed under excluded with the pattern and
+      left out of every count and verdict; a network interface also leaves with
+      the virtual network its subnets sit in. NIC coverage and east-west
+      segmentation are still worked out against every NSG and virtual network, so
+      an in-scope subnet or NIC whose NSG is excluded keeps its verdict. A pattern
+      without one of these prefixes fails the run. Set it once for every Azure
+      fetcher under platforms.azure.config. Can be ${env:VAR}. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -81,3 +103,17 @@ evidence_set:
     Not considered: NIC-level NSGs (they can only narrow a pair this calls open),
     traffic within one subnet, and peered VNets. Maps to KSI-CNA-RNT / KSI-CNA-MAT /
     KSI-CNA-ULN / KSI-CNA-DFP.
+
+    Resources the resource_exclusions patterns take out are listed under excluded
+    instead, each with the pattern that matched; a network interface taken out with
+    its virtual network names that network in matched_id.
+
+    Which resources are left out of scope?
+      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no network security group, virtual network or network interface, such as a mistyped name
+      - excluded_network_security_groups — Number of network security groups left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+      - excluded_virtual_networks — Number of virtual networks left out of scope the same way; their subnets leave with them and no subnet count includes them
+      - excluded_network_interfaces — Number of network interfaces left out of scope the same way, or because a pattern matched the virtual network their subnets sit in
+      - in_scope_network_security_groups — Number of network security groups read and in scope; 0 means none was read or the patterns took out every one, which a check can catch by requiring more than 0
+      - in_scope_virtual_networks — Number of virtual networks read and in scope
+      - in_scope_network_interfaces — Number of network interfaces read and in scope
