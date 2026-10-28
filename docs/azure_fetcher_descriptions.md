@@ -3186,7 +3186,7 @@ Summary fields:
 - `new_ports_count` — Number of direction, protocol and destination port combinations with allowed flows in the window and none in the prior window; null without a baseline
 - `outbound_destinations` — Number of destination addresses that allowed outbound flows reached in the window, counted once per flow type and Traffic Analytics table; null when no Traffic Analytics table was read
 - `new_outbound_destinations` — Number of destination addresses that allowed outbound flows reached in the window but not in the prior window, counted once per flow type and Traffic Analytics table; null without a baseline
-- `denied_spike_days` — List of days in the window whose denied flows exceed the spike threshold: `denied_spike_factor` times the prior window's daily average of denied flows, or 100 flows if that is higher; null without a baseline
+- `denied_spike_days` — List of days in the window whose denied flows exceed the spike threshold: `denied_spike_factor` times the larger of the prior window's daily average of denied flows and 100 flows (300 at the default factor), averaged over the prior-window days that hold records; null without a baseline
 - `denied_spike_days_count` — Number of days in the window whose denied flows exceed the spike threshold; null without a baseline
 
 **Do Front Door's access logs show its requests?**
@@ -3195,7 +3195,7 @@ Summary fields:
 - `front_door_profiles_with_requests` — Number of Front Door profiles whose access log has records in the window
 - `front_door_profiles_without_access_log_records` — Number of Front Door profiles that export the access log to workspaces that were read and hold no records in the window
 - `front_door_profiles_access_log_unknown` — Number of Front Door profiles that export the access log to a workspace that couldn't be read
-- `front_door_requests` — Number of client requests across the profiles that export the access log, counting the edge's copy of each request and not the origin shield's; null when any of these profiles' logs couldn't be read
+- `front_door_requests` — Number of client requests across the profiles that export the access log, leaving out records the log marks as not received from the client (origin shield copies), where the log carries that mark; null when any of these profiles' logs couldn't be read
 - `front_door_5xx_responses` — Number of client requests answered with a 5xx status across the profiles that export the access log; null when any of these profiles' logs couldn't be read
 
 **Is any origin reached without going through Front Door?**
@@ -3203,7 +3203,7 @@ Summary fields:
 - `origin_apps_exporting_http_logs` — Number of origin apps that send AppServiceHTTPLogs to a workspace, by name or through allLogs
 - `origin_apps_without_http_log_export` — Number of origin apps that send no AppServiceHTTPLogs to a workspace, so whether they were reached directly is unknown
 - `origin_apps_private_link` — Number of origin apps that every Front Door origin naming them reaches over Private Link; Front Door's requests to these apps arrive from private addresses
-- `origin_apps_bypass_unknown` — Number of origin apps that export HTTP logs but whose records couldn't be read or classified (a workspace refused the read, or Front Door's address ranges couldn't be read)
+- `origin_apps_bypass_unknown` — Number of origin apps that export HTTP logs but whose records couldn't be read or classified (a workspace refused the read, Front Door's address ranges couldn't be read, or a request's caller address is empty or not an IP address)
 - `origin_apps_reached_outside_front_door` — Number of origin apps that export HTTP logs and received at least one request from outside Front Door: from a public address outside the AzureFrontDoor.Backend ranges. Private, loopback, link-local and shared addresses count as internal, not outside, and so do Front Door's requests over Private Link. App Service's own management addresses (AppServiceManagement) count as the platform, not outside
 - `origin_apps_served_outside_front_door` — Number of origin apps that export HTTP logs and served (status under 400) at least one request from outside Front Door
 - `origin_requests_outside_front_door` — Number of requests from outside Front Door across the origin apps that export HTTP logs; null when any of these apps' records are unknown
@@ -3527,6 +3527,7 @@ Summary fields:
 - `app_gateway_waf_resources` — Number of WAF resources that are App Gateways
 - `front_door_profiles_without_waf` — Number of Front Door Standard and Premium profiles that attach no WAF policy
 - `waf_resources_in_detection_mode` — Number of WAF resources with a policy in Detection mode, which logs matching requests without blocking them
+- `waf_resources_mode_unknown` — Number of WAF resources with no policy in Detection mode where a policy's mode couldn't be read (the profile's security policies or the policy itself couldn't be read)
 
 **Do the WAFs send their logs?**
 - `waf_resources_exporting_waf_log` — Number of WAF resources with a diagnostic setting that sends the WAF log to a workspace, by name or through allLogs
@@ -3538,16 +3539,16 @@ Summary fields:
 - `waf_resources_waf_log_unknown` — Number of WAF resources that export the WAF log to a workspace that couldn't be read, or to a Basic-plan table that wasn't queried
 - `waf_events` — Number of WAF log records in the window (one per rule a request matched); null when any WAF resource's records couldn't be read
 - `waf_requests_matched` — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id; null when any WAF resource's records couldn't be read
-- `waf_requests_blocked` — Number of requests the WAF blocked (Block, Blocked or a failed JavaScript challenge on any of the request's records); null when any WAF resource's records couldn't be read
+- `waf_requests_blocked` — Number of requests the WAF blocked (Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records); null when any WAF resource's records couldn't be read
 - `waf_requests_logged_only` — Number of requests that matched a rule but were only logged (Log, AnomalyScoring, Detected or Matched, and neither blocked nor allowed), as in Detection mode; null when any WAF resource's records couldn't be read
 - `last_waf_event` — Time of the latest WAF log record across all WAF resources (UTC)
 
 **Do WAF alerts reach someone?**
-- `waf_alert_rules` — Number of alert rules on a WAF metric (WebApplicationFirewallRequestCount, Azwaf*, BlockedCount or MatchedCount) or whose query reads a WAF log
-- `waf_alert_rules_enabled` — Number of enabled WAF alert rules
-- `waf_alert_rules_reaching_person` — Number of enabled WAF alert rules that reach a person: an enabled action group with an email, SMS, voice, push, ARM role or ITSM receiver, and no alert processing rule that always suppresses it
-- `waf_resources_with_alert_reaching_person` — Number of WAF resources covered by a WAF alert rule that reaches a person; a rule covers a resource when it is scoped to the resource, a resource group or subscription holding it, or (for a log alert) a workspace receiving its WAF log
-- `waf_resources_without_waf_alert` — Number of WAF resources that no enabled WAF alert rule covers
+- `waf_alert_rules` — Number of alert rules on a WAF metric (WebApplicationFirewallRequestCount, Azwaf*, BlockedCount or MatchedCount) or whose query reads a WAF log; null when the alert rule lists couldn't be read
+- `waf_alert_rules_enabled` — Number of enabled WAF alert rules; null when the alert rule lists couldn't be read
+- `waf_alert_rules_reaching_person` — Number of enabled WAF alert rules that reach a person: an enabled action group with an email, SMS, voice, push, ARM role or ITSM receiver, and no alert processing rule that always suppresses it; null when the alert rule lists couldn't be read
+- `waf_resources_with_alert_reaching_person` — Number of WAF resources covered by a WAF alert rule that reaches a person; a rule covers a resource when it is scoped to the resource, a resource group or subscription holding it, or (for a log alert) a workspace receiving its WAF log, and its metric or log belongs to that kind of WAF (WebApplicationFirewallRequestCount and the Front Door WAF log for Front Door; the other WAF metrics and logs for App Gateways); null when the alert rule lists couldn't be read
+- `waf_resources_without_waf_alert` — Number of WAF resources that no enabled WAF alert rule covers; null when the alert rule lists couldn't be read
 
 **Are DDoS attacks watched on the attached public IPs?**
 - `public_ips` — Number of public IPs in the subscription
@@ -3556,11 +3557,11 @@ Summary fields:
 - `public_ips_protection_disabled` — Number of attached public IPs whose DDoS protection mode is Disabled
 - `public_ips_protection_inherited` — Number of attached public IPs whose DDoS protection mode is inherited from their virtual network, or unset; whether that network has a DDoS plan is shown by azure_ddos_protection
 - `public_ips_exporting_ddos_logs` — Number of attached public IPs whose diagnostic settings send all three DDoS log categories to a workspace
-- `public_ips_with_attack_alert` — Number of attached public IPs covered by an enabled alert rule on IfUnderDDoSAttack or a DDoS log category
-- `public_ips_with_attack_alert_reaching_person` — Number of attached public IPs whose attack alert reaches a person
-- `ddos_attack_alert_rules` — Number of alert rules on IfUnderDDoSAttack or whose query reads a DDoS log category
-- `protected_ips_with_attack_alert_reaching_receiver` — Number of public IPs with IP Protection whose attack alert routes to an enabled receiver; null when no attached IP has IP Protection, because without DDoS Protection the alert can't fire
-- `protected_ips_without_attack_alert` — Number of public IPs with IP Protection and no attack alert; null when no attached IP has IP Protection
+- `public_ips_with_attack_alert` — Number of attached public IPs covered by an enabled alert rule on IfUnderDDoSAttack or a DDoS log category; null when the alert rule lists couldn't be read
+- `public_ips_with_attack_alert_reaching_person` — Number of attached public IPs whose attack alert reaches a person; null when the alert rule lists couldn't be read
+- `ddos_attack_alert_rules` — Number of alert rules on IfUnderDDoSAttack or whose query reads a DDoS log category; null when the alert rule lists couldn't be read
+- `protected_ips_with_attack_alert_reaching_receiver` — Number of public IPs with IP Protection whose attack alert routes to an enabled receiver; null when no attached IP has IP Protection, because without DDoS Protection the alert can't fire, or when the alert rule lists couldn't be read
+- `protected_ips_without_attack_alert` — Number of public IPs with IP Protection and no attack alert; null when no attached IP has IP Protection, or when the alert rule lists couldn't be read
 - `public_ips_attacked` — Number of attached public IPs with at least one hour under attack in the window; null when no attached IP has IP Protection and none showed an attack, because without DDoS Protection the attack metric stays 0
 - `ddos_mitigations_started` — Number of DDoS mitigations started on public IPs with IP Protection; null when no attached IP has IP Protection, or any such IP's DDoS logs couldn't be read
 

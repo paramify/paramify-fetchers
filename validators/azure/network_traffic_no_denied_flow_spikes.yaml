@@ -5,7 +5,8 @@ role: configuration
 statement: >-
   Traffic Analytics was read in full, the prior window (the same number of days before the window) has
   flows to compare against, and no day in the window had more denied flows than the fetcher's spike
-  factor (default 3) times the prior window's daily average, or 100 flows if that is higher.
+  factor (default 3) times the larger of the prior window's daily average and 100 flows (300 at the
+  default factor). The average spans the prior-window days that hold records.
   Substantiates that blocked traffic is watched for sudden increases that point to scanning or an
   attack (KSI-CNA-ULN). Does NOT prove that the spike factor is the approved threshold (it is the
   fetcher's configuration), that a day under the threshold is benign, that traffic on subnets without a
