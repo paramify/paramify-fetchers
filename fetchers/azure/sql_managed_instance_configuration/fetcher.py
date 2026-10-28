@@ -62,6 +62,8 @@ NON_PUBLIC_RANGES = tuple(ipaddress.ip_network(n) for n in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
     "fc00::/7", "fe80::/10", "::1/128",
 ))
+# Every Azure datacenter public address, other customers' VMs included; matches AzureCloud and AzureCloud.<region>.
+PUBLIC_SERVICE_TAG = "azurecloud"
 DEFAULT_MAINTENANCE_CONFIGURATION = "sql_default"
 MAINTENANCE_API_VERSION = "2023-04-01"
 
@@ -258,8 +260,8 @@ def _covers_all_ports(values) -> bool:
 
 
 def public_source(prefix) -> bool:
-    """*, Any, Internet, 0.0.0.0/0, or an address range reaching past non-public space; other service tags don't count."""
-    if lower(prefix) in ANY_ADDRESS:
+    """*, Any, Internet, 0.0.0.0/0, AzureCloud, or an address range reaching past non-public space; other service tags don't count."""
+    if lower(prefix) in ANY_ADDRESS or lower(prefix).split(".")[0] == PUBLIC_SERVICE_TAG:
         return True
     try:
         net = ipaddress.ip_network(str(prefix), strict=False)
@@ -286,7 +288,7 @@ def allows_smb_outbound(rule: dict) -> bool:
 
 
 def allows_public_all_ports_inbound(rule: dict) -> bool:
-    """An inbound Allow on every port, on any protocol, from a source list that includes public addresses."""
+    """An inbound Allow on every port, whatever its protocol, from a source list that includes public addresses."""
     return (
         lower(rule.get("access")) == "allow"
         and lower(rule.get("direction")) == "inbound"

@@ -389,7 +389,7 @@ def test_smb_outbound_and_public_all_ports_inbound_rules_leave_service_aided_one
     east = instances["mi-east"]
     assert collector.ok
     assert east["subnet_smb_outbound_allow_rules"] == ["smb-out", "smb-range-out"]
-    assert east["subnet_public_all_ports_inbound_allow_rules"] == ["partners-in", "split-ports-in"]
+    assert east["subnet_public_all_ports_inbound_allow_rules"] == ["partners-in", "split-ports-in", "azure-in"]
     assert east["subnet_allow_any_to_any_rules"] == []
     assert summary["instances_subnet_smb_outbound_allow_rule"] == 2
     assert summary["instances_subnet_public_all_ports_inbound_allow_rule"] == 2
@@ -399,7 +399,7 @@ def test_smb_outbound_and_public_all_ports_inbound_rules_leave_service_aided_one
 @pytest.mark.parametrize("prefix,expected", [
     ("*", True), ("Internet", True), ("0.0.0.0/0", True), ("52.1.2.3", True), ("10.0.0.0/7", True), ("::/0", True),
     ("10.1.0.0/16", False), ("172.16.5.0/24", False), ("100.64.0.0/10", False), ("fd00::/8", False),
-    ("VirtualNetwork", False), ("AzureCloud", False),
+    ("VirtualNetwork", False), ("AzureCloud", True), ("AzureCloud.eastus", True), ("Storage", False),
 ])
 def test_public_source(prefix, expected):
     assert configuration.public_source(prefix) is expected
