@@ -615,6 +615,7 @@ Commands Executed:
 - Microsoft Graph `GET /organization` — the tenant's name and domain
 - Microsoft Graph `GET /directoryRoles` — the directory roles activated in the tenant
 - Microsoft Graph `GET /directoryRoles/{id}/members` (per role) — who holds each role
+- Microsoft Graph `GET /directoryRoles/{id}/members/microsoft.graph.servicePrincipal` (per role) — the service principals holding each role, which the members list can leave out
 
 Output: `azure_entra_privileged_roles_<tenant>.json` — each activated directory role, whether it's privileged or Global Administrator, and the users, groups and apps holding it, plus the list of role names counted as privileged.
 
@@ -641,7 +642,7 @@ Summary fields:
 **What kind of account holds privileged power?**
 - `users_in_privileged_roles` — Number of privileged-role assignments held by users; a user holding two privileged roles counts twice
 - `groups_in_privileged_roles` — Number of privileged-role assignments held by groups; members of the group aren't counted
-- `service_principals_in_privileged_roles` — Number of privileged-role assignments held by service principals (apps and managed identities)
+- `service_principals_in_privileged_roles` — Number of privileged-role assignments held by service principals (apps and managed identities); null if any privileged role's service principals couldn't be read
 
 
 ### azure_entra_risky_users
