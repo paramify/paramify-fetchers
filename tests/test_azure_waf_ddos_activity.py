@@ -187,6 +187,18 @@ def test_waf_activity_unknown_unless_read(settings, workspaces, arriving, events
     assert rec["waf_alert_rules"] == [] and rec["waf_alert_reaches_person"] is False
 
 
+def test_rules_from_a_log_that_failed_to_read_are_not_reported():
+    workspaces = {LAW.lower(): {"status": wda.WS_ERROR, "read_tables": [], "failed_queries": ["fd:requests"],
+                                "fd:rules": [{"ResourceId": PROFILE.lower(), "Rule": "DefaultRuleSet-1.0-SQLI-942100",
+                                              "Events": 8, "Blocked": 0}]}}
+    rec = wda.waf_activity(fd_resource(), [setting(category="FrontDoorWebApplicationFirewallLog")], workspaces, POLICIES, [],
+                           sample=5)
+    assert rec["waf_events"] is None and rec["top_rules"] is None
+
+
+def test_requests_query_keeps_one_type_for_the_request_reference():
+    assert "iff(isempty(Ref), tostring(new_guid()), Ref)" in wda.WAF_QUERIES["requests"]
+
 def test_gateway_with_dedicated_tables_reads_agw_firewall_logs():
     gateway = wda.gateway_waf_resource({"id": AGW, "name": "agw1", "properties": {
         "sku": {"tier": "WAF_v2", "name": "WAF_v2"}, "firewallPolicy": {"id": AGW_POLICY}}})

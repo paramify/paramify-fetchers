@@ -107,7 +107,7 @@ _LOG = "Action in ({})".format(", ".join(f"'{a}'" for a in LOG_ACTIONS))
 _ALLOW = "Action in ({})".format(", ".join(f"'{a}'" for a in ALLOW_ACTIONS))
 # One request can match several rules, so each is folded to one row before it is counted.
 WAF_QUERIES = {
-    "requests": "| extend Ref = iff(isempty(Ref), new_guid(), Ref) "
+    "requests": "| extend Ref = iff(isempty(Ref), tostring(new_guid()), Ref) "
                 f"| summarize Events = count(), Blocked = countif({_BLOCK}) > 0, Logged = countif({_LOG}) > 0, "
                 f"Allowed = countif({_ALLOW}) > 0, Challenged = countif(Action has 'challenge' and not({_BLOCK})) > 0, "
                 "First = min(TimeGenerated), Last = max(TimeGenerated) by ResourceId, Policy, Mode, Ref "
@@ -414,7 +414,7 @@ def waf_activity(resource: dict, settings, workspaces: dict, policies: dict, ale
         ] if known else None,
         "first_event": _earliest(r.get("FirstEvent") for r in rows),
         "last_event": _latest(r.get("LastEvent") for r in rows),
-        "top_rules": rules,
+        "top_rules": rules if known else None,
         "waf_logs_arriving": arriving,
         "waf_alert_rules": [r["name"] for r in covering],
         "waf_alert_routes_to_receiver": tri_any(r["routes_to_enabled_receiver"] for r in covering) if covering else False,
