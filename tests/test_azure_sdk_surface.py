@@ -4040,6 +4040,45 @@ def test_graph_service_principal_access_builders_present() -> None:
         "applications.by_application_id(...).owners is gone.\n"
         "  affected fetchers: azure/entra_service_principals"
     )
+def test_graph_access_review_builders_present() -> None:
+    """azure/entra_access_reviews walks definitions → instances → decisions by id."""
+    builder: object = _build("msgraph", "GraphServiceClient")
+    for part in ("identity_governance", "access_reviews", "definitions"):
+        builder = getattr(builder, part, None)
+        assert builder is not None, "GraphServiceClient.identity_governance.access_reviews.definitions is gone (azure/entra_access_reviews)"
+    lists = [builder]
+    for step in ("by_access_review_schedule_definition_id", "instances", "by_access_review_instance_id", "decisions"):
+        attr = getattr(type(builder), step, None)
+        assert attr is not None, f"{type(builder).__name__}.{step} is gone (azure/entra_access_reviews)"
+        builder = attr(builder, "x") if callable(attr) and step.startswith("by_") else getattr(builder, step)
+        if not step.startswith("by_"):
+            lists.append(builder)
+    # Each list is paged with $top/$skip when Graph sends a full page without a nextLink.
+    for listed in lists:
+        query = getattr(type(listed), f"{type(listed).__name__}GetQueryParameters", None)
+        assert query is not None and {"top", "skip"} <= set(inspect.signature(query).parameters), (
+            f"{type(listed).__name__} lost $top/$skip (azure/entra_access_reviews)"
+        )
+
+
+def test_graph_access_review_models_present() -> None:
+    """The fields azure/entra_access_reviews reads; a rename reads as a setting turned off, not an error."""
+    for module, name, fields in [
+        ("access_review_schedule_definition", "AccessReviewScheduleDefinition",
+         ["display_name", "status", "scope", "instance_enumeration_scope", "reviewers", "settings", "stage_settings"]),
+        ("access_review_schedule_settings", "AccessReviewScheduleSettings",
+         ["recurrence", "default_decision_enabled", "default_decision", "auto_apply_decisions_enabled",
+          "instance_duration_in_days", "apply_actions"]),
+        ("patterned_recurrence", "PatternedRecurrence", ["pattern", "range"]),
+        ("recurrence_pattern", "RecurrencePattern", ["type", "interval"]),
+        ("access_review_query_scope", "AccessReviewQueryScope", ["query", "query_type", "query_root"]),
+        ("access_review_instance", "AccessReviewInstance", ["status", "start_date_time", "end_date_time"]),
+        ("access_review_instance_decision_item", "AccessReviewInstanceDecisionItem",
+         ["decision", "apply_result", "reviewed_by", "principal", "resource"]),
+    ]:
+        model = _import(f"msgraph.generated.models.{module}", name)
+        missing = [f for f in fields if f not in getattr(model, "__dataclass_fields__", {})]
+        assert not missing, f"{name} lost {missing} (azure/entra_access_reviews)"
 
 
 def test_graph_group_member_builders_present() -> None:

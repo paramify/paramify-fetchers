@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 79 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 83 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -87,12 +87,15 @@ and reads the tenant it belongs to.
 | `Application.Read.All` | `azure_entra_app_registrations`, `azure_entra_service_principals` |
 | `Policy.Read.All` | `azure_entra_conditional_access_policies`, `azure_entra_authentication_policy` |
 | `Directory.Read.All` | `azure_entra_authentication_policy` (group settings, subscribed SKUs), `azure_entra_mfa_status` (users, role members), `azure_entra_privileged_roles`, `azure_residual_resources` (principal lookup), `azure_entra_dormant_identities` (tenant check, users, role members, app registrations, principal lookup) |
-| `AuditLog.Read.All` | `azure_entra_mfa_status` (sign-in activity and the registration report), `azure_entra_dormant_identities` (users' and service principals' sign-in activity) |
+| `AuditLog.Read.All` | `azure_entra_mfa_status` (sign-in activity and the registration report), `azure_entra_dormant_identities` (users' and service principals' sign-in activity), `azure_entra_sign_ins` (sign-in logs; the tenant also needs Entra ID P1 or P2, and without it `sign_in_logs` reads `not_licensed` and the run succeeds) |
 | `GroupMember.Read.All` | `azure_entra_groups` (groups, members and owners). `Directory.Read.All` covers it and the fetcher's optional permissions below, except `Member.Read.Hidden` |
+| `AccessReview.Read.All` | `azure_entra_access_reviews` (review series, runs and decisions). The tenant needs Entra ID P2 or ID Governance; without it `access_reviews_available` reads false and the run succeeds |
 | `Directory.Read.All` (optional) | `azure_log_analytics_deletion_rights`: principal names; without it the grants are listed by id |
 | `Application.Read.All` (optional) | `azure_managed_identity_configuration`: each identity's Graph app permissions; without it `graph_access` reads `not_authorized` and the run succeeds. `azure_entra_groups`: the account state of owners that are apps or managed identities; without it `groups_with_only_disabled_owners` reads null when any owner is one |
 | `DelegatedPermissionGrant.Read.All` (optional) | `azure_entra_service_principals`: delegated grants; without it the delegated grant fields read null and the run succeeds |
 | `User.Read.All` (optional) | `azure_entra_groups`: members' and owners' sign-in names, account state and guest status; without it users come back as an id only, so `member_details_readable` and `owner_details_readable` read false, the guest, disabled-user and disabled-owner figures read null, and the run succeeds. `azure_entra_service_principals`: user owners' names and account state; without it they read null, and so does `service_principals_with_only_disabled_owners` |
+| `Policy.Read.ConditionalAccess` or `Policy.Read.All` (optional) | `azure_entra_sign_ins`: the Conditional Access policies applied to each listed sign-in; without it they read null and the run succeeds |
+| `User.Read.All` (optional) | `azure_entra_groups`: members' and owners' sign-in names, account state and guest status; without it users come back as an id only, so `member_details_readable` and `owner_details_readable` read false, the guest, disabled-user and disabled-owner figures read null, and the run succeeds |
 | `Member.Read.Hidden` (optional) | `azure_entra_groups`: members of hidden-membership groups; without it they read unknown and are counted in `hidden_membership_groups_unread`. `Directory.Read.All` doesn't cover it |
 | `Organization.Read.All` (optional) | Every `azure_entra_*` fetcher but `azure_entra_dormant_identities`: tenant name and domain; without it the tenant id comes from `AZURE_TENANT_ID`, and the run fails only if that is unset too |
 
@@ -196,6 +199,8 @@ Identity and access:
 | `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted and tenant-wide admin roles flagged |
 | `azure_entra_dormant_identities` | Users and service principals holding a directory role or an Azure role in the subscription, with their last sign-in: dormant, never-used, guest and deleted identities flagged |
 | `azure_entra_groups` | Groups with their members and owners: kind, whether they can hold directory roles, and dynamic (paused flagged), assigned or synced membership, with groups that have no owner, only disabled owners, guests or disabled users flagged |
+| `azure_entra_sign_ins` | Interactive sign-ins over a lookback: MFA required and passed, methods used (phishing-resistant counted), legacy clients, Conditional Access applied, and risky sign-ins (risk levels need Entra ID P2) |
+| `azure_entra_access_reviews` | Access review series: what each reviews (group membership, app assignment, directory role or access package), recurrence, default decision, auto-apply and reviewers, with series that aren't monthly, deny-by-default and auto-applying flagged, and what each active series' latest cycle decided and applied |
 | `azure_rbac_role_assignments` | Role assignments at the subscription and above, and separately below it, with Owner, Contributor, User Access Administrator and RBAC Administrator flagged; whether each is permanent, time-bound or activated through PIM, PIM-eligible assignments, and the over-broad roles' PIM activation settings |
 | `azure_rbac_custom_roles` | Custom role definitions with their full permission sets, flagged for wildcards and for permissions that allow privilege escalation |
 | `azure_managed_identity_configuration` | Managed identities: attached resources, federated credentials, Azure roles judged by their permissions, and Microsoft Graph app permissions |
@@ -274,6 +279,7 @@ Logging and monitoring:
 | `azure_network_flow_logs` | Network Watchers and flow logs (target, state, storage, retention, Traffic Analytics), and which virtual networks and subnets an enabled flow log covers |
 | `azure_alert_rules` | Metric, log search and smart detector alert rules, resolved to the receivers they notify and checked against suppression rules |
 | `azure_activity_log_alerts` | Activity log alert rules and which security-relevant control-plane operations they cover |
+| `azure_monitor_fired_alerts` | Alerts fired in the last 30 days, who acknowledged and closed each and when, and how often each alert rule fired |
 
 Microsoft Sentinel:
 
