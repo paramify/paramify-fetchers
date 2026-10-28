@@ -1144,9 +1144,19 @@ Commands Executed:
 - `GET Microsoft.AlertsManagement/actionRules` — processing rules that suppress or add action groups
 - `GET {action group id}` (groups in other subscriptions) — their receivers
 
-Output: `azure_alert_rules_<subscription>.json` — each alert rule with its condition, the receivers it notifies (phone numbers cut to the last 4 digits, webhooks to their host, Logic Apps and Functions to their resource id), any processing rules that suppress or add groups to it, and whether it reaches a person; mute durations are recorded but not evaluated, and activity log alerts are in `azure_activity_log_alerts`.
+Output: `azure_alert_rules_<subscription>.json` — each alert rule with its condition, the receivers it notifies (phone numbers cut to the last 4 digits, webhooks to their host, Logic Apps and Functions to their resource id), any processing rules that suppress or add groups to it, and whether it reaches a person; mute durations are recorded but not evaluated, and activity log alerts are in `azure_activity_log_alerts`. Resources the resource_exclusions patterns take out are listed under excluded instead.
 
 Summary fields:
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no alert rule, action group or processing rule, such as a mistyped name
+- `excluded_alert_rules` — Number of alert rules left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+- `excluded_action_groups` — Number of action groups left out of scope because a pattern matched their resource group, region or id
+- `excluded_processing_rules` — Number of alert processing rules left out of scope because a pattern matched their resource group, region or id
+- `in_scope_alert_rules` — Number of alert rules read and in scope; 0 means none was read or the patterns took out every rule, which a check can catch by requiring more than 0
+- `in_scope_action_groups` — Number of action groups read and in scope
+- `in_scope_processing_rules` — Number of alert processing rules read and in scope
 
 **What alert rules exist?**
 - `total_alert_rules` — Number of alert rules of all types
@@ -1372,9 +1382,15 @@ Output: `azure_log_analytics_workspaces_<subscription>.json` — each workspace 
 Summary fields:
 
 **What was checked?**
-- `total_workspaces` — Number of Log Analytics workspaces in the subscription
+- `total_workspaces` — Number of Log Analytics workspaces in scope (not taken out by a resource_exclusions pattern)
 - `total_tables` — Number of tables, built-in and custom, across all workspaces whose tables were read
 - `provider_registration_status` — Whether the Log Analytics provider (Microsoft.OperationalInsights) is registered on the subscription: registered, not_registered or unknown
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no workspace, such as a mistyped name
+- `excluded_workspaces` — Number of Log Analytics workspaces left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them, their tables, data exports or solutions
+- `in_scope_workspaces` — Number of workspaces read and in scope; 0 means none was read or the patterns took out every workspace, which a check can catch by requiring more than 0
 
 **How long are logs kept, and can ingestion stop?**
 - `min_workspace_retention_in_days` — Shortest workspace retention in days (how long a workspace keeps data available to query by default) across all workspaces; null when no workspace reports one
@@ -1581,16 +1597,22 @@ Commands Executed:
 - KQL `union *` on each destination workspace (text in `results.ingestion_query`) — newest event time (TimeGenerated) and record count for each resource over the lookback. One query per workspace; it costs nothing on Analytics tables but scans them all, so a large workspace can take minutes. A query that hits a service limit fails the run. One that runs past the 600-second wait is retried up to 4 more times, and destinations are read one after another, so a slow destination can push the run past its 3600-second timeout. It leaves out tables written whatever a diagnostic setting says: AzureActivity, AzureMetrics, InsightsMetrics, Perf, Heartbeat, Syslog, Event and the Container Insights tables (ContainerLog, ContainerLogV2, ContainerInventory, ContainerNodeInventory, ContainerImageInventory, ContainerServiceLog and the Kube tables). Application Insights tables stay, since their rows are the component's own telemetry; a component whose linked workspace is also its destination reads arrived, whatever its setting does
 - KQL on each Basic or Auxiliary table through the `/search` endpoint, since `/query` refuses these tables (text in `results.basic_table_query`), only when `basic_logs_lookback_hours` is above 0 — newest event time and record count over that many hours for the tables union * skips; off by default because these queries bill per GB scanned. Custom (_CL) tables and the left-out tables above are never queried, and a table whose query fails stays unqueried without failing the run
 
-Output: `azure_resource_diagnostic_settings_<subscription>.json` — each resource with its diagnostic settings, where its logs go, which log and audit categories aren't exported, and per destination workspace whether anything from it arrived (log_analytics_ingestion, last_ingested, ingested_in_window), plus each destination workspace's status, unqueried_tables and table_errors (the Basic or Auxiliary queries that failed) in log_analytics_destinations.
+Output: `azure_resource_diagnostic_settings_<subscription>.json` — each resource with its diagnostic settings, where its logs go, which log and audit categories aren't exported, and per destination workspace whether anything from it arrived (log_analytics_ingestion, last_ingested, ingested_in_window), plus each destination workspace's status, unqueried_tables and table_errors (the Basic or Auxiliary queries that failed) in log_analytics_destinations. Resources the resource_exclusions patterns take out are listed under excluded instead.
 
 Summary fields:
 
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no resource, such as a mistyped name
+- `excluded_resources` — Number of resources left out of scope because a pattern matched their resource group, region or id, the added storage services of an excluded storage account included; each is listed under excluded with the pattern, is not read, and no other count includes it
+- `in_scope_resources` — Number of resources in scope and checked, the added storage services included, so it equals `resources_evaluated`; 0 means none was found or the patterns took out every resource, which a check can catch by requiring more than 0
+
 **Was every resource found and checked?**
-- `resources_enumerated` — Number of resources Resource Graph returned
-- `resource_graph_total_records` — Number of resources Resource Graph reported in total; must equal `resources_enumerated`, and the run fails if they differ, which proves no resource was missed; null if Resource Graph gave no total
+- `resources_enumerated` — Number of resources Resource Graph returned, including resources a resource_exclusions pattern takes out
+- `resource_graph_total_records` — Number of resources Resource Graph reported in total, including resources a resource_exclusions pattern takes out; must equal `resources_enumerated`, and the run fails if they differ, which proves no resource was missed; null if Resource Graph gave no total
 - `resource_graph_pages` — Number of Resource Graph result pages read
 - `child_services_synthesized` — Number of storage blob, file, queue and table services added to the inventory (Resource Graph doesn't list them)
-- `resources_evaluated` — Number of resources checked, including the added storage services
+- `resources_evaluated` — Number of in-scope resources checked, including the added storage services
 - `resources_assessed` — Number of resources whose diagnostic log categories were read
 - `resources_unsupported` — Number of resources whose type doesn't support diagnostic settings
 - `resources_not_found` — Number of resources deleted between being listed and being checked
@@ -1917,12 +1939,18 @@ Output: `azure_app_service_backups_<subscription>.json` — each web app's autom
 
 Summary fields:
 
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no web app, function app or deployment slot, such as a mistyped name
+- `excluded_web_apps` — Number of web apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, gets no backup calls, and no other count includes it. Function apps and deployment slots a pattern matches are left out the same way, and a slot follows its app
+- `in_scope_web_apps` — Number of web apps read and in scope; 0 means none was read or the patterns took out every app, which a check can catch by requiring more than 0
+
 **Which web apps were checked?**
-- `total_web_apps` — Number of web apps assessed (production sites only; function apps and slots are left out)
+- `total_web_apps` — Number of in-scope web apps assessed (production sites only; function apps and slots are left out)
 - `apps_by_plan_tier` — Number of web apps on each App Service plan tier
-- `excluded_function_apps` — Number of function apps left out of the assessment
-- `excluded_deployment_slots` — Number of deployment slots left out of the assessment
-- `resource_graph_web_apps` — Number of web apps Resource Graph lists, used to check the app list is complete
+- `excluded_function_apps` — Number of in-scope function apps left out of the assessment
+- `excluded_deployment_slots` — Number of in-scope deployment slots left out of the assessment
+- `resource_graph_web_apps` — Number of in-scope web apps Resource Graph lists, used to check the app list is complete
 - `web_apps_added_from_resource_graph` — Number of web apps Resource Graph found that the main app list missed
 - `provider_registration_status` — Whether the App Service provider (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown
 
@@ -1985,9 +2013,9 @@ Output: `azure_backup_recovery_status_<subscription>.json` — each Recovery Ser
 Summary fields:
 
 **What was checked?**
-- `total_recovery_services_vaults` — Number of Recovery Services vaults in the subscription
+- `total_recovery_services_vaults` — Number of Recovery Services vaults in scope (not taken out by a resource_exclusions pattern)
 - `vaults_with_protected_items` — Number of vaults that back up at least one item
-- `vaults_without_protected_items` — Number of vaults that back up nothing
+- `vaults_without_protected_items` — Number of in-scope vaults that back up nothing, including a vault whose protected items were all taken out of scope
 - `total_backup_policies` — Number of backup policies across all vaults
 - `total_protected_items` — Number of protected items (VMs, file shares, databases and other workloads registered for backup) across all vaults
 - `protected_items_by_workload_type` — Number of protected items for each workload type, keyed by Azure's name for the type; common keys:
@@ -1997,6 +2025,14 @@ Summary fields:
   - SAPHanaDatabase (SAP HANA database in a VM)
   - unknown (Azure reported no workload type)
 - `provider_registration_status` — Whether the Recovery Services provider (Microsoft.RecoveryServices) is registered on the subscription: registered, not_registered or unknown
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no Recovery Services vault, protected item or protected resource, such as a mistyped name
+- `excluded_recovery_services_vaults` — Number of Recovery Services vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them, their backup policies or their protected items
+- `excluded_protected_items` — Number of protected items left out of scope: items in an excluded vault, and items whose protected resource a pattern matched by resource group or id; each is listed under excluded
+- `in_scope_recovery_services_vaults` — Number of Recovery Services vaults read and in scope; 0 means none was read or the patterns took out every vault, which a check can catch by requiring more than 0
+- `in_scope_protected_items` — Number of protected items read and in scope
 
 **Are backups kept long enough?**
 - `retention_threshold_days` — Days of retention a backup policy must reach to meet the threshold (30)
@@ -2035,7 +2071,13 @@ Summary fields:
 
 **What was checked?**
 - `provider_registration_status` — Whether Defender for Cloud's provider (Microsoft.Security) is registered on the subscription: registered, not_registered (Defender for Cloud is not in use, so no results are listed) or unknown (the read failed)
-- `total_assessments` — Number of check results, one for each resource and check
+- `total_assessments` — Number of in-scope check results, one for each resource and check
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no assessment, such as a mistyped name
+- `excluded_assessments` — Number of check results left out of scope because a pattern matched the resource they are about by resource group or id; a check result has no region, so location: patterns never match one, and results about the subscription itself stay; each is listed under excluded with the pattern, and no other count includes them
+- `in_scope_assessments` — Number of check results read and in scope; equals `total_assessments`
 
 **Which checks pass and fail?**
 - `healthy_count` — Number of check results with status Healthy (the resource passes the check)
@@ -2289,20 +2331,32 @@ Output: `azure_policy_compliance_<subscription>.json` — the subscription's and
 
 Summary fields:
 
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no assignment, non-compliant state, remediation task or remediation deployment, such as a mistyped name
+- `excluded_policy_assignments` — Number of policy assignments left out of scope because a pattern matched the resource group or id of the scope they were made at; assignments made at the subscription or a management group stay, and each excluded one is listed under excluded with the pattern
+- `excluded_policy_states` — Number of non-compliant (resource, policy) records left out of scope because a pattern matched the resource they are about by id, resource group or region; each is listed under excluded with the pattern, and its evaluation details are not read
+- `excluded_remediation_tasks` — Number of remediation tasks left out of scope because a pattern matched the resource group or id of the scope they were made at; each is listed under excluded with the pattern, and its deployments are not read
+- `excluded_remediation_deployments` — Number of per-resource remediation deployments left out of scope because a pattern matched the resource they remediated by id, resource group or region; each is listed under excluded with the pattern
+- `in_scope_policy_assignments` — Number of policy assignments read and in scope
+- `in_scope_policy_states` — Number of non-compliant (resource, policy) records read and in scope
+- `in_scope_remediation_tasks` — Number of remediation tasks read and in scope
+- `in_scope_remediation_deployments` — Number of remediation deployments read and in scope
+
 **What was evaluated?**
-- `resources_evaluated` — Number of resources with a compliance state in the service's evaluation window (the last day); 0 means nothing was evaluated, not that everything passed
-- `resources_by_compliance_state` — Number of resources in each compliance state (for example Compliant, NonCompliant, Exempt)
-- `policies_by_compliance_state` — Number of policies in each compliance state
-- `assignments_evaluated` — Number of policy assignments the service summarized
+- `resources_evaluated` — Number of resources with a compliance state in the service's evaluation window (the last day); 0 means nothing was evaluated, not that everything passed; the service counts every resource in the subscription, so it still includes resources a resource_exclusions pattern takes out
+- `resources_by_compliance_state` — Number of resources in each compliance state (for example Compliant, NonCompliant, Exempt), including resources a resource_exclusions pattern takes out
+- `policies_by_compliance_state` — Number of policies in each compliance state, counted over every resource, including resources a resource_exclusions pattern takes out
+- `assignments_evaluated` — Number of in-scope policy assignments the service summarized
 - `provider_registration_status` — Whether the policy compliance provider (Microsoft.PolicyInsights) is registered on the subscription: registered, not_registered or unknown
 
 **How compliant is the subscription?**
-- `non_compliant_resources` — Number of resources non-compliant with at least one policy, as the service counts them
-- `non_compliant_policies` — Number of policies with at least one non-compliant resource, as the service counts them
-- `compliant_resources` — Number of resources compliant with every policy that applies to them
-- `resource_compliance_percentage` — Percentage of evaluated resources that are compliant = `compliant_resources` / (`compliant_resources` + the NonCompliant count in `resources_by_compliance_state`) × 100 (a whole number, 0–100); 0 when that sum is 0. Resources in other states (exempt, unknown, conflicting) are left out of both
-- `non_compliant_assignments` — Number of policy assignments with at least one non-compliant resource
-- `compliant_assignments` — Number of policy assignments with no non-compliant resource
+- `non_compliant_resources` — Number of resources non-compliant with at least one policy, as the service counts them; the service counts every resource in the subscription, so it still includes resources a resource_exclusions pattern takes out
+- `non_compliant_policies` — Number of policies with at least one non-compliant resource, as the service counts them, resources a resource_exclusions pattern takes out included
+- `compliant_resources` — Number of resources compliant with every policy that applies to them, resources a resource_exclusions pattern takes out included
+- `resource_compliance_percentage` — Percentage of evaluated resources that are compliant = `compliant_resources` / (`compliant_resources` + the NonCompliant count in `resources_by_compliance_state`) × 100 (a whole number, 0–100); 0 when that sum is 0. Resources in other states (exempt, unknown, conflicting) are left out of both, and resources a resource_exclusions pattern takes out are in both
+- `non_compliant_assignments` — Number of in-scope policy assignments with at least one non-compliant resource, by the service's per-assignment count, which includes resources a resource_exclusions pattern takes out
+- `compliant_assignments` — Number of in-scope policy assignments with no non-compliant resource, by the service's per-assignment count, which includes resources a resource_exclusions pattern takes out
 
 **Which resources are non-compliant?**
 - `listed_non_compliant_states` — Number of non-compliant (resource, policy) records listed in the evidence (at most the `max_non_compliant_resources` setting, default 1000)
@@ -2325,7 +2379,7 @@ Summary fields:
   - failed (the read for the resource failed)
 
 **Do remediation tasks fix what they target?**
-- `remediation_tasks` — Number of remediation tasks on the subscription
+- `remediation_tasks` — Number of in-scope remediation tasks on the subscription
 - `remediation_tasks_by_provisioning_state` — Number of remediation tasks in each state (for example Succeeded, Failed, Evaluating)
 - `remediation_successful_deployments` — Number of remediation deployments that succeeded, as the tasks report them
 - `remediation_failed_deployments` — Number of remediation deployments that failed, as the tasks report them
@@ -2374,13 +2428,21 @@ Output: `azure_residual_resources_<subscription>.json` — each leftover resourc
 
 Summary fields:
 
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no orphaned resource or role assignment, such as a mistyped name
+- `excluded_orphaned_resources` — Number of orphaned resources left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+- `excluded_role_assignments` — Number of role assignments left out of scope because a pattern matched the resource group, region or id of the scope they were made at; assignments made at the subscription itself stay, and each excluded one is listed under excluded with the pattern
+- `in_scope_orphaned_resources` — Number of orphaned resources read and in scope
+- `in_scope_role_assignments` — Number of role assignments read and in scope
+
 **How many leftovers are there?**
 - `total_orphans` — Number of leftover items found: orphaned resources plus role assignments to deleted users, groups or apps
 - `orphans_by_kind` — Number of leftover items of each kind (for example, unattached disks, empty resource groups, role assignments to deleted principals)
 - `orphaned_resources` — Number of orphaned resources, not counting role assignments
 
 **Do role assignments point to deleted users, groups or apps?**
-- `role_assignments_checked` — Number of role assignments read
+- `role_assignments_checked` — Number of in-scope role assignments read
 - `deleted_principal_assignments` — Number of role assignments whose user, group or app no longer exists in Entra ID
 - `principals_checked` — Number of distinct users, groups and apps (principals) the role assignments point to
 - `principals_missing` — Number of distinct principals that no longer exist in Entra ID
@@ -2388,8 +2450,8 @@ Summary fields:
 - `principal_check` — Whether the deleted-principal check ran: `complete`; `failed` (reading role assignments, checking the tenant or the Graph lookup failed, so the run fails); or `not_run` (no subscription or credential)
 
 **How many identities and slots were checked, and when is a slot stale?**
-- `identities_checked` — Number of user-assigned managed identities read
-- `slots_checked` — Number of deployment slots read
+- `identities_checked` — Number of user-assigned managed identities read that no resource_exclusions pattern matches
+- `slots_checked` — Number of deployment slots read that no resource_exclusions pattern matches
 - `stale_slot_days` — Days without changes after which a deployment slot counts as stale (default 90); a stopped slot also counts as stale
 
 
@@ -2410,8 +2472,14 @@ Output: `azure_resource_inventory_<subscription>.json` — each resource with it
 
 Summary fields:
 
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no resource, such as a mistyped name
+- `excluded_resources` — Number of resources left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+- `in_scope_resources` — Number of resources read and in scope; 0 means none was read or the patterns took out every resource, which a check can catch by requiring more than 0
+
 **What resources exist?**
-- `total_resources` — Number of resources in the subscription (resource groups and the subscription itself are not counted)
+- `total_resources` — Number of in-scope resources (resource groups and the subscription itself are not counted)
 - `resource_type_count` — Number of different resource types
 - `resources_by_type` — Number of resources of each type
 - `location_count` — Number of different locations (regions, plus global)
@@ -2425,11 +2493,11 @@ Summary fields:
 **Was coverage read completely?**
 - `defender_coverage_collected` — True if every page of Defender assessments was read; false if the query failed, came back truncated or short, or never ran because the `Resources` query failed, and then every Defender field below is null
 - `policy_coverage_collected` — True if every page of Policy states was read; false if the query failed, came back truncated or short, or never ran because the `Resources` query failed, and then every Policy field below is null
-- `defender_assessments_total` — Number of Defender for Cloud assessments in the subscription that came back Healthy or Unhealthy (an assessment that ran); NotApplicable and other statuses are counted apart
-- `defender_not_applicable_total` — Number of Defender assessments in the subscription with status NotApplicable (the check didn't run on the resource, for example because a policy turned it off); these never count as coverage
-- `defender_unknown_status_total` — Number of Defender assessments in the subscription with a missing or unexpected status (not Healthy, Unhealthy or NotApplicable); these never count as coverage. With `defender_assessments_total` and `defender_not_applicable_total` this makes every assessment read
+- `defender_assessments_total` — Number of in-scope Defender for Cloud assessments that came back Healthy or Unhealthy (an assessment that ran); NotApplicable and other statuses are counted apart
+- `defender_not_applicable_total` — Number of in-scope Defender assessments with status NotApplicable (the check didn't run on the resource, for example because a policy turned it off); these never count as coverage
+- `defender_unknown_status_total` — Number of in-scope Defender assessments with a missing or unexpected status (not Healthy, Unhealthy or NotApplicable); these never count as coverage. With `defender_assessments_total` and `defender_not_applicable_total` this makes every assessment read
 - `defender_assessments_outside_inventory` — Number of Healthy or Unhealthy Defender assessments about something that is not an inventoried resource or a child of one (the subscription itself, a resource that no longer exists, or an AWS, GCP or on-premises machine, even when its id sits under an inventoried connector)
-- `policy_evaluations_total` — Number of Azure Policy states in the subscription, one for each resource, policy assignment and policy
+- `policy_evaluations_total` — Number of in-scope Azure Policy states, one for each resource, policy assignment and policy
 - `policy_evaluations_outside_inventory` — Number of Policy states about something that is not an inventoried resource or a child of one (a resource group, the subscription, or a resource that no longer exists)
 
 **Does Defender for Cloud assess every resource it can?**
@@ -2445,8 +2513,8 @@ Summary fields:
 - `resources_with_unhealthy_high_severity` — Number of resources with at least one unhealthy Defender assessment of High or Critical severity
 - `unhealthy_high_severity_assessments` — Number of unhealthy Defender assessments of High or Critical severity on inventoried resources and their children; assessments about the subscription or anything else not inventoried are not counted here
 - `unhealthy_assessments_without_severity` — Number of unhealthy Defender assessments on inventoried resources that carry no severity, so they can't be counted as High or not
-- `defender_unhealthy_outside_inventory` — Number of unhealthy Defender assessments about something not inventoried (the subscription itself, a resource that no longer exists, or an AWS, GCP or on-premises machine), of any severity. Together with the unhealthy assessments on inventoried resources this makes every unhealthy assessment in the subscription
-- `defender_unhealthy_high_severity_outside_inventory` — Number of unhealthy Defender assessments of High or Critical severity about something not inventoried. With `unhealthy_high_severity_assessments` this makes every unhealthy High or Critical assessment in the subscription
+- `defender_unhealthy_outside_inventory` — Number of unhealthy Defender assessments about something not inventoried (the subscription itself, a resource that no longer exists, or an AWS, GCP or on-premises machine), of any severity. Together with the unhealthy assessments on inventoried resources this makes every in-scope unhealthy assessment
+- `defender_unhealthy_high_severity_outside_inventory` — Number of unhealthy Defender assessments of High or Critical severity about something not inventoried. With `unhealthy_high_severity_assessments` this makes every in-scope unhealthy High or Critical assessment
 - `defender_unhealthy_without_severity_outside_inventory` — Number of unhealthy Defender assessments with no severity about something not inventoried
 
 **Does Azure Policy evaluate every resource it can?**
@@ -2461,7 +2529,7 @@ Summary fields:
 **Is anything non-compliant?**
 - `resources_with_non_compliant_policy` — Number of resources with at least one non-compliant Policy state
 - `non_compliant_policy_evaluations` — Number of non-compliant Policy states on inventoried resources and their children; states about the subscription, a resource group or anything else not inventoried are not counted here
-- `policy_non_compliant_outside_inventory` — Number of non-compliant Policy states about something not inventoried (the subscription, a resource group, or a resource that no longer exists). `non_compliant_policy_evaluations` plus this is every non-compliant state in the subscription
+- `policy_non_compliant_outside_inventory` — Number of non-compliant Policy states about something not inventoried (the subscription, a resource group, or a resource that no longer exists). `non_compliant_policy_evaluations` plus this is every in-scope non-compliant state
 
 **What does nothing cover?**
 - `resources_covered_by_neither_by_type` — Number of resources of each type that have neither a Defender assessment nor a Policy state. It counts every such resource, so it holds both the missing resources listed above and the types neither service covers on any resource; null if either query failed
@@ -3170,8 +3238,18 @@ Output: `azure_network_security_groups_<subscription>.json` — every NSG with i
 
 Summary fields:
 
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no network security group, virtual network or network interface, such as a mistyped name
+- `excluded_network_security_groups` — Number of network security groups left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+- `excluded_virtual_networks` — Number of virtual networks left out of scope because a pattern matched their resource group, region or id; their subnets leave with them and no subnet count includes them
+- `excluded_network_interfaces` — Number of network interfaces left out of scope because a pattern matched their resource group, region or id, or because a pattern matched the virtual network their subnets sit in
+- `in_scope_network_security_groups` — Number of network security groups read and in scope; 0 means none was read or the patterns took out every network security group, which a check can catch by requiring more than 0
+- `in_scope_virtual_networks` — Number of virtual networks read and in scope
+- `in_scope_network_interfaces` — Number of network interfaces read and in scope
+
 **Are SSH, RDP or other ports open to the Internet?**
-- `total_network_security_groups` — Number of network security groups (NSGs)
+- `total_network_security_groups` — Number of network security groups (NSGs) in scope (not taken out by a resource_exclusions pattern)
 - `total_security_rules` — Number of custom (user-written) rules across all NSGs
 - `inbound_allow_rules` — Number of custom rules that allow inbound traffic
 - `internet_sourced_allow_rules` — Number of custom rules that allow inbound traffic from anywhere on the Internet (source Internet, * or 0.0.0.0/0)
@@ -3319,23 +3397,29 @@ Output: `azure_private_dns_zone_configuration_<subscription>.json` — each priv
 Summary fields:
 
 **What was checked?**
-- `total_zones` — Number of private DNS zones in the subscription
+- `total_zones` — Number of private DNS zones in scope (not taken out by a resource_exclusions pattern)
 - `privatelink_zones` — Number of private DNS zones with a privatelink or privatelink-… label anywhere in the name (the zones Azure services use for private endpoints, such as privatelink.blob.core.windows.net, AKS zones with privatelink in the middle of the name, or Azure Virtual Desktop's privatelink-global.wvd.microsoft.com)
 - `custom_zones` — Number of private DNS zones with no privatelink or privatelink-… label in the name
 - `zones_links_unknown` — Number of private DNS zones whose virtual network links couldn't be listed, so whether they're linked is unknown (never counted as unlinked)
 - `zones_records_unknown` — Number of private DNS zones whose records couldn't be listed, so their records are unknown (never counted as having none)
 - `provider_registration_status` — Whether Microsoft.Network is registered on the subscription: registered, not_registered or unknown
 
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no private DNS zone, such as a mistyped name or a location: pattern, which never matches a global zone
+- `excluded_private_dns_zones` — Number of private DNS zones left out of scope because a pattern matched their resource group or id; each is listed under excluded with the pattern, and no other count includes them, their virtual network links or their records
+- `in_scope_private_dns_zones` — Number of private DNS zones read and in scope; 0 means none was read or the patterns took out every private DNS zone, which a check can catch by requiring more than 0
+
 **Which virtual networks does each zone serve?**
 - `zones_without_virtual_network_links` — Number of private DNS zones linked to no virtual network, so no network resolves their names
-- `total_virtual_network_links` — Number of virtual network links across all zones in the subscription
+- `total_virtual_network_links` — Number of virtual network links across all in-scope zones
 - `links_with_auto_registration` — Number of virtual network links that automatically register the linked network's virtual machines in the zone
 - `links_with_nxdomain_redirect` — Number of virtual network links whose resolution policy is NxDomainRedirect, so names missing from the zone fall back to public DNS
 - `links_not_completed` — Number of virtual network links whose link state isn't Completed
 - `links_to_deleted_virtual_networks` — Number of virtual network links whose virtual network is deleted (the credential can read the network's resource group and the network isn't there)
 - `links_to_unreadable_virtual_networks` — Number of virtual network links whose virtual network is unreadable (its subscription or resource group isn't readable by the credential; a deleted resource group also counts here)
 - `links_virtual_network_unknown` — Number of virtual network links whose virtual network lookup failed, so whether it exists is unknown
-- `duplicate_zone_names` — List of zone names in this subscription that exist more than once, each with the ids of every zone carrying the name and the virtual networks linked to any copy; Azure blocks linking one network to two zones of the same name, so a duplicated name resolves differently in different networks
+- `duplicate_zone_names` — List of zone names held by at least one in-scope zone that exist more than once in this subscription, each with the ids of every zone carrying the name, excluded zones included and the virtual networks linked to any copy; Azure blocks linking one network to two zones of the same name, so a duplicated name resolves differently in different networks
 - `duplicate_zone_names_scope` — Whether duplicate zone names were looked for across readable subscriptions or only this one: readable_subscriptions (every subscription the credential can read), target_subscription (only this subscription, because the cross-subscription query failed) or null when the subscription has no zones
 
 **Does every privatelink record point at a live private endpoint?**
@@ -3372,9 +3456,15 @@ Output: `azure_private_endpoint_configuration_<subscription>.json` — each priv
 Summary fields:
 
 **What was checked?**
-- `total_private_endpoints` — Number of private endpoints in the subscription
+- `total_private_endpoints` — Number of private endpoints in scope (not taken out by a resource_exclusions pattern)
 - `provider_registration_status` — Whether Microsoft.Network is registered on the subscription: registered, not_registered or unknown
 - `connections_by_target_type` — Number of private link connections for each target resource type, keyed by the lowercased type (for example microsoft.storage/storageaccounts), or unknown when the target id has no type
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no private endpoint, such as a mistyped name
+- `excluded_private_endpoints` — Number of private endpoints left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or the target resources only they connect to
+- `in_scope_private_endpoints` — Number of private endpoints read and in scope; 0 means none was read or the patterns took out every private endpoint, which a check can catch by requiring more than 0
 
 **Are the endpoints approved and published in DNS?**
 - `approved_endpoints` — Number of private endpoints that are approved (every connection, automatic or manual, has the status Approved)
@@ -3392,7 +3482,7 @@ Summary fields:
 - `endpoints_private_dns_zone_group_unknown` — Number of private endpoints whose private DNS zone groups couldn't be listed, so whether they're published is unknown
 
 **Could the resources behind the endpoints be read?**
-- `total_target_resources` — Number of distinct target resources the endpoints connect to (an App Service slot, reached through its parent site, counts as the slot)
+- `total_target_resources` — Number of distinct target resources the in-scope endpoints connect to (an App Service slot, reached through its parent site, counts as the slot)
 - `target_resources_found` — Number of target resources that Resource Graph returned
 - `target_resources_not_found` — Number of target resources not found (the credential can read the resource group the target belongs in, and the target isn't there, so it was most likely deleted)
 - `target_resources_not_visible` — Number of target resources not visible (their subscription or resource group isn't readable by the credential; a deleted resource group also counts here)
@@ -3407,7 +3497,7 @@ Summary fields:
 - `target_public_access_disabled_percentage` — Percentage of found target resources with public network access Disabled or SecuredByPerimeter = `target_resources_public_access_disabled` / `target_resources_found` × 100 (a whole number, 0–100); 0 when `target_resources_found` is 0. Targets not found, not visible or unknown are left out of both
 
 **Does the subnet's NSG filter endpoint traffic?**
-- `total_endpoint_subnets` — Number of distinct subnets that hold private endpoints
+- `total_endpoint_subnets` — Number of distinct subnets that hold in-scope private endpoints
 - `endpoints_subnet_lookup_not_read` — Number of private endpoints whose subnet couldn't be read (its virtual network wasn't found, isn't readable, or the lookup failed)
 - `endpoints_subnet_policies_disabled` — Number of private endpoints in a read subnet whose private endpoint network policy is Disabled, so Azure applies neither the subnet's NSG nor its route table to endpoint traffic
 - `endpoints_nsg_enforced` — Number of private endpoints whose subnet NSG filters their traffic (the subnet's private endpoint network policy is Enabled or NetworkSecurityGroupEnabled and an NSG is attached); it shows the NSG is in the path, not what its rules allow
@@ -3488,8 +3578,24 @@ Output: `azure_vnet_egress_routing_<subscription>.json` — each subnet's and ne
 
 Summary fields:
 
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no virtual network, subnet, route table, network interface, Azure Firewall or Virtual WAN hub, such as a mistyped name
+- `excluded_virtual_networks` — Number of virtual networks left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+- `excluded_subnets` — Number of subnets left out of scope because a pattern matched their resource group, region or id, which takes every subnet of an excluded virtual network
+- `excluded_route_tables` — Number of route tables left out of scope because a pattern matched their resource group, region or id
+- `excluded_network_interfaces` — Number of network interfaces left out of scope because a pattern matched their resource group, region or id, or one of their subnets
+- `excluded_azure_firewalls` — Number of Azure Firewalls left out of scope because a pattern matched their resource group, region or id
+- `excluded_virtual_hubs` — Number of Virtual WAN hubs left out of scope because a pattern matched their resource group, region or id
+- `in_scope_virtual_networks` — Number of virtual networks read and in scope; 0 means none was read or the patterns took out every virtual network, which a check can catch by requiring more than 0
+- `in_scope_subnets` — Number of subnets read and in scope, platform subnets included
+- `in_scope_route_tables` — Number of route tables read and in scope
+- `in_scope_network_interfaces` — Number of network interfaces read and in scope
+- `in_scope_azure_firewalls` — Number of Azure Firewalls read and in scope
+- `in_scope_virtual_hubs` — Number of Virtual WAN hubs read and in scope, from this subscription or found for one of its spokes
+
 **Which networks were checked?**
-- `total_virtual_networks` — Number of virtual networks (VNets) in the subscription
+- `total_virtual_networks` — Number of virtual networks (VNets) in scope (not taken out by a resource_exclusions pattern)
 - `total_subnets` — Number of subnets
 - `workload_subnets` — Number of subnets that hold workloads (all except Azure platform subnets such as GatewaySubnet and AzureFirewallSubnet)
 - `platform_subnets` — Number of Azure platform subnets, whose routing Azure manages
@@ -3524,7 +3630,7 @@ Summary fields:
 **Are the firewalls in use and blocking known threats?**
 - `total_azure_firewalls` — Number of Azure Firewalls
 - `azure_firewalls_by_effective_threat_intel_mode` — Number of Azure Firewalls in each threat-intelligence mode (Deny, Alert or Off), using the strictest mode across the firewall's policy and its parent policies
-- `azure_firewalls_with_no_routed_subnet` — Number of Azure Firewalls that no workload subnet sends traffic to
+- `azure_firewalls_with_no_routed_subnet` — Number of in-scope Azure Firewalls that no workload subnet sends traffic to, an excluded subnet included
 
 
 ### azure_vpn_gateway_configuration
@@ -3897,12 +4003,18 @@ Commands Executed:
 - `provider.get_web_app_stacks()` — App Service's runtime list with end-of-life dates
 - `diagnostic_settings.list()` (per app) — which log categories are exported
 
-Output: `azure_app_service_configuration_<subscription>.json` — each web app's transport, publishing, identity, network, logging, Key Vault and runtime settings, with a verdict on whether its runtimes are still supported and, when the scan is on, the names of settings holding a literal secret.
+Output: `azure_app_service_configuration_<subscription>.json` — each web app's transport, publishing, identity, network, logging, Key Vault and runtime settings, with a verdict on whether its runtimes are still supported and, when the scan is on, the names of settings holding a literal secret. Resources the resource_exclusions patterns take out are listed under excluded instead.
 
 Summary fields:
 
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no web app, such as a mistyped name
+- `excluded_web_apps` — Number of web apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, none of its settings are read, and no other count includes it
+- `in_scope_web_apps` — Number of web apps read and in scope; 0 means none was read or the patterns took out every app, which a check can catch by requiring more than 0
+
 **Which web apps were checked?**
-- `total_web_apps` — Number of web apps checked (function apps are left out)
+- `total_web_apps` — Number of in-scope web apps checked (function apps are left out)
 - `provider_registration_status` — Whether the App Service provider (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown
 
 **Is traffic encrypted with modern TLS?**
@@ -4056,10 +4168,18 @@ Output: `azure_app_service_plans_<subscription>.json` — each App Service plan 
 Summary fields:
 
 **What was checked?**
-- `total_app_service_plans` — Number of App Service plans in the subscription
-- `empty_plans` — Number of plans with no web app or function app on them
-- `total_sites` — Number of web apps and function apps running on the subscription's plans
+- `total_app_service_plans` — Number of App Service plans in scope (not taken out by a resource_exclusions pattern)
+- `empty_plans` — Number of in-scope plans with no in-scope web app or function app on them
+- `total_sites` — Number of in-scope web apps and function apps running on the subscription's plans, sites on an excluded plan included
 - `provider_registration_status` — Whether the App Service provider (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no plan or site, such as a mistyped name
+- `excluded_app_service_plans` — Number of App Service plans left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+- `excluded_sites` — Number of web apps and function apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern
+- `in_scope_app_service_plans` — Number of App Service plans read and in scope; 0 means none was read or the patterns took out every plan, which a check can catch by requiring more than 0
+- `in_scope_sites` — Number of web apps and function apps read and in scope
 
 **Does each plan carry an uptime SLA?**
 - `no_sla_tier_plans` — Number of plans on the Free or Shared tier, which run on shared infrastructure with no uptime SLA
@@ -4068,12 +4188,12 @@ Summary fields:
 - `multi_instance_plans` — Number of plans with more than one provisioned instance (the instance count set on the plan's SKU)
 - `single_instance_plans` — Number of plans with a fixed instance count of 1 or less, or none reported, where losing that instance is an outage; platform-scaled plans are left out
 - `platform_scaled_plans` — Number of platform-scaled plans (Consumption, Flex Consumption or Elastic Premium tier), where Azure adds and removes instances itself, so the instance count isn't a fixed number
-- `sites_on_multi_instance_plans` — Number of web apps and function apps on a plan with more than one provisioned instance
+- `sites_on_multi_instance_plans` — Number of in-scope web apps and function apps on a plan with more than one provisioned instance, an excluded plan included
 
 **Does each plan survive losing an availability zone?**
 - `zone_redundant_plans` — Number of plans that are zone redundant, spreading their instances across availability zones
 - `zone_redundant_percentage` — Percentage of plans that are zone redundant = `zone_redundant_plans` / `total_app_service_plans` × 100 (a whole number, 0–100); 0 when `total_app_service_plans` is 0. Free, Shared, Basic and Standard plans can't be zone redundant, so 100 may be impossible
-- `sites_on_zone_redundant_plans` — Number of web apps and function apps on a zone-redundant plan
+- `sites_on_zone_redundant_plans` — Number of in-scope web apps and function apps on a zone-redundant plan, an excluded plan included
 
 
 ### azure_container_registry_configuration
@@ -4450,8 +4570,14 @@ Output: `azure_key_vault_configuration_<subscription>.json` — each key vault w
 Summary fields:
 
 **What was checked?**
-- `total_key_vaults` — Number of key vaults in the subscription
+- `total_key_vaults` — Number of key vaults in scope (not taken out by a resource_exclusions pattern)
 - `provider_registration_status` — Whether Microsoft.KeyVault is registered on the subscription: registered, not_registered or unknown
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no key vault, such as a mistyped name
+- `excluded_key_vaults` — Number of key vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+- `in_scope_key_vaults` — Number of key vaults read and in scope; 0 means none was read or the patterns took out every vault, which a check can catch by requiring more than 0
 
 **How is access to the vaults granted?**
 - `rbac_authorization_vaults` — Number of vaults that use Azure RBAC role assignments for access to keys, secrets and certificates (the role assignments aren't in this evidence)
@@ -4498,12 +4624,12 @@ Commands Executed:
 - `CertificateClient.list_properties_of_certificates()` and `get_certificate_policy()` (per vault, per certificate) — certificate expiry and renewal policy; certificates not yet issued (still pending) are not listed; on the list, a 401 or 403 is that vault's not_authorized answer and any other error fails the run; on a policy read, a 401, 403 or 404 leaves that one certificate with policy_readable false and auto_renew_enabled null, and any other error fails the run
 - `certificates.list()` (App Service) — App Service certificates, their expiry and source; a failure fails the run
 
-Output: `azure_key_vault_key_rotation_<subscription>.json` — every key vault's keys with their rotation policies, secrets with their expiry, and certificates with their expiry and renewal policy, plus every App Service certificate with its expiry and where it comes from; no key material, secret value, certificate body or PFX password is read.
+Output: `azure_key_vault_key_rotation_<subscription>.json` — every key vault's keys with their rotation policies, secrets with their expiry, and certificates with their expiry and renewal policy, plus every App Service certificate with its expiry and where it comes from; no key material, secret value, certificate body or PFX password is read. Resources the resource_exclusions patterns take out are listed under excluded instead.
 
 Summary fields:
 
 **What was checked?**
-- `total_key_vaults` — Number of key vaults in the subscription
+- `total_key_vaults` — Number of key vaults in scope (not taken out by a resource_exclusions pattern)
 - `data_plane_accessible_vaults` — Number of key vaults whose keys this credential could list on the data plane
 - `data_plane_inaccessible_vaults` — Number of key vaults whose data-plane key list answered this credential with an HTTP error (most often no role or access policy, or a vault firewall); a permission or network gap, not a failed run
 - `rbac_authorization_vaults` — Number of key vaults that use Azure RBAC rather than access policies for data-plane permissions
@@ -4511,6 +4637,20 @@ Summary fields:
 - `certificate_not_authorized_vaults` — Number of key vaults that refused to list their certificates (HTTP 401 or 403, read as not_authorized); their certificates are unknown, not zero. Vaults whose certificate list failed, or that had no data-plane address, are in neither this count nor `certificate_accessible_vaults`
 - `provider_registration_status` — Whether Key Vault (Microsoft.KeyVault) is registered on the subscription: registered, not_registered or unknown
 - `web_provider_registration_status` — Whether App Service (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown; not_registered means no App Service in use rather than zero certificates
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no key vault, key, secret, Key Vault certificate or App Service certificate, such as a mistyped name
+- `excluded_key_vaults` — Number of key vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their keys, secrets and certificates
+- `excluded_keys` — Number of keys left out of scope, keys in an excluded vault included; each is listed under excluded
+- `excluded_secrets` — Number of secrets left out of scope, secrets in an excluded vault included; each is listed under excluded
+- `excluded_certificates` — Number of Key Vault certificates left out of scope, certificates in an excluded vault included; each is listed under excluded
+- `excluded_app_service_certificates` — Number of App Service certificates left out of scope because a pattern matched their resource group, region or id
+- `in_scope_key_vaults` — Number of key vaults read and in scope; 0 means none was read or the patterns took out every vault, which a check can catch by requiring more than 0
+- `in_scope_keys` — Number of keys read and in scope
+- `in_scope_secrets` — Number of secrets read and in scope
+- `in_scope_certificates` — Number of Key Vault certificates read and in scope
+- `in_scope_app_service_certificates` — Number of App Service certificates read and in scope
 
 **Do keys rotate?**
 - `total_keys` — Number of keys across all key vaults
@@ -4809,10 +4949,18 @@ Output: `azure_sql_managed_instance_backups_<subscription>.json` — each SQL Ma
 Summary fields:
 
 **What was checked?**
-- `total_managed_instances` — Number of SQL Managed Instances in the subscription
+- `total_managed_instances` — Number of SQL Managed Instances in scope (not taken out by a resource_exclusions pattern)
 - `total_user_databases` — Number of user databases across all instances (master, model, msdb and tempdb are left out); null if any instance's database list couldn't be read
 - `instances_stopped` — Number of instances in the Stopped state; Azure takes no backups while an instance is stopped
 - `provider_registration_status` — Whether Microsoft.Sql is registered on the subscription: registered, not_registered or unknown
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no managed instance or instance failover group, such as a mistyped name
+- `excluded_managed_instances` — Number of SQL Managed Instances left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their databases
+- `excluded_instance_failover_groups` — Number of instance failover groups left out of scope because every instance the group pairs in this subscription is out of scope; each is listed under excluded with the pattern
+- `in_scope_managed_instances` — Number of SQL Managed Instances read and in scope; 0 means none was read or the patterns took out every instance, which a check can catch by requiring more than 0
+- `in_scope_instance_failover_groups` — Number of instance failover groups read and in scope
 
 **Does every user database keep at least 7 days of point-in-time restore?**
 - `databases_retention_at_least_7_days` — Number of user databases whose short-term (point-in-time restore) retention is 7 days or more
@@ -4835,7 +4983,7 @@ Summary fields:
 - `instances_zone_redundant` — Number of instances with compute zone redundancy on (replicas spread across availability zones), a separate setting from backup storage; a setting Azure didn't return counts as off
 - `instances_in_failover_group` — Number of instances in an instance failover group, as the primary or the partner of one of its instance pairs
 - `instances_failover_group_unknown` — Number of instances whose failover group membership is unknown: the failover group list for their resource group and region couldn't be read, and no other region's list showed them in a group
-- `total_instance_failover_groups` — Number of instance failover groups found in the resource groups and regions holding an instance, each counted once although Azure lists a group from every region it spans; null if any failover group list couldn't be read
+- `total_instance_failover_groups` — Number of in-scope instance failover groups found in the resource groups and regions holding an instance, each counted once although Azure lists a group from every region it spans; null if any failover group list couldn't be read
 - `failover_groups_manual_policy` — Number of instance failover groups whose failover policy is Manual, so a person has to start a failover (Automatic fails over on its own); null if any failover group list couldn't be read
 
 
@@ -4863,8 +5011,14 @@ Output: `azure_sql_managed_instance_configuration_<subscription>.json` — each 
 Summary fields:
 
 **What was checked?**
-- `total_managed_instances` — Number of SQL Managed Instances in the subscription
+- `total_managed_instances` — Number of SQL Managed Instances in scope (not taken out by a resource_exclusions pattern)
 - `provider_registration_status` — Whether Microsoft.Sql is registered on the subscription: registered, not_registered or unknown
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no managed instance, such as a mistyped name
+- `excluded_managed_instances` — Number of SQL Managed Instances left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their databases
+- `in_scope_managed_instances` — Number of SQL Managed Instances read and in scope; 0 means none was read or the patterns took out every instance, which a check can catch by requiring more than 0
 
 **Is the instance closed to the public internet?**
 - `instances_public_data_endpoint_enabled` — Number of instances with the public data endpoint enabled, the only way to reach an instance from outside its virtual network
@@ -4922,9 +5076,15 @@ Output: `azure_sql_managed_instance_encryption_<subscription>.json` — each SQL
 Summary fields:
 
 **What was checked?**
-- `total_managed_instances` — Number of SQL Managed Instances in the subscription
+- `total_managed_instances` — Number of SQL Managed Instances in scope (not taken out by a resource_exclusions pattern)
 - `total_user_databases` — Number of user databases across all instances (the system databases master, model, msdb and tempdb are left out); null if any instance's database list couldn't be read
 - `provider_registration_status` — Whether the Azure SQL provider (Microsoft.Sql) is registered on the subscription: registered, not_registered or unknown
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no managed instance, such as a mistyped name
+- `excluded_managed_instances` — Number of SQL Managed Instances left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their databases
+- `in_scope_managed_instances` — Number of SQL Managed Instances read and in scope; 0 means none was read or the patterns took out every instance, which a check can catch by requiring more than 0
 
 **Who holds the encryption key?**
 - `instances_customer_managed_key` — Number of instances whose TDE protector is a customer-managed key in Azure Key Vault (server key type AzureKeyVault) rather than a service-managed key
@@ -5000,13 +5160,21 @@ Commands Executed:
 - `storage_accounts.get_properties(expand="geoReplicationStats")` (per geo-redundant account) — replication health and last sync time; LastSyncTimeUnavailable reads as unavailable, any other error fails the run
 - `blob_containers.list()` (per account) — each container's access level and immutability; an account kind with no Blob service reads not_supported, any other error fails the run
 
-Output: `azure_storage_encryption_status_<subscription>.json` — every storage account's encryption, network exposure, access-key age, replication to a second region, blob containers (with metadata keys only, never values, and null when the list returns no metadata) and tags.
+Output: `azure_storage_encryption_status_<subscription>.json` — every storage account's encryption, network exposure, access-key age, replication to a second region, blob containers (with metadata keys only, never values, and null when the list returns no metadata) and tags. Resources the resource_exclusions patterns take out are listed under excluded instead.
 
 Summary fields:
 
 **What was checked?**
-- `total_storage_accounts` — Number of storage accounts in the subscription
+- `total_storage_accounts` — Number of storage accounts in scope (not taken out by a resource_exclusions pattern)
 - `provider_registration_status` — Whether Azure Storage (Microsoft.Storage) is registered on the subscription: registered, not_registered or unknown
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no storage account or blob container, such as a mistyped name
+- `excluded_storage_accounts` — Number of storage accounts left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their containers
+- `excluded_containers` — Number of blob containers left out of scope, containers in an excluded account included; each is listed under excluded
+- `in_scope_storage_accounts` — Number of storage accounts read and in scope; 0 means none was read or the patterns took out every account, which a check can catch by requiring more than 0
+- `in_scope_containers` — Number of blob containers listed and in scope
 
 **Who holds the encryption keys?**
 - `customer_managed_key_storage` — Number of storage accounts encrypted with a customer-managed key held in Key Vault
