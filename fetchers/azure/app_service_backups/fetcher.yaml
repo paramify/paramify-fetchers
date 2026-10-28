@@ -1,5 +1,5 @@
 name: azure_app_service_backups
-version: 0.1.0
+version: 0.2.0
 description: >
   For each App Service web app in the subscription, reports whether it is actually
   being backed up, from the restore points that exist: its automatic backups (hourly,
@@ -58,6 +58,24 @@ config_schema:
     description: >
       How far back a restore from a custom backup counts toward
       `custom_backup_restored_in_window`.
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2) or id:<resource id>
+      (also matches that resource's child resources). * matches any run of
+      characters and ? one character. A matching web app, function app or
+      deployment slot is listed under excluded with the pattern, gets no backup
+      calls, and is left out of every count and verdict, the inventory check and
+      the exclusions lists; a slot follows its app. A custom backup storage
+      account an in-scope app uses is still resolved and listed. A pattern
+      without one of these prefixes fails the run. Set it once for every Azure
+      fetcher under platforms.azure.config. Can be ${env:VAR}. Empty: every
+      resource is in scope.
 
 target_schema:
   subscription_id:
@@ -104,7 +122,16 @@ evidence_set:
     Scope: web apps (kinds starting with "app"), production slot only. Function apps
     and deployment slots are listed in `results.exclusions` with a count and the
     reason for each, and counted in `summary.excluded_function_apps` and
-    `excluded_deployment_slots`. Apps on a Free or Shared plan (`plan_tier`, the
+    `excluded_deployment_slots`. Resources the resource_exclusions patterns take
+    out (web apps, function apps and deployment slots, by resource group, region
+    or id; a slot follows its app) are listed under `results.excluded` instead,
+    with the pattern, get no backup calls, and are left out of the inventory
+    check, `results.exclusions` and every count. `summary.excluded_web_apps`
+    counts the web apps taken out and `in_scope_web_apps` those left (0 means
+    none was read or the patterns took out every app);
+    `resource_exclusion_patterns` echoes the patterns and
+    `resource_exclusion_patterns_unmatched` lists those that matched nothing,
+    such as a mistyped name. Apps on a Free or Shared plan (`plan_tier`, the
     site's sku) get no backup calls: App Service backs up only Basic, Standard,
     Premium and Isolated, so `backups_supported` is false and the app is not backed
     up.

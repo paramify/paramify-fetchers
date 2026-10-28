@@ -37,6 +37,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from azure_rest import int_config, parse_time, pinned_credential  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_app_service_backups")
@@ -96,10 +97,11 @@ LIMITATIONS = [
 # `kind` is a KQL keyword: projecting `kind = tostring(kind)` fails with ParserFailure (measured).
 SITES_QUERY = (
     "Resources | where type in~ ('microsoft.web/sites', 'microsoft.web/sites/slots')"
-    " | project id = tostring(id), name, kind, type = tolower(type) | order by id asc"
+    " | project id = tostring(id), name, kind, location, type = tolower(type) | order by id asc"
 )
 SITE_TYPE = "microsoft.web/sites"
 SLOT_TYPE = "microsoft.web/sites/slots"
+WEB_APP_KIND, FUNCTION_APP_KIND, SLOT_KIND = "web_app", "function_app", "deployment_slot"
 STORAGE_NAME = re.compile(r"^[a-z0-9]{3,24}$")
 
 # A backup's storage URL carries its SAS token in the query string.
@@ -467,6 +469,32 @@ def exclusion(resources, reason: str) -> dict:
     return {"count": None if listed is None else len(listed), "reason": reason, "resources": listed}
 
 
+def site_kind(site: dict) -> str:
+    if lower(site.get("type")) == SLOT_TYPE:
+        return SLOT_KIND
+    return WEB_APP_KIND if is_web_app(site.get("kind")) else FUNCTION_APP_KIND
+
+
+def exclude_sites(scope: ResourceExclusions, sites, rows):
+    """(sites, rows, excluded entries): an out-of-scope site or slot leaves both lists and is listed once. A slot
+    without a region takes its app's, so it follows its app."""
+    listed = (sites or []) + (rows or [])
+    regions = {arm_id_key(s.get("id")): s.get("location") for s in reversed(listed) if s.get("location")}
+    out: dict = {}
+    for kind in (WEB_APP_KIND, FUNCTION_APP_KIND, SLOT_KIND):
+        _, entries = scope.split(
+            [s for s in listed if site_kind(s) == kind], kind,
+            location=lambda s: s.get("location") or regions.get(arm_id_key(s.get("id")).split("/slots/")[0]),
+        )
+        for entry in entries:
+            out.setdefault(arm_id_key(entry["id"]), entry)
+
+    def keep(items):
+        return None if items is None else [s for s in items if arm_id_key(s.get("id")) not in out]
+
+    return keep(sites), keep(rows), sorted(out.values(), key=lambda e: arm_id_key(e["id"]))
+
+
 # --- collection (lazy azure imports) ---
 
 def list_sites(client, collector: Collector):
@@ -553,7 +581,10 @@ def resolve_storage(graph, subscription_id, collector: Collector, apps: list[dic
     ]
 
 
-def collect(subscription_id, cred, collector: Collector, settings: dict, now: datetime):
+def collect(subscription_id, cred, collector: Collector, settings: dict, now: datetime,
+            scope: ResourceExclusions | None = None, excluded: list | None = None):
+    """Sites and slots the scope takes out are appended to `excluded` before the inventory check and the
+    per-app reads."""
     exclusions = {
         "function_apps": exclusion(None, FUNCTION_APP_REASON),
         "deployment_slots": exclusion(None, SLOT_REASON),
@@ -562,13 +593,17 @@ def collect(subscription_id, cred, collector: Collector, settings: dict, now: da
     if client is None:
         return [], None, exclusions, []
     sites = list_sites(client, collector)
-    apps = [s for s in sites or [] if is_web_app(s.get("kind"))]
 
     graph = collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
     result = graph and collector.guard(
         "resourcegraph.resources (web sites and slots)", lambda: query_all(graph, subscription_id, SITES_QUERY)
     )
     rows = None if result is None else result["rows"]
+    if scope:
+        sites, rows, out = exclude_sites(scope, sites, rows)
+        if excluded is not None:
+            excluded += out
+    apps = [s for s in sites or [] if is_web_app(s.get("kind"))]
     inventory = None
     if rows is not None:
         apps, inventory = reconcile(client, collector, apps, rows)
@@ -606,6 +641,9 @@ def main() -> int:
     collector = Collector(logger)
     settings = read_settings()
     now = utc_now()
+    scope = ResourceExclusions.from_env()
+    scope.record_invalid(collector)
+    excluded: list[dict] = []
 
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
@@ -625,7 +663,7 @@ def main() -> int:
                 "Microsoft.Web is not registered on subscription %s — no App Service in use",
                 subscription_id,
             )
-        apps, inventory, exclusions, storage = collect(subscription_id, cred, collector, settings, now)
+        apps, inventory, exclusions, storage = collect(subscription_id, cred, collector, settings, now, scope, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -634,6 +672,7 @@ def main() -> int:
                 "ambient Azure credential that can list subscriptions)"
             ),
         )
+    scope.warn_unmatched(logger)
 
     not_authorized = sum(1 for a in apps if a["custom_backup_configuration_status"] == CONFIG_NOT_AUTHORIZED)
     evidence = build_payload(
@@ -658,10 +697,12 @@ def main() -> int:
             "inventory_check": inventory,
             "limitations": LIMITATIONS,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(apps, inventory, exclusions, storage, settings),
             "provider_registration_status": registration,
+            **scope.summary(excluded, (WEB_APP_KIND,), {"web_apps": len(apps)}),
         },
     )
 

@@ -37,6 +37,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
     report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_app_service_plans")
 
@@ -46,6 +47,7 @@ NO_SLA_TIERS = ("free", "shared")
 # Tiers where the platform scales instances itself, so `sku.capacity` is not a
 # provisioned instance count (it reads 0 on a consumption plan, seen live).
 PLATFORM_SCALED_TIERS = ("dynamic", "flexconsumption", "elasticpremium")
+PLAN_KIND, SITE_KIND = "app_service_plan", "site"
 
 
 # --- projection: the only azure-mgmt model access ---
@@ -84,6 +86,7 @@ def project_site(site) -> dict:
     return {
         "id": model_attr(site, "id"),
         "name": model_attr(site, "name"),
+        "location": model_attr(site, "location"),
         "kind": model_attr(site, "kind"),
         "state": model_attr(site, "state"),
         "server_farm_id": model_attr(site, "server_farm_id"),
@@ -161,11 +164,26 @@ def plan_record(plan: dict, sites: list[dict]) -> dict:
     }
 
 
-def summarize(plans: list[dict]) -> dict:
-    """How many plans (and the sites on them) survive a zone or an instance failure."""
+def plan_records(raw_plans: list[dict], raw_sites: list[dict], exclusions: ResourceExclusions):
+    """(in-scope plans, excluded entries). Sites are split first and joined to every plan, so an in-scope site on
+    an excluded plan stays on that plan's entry with the plan's zone redundancy and instance count."""
+    sites, excluded = exclusions.split(raw_sites, SITE_KIND)
+    records = sorted((plan_record(p, sites) for p in raw_plans), key=lambda r: r.get("id") or "")
+    plans, excluded_plans = exclusions.split(records, PLAN_KIND)
+    by_id = {_arm_id_key(r["id"]): r for r in records}
+    for entry in excluded_plans:
+        plan = by_id[_arm_id_key(entry["id"])]
+        entry.update(zone_redundant=plan["zone_redundant"], multi_instance=plan["multi_instance"], sites=plan["sites"])
+    return plans, excluded + excluded_plans
+
+
+def summarize(plans: list[dict], excluded_plans: list[dict] | None = None) -> dict:
+    """How many plans (and the sites on them) survive a zone or an instance failure; in-scope sites on an excluded
+    plan count with that plan."""
     total = len(plans)
     zone_redundant = sum(1 for p in plans if p["zone_redundant"])
-    sites = [s for p in plans for s in p["sites"]]
+    hosts = plans + (excluded_plans or [])
+    sites = [s for p in hosts for s in p["sites"]]
     return {
         "total_app_service_plans": total,
         "zone_redundant_plans": zone_redundant,
@@ -180,18 +198,18 @@ def summarize(plans: list[dict]) -> dict:
         "empty_plans": sum(1 for p in plans if not p["sites"]),
         "total_sites": len(sites),
         "sites_on_zone_redundant_plans": sum(
-            len(p["sites"]) for p in plans if p["zone_redundant"]
+            len(p["sites"]) for p in hosts if p["zone_redundant"]
         ),
         "sites_on_multi_instance_plans": sum(
-            len(p["sites"]) for p in plans if p["multi_instance"]
+            len(p["sites"]) for p in hosts if p["multi_instance"]
         ),
     }
 
 
 # --- collection (lazy azure imports) ---
 
-def collect_plans(subscription_id, cred, collector: Collector) -> list[dict]:
-    """app_service_plans.list(detailed=True), then web_apps.list() for the join.
+def collect_plans(subscription_id, cred, collector: Collector) -> tuple[list[dict], list[dict]]:
+    """app_service_plans.list(detailed=True), then web_apps.list() for the join: (plans, sites), projected.
 
     Both are ItemPaged, so the SDK follows nextLink itself. `web_apps.list()` returns
     web apps AND function apps; both run on a plan, so neither is filtered out. If the
@@ -206,7 +224,7 @@ def collect_plans(subscription_id, cred, collector: Collector) -> list[dict]:
 
     client = collector.guard("web.WebSiteManagementClient (init)", _client)
     if client is None:
-        return []
+        return [], []
 
     raw_plans = collector.guard(
         "web.app_service_plans.list",
@@ -218,8 +236,7 @@ def collect_plans(subscription_id, cred, collector: Collector) -> list[dict]:
         lambda: [project_site(s) for s in client.web_apps.list()],
         default=[],
     )
-    plans = [plan_record(p, raw_sites) for p in raw_plans]
-    return sorted(plans, key=lambda r: r.get("id") or "")
+    return raw_plans, raw_sites
 
 
 def main() -> int:
@@ -239,7 +256,8 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    plans: list[dict] = []
+    raw_plans: list[dict] = []
+    raw_sites: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list call, so a zero-plan result is legible: Azure returns
@@ -253,7 +271,7 @@ def main() -> int:
                 "in use; reporting status not_registered",
                 subscription_id,
             )
-        plans = collect_plans(subscription_id, cred, collector)
+        raw_plans, raw_sites = collect_plans(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -263,6 +281,12 @@ def main() -> int:
             ),
         )
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    plans, excluded = plan_records(raw_plans, raw_sites, exclusions)
+    exclusions.warn_unmatched(logger)
+    summary = summarize(plans, [e for e in excluded if e["kind"] == PLAN_KIND])
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -270,8 +294,14 @@ def main() -> int:
         results={
             "app_service_plans": plans,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(plans), "provider_registration_status": registration},
+        summary={
+            **summary,
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, (PLAN_KIND, SITE_KIND), {
+                "app_service_plans": len(plans), "sites": summary["total_sites"]}),
+        },
     )
 
     filename = (
