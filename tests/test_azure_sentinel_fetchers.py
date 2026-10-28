@@ -11,6 +11,7 @@ exist yet.
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import os
@@ -31,9 +32,13 @@ FETCHERS = [
     "sentinel_incidents",
     "sentinel_automation_rules",
     "log_analytics_query_audit",
+    "entra_diagnostic_settings",
     "log_analytics_deletion_rights",
     "log_storage_immutability",
+    "sentinel_playbooks",
+    "entra_risky_users",
 ]
+TENANT_FETCHERS = {"entra_diagnostic_settings", "entra_risky_users"}
 
 
 def _load(name):
@@ -78,6 +83,11 @@ def table(columns, rows):
                         "rows": rows}]}
 
 
+def law_tables(names, basic=()):
+    return {"value": [{"name": n, "properties": {"plan": "Analytics"}} for n in names]
+            + [{"name": n, "properties": {"plan": "Basic"}} for n in basic]}
+
+
 class Resp:
     def __init__(self, status, body, headers=None):
         self.status_code, self._body = status, body
@@ -109,6 +119,8 @@ class FakeAzure:
                  "properties": {"tenantId": "t", "dataTypes": {"exchange": {"state": "Enabled"},
                                                                "teams": {"state": "Disabled"}}}},
             ]},
+            (f"{SI_A}/dataConnectors", "2025-10-01-preview"): {"value": []},
+            (f"{SI_A}/dataConnectorDefinitions", "2025-09-01"): {"value": []},
             (f"{SI_A}/alertRules", "2025-09-01"): {
                 "value": [rule("fusion", "Fusion", True, "f71aba3d-28fb-450b-b192-4e76a83015c8")],
                 "nextLink": f"https://management.azure.com{SI_A}/alertRules?api-version=2025-09-01&$skipToken=p2"},
@@ -132,7 +144,7 @@ class FakeAzure:
             (f"{SI_A}/alertRuleTemplates/tpl-nrt", "2025-10-01-preview"): {
                 "name": "tpl-nrt", "kind": "NRT", "properties": {"requiredDataConnectors": [
                     {"connectorId": "AzureActivity", "dataTypes": ["AzureActivity"]}]}},
-            (f"{WS_A}/tables", "2023-09-01"): {"value": WORKSPACE_TABLES},
+            (f"{WS_A}/tables", "2023-09-01"): {"value": WORKSPACE_TABLES + EXTRA_TABLES["value"]},
             (f"{WS_A}/savedSearches", "2023-09-01"): {"value": [
                 {"name": "parser", "properties": {"category": "Security", "functionAlias": "CiscoASA", "query": "Syslog"}},
                 {"name": "hunt", "properties": {"category": "Hunting Queries", "query": "SigninLogs | take 1"}}]},
@@ -170,6 +182,7 @@ class FakeAzure:
                 ["i-new", "New", None, iso(NOW - timedelta(days=200)), "[]"]])),
             ("by ProductName", table(["ProductName", "LastIngested", "Records"], [
                 ["Microsoft Defender Advanced Threat Protection", iso(NOW), 1], ["Azure Sentinel", iso(NOW), 1]])),
+            ("ParamifyIndex", table(["Time", "ParamifyIndex"], [])),
             ("SecurityIncident", table(["IncidentName", "Status", "ClosedTime", "CreatedTime"], [
                 ["i-closed", "Closed", iso(NOW - timedelta(days=2)), iso(NOW - timedelta(days=3))],
                 ["i-new", "New", None, iso(NOW - timedelta(days=200))]])),
@@ -253,7 +266,9 @@ def ws_a(evidence):
 def test_every_fetcher_follows_the_shape(name):
     spec = yaml.safe_load((AZURE / name / "fetcher.yaml").read_text())
     assert MODS[name].NAME == spec["name"] == f"azure_{name}"
-    if name != "log_storage_immutability":
+    if name in TENANT_FETCHERS:
+        assert spec["target_schema"]["tenant_id"]["env"] == "AZURE_TENANT_ID"
+    elif name != "log_storage_immutability":
         assert spec["target_schema"]["workspaces"]["env"] == azure_rest.WORKSPACES_ENV
     assert spec["evidence_set"]["reference_id"].startswith("EVD-AZURE-")
     instructions = spec["evidence_set"]["instructions"]
@@ -334,6 +349,398 @@ def test_data_sources(azure, tmp_path):
     assert ev["summary"]["workspaces_with_2plus_sources"] == 1
 
 
+def ui_connector(name, data_types, criteria=None):
+    return {"id": f"{SI_A}/dataConnectors/{name}", "name": name, "kind": "StaticUI", "properties": {"connectorUiConfig": {
+        "title": name, "connectivityCriterias": criteria or [],
+        "dataTypes": [{"name": n, "lastDataReceivedQuery": f"{q}\n | summarize Time = max(TimeGenerated)\n | where isnotempty(Time)"}
+                      for n, q in data_types]}}}
+
+
+def connectors_workspace(azure):
+    """Content Hub definitions, a codeless one, and connections only the preview listing returns."""
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [
+        ui_connector("AzureActiveDirectory", [("SigninLogs", "SigninLogs"), ("AuditLogs", "AuditLogs")]),
+        ui_connector("MicrosoftDefenderAdvancedThreatProtection",
+                     [("SecurityAlert (MDATP)", 'SecurityAlert\u200b | where ProviderName == "MDATP"')],
+                     [{"type": "MtpAlerts", "value": ["MicrosoftDefenderAdvancedThreatProtection"]}]),
+        ui_connector("Office365", [("OfficeActivity (Exchange)", 'OfficeActivity | where OfficeWorkload == "Exchange"'),
+                                   ("OfficeActivity (Teams)", 'OfficeActivity | where OfficeWorkload == "MicrosoftTeams"')]),
+        {"id": f"{SI_A}/dataConnectors/o365", "name": "o365", "kind": "Office365",
+         "properties": {"dataTypes": {"exchange": {"state": "Enabled"}}}},
+        {"id": f"{SI_A}/dataConnectors/mtp", "name": "mtp", "kind": "MicrosoftThreatProtection",
+         "properties": {"dataTypes": {"alerts": {"state": "enabled"}, "incidents": {"state": "enabled"}}}},
+        {"id": f"{SI_A}/dataConnectors/ccp1", "name": "ccp1", "kind": "RestApiPoller",
+         "properties": {"connectorDefinitionName": "MyCcp"}}]}
+    azure.arm[(f"{SI_A}/dataConnectorDefinitions", "2025-09-01")] = {"value": [
+        {"name": "MyCcp", "kind": "Customizable", "properties": {"connectorUiConfig": {
+            "title": "My codeless connector", "graphQueriesTableName": "MyCcp_CL",
+            "dataTypes": [{"name": "{{graphQueriesTableName}}",
+                           "lastDataReceivedQuery": "{{graphQueriesTableName}}\n | summarize Time = max(TimeGenerated)\n | where isnotempty(Time)"}],
+            "connectivityCriteria": [{"type": "HasDataConnectors"}]}}}]}
+    azure.queries[0] = ("union withsource=ParamifySourceTable", table(["ParamifySourceTable", "LastIngested", "Records"], [
+        ["SigninLogs", iso(NOW - timedelta(hours=1)), 9], ["SecurityAlert", iso(NOW), 2], ["OfficeActivity", iso(NOW), 4],
+        ["SentinelHealth", iso(NOW), 1], ["Usage", iso(NOW), 5]]))
+    azure.queries.insert(0, ("SentinelResourceType", table(
+        ["SentinelResourceId", "TimeGenerated", "Status", "Reason", "Description", "SentinelResourceKind", "SentinelResourceName"],
+        [[f"{SI_A}/dataConnectors/CCP1", iso(NOW), "Failure", "Unauthorized", "token expired", "RestApiPoller", "ccp1"]])))
+
+
+def test_data_sources_last_data_per_connector(azure, tmp_path):
+    connectors_workspace(azure)
+    # Filtered data types on tables with data, in catalog order: ASC alerts, MDATP alerts, Defender XDR alerts, Exchange, Teams.
+    azure.queries.insert(0, ("ParamifyIndex", table(["Time", "ParamifyIndex"], [[iso(NOW), 1], [iso(NOW), 2], [iso(NOW), 3]])))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    ws = ws_a(ev)
+    union = next(q for _, _, q in azure.calls if "ParamifyIndex" in q)
+    # Bare tables come from the ingestion query; listed tables with no data aren't queried.
+    assert "\u200b" not in union and union.count("ParamifyIndex =") == 5
+    assert "AuditLogs" not in union and "MyCcp_CL" not in union
+    # Sentinel's own analytics alerts in SecurityAlert don't count for Defender XDR.
+    assert 'SecurityAlert | where ProductName in ("Microsoft Defender Advanced Threat Protection"' in union
+    assert [(c["name"], c["seen_in"]) for c in ws["data_connectors"]] == [
+        ("asc", ["stable"]), ("mtp", ["preview"]), ("o365", ["stable", "preview"]), ("ccp1", ["preview"])]
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert list(by_id) == ["AzureActiveDirectory", "AzureSecurityCenter", "MicrosoftDefenderAdvancedThreatProtection",
+                           "MicrosoftThreatProtection", "MyCcp", "Office365"]
+    aad = by_id["AzureActiveDirectory"]
+    assert [d["last_data_received"] is not None for d in aad["data_types"]] == [True, False]
+    assert aad["connected"] is True and aad["definition"] == "content_hub" and aad["connections"] == []
+    asc = by_id["AzureSecurityCenter"]
+    assert (asc["definition"], asc["alert_only"], asc["connected"]) == ("built_in", True, False)
+    assert by_id["MicrosoftDefenderAdvancedThreatProtection"]["connections"] == ["mtp"]
+    mtp = by_id["MicrosoftThreatProtection"]
+    assert [d["table"] for d in mtp["data_types"]] == ["SecurityIncident", "SecurityAlert"] and mtp["connected"] is True
+    assert mtp["alert_only"] is False and by_id["MicrosoftDefenderAdvancedThreatProtection"]["alert_only"] is True
+    ccp = by_id["MyCcp"]
+    assert (ccp["definition"], ccp["connections"], ccp["data_types"][0]["table"]) == ("codeless", ["ccp1"], "MyCcp_CL")
+    assert ccp["connected"] is False and ccp["health_status"] == "Failure"
+    office = by_id["Office365"]
+    assert office["connections"] == ["o365"] and office["last_data_received"] == iso(NOW)
+    assert [d["last_data_received"] is not None for d in office["data_types"]] == [True, False]
+    assert ws["connectors_connected"] == 4 and ws["connectors_not_connected"] == ["MyCcp"]
+    assert ws["connectors_quiet"] == ["AzureSecurityCenter"]
+    assert ws["connectors_configured_without_data"] == ["MyCcp"]
+    assert ws["health_monitoring"] is True and ws["connector_health"][0]["reason"] == "Unauthorized"
+    assert {k: ev["summary"][k] for k in ("connectors_connected", "connectors_not_connected", "connectors_quiet",
+                                          "connectors_configured_without_data", "workspaces_with_health_monitoring",
+                                          "connectors_unhealthy")} == {
+        "connectors_connected": 4, "connectors_not_connected": 1, "connectors_quiet": 1,
+        "connectors_configured_without_data": 1, "workspaces_with_health_monitoring": 1, "connectors_unhealthy": 1}
+
+
+def alert_only_workspace(azure, discovery_logs):
+    """Alert-only connectors fed by their own connection, by Defender XDR, by a connection with alerts off, and by nothing."""
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-09-01")] = {"value": [
+        {"id": f"{SI_A}/dataConnectors/mcas", "name": "mcas", "kind": "MicrosoftCloudAppSecurity", "properties": {
+            "dataTypes": {"alerts": {"state": "Enabled"}, "discoveryLogs": {"state": discovery_logs}}}},
+        {"id": f"{SI_A}/dataConnectors/oatp", "name": "oatp", "kind": "OfficeATP",
+         "properties": {"dataTypes": {"alerts": {"state": "Disabled"}}}},
+        {"id": f"{SI_A}/dataConnectors/o365", "name": "o365", "kind": "Office365",
+         "properties": {"dataTypes": {"exchange": {"state": "Enabled"}}}}]}
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [
+        ui_connector("MicrosoftCloudAppSecurity", [
+            ("SecurityAlert (MCAS)", 'SecurityAlert | where ProductName == "Microsoft Cloud App Security"'),
+            ("McasShadowItReporting", "McasShadowItReporting")]),
+        ui_connector("AzureAdvancedThreatProtection",
+                     [("SecurityAlert (AATP)", 'SecurityAlert | where ProductName == "Azure Advanced Threat Protection"')],
+                     [{"type": "MtpAlerts", "value": ["AzureAdvancedThreatProtection"]}]),
+        ui_connector("AzureSecurityCenter", [("SecurityAlert (ASC)", 'SecurityAlert | where ProductName == "Azure Security Center"')]),
+        ui_connector("Office365", [("OfficeActivity (Exchange)", 'OfficeActivity | where OfficeWorkload == "Exchange"')]),
+        {"id": f"{SI_A}/dataConnectors/mtp", "name": "mtp", "kind": "MicrosoftThreatProtection",
+         "properties": {"dataTypes": {"alerts": {"state": "enabled"}, "incidents": {"state": "enabled"}}}}]}
+
+
+def test_data_sources_alert_only_connectors_read_quiet(azure, tmp_path):
+    alert_only_workspace(azure, "Disabled")
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert code == 0 and {i: c["alert_only"] for i, c in by_id.items()} == {
+        "AzureAdvancedThreatProtection": True, "AzureSecurityCenter": True, "MicrosoftCloudAppSecurity": True,
+        "MicrosoftThreatProtection": False, "Office365": False, "OfficeATP": True}
+    # Quiet needs a linked connection sending alerts, its own or Defender XDR's; Cloud Discovery logs are off on MCAS.
+    assert ws["connectors_quiet"] == ["AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity"]
+    assert by_id["AzureAdvancedThreatProtection"]["connections"] == ["mtp"]
+    assert by_id["MicrosoftCloudAppSecurity"]["connected"] is False
+    # Never connected, or its connection's alerts are Disabled: not connected.
+    assert (by_id["AzureSecurityCenter"]["connections"], by_id["OfficeATP"]["connections"]) == ([], ["oatp"])
+    assert ws["connectors_not_connected"] == ["AzureSecurityCenter", "MicrosoftThreatProtection", "Office365", "OfficeATP"]
+    assert ws["connectors_connected"] == 0
+    assert (ev["summary"]["connectors_quiet"], ev["summary"]["connectors_not_connected"]) == (2, 4)
+
+
+@pytest.mark.parametrize("own", [False, True])
+def test_data_sources_defender_xdr_links_only_the_products_it_carries(azure, tmp_path, own):
+    alert_only_workspace(azure, "Disabled")
+    # Tenant-based Defender for Cloud's MtpAlerts value isn't in Defender XDR's list; IoT has no MtpAlerts criterion.
+    preview = azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"]
+    preview += [
+        ui_connector("MicrosoftDefenderForCloudTenantBased",
+                     [("SecurityAlert(ASC)", 'SecurityAlert | where ProductName == "Azure Security Center"')],
+                     [{"type": "MtpAlerts", "value": ["MicrosoftDefenderForCloudTenantBased"]}]),
+        ui_connector("IoT", [("SecurityAlert (ASC for IoT)", 'SecurityAlert | where ProductName == "Azure Security Center for IoT"')],
+                     [{"type": "SentinelKinds", "value": ["IOT"]}])]
+    if own:
+        preview.append({"id": f"{SI_A}/dataConnectors/mdc", "name": "mdc", "kind": "RestApiPoller", "properties": {
+            "connectorDefinitionName": "MicrosoftDefenderForCloudTenantBased", "dataTypes": {"alerts": {"state": "Disabled"}}}})
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    # Defender XDR still makes Defender for Identity quiet, but not Defender for Cloud or IoT.
+    assert code == 0 and ws["connectors_quiet"] == ["AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity"]
+    assert {"IoT", "MicrosoftDefenderForCloudTenantBased"} <= set(ws["connectors_not_connected"])
+    assert ("MicrosoftDefenderForCloudTenantBased" in ws["connectors_configured_without_data"]) is own
+    mdc = by_id["MicrosoftDefenderForCloudTenantBased"]
+    assert (mdc["alert_only"], mdc["connected"]) == (True, False)
+    assert (mdc["connections"], by_id["IoT"]["connections"]) == ((["mdc"] if own else []), [])
+
+
+def test_data_sources_defender_xdr_link_needs_every_mtp_alerts_value_carried(azure, tmp_path):
+    alert_only_workspace(azure, "Disabled")
+    alert = 'SecurityAlert | where ProductName == "{}"'
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"] += [
+        ui_connector("AzureActiveDirectoryIdentityProtection",
+                     [("SecurityAlert (IPC)", alert.format("Azure Active Directory Identity Protection"))],
+                     [{"type": "MtpAlerts", "value": ["AzureActiveDirectory"]}]),
+        ui_connector("OfficeATP", [("SecurityAlert(OATP)", 'SecurityAlert | where ProviderName == "OATP"')],
+                     [{"type": "MtpAlerts", "value": ["OfficeATP"]}]),
+        ui_connector("OfficeIRM", [("SecurityAlert (OfficeIRM)", alert.format("Microsoft 365 Insider Risk Management"))],
+                     [{"type": "MtpAlerts", "value": ["OfficeIRM"]}]),
+        ui_connector("Mixed", [("SecurityAlert", alert.format("Azure Security Center"))],
+                     [{"type": "MtpAlerts", "value": ["AzureAdvancedThreatProtection", "MicrosoftDefenderForCloudTenantBased"]}])]
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    # OfficeATP's own connection has alerts Disabled, so only Defender XDR makes it quiet.
+    assert code == 0 and ws["connectors_quiet"] == [
+        "AzureActiveDirectoryIdentityProtection", "AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity",
+        "OfficeATP", "OfficeIRM"]
+    assert [by_id[i]["connections"] for i in ("AzureActiveDirectoryIdentityProtection", "OfficeATP", "OfficeIRM")] == [
+        ["mtp"], ["mtp", "oatp"], ["mtp"]]
+    # One value Defender XDR doesn't carry is enough to leave it unlinked.
+    assert by_id["Mixed"]["connections"] == [] and "Mixed" in ws["connectors_not_connected"]
+
+
+def test_data_sources_configured_without_data_leaves_out_unconnected_and_quiet(azure, tmp_path):
+    alert_only_workspace(azure, "Disabled")
+    # Installed from Content Hub with no connection, and not alert-only; and one connected to a Basic-plan table.
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"] += [
+        ui_connector("AzureActiveDirectory", [("AuditLogs", "AuditLogs")]),
+        ui_connector("AzureStorage", [("StorageBlobLogs", "StorageBlobLogs")])]
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-09-01")]["value"].append(
+        {"id": f"{SI_A}/dataConnectors/storage", "name": "storage", "kind": "AzureStorage", "properties": {}})
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert code == 0 and (by_id["AzureActiveDirectory"]["connections"], by_id["AzureActiveDirectory"]["connected"]) == ([], False)
+    # Configured but unmeasured isn't listed.
+    assert (by_id["AzureStorage"]["connections"], by_id["AzureStorage"]["connected"]) == (["storage"], None)
+    assert {"AzureActiveDirectory", "AzureSecurityCenter"} <= set(ws["connectors_not_connected"])
+    # OfficeATP's connection has alerts Disabled; AATP (via Defender XDR) and MCAS are quiet.
+    assert ws["connectors_configured_without_data"] == ["MicrosoftThreatProtection", "Office365", "OfficeATP"]
+    assert ev["summary"]["connectors_configured_without_data"] == 3
+
+
+def test_data_sources_configured_without_data_reads_null_when_any_workspace_is_unmeasured(azure, tmp_path):
+    onboard_second_workspace(azure)
+    si_b = f"{WS_B}/providers/Microsoft.SecurityInsights"
+    for api in ("2025-09-01", "2025-10-01-preview"):
+        azure.arm[(f"{si_b}/dataConnectors", api)] = {"value": []}
+    azure.arm[(f"{si_b}/dataConnectorDefinitions", "2025-09-01")] = {"value": []}
+    azure.arm[(f"{WS_B}/tables", "2023-09-01")] = law_tables(["AzureActivity", "SecurityAlert", "Usage", "Heartbeat"])
+    # A failed preview listing is only a note, so the run still exits 0.
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = Resp(
+        400, {"error": {"code": "InvalidApiVersionParameter", "message": "retired"}})
+    code, ev = run("sentinel_data_sources", tmp_path)
+    by_name = {w["name"]: w for w in ev["results"]["workspaces"]}
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    assert (by_name["law-sentinel"]["connectors_configured_without_data"],
+            by_name["law-plain"]["connectors_configured_without_data"]) == (None, [])
+    # The siblings still sum the measured workspaces.
+    assert (ev["summary"]["connectors_configured_without_data"], ev["summary"]["connectors_not_connected"]) == (None, 0)
+
+
+def test_data_sources_configured_without_data_is_null_without_a_sentinel_workspace(azure, tmp_path):
+    azure.arm[(f"{SI_A}/onboardingStates", "2025-09-01")] = {"value": []}
+    code, ev = run("sentinel_data_sources", tmp_path)
+    # Nothing measured can't read as none configured without data.
+    assert code == 0 and ev["summary"]["workspaces_without_sentinel"] == 2
+    assert ev["summary"]["connectors_configured_without_data"] is None
+
+
+def test_data_sources_mcas_with_cloud_discovery_on_isnt_alert_only(azure, tmp_path):
+    alert_only_workspace(azure, "Enabled")
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    mcas = next(c for c in ws["connectors"] if c["id"] == "MicrosoftCloudAppSecurity")
+    assert code == 0 and mcas["alert_only"] is False and mcas["connected"] is False
+    assert ws["connectors_quiet"] == ["AzureAdvancedThreatProtection"]
+    assert "MicrosoftCloudAppSecurity" in ws["connectors_not_connected"]
+
+
+def test_data_sources_bad_connector_query_is_isolated(azure, tmp_path):
+    connectors_workspace(azure)
+    bad = Resp(400, {"error": {"code": "BadArgumentError", "innererror": {"message": "Syntax error"}}})
+    # The batch fails, then each data type runs alone, as written: ASC answers, MDATP is malformed, the rest are empty.
+    azure.queries[:0] = [("ParamifyIndex", bad), ('"Azure Security Center"', table(["Time"], [[iso(NOW)]])),
+                         ('"MDATP"', bad), ("Time = max(TimeGenerated)", table(["Time"], []))]
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    alone = [q for _, _, q in azure.calls if q and "Time = max(TimeGenerated)" in q and "ParamifyIndex" not in q]
+    assert len(alone) == 5 and not any(q.startswith("union") for q in alone)
+    assert code == 0 and by_id["AzureSecurityCenter"]["connected"] is True
+    assert by_id["MicrosoftDefenderAdvancedThreatProtection"]["connected"] is None
+    assert "MicrosoftDefenderAdvancedThreatProtection: SecurityAlert (MDATP)" in ws["notes"][0]
+
+
+def test_data_sources_let_query_runs_alone(azure, tmp_path):
+    connectors_workspace(azure)
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"].append(
+        ui_connector("Okta", [("Okta_CL", 'let events = Okta_CL;\nevents | where eventType_s != ""')]))
+    # As in Log Analytics, a let statement inside a union operand is a syntax error.
+    bad = Resp(400, {"error": {"code": "BadArgumentError", "innererror": {"message": "Syntax error"}}})
+    azure.queries[:0] = [("(let ", bad), ("let events", table(["Time"], [[iso(NOW)]]))]
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    okta = next(c for c in ws["connectors"] if c["id"] == "Okta")
+    assert code == 0 and okta["connected"] is True and okta["last_data_received"] == iso(NOW)
+    assert not ws["notes"]
+    # The let query stays out of the union, so the rest still run as one batch.
+    unions = [q for _, _, q in azure.calls if q and "ParamifyIndex" in q]
+    assert len(unions) == 1 and "let " not in unions[0] and unions[0].count("ParamifyIndex =") == 5
+
+
+def test_data_sources_without_health_monitoring(azure, tmp_path):
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["health_monitoring"] is False and ws["connector_health"] is None
+    assert [c["id"] for c in ws["connectors"]] == ["AzureSecurityCenter", "Office365"]
+    assert all(c["definition"] == "built_in" for c in ws["connectors"])
+    assert not any("SentinelHealth" in q for _, _, q in azure.calls if q)
+    # No health data is unknown, not zero unhealthy.
+    assert ws["connectors_unhealthy"] is None and ev["summary"]["connectors_unhealthy"] is None
+
+
+def test_data_sources_parser_union_and_basic_table_queries(azure, tmp_path):
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [
+        ui_connector("SophosXGFirewall", [("Syslog (SophosXGFirewall)", "SophosXGFirewall ")]),
+        ui_connector("Wiz", [("WizIssues_CL", "union isfuzzy=true \n(WizIssues_CL),\n(WizIssuesV2_CL)")]),
+        ui_connector("AzureStorage", [("StorageBlobLogs", "StorageBlobLogs")]),
+        ui_connector("Broken", [("x", "{{tableName}}")])]}
+    # Pending, in catalog order: ASC alerts (no data), then the parser function and the union, which both have data.
+    azure.queries.insert(0, ("ParamifyIndex", table(["Time", "ParamifyIndex"], [[iso(NOW), 1], [iso(NOW), 2]])))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    union = next(q for _, _, q in azure.calls if "ParamifyIndex" in q)
+    assert code == 0 and "SophosXGFirewall" in union and "WizIssues_CL" in union and "StorageBlobLogs" not in union
+    assert by_id["SophosXGFirewall"]["connected"] is True and by_id["Wiz"]["connected"] is True
+    assert by_id["Wiz"]["data_types"][0]["table"] is None
+    # A Basic-plan table can't be read with /query, so it is unmeasured rather than empty.
+    assert by_id["AzureStorage"]["connected"] is None and ws["tables_not_measured"] == ["StorageBlobLogs"]
+    assert by_id["Broken"]["connected"] is None and any("connector Broken" in n for n in ws["notes"])
+    assert "Broken" not in ws["connectors_not_connected"] and "AzureStorage" not in ws["connectors_not_connected"]
+
+
+def test_data_sources_entra_id_protection_and_grouped_built_ins(azure, tmp_path):
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [
+        ui_connector("AzureActiveDirectory", [("SigninLogs", "SigninLogs")])]}
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-09-01")]["value"] += [
+        {"id": f"{SI_A}/dataConnectors/ipc", "name": "ipc", "kind": "AzureActiveDirectory",
+         "properties": {"dataTypes": {"alerts": {"state": "Enabled"}}}},
+        {"id": f"{SI_A}/dataConnectors/o365-b", "name": "o365-b", "kind": "Office365", "properties": {}}]
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    # The AzureActiveDirectory connection kind is Entra ID Protection, not the Entra ID logs connector.
+    assert by_id["AzureActiveDirectory"]["connections"] == []
+    ipc = by_id["AzureActiveDirectoryIdentityProtection"]
+    assert (ipc["definition"], ipc["connections"], [d["name"] for d in ipc["data_types"]]) == (
+        "built_in", ["ipc"], ["SecurityAlert (IPC)"])
+    assert [c["id"] for c in ws["connectors"]].count("Office365") == 1 and by_id["Office365"]["connections"] == ["o365", "o365-b"]
+
+
+def test_data_sources_health_shows_the_worst_connection(azure, tmp_path):
+    connectors_workspace(azure)
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"] += [
+        {"id": f"{SI_A}/dataConnectors/{n}", "name": n, "kind": "RestApiPoller", "properties": {"connectorDefinitionName": "MyCcp"}}
+        for n in ("ccp2", "ccp3")]
+    # A Warning listed first doesn't hide a Failure.
+    azure.queries.insert(0, ("SentinelResourceType", table(
+        ["SentinelResourceId", "TimeGenerated", "Status", "Reason", "Description", "SentinelResourceKind", "SentinelResourceName"],
+        [[f"{SI_A}/dataConnectors/ccp1", iso(NOW), "Success", None, None, "RestApiPoller", "ccp1"],
+         [f"{SI_A}/dataConnectors/ccp2", iso(NOW), "Warning", "Throttled", "slow", "RestApiPoller", "ccp2"],
+         [f"{SI_A}/dataConnectors/ccp3", iso(NOW), "Failure", "Unauthorized", "token expired", "RestApiPoller", "ccp3"]])))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    ccp = next(c for c in ws["connectors"] if c["id"] == "MyCcp")
+    assert ccp["connections"] == ["ccp1", "ccp2", "ccp3"] and ccp["health_status"] == "Failure"
+    assert ws["connectors_unhealthy"] == 2 and ev["summary"]["connectors_unhealthy"] == 2
+    # The hourly Informational failure summary, written only after polling errors, mustn't hide a Failure.
+    health = next(q for _, _, q in azure.calls if q and "SentinelResourceType" in q)
+    assert "OperationName == 'Data fetch status change'" in health
+
+
+def test_data_sources_batches_map_rows_back(azure, tmp_path, monkeypatch):
+    monkeypatch.setattr(MODS["sentinel_data_sources"], "QUERY_BATCH", 2)
+    connectors_workspace(azure)
+    # Batches: [ASC, MDATP], [Defender XDR alerts, Exchange], [Teams]; ParamifyIndex is per batch.
+    azure.queries.insert(0, ("ParamifyIndex", [table(["Time", "ParamifyIndex"], [[iso(NOW), 1]]),
+                                               table(["Time", "ParamifyIndex"], [[iso(NOW), 1]]),
+                                               table(["Time", "ParamifyIndex"], [])]))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    by_id = {c["id"]: c for c in ws_a(ev)["connectors"]}
+    assert code == 0 and sum("ParamifyIndex" in q for _, _, q in azure.calls if q) == 3
+    assert by_id["MicrosoftDefenderAdvancedThreatProtection"]["connected"] is True
+    assert by_id["AzureSecurityCenter"]["connected"] is False
+    assert [d["last_data_received"] is not None for d in by_id["Office365"]["data_types"]] == [True, False]
+
+
+def test_data_sources_failed_last_data_query_keeps_ingestion_answers(azure, tmp_path):
+    connectors_workspace(azure)
+    azure.queries.insert(0, ("ParamifyIndex", Resp(403, {"error": {"code": "Forbidden", "message": "no"}})))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    by_id = {c["id"]: c for c in ws_a(ev)["connectors"]}
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert by_id["AzureActiveDirectory"]["connected"] is True  # SigninLogs, from the ingestion query
+    assert by_id["AzureSecurityCenter"]["connected"] is None
+    # The counts are unknown, not partial.
+    for counts in (ws_a(ev), ev["summary"]):
+        assert [counts[k] for k in ("connectors_connected", "connectors_not_connected", "connectors_quiet",
+                                    "connectors_configured_without_data")] == [None] * 4
+
+
+def test_data_sources_incomplete_listings_read_null(azure, tmp_path):
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = Resp(
+        400, {"error": {"code": "InvalidApiVersionParameter", "message": "retired"}})
+    azure.arm[(f"{WS_A}/tables", "2023-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["notes"][0].startswith("preview listing")
+    assert (ws["connectors_total"], ws["connectors_connected"], ws["connectors_not_connected"], ws["connectors_quiet"],
+            ws["connectors_configured_without_data"]) == (None, None, None, None, None)
+    assert ws["data_connectors_total"] is None and ws["tables_not_measured"] is None
+    # Without the table plans, no data can't be told from a Basic table.
+    assert all(c["connected"] is None for c in ws["connectors"])
+    assert {k: ev["summary"][k] for k in ("data_connectors_total", "connectors_connected", "connectors_not_connected",
+                                          "connectors_quiet", "connectors_configured_without_data")} == {
+        "data_connectors_total": None, "connectors_connected": None, "connectors_not_connected": None, "connectors_quiet": None,
+        "connectors_configured_without_data": None}
+
+
+def test_data_sources_unknown_ingestion_reads_null(azure, tmp_path):
+    azure.queries[0] = ("union withsource=ParamifySourceTable", Resp(403, {"error": {"code": "Forbidden", "message": "no"}}))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["health_monitoring"] is None and ws["connectors_unhealthy"] is None
+    assert {k: ev["summary"][k] for k in ("connectors_connected", "connectors_not_connected", "connectors_quiet",
+                                          "connectors_configured_without_data", "connectors_unhealthy")} == {
+        "connectors_connected": None, "connectors_not_connected": None, "connectors_quiet": None,
+        "connectors_configured_without_data": None, "connectors_unhealthy": None}
+
+
 def test_analytics_rules_merge_preview_kinds(azure, tmp_path):
     code, ev = run("sentinel_analytics_rules", tmp_path)
     assert code == 0
@@ -398,6 +805,8 @@ WORKSPACE_TABLES = [
                     ("CommonSecurityLog", []), ("OfficeActivity", ["Operation"]), ("Operation", []),
                     ("Event", []), ("Usage", []), ("Heartbeat", []), ("SecurityEvent", []),
                     ("AzureDiagnostics", []), ("AuditLogs", []))]
+# The data-source fetcher's additions to the default listing; StorageBlobLogs is Basic.
+EXTRA_TABLES = law_tables(["SentinelHealth", "SecurityIncident", "McasShadowItReporting", "MyCcp_CL"], basic=["StorageBlobLogs"])
 TABLES = {t["name"] for t in WORKSPACE_TABLES}
 AMBIGUOUS = {"Operation"}
 
@@ -615,7 +1024,7 @@ def test_analytics_rules_tables_and_data(azure, tmp_path):
     assert [(t["table"], t["enabled_rules"], t["last_ingested"] is not None) for t in ws["tables_read_by_enabled_rules"]] == [
         ("AzureActivity", 1, True), ("CommonSecurityLog", 2, False), ("Event", 1, False), ("MyApp_CL", 1, False),
         ("SecurityAlert", 2, True), ("SigninLogs", 1, False), ("Syslog", 1, True)]
-    assert ws["workspace_tables_listed"] == len(WORKSPACE_TABLES) and ws["ingestion_window_days"] == 14
+    assert ws["workspace_tables_listed"] == len(WORKSPACE_TABLES) + len(EXTRA_TABLES["value"]) and ws["ingestion_window_days"] == 14
     assert ev["summary"]["enabled_rules_missing_data"] == 4 and ev["summary"]["ingesting_tables_not_read"] == 1
     # A template's data types are what the rule may read, so tables read only that way are labelled.
     assert {t["table"]: t["enabled_rules_by_template"] for t in ws["tables_read_by_enabled_rules"]} == {
@@ -645,7 +1054,7 @@ def incident_rule(name, product, enabled=True):
     return rule(name, "MicrosoftSecurityIncidentCreation", enabled, productFilter=product)
 
 
-def alert_only_workspace(azure, rules, stable=(), preview=()):
+def incident_rules_workspace(azure, rules, stable=(), preview=()):
     """Incident-creation rules for products that sent no alert (the products query finds only Defender for Endpoint)."""
     azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": list(rules)}
     azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
@@ -655,7 +1064,7 @@ def alert_only_workspace(azure, rules, stable=(), preview=()):
 
 
 def test_analytics_rules_alert_only_rule_is_quiet_through_its_own_connection(azure, tmp_path):
-    alert_only_workspace(azure, [incident_rule("ipc", "Azure Active Directory Identity Protection")],
+    incident_rules_workspace(azure, [incident_rule("ipc", "Azure Active Directory Identity Protection")],
                          stable=[connection("aad", "AzureActiveDirectory")])
     code, ev = run("sentinel_analytics_rules", tmp_path)
     ws = ws_a(ev)
@@ -670,7 +1079,7 @@ def test_analytics_rules_alert_only_rule_is_quiet_through_its_own_connection(azu
 
 def test_analytics_rules_alert_only_rule_is_quiet_through_defender_xdr(azure, tmp_path):
     # Only the preview listing returns the Defender XDR connection.
-    alert_only_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
+    incident_rules_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
                          stable=[connection("o365", "Office365")],
                          preview=[connection("o365", "Office365"), connection("xdr", "MicrosoftThreatProtection")])
     code, ev = run("sentinel_analytics_rules", tmp_path)
@@ -685,7 +1094,7 @@ def test_analytics_rules_unknown_product_is_never_quiet(azure, tmp_path):
     # alerts don't make it quiet.
     kinds = ["AzureActiveDirectory", "AzureAdvancedThreatProtection", "AzureSecurityCenter", "IOT",
              "MicrosoftCloudAppSecurity", "MicrosoftDefenderAdvancedThreatProtection", "OfficeATP", "MicrosoftThreatProtection"]
-    alert_only_workspace(azure, [incident_rule("new", "Microsoft Defender for Something New")],
+    incident_rules_workspace(azure, [incident_rule("new", "Microsoft Defender for Something New")],
                          preview=[connection(k.lower(), k) for k in kinds])
     code, ev = run("sentinel_analytics_rules", tmp_path)
     ws = ws_a(ev)
@@ -697,7 +1106,7 @@ def test_analytics_rules_unknown_product_is_never_quiet(azure, tmp_path):
 def test_analytics_rules_alert_only_rules_not_wired_are_not_quiet(azure, tmp_path):
     # Defender for Office 365's alerts are Disabled on its own connection and on Defender XDR's; Defender for Cloud
     # was never connected, and Defender XDR doesn't carry its alerts.
-    alert_only_workspace(
+    incident_rules_workspace(
         azure,
         [incident_rule("mdo", "Office 365 Advanced Threat Protection"), incident_rule("mdc", "Azure Security Center"),
          incident_rule("off", "Azure Advanced Threat Protection", enabled=False)],
@@ -717,7 +1126,7 @@ def test_analytics_rules_alert_only_rules_not_wired_are_not_quiet(azure, tmp_pat
 
 def test_analytics_rules_only_incident_rules_read_quiet(azure, tmp_path):
     # SecurityAlert got nothing at all; a scheduled rule reading it and SigninLogs stays missing data.
-    alert_only_workspace(
+    incident_rules_workspace(
         azure,
         [incident_rule("mdi", "Azure Advanced Threat Protection"),
          rule("mixed", "Scheduled", True, query="SecurityAlert | join (SigninLogs) on $left.CompromisedEntity == $right.UserPrincipalName")],
@@ -734,7 +1143,7 @@ def test_analytics_rules_only_incident_rules_read_quiet(azure, tmp_path):
 
 
 def test_analytics_rules_unreadable_connector_listing_leaves_quiet_unknown(azure, tmp_path):
-    alert_only_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
+    incident_rules_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
                          stable=Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}}),
                          preview=[connection("o365", "Office365")])
     code, ev = run("sentinel_analytics_rules", tmp_path)
@@ -745,13 +1154,13 @@ def test_analytics_rules_unreadable_connector_listing_leaves_quiet_unknown(azure
 
 def test_analytics_rules_failed_preview_connector_listing_is_a_note(azure, tmp_path):
     retired = Resp(400, {"error": {"code": "InvalidApiVersionParameter", "message": "retired"}})
-    alert_only_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")], preview=retired)
+    incident_rules_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")], preview=retired)
     code, ev = run("sentinel_analytics_rules", tmp_path)
     ws = ws_a(ev)
     assert code == 0 and ws["enabled_rules_quiet"] is None and ev["summary"]["enabled_rules_quiet"] is None
     assert len(ws["notes"]) == 1 and "Defender XDR" in ws["notes"][0]
     # A rule its own stable-listed connection makes quiet stays quiet without the preview listing.
-    alert_only_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
+    incident_rules_workspace(azure, [incident_rule("mdi", "Azure Advanced Threat Protection")],
                          stable=[connection("aatp", "AzureAdvancedThreatProtection")], preview=retired)
     for f in tmp_path.glob("azure_sentinel_analytics_rules_*.json"):
         f.unlink()
@@ -760,7 +1169,7 @@ def test_analytics_rules_failed_preview_connector_listing_is_a_note(azure, tmp_p
 
 
 def test_analytics_rules_without_alert_only_rules_missing_data_skip_the_connector_listing(azure, tmp_path):
-    alert_only_workspace(azure, [incident_rule("mde", "Microsoft Defender Advanced Threat Protection")])
+    incident_rules_workspace(azure, [incident_rule("mde", "Microsoft Defender Advanced Threat Protection")])
     code, ev = run("sentinel_analytics_rules", tmp_path)
     assert code == 0 and ws_a(ev)["enabled_rules_quiet"] == [] and ev["summary"]["enabled_rules_quiet"] == 0
     assert not any(c[1] == f"{SI_A}/dataConnectors" for c in azure.calls)
@@ -1698,6 +2107,7 @@ def test_query_audit_weeks_older_than_retention_are_unknown(azure, tmp_path):
 # --- the gap-closing fetchers ---------------------------------------------------
 
 RD = f"/subscriptions/{SUB}/providers/Microsoft.Authorization/roleDefinitions"
+PB = f"{RG}/providers/Microsoft.Logic/workflows/pb"
 SA = f"{RG}/providers/Microsoft.Storage/storageAccounts"
 
 
@@ -1718,7 +2128,39 @@ def container(name, policy=None, legal_hold=False):
     return {"name": name, "properties": props}
 
 
+PLAYBOOK = {"id": PB, "name": "pb", "properties": {
+    "state": "Enabled",
+    "parameters": {"$connections": {"value": {
+        "azuresentinel": {"id": "/subscriptions/x/providers/Microsoft.Web/locations/eastus/managedApis/azuresentinel"},
+        "office365": {"id": "/subscriptions/x/providers/Microsoft.Web/locations/eastus/managedApis/office365"},
+        "azuread": {"id": "/subscriptions/x/providers/Microsoft.Web/locations/eastus/managedApis/azuread"}}}},
+    "definition": {
+        "triggers": {"Microsoft_Sentinel_incident": {"type": "ApiConnectionWebhook", "inputs": {
+            "host": {"connection": {"name": "@parameters('$connections')['azuresentinel']['connectionId']"}},
+            "path": "/incident-creation"}}},
+        "actions": {"Condition": {"type": "If", "actions": {
+            "Send_an_email_(V2)": {"type": "ApiConnection", "inputs": {
+                "host": {"connection": {"name": "@parameters('$connections')['office365']['connectionId']"}},
+                "method": "post", "path": "/v2/Mail",
+                "body": {"To": "SecOps@Contoso.com; @{triggerBody()?['owner']}", "Subject": "incident"}}}},
+            "else": {"actions": {
+                "Disable_user": {"type": "ApiConnection", "inputs": {
+                    "host": {"connection": {"name": "@parameters('$connections')['azuread']['connectionId']"}},
+                    "method": "patch", "path": "/v1.0/users/@{encodeURIComponent('x')}",
+                    "body": {"accountEnabled": False}}}}}}}}}}
+NOT_A_PLAYBOOK = {"id": f"{RG}/providers/Microsoft.Logic/workflows/etl", "name": "etl",
+                  "properties": {"state": "Enabled", "definition": {"triggers": {"Recurrence": {"type": "Recurrence"}},
+                                                                     "actions": {"Compose": {"type": "Compose", "inputs": "noop"}}}}}
+
 EXTRA_ARM = {
+    ("/providers/microsoft.aadiam/diagnosticSettings", "2017-04-01"): {"value": [
+        {"name": "to-sentinel", "properties": {"workspaceId": WS_A, "logs": [
+            {"category": "AuditLogs", "enabled": True}, {"category": "SignInLogs", "enabled": True},
+            {"category": "ProvisioningLogs", "enabled": False}]}},
+        {"name": "archive", "properties": {"storageAccountId": f"{SA}/starchive", "logs": [
+            {"category": "NonInteractiveUserSignInLogs", "enabled": True}]}}]},
+    ("/providers/microsoft.aadiam/diagnosticSettingsCategories", "2017-04-01-preview"): {"value": [
+        {"name": n} for n in ("AuditLogs", "SignInLogs", "NonInteractiveUserSignInLogs", "ProvisioningLogs")]},
     (f"{WS_A}/providers/Microsoft.Authorization/roleAssignments", "2022-04-01"): {"value": [
         assignment("u-purger", "User", "purger", WS_A),
         assignment("sp-la", "ServicePrincipal", "lacontrib", f"/subscriptions/{SUB}"),
@@ -1752,8 +2194,61 @@ EXTRA_ARM = {
     (f"{SA}/stlogs/blobServices/default", "2023-05-01"): {"properties": {
         "deleteRetentionPolicy": {"enabled": True, "days": 14}, "isVersioningEnabled": True}},
     (f"{SA}/stapp/blobServices/default/containers", "2023-05-01"): {"value": [container("images")]},
-
+    (f"/subscriptions/{SUB}/providers/Microsoft.Logic/workflows", "2019-05-01"): {"value": [PLAYBOOK, NOT_A_PLAYBOOK]},
+    ("/v1.0/identityProtection/riskyUsers", None): {"value": [
+        {"id": "u-admin", "userPrincipalName": "admin@contoso.com", "riskLevel": "high", "riskState": "atRisk",
+         "riskLastUpdatedDateTime": iso(NOW - timedelta(days=10))}],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/identityProtection/riskyUsers?$skiptoken=p2"},
+    ("/v1.0/identityProtection/riskyUsers", None, "p2"): {"value": [
+        {"id": "u-staff", "userPrincipalName": "staff@contoso.com", "riskLevel": "medium", "riskState": "remediated",
+         "riskLastUpdatedDateTime": iso(NOW - timedelta(days=3))},
+        {"id": "u-reader", "userPrincipalName": "reader@contoso.com", "riskLevel": "low", "riskState": "atRisk",
+         "riskLastUpdatedDateTime": iso(NOW - timedelta(days=1))}]},
+    ("/v1.0/directoryRoles", None): {"value": [
+        {"id": "role-ga", "displayName": "Company Admin", "roleTemplateId": "62e90394-69f5-4237-9190-012177145e10"},
+        {"id": "role-dr", "displayName": "Directory Readers", "roleTemplateId": "88d8e3e3-8f55-4a1e-953a-9b9898b8876b"}]},
+    # More members than $expand would return: the role's member list is paged.
+    ("/v1.0/directoryRoles/role-ga/members", None): {
+        "value": [{"id": f"u-filler-{i}"} for i in range(20)],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/directoryRoles/role-ga/members?$skiptoken=p2"},
+    ("/v1.0/directoryRoles/role-ga/members", None, "p2"): {"value": [{"id": "u-admin"}]},
+    ("/v1.0/directoryRoles/role-dr/members", None): {"value": [{"id": "u-reader"}, {"id": "u-admin"}]},
+    # v1.0's members list leaves service principals out; only the cast returns them.
+    ("/v1.0/directoryRoles/role-ga/members/microsoft.graph.servicePrincipal", None): {"value": [{"id": "sp-deploy"}]},
+    ("/v1.0/directoryRoles/role-dr/members/microsoft.graph.servicePrincipal", None): {"value": []},
+    ("/v1.0/users/u-admin", None): {"id": "u-admin", "accountEnabled": True},
 }
+
+
+def test_entra_diagnostic_settings(azure, tmp_path):
+    code, ev = run("entra_diagnostic_settings", tmp_path)
+    assert code == 0
+    s = ev["summary"]
+    assert s["key_categories_to_sentinel"] == {"AuditLogs": True, "SignInLogs": True}
+    assert s["audit_and_signin_logs_to_sentinel"] is True and s["categories_not_exported"] == ["ProvisioningLogs"]
+    coverage = {c["category"]: c for c in ev["results"]["category_coverage"]}
+    assert coverage["NonInteractiveUserSignInLogs"]["to_storage"] is True
+    assert coverage["NonInteractiveUserSignInLogs"]["to_sentinel_workspace"] is False
+
+
+def test_entra_diagnostic_settings_unread_categories_leave_not_exported_unknown(azure, tmp_path):
+    azure.arm[("/providers/microsoft.aadiam/diagnosticSettingsCategories", "2017-04-01-preview")] = Resp(
+        400, {"Message": "Invalid api-version query string value."})
+    code, ev = run("entra_diagnostic_settings", tmp_path)
+    s = ev["summary"]
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and ev["results"]["categories_available"] is None
+    assert s["categories_not_exported"] is None and s["categories_exported"] == 3
+    assert s["audit_and_signin_logs_to_sentinel"] is True
+
+
+def test_entra_diagnostic_settings_wrong_tenant_fails(azure, tmp_path, monkeypatch):
+    claims = base64.urlsafe_b64encode(json.dumps({"tid": "other-tenant"}).encode()).decode().rstrip("=")
+    monkeypatch.setattr(azure_rest, "pinned_credential", lambda sub: type("C", (), {
+        "get_token": lambda self, scope: namedtuple("T", "token expires_on")(f"h.{claims}.s", 9_999_999_999)})())
+    monkeypatch.setenv("AZURE_TENANT_ID", "target-tenant")
+    code, ev = run("entra_diagnostic_settings", tmp_path)
+    assert code == 1 and "not the target tenant" in ev["metadata"]["api_failures"][0]["message"]
+    assert not any("aadiam" in c[1] for c in azure.calls)
 
 
 def test_deletion_rights(azure, tmp_path):
@@ -1803,6 +2298,100 @@ def test_log_storage_immutability(azure, tmp_path):
     assert not any("stfiles" in c[1] for c in azure.calls)
 
 
+def test_sentinel_playbooks(azure, tmp_path):
+    code, ev = run("sentinel_playbooks", tmp_path)
+    assert code == 0
+    (pb,) = ev["results"]["playbooks"]
+    assert pb["name"] == "pb" and pb["triggers"][0]["kind"] == "incident"
+    assert pb["capabilities"] == {"account_containment": True, "device_isolation": False, "email": True,
+                                  "teams": False, "incident_update": False}
+    assert pb["email_recipients"] == ["secops@contoso.com"] and pb["dynamic_recipient_fields"] == 1
+    assert pb["automation_rules"] == [{"workspace": "law-sentinel", "rule": "notify", "active": True}]
+    s = ev["summary"]
+    assert s["run_by_active_automation_rule"] == 1 and s["live_account_containment_playbooks"] == 1
+    assert s["notification_recipients"] == ["secops@contoso.com"] and s["logic_apps_scanned"] == 2
+
+
+def test_entra_risky_users(azure, tmp_path):
+    code, ev = run("entra_risky_users", tmp_path)
+    assert code == 0
+    users = {u["user_principal_name"]: u for u in ev["results"]["risky_users"]}
+    # Global Administrator found by template id past the first 20 members; Directory Readers isn't privileged.
+    assert users["admin@contoso.com"]["privileged_roles"] == ["Company Admin"]
+    assert users["admin@contoso.com"]["directory_roles"] == ["Company Admin", "Directory Readers"]
+    assert users["reader@contoso.com"]["privileged_roles"] == [] and "account_enabled" not in users["reader@contoso.com"]
+    assert users["admin@contoso.com"]["account_enabled"] is True and "account_enabled" not in users["staff@contoso.com"]
+    s = ev["summary"]
+    assert s["risky_users_total"] == 3 and s["by_risk_state"] == {"atRisk": 2, "remediated": 1}
+    assert s["privileged_open_risk_users"] == 1 and s["privileged_open_risk_users_enabled"] == 1
+    # 20 fillers, the admin and the service principal only the cast returns.
+    assert s["privileged_principals"] == 22
+
+
+def test_entra_risky_users_refused_account_read_is_unknown(azure, tmp_path):
+    azure.arm[("/v1.0/users/u-admin", None)] = Resp(
+        403, {"error": {"code": "Authorization_RequestDenied", "message": "Insufficient privileges to complete the operation."}})
+    code, ev = run("entra_risky_users", tmp_path)
+    admin = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "admin@contoso.com")
+    assert code == 0 and ev["metadata"]["partial_failure"] is False and admin["account_enabled"] is None
+    assert ev["summary"]["privileged_open_risk_users_enabled"] == 1
+
+
+def test_entra_risky_users_other_account_read_errors_fail(azure, tmp_path):
+    azure.arm[("/v1.0/users/u-admin", None)] = Resp(400, {"error": {"code": "BadRequest", "message": "bad"}})
+    code, ev = run("entra_risky_users", tmp_path)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+
+
+def test_entra_risky_users_unread_roles_leave_privileged_figures_unknown(azure, tmp_path):
+    azure.arm[("/v1.0/directoryRoles", None)] = Resp(
+        403, {"error": {"code": "Authorization_RequestDenied", "message": "Insufficient privileges to complete the operation."}})
+    code, ev = run("entra_risky_users", tmp_path)
+    s = ev["summary"]
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and s["open_risk_users"] == 2
+    assert s["privileged_open_risk_users"] is None and s["privileged_open_risk_users_enabled"] is None
+    assert s["privileged_principals"] is None
+    assert all(u["privileged_roles"] is None and "account_enabled" not in u for u in ev["results"]["risky_users"])
+
+
+def test_entra_risky_users_failed_service_principal_read_leaves_privileged_figures_unknown(azure, tmp_path):
+    azure.arm[("/v1.0/directoryRoles/role-ga/members/microsoft.graph.servicePrincipal", None)] = Resp(
+        403, {"error": {"code": "Authorization_RequestDenied", "message": "Insufficient privileges to complete the operation."}})
+    code, ev = run("entra_risky_users", tmp_path)
+    assert code == 1 and ev["summary"]["privileged_principals"] is None
+
+
+def test_entra_risky_users_without_p2_is_a_state(azure, tmp_path):
+    azure.arm[("/v1.0/identityProtection/riskyUsers", None)] = Resp(
+        403, {"error": {"code": "Forbidden", "message": "Your tenant is not licensed for this feature."}})
+    code, ev = run("entra_risky_users", tmp_path)
+    assert code == 0 and ev["summary"] == {"identity_protection_available": False}
+
+
+def test_entra_diagnostic_settings_unreadable_destination_is_unknown(azure, tmp_path):
+    other = "/subscriptions/other/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/law-elsewhere"
+    azure.arm[("/providers/microsoft.aadiam/diagnosticSettings", "2017-04-01")]["value"].append(
+        {"name": "elsewhere", "properties": {"workspaceId": other, "logs": [{"category": "ProvisioningLogs", "enabled": True}]}})
+    azure.arm[(f"{other}/providers/Microsoft.SecurityInsights/onboardingStates", "2025-09-01")] = Resp(
+        403, {"error": {"code": "AuthorizationFailed", "message": "no access"}})
+    code, ev = run("entra_diagnostic_settings", tmp_path)
+    coverage = {c["category"]: c for c in ev["results"]["category_coverage"]}
+    assert code == 0 and coverage["ProvisioningLogs"]["to_sentinel_workspace"] is None
+    assert coverage["AuditLogs"]["to_sentinel_workspace"] is True and ev["summary"]["audit_and_signin_logs_to_sentinel"] is True
+    assert "1 destination workspace" in ev["results"]["notes"][0]
+
+
+def test_entra_key_category_only_to_an_unreadable_workspace_is_unknown(azure, tmp_path):
+    settings = azure.arm[("/providers/microsoft.aadiam/diagnosticSettings", "2017-04-01")]["value"]
+    other = "/subscriptions/other/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/law-elsewhere"
+    settings[0]["properties"]["workspaceId"] = other
+    azure.arm[(f"{other}/providers/Microsoft.SecurityInsights/onboardingStates", "2025-09-01")] = Resp(
+        404, {"error": {"code": "SubscriptionNotFound", "message": "not in this tenant"}})
+    code, ev = run("entra_diagnostic_settings", tmp_path)
+    assert code == 0 and ev["summary"]["key_categories_to_sentinel"] == {"AuditLogs": None, "SignInLogs": None}
+    assert ev["summary"]["audit_and_signin_logs_to_sentinel"] is None
+
+
 def test_deletion_rights_without_pim_is_a_note(azure, tmp_path):
     azure.arm[(f"{WS_A}/providers/Microsoft.Authorization/roleEligibilityScheduleInstances", "2020-10-01")] = Resp(
         400, {"error": {"code": "AadPremiumLicenseRequired", "message": "The tenant needs an AAD Premium P2 license."}})
@@ -1829,6 +2418,37 @@ def test_log_storage_account_default_version_policy(azure, tmp_path):
     # The container's own Unlocked policy overrides the account default, and doesn't protect.
     assert by_name["insights-logs-auditlogs"]["policy_source"] == "container"
     assert not by_name["insights-logs-auditlogs"]["protected"]
+
+
+STD = f"{RG}/providers/Microsoft.Web/sites/la-std/workflows/contain"
+
+
+def _run_standard_playbook(azure, envelope):
+    rules = azure.arm[(f"{SI_A}/automationRules", "2025-09-01")]["value"]
+    rules[0]["properties"]["actions"].append(
+        {"order": 2, "actionType": "RunPlaybook", "actionConfiguration": {"logicAppResourceId": STD}})
+    azure.arm[(STD, "2024-04-01")] = envelope
+
+
+def test_sentinel_playbooks_standard_workflow(azure, tmp_path):
+    _run_standard_playbook(azure, {"id": STD, "name": "la-std/contain", "properties": {
+        "flowState": "Enabled", "files": {"workflow.json": {"kind": "Stateful", "definition": {
+            "triggers": {"incident": {"type": "ApiConnectionWebhook", "inputs": {
+                "host": {"connection": {"referenceName": "azuresentinel"}}, "path": "/incident-creation"}}},
+            "actions": {"Disable_user": {"type": "ApiConnection", "inputs": {
+                "host": {"connection": {"referenceName": "azuread"}}, "method": "patch",
+                "path": "/v1.0/users/x", "body": {"accountEnabled": False}}}}}}}}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    std = next(p for p in ev["results"]["playbooks"] if p["id"] == STD)
+    assert code == 0 and std["plan"] == "standard" and std["definition_read"] and std["enabled"]
+    assert std["triggers"][0]["kind"] == "incident" and std["capabilities"]["account_containment"]
+    assert ("GET", STD, "2024-04-01") in azure.calls and ev["summary"]["standard_playbooks"] == 1
+
+
+def test_sentinel_playbooks_standard_workflow_without_definition(azure, tmp_path):
+    _run_standard_playbook(azure, {"id": STD, "name": "la-std/contain", "properties": {"flowState": "Enabled"}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    assert code == 0 and ev["summary"]["playbooks_without_definition"] == [STD]
 
 
 def test_throttling_is_retried_after_retry_after(azure, tmp_path):

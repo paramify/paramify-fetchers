@@ -2707,6 +2707,74 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/entra_service_principals — federated credentials arrive only via $expand",
     ),
     (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["owners", "app_role_assignments", "app_roles"],
+        "azure/entra_service_principals — the $expand targets and the resource's role "
+        "names; without them every principal reads as ownerless and permission-free",
+    ),
+    (
+        "msgraph.generated.models.user",
+        "User",
+        ["odata_type", "display_name", "user_principal_name", "account_enabled"],
+        "azure/entra_service_principals — an owner's name and account state; without "
+        "them owner_details_readable reads false and the disabled-owner count null",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["odata_type", "display_name", "account_enabled"],
+        "azure/entra_service_principals — a service principal owner's name and account state",
+    ),
+    (
+        "msgraph.generated.models.application",
+        "Application",
+        ["owners"],
+        "azure/entra_service_principals — every app registration would read as ownerless",
+    ),
+    (
+        "msgraph.generated.models.app_role_assignment",
+        "AppRoleAssignment",
+        ["app_role_id", "resource_id", "resource_display_name", "created_date_time"],
+        "azure/entra_service_principals — the application permissions a principal holds",
+    ),
+    (
+        "msgraph.generated.models.app_role",
+        "AppRole",
+        ["id", "value"],
+        "azure/entra_service_principals — names each application permission",
+    ),
+    (
+        "msgraph.generated.models.o_auth2_permission_grant",
+        "OAuth2PermissionGrant",
+        ["client_id", "consent_type", "principal_id", "resource_id", "scope"],
+        "azure/entra_service_principals — the delegated grants a principal holds",
+    ),
+    (
+        "msgraph.generated.service_principals.service_principals_request_builder",
+        "ServicePrincipalsRequestBuilder.ServicePrincipalsRequestBuilderGetQueryParameters",
+        ["select", "expand"],
+        "azure/entra_service_principals — owners and app role assignments arrive via $expand",
+    ),
+    (
+        "msgraph.generated.service_principals.item.owners.owners_request_builder",
+        "OwnersRequestBuilder.OwnersRequestBuilderGetQueryParameters",
+        ["select"],
+        "azure/entra_service_principals — owners past the 20-item $expand limit",
+    ),
+    (
+        "msgraph.generated.applications.item.owners.owners_request_builder",
+        "OwnersRequestBuilder.OwnersRequestBuilderGetQueryParameters",
+        ["select"],
+        "azure/entra_service_principals — owners past the 20-item $expand limit",
+    ),
+    (
+        "msgraph.generated.service_principals.item.service_principal_item_request_builder",
+        "ServicePrincipalItemRequestBuilder.ServicePrincipalItemRequestBuilderGetQueryParameters",
+        ["select"],
+        "azure/entra_service_principals — the resource principal's app roles",
+    ),
+    (
         "msgraph.generated.models.group",
         "Group",
         [
@@ -3993,6 +4061,7 @@ GRAPH_BUILDERS = [
     ("group_setting_templates", "azure/entra_authentication_policy"),
     ("subscribed_skus", "azure/entra_authentication_policy"),
     ("directory_objects", "azure/residual_resources — getByIds; without it no deleted principal is found"),
+    ("oauth2_permission_grants", "azure/entra_service_principals — delegated grants"),
 ]
 
 
@@ -4024,6 +4093,107 @@ def test_graph_admin_membership_builders_present() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "path,params",
+    [
+        ("role_management.directory.role_definitions", []),
+        ("role_management.directory.role_eligibility_schedule_instances", ["expand"]),
+        ("role_management.directory.role_assignment_schedule_instances", ["expand"]),
+        ("policies.role_management_policy_assignments", ["filter", "expand"]),
+    ],
+)
+def test_graph_pim_builders_present(path: str, params: list[str]) -> None:
+    """azure/entra_pim_assignments walks these and builds each query from `<Builder>GetQueryParameters`."""
+    builder: object = _build("msgraph", "GraphServiceClient")
+    for part in path.split("."):
+        builder = getattr(builder, part, None)
+        assert builder is not None, f"GraphServiceClient.{path} is gone.\n  affected fetchers: azure/entra_pim_assignments"
+    query = getattr(type(builder), f"{type(builder).__name__}GetQueryParameters", None)
+    assert query is not None, f"{type(builder).__name__}GetQueryParameters is gone (azure/entra_pim_assignments)"
+    assert set(params) <= set(inspect.signature(query).parameters), (
+        f"{type(builder).__name__}GetQueryParameters lost one of {params} (azure/entra_pim_assignments)"
+    )
+
+
+def test_graph_pim_rule_models_present() -> None:
+    """The policy-rule fields azure/entra_pim_assignments reads; a rename reads as an unknown rule, not an error."""
+    for module, name, fields in [
+        ("unified_role_management_policy_expiration_rule", "UnifiedRoleManagementPolicyExpirationRule",
+         ["is_expiration_required", "maximum_duration"]),
+        ("unified_role_management_policy_enablement_rule", "UnifiedRoleManagementPolicyEnablementRule", ["enabled_rules"]),
+        ("unified_role_management_policy_approval_rule", "UnifiedRoleManagementPolicyApprovalRule", ["setting"]),
+        ("unified_role_management_policy_authentication_context_rule",
+         "UnifiedRoleManagementPolicyAuthenticationContextRule", ["is_enabled", "claim_value"]),
+        ("approval_settings", "ApprovalSettings", ["is_approval_required", "approval_stages"]),
+        ("unified_approval_stage", "UnifiedApprovalStage",
+         ["primary_approvers", "is_escalation_enabled", "approval_stage_time_out_in_days"]),
+        ("unified_role_assignment_schedule_instance", "UnifiedRoleAssignmentScheduleInstance",
+         ["assignment_type", "member_type", "start_date_time", "end_date_time", "principal", "directory_scope_id"]),
+        ("unified_role_eligibility_schedule_instance", "UnifiedRoleEligibilityScheduleInstance",
+         ["member_type", "start_date_time", "end_date_time", "principal"]),
+    ]:
+        model = _import(f"msgraph.generated.models.{module}", name)
+        missing = [f for f in fields if f not in getattr(model, "__dataclass_fields__", {})]
+        assert not missing, f"{name} lost {missing} (azure/entra_pim_assignments)"
+
+
+def test_graph_service_principal_access_builders_present() -> None:
+    """The per-item builders azure/entra_service_principals reads past the $expand limit."""
+    client = _build("msgraph", "GraphServiceClient")
+    oid = "00000000-0000-0000-0000-000000000000"
+    sp = client.service_principals.by_service_principal_id(oid)
+    for name in ("owners", "app_role_assignments"):
+        assert getattr(sp, name, None) is not None, (
+            f"service_principals.by_service_principal_id(...).{name} is gone.\n"
+            "  affected fetchers: azure/entra_service_principals"
+        )
+    assert getattr(client.applications.by_application_id(oid), "owners", None) is not None, (
+        "applications.by_application_id(...).owners is gone.\n"
+        "  affected fetchers: azure/entra_service_principals"
+    )
+
+
+def test_graph_access_review_builders_present() -> None:
+    """azure/entra_access_reviews walks definitions → instances → decisions by id."""
+    builder: object = _build("msgraph", "GraphServiceClient")
+    for part in ("identity_governance", "access_reviews", "definitions"):
+        builder = getattr(builder, part, None)
+        assert builder is not None, "GraphServiceClient.identity_governance.access_reviews.definitions is gone (azure/entra_access_reviews)"
+    lists = [builder]
+    for step in ("by_access_review_schedule_definition_id", "instances", "by_access_review_instance_id", "decisions"):
+        attr = getattr(type(builder), step, None)
+        assert attr is not None, f"{type(builder).__name__}.{step} is gone (azure/entra_access_reviews)"
+        builder = attr(builder, "x") if callable(attr) and step.startswith("by_") else getattr(builder, step)
+        if not step.startswith("by_"):
+            lists.append(builder)
+    # Each list is paged with $top/$skip when Graph sends a full page without a nextLink.
+    for listed in lists:
+        query = getattr(type(listed), f"{type(listed).__name__}GetQueryParameters", None)
+        assert query is not None and {"top", "skip"} <= set(inspect.signature(query).parameters), (
+            f"{type(listed).__name__} lost $top/$skip (azure/entra_access_reviews)"
+        )
+
+
+def test_graph_access_review_models_present() -> None:
+    """The fields azure/entra_access_reviews reads; a rename reads as a setting turned off, not an error."""
+    for module, name, fields in [
+        ("access_review_schedule_definition", "AccessReviewScheduleDefinition",
+         ["display_name", "status", "scope", "instance_enumeration_scope", "reviewers", "settings", "stage_settings"]),
+        ("access_review_schedule_settings", "AccessReviewScheduleSettings",
+         ["recurrence", "default_decision_enabled", "default_decision", "auto_apply_decisions_enabled",
+          "instance_duration_in_days", "apply_actions"]),
+        ("patterned_recurrence", "PatternedRecurrence", ["pattern", "range"]),
+        ("recurrence_pattern", "RecurrencePattern", ["type", "interval"]),
+        ("access_review_query_scope", "AccessReviewQueryScope", ["query", "query_type", "query_root"]),
+        ("access_review_instance", "AccessReviewInstance", ["status", "start_date_time", "end_date_time"]),
+        ("access_review_instance_decision_item", "AccessReviewInstanceDecisionItem",
+         ["decision", "apply_result", "reviewed_by", "principal", "resource"]),
+    ]:
+        model = _import(f"msgraph.generated.models.{module}", name)
+        missing = [f for f in fields if f not in getattr(model, "__dataclass_fields__", {})]
+        assert not missing, f"{name} lost {missing} (azure/entra_access_reviews)"
+
+
 def test_graph_group_member_builders_present() -> None:
     """The per-group builders azure/entra_groups reads past the $expand limit."""
     client = _build("msgraph", "GraphServiceClient")
@@ -4050,8 +4220,9 @@ def test_graph_group_member_builders_present() -> None:
 REST_FETCHERS = (
     "azure/sentinel_data_sources, azure/sentinel_analytics_rules, "
     "azure/sentinel_incidents, azure/sentinel_automation_rules, "
-    "azure/log_analytics_query_audit, azure/log_analytics_deletion_rights, "
-    "azure/log_storage_immutability"
+    "azure/sentinel_playbooks, azure/log_analytics_query_audit, "
+    "azure/log_analytics_deletion_rights, azure/log_storage_immutability, "
+    "azure/entra_diagnostic_settings, azure/entra_risky_users"
 )
 
 # (class, constructor keywords, affected fetchers)
