@@ -34,8 +34,9 @@ config_schema:
     default: 1000
     env: AZURE_POLICY_MAX_NON_COMPLIANT
     description: >
-      How many non-compliant (resource, policy) records to itemize. The summary
-      counts are complete regardless; this bounds only the list, and
+      How many non-compliant (resource, policy) records to itemize. Without
+      resource_exclusions the summary counts are complete regardless; this bounds
+      only the list, and
       non_compliant_states_truncated says when it was reached. 0 skips the list.
       With resource_exclusions set, excluded states don't count toward it, and the
       non-compliant counts are recounted from this list, so they are null when it
