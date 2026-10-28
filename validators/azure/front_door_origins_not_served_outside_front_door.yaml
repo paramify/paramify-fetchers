@@ -9,10 +9,12 @@ statement: >-
   address outside Front Door's ranges. Substantiates that public traffic reaches the origins only
   through Front Door and its WAF (KSI-CNA-ULN). Does NOT prove anything about origins that aren't App
   Service apps (storage, custom hosts, virtual machines), Kudu (scm) sites, requests refused by the app
-  (status 400 or above, which is lockdown working), private or internal callers, or that the app's
-  access restrictions admit only this profile's Front Door id (azure_front_door_origins). Azure's own
-  public callers outside Front Door's ranges, such as availability tests, count as bypass. An approved
-  exception is the organization's own record and isn't read; any served request from outside Front Door fails.
+  (status 400 or above, which is lockdown working), private or internal callers (including Front
+  Door's own requests over Private Link), App Service's management addresses (AppServiceManagement),
+  or that the app's access restrictions admit only this profile's Front Door id
+  (azure_front_door_origins). Other Azure public callers outside Front Door's ranges, such as
+  availability tests, count as bypass. An approved exception is the organization's own record and
+  isn't read; any served request from outside Front Door fails.
 
 regex: '"summary":\s*\{[^{}]*?"origin_apps":\s*(?<origin_apps>[1-9]\d*)[^{}]*?"origin_apps_bypass_unknown":\s*(?<origin_apps_bypass_unknown>\d+)[^{}]*?"origin_apps_served_outside_front_door":\s*(?<origin_apps_served_outside_front_door>\d+)[^{}]*?"origin_apps_without_http_log_export":\s*(?<origin_apps_without_http_log_export>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0; MATCH_GROUP[4] EQUALS 0
