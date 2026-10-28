@@ -203,10 +203,10 @@ def test_failed_tde_call_is_unknown_not_unencrypted(monkeypatch):
 
 
 def rule(name, priority, direction="Inbound", access="Allow", protocol="Tcp", source="VirtualNetwork",
-         destination="VirtualNetwork", port="1433"):
+         destination="VirtualNetwork", port="1433", **lists):
     return ns(id=f"{NSG}/securityRules/{name}", name=name, priority=priority, direction=direction, access=access,
               protocol=protocol, source_address_prefix=source, destination_address_prefix=destination,
-              destination_port_range=port)
+              destination_port_range=port, **lists)
 
 
 DEFAULT_RULES = [
@@ -338,6 +338,8 @@ def test_subnet_without_nsg_or_route_table_reads_false_not_null(monkeypatch):
     assert east["subnet_has_network_security_group"] is False
     assert east["subnet_network_security_group"] is None
     assert east["subnet_allow_any_to_any_rules"] == []
+    assert east["subnet_smb_outbound_allow_rules"] == []
+    assert east["subnet_public_all_ports_inbound_allow_rules"] == []
     assert east["subnet_unrestricted_internet_outbound"] is True
     assert east["subnet_has_route_table"] is False
     assert summary["instances_subnet_network_security_group"] == 0
@@ -352,18 +354,65 @@ def test_failed_subnet_reads_leave_subnet_fields_null(monkeypatch):
     instances, summary, collector = run_configuration(monkeypatch, sql_client(), net=net)
     east, west = instances["mi-east"], instances["mi-west"]
     assert not collector.ok
-    for field in ("subnet", "subnet_has_network_security_group", "subnet_allow_any_to_any_rules",
-                  "subnet_unrestricted_internet_outbound", "subnet_has_route_table"):
+    rule_fields = ("subnet_allow_any_to_any_rules", "subnet_unrestricted_internet_outbound",
+                   "subnet_smb_outbound_allow_rules", "subnet_public_all_ports_inbound_allow_rules")
+    for field in ("subnet", "subnet_has_network_security_group", "subnet_has_route_table", *rule_fields):
         assert east[field] is None, field
     assert west["subnet_has_network_security_group"] is True
     assert west["subnet_network_security_group"] is None
-    assert west["subnet_allow_any_to_any_rules"] is None
-    assert west["subnet_unrestricted_internet_outbound"] is None
+    for field in rule_fields:
+        assert west[field] is None, field
     assert west["subnet_route_table"]["name"] == "rt-mi"
     assert summary["instances_subnet_unknown"] == 1
     assert summary["instances_subnet_rules_unknown"] == 2
     assert summary["instances_subnet_network_security_group"] == 1
     assert summary["instances_subnet_unrestricted_internet_outbound"] == 0
+    assert summary["instances_subnet_smb_outbound_allow_rule"] == 0
+    assert summary["instances_subnet_public_all_ports_inbound_allow_rule"] == 0
+
+
+def test_smb_outbound_and_public_all_ports_inbound_rules_leave_service_aided_ones_out(monkeypatch):
+    rules = [
+        rule("smb-out", 300, "Outbound", destination="*", port="445"),
+        rule("smb-range-out", 310, "Outbound", protocol="*", destination="Internet", port="400-500"),
+        rule("smb-to-vnet", 320, "Outbound", destination="VirtualNetwork", port="445"),
+        rule("smb-udp-out", 330, "Outbound", protocol="Udp", destination="*", port="445"),
+        rule("Microsoft.Sql-managedInstances_UseOnly_mi-smb-out", 340, "Outbound", destination="*", port="445"),
+        rule("partners-in", 400, source=None, port="*", source_address_prefixes=["10.0.0.0/8", "52.1.2.3"]),
+        rule("split-ports-in", 410, source="Internet", port=None, destination_port_ranges=["1-1024", "1025-65535"]),
+        rule("private-in", 420, source=None, port="*", source_address_prefixes=["10.0.0.0/8", "192.168.1.0/24"]),
+        rule("https-in", 430, source="*", port="443"),
+        rule("azure-in", 440, source="AzureCloud", port="*"),
+        rule("Microsoft.Sql-managedInstances_UseOnly_mi-all-in", 450, source="*", port="*"),
+    ]
+    instances, summary, collector = run_configuration(monkeypatch, sql_client(), net=network(rules=rules))
+    east = instances["mi-east"]
+    assert collector.ok
+    assert east["subnet_smb_outbound_allow_rules"] == ["smb-out", "smb-range-out"]
+    assert east["subnet_public_all_ports_inbound_allow_rules"] == ["partners-in", "split-ports-in"]
+    assert east["subnet_allow_any_to_any_rules"] == []
+    assert summary["instances_subnet_smb_outbound_allow_rule"] == 2
+    assert summary["instances_subnet_public_all_ports_inbound_allow_rule"] == 2
+    assert summary["instances_subnet_rules_unknown"] == 0
+
+
+@pytest.mark.parametrize("prefix,expected", [
+    ("*", True), ("Internet", True), ("0.0.0.0/0", True), ("52.1.2.3", True), ("10.0.0.0/7", True), ("::/0", True),
+    ("10.1.0.0/16", False), ("172.16.5.0/24", False), ("100.64.0.0/10", False), ("fd00::/8", False),
+    ("VirtualNetwork", False), ("AzureCloud", False),
+])
+def test_public_source(prefix, expected):
+    assert configuration.public_source(prefix) is expected
+
+
+@pytest.mark.parametrize("ports,expected", [
+    (["*"], True), (["0-65535"], True), (["1-65535"], True), (["1-1024", "1025-65535"], True),
+    (["2-65535"], False), (["1-1024", "1026-65535"], False), (["443"], False), ([], False),
+])
+def test_all_ports_inbound_needs_every_port(ports, expected):
+    base = {"access": "Allow", "direction": "Inbound", "source_address_prefix": "Internet",
+            "destination_port_ranges": ports}
+    assert configuration.allows_public_all_ports_inbound(base) is expected
 
 
 @pytest.mark.parametrize("fields,expected", [

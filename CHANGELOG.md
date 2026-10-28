@@ -207,8 +207,13 @@ schemas and the `paramify` CLI — not the internal code.
   `subnet_allow_any_to_any_rules` names custom rules allowing every protocol and
   port from any address to any address, and
   `subnet_unrestricted_internet_outbound` reads the NSG the way
-  `azure_network_security_groups` does; `instances_subnet_rules_unknown` counts
-  the instances whose subnet or NSG couldn't be read for either. The instance's
+  `azure_network_security_groups` does. `subnet_smb_outbound_allow_rules` names
+  custom rules allowing TCP 445 out to any address, and
+  `subnet_public_all_ports_inbound_allow_rules` names custom rules allowing every
+  port in from a source list that includes public addresses; both leave the
+  service-aided rules out. `instances_subnet_rules_unknown` counts the instances
+  whose subnet or NSG couldn't be read, so none of these rule fields could be
+  judged. The instance's
   `maintenance_configuration_id` is resolved through
   `publicMaintenanceConfigurations` to its window (start, duration, time zone,
   recurrence), with `maintenance_window_default` for `SQL_Default`. Each user

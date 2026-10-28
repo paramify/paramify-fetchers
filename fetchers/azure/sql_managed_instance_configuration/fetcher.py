@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Azure SQL Managed Instance network exposure, TLS, Entra authentication, audit-log export, subnet rules and routes, maintenance window and data classification."""
 
+import ipaddress
 import logging
 import os
 import sys
@@ -55,6 +56,12 @@ MANAGED_INSTANCE_DELEGATION = "microsoft.sql/managedinstances"
 ANY_ADDRESS = ("*", "0.0.0.0/0", "any", "internet")
 ALL_PORTS = ("*", "0-65535")
 INTERNET_DESTINATIONS = ("*", "0.0.0.0/0", "internet")
+SMB_PORT = 445
+# Private, shared (CGNAT), loopback and link-local space; a source reaching past these includes public addresses.
+NON_PUBLIC_RANGES = tuple(ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+    "fc00::/7", "fe80::/10", "::1/128",
+))
 DEFAULT_MAINTENANCE_CONFIGURATION = "sql_default"
 MAINTENANCE_API_VERSION = "2023-04-01"
 
@@ -230,6 +237,64 @@ def allows_any_to_any(rule: dict) -> bool:
     )
 
 
+def _port_span(value):
+    if value == "*":
+        return 0, 65535
+    low, _, high = str(value).partition("-")
+    try:
+        return int(low), int(high or low)
+    except ValueError:
+        return None
+
+
+def _covers_all_ports(values) -> bool:
+    """Ranges merged, so 1-1024 plus 1025-65535 counts; port 0 is not needed."""
+    reach = 0
+    for low, high in sorted(s for s in map(_port_span, values) if s):
+        if low > reach + 1:
+            return False
+        reach = max(reach, high)
+    return reach >= 65535
+
+
+def public_source(prefix) -> bool:
+    """*, Any, Internet, 0.0.0.0/0, or an address range reaching past non-public space; other service tags don't count."""
+    if lower(prefix) in ANY_ADDRESS:
+        return True
+    try:
+        net = ipaddress.ip_network(str(prefix), strict=False)
+    except ValueError:
+        return False
+    return not any(net.version == r.version and net.subnet_of(r) for r in NON_PUBLIC_RANGES)  # type: ignore[arg-type]
+
+
+def allows_smb_outbound(rule: dict) -> bool:
+    """An outbound Allow on TCP (or any protocol) covering port 445 to any address."""
+    return (
+        lower(rule.get("access")) == "allow"
+        and lower(rule.get("direction")) == "outbound"
+        and lower(rule.get("protocol")) in ("tcp", "*")
+        and any(
+            (span := _port_span(p)) is not None and span[0] <= SMB_PORT <= span[1]
+            for p in _values(rule, "destination_port_range", "destination_port_ranges")
+        )
+        and any(
+            lower(a) in ANY_ADDRESS
+            for a in _values(rule, "destination_address_prefix", "destination_address_prefixes")
+        )
+    )
+
+
+def allows_public_all_ports_inbound(rule: dict) -> bool:
+    """An inbound Allow on every port, on any protocol, from a source list that includes public addresses."""
+    return (
+        lower(rule.get("access")) == "allow"
+        and lower(rule.get("direction")) == "inbound"
+        and _covers_all_ports(_values(rule, "destination_port_range", "destination_port_ranges"))
+        and any(public_source(a) for a in _values(rule, "source_address_prefix", "source_address_prefixes"))
+    )
+
+
 # Same reading as azure_network_security_groups: the first all-port, all-protocol outbound rule to the Internet decides.
 def unrestricted_internet_outbound(group: dict) -> bool:
     rules = sorted(
@@ -261,6 +326,15 @@ def subnet_fields(subnet: dict | None, group: dict | None, table: dict | None) -
         }
     if table is not None:
         table = {**table, "routes": [{**r, "service_aided": service_aided(r["name"])} for r in table["routes"]]}
+
+    def customer_rules(test) -> list | None:
+        """Names of the custom rules, service-aided ones left out, that pass `test`."""
+        if has_group is False:
+            return []
+        return None if group is None else [
+            r["name"] for r in group["security_rules"] if not r["service_aided"] and test(r)
+        ]
+
     return {
         "subnet": subnet,
         "subnet_delegated_to_managed_instance": None if subnet is None else any(
@@ -279,6 +353,8 @@ def subnet_fields(subnet: dict | None, group: dict | None, table: dict | None) -
             else None if group is None
             else unrestricted_internet_outbound(group)
         ),
+        "subnet_smb_outbound_allow_rules": customer_rules(allows_smb_outbound),
+        "subnet_public_all_ports_inbound_allow_rules": customer_rules(allows_public_all_ports_inbound),
         "subnet_has_route_table": has_table,
         "subnet_route_table": table,
     }
@@ -389,6 +465,10 @@ def summarize(instances: list[dict]) -> dict:
         "instances_subnet_allow_any_to_any_rule": sum(1 for i in instances if i["subnet_allow_any_to_any_rules"]),
         "instances_subnet_unrestricted_internet_outbound": sum(
             1 for i in instances if i["subnet_unrestricted_internet_outbound"] is True
+        ),
+        "instances_subnet_smb_outbound_allow_rule": sum(1 for i in instances if i["subnet_smb_outbound_allow_rules"]),
+        "instances_subnet_public_all_ports_inbound_allow_rule": sum(
+            1 for i in instances if i["subnet_public_all_ports_inbound_allow_rules"]
         ),
         "instances_subnet_route_table": sum(1 for i in instances if i["subnet_has_route_table"] is True),
         "instances_custom_maintenance_window": sum(
