@@ -4109,8 +4109,9 @@ def test_graph_group_member_builders_present() -> None:
 REST_FETCHERS = (
     "azure/sentinel_data_sources, azure/sentinel_analytics_rules, "
     "azure/sentinel_incidents, azure/sentinel_automation_rules, "
-    "azure/log_analytics_query_audit, azure/log_analytics_deletion_rights, "
-    "azure/log_storage_immutability"
+    "azure/sentinel_playbooks, azure/log_analytics_query_audit, "
+    "azure/log_analytics_deletion_rights, azure/log_storage_immutability, "
+    "azure/entra_diagnostic_settings, azure/entra_risky_users"
 )
 
 # (class, constructor keywords, affected fetchers)
