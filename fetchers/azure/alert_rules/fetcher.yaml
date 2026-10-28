@@ -17,11 +17,17 @@ config_schema:
       (the region's name without spaces, such as eastus2; a resource with no
       location never matches one) or id:<resource id> (also matches that
       resource's child resources). * matches any run of characters and ? one
-      character. A matching alert rule, action group or processing rule is listed
-      under excluded with the pattern and left out of every count and verdict;
-      routing is still worked out against every action group and processing rule,
-      so an in-scope rule's verdict doesn't change. A pattern without one of these
-      prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      character. Metric alert and smart detector rules always carry the location
+      global, and action groups and processing rules carry none, so location:
+      reaches only log search rules; the others need rg: or id:. A matching alert
+      rule, action group or processing rule is listed under excluded with the
+      pattern and left out of every count and verdict; routing is still worked out
+      against every action group and processing rule, so an in-scope rule's verdict
+      doesn't change. So an excluded suppression rule still marks in-scope rules
+      suppressed though suppressing_processing_rules_active doesn't count it, and an
+      in-scope rule routing to an excluded action group keeps that route though
+      deliverable_action_groups doesn't count the group. A pattern without one of
+      these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true
@@ -72,7 +78,7 @@ evidence_set:
     - GET Microsoft.AlertsManagement/smartDetectorAlertRules — smart detector rules
     - GET Microsoft.Insights/actionGroups — action groups and their receivers
     - GET Microsoft.AlertsManagement/actionRules — processing rules that suppress or add action groups
-    - GET {action group id} (groups in other subscriptions) — their receivers
+    - GET {action group id} (groups in other subscriptions that an in-scope rule or processing rule uses) — their receivers
 
     Output: azure_alert_rules_<subscription>.json — each alert rule with its condition, the receivers it notifies (phone numbers cut to the last 4 digits, webhooks to their host, Logic Apps and Functions to their resource id), any processing rules that suppress or add groups to it, and whether it reaches a person; mute durations are recorded but not evaluated, and activity log alerts are in azure_activity_log_alerts. Resources the resource_exclusions patterns take out are listed under excluded instead.
 

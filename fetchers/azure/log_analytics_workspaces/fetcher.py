@@ -318,8 +318,9 @@ def summarize(workspaces: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_workspaces(subscription_id, cred, collector: Collector) -> list[dict]:
-    """One workspaces.list(), then three GETs per workspace."""
+def collect_workspaces(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+                       excluded: list | None = None) -> list[dict]:
+    """One workspaces.list(), then three GETs per workspace; excluded ones are appended to `excluded` unread."""
 
     def _client():
         from azure.mgmt.loganalytics import LogAnalyticsManagementClient  # lazy
@@ -338,6 +339,9 @@ def collect_workspaces(subscription_id, cred, collector: Collector) -> list[dict
         lambda: [project_workspace(w) for w in client.workspaces.list()],
         default=[],
     )
+    if exclusions and excluded is not None:
+        workspaces, out = exclusions.split(workspaces, "workspace")
+        excluded += sorted(out, key=lambda e: e["id"] or "")
 
     records = []
     for workspace in workspaces:
@@ -384,6 +388,8 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     workspaces: list[dict] = []
+    excluded: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # ARM returns an empty list, not an error, for an unregistered provider.
@@ -396,7 +402,7 @@ def main() -> int:
                 "no Log Analytics workspaces in use; reporting status not_registered",
                 subscription_id,
             )
-        workspaces = collect_workspaces(subscription_id, cred, collector)
+        workspaces = collect_workspaces(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -406,9 +412,7 @@ def main() -> int:
             ),
         )
 
-    exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
-    workspaces, excluded = exclusions.split(workspaces, "workspace")
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

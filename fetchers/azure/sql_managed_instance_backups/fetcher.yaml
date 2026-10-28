@@ -24,8 +24,8 @@ config_schema:
       location never matches one) or id:<resource id> (also matches that resource's
       child resources). * matches any run of characters and ? one character. A
       matching managed instance is listed under excluded with the pattern and left
-      out of every count and verdict, with its databases and their retention (an id:
-      pattern naming one database matches nothing). An instance failover group
+      out of every count and verdict; its databases and their retention are not
+      read (an id: pattern naming one database matches nothing). An instance failover group
       leaves scope only when every instance it pairs in this subscription is
       excluded; failover groups are still matched against every instance, so an
       in-scope instance's verdict doesn't change when its partner is excluded. A

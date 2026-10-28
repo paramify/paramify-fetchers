@@ -22,10 +22,9 @@ config_schema:
       (the region's name without spaces, such as eastus2; a resource with no
       location never matches one) or id:<resource id> (also matches that resource's
       child resources). * matches any run of characters and ? one character. A
-      matching managed instance is listed under excluded with the pattern and left
-      out of every count and verdict, with its databases (an id: pattern naming one
-      database matches nothing). A pattern without one of these prefixes fails the
-      run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
+      matching managed instance is listed under excluded with the pattern, is not
+      read further, and is left out of every count and verdict. A pattern without
+      one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
       ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true

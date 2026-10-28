@@ -119,13 +119,19 @@ def summarize(instances: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect(subscription_id, cred, collector: Collector) -> list[dict]:
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None) -> list[dict]:
+    """Instances the exclusions take out are appended to `excluded` and get none of the per-instance reads."""
     client = sql_client(subscription_id, cred, collector)
     if client is None:
         return []
+    instances = list_instances(client, collector, project_instance)
+    if exclusions and excluded is not None:
+        instances, out = exclusions.split(instances, "managed_instance")
+        excluded += sorted(out, key=lambda e: e["id"] or "")
 
     records = []
-    for instance in list_instances(client, collector, project_instance):
+    for instance in instances:
         group, name = instance["resource_group"], instance["name"]
         protector = collector.guard(
             f"sql.managed_instance_encryption_protectors.get ({name})",
@@ -174,6 +180,8 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     instances: list[dict] = []
+    excluded: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(
@@ -185,7 +193,7 @@ def main() -> int:
                 "Instance in use; reporting status not_registered",
                 subscription_id,
             )
-        instances = collect(subscription_id, cred, collector)
+        instances = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -195,9 +203,7 @@ def main() -> int:
             ),
         )
 
-    exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
-    instances, excluded = exclusions.split(instances, "managed_instance")
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

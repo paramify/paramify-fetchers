@@ -258,7 +258,9 @@ def summarize(
 
 # --- collection (lazy azure imports) ---
 
-def collect(subscription_id, cred, collector: Collector) -> tuple[list[dict], list[dict], set]:
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None) -> tuple[list[dict], list[dict], set]:
+    """Failover groups are matched against every instance; excluded instances get no database reads."""
     client = sql_client(subscription_id, cred, collector)
     if client is None:
         return [], [], set()
@@ -289,8 +291,9 @@ def collect(subscription_id, cred, collector: Collector) -> tuple[list[dict], li
         (merge_failover_group_views(v) for v in views.values()), key=lambda g: g.get("id") or ""
     )
 
+    in_scope, out = exclusions.split(projected, "managed_instance") if exclusions else (projected, [])
     instances: list[dict] = []
-    for instance in projected:
+    for instance in in_scope:
         group_name, name = instance["resource_group"], instance["name"]
         databases = list_databases(client, collector, instance)
         records = []
@@ -327,6 +330,10 @@ def collect(subscription_id, cred, collector: Collector) -> tuple[list[dict], li
             )
         )
 
+    out.sort(key=lambda e: e["id"] or "")
+    groups, dropped = split_failover_groups(groups, {lower(i.get("id")) for i in projected}, out)
+    if excluded is not None:
+        excluded += out + dropped
     return sorted(instances, key=lambda i: i.get("id") or ""), groups, unlisted
 
 
@@ -348,6 +355,8 @@ def main() -> int:
     instances: list[dict] = []
     groups: list[dict] = []
     unlisted: set = set()
+    excluded: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(
@@ -359,7 +368,7 @@ def main() -> int:
                 "Instance in use; reporting status not_registered",
                 subscription_id,
             )
-        instances, groups, unlisted = collect(subscription_id, cred, collector)
+        instances, groups, unlisted = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -369,13 +378,7 @@ def main() -> int:
             ),
         )
 
-    # Failover groups were read and matched against every instance first, so an in-scope instance keeps its verdict.
-    exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
-    listed = {lower(i.get("id")) for i in instances}
-    instances, excluded = exclusions.split(instances, "managed_instance")
-    groups, excluded_groups = split_failover_groups(groups, listed, excluded)
-    excluded += excluded_groups
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

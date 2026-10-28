@@ -74,9 +74,12 @@ def _key(rid):
     return rid.split("/")[4], rid.rsplit("/", 1)[1]
 
 
-def _call(table):
+def _call(table, op=None, reads=None, deny=()):
     def fn(*args, **kwargs):
-        value = table[args or tuple(kwargs.values())]
+        key = args or tuple(kwargs.values())
+        if reads is not None:
+            reads.append((op, key))
+        value = DENIED if key[1] in deny else table[key]
         if isinstance(value, Exception):
             raise value
         return value
@@ -100,42 +103,66 @@ FAILOVER = {
 }
 
 
-def _sql_client(failover=None):
+def _sql_client(failover=None, reads=None, deny=()):
+    """Per-instance calls append (operation, args) to reads and raise DENIED for an instance named in deny."""
     keys = [_key(rid) for rid in LOCATIONS]
+
+    def per_instance(op, table):
+        return _call(table, op, reads, deny)
+
     return ns(
         managed_instances=ns(list=lambda: [
             ns(id=rid, name=_key(rid)[1], location=loc, state="Ready", current_backup_storage_redundancy="Geo",
                public_data_endpoint_enabled=rid != MI_IN, minimal_tls_version="1.2")
             for rid, loc in LOCATIONS.items()]),
-        managed_databases=ns(list_by_instance=_call({
+        managed_databases=ns(list_by_instance=per_instance("databases", {
             _key(rid): [ns(id=f"{rid}/databases/app", name="app", status="Online")] for rid in LOCATIONS})),
-        managed_backup_short_term_retention_policies=ns(get=_call(
-            {(*k, "app", "default"): ns(retention_days=7 if k[1] == "mi-in" else 3) for k in keys})),
-        managed_instance_long_term_retention_policies=ns(get=_call(
-            {(*k, "app", "default"): ns(weekly_retention="P4W") for k in keys})),
-        instance_failover_groups=ns(list_by_location=_call(failover or FAILOVER)),
-        managed_instance_encryption_protectors=ns(get=_call(
-            {(*k, "current"): ns(server_key_type="ServiceManaged" if k[1] == "mi-in" else "AzureKeyVault")
-             for k in keys})),
-        managed_database_transparent_data_encryption=ns(get=_call(
-            {(*k, "app", "current"): ns(state="Enabled" if k[1] == "mi-in" else "Disabled") for k in keys})),
-        managed_instance_administrators=ns(list_by_instance=_call(
-            {k: [ns(administrator_type="ActiveDirectory", login="dba")] for k in keys})),
-        managed_instance_azure_ad_only_authentications=ns(list_by_instance=_call(
-            {k: [ns(azure_ad_only_authentication=True)] for k in keys})),
+        managed_backup_short_term_retention_policies=ns(get=per_instance(
+            "short_term_retention", {(*k, "app", "default"): ns(retention_days=7 if k[1] == "mi-in" else 3)
+                                     for k in keys})),
+        managed_instance_long_term_retention_policies=ns(get=per_instance(
+            "long_term_retention", {(*k, "app", "default"): ns(weekly_retention="P4W") for k in keys})),
+        instance_failover_groups=ns(list_by_location=_call(failover or FAILOVER, "failover_groups", reads)),
+        managed_instance_encryption_protectors=ns(get=per_instance("protector", {
+            (*k, "current"): ns(server_key_type="ServiceManaged" if k[1] == "mi-in" else "AzureKeyVault")
+            for k in keys})),
+        managed_database_transparent_data_encryption=ns(get=per_instance("tde", {
+            (*k, "app", "current"): ns(state="Enabled" if k[1] == "mi-in" else "Disabled") for k in keys})),
+        managed_instance_administrators=ns(list_by_instance=per_instance("administrators", {
+            k: [ns(administrator_type="ActiveDirectory", login="dba")] for k in keys})),
+        managed_instance_azure_ad_only_authentications=ns(list_by_instance=per_instance("entra_only", {
+            k: [ns(azure_ad_only_authentication=True)] for k in keys})),
     )
 
 
-def run_sql(monkeypatch, tmp_path, module, patterns, failover=None):
+def run_sql_reads(monkeypatch, tmp_path, module, patterns, failover=None, deny=()):
     _common(monkeypatch, tmp_path, module, patterns)
-    monkeypatch.setattr(module, "sql_client", lambda *a: _sql_client(failover))
+    reads: list = []
+    monkeypatch.setattr(module, "sql_client", lambda *a: _sql_client(failover, reads, deny))
     if module is configuration:
         audit = ns(id="ds", name="ds", workspace_id=WORKSPACE_OUT,
                    logs=[ns(category="SQLSecurityAuditEvents", enabled=True)])
-        monkeypatch.setattr(module, "monitor_client", lambda *a: ns(diagnostic_settings=ns(list=lambda **k: [audit])))
+
+        def diagnostic_settings(resource_uri):
+            name = resource_uri.rsplit("/", 1)[1]
+            reads.append(("diagnostic_settings", ("", name)))
+            if name in deny:
+                raise DENIED
+            return [audit]
+
+        monkeypatch.setattr(module, "monitor_client", lambda *a: ns(diagnostic_settings=ns(list=diagnostic_settings)))
     code = module.main()
     name = module.logger.name
-    return code, json.loads((tmp_path / f"{name}_s1.json").read_text())
+    return code, json.loads((tmp_path / f"{name}_s1.json").read_text()), reads
+
+
+def run_sql(monkeypatch, tmp_path, module, patterns, failover=None):
+    code, evidence, _ = run_sql_reads(monkeypatch, tmp_path, module, patterns, failover)
+    return code, evidence
+
+
+def _instances_read(reads) -> set:
+    return {key[1] for op, key in reads if op != "failover_groups"}
 
 
 def test_sql_configuration_and_encryption_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path):
@@ -222,6 +249,26 @@ def test_sql_backups_failover_verdict_still_uses_an_excluded_partners_region(mon
     assert [g["name"] for g in evidence["results"]["instance_failover_groups"]] == ["fog-a", "fog-b"]
 
 
+def test_sql_excluded_instances_get_no_per_instance_reads(monkeypatch, tmp_path):
+    for module in (configuration, encryption, backups):
+        _, _, reads = run_sql_reads(monkeypatch, tmp_path, module, None)
+        assert _instances_read(reads) == {"mi-in", "mi-out", "mi-south"}
+        _, _, reads = run_sql_reads(monkeypatch, tmp_path, module, PATTERNS)
+        assert _instances_read(reads) == {"mi-in"}, module.logger.name
+    listed = sorted(key for op, key in reads if op == "failover_groups")
+    assert listed == [("rg-in", "regioneast"), ("rg-in", "regionsouth"), ("rg-out", "regionwest")]
+
+
+def test_sql_failed_reads_on_excluded_instances_leave_the_run_ok(monkeypatch, tmp_path):
+    for module in (configuration, encryption, backups):
+        code, _, _ = run_sql_reads(monkeypatch, tmp_path, module, None, deny=("mi-out", "mi-south"))
+        assert code == 1
+        _, clean, _ = run_sql_reads(monkeypatch, tmp_path, module, PATTERNS)
+        code, evidence, _ = run_sql_reads(monkeypatch, tmp_path, module, PATTERNS, deny=("mi-out", "mi-south"))
+        assert code == 0, module.logger.name
+        assert evidence["summary"] == clean["summary"] and evidence["results"] == clean["results"]
+
+
 def test_sql_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     for module in (configuration, backups, encryption):
         code, evidence = run_sql(monkeypatch, tmp_path, module, "rg-out")
@@ -231,21 +278,42 @@ def test_sql_bare_pattern_fails_the_run(monkeypatch, tmp_path):
 
 # --- Log Analytics workspaces ---
 
-def _workspace(rg, name, location, retention, sentinel):
-    rid = f"{SUB}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}"
-    packs = [{"name": "SecurityInsights", "enabled": sentinel}]
-    return law.workspace_record({"id": rid, "name": name, "location": location, "retention_in_days": retention},
-                                [], [], packs)
+WORKSPACES = (("rg-in", "law-in", "regioneast", 90, True), ("rg-in", "law-south", "regionsouth", 7, False),
+              ("rg-out", "law-out", "regionwest", 30, True))
+
+
+def run_law_reads(monkeypatch, tmp_path, patterns, deny=()):
+    """Per-workspace reads append (operation, workspace) to reads and raise DENIED for a workspace named in deny."""
+    _common(monkeypatch, tmp_path, law, patterns)
+    reads: list = []
+    sentinel = {name: on for _, name, _, _, on in WORKSPACES}
+
+    def per_workspace(op, rows):
+        def fn(rg, name):
+            reads.append((op, name))
+            if name in deny:
+                raise DENIED
+            return rows(name)
+
+        return fn
+
+    client = ns(
+        workspaces=ns(list=lambda: [
+            ns(id=f"{SUB}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}", name=name,
+               location=location, retention_in_days=retention) for rg, name, location, retention, _ in WORKSPACES]),
+        tables=ns(list_by_workspace=per_workspace("tables", lambda name: [])),
+        data_exports=ns(list_by_workspace=per_workspace("data_exports", lambda name: [])),
+        intelligence_packs=ns(list=per_workspace(
+            "intelligence_packs", lambda name: [ns(name="SecurityInsights", enabled=sentinel[name])])),
+    )
+    monkeypatch.setitem(sys.modules, "azure.mgmt.loganalytics", ns(LogAnalyticsManagementClient=lambda **k: client))
+    code = law.main()
+    return code, json.loads((tmp_path / "azure_log_analytics_workspaces_s1.json").read_text()), reads
 
 
 def run_law(monkeypatch, tmp_path, patterns):
-    _common(monkeypatch, tmp_path, law, patterns)
-    workspaces = [_workspace("rg-in", "law-in", "regioneast", 90, True),
-                  _workspace("rg-in", "law-south", "regionsouth", 7, False),
-                  _workspace("rg-out", "law-out", "regionwest", 30, True)]
-    monkeypatch.setattr(law, "collect_workspaces", lambda *a: workspaces)
-    code = law.main()
-    return code, json.loads((tmp_path / "azure_log_analytics_workspaces_s1.json").read_text())
+    code, evidence, _ = run_law_reads(monkeypatch, tmp_path, patterns)
+    return code, evidence
 
 
 def test_log_analytics_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
@@ -268,6 +336,28 @@ def test_log_analytics_excludes_by_group_and_region(monkeypatch, tmp_path):
     assert (summary["total_workspaces"], summary["in_scope_workspaces"], summary["excluded_workspaces"]) == (1, 1, 2)
     assert (summary["min_workspace_retention_in_days"], summary["sentinel_onboarded_workspaces"]) == (90, 1)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
+
+
+def test_log_analytics_excluded_workspaces_get_no_per_workspace_reads(monkeypatch, tmp_path):
+    _, _, reads = run_law_reads(monkeypatch, tmp_path, None)
+    assert {name for _, name in reads} == {"law-in", "law-south", "law-out"}
+    _, _, reads = run_law_reads(monkeypatch, tmp_path, PATTERNS)
+    assert sorted(reads) == [("data_exports", "law-in"), ("intelligence_packs", "law-in"), ("tables", "law-in")]
+
+
+def test_log_analytics_failed_reads_on_excluded_workspaces_leave_the_run_ok(monkeypatch, tmp_path):
+    code, _, _ = run_law_reads(monkeypatch, tmp_path, None, deny=("law-south", "law-out"))
+    assert code == 1
+    _, clean, _ = run_law_reads(monkeypatch, tmp_path, PATTERNS)
+    code, evidence, _ = run_law_reads(monkeypatch, tmp_path, PATTERNS, deny=("law-south", "law-out"))
+    assert code == 0
+    assert evidence["summary"] == clean["summary"] and evidence["results"] == clean["results"]
+
+
+def test_log_analytics_excluding_the_sentinel_workspace_reads_sentinel_not_onboarded(monkeypatch, tmp_path):
+    _, evidence, _ = run_law_reads(monkeypatch, tmp_path, "id:*/workspaces/law-in, rg:rg-out")
+    assert [w["name"] for w in evidence["results"]["workspaces"]] == ["law-south"]
+    assert (evidence["summary"]["sentinel_onboarded"], evidence["summary"]["sentinel_onboarded_workspaces"]) == (False, 0)
 
 
 def test_log_analytics_bare_pattern_fails_the_run(monkeypatch, tmp_path):

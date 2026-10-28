@@ -28,7 +28,7 @@ config_schema:
       location never matches one) or id:<resource id> (also matches that resource's
       child resources). * matches any run of characters and ? one character. A
       matching workspace is listed under excluded with the pattern and left out of
-      every count and verdict, with its tables, data exports and solutions. A
+      every count and verdict; its tables, data exports and solutions are not read. A
       pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
       resource is in scope.
@@ -78,7 +78,8 @@ evidence_set:
     GETs, and no log data is queried.
     Resources the resource_exclusions patterns take out are listed under `excluded`
     instead, each with the pattern that matched, and every count covers only the
-    workspaces in scope. The summary echoes `resource_exclusion_patterns`, lists
+    workspaces in scope, so excluding the workspace Microsoft Sentinel is onboarded
+    to makes `sentinel_onboarded` false. The summary echoes `resource_exclusion_patterns`, lists
     `resource_exclusion_patterns_unmatched` (patterns that matched no workspace,
     such as a mistyped name), and counts `excluded_workspaces` and
     `in_scope_workspaces` (0 when none was read or the patterns took out every
