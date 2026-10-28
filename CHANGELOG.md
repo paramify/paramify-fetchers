@@ -54,7 +54,7 @@ schemas and the `paramify` CLI — not the internal code.
     each assignment's non-compliant counts, `is_compliant` and failing members,
     and `non_compliant_assignments` / `compliant_assignments`) and the remediation
     deployment totals are recounted over the in-scope lists, and read null when
-    a list is cut short. The compliant side (`compliant_resources`,
+    a list is cut short or a read for it fails. The compliant side (`compliant_resources`,
     `resources_evaluated`, the percentages) is still the service's
     subscription-wide count, which `service_counts_include_excluded_resources`
     marks true.

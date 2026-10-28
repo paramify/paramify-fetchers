@@ -427,9 +427,13 @@ def _deployment(resource, location, status="Succeeded"):
               error=None, created_on=WHEN, last_updated_on=WHEN)
 
 
-def _policy_client(calls, refuse=()):
+def _policy_client(calls, refuse=(), fail=()):
     timeline = [NS(timestamp=datetime(2026, 10, d, tzinfo=timezone.utc), compliance_state=s)
                 for d, s in ((1, "NonCompliant"), (2, "Compliant"), (3, "NonCompliant"))]
+
+    def cut_off(rows):
+        yield from rows
+        raise RuntimeError("request timed out")
 
     def member(definition, effect, non_compliant):
         return NS(policy_definition_id=definition, policy_definition_reference_id=None, effect=effect,
@@ -460,6 +464,8 @@ def _policy_client(calls, refuse=()):
             return []
         top = getattr(query_options, "top", None)
         calls.append(("states", top))
+        if "states" in fail:
+            return cut_off(POLICY_STATES[:2])
         return list(POLICY_STATES[:top] if top else POLICY_STATES)
 
     def for_resource(resource, resource_id, query_options):
@@ -468,6 +474,8 @@ def _policy_client(calls, refuse=()):
 
     def at_subscription(name):
         calls.append(("deployments", name))
+        if "deployments" in fail:
+            raise RuntimeError("403 Forbidden")
         return [_deployment(VM_EAST2, "regioneast", "Failed"), _deployment(VM_IN, "regionwest"),
                 _deployment(VNET_IN, "regionwest")]
 
@@ -475,11 +483,15 @@ def _policy_client(calls, refuse=()):
         calls.append(("deployments", name))
         return [_deployment(VM_OUT, "regionwest")]
 
+    def tasks():
+        if "tasks" in fail:
+            raise RuntimeError("403 Forbidden")
+        return [_task(SUB, "t-sub", failed=1, total=3), _task(OUT_RG, "t-out")]
+
     return NS(policy_states=NS(summarize_for_subscription=summarize_for_subscription,
                                list_query_results_for_subscription=for_subscription,
                                list_query_results_for_resource=for_resource),
-              remediations=NS(list_for_subscription=lambda: [_task(SUB, "t-sub", failed=1, total=3),
-                                                             _task(OUT_RG, "t-out")],
+              remediations=NS(list_for_subscription=tasks,
                               list_deployments_at_subscription=at_subscription,
                               list_deployments_at_resource_group=at_resource_group))
 
@@ -493,10 +505,10 @@ def _stub_policyinsights(monkeypatch, client):
     monkeypatch.setitem(sys.modules, "azure.mgmt.policyinsights.models", models)
 
 
-def run_policy(monkeypatch, tmp_path, patterns, refuse=(), env=None):
+def run_policy(monkeypatch, tmp_path, patterns, refuse=(), env=None, fail=()):
     _env(monkeypatch, tmp_path, pc, patterns)
     calls: list = []
-    _stub_policyinsights(monkeypatch, _policy_client(calls, refuse))
+    _stub_policyinsights(monkeypatch, _policy_client(calls, refuse, fail))
     monkeypatch.setattr(pc, "credential", lambda: object())
     monkeypatch.setattr(pc, "provider_registration_status", lambda *a: "registered")
     for name in (pc.MAX_NON_COMPLIANT_ENV, pc.MAX_DETAIL_RESOURCES_ENV, pc.MAX_RECURRENCE_PAIRS_ENV,
@@ -624,6 +636,28 @@ def test_policy_recounts_are_null_when_a_list_is_cut_short(monkeypatch, tmp_path
     _, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, env={pc.MAX_REMEDIATION_DEPLOYMENTS_ENV: "0"})
     assert evidence["summary"]["remediation_failed_deployments"] is None
     assert evidence["summary"]["non_compliant_resources"] == 2
+
+
+def test_policy_recounts_are_null_when_the_states_read_fails_partway(monkeypatch, tmp_path):
+    code, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, fail=("states",))
+    summary, results = evidence["summary"], evidence["results"]
+    # Read as complete, the partial list would show the deny assignment compliant.
+    assert code == 1 and summary["non_compliant_states_truncated"] is False
+    for key in ("non_compliant_resources", "non_compliant_policies", "non_compliant_assignments",
+                "compliant_assignments"):
+        assert summary[key] is None, key
+    assert all(a["is_compliant"] is None for a in results["assignment_compliance"])
+    assert summary["remediation_failed_deployments"] == 0
+
+
+def test_policy_remediation_totals_are_null_when_a_task_or_deployment_list_fails(monkeypatch, tmp_path):
+    for fail in ("deployments", "tasks"):
+        code, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, fail=(fail,))
+        summary = evidence["summary"]
+        assert code == 1 and summary["remediation_deployments_truncated"] is False, fail
+        assert (summary["remediation_failed_deployments"], summary["remediation_successful_deployments"]) == (
+            None, None), fail
+        assert summary["non_compliant_resources"] == 2, fail
 
 
 def test_policy_bare_pattern_fails_the_run(monkeypatch, tmp_path):

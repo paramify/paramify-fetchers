@@ -40,7 +40,7 @@ config_schema:
       non_compliant_states_truncated says when it was reached. 0 skips the list.
       With resource_exclusions set, excluded states don't count toward it, and the
       non-compliant counts are recounted from this list, so they are null when it
-      is truncated or skipped.
+      is truncated, skipped or not read in full.
   max_evaluation_detail_resources:
     type: integer
     required: false
@@ -75,7 +75,8 @@ config_schema:
       Deployments the resource_exclusions patterns take out don't count toward it.
       With patterns set, remediation_failed_deployments and
       remediation_successful_deployments are counted from this list, so they are
-      null when it is truncated or skipped.
+      null when it is truncated or skipped, or when the task list or any task's
+      deployment list fails.
       Azure deletes a task 60 days after its last change, so older ones are gone.
   resource_exclusions:
     type: string
@@ -102,7 +103,7 @@ config_schema:
       each assignment's non-compliant counts, is_compliant and failing members) is
       recounted from the in-scope listed states, and the failed and successful
       deployment totals from the in-scope listed deployments; each is null when its
-      list is truncated. The compliant side (compliant_resources,
+      list is truncated or a read for it fails. The compliant side (compliant_resources,
       resources_evaluated, the percentages and the other by-state entries) and
       remediation_tasks_by_provisioning_state still come from the service and
       include excluded resources. A pattern without one of these prefixes
@@ -175,7 +176,8 @@ evidence_set:
     results.subscription_compliance and results.assignment_compliance, and
     remediation_failed_deployments and remediation_successful_deployments are
     recounted over the in-scope itemized records, and are null when the list they
-    come from is truncated or skipped. A failing member the service did not list
+    come from is truncated, skipped or not read in full (a failed states read, task
+    list or deployment list). A failing member the service did not list
     takes the effect its evaluation ran under. service_counts_include_excluded_resources
     is true when any pattern is set: compliant_resources, resources_evaluated,
     resource_compliance_percentage, each assignment's compliant_resources and
