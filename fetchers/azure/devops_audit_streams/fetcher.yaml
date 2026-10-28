@@ -1,5 +1,5 @@
 name: azure_devops_audit_streams
-version: 0.1.0
+version: 0.1.1
 description: >
   For one Azure DevOps organization: whether auditing is on (from the Log
   Audit Events policy when the token can read it, else from the audit log's

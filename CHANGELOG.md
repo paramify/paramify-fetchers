@@ -437,6 +437,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_devops_audit_streams` no longer reads unlisted streams as no
+  streams** (0.1.0 → 0.1.1). When the audit streams can't be listed, for
+  example a 403 to an identity that may read the audit log but not its streams,
+  `streams_delivering`, `streams_not_delivering`, `streams_by_target` and the
+  two Azure Monitor counts are now null, as `streams` already was. Before, they
+  read 0, an empty list and an empty map. The Azure Monitor counts are also
+  null when any Azure Monitor stream's workspace couldn't be checked.
+
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
   collection as a success.** A 200 response that is not JSON, for example a
   single sign-on or instance hibernation page, and a response whose
