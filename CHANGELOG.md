@@ -13,19 +13,22 @@ schemas and the `paramify` CLI — not the internal code.
 ### Added
 
 - **`azure_entra_emergency_accounts`** (`EVD-AZURE-ENTRA-EMERGENCY-ACCOUNTS`) —
-  whether the only enabled users excluded from MFA are approved, monitored
-  emergency (break-glass) accounts. Reads the enforced Conditional Access policies
-  that require MFA or an authentication strength and resolves who each excludes:
-  directly, through a group (nested included), through a directory role or as a
-  guest. For each account named in `ENTRA_EMERGENCY_ACCOUNTS` it records those
-  exclusions, its last successful sign-in, its registered methods (phishing-resistant
-  flagged) and the enabled Microsoft Sentinel analytics rules and Azure Monitor log
-  search alert rules in the subscription whose query names it by sign-in name or
-  object id. Every other excluded user is listed too. With no accounts named, the
-  users excluded from every MFA policy are reported as candidates and none counts
-  as approved. A summary field whose read failed is null, not 0. Microsoft Graph
-  Policy.Read.All, Directory.Read.All and AuditLog.Read.All, and Reader on the
-  subscription.
+  whether the only enabled users an MFA exclusion leaves without MFA are approved,
+  monitored emergency (break-glass) accounts. Reads the enforced Conditional Access
+  policies that require MFA or an authentication strength and resolves who each
+  includes and excludes: directly, through a group (nested included), through a
+  directory role or as a guest. A user an exclusion names counts as left without
+  MFA only when no policy that targets all cloud apps, with no narrowing condition
+  (client apps, risk, platforms, locations, device filter), includes and doesn't
+  exclude them. For each account named in `ENTRA_EMERGENCY_ACCOUNTS` it records its
+  exclusions and coverage, its last successful sign-in, its registered methods
+  (phishing-resistant flagged) and the enabled Microsoft Sentinel analytics rules
+  and Azure Monitor log search alert rules in the subscription whose query names
+  it by whole sign-in name or object id. Every other excluded user is listed too.
+  With no accounts named, the users excluded from every enforced MFA policy for
+  all users are reported as candidates and none counts as approved. A summary
+  field whose read failed is null, not 0. Microsoft Graph Policy.Read.All,
+  Directory.Read.All and AuditLog.Read.All, and Reader on the subscription.
 - **`azure_devops_identities`** (`EVD-AZURE-DEVOPS-IDENTITIES`): who can sign in to
   an Azure DevOps organization and who holds its administrative groups. It records:
   - every user, service principal and service identity, with access level,

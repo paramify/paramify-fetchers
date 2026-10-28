@@ -29,6 +29,7 @@ NOT_LICENSED = emergency.ArmError(
     403, "Authentication_RequestFromNonPremiumTenantOrB2CTenant",
     "Neither tenant is B2C or tenant doesn't have premium license")
 ADMIN_ROLE = "62e90394-69f5-4237-9190-012177145e10"
+TRUSTED_LOCATIONS = {"includeLocations": ["All"], "excludeLocations": ["AllTrusted"]}
 
 
 def uid(n: int) -> str:
@@ -61,10 +62,14 @@ USERS = {
 }
 
 
-def _policy(pid, name, state="enabled", controls=("mfa",), strength=None, users=None):
+def _policy(pid, name, state="enabled", controls=("mfa",), strength=None, users=None, apps=("All",),
+            client_apps=("all",), locations=None):
     return {"id": pid, "displayName": name, "state": state,
             "grantControls": {"builtInControls": list(controls), "authenticationStrength": strength},
-            "conditions": {"users": {"includeUsers": ["All"], **(users or {})}}}
+            "conditions": {"users": users if users is not None else {"includeUsers": ["All"]},
+                           "applications": {"includeApplications": list(apps)},
+                           "clientAppTypes": list(client_apps), "locations": locations,
+                           "platforms": None, "signInRiskLevels": [], "userRiskLevels": []}}
 
 
 def _rule(name, query, enabled=True, kind="Scheduled"):
@@ -82,9 +87,10 @@ def _tenant():
     graph = {
         "/organization": [{"id": TENANT}],
         "/identity/conditionalAccess/policies": [
-            _policy("p-all", "MFA for everyone", users={"excludeGroups": ["g-bg"], "excludeUsers": [SVC, OFF]}),
+            _policy("p-all", "MFA for everyone",
+                    users={"includeUsers": ["All"], "excludeGroups": ["g-bg"], "excludeUsers": [SVC, OFF]}),
             _policy("p-admins", "Phishing-resistant MFA for admins", controls=(), strength={"id": "s"},
-                    users={"excludeGroups": ["g-bg"]}),
+                    users={"includeRoles": [ADMIN_ROLE], "excludeGroups": ["g-bg"]}),
             # Neither counts: report-only, and no MFA grant.
             _policy("p-pilot", "Pilot", state="enabledForReportingButNotEnforced", users={"excludeUsers": [OUTSIDER]}),
             _policy("p-device", "Compliant device", controls=("compliantDevice",), users={"excludeUsers": [OUTSIDER]}),
@@ -116,6 +122,15 @@ def _tenant():
     return graph, arm
 
 
+def _with_admin_role(graph):
+    graph["/directoryRoles"] = [
+        {"id": "r-ga", "displayName": "Global Administrator", "roleTemplateId": ADMIN_ROLE},
+        {"id": "r-other", "displayName": "Directory Readers", "roleTemplateId": "88d8e3e3-8f55-4a1e-953a-9b9898b8876b"},
+    ]
+    graph["/directoryRoles/r-ga/members/microsoft.graph.user"] = [USERS[ADMIN]]
+    return graph
+
+
 class FakeClient:
     """AzureRestClient's get / graph_list / graph_get / list, answered from dicts; errors by path substring."""
 
@@ -131,13 +146,13 @@ class FakeClient:
         self._raise(path)
         return self.arm[path]
 
-    def graph_list(self, path, version="v1.0"):
+    def graph_list(self, path, version="v1.0", params=None):
         self.calls.append(path)
         self._raise(path)
         found = self.graph.get(path.split("?")[0], [])
         return found if isinstance(found, list) else [found]
 
-    def graph_get(self, path, version="v1.0"):
+    def graph_get(self, path, params=None):
         self.calls.append(path)
         self._raise(path)
         found = self.graph.get(path.split("?")[0])
@@ -177,20 +192,28 @@ def _collect(monkeypatch, client, accounts=None):
     return results, summary, collector
 
 
+EXCLUSION_FIGURES = ("users_excluded_from_an_mfa_policy", "users_excluded_from_mfa",
+                     "excluded_users_not_emergency_accounts", "emergency_accounts_excluded_without_alert",
+                     "excluded_users_not_monitored_emergency_accounts",
+                     "emergency_accounts_excluded_from_every_all_users_mfa_policy")
+
+
 def test_named_accounts_excluded_and_monitored(monkeypatch):
     results, s, collector = _collect(monkeypatch, FakeClient(*_tenant()), f"breakglass1@contoso.test, {BG2}")
 
     assert collector.failures == []
     assert s["emergency_accounts_source"] == "configured" and s["emergency_accounts_named"] == 2
-    assert s["conditional_access_readable"] and s["exclusions_readable"] and s["alert_rules_readable"]
-    assert s["enforced_mfa_policies"] == 2
+    assert s["conditional_access_readable"] and s["exclusions_readable"] and s["coverage_readable"]
+    assert s["alert_rules_readable"]
+    assert s["enforced_mfa_policies"] == 2 and s["enforced_mfa_policies_for_all_users"] == 1
+    assert s["mfa_policies_counting_for_coverage"] == 2
     assert s["emergency_accounts"] == 2 and s["emergency_accounts_not_found"] == 0
-    assert s["emergency_accounts_excluded_from_every_mfa_policy"] == 2
+    assert s["emergency_accounts_excluded_from_every_all_users_mfa_policy"] == 2
     assert s["emergency_accounts_with_phishing_resistant_method"] == 1
     # BG2 is named only by a disabled rule.
     assert s["emergency_accounts_monitored"] == 1
     # SVC is excluded directly; OFF is disabled; OUTSIDER only from a report-only and a non-MFA policy.
-    assert s["users_excluded_from_mfa"] == 3
+    assert s["users_excluded_from_an_mfa_policy"] == 3 and s["users_excluded_from_mfa"] == 3
     assert s["excluded_users_not_emergency_accounts"] == 1
     assert s["emergency_accounts_excluded_without_alert"] == 1
     assert s["excluded_users_not_monitored_emergency_accounts"] == 2
@@ -199,36 +222,100 @@ def test_named_accounts_excluded_and_monitored(monkeypatch):
     bg1, bg2 = results["emergency_accounts"]
     assert bg1["named_as"] == "breakglass1@contoso.test" and bg2["named_as"] == BG2
     assert [e["via"] for e in bg1["mfa_policy_exclusions"]] == ["group", "group"]
-    assert bg1["excluded_from_every_mfa_policy"] and bg1["phishing_resistant_method_registered"] is True
+    assert bg1["excluded_from_every_all_users_mfa_policy"] and bg1["covered_by_an_mfa_policy"] is False
+    assert bg1["excluded_from_mfa"] is True and bg1["phishing_resistant_method_registered"] is True
     assert {r["display_name"] for r in bg1["alert_rules_naming_account"]} == {"Break-glass sign-in", "Emergency account used"}
     assert bg1["monitored"] is True and bg1["days_since_last_successful_sign_in"] == 40
+    assert bg1["sign_in_activity_read"] is True
     assert bg2["monitored"] is False and bg2["alert_rules_naming_account"] == []
     assert [u["id"] for u in results["other_users_excluded_from_mfa"]] == [OFF, SVC]
     assert [p["id"] for p in results["mfa_policies"]] == ["p-all", "p-admins"]
 
 
-def test_without_named_accounts_candidates_are_never_approved(monkeypatch):
-    results, s, collector = _collect(monkeypatch, FakeClient(*_tenant()))
+def test_candidates_come_only_from_all_users_policies_and_are_never_approved(monkeypatch):
+    graph, arm = _tenant()
+    # Every member is outside a guests-only policy; it mustn't stop anyone being a candidate.
+    graph["/identity/conditionalAccess/policies"].append(
+        _policy("p-guests", "MFA for guests", users={"includeUsers": ["GuestsOrExternalUsers"]}))
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm))
 
     assert collector.failures == []
     assert s["emergency_accounts_source"] == "candidates" and s["emergency_accounts_named"] == 0
-    # Excluded from both policies: the two break-glass accounts. SVC is excluded from one only.
-    assert [a["id"] for a in results["emergency_accounts"]] == [BG1, BG2]
+    # Excluded from the only all-users policy: the two break-glass accounts and the service account.
+    assert [a["id"] for a in results["emergency_accounts"]] == [BG1, BG2, SVC]
     assert all(a["named_as"] is None for a in results["emergency_accounts"])
     assert s["excluded_users_not_emergency_accounts"] == 3
     assert s["excluded_users_not_monitored_emergency_accounts"] == 3
 
 
+def test_a_user_another_policy_covers_is_not_excluded_from_mfa(monkeypatch):
+    graph, arm = _with_admin_role(_tenant()[0]), _tenant()[1]
+    graph["/identity/conditionalAccess/policies"][0]["conditions"]["users"]["excludeUsers"].append(ADMIN)
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm), f"breakglass1@contoso.test,{BG2}")
+
+    assert collector.failures == []
+    admin = next(u for u in results["other_users_excluded_from_mfa"] if u["id"] == ADMIN)
+    assert admin["covered_by_an_mfa_policy"] is True and admin["excluded_from_mfa"] is False
+    # The admin is excluded from the baseline but covered by the admins' policy: not left without MFA.
+    assert s["users_excluded_from_an_mfa_policy"] == 4 and s["users_excluded_from_mfa"] == 3
+    assert s["excluded_users_not_emergency_accounts"] == 1
+
+
+def test_policies_for_some_apps_or_with_conditions_do_not_cover(monkeypatch):
+    graph, arm = _tenant()
+    graph["/identity/conditionalAccess/policies"] += [
+        _policy("p-portal", "MFA for the admin portals", apps=("MicrosoftAdminPortals",)),
+        _policy("p-offsite", "MFA off the trusted network", locations=TRUSTED_LOCATIONS),
+        _policy("p-modern", "MFA for browsers", client_apps=("browser",)),
+    ]
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm), BG1)
+
+    by_id = {p["id"]: p for p in results["mfa_policies"]}
+    assert by_id["p-offsite"]["narrowing_conditions"] == ["locations"]
+    assert by_id["p-modern"]["narrowing_conditions"] == ["client_app_types"]
+    assert by_id["p-portal"]["targets_all_applications"] is False
+    assert s["mfa_policies_counting_for_coverage"] == 2
+    svc = next(u for u in results["other_users_excluded_from_mfa"] if u["id"] == SVC)
+    assert svc["covered_by_an_mfa_policy"] is False and svc["excluded_from_mfa"] is True
+    assert s["users_excluded_from_mfa"] == 3
+
+
+def test_failed_include_read_leaves_coverage_unknown(monkeypatch):
+    graph, arm = _tenant()
+    graph["/identity/conditionalAccess/policies"].append(
+        _policy("p-staff", "MFA for staff", users={"includeGroups": ["g-staff"]}))
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm, errors={"/groups/g-staff": DENIED}), BG1)
+
+    assert classify_failure_code(collector.failures) == "not_authorized"
+    assert s["exclusions_readable"] is True and s["coverage_readable"] is False
+    svc = next(u for u in results["other_users_excluded_from_mfa"] if u["id"] == SVC)
+    assert svc["covered_by_an_mfa_policy"] is None and svc["excluded_from_mfa"] is None
+    assert s["users_excluded_from_an_mfa_policy"] == 3
+    for key in ("users_excluded_from_mfa", "excluded_users_not_emergency_accounts",
+                "excluded_users_not_monitored_emergency_accounts"):
+        assert s[key] is None, key
+
+
+def test_included_group_covers_its_members(monkeypatch):
+    graph, arm = _tenant()
+    graph["/identity/conditionalAccess/policies"].append(
+        _policy("p-staff", "MFA for staff", users={"includeGroups": ["g-staff"]}))
+    graph["/groups/g-staff/transitiveMembers/microsoft.graph.user"] = [USERS[SVC]]
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm), BG1)
+
+    assert collector.failures == []
+    svc = next(u for u in results["other_users_excluded_from_mfa"] if u["id"] == SVC)
+    assert svc["covered_by_an_mfa_policy"] is True
+    assert s["users_excluded_from_mfa"] == 2 and s["excluded_users_not_emergency_accounts"] == 1
+
+
 def test_role_and_guest_exclusions(monkeypatch):
     graph, arm = _tenant()
     graph["/identity/conditionalAccess/policies"] = [
-        _policy("p-all", "MFA", users={"excludeRoles": [ADMIN_ROLE], "excludeUsers": ["GuestsOrExternalUsers"]}),
+        _policy("p-all", "MFA", users={"includeUsers": ["All"], "excludeRoles": [ADMIN_ROLE],
+                                       "excludeUsers": ["GuestsOrExternalUsers"]}),
     ]
-    graph["/directoryRoles"] = [
-        {"id": "r-ga", "displayName": "Global Administrator", "roleTemplateId": ADMIN_ROLE},
-        {"id": "r-other", "displayName": "Directory Readers", "roleTemplateId": "88d8e3e3-8f55-4a1e-953a-9b9898b8876b"},
-    ]
-    graph["/directoryRoles/r-ga/members/microsoft.graph.user"] = [USERS[ADMIN]]
+    _with_admin_role(graph)
     graph["/directoryRoles/r-ga/members/microsoft.graph.group"] = [{"id": "g-bg"}]
     graph["/users"] = [USERS[GUEST]]
     client = FakeClient(graph, arm)
@@ -242,6 +329,25 @@ def test_role_and_guest_exclusions(monkeypatch):
     assert s["excluded_users_not_emergency_accounts"] == 3
     assert results["mfa_policies"][0]["excludes_guests_or_external_users"] is True
     assert results["mfa_policies"][0]["exclude_users"] == []
+
+
+def test_guest_include_counts_only_when_it_names_every_guest(monkeypatch):
+    graph, arm = _tenant()
+    some = {"guestOrExternalUserTypes": "b2bCollaborationGuest", "externalTenants": {"membershipKind": "all"}}
+    every = {"guestOrExternalUserTypes": "internalGuest,b2bCollaborationGuest,b2bCollaborationMember",
+             "externalTenants": {"membershipKind": "all"}}
+    graph["/identity/conditionalAccess/policies"] = [
+        _policy("p-all", "MFA", users={"includeUsers": ["All"], "excludeUsers": ["GuestsOrExternalUsers"]}),
+        _policy("p-some", "MFA for B2B guests", users={"includeGuestsOrExternalUsers": some}),
+    ]
+    graph["/users"] = [USERS[GUEST]]
+    _, s, _ = _collect(monkeypatch, FakeClient(graph, arm), BG1)
+    assert s["users_excluded_from_mfa"] == 1
+
+    graph["/identity/conditionalAccess/policies"][1] = _policy(
+        "p-every", "MFA for every guest", users={"includeGuestsOrExternalUsers": every})
+    _, s, _ = _collect(monkeypatch, FakeClient(graph, arm), BG1)
+    assert s["users_excluded_from_mfa"] == 0
 
 
 def test_named_account_missing_from_directory(monkeypatch):
@@ -262,10 +368,23 @@ def test_denied_conditional_access_is_not_authorized_and_nulls_the_exclusions(mo
     assert classify_failure_code(collector.failures) == "not_authorized"
     assert s["conditional_access_readable"] is False and s["exclusions_readable"] is False
     assert s["enforced_mfa_policies"] is None and results["mfa_policies"] is None
-    for key in ("users_excluded_from_mfa", "excluded_users_not_emergency_accounts",
-                "emergency_accounts_excluded_without_alert", "excluded_users_not_monitored_emergency_accounts",
-                "emergency_accounts_excluded_from_every_mfa_policy"):
+    for key in EXCLUSION_FIGURES:
         assert s[key] is None, key
+    account = results["emergency_accounts"][0]
+    for key in ("mfa_policy_exclusions", "excluded_from_an_mfa_policy", "excluded_from_every_all_users_mfa_policy",
+                "covered_by_an_mfa_policy", "excluded_from_mfa"):
+        assert account[key] is None, key
+
+
+def test_denied_conditional_access_without_named_accounts_counts_nothing_as_zero(monkeypatch):
+    graph, arm = _tenant()
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm, errors={"/identity/conditionalAccess": DENIED}))
+
+    assert results["emergency_accounts"] == []
+    for key in ("emergency_accounts", "emergency_accounts_enabled", "emergency_accounts_monitored",
+                "emergency_accounts_with_phishing_resistant_method", *EXCLUSION_FIGURES):
+        assert s[key] is None, key
+    assert s["user_sign_in_activity"] == "not_read" and s["registration_details"] == "not_read"
 
 
 def test_unlicensed_sign_in_activity_and_registration(monkeypatch):
@@ -277,6 +396,7 @@ def test_unlicensed_sign_in_activity_and_registration(monkeypatch):
     assert s["emergency_accounts_with_phishing_resistant_method"] is None
     account = results["emergency_accounts"][0]
     assert account["last_successful_sign_in"] is None and account["methods_registered"] is None
+    assert account["sign_in_activity_read"] is False
     # The exclusion figures don't depend on those reads.
     assert s["excluded_users_not_monitored_emergency_accounts"] == 2
     assert collector.failures
@@ -313,6 +433,7 @@ def test_deleted_excluded_group_is_empty_not_a_failure(monkeypatch):
     assert collector.failures == []
     assert s["exclusions_readable"] is True
     assert results["emergency_accounts"][0]["mfa_policy_exclusions"] == []
+    assert results["emergency_accounts"][0]["excluded_from_mfa"] is False
 
 
 def test_failed_group_read_nulls_the_exclusions(monkeypatch):
@@ -353,15 +474,17 @@ def test_mfa_policy_needs_enforcement_and_an_mfa_grant():
     assert emergency.mfa_policy(_policy("d", "d", controls=("block",))) is None
 
 
-def test_naming_rules_matches_upn_or_id_case_insensitively_and_skips_disabled():
-    user = {"id": BG1.upper(), "userPrincipalName": "BreakGlass1@Contoso.test"}
+def test_naming_rules_matches_whole_upn_or_id_case_insensitively_and_skips_disabled():
+    user = {"id": BG1.upper(), "userPrincipalName": "BG@Contoso.test"}
     rules = [
         {"source": "sentinel", "id": "1", "display_name": "a", "kind": "Scheduled", "workspace": "w", "enabled": True,
-         "_query": "where UserPrincipalName == 'breakglass1@contoso.test'"},
+         "_query": "where UserPrincipalName == 'bg@contoso.test'"},
         {"source": "azure_monitor", "id": "2", "display_name": "b", "kind": "LogAlert", "workspace": None,
          "enabled": True, "_query": f"where UserId == '{BG1}'"},
         {"source": "sentinel", "id": "3", "display_name": "c", "kind": "NRT", "workspace": "w", "enabled": False,
-         "_query": "breakglass1@contoso.test"},
+         "_query": "bg@contoso.test"},
+        {"source": "sentinel", "id": "4", "display_name": "d", "kind": "Scheduled", "workspace": "w", "enabled": True,
+         "_query": "where UserPrincipalName in ('xbg@contoso.test', 'bg@contoso.testing')"},
     ]
     assert [r["id"] for r in emergency.naming_rules(user, rules)] == ["1", "2"]
     assert "_query" not in emergency.naming_rules(user, rules)[0]

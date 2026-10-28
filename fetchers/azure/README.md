@@ -196,7 +196,7 @@ Identity and access:
 | `azure_entra_mfa_status` | Each user's enabled state, last sign-in and MFA capability, with coverage for admins, members and guests |
 | `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted and tenant-wide admin roles flagged |
 | `azure_entra_dormant_identities` | Users and service principals holding a directory role or an Azure role in the subscription, with their last sign-in: dormant, never-used, guest and deleted identities flagged |
-| `azure_entra_emergency_accounts` | Users that Conditional Access MFA policies exclude, and each emergency account's exclusions, last sign-in, registered methods and the Sentinel or Azure Monitor alert rules that name it |
+| `azure_entra_emergency_accounts` | Users that Conditional Access MFA policies exclude and whether another policy still covers them, and each emergency account's exclusions, last sign-in, registered methods and the Sentinel or Azure Monitor alert rules that name it |
 | `azure_entra_groups` | Groups with their members and owners: kind, whether they can hold directory roles, and dynamic (paused flagged), assigned or synced membership, with groups that have no owner, only disabled owners, guests or disabled users flagged |
 | `azure_rbac_role_assignments` | Role assignments at the subscription and above, and separately below it, with Owner, Contributor, User Access Administrator and RBAC Administrator flagged; whether each is permanent, time-bound or activated through PIM, PIM-eligible assignments, and the over-broad roles' PIM activation settings |
 | `azure_rbac_custom_roles` | Custom role definitions with their full permission sets, flagged for wildcards and for permissions that allow privilege escalation |

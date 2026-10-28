@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emergency (break-glass) accounts: their Conditional Access MFA exclusions, sign-in methods, last use and the alert rules that name them, and every other user excluded from an MFA policy."""
+"""Emergency (break-glass) accounts: their Conditional Access MFA exclusions, sign-in methods, last use and the alert rules that name them, and every other user an MFA policy excludes."""
 
 import logging
 import os
@@ -26,11 +26,13 @@ ACCOUNTS_ENV = "ENTRA_EMERGENCY_ACCOUNTS"
 SUBSCRIPTION_API = "2022-12-01"
 LOG_ALERT_API = "2023-12-01"
 USER_SELECT = "id,displayName,userPrincipalName,accountEnabled,userType,createdDateTime"
-ODATA_GROUP = "#microsoft.graph.group"
 STATE_ENABLED = "enabled"
 MFA_CONTROL = "mfa"
+ALL = "all"
 GUESTS = "GuestsOrExternalUsers"
 GUEST_FILTER = "userType eq 'Guest'"
+# guestOrExternalUserTypes that hold users of type Guest; an include naming both, for every tenant, covers them all.
+GUEST_USER_TYPES = frozenset({"internalguest", "b2bcollaborationguest"})
 # The 403 Graph sends a tenant with no Entra ID P1/P2.
 NOT_LICENSED_MARKER = "nonpremiumtenant"
 # Graph's empty sign-in time is 0001-01-01T00:00:00Z.
@@ -72,23 +74,70 @@ def _signed_in_at(value) -> Optional[str]:
     return value if parsed is not None and parsed.year >= EARLIEST_REAL_YEAR else None
 
 
+def _lower(values) -> List[str]:
+    return sorted({str(v).lower() for v in values or [] if v})
+
+
 # --- Conditional Access ---
 
+def narrowing_conditions(conditions: Dict[str, Any]) -> List[str]:
+    """The conditions that limit when a policy applies; a policy with any doesn't count as covering a user."""
+    found = []
+    if any(str(t).lower() != ALL for t in conditions.get("clientAppTypes") or []):
+        found.append("client_app_types")
+    for key, name in (("signInRiskLevels", "sign_in_risk"), ("userRiskLevels", "user_risk"),
+                      ("servicePrincipalRiskLevels", "service_principal_risk"), ("insiderRiskLevels", "insider_risk")):
+        if conditions.get(key):
+            found.append(name)
+    platforms = conditions.get("platforms") or {}
+    if any(str(p).lower() != ALL for p in platforms.get("includePlatforms") or []) or platforms.get("excludePlatforms"):
+        found.append("platforms")
+    locations = conditions.get("locations") or {}
+    if any(str(loc).lower() != ALL for loc in locations.get("includeLocations") or []) or locations.get("excludeLocations"):
+        found.append("locations")
+    if (conditions.get("devices") or {}).get("deviceFilter"):
+        found.append("device_filter")
+    if conditions.get("authenticationFlows"):
+        found.append("authentication_flows")
+    return found
+
+
+def _includes_every_guest(users: Dict[str, Any]) -> bool:
+    if GUESTS in (users.get("includeUsers") or []):
+        return True
+    spec = users.get("includeGuestsOrExternalUsers") or {}
+    types = {t.strip().lower() for t in str(spec.get("guestOrExternalUserTypes") or "").split(",")}
+    tenants = (spec.get("externalTenants") or {}).get("membershipKind") or ALL
+    return bool(spec) and GUEST_USER_TYPES <= types and str(tenants).lower() == ALL
+
+
 def mfa_policy(policy: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """An enforced policy that requires MFA or an authentication strength, with who it excludes; else None."""
+    """An enforced policy that requires MFA or an authentication strength, with who it includes and excludes; else None."""
     grant = policy.get("grantControls") or {}
     controls = {str(c).lower() for c in grant.get("builtInControls") or []}
     if policy.get("state") != STATE_ENABLED or (MFA_CONTROL not in controls and not grant.get("authenticationStrength")):
         return None
-    users = (policy.get("conditions") or {}).get("users") or {}
+    conditions = policy.get("conditions") or {}
+    users = conditions.get("users") or {}
+    included = users.get("includeUsers") or []
     excluded = users.get("excludeUsers") or []
+    all_apps = ALL in _lower((conditions.get("applications") or {}).get("includeApplications"))
+    narrowing = narrowing_conditions(conditions)
     return {
         "id": policy.get("id"),
         "display_name": policy.get("displayName"),
-        "exclude_users": sorted(u for u in excluded if u != GUESTS),
+        "includes_all_users": ALL in _lower(included),
+        "include_users": sorted(u for u in included if _GUID.match(str(u))),
+        "include_groups": sorted(users.get("includeGroups") or []),
+        "include_roles": sorted(users.get("includeRoles") or []),
+        "includes_every_guest": _includes_every_guest(users),
+        "exclude_users": sorted(u for u in excluded if _GUID.match(str(u))),
         "exclude_groups": sorted(users.get("excludeGroups") or []),
         "exclude_roles": sorted(users.get("excludeRoles") or []),
         "excludes_guests_or_external_users": GUESTS in excluded or bool(users.get("excludeGuestsOrExternalUsers")),
+        "targets_all_applications": all_apps,
+        "narrowing_conditions": narrowing,
+        "counts_for_coverage": all_apps and not narrowing,
     }
 
 
@@ -120,6 +169,24 @@ def excluded_by(policies: List[dict], direct: Dict[str, Optional[dict]], groups:
     return out
 
 
+def covered(user: dict, excluded_from: set, policies: List[dict], included: Dict[str, Optional[set]]) -> Optional[bool]:
+    """True if a policy that counts for coverage includes the user and doesn't exclude it; None if that rests on a failed read."""
+    uid = (user.get("id") or "").lower()
+    guest = str(user.get("userType") or "").lower() == "guest"
+    unknown = False
+    for p in policies:
+        if not p["counts_for_coverage"] or p["id"] in excluded_from:
+            continue
+        if p["includes_all_users"] or uid in _lower(p["include_users"]) or (guest and p["includes_every_guest"]):
+            return True
+        members = included.get(p["id"], set())
+        if members is None:
+            unknown = True
+        elif uid in members:
+            return True
+    return None if unknown else False
+
+
 # --- alert rules ---
 
 def sentinel_rule(raw: Dict[str, Any], workspace: str) -> Dict[str, Any]:
@@ -137,12 +204,17 @@ def log_alert_rule(raw: Dict[str, Any]) -> Dict[str, Any]:
             "_query": "\n".join(queries)}
 
 
+def _names(query: str, needle: str) -> bool:
+    # Whole names only: "bg@contoso.com" must not match inside "xbg@contoso.com".
+    return re.search(rf"(?<![\w.+%-]){re.escape(needle)}(?![\w.-])", query, re.I) is not None
+
+
 def naming_rules(user: dict, rules: List[dict]) -> List[dict]:
     """Enabled rules whose query names the account by its user principal name or object id."""
-    needles = [n.lower() for n in (user.get("userPrincipalName"), user.get("id")) if n]
+    needles = [n for n in (user.get("userPrincipalName"), user.get("id")) if n]
     return [
         {k: r[k] for k in ("source", "id", "display_name", "kind", "workspace")}
-        for r in rules if r["enabled"] and any(n in r["_query"].lower() for n in needles)
+        for r in rules if r["enabled"] and any(_names(r["_query"], n) for n in needles)
     ]
 
 
@@ -158,13 +230,29 @@ def _registration(details: Optional[dict]) -> dict:
     }
 
 
-def account_record(named_as: Optional[str], user: dict, exclusions: List[dict], mfa_policies: int,
-                   activity_ok: bool, registration: Optional[dict], registration_ok: bool,
-                   rules: List[dict], rules_ok: bool, now: datetime) -> dict:
+def _exclusion_fields(exclusions: Optional[List[dict]], all_users_policies: set,
+                      is_covered: Optional[bool]) -> dict:
+    """Null throughout when the exclusions weren't read, so an unread list never reads as 'not excluded'."""
+    if exclusions is None:
+        return {"mfa_policy_exclusions": None, "excluded_from_an_mfa_policy": None,
+                "excluded_from_every_all_users_mfa_policy": None, "covered_by_an_mfa_policy": None,
+                "excluded_from_mfa": None}
+    from_policies = {e["policy_id"] for e in exclusions}
+    return {
+        "mfa_policy_exclusions": exclusions,
+        "excluded_from_an_mfa_policy": bool(exclusions),
+        "excluded_from_every_all_users_mfa_policy": bool(all_users_policies) and all_users_policies <= from_policies,
+        "covered_by_an_mfa_policy": is_covered,
+        "excluded_from_mfa": (None if is_covered is None else not is_covered) if exclusions else False,
+    }
+
+
+def account_record(named_as: Optional[str], user: dict, exclusion_fields: dict, activity_ok: bool,
+                   registration: Optional[dict], registration_ok: bool, rules: List[dict], rules_ok: bool,
+                   now: datetime) -> dict:
     activity = user.get("signInActivity") or {}
     last = _signed_in_at(activity.get("lastSuccessfulSignInDateTime"))
     parsed = parse_time(last)
-    excluded_policies = {e["policy_id"] for e in exclusions}
     watching = naming_rules(user, rules) if rules_ok else None
     return {
         "named_as": named_as,
@@ -174,71 +262,77 @@ def account_record(named_as: Optional[str], user: dict, exclusions: List[dict], 
         "user_type": user.get("userType"),
         "account_enabled": user.get("accountEnabled"),
         "created_date_time": user.get("createdDateTime"),
+        "sign_in_activity_read": activity_ok,
         "last_successful_sign_in": last if activity_ok else None,
         "last_sign_in_attempt": _signed_in_at(activity.get("lastSignInDateTime")) if activity_ok else None,
         "days_since_last_successful_sign_in": (now - parsed).days if activity_ok and parsed else None,
         **(_registration(registration) if registration_ok else _registration(None)),
-        "mfa_policy_exclusions": exclusions,
-        "excluded_from_an_mfa_policy": bool(exclusions),
-        "excluded_from_every_mfa_policy": bool(mfa_policies) and len(excluded_policies) == mfa_policies,
+        **exclusion_fields,
         "alert_rules_naming_account": watching,
         "monitored": bool(watching) if watching is not None else None,
     }
 
 
-def excluded_user_record(user: dict, exclusions: List[dict]) -> dict:
+def excluded_user_record(user: dict, exclusion_fields: dict) -> dict:
     return {
         "id": user.get("id"),
         "display_name": user.get("displayName"),
         "user_principal_name": user.get("userPrincipalName"),
         "user_type": user.get("userType"),
         "account_enabled": user.get("accountEnabled"),
-        "mfa_policy_exclusions": exclusions,
+        **{k: exclusion_fields[k] for k in ("mfa_policy_exclusions", "excluded_from_an_mfa_policy",
+                                            "covered_by_an_mfa_policy", "excluded_from_mfa")},
     }
 
 
 def summarize(accounts: List[dict], not_found: List[str], others: List[dict], policies: Optional[List[dict]],
               rules: Optional[List[dict]], workspaces: Optional[int], status: Dict[str, str], source: str,
               named: int) -> dict:
-    exclusions_ok = status["policies"] == READ and status["exclusions"] == READ and status["accounts"] == READ
+    accounts_ok = status["accounts"] == READ
+    exclusions_ok = status["policies"] == READ and status["exclusions"] == READ and accounts_ok
     rules_ok = status["alert_rules"] == READ
     registration_ok = status["registration_details"] == READ
-    enabled_excluded = [a for a in accounts if a["account_enabled"] and a["mfa_policy_exclusions"]]
-    enabled_others = [u for u in others if u["account_enabled"]]
     approved = source == CONFIGURED
-    unwatched = [a for a in enabled_excluded if not a["monitored"]] if rules_ok else None
-    not_listed = len(enabled_others) + (0 if approved else len(enabled_excluded))
+    population = [r for r in [*accounts, *others] if r["account_enabled"] and r["excluded_from_an_mfa_policy"]]
+    coverage_known = exclusions_ok and all(r["excluded_from_mfa"] is not None for r in population)
+    out_accounts = [a for a in accounts if a["account_enabled"] and a["excluded_from_mfa"]]
+    out_others = [u for u in others if u["account_enabled"] and u["excluded_from_mfa"]]
+    not_listed = len(out_others) + (0 if approved else len(out_accounts))
+    unwatched = len([a for a in out_accounts if not a["monitored"]]) if approved else 0
 
-    def known(value, ok=True):
-        return value if exclusions_ok and ok else None
+    def count(value, ok=True):
+        return value if ok else None
 
     return {
         "emergency_accounts_source": source,
         "emergency_accounts_named": named,
         "conditional_access_readable": status["policies"] == READ,
-        "exclusions_readable": status["exclusions"] == READ and status["accounts"] == READ,
+        "exclusions_readable": status["exclusions"] == READ and accounts_ok,
+        "coverage_readable": status["coverage"] == READ,
         "alert_rules_readable": rules_ok,
         "user_sign_in_activity": status["user_sign_in_activity"],
         "registration_details": status["registration_details"],
         "enforced_mfa_policies": len(policies) if policies is not None else None,
+        "enforced_mfa_policies_for_all_users": (
+            sum(1 for p in policies if p["includes_all_users"]) if policies is not None else None),
+        "mfa_policies_counting_for_coverage": (
+            sum(1 for p in policies if p["counts_for_coverage"]) if policies is not None else None),
         "sentinel_workspaces_checked": workspaces if rules_ok else None,
         "alert_rules_checked": len(rules) if rules_ok and rules is not None else None,
-        "emergency_accounts": len(accounts) if status["accounts"] == READ else None,
-        "emergency_accounts_not_found": len(not_found) if status["accounts"] == READ else None,
-        "emergency_accounts_enabled": sum(1 for a in accounts if a["account_enabled"]) if status["accounts"] == READ else None,
-        "emergency_accounts_excluded_from_every_mfa_policy": known(
-            sum(1 for a in accounts if a["excluded_from_every_mfa_policy"])),
-        "emergency_accounts_with_phishing_resistant_method": (
-            sum(1 for a in accounts if a["phishing_resistant_method_registered"])
-            if registration_ok and status["accounts"] == READ else None),
-        "emergency_accounts_monitored": (
-            sum(1 for a in accounts if a["monitored"]) if rules_ok and status["accounts"] == READ else None),
-        "users_excluded_from_mfa": known(len(enabled_excluded) + len(enabled_others)),
-        "excluded_users_not_emergency_accounts": known(not_listed),
-        "emergency_accounts_excluded_without_alert": known(
-            len(unwatched) if unwatched is not None else None, rules_ok),
-        "excluded_users_not_monitored_emergency_accounts": known(
-            not_listed + (len(unwatched) if approved and unwatched is not None else 0), rules_ok),
+        "emergency_accounts": count(len(accounts), accounts_ok),
+        "emergency_accounts_not_found": count(len(not_found), accounts_ok),
+        "emergency_accounts_enabled": count(sum(1 for a in accounts if a["account_enabled"]), accounts_ok),
+        "emergency_accounts_excluded_from_every_all_users_mfa_policy": count(
+            sum(1 for a in accounts if a["excluded_from_every_all_users_mfa_policy"]), exclusions_ok),
+        "emergency_accounts_with_phishing_resistant_method": count(
+            sum(1 for a in accounts if a["phishing_resistant_method_registered"]), registration_ok and accounts_ok),
+        "emergency_accounts_monitored": count(sum(1 for a in accounts if a["monitored"]), rules_ok and accounts_ok),
+        "users_excluded_from_an_mfa_policy": count(len(population), exclusions_ok),
+        "users_excluded_from_mfa": count(len(out_accounts) + len(out_others), coverage_known),
+        "excluded_users_not_emergency_accounts": count(not_listed, coverage_known),
+        "emergency_accounts_excluded_without_alert": count(
+            len([a for a in out_accounts if not a["monitored"]]), coverage_known and rules_ok),
+        "excluded_users_not_monitored_emergency_accounts": count(not_listed + unwatched, coverage_known and rules_ok),
     }
 
 
@@ -258,66 +352,126 @@ def _user_path(ref: str, select: str) -> str:
     return f"/users/{quote(ref, safe='@')}?$select={select}"
 
 
-def _members(client, collector, operation: str, path: str) -> Optional[List[dict]]:
-    """A member listing, [] for a group or role the directory no longer has."""
-    def read():
-        try:
-            return client.graph_list(path)
-        except ArmError as exc:
-            if exc.status == 404:
-                return []
-            raise
-    return collector.guard(operation, read, default=None)
+class Directory:
+    """Group, role and guest membership reads, each made once; None marks a read that failed."""
+
+    def __init__(self, client, collector):
+        self.client, self.collector = client, collector
+        self.users: Dict[str, dict] = {}
+        self._groups: Dict[str, Optional[List[dict]]] = {}
+        self._roles: Dict[str, Optional[List[dict]]] = {}
+        self._active: Optional[List[dict]] = None
+        self._active_read = False
+        self._guests: Optional[List[dict]] = None
+        self._guests_read = False
+
+    def _keep(self, users: Optional[List[dict]]) -> Optional[List[dict]]:
+        for u in users or []:
+            if u.get("id"):
+                self.users.setdefault(u["id"].lower(), u)
+        return users
+
+    def _members(self, operation: str, path: str) -> Optional[List[dict]]:
+        """A member listing, [] for a group or role the directory no longer has."""
+        def read():
+            try:
+                return self.client.graph_list(path)
+            except ArmError as exc:
+                if exc.status == 404:
+                    return []
+                raise
+        return self.collector.guard(operation, read, default=None)
+
+    def user(self, uid: str):
+        """The user, None if the directory has none, or False if the read failed."""
+        found = self.collector.guard(f"graph.users({uid}).get",
+                                     lambda: _get_user(self.client, _user_path(uid, USER_SELECT)), default=False)
+        if found:
+            self._keep([found])
+        return found
+
+    def group(self, gid: str) -> Optional[List[dict]]:
+        gid = gid.lower()
+        if gid not in self._groups:
+            self._groups[gid] = self._keep(self._members(
+                f"graph.groups({gid}).transitiveMembers.get",
+                f"/groups/{gid}/transitiveMembers/microsoft.graph.user?$select={USER_SELECT}"))
+        return self._groups[gid]
+
+    def role(self, template: str) -> Optional[List[dict]]:
+        """Users holding the role now, directly or through a role-assignable group; [] if it isn't activated."""
+        template = template.lower()
+        if template in self._roles:
+            return self._roles[template]
+        if not self._active_read:
+            self._active_read = True
+            self._active = self.collector.guard("graph.directoryRoles.get", lambda: self.client.graph_list(
+                "/directoryRoles?$select=id,displayName,roleTemplateId"))
+        held: Optional[List[dict]] = None
+        if self._active is not None:
+            held = []
+            for role in self._active:
+                if (role.get("roleTemplateId") or "").lower() != template:
+                    continue
+                base = f"/directoryRoles/{role.get('id')}/members"
+                users = self._members(f"graph.directoryRoles({role.get('displayName')}).members.get",
+                                      f"{base}/microsoft.graph.user?$select={USER_SELECT}")
+                nested = self._members(f"graph.directoryRoles({role.get('displayName')}).groups.get",
+                                       f"{base}/microsoft.graph.group?$select=id")
+                inner = [self.group(g.get("id") or "") for g in nested or []]
+                if users is None or nested is None or any(i is None for i in inner):
+                    held = None
+                    break
+                held.extend(self._keep(users) or [])
+                for i in inner:
+                    held.extend(i or [])
+        self._roles[template] = held
+        return held
+
+    def guests(self) -> Optional[List[dict]]:
+        if not self._guests_read:
+            self._guests_read = True
+            self._guests = self._keep(self.collector.guard("graph.users.get(guests)", lambda: self.client.graph_list(
+                f"/users?$filter={quote(GUEST_FILTER)}&$select={USER_SELECT}&$top=999")))
+        return self._guests
 
 
-def _group_users(client, collector, gid: str) -> Optional[List[dict]]:
-    return _members(client, collector, f"graph.groups({gid}).transitiveMembers.get",
-                    f"/groups/{gid}/transitiveMembers/microsoft.graph.user?$select={USER_SELECT}")
-
-
-def _resolve_exclusions(client, collector, policies: List[dict]) -> tuple:
+def _resolve_exclusions(directory: Directory, policies: List[dict]) -> tuple:
     """(direct users, group users, role users, guests, readable) for every exclusion of the MFA policies."""
     ok = True
     direct: Dict[str, Optional[dict]] = {}
-    for uid in sorted({u.lower() for p in policies for u in p["exclude_users"] if _GUID.match(u)}):
-        user = collector.guard(f"graph.users({uid}).get", lambda uid=uid: _get_user(client, _user_path(uid, USER_SELECT)),
-                               default=False)
+    for uid in sorted({u.lower() for p in policies for u in p["exclude_users"]}):
+        user = directory.user(uid)
         ok = ok and user is not False
         direct[uid] = user or None
     groups: Dict[str, List[dict]] = {}
     for gid in sorted({g.lower() for p in policies for g in p["exclude_groups"]}):
-        members = _group_users(client, collector, gid)
+        members = directory.group(gid)
         ok = ok and members is not None
         groups[gid] = members or []
     roles: Dict[str, List[dict]] = {}
-    wanted = {r.lower() for p in policies for r in p["exclude_roles"]}
-    if wanted:
-        active = collector.guard("graph.directoryRoles.get",
-                                 lambda: client.graph_list("/directoryRoles?$select=id,displayName,roleTemplateId"))
-        ok = ok and active is not None
-        for role in active or []:
-            template = (role.get("roleTemplateId") or "").lower()
-            if template not in wanted:
-                continue
-            base = f"/directoryRoles/{role.get('id')}/members"
-            users = _members(client, collector, f"graph.directoryRoles({role.get('displayName')}).members.get",
-                             f"{base}/microsoft.graph.user?$select={USER_SELECT}")
-            nested = _members(client, collector, f"graph.directoryRoles({role.get('displayName')}).groups.get",
-                              f"{base}/microsoft.graph.group?$select=id")
-            ok = ok and users is not None and nested is not None
-            held = list(users or [])
-            for g in nested or []:
-                inner = _group_users(client, collector, (g.get("id") or "").lower())
-                ok = ok and inner is not None
-                held.extend(inner or [])
-            roles[template] = held
+    for rid in sorted({r.lower() for p in policies for r in p["exclude_roles"]}):
+        held = directory.role(rid)
+        ok = ok and held is not None
+        roles[rid] = held or []
     guests: List[dict] = []
     if any(p["excludes_guests_or_external_users"] for p in policies):
-        listed = collector.guard("graph.users.get(guests)", lambda: client.graph_list(
-            f"/users?$filter={quote(GUEST_FILTER)}&$select={USER_SELECT}&$top=999"))
+        listed = directory.guests()
         ok = ok and listed is not None
         guests = listed or []
     return direct, groups, roles, guests, ok
+
+
+def _resolve_includes(directory: Directory, policies: List[dict]) -> Dict[str, Optional[set]]:
+    """The user ids each covering policy includes through groups and roles; None for a policy whose read failed."""
+    out: Dict[str, Optional[set]] = {}
+    for p in policies:
+        if not p["counts_for_coverage"] or p["includes_all_users"]:
+            continue
+        reads = [directory.group(g) for g in p["include_groups"]] + [directory.role(r) for r in p["include_roles"]]
+        out[p["id"]] = None if any(r is None for r in reads) else {
+            (u.get("id") or "").lower() for r in reads for u in r or []}
+    return out
 
 
 def _alert_rules(client, collector, subscription_id: str) -> tuple:
@@ -369,8 +523,8 @@ def collect(client, subscription_id: str, collector) -> tuple:
     now = datetime.now(timezone.utc)
     named = named_accounts()
     source = CONFIGURED if named else CANDIDATES
-    status = dict.fromkeys(("policies", "exclusions", "accounts", "alert_rules"), NOT_READ)
-    status.update(user_sign_in_activity=NOT_READ, registration_details=NOT_READ)
+    status = dict.fromkeys(("policies", "exclusions", "coverage", "accounts", "alert_rules",
+                            "user_sign_in_activity", "registration_details"), NOT_READ)
 
     subscription = collector.guard("subscriptions.get", lambda: client.get(
         f"/subscriptions/{subscription_id}", SUBSCRIPTION_API), default=None) or {}
@@ -393,15 +547,24 @@ def collect(client, subscription_id: str, collector) -> tuple:
         status["policies"] = NOT_LICENSED
     policies = [p for p in (mfa_policy(r) for r in raw_policies or []) if p is not None]
     policies.sort(key=lambda p: ((p["display_name"] or "").lower(), p["id"] or ""))
+    all_users_policies = {p["id"] for p in policies if p["includes_all_users"]}
 
-    direct, groups, roles, guests, resolved = _resolve_exclusions(client, collector, policies)
+    directory = Directory(client, collector)
+    direct, groups, roles, guests, resolved = _resolve_exclusions(directory, policies)
     status["exclusions"] = READ if resolved and status["policies"] == READ else NOT_READ
     exclusions = excluded_by(policies, direct, groups, roles, guests)
-    users: Dict[str, dict] = {}
-    for u in [*direct.values(), *(m for ms in groups.values() for m in ms),
-              *(m for ms in roles.values() for m in ms), *guests]:
-        if u and u.get("id"):
-            users.setdefault(u["id"].lower(), u)
+    excluded_users = {uid: directory.users[uid] for uid in exclusions if uid in directory.users}
+    before = len(collector.failures)
+    included = _resolve_includes(directory, policies) if excluded_users else {}
+    status["coverage"] = READ if len(collector.failures) == before and status["policies"] == READ else NOT_READ
+
+    def exclusion_fields(user: dict) -> dict:
+        if status["exclusions"] != READ:
+            return _exclusion_fields(None, all_users_policies, None)
+        entries = exclusions.get((user.get("id") or "").lower(), [])
+        from_policies = {e["policy_id"] for e in entries}
+        return _exclusion_fields(entries, all_users_policies,
+                                 covered(user, from_policies, policies, included) if entries else None)
 
     accounts_in: List[tuple] = []
     not_found: List[str] = []
@@ -416,8 +579,10 @@ def collect(client, subscription_id: str, collector) -> tuple:
         else:
             accounts_in.append((ref, user))
     if not named:
-        for uid, user in sorted(users.items()):
-            if user.get("accountEnabled") and policies and len({e["policy_id"] for e in exclusions.get(uid, [])}) == len(policies):
+        # Candidates: enabled users that every enforced MFA policy for all users excludes.
+        ok = status["exclusions"] == READ
+        for uid, user in sorted(excluded_users.items()):
+            if user.get("accountEnabled") and exclusion_fields(user)["excluded_from_every_all_users_mfa_policy"]:
                 accounts_in.append((None, user))
     status["accounts"] = READ if ok else NOT_READ
 
@@ -429,24 +594,24 @@ def collect(client, subscription_id: str, collector) -> tuple:
         full, act, details, reg = _account_detail(client, collector, user)
         activity.append(act)
         registration.append(reg)
-        accounts.append(account_record(
-            ref, full, exclusions.get((user.get("id") or "").lower(), []), len(policies), act == READ,
-            details, reg == READ, rules, rules_ok, now))
-    status["user_sign_in_activity"] = _worst(activity) if accounts_in else READ
-    status["registration_details"] = _worst(registration) if accounts_in else READ
+        accounts.append(account_record(ref, full, exclusion_fields(user), act == READ, details, reg == READ,
+                                       rules, rules_ok, now))
+    if status["accounts"] == READ:
+        status["user_sign_in_activity"] = _worst(activity)
+        status["registration_details"] = _worst(registration)
     accounts.sort(key=lambda a: ((a["user_principal_name"] or "").lower(), a["id"] or ""))
 
     account_ids = {(a["id"] or "").lower() for a in accounts}
     others = sorted(
-        (excluded_user_record(users[uid], entries) for uid, entries in exclusions.items()
-         if uid not in account_ids and uid in users),
+        (excluded_user_record(user, exclusion_fields(user)) for uid, user in excluded_users.items()
+         if uid not in account_ids),
         key=lambda u: ((u["user_principal_name"] or "").lower(), u["id"] or ""),
     )
     logger.info("Collected %d emergency account(s) (%s), %d other excluded user(s), %d MFA policy/policies, %d alert rule(s)",
                 len(accounts), source, len(others), len(policies), len(rules))
-    return (_results(tenant_id, source, accounts, not_found, others, policies if status["policies"] == READ else None, now),
-            summarize(accounts, not_found, others, policies if status["policies"] == READ else None,
-                      rules, workspaces, status, source, len(named)))
+    read_policies = policies if status["policies"] == READ else None
+    return (_results(tenant_id, source, accounts, not_found, others, read_policies, now),
+            summarize(accounts, not_found, others, read_policies, rules, workspaces, status, source, len(named)))
 
 
 def _results(tenant_id, source: str, accounts: List[dict], not_found: List[str], others: List[dict],
