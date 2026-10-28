@@ -119,9 +119,10 @@ def test_alert_rule_record(rule_type, raw, waf, ddos, enabled):
     assert (record["watches_waf"], record["watches_ddos_attack"], record["enabled"]) == (waf, ddos, enabled)
 
 
-def rule(scopes, rule_type="metric", enabled=True, waf=True, reaches=True):
+def rule(scopes, rule_type="metric", enabled=True, waf=True, reaches=True, waf_types=("front_door",)):
     return {"name": "r", "rule_type": rule_type, "enabled": enabled, "watches_waf": waf, "watches_ddos_attack": not waf,
-            "_scopes": scopes, "routes_to_enabled_receiver": reaches, "reaches_human": reaches}
+            "waf_resource_types": list(waf_types) if waf else [], "_scopes": scopes,
+            "routes_to_enabled_receiver": reaches, "reaches_human": reaches}
 
 
 def test_covering_rules_by_scope_parent_and_workspace():
@@ -129,6 +130,18 @@ def test_covering_rules_by_scope_parent_and_workspace():
              rule([f"{RG}2"])]
     covered = wda.covering_rules(rules, PROFILE, [LAW], "watches_waf")
     assert len(covered) == 3
+
+
+def test_a_waf_metric_covers_only_its_own_waf_kind():
+    rules = [rule([RG], waf_types=["application_gateway"]), rule([RG], waf_types=["front_door"])]
+    assert len(wda.covering_rules(rules, PROFILE, [], "watches_waf", wda.FRONT_DOOR)) == 1
+    assert len(wda.covering_rules(rules, AGW, [], "watches_waf", wda.APP_GATEWAY)) == 1
+    assert wda.alert_rule_record("metric", metric_alert("WebApplicationFirewallRequestCount"))["waf_resource_types"] == [
+        wda.FRONT_DOOR]
+    assert wda.alert_rule_record("metric", metric_alert("AzwafSecRule"))["waf_resource_types"] == [wda.APP_GATEWAY]
+    assert wda.alert_rule_record("log_search", log_alert("AGWFirewallLogs | take 1"))["waf_resource_types"] == [
+        wda.APP_GATEWAY]
+    assert wda.alert_rule_record("metric", metric_alert("IfUnderDDoSAttack"))["waf_resource_types"] == []
 
 
 # --- WAF activity ---
@@ -198,6 +211,36 @@ def test_rules_from_a_log_that_failed_to_read_are_not_reported():
 
 def test_requests_query_keeps_one_type_for_the_request_reference():
     assert "iff(isempty(Ref), tostring(new_guid()), Ref)" in wda.WAF_QUERIES["requests"]
+
+
+@pytest.mark.parametrize("policy_ids, policies, expected", [
+    ([FD_POLICY], {FD_POLICY.lower(): {"id": FD_POLICY, "name": "p", "mode": "Detection", "enabled": True}}, True),
+    ([FD_POLICY], {FD_POLICY.lower(): {"id": FD_POLICY, "name": "p", "mode": "Prevention", "enabled": True}}, False),
+    ([FD_POLICY], {}, None),
+    (None, {}, None),
+])
+def test_detection_mode_is_unknown_when_a_mode_is_unread(policy_ids, policies, expected):
+    resource = {**fd_resource(), "waf_policy_ids": policy_ids}
+    rec = wda.waf_activity(resource, [], {}, policies, [], sample=5)
+    assert rec["detection_mode"] is expected
+
+
+def test_alerts_read_null_when_the_rule_lists_failed():
+    rec = wda.waf_activity(fd_resource(), [], {}, POLICIES, None, sample=5)
+    assert (rec["waf_alert_rules"], rec["waf_alert_reaches_person"]) == (None, None)
+    ip = wda.ddos_record(public_ip("Enabled"), [], {}, None, None, {})
+    assert (ip["attack_alert_rules"], ip["attack_alert_can_fire"]) == (None, None)
+    summary = wda.summarize([rec], [ip], None, [], 30, 0, total_ips=1)
+    assert summary["waf_alert_rules"] is None and summary["waf_resources_without_waf_alert"] is None
+    assert summary["public_ips_with_attack_alert"] is None and summary["protected_ips_without_attack_alert"] is None
+
+
+def test_policy_state_unset_reads_unknown():
+    assert wda.policy_record({"id": "p", "properties": {"policySettings": {"mode": "Prevention"}}})["enabled"] is None
+
+
+def test_redirect_counts_as_blocked():
+    assert "redirect" in wda.BLOCK_ACTIONS
 
 def test_gateway_with_dedicated_tables_reads_agw_firewall_logs():
     gateway = wda.gateway_waf_resource({"id": AGW, "name": "agw1", "properties": {
@@ -393,6 +436,18 @@ def _lists():
         f"{base}/Microsoft.AlertsManagement/actionRules": [],
     }
 
+
+
+def test_collect_reads_alerts_unknown_when_a_rule_list_fails():
+    lists = _lists()
+    lists[f"/subscriptions/{SUB_ID}/providers/Microsoft.Insights/scheduledQueryRules"] = azure_rest.ArmError(500, "InternalError", "x")
+    client = FakeClient(tables={wda.DIAG_TABLE: "Analytics"}, lists=lists)
+    c = collector()
+    results, summary = wda.collect(client, SUB_ID, c)
+    assert not c.ok
+    assert results["alert_rules"] is None
+    assert summary["waf_alert_rules"] is None and summary["ddos_attack_alert_rules"] is None
+    assert results["waf_resources"][0]["waf_alert_rules"] is None
 
 def test_collect_wires_waf_ddos_and_alerts(monkeypatch):
     monkeypatch.setenv(wda.LOOKBACK_ENV, "14")

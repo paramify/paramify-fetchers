@@ -60,12 +60,15 @@ APP_GATEWAY = "application_gateway"
 ATTACK_METRIC = "IfUnderDDoSAttack"
 WAF_METRIC = re.compile(r"^(webapplicationfirewall|azwaf|blockedcount|blockedreqcount|matchedcount)", re.IGNORECASE)
 WAF_TABLES = re.compile(r"\b(FrontDoorWebApplicationFirewallLog|ApplicationGatewayFirewallLog|AGWFirewallLogs)\b", re.IGNORECASE)
+# Which WAF a metric or log belongs to: Front Door's start with WebApplicationFirewall, every other one is a gateway's.
+FRONT_DOOR_WAF_SIGNAL = re.compile(r"^(webapplicationfirewall|frontdoorwebapplicationfirewalllog)", re.IGNORECASE)
 DDOS_TABLES = re.compile(r"\b(DDoSProtectionNotifications|DDoSMitigationReports|DDoSMitigationFlowLogs)\b", re.IGNORECASE)
 # Rule and policy names reach the evidence verbatim; anything else could carry a probe's text into the upload.
 PLAIN_NAME = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 QUERY_CODE = re.compile(r"^\((\d{3})\)\s*(\S*)")
 
-BLOCK_ACTIONS = ("block", "blocked", "jschallengeblock")
+# Redirect sends the request elsewhere, so it never reaches the origin.
+BLOCK_ACTIONS = ("block", "blocked", "jschallengeblock", "redirect")
 LOG_ACTIONS = ("log", "anomalyscoring", "logandscore", "detected", "matched")
 ALLOW_ACTIONS = ("allow", "allowed")
 
@@ -276,6 +279,7 @@ def alert_rule_record(rule_type: str, raw: dict) -> dict:
         signal = sorted({m.group(1) for m in list(WAF_TABLES.finditer(queries)) + list(DDOS_TABLES.finditer(queries))})
         # LogToMetric rules publish a metric and never notify.
         alerting = (raw.get("kind") or "LogAlert") != "LogToMetric"
+    waf_signals = [s for s in signal if WAF_METRIC.match(s) or WAF_TABLES.fullmatch(s)]
     return {
         "id": raw.get("id"),
         "name": raw.get("name"),
@@ -284,6 +288,7 @@ def alert_rule_record(rule_type: str, raw: dict) -> dict:
         "scopes": props.get("scopes") or [],
         "signals": signal,
         "watches_waf": watches_waf,
+        "waf_resource_types": sorted({FRONT_DOOR if FRONT_DOOR_WAF_SIGNAL.match(s) else APP_GATEWAY for s in waf_signals}),
         "watches_ddos_attack": watches_ddos,
         "action_group_ids": groups,
     }
@@ -292,7 +297,8 @@ def alert_rule_record(rule_type: str, raw: dict) -> dict:
 def routed(rule: dict, groups: dict, processing_rules: list[dict]) -> dict:
     r = route(rule["enabled"], rule["action_group_ids"], rule["scopes"], groups, processing_rules)
     return {
-        **{k: rule[k] for k in ("id", "name", "rule_type", "enabled", "signals", "watches_waf", "watches_ddos_attack")},
+        **{k: rule[k] for k in ("id", "name", "rule_type", "enabled", "signals", "watches_waf", "waf_resource_types",
+                                "watches_ddos_attack")},
         "scopes": len(rule["scopes"]),
         "routes_to_enabled_receiver": r["routes_to_enabled_receiver"],
         "routes_to_person": r["routes_to_person"],
@@ -302,12 +308,13 @@ def routed(rule: dict, groups: dict, processing_rules: list[dict]) -> dict:
     }
 
 
-def covering_rules(rules: list[dict], resource_id: str, workspaces: list[str], key: str) -> list[dict]:
-    """Enabled rules on the signal scoped to the resource or a parent of it, or (log rules) to a workspace receiving its logs."""
+def covering_rules(rules: list[dict], resource_id: str, workspaces: list[str], key: str, waf_type: str | None = None) -> list[dict]:
+    """Enabled rules on the signal scoped to the resource, a parent of it or (log rules) a workspace receiving its logs;
+    a WAF rule covers only its own WAF kind."""
     wanted = {id_key(w) for w in workspaces}
     return [
         r for r in rules
-        if r["enabled"] and r[key]
+        if r["enabled"] and r[key] and (waf_type is None or waf_type in r["waf_resource_types"])
         and any(_covers(s, resource_id) or (r["rule_type"] == "log_search" and id_key(s) in wanted) for s in r["_scopes"])
     ]
 
@@ -339,15 +346,35 @@ def gateway_waf_resource(gateway: dict) -> dict | None:
 
 def policy_record(raw: dict) -> dict:
     settings = dig(raw, "properties", "policySettings") or {}
+    state = settings.get("enabledState") or settings.get("state")
     return {"id": raw.get("id"), "name": raw.get("name"), "mode": settings.get("mode"),
-            "enabled": (settings.get("enabledState") or settings.get("state") or "Enabled").lower() == "enabled"}
+            "enabled": state.lower() == "enabled" if state else None}
+
+
+def detection_mode(resource: dict, attached: list[dict]):
+    """True if any policy is in Detection mode; None if a mode couldn't be read; otherwise False."""
+    modes = [(p["mode"] or "").lower() for p in attached]
+    if "detection" in modes:
+        return True
+    return None if resource["waf_policy_ids"] is None or "" in modes else False
+
+
+def alert_fields(prefix: str, covering: list[dict] | None) -> dict:
+    """A resource's covering alert rules and where they reach; null when the alert rules couldn't be listed."""
+    if covering is None:
+        return {f"{prefix}_rules": None, f"{prefix}_routes_to_receiver": None, f"{prefix}_reaches_person": None}
+    return {
+        f"{prefix}_rules": [r["name"] for r in covering],
+        f"{prefix}_routes_to_receiver": tri_any(r["routes_to_enabled_receiver"] for r in covering) if covering else False,
+        f"{prefix}_reaches_person": tri_any(r["reaches_human"] for r in covering) if covering else False,
+    }
 
 
 def _rows(ws: dict, key: str, rid: str) -> list[dict]:
     return [r for r in ws.get(key) or [] if (r.get("ResourceId") or "").lower() == rid]
 
 
-def waf_activity(resource: dict, settings, workspaces: dict, policies: dict, alert_rules: list[dict], sample: int) -> dict:
+def waf_activity(resource: dict, settings, workspaces: dict, policies: dict, alert_rules: list[dict] | None, sample: int) -> dict:
     rid = id_key(resource["id"])
     wids = exported_categories(settings, [resource["category"]])[resource["category"]]
     reads: list[dict] = []
@@ -389,7 +416,7 @@ def waf_activity(resource: dict, settings, workspaces: dict, policies: dict, ale
          for r in (best["rules"] if best else []) if plain_name(r.get("Rule"))),
         key=lambda x: (-x["events"], x["rule"]),
     )[:sample]
-    covering = covering_rules(alert_rules, resource["id"], wids, "watches_waf")
+    covering = None if alert_rules is None else covering_rules(alert_rules, resource["id"], wids, "watches_waf", resource["type"])
     return {
         "id": resource["id"],
         "name": resource["name"],
@@ -397,7 +424,7 @@ def waf_activity(resource: dict, settings, workspaces: dict, policies: dict, ale
         "sku": resource["sku"],
         "waf_policies": [{"name": p["name"], "mode": p["mode"], "enabled": p["enabled"]} for p in attached],
         "waf_policies_read": resource["waf_policy_ids"] is not None,
-        "detection_mode": any((p["mode"] or "").lower() == "detection" for p in attached),
+        "detection_mode": detection_mode(resource, attached),
         "diagnostic_settings_read": settings is not None,
         "waf_log_exported": bool(wids) if settings is not None else None,
         "waf_log_workspaces": wids,
@@ -412,13 +439,11 @@ def waf_activity(resource: dict, settings, workspaces: dict, policies: dict, ale
              "requests_blocked": c["RequestsBlocked"], "requests_logged_only": c["RequestsLoggedOnly"]}
             for name, c in sorted(per_policy.items())
         ] if known else None,
-        "first_event": _earliest(r.get("FirstEvent") for r in rows),
-        "last_event": _latest(r.get("LastEvent") for r in rows),
+        "first_event": _earliest(r.get("FirstEvent") for r in rows) if known else None,
+        "last_event": _latest(r.get("LastEvent") for r in rows) if known else None,
         "top_rules": rules if known else None,
         "waf_logs_arriving": arriving,
-        "waf_alert_rules": [r["name"] for r in covering],
-        "waf_alert_routes_to_receiver": tri_any(r["routes_to_enabled_receiver"] for r in covering) if covering else False,
-        "waf_alert_reaches_person": tri_any(r["reaches_human"] for r in covering) if covering else False,
+        **alert_fields("waf_alert", covering),
     }
 
 
@@ -447,7 +472,7 @@ def attack_hours(metrics: list | None) -> int | None:
                if (d.get("maximum") or 0) >= 1)
 
 
-def ddos_record(ip: dict, settings, workspaces: dict, alert_rules: list[dict], metric, ddos_read: dict) -> dict:
+def ddos_record(ip: dict, settings, workspaces: dict, alert_rules: list[dict] | None, metric, ddos_read: dict) -> dict:
     rid = id_key(ip.get("id"))
     mode = protection(ip)
     known_on = True if mode == IP_PROTECTION else None
@@ -458,7 +483,8 @@ def ddos_record(ip: dict, settings, workspaces: dict, alert_rules: list[dict], m
     records = max((_num(r.get("Notifications")) + _num(r.get("Reports")) + _num(r.get("FlowLogRecords")) for r in rows), default=0)
     best = max(rows, key=lambda r: _num(r.get("Notifications")) + _num(r.get("Reports")), default={})
     hours = attack_hours(metric)
-    covering = covering_rules(alert_rules, ip.get("id") or "", wids, "watches_ddos_attack")
+    covering = None if alert_rules is None else covering_rules(alert_rules, ip.get("id") or "", wids, "watches_ddos_attack")
+    alerts = alert_fields("attack_alert", covering)
     # Without DDoS Protection Azure records no mitigations and the attack metric stays 0, so a zero there proves nothing.
     zero_means_none = known_on is True
     return {
@@ -472,11 +498,8 @@ def ddos_record(ip: dict, settings, workspaces: dict, alert_rules: list[dict], m
         "diagnostic_settings_read": settings is not None,
         "ddos_log_categories_exported": sorted(c for c, ws in exports.items() if ws) if settings is not None else None,
         "ddos_logs_exported": all(exports[c] for c in DDOS_CATEGORIES) if settings is not None else None,
-        "attack_alert_rules": [r["name"] for r in covering],
-        "attack_alert_routes_to_receiver": tri_any(r["routes_to_enabled_receiver"] for r in covering) if covering else False,
-        "attack_alert_reaches_person": tri_any(r["reaches_human"] for r in covering) if covering else False,
-        "attack_alert_can_fire": (tri_any(r["routes_to_enabled_receiver"] for r in covering) if covering else False)
-        if zero_means_none else None,
+        **alerts,
+        "attack_alert_can_fire": alerts["attack_alert_routes_to_receiver"] if zero_means_none else None,
         "attack_hours": hours if hours or (zero_means_none and hours is not None) else None,
         "mitigations_started": _num(best.get("MitigationsStarted")) if records or (zero_means_none and read_all) else None,
         "mitigation_reports": _num(best.get("Reports")) if records or (zero_means_none and read_all) else None,
@@ -495,20 +518,26 @@ def _count(items, field, value) -> int:
     return sum(1 for i in items if i[field] is value)
 
 
-def summarize(waf: list[dict], ips: list[dict], rules: list[dict], workspaces: list[dict], days: int, fd_without_waf: int,
-              total_ips: int) -> dict:
+def summarize(waf: list[dict], ips: list[dict], rules: list[dict] | None, workspaces: list[dict], days: int,
+              fd_without_waf: int, total_ips: int) -> dict:
     exporting = [w for w in waf if w["waf_log_exported"]]
     status = Counter(w["status"] for w in workspaces)
     facing = [i for i in ips if i["attached"]]
     protected = [i for i in facing if i["ddos_protection_known_on"]]
     last = _latest(w["last_event"] for w in waf)
+
+    def alerts(count):
+        """An alert figure, or null when the alert rules couldn't be listed."""
+        return None if rules is None else count()
+
     return {
         "lookback_days": days,
         "waf_resources": len(waf),
         "front_door_waf_resources": sum(1 for w in waf if w["type"] == FRONT_DOOR),
         "app_gateway_waf_resources": sum(1 for w in waf if w["type"] == APP_GATEWAY),
         "front_door_profiles_without_waf": fd_without_waf,
-        "waf_resources_in_detection_mode": sum(1 for w in waf if w["detection_mode"]),
+        "waf_resources_in_detection_mode": _count(waf, "detection_mode", True),
+        "waf_resources_mode_unknown": _count(waf, "detection_mode", None),
         "waf_resources_exporting_waf_log": len(exporting),
         "waf_resources_without_waf_log_export": _count(waf, "waf_log_exported", False),
         "waf_resources_with_waf_events": _count(exporting, "waf_logs_arriving", True),
@@ -519,22 +548,24 @@ def summarize(waf: list[dict], ips: list[dict], rules: list[dict], workspaces: l
         "waf_requests_blocked": _total(w["requests_blocked"] for w in exporting),
         "waf_requests_logged_only": _total(w["requests_logged_only"] for w in exporting),
         "last_waf_event": last,
-        "waf_alert_rules": sum(1 for r in rules if r["watches_waf"]),
-        "waf_alert_rules_enabled": sum(1 for r in rules if r["watches_waf"] and r["enabled"]),
-        "waf_alert_rules_reaching_person": sum(1 for r in rules if r["watches_waf"] and r["reaches_human"] is True),
-        "waf_resources_with_alert_reaching_person": _count(waf, "waf_alert_reaches_person", True),
-        "waf_resources_without_waf_alert": sum(1 for w in waf if not w["waf_alert_rules"]),
+        "waf_alert_rules": alerts(lambda: sum(1 for r in rules or [] if r["watches_waf"])),
+        "waf_alert_rules_enabled": alerts(lambda: sum(1 for r in rules or [] if r["watches_waf"] and r["enabled"])),
+        "waf_alert_rules_reaching_person": alerts(lambda: sum(1 for r in rules or [] if r["watches_waf"] and r["reaches_human"] is True)),
+        "waf_resources_with_alert_reaching_person": alerts(lambda: _count(waf, "waf_alert_reaches_person", True)),
+        "waf_resources_without_waf_alert": alerts(lambda: sum(1 for w in waf if not w["waf_alert_rules"])),
         "public_ips": total_ips,
         "internet_facing_public_ips": len(facing),
         "public_ips_with_ip_protection": len(protected),
         "public_ips_protection_disabled": sum(1 for i in facing if i["protection"] == DISABLED),
         "public_ips_protection_inherited": sum(1 for i in facing if i["protection"] == INHERITED),
         "public_ips_exporting_ddos_logs": _count(facing, "ddos_logs_exported", True),
-        "public_ips_with_attack_alert": sum(1 for i in facing if i["attack_alert_rules"]),
-        "public_ips_with_attack_alert_reaching_person": _count(facing, "attack_alert_reaches_person", True),
-        "protected_ips_with_attack_alert_reaching_receiver": _count(protected, "attack_alert_can_fire", True) if protected else None,
-        "protected_ips_without_attack_alert": sum(1 for i in protected if not i["attack_alert_rules"]) if protected else None,
-        "ddos_attack_alert_rules": sum(1 for r in rules if r["watches_ddos_attack"]),
+        "public_ips_with_attack_alert": alerts(lambda: sum(1 for i in facing if i["attack_alert_rules"])),
+        "public_ips_with_attack_alert_reaching_person": alerts(lambda: _count(facing, "attack_alert_reaches_person", True)),
+        "protected_ips_with_attack_alert_reaching_receiver":
+            alerts(lambda: _count(protected, "attack_alert_can_fire", True)) if protected else None,
+        "protected_ips_without_attack_alert":
+            alerts(lambda: sum(1 for i in protected if not i["attack_alert_rules"])) if protected else None,
+        "ddos_attack_alert_rules": alerts(lambda: sum(1 for r in rules or [] if r["watches_ddos_attack"])),
         "public_ips_attacked": sum(1 for i in facing if i["attack_hours"]) if protected or any(i["attack_hours"] for i in facing) else None,
         "ddos_mitigations_started": _total(i["mitigations_started"] for i in protected) if protected else None,
         "log_workspaces": len(workspaces),
@@ -546,8 +577,8 @@ def summarize(waf: list[dict], ips: list[dict], rules: list[dict], workspaces: l
 
 # --- collection ---
 
-def _provider_list(client, path: str, api: str, operation: str, collector) -> list:
-    """A resource provider the subscription never registered has none of its resources."""
+def _provider_read(client, path: str, api: str, operation: str, collector) -> list | None:
+    """None when the list failed; a resource provider the subscription never registered has none of its resources."""
     def _list():
         try:
             return client.list(path, api)
@@ -555,7 +586,11 @@ def _provider_list(client, path: str, api: str, operation: str, collector) -> li
             if exc.code.lower() == "missingsubscriptionregistration":
                 return []
             raise
-    return collector.guard(operation, _list) or []
+    return collector.guard(operation, _list)
+
+
+def _provider_list(client, path: str, api: str, operation: str, collector) -> list:
+    return _provider_read(client, path, api, operation, collector) or []
 
 
 def _settings(client, resource_id: str, collector):
@@ -627,13 +662,16 @@ def read_workspace(client, workspace_id: str, jobs: list[tuple], basic: bool, da
     return out
 
 
-def collect_alert_rules(client, subscription_id: str, collector) -> list[dict]:
+def collect_alert_rules(client, subscription_id: str, collector) -> list[dict] | None:
+    """The WAF and DDoS alert rules; None when either rule list couldn't be read."""
     base = f"/subscriptions/{subscription_id}/providers"
-    raw = [("metric", r) for r in _provider_list(client, f"{base}/Microsoft.Insights/metricAlerts", METRIC_ALERT_API,
-                                                 "insights.metricAlerts.list", collector)]
-    raw += [("log_search", r) for r in _provider_list(client, f"{base}/Microsoft.Insights/scheduledQueryRules", LOG_ALERT_API,
-                                                      "insights.scheduledQueryRules.list", collector)]
-    rules = [alert_rule_record(t, r) for t, r in raw]
+    metric = _provider_read(client, f"{base}/Microsoft.Insights/metricAlerts", METRIC_ALERT_API,
+                            "insights.metricAlerts.list", collector)
+    logs = _provider_read(client, f"{base}/Microsoft.Insights/scheduledQueryRules", LOG_ALERT_API,
+                          "insights.scheduledQueryRules.list", collector)
+    if metric is None or logs is None:
+        return None
+    rules = [alert_rule_record("metric", r) for r in metric] + [alert_rule_record("log_search", r) for r in logs]
     rules = [r for r in rules if r["watches_waf"] or r["watches_ddos_attack"]]
     if not rules:
         return []
@@ -726,7 +764,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
          for ip in facing),
         key=lambda i: id_key(i["id"]),
     )
-    rule_records = [{k: v for k, v in r.items() if k != "_scopes"} for r in alert_rules]
+    rule_records = None if alert_rules is None else [{k: v for k, v in r.items() if k != "_scopes"} for r in alert_rules]
     workspace_records = [
         {k: ws[k] for k in ("workspace_id", "name", "status", "error", "tables", "read_tables", "skipped_tables", "failed_queries")}
         for ws in workspaces.values()
