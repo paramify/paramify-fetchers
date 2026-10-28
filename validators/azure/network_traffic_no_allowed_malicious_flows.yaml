@@ -1,0 +1,29 @@
+key: network_traffic_no_allowed_malicious_flows
+name: Network Traffic Allows No Flows With Known-Malicious Addresses
+type: AUTOMATED
+role: configuration
+statement: >-
+  Traffic Analytics was read in full and, over the window, allowed no flow that it classed as
+  MaliciousFlow: traffic to or from an address that Microsoft's threat intelligence flags.
+  Substantiates that the network refuses traffic with known-malicious destinations and sources
+  (KSI-CNA-ULN). Does NOT prove anything about subnets without a flow log or without Traffic
+  Analytics, addresses threat intelligence doesn't flag, or flows outside the window. Denied
+  malicious flows don't fail it; they are the control working. It fails when Traffic Analytics
+  wasn't read in full or the count reads null, because zero can't be shown. An approved
+  exception is the organization's own record and isn't read; any allowed malicious flow fails.
+
+regex: '"summary":\s*\{[^{}]*?"malicious_allowed_flows":\s*(?<malicious_allowed_flows>\d+|null)[^{}]*?"traffic_read_in_full":\s*(?<traffic_read_in_full>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS true
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # malicious_allowed_flows
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # traffic_read_in_full
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-AZURE-NETWORK-TRAFFIC-ACTIVITY
