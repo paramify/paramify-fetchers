@@ -525,10 +525,11 @@ Summary fields:
 - `mfa_capable_enabled_users` — Number of enabled users who are MFA-capable
 - `enabled_users_without_mfa` — Number of enabled users who aren't MFA-capable, including users with no row in the registration report
 - `mfa_coverage_percentage` — Percentage of enabled users who are MFA-capable = `mfa_capable_enabled_users` / `enabled_users` × 100 (a whole number, 0–100); 0 when `enabled_users` is 0. Users with no row in the registration report count in the total but not as capable
-- `mfa_coverage_percentage_all_users` — Percentage of all users, enabled or not, who are MFA-capable = `mfa_capable_users` / `total_users` × 100 (a whole number, 0–100); 0 when `total_users` is 0
+- `mfa_coverage_percentage_all_users` — Percentage of users, enabled or not, with a row in the registration report who are MFA-capable = `mfa_capable_users` / `users_with_registration_details` × 100 (a whole number, 0–100); 0 when `users_with_registration_details` is 0. Users with no row are left out of both: the report omits disabled accounts, so their MFA is unknown, not absent
 - `mfa_registered_enabled_users` — Number of enabled users the registration report shows as registered for MFA, whether or not the tenant's policy allows the method they registered
 - `sspr_registered_enabled_users` — Number of enabled users registered for self-service password reset (SSPR)
-- `users_without_registration_details` — Number of users, enabled or not, with no row in the registration report; each counts as not MFA-capable, so this shows how much of the gap rests on a missing row
+- `users_with_registration_details` — Number of users, enabled or not, with a row in the registration report
+- `users_without_registration_details` — Number of users, enabled or not, with no row in the registration report (the report omits disabled accounts); each counts as not MFA-capable in the enabled-user and admin figures and is left out of `mfa_coverage_percentage_all_users`
 
 **Can enabled users sign in without a password?**
 - `passwordless_capable_enabled_users` — Number of enabled users who are passwordless-capable: the registration report says they've registered a passwordless method the policy allows (a FIDO2 security key or passkey, Windows Hello for Business, or Microsoft Authenticator phone sign-in)
@@ -673,9 +674,9 @@ Summary fields:
 - `oldest_open_risk_days` — Days since the oldest open risk was last updated
 
 **Are privileged accounts at risk?**
-- `privileged_open_risk_users` — Number of users with open risk who hold a privileged admin role
-- `privileged_open_risk_users_enabled` — Number of users with open risk who hold a privileged role and whose account isn't known to be disabled; an account reads unknown when User.Read.All isn't granted, and unknown counts as enabled
-- `privileged_principals` — Number of users, groups or apps that directly hold at least one privileged role
+- `privileged_open_risk_users` — Number of users with open risk who hold a privileged admin role; null if the directory roles couldn't be read
+- `privileged_open_risk_users_enabled` — Number of users with open risk who hold a privileged role and whose account isn't known to be disabled; an account reads unknown when User.Read.All isn't granted, and unknown counts as enabled; null if the directory roles couldn't be read
+- `privileged_principals` — Number of users, groups or apps that directly hold at least one privileged role; null if the directory roles couldn't be read
 
 **Did every serious risk raise an alert that someone owns?**
 - `open_or_high_risk_users` — Number of risky users at open or high risk: risk still open (at risk, or confirmed compromised), or a high risk level in any state. Their risk history and alerts are read
@@ -812,13 +813,14 @@ Summary fields:
 - `apps_signed_in_to` — Number of distinct apps signed in to; null if the logs weren't read
 
 **Did each sign-in require and pass MFA?**
-- `successful_single_factor_sign_ins` — Number of successful sign-ins that required only one factor (a password alone, for example). This and `multi_factor_percentage` follow what Entra required for the sign-in (authenticationRequirement), not the method the user presented, so a passwordless sign-in that no policy required MFA for counts as single-factor; null if the logs weren't read
-- `successful_multi_factor_sign_ins` — Number of successful sign-ins that required and passed MFA; null if the logs weren't read
-- `successful_sign_ins_with_unknown_requirement` — Number of successful sign-ins whose MFA requirement Graph didn't report (null or unknownFutureValue). They count in `successful_sign_ins` but in neither single- nor multi-factor sign-ins, so they lower `multi_factor_percentage`; null if the logs weren't read
-- `multi_factor_percentage` — Percentage of successful sign-ins that passed MFA = `successful_multi_factor_sign_ins` / `successful_sign_ins` × 100 (a whole number, 0–100), counting a sign-in with an unreported requirement as not MFA; null when `successful_sign_ins` is 0 or the logs weren't read
-- `users_with_single_factor_sign_ins` — Number of users with at least one successful single-factor sign-in; null if the logs weren't read
-- `apps_with_single_factor_sign_ins` — Number of apps with at least one successful single-factor sign-in; null if the logs weren't read
-- `successful_legacy_authentication_sign_ins` — Number of successful sign-ins from legacy clients that can't do MFA: any client other than a browser, modern mobile and desktop apps or modern clients (Microsoft's own rule), such as IMAP, POP, SMTP or Exchange ActiveSync. A floor: only interactive sign-ins are read, and Microsoft's guidance is to check non-interactive sign-ins for legacy authentication too; null if the logs weren't read
+- `successful_windows_device_sign_ins` — Number of successful Windows device logons: sign-ins to the Windows Sign In app, made when someone signs in to a Windows computer rather than to an app. They count in `successful_sign_ins` and here only, never in the single-factor, multi-factor or no-Conditional-Access figures below, and are listed one by one only when risky; null if the logs weren't read
+- `successful_single_factor_sign_ins` — Number of successful sign-ins to apps (not Windows device logons) that required only one factor (a password alone, for example). This and `multi_factor_percentage` follow what Entra required for the sign-in (authenticationRequirement), not the method the user presented, so a passwordless sign-in that no policy required MFA for counts as single-factor; null if the logs weren't read
+- `successful_multi_factor_sign_ins` — Number of successful sign-ins to apps (not Windows device logons) that required and passed MFA; null if the logs weren't read
+- `successful_sign_ins_with_unknown_requirement` — Number of successful sign-ins to apps (not Windows device logons) whose MFA requirement Graph didn't report (null or unknownFutureValue). They count in `successful_sign_ins` but in neither single- nor multi-factor sign-ins, so they lower `multi_factor_percentage`; null if the logs weren't read
+- `multi_factor_percentage` — Percentage of successful sign-ins to apps that passed MFA = `successful_multi_factor_sign_ins` / (`successful_sign_ins` − `successful_windows_device_sign_ins`) × 100 (a whole number, 0–100), counting a sign-in with an unreported requirement as not MFA and leaving Windows device logons out of both; null when `successful_sign_ins` − `successful_windows_device_sign_ins` is 0 or the logs weren't read
+- `users_with_single_factor_sign_ins` — Number of users with at least one successful single-factor sign-in to an app (not a Windows device logon); null if the logs weren't read
+- `apps_with_single_factor_sign_ins` — Number of apps with at least one successful single-factor sign-in (the Windows Sign In app never counts); null if the logs weren't read
+- `successful_legacy_authentication_sign_ins` — Number of successful sign-ins from legacy clients that can't do MFA: any client other than a browser, modern mobile and desktop apps or modern clients (Microsoft's own rule), such as IMAP, POP, SMTP or Exchange ActiveSync; a client Graph reports as Unknown isn't counted. A floor: only interactive sign-ins are read, and Microsoft's guidance is to check non-interactive sign-ins for legacy authentication too; null if the logs weren't read
 
 **Which methods were used?**
 - `methods_used` — Number of successful sign-ins that used each authentication method (Password, Authenticator App, SMS, FIDO2 security key and so on); a sign-in using two methods counts under both; null if the logs weren't read
@@ -826,8 +828,8 @@ Summary fields:
 - `users_using_phishing_resistant_methods` — Number of users with at least one successful phishing-resistant sign-in, a floor since a step that reused an earlier authentication never counts; null if the logs weren't read
 
 **Did Conditional Access apply?**
-- `successful_sign_ins_without_conditional_access` — Number of successful sign-ins that no Conditional Access policy applied to; null if the logs weren't read
-- `users_with_sign_ins_without_conditional_access` — Number of users with at least one successful sign-in no Conditional Access policy applied to; null if the logs weren't read
+- `successful_sign_ins_without_conditional_access` — Number of successful sign-ins to apps (not Windows device logons) that no Conditional Access policy applied to; null if the logs weren't read
+- `users_with_sign_ins_without_conditional_access` — Number of users with at least one successful sign-in to an app (not a Windows device logon) that no Conditional Access policy applied to; null if the logs weren't read
 - `conditional_access_failures` — Number of sign-ins a Conditional Access policy blocked or failed; null if the logs weren't read
 
 **Which sign-ins did Entra rate risky?**
@@ -838,7 +840,7 @@ Summary fields:
 - `users_with_risky_sign_ins` — Number of users with at least one risky sign-in; null if the logs weren't read or `risk_levels_available` is false
 
 **Which sign-ins are listed one by one?**
-- `exception_sign_ins` — Number of exceptions: successful single-factor sign-ins, successful sign-ins no Conditional Access policy applied to, and risky sign-ins. Each listed sign-in names its reasons: single_factor, single_factor_phishing_resistant (a FIDO2 key, passkey or similar alone, with no policy requiring MFA), no_conditional_access and risky. When `risk_levels_available` is false no sign-in counts as risky, so one flagged only by its risk state isn't an exception; null if the logs weren't read
+- `exception_sign_ins` — Number of exceptions: successful single-factor sign-ins to apps, successful sign-ins to apps no Conditional Access policy applied to, and risky sign-ins (Windows device logons included). Each listed sign-in names its reasons: single_factor, single_factor_phishing_resistant (a FIDO2 key, passkey or similar alone, with no policy requiring MFA), no_conditional_access and risky. When `risk_levels_available` is false no sign-in counts as risky, so one flagged only by its risk state isn't an exception; null if the logs weren't read
 - `exception_sign_ins_listed` — Number of exceptions listed in the evidence, the newest first, at most 1000; null if the logs weren't read
 
 
@@ -1287,7 +1289,7 @@ Summary fields:
 **Are Entra ID logs exported?**
 - `settings_total` — Number of Entra ID diagnostic settings in the tenant
 - `categories_exported` — Number of Entra ID log categories that at least one setting exports
-- `categories_not_exported` — List of Entra ID log categories no setting exports
+- `categories_not_exported` — List of Entra ID log categories no setting exports; null if the list of available categories couldn't be read
 
 **Do audit and sign-in logs reach Sentinel?**
 - `key_categories_to_sentinel` — For audit logs (AuditLogs) and sign-in logs (SignInLogs): whether each reaches a Sentinel workspace (true, false, or null when unknown)
