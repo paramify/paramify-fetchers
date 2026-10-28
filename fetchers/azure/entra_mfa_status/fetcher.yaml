@@ -82,4 +82,5 @@ evidence_set:
     GET /organization. Collections paged via @odata.nextLink. Coverage over all users
     leaves out users with no registration-details row (the report omits disabled
     accounts, so their MFA is unknown); coverage over enabled users counts them as
-    without MFA.
+    without MFA. A failed users read leaves every figure null, and a failed
+    registration-details read every figure that relies on it.

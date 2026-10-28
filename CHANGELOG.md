@@ -443,7 +443,9 @@ schemas and the `paramify` CLI — not the internal code.
   counted every one as without MFA. It is now taken over the users with a row,
   and the new `users_with_registration_details` gives its denominator. The
   figures over enabled users and admins are unchanged: there a user with no row
-  still counts as without MFA.
+  still counts as without MFA. A failed read no longer reads as 0: when the users
+  list can't be read in full every figure is null, and when the registration
+  report can't be, every figure that relies on it.
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
   collection as a success.** A 200 response that is not JSON, for example a
   single sign-on or instance hibernation page, and a response whose
