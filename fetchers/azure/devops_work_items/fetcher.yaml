@@ -131,7 +131,7 @@ evidence_set:
     - work_items_total — Number of work items collected; null if a project's items couldn't be listed
     - work_items_by_type — Number of work items of each type; null if a project's items couldn't be listed
     - work_items_by_state_category — Number of work items in each state category (Proposed, InProgress, Resolved, Completed, Removed); null if a project's items couldn't be listed
-    - work_item_states_undefined — List of item states, as type: state, that the item's type no longer defines (as after a process change), so those items' state category reads unknown and they count as neither open nor finished; null if a project's items couldn't be listed
+    - work_item_states_undefined — List of item states, as type: state, that the item's type no longer defines (as after a process change); an item in such a state has an unknown state category and counts as neither open nor finished; null if a project's items couldn't be listed
     - work_items_open — Number of work items in a state whose category isn't Completed or Removed; null if a project's items couldn't be listed
     - approval_history_collected — True if every item's state history and comments were read; false if not
 
