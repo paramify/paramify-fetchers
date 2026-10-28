@@ -322,6 +322,7 @@ Commands Executed:
 - Microsoft Graph `GET /applications` — when each of this tenant's app registrations was created, for the grace period of a service principal with no creation date of its own
 - Microsoft Graph `GET /reports/servicePrincipalSignInActivities` on the beta endpoint — when each app or managed identity last signed in
 - Microsoft Graph `GET /directoryRoles` and `GET /directoryRoles/{id}/members` (per role) — who holds each directory role now, tenant-wide; eligible (PIM) assignments and roles scoped to an administrative unit aren't read
+- Microsoft Graph `GET /directoryRoles/{id}/members/microsoft.graph.servicePrincipal` (per role) — the service principals holding the role, which the members list leaves out
 - `GET Microsoft.Authorization/roleDefinitions` and `GET Microsoft.Authorization/roleAssignments` — every active Azure role assignment that applies in the subscription, including those inherited from management groups and made below it, with its role name; eligible (PIM) assignments aren't read
 - Microsoft Graph `GET /groups/{id}/transitiveMembers` on the beta endpoint (per group holding a role) — who holds the role through the group; beta because v1.0 member reads are known to leave out service principals
 - Microsoft Graph `POST /directoryObjects/getByIds` — the service principals holding a role, and which assigned principals no longer exist
@@ -514,39 +515,39 @@ Output: `azure_entra_mfa_status_<tenant>.json` — every user with whether the a
 Summary fields:
 
 **What was checked?**
-- `total_users` — Number of users in the tenant, members and guests, enabled or not
-- `enabled_users` — Number of users whose account is enabled and can sign in; a user whose account state Graph didn't return counts as enabled
-- `disabled_users` — Number of users whose account is disabled
-- `guest_users` — Number of guest users (invited from another organization), enabled or not
-- `users_never_signed_in` — Number of users with no recorded interactive sign-in (successful or failed), enabled or not; a user whose sign-in activity Graph didn't return counts too
+- `total_users` — Number of users in the tenant, members and guests, enabled or not; null if the users list couldn't be read in full
+- `enabled_users` — Number of users whose account is enabled and can sign in; a user whose account state Graph didn't return counts as enabled; null if the users list couldn't be read in full
+- `disabled_users` — Number of users whose account is disabled; null if the users list couldn't be read in full
+- `guest_users` — Number of guest users (invited from another organization), enabled or not; null if the users list couldn't be read in full
+- `users_never_signed_in` — Number of users with no recorded interactive sign-in (successful or failed), enabled or not; a user whose sign-in activity Graph didn't return counts too; null if the users list couldn't be read in full
 
 **Can every enabled user do MFA?**
-- `mfa_capable_users` — Number of users, enabled or not, who are MFA-capable: the registration report says they've registered a method that can do MFA and the tenant's authentication methods policy allows it. A user with no row in the report counts as not capable
-- `mfa_capable_enabled_users` — Number of enabled users who are MFA-capable
-- `enabled_users_without_mfa` — Number of enabled users who aren't MFA-capable, including users with no row in the registration report
-- `mfa_coverage_percentage` — Percentage of enabled users who are MFA-capable = `mfa_capable_enabled_users` / `enabled_users` × 100 (a whole number, 0–100); 0 when `enabled_users` is 0. Users with no row in the registration report count in the total but not as capable
-- `mfa_coverage_percentage_all_users` — Percentage of users, enabled or not, with a row in the registration report who are MFA-capable = `mfa_capable_users` / `users_with_registration_details` × 100 (a whole number, 0–100); 0 when `users_with_registration_details` is 0. Users with no row are left out of both: the report omits disabled accounts, so their MFA is unknown, not absent
-- `mfa_registered_enabled_users` — Number of enabled users the registration report shows as registered for MFA, whether or not the tenant's policy allows the method they registered
-- `sspr_registered_enabled_users` — Number of enabled users registered for self-service password reset (SSPR)
-- `users_with_registration_details` — Number of users, enabled or not, with a row in the registration report
-- `users_without_registration_details` — Number of users, enabled or not, with no row in the registration report (the report omits disabled accounts); each counts as not MFA-capable in the enabled-user and admin figures and is left out of `mfa_coverage_percentage_all_users`
+- `mfa_capable_users` — Number of users, enabled or not, who are MFA-capable: the registration report says they've registered a method that can do MFA and the tenant's authentication methods policy allows it. A user with no row in the report counts as not capable; null if the users list or the registration report couldn't be read in full
+- `mfa_capable_enabled_users` — Number of enabled users who are MFA-capable; null if the users list or the registration report couldn't be read in full
+- `enabled_users_without_mfa` — Number of enabled users who aren't MFA-capable, including users with no row in the registration report; null if the users list or the registration report couldn't be read in full
+- `mfa_coverage_percentage` — Percentage of enabled users who are MFA-capable = `mfa_capable_enabled_users` / `enabled_users` × 100 (a whole number, 0–100); 0 when `enabled_users` is 0; null if the users list or the registration report couldn't be read in full. Users with no row in the registration report count in the total but not as capable
+- `mfa_coverage_percentage_all_users` — Percentage of users, enabled or not, with a row in the registration report who are MFA-capable = `mfa_capable_users` / `users_with_registration_details` × 100 (a whole number, 0–100); 0 when `users_with_registration_details` is 0; null if the users list or the registration report couldn't be read in full. Users with no row are left out of both: the report omits disabled accounts, so their MFA is unknown, not absent
+- `mfa_registered_enabled_users` — Number of enabled users the registration report shows as registered for MFA, whether or not the tenant's policy allows the method they registered; null if the users list or the registration report couldn't be read in full
+- `sspr_registered_enabled_users` — Number of enabled users registered for self-service password reset (SSPR); null if the users list or the registration report couldn't be read in full
+- `users_with_registration_details` — Number of users, enabled or not, with a row in the registration report; null if the users list or the registration report couldn't be read in full
+- `users_without_registration_details` — Number of users, enabled or not, with no row in the registration report (the report omits disabled accounts); each counts as not MFA-capable in the enabled-user and admin figures and is left out of `mfa_coverage_percentage_all_users`; null if the users list or the registration report couldn't be read in full
 
 **Can enabled users sign in without a password?**
-- `passwordless_capable_enabled_users` — Number of enabled users who are passwordless-capable: the registration report says they've registered a passwordless method the policy allows (a FIDO2 security key or passkey, Windows Hello for Business, or Microsoft Authenticator phone sign-in)
-- `passwordless_coverage_percentage` — Percentage of enabled users who are passwordless-capable = `passwordless_capable_enabled_users` / `enabled_users` × 100 (a whole number, 0–100); 0 when `enabled_users` is 0
+- `passwordless_capable_enabled_users` — Number of enabled users who are passwordless-capable: the registration report says they've registered a passwordless method the policy allows (a FIDO2 security key or passkey, Windows Hello for Business, or Microsoft Authenticator phone sign-in); null if the users list or the registration report couldn't be read in full
+- `passwordless_coverage_percentage` — Percentage of enabled users who are passwordless-capable = `passwordless_capable_enabled_users` / `enabled_users` × 100 (a whole number, 0–100); 0 when `enabled_users` is 0; null if the users list or the registration report couldn't be read in full
 
 **Are enabled members covered, leaving guests aside?**
-- `enabled_member_users` — Number of enabled users who aren't guests
-- `mfa_capable_enabled_member_users` — Number of enabled non-guest users who are MFA-capable
-- `member_mfa_coverage_percentage` — Percentage of enabled non-guest users who are MFA-capable = `mfa_capable_enabled_member_users` / `enabled_member_users` × 100 (a whole number, 0–100); 0 when `enabled_member_users` is 0
+- `enabled_member_users` — Number of enabled users who aren't guests; null if the users list couldn't be read in full
+- `mfa_capable_enabled_member_users` — Number of enabled non-guest users who are MFA-capable; null if the users list or the registration report couldn't be read in full
+- `member_mfa_coverage_percentage` — Percentage of enabled non-guest users who are MFA-capable = `mfa_capable_enabled_member_users` / `enabled_member_users` × 100 (a whole number, 0–100); 0 when `enabled_member_users` is 0; null if the users list or the registration report couldn't be read in full
 
 **Can every admin do MFA?**
 - `admin_role_membership_readable` — True if the members of every activated privileged role, and of every group holding one, were read; false if any read failed, and every admin field reads null
-- `admin_users` — Number of admins, enabled or not: users holding a privileged directory role (one of the 24 admin roles `azure_entra_privileged_roles` flags, such as Global Administrator, User Administrator or Security Reader) directly or through a group, plus users the registration report flags as admins. Only active role holders are seen, so a PIM-eligible admin who hasn't activated counts only through the report's flag; null if role membership couldn't be read
-- `mfa_capable_admin_users` — Number of admins who are MFA-capable; null if role membership couldn't be read
-- `admin_users_without_mfa` — Number of admins who aren't MFA-capable, including admins with no row in the registration report; null if role membership couldn't be read
-- `admin_users_without_registration_details` — Number of admins with no row in the registration report; null if role membership couldn't be read
-- `admin_mfa_coverage_percentage` — Percentage of admins who are MFA-capable = `mfa_capable_admin_users` / `admin_users` × 100 (a whole number, 0–100); 0 when `admin_users` is 0; null if role membership couldn't be read. Disabled admin accounts count in the total
+- `admin_users` — Number of admins, enabled or not: users holding a privileged directory role (one of the 24 admin roles `azure_entra_privileged_roles` flags, such as Global Administrator, User Administrator or Security Reader) directly or through a group, plus users the registration report flags as admins. Only active role holders are seen, so a PIM-eligible admin who hasn't activated counts only through the report's flag; null if role membership or the users list couldn't be read in full
+- `mfa_capable_admin_users` — Number of admins who are MFA-capable; null if role membership, the users list or the registration report couldn't be read in full
+- `admin_users_without_mfa` — Number of admins who aren't MFA-capable, including admins with no row in the registration report; null if role membership, the users list or the registration report couldn't be read in full
+- `admin_users_without_registration_details` — Number of admins with no row in the registration report; null if role membership, the users list or the registration report couldn't be read in full
+- `admin_mfa_coverage_percentage` — Percentage of admins who are MFA-capable = `mfa_capable_admin_users` / `admin_users` × 100 (a whole number, 0–100); 0 when `admin_users` is 0; null if role membership, the users list or the registration report couldn't be read in full. Disabled admin accounts count in the total
 
 
 ### azure_entra_pim_assignments
@@ -622,27 +623,27 @@ Output: `azure_entra_privileged_roles_<tenant>.json` — each activated director
 Summary fields:
 
 **What was checked?**
-- `total_directory_roles_activated` — Number of directory roles activated in the tenant (a role is activated the first time anyone is assigned it; a role never assigned isn't listed and has no holders)
-- `roles_with_no_members` — Number of activated roles nobody holds now (assigned once, then removed)
-- `total_role_assignments` — Number of active role assignments across all activated roles, one per role per holder (user, group, app or other account); PIM-eligible holders who haven't activated aren't listed
-- `distinct_principals_with_a_directory_role` — Number of distinct users, groups, apps and other accounts holding at least one directory role
+- `total_directory_roles_activated` — Number of directory roles activated in the tenant (a role is activated the first time anyone is assigned it; a role never assigned isn't listed and has no holders); null if the role list couldn't be read
+- `roles_with_no_members` — Number of activated roles nobody holds now (assigned once, then removed); null if the role list or any role's members couldn't be read
+- `total_role_assignments` — Number of active role assignments across all activated roles, one per role per holder (user, group, app or other account); PIM-eligible holders who haven't activated aren't listed; null if the role list or any role's members couldn't be read
+- `distinct_principals_with_a_directory_role` — Number of distinct users, groups, apps and other accounts holding at least one directory role; null if the role list or any role's members couldn't be read
 
 **How many Global Administrators are there?**
-- `global_administrator_count` — Number of users, groups and apps holding Global Administrator directly; a group counts once, not its members
-- `global_administrator_role_activated` — True if the Global Administrator role is activated in the tenant; false if not, and `global_administrator_count` is 0
+- `global_administrator_count` — Number of users, groups and apps holding Global Administrator directly; a group counts once, not its members; null if the role list or the Global Administrator role's members couldn't be read
+- `global_administrator_role_activated` — True if the Global Administrator role is activated in the tenant; false if not, and `global_administrator_count` is 0; null if the role list couldn't be read
 
 **Who holds privileged roles?**
-- `privileged_roles_activated` — Number of activated privileged roles: the 24 built-in roles the fetcher treats as tenant-wide admin power, such as Global Administrator, Privileged Role Administrator, User Administrator, Security Administrator and Global Reader (the full list is in the output)
-- `privileged_roles_with_members` — Number of privileged roles at least one user, group or app holds
-- `privileged_role_names_assigned` — List of the privileged role names at least one user, group or app holds
-- `privileged_role_assignments` — Number of assignments to privileged roles, one per role per holder
-- `distinct_privileged_principals` — Number of distinct users, groups, apps and other accounts holding at least one privileged role
-- `privileged_assignment_percentage` — Percentage of role assignments that are to privileged roles = `privileged_role_assignments` / `total_role_assignments` × 100 (a whole number, 0–100); 0 when `total_role_assignments` is 0
+- `privileged_roles_activated` — Number of activated privileged roles: the 24 built-in roles the fetcher treats as tenant-wide admin power, such as Global Administrator, Privileged Role Administrator, User Administrator, Security Administrator and Global Reader (the full list is in the output); null if the role list couldn't be read
+- `privileged_roles_with_members` — Number of privileged roles at least one user, group or app holds; null if the role list or any privileged role's members couldn't be read
+- `privileged_role_names_assigned` — List of the privileged role names at least one user, group or app holds; null if the role list or any privileged role's members couldn't be read
+- `privileged_role_assignments` — Number of assignments to privileged roles, one per role per holder; null if the role list or any privileged role's members couldn't be read
+- `distinct_privileged_principals` — Number of distinct users, groups, apps and other accounts holding at least one privileged role; null if the role list or any privileged role's members couldn't be read
+- `privileged_assignment_percentage` — Percentage of role assignments that are to privileged roles = `privileged_role_assignments` / `total_role_assignments` × 100 (a whole number, 0–100); 0 when `total_role_assignments` is 0; null if the role list or any role's members couldn't be read
 
 **What kind of account holds privileged power?**
-- `users_in_privileged_roles` — Number of privileged-role assignments held by users; a user holding two privileged roles counts twice
-- `groups_in_privileged_roles` — Number of privileged-role assignments held by groups; members of the group aren't counted
-- `service_principals_in_privileged_roles` — Number of privileged-role assignments held by service principals (apps and managed identities); null if any privileged role's service principals couldn't be read
+- `users_in_privileged_roles` — Number of privileged-role assignments held by users; a user holding two privileged roles counts twice; null if the role list or any privileged role's members couldn't be read
+- `groups_in_privileged_roles` — Number of privileged-role assignments held by groups; members of the group aren't counted; null if the role list or any privileged role's members couldn't be read
+- `service_principals_in_privileged_roles` — Number of privileged-role assignments held by service principals (apps and managed identities); null if the role list or any privileged role's service principals couldn't be read
 
 
 ### azure_entra_risky_users
@@ -658,6 +659,7 @@ Commands Executed:
 - Microsoft Graph `GET /security/alerts_v2` (Entra ID Protection alerts only) — the alerts naming each user at open or high risk, with owner, status and incident
 - Microsoft Graph `GET /directoryRoles` — activated directory roles
 - Microsoft Graph `GET /directoryRoles/{id}/members` — who holds each role
+- Microsoft Graph `GET /directoryRoles/{id}/members/microsoft.graph.servicePrincipal` — the service principals holding each role, which the members list leaves out
 - Microsoft Graph `GET /users/{id}?$select=accountEnabled` (privileged users at open risk) — whether the account is enabled (a 403 means User.Read.All isn't granted, and the status reads unknown)
 
 Output: `azure_entra_risky_users_<tenant>.json` — whether Identity Protection is available, and each risky user with their risk level, state and any privileged roles, plus the risk history and alerts of users at open or high risk.
@@ -814,7 +816,7 @@ Summary fields:
 - `apps_signed_in_to` — Number of distinct apps signed in to; null if the logs weren't read
 
 **Did each sign-in require and pass MFA?**
-- `successful_windows_device_sign_ins` — Number of successful Windows device logons: sign-ins to the Windows Sign In app, made when someone signs in to a Windows computer rather than to an app. They count in `successful_sign_ins` and here only, never in the single-factor, multi-factor or no-Conditional-Access figures below, and are listed one by one only when risky; null if the logs weren't read
+- `successful_windows_device_sign_ins` — Number of successful Windows device logons: sign-ins to the Windows Sign In app, made when someone signs in to a Windows computer rather than to an app. They count in `successful_sign_ins` but never in the single-factor, multi-factor or no-Conditional-Access figures below, and are listed one by one only when risky; null if the logs weren't read
 - `successful_single_factor_sign_ins` — Number of successful sign-ins to apps (not Windows device logons) that required only one factor (a password alone, for example). This and `multi_factor_percentage` follow what Entra required for the sign-in (authenticationRequirement), not the method the user presented, so a passwordless sign-in that no policy required MFA for counts as single-factor; null if the logs weren't read
 - `successful_multi_factor_sign_ins` — Number of successful sign-ins to apps (not Windows device logons) that required and passed MFA; null if the logs weren't read
 - `successful_sign_ins_with_unknown_requirement` — Number of successful sign-ins to apps (not Windows device logons) whose MFA requirement Graph didn't report (null or unknownFutureValue). They count in `successful_sign_ins` but in neither single- nor multi-factor sign-ins, so they lower `multi_factor_percentage`; null if the logs weren't read
