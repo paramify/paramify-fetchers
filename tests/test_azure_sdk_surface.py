@@ -753,8 +753,15 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure.mgmt.storage",
         "StorageManagementClient",
         "storage_accounts",
+        ["list", "get_properties"],
+        "azure/storage_encryption_status — get_properties expands geoReplicationStats",
+    ),
+    (
+        "azure.mgmt.storage",
+        "StorageManagementClient",
+        "blob_containers",
         ["list"],
-        "azure/storage_encryption_status",
+        "azure/storage_encryption_status — container access level and immutability",
     ),
     (
         "azure.mgmt.storage",
@@ -829,6 +836,27 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "role_assignments",
         ["list_for_subscription"],
         "azure/rbac_role_assignments, azure/managed_identity_configuration",
+    ),
+    (
+        "azure.mgmt.authorization",
+        "AuthorizationManagementClient",
+        "role_assignment_schedule_instances",
+        ["list_for_scope"],
+        "azure/rbac_role_assignments — standing (permanent / time_bound / pim_activated)",
+    ),
+    (
+        "azure.mgmt.authorization",
+        "AuthorizationManagementClient",
+        "role_eligibility_schedule_instances",
+        ["list_for_scope"],
+        "azure/rbac_role_assignments — eligible_role_assignments",
+    ),
+    (
+        "azure.mgmt.authorization",
+        "AuthorizationManagementClient",
+        "role_management_policy_assignments",
+        ["list_for_scope"],
+        "azure/rbac_role_assignments — pim_role_policies",
     ),
     # --- compute -------------------------------------------------------------
     (
@@ -1077,6 +1105,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list_properties_of_keys", "get_key_rotation_policy"],
         "azure/key_vault_key_rotation — rotation policy is data-plane only",
     ),
+    (
+        "azure.keyvault.certificates",
+        "CertificateClient",
+        None,
+        ["list_properties_of_certificates", "get_certificate_policy"],
+        "azure/key_vault_key_rotation — certificates and their auto-renew policy are data-plane only",
+    ),
     # --- Log Analytics ---------------------------------------------------------
     (
         "azure.mgmt.loganalytics",
@@ -1187,6 +1222,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "app_service_plans",
         ["list"],
         "azure/app_service_plans",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "certificates",
+        ["list"],
+        "azure/key_vault_key_rotation — App Service certificates",
     ),
     (
         "azure.mgmt.web",
@@ -1510,6 +1552,60 @@ def test_operation_group_surface(
 # (module, model, required fields, affected fetchers)
 REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleAssignmentScheduleInstance",
+        ["origin_role_assignment_id", "assignment_type", "member_type", "status", "end_date_time"],
+        "azure/rbac_role_assignments — a renamed origin id leaves every grant unmatched, i.e. 'permanent'",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleEligibilityScheduleInstance",
+        ["principal_id", "role_definition_id", "scope", "status", "end_date_time"],
+        "azure/rbac_role_assignments — eligible_role_assignments",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyAssignment",
+        ["role_definition_id", "effective_rules"],
+        "azure/rbac_role_assignments — pim_role_policies",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyExpirationRule",
+        ["is_expiration_required", "maximum_duration"],
+        "azure/rbac_role_assignments — maximum activation and assignment durations",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyEnablementRule",
+        ["enabled_rules"],
+        "azure/rbac_role_assignments — MFA and justification on activation",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "ApprovalSettings",
+        ["is_approval_required", "approval_stages"],
+        "azure/rbac_role_assignments — approval on activation",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyApprovalRule",
+        ["setting"],
+        "azure/rbac_role_assignments — approval on activation",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "ApprovalStage",
+        ["primary_approvers"],
+        "azure/rbac_role_assignments — activation_approver_sets",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyAuthenticationContextRule",
+        ["is_enabled", "claim_value"],
+        "azure/rbac_role_assignments — an authentication context in place of MFA on activation",
+    ),
+    (
         "azure.mgmt.sql.models",
         "TransparentDataEncryptionProperties",
         ["state"],
@@ -1645,6 +1741,49 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "ManagedTransparentDataEncryptionProperties",
         ["state"],
         "azure/sql_managed_instance_encryption — a lost field reads as 'not encrypted'",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "StorageAccountProperties",
+        [
+            "key_creation_time",
+            "geo_replication_stats",
+            "primary_location",
+            "secondary_location",
+            "status_of_primary",
+            "status_of_secondary",
+            "last_geo_failover_time",
+        ],
+        "azure/storage_encryption_status — a renamed key_creation_time reads every "
+        "access key's age as unknown",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "GeoReplicationStats",
+        ["status", "last_sync_time", "can_failover", "can_planned_failover",
+         "post_failover_redundancy", "post_planned_failover_redundancy"],
+        "azure/storage_encryption_status — geo-replication health",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "KeyCreationTime",
+        ["key1", "key2"],
+        "azure/storage_encryption_status — access-key age",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "ContainerProperties",
+        ["public_access", "metadata", "has_immutability_policy", "has_legal_hold",
+         "immutable_storage_with_versioning"],
+        "azure/storage_encryption_status — a renamed public_access reads a public "
+        "container as private",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "NetworkRuleSet",
+        ["default_action", "ip_rules", "ipv6_rules", "virtual_network_rules"],
+        "azure/storage_encryption_status — a renamed ipv6_rules reads an account "
+        "that admits IPv6 clients as closed to the internet",
     ),
     (
         "azure.mgmt.keyvault.models",
@@ -2102,6 +2241,24 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "BackupSchedule",
         ["frequency_interval", "frequency_unit", "retention_period_in_days", "keep_at_least_one_backup"],
         "azure/app_service_backups — custom backup interval and retention",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "CertificateProperties",
+        [
+            "expiration_date",
+            "key_vault_id",
+            "key_vault_secret_name",
+            "key_vault_secret_status",
+            "canonical_name",
+            "domain_validation_method",
+            "thumbprint",
+            "host_names",
+            "issuer",
+            "subject_name",
+        ],
+        "azure/key_vault_key_rotation — a renamed key_vault_id or canonical_name "
+        "reads a Key Vault or managed certificate as an uploaded one",
     ),
     (
         "azure.mgmt.network.models",
