@@ -365,6 +365,12 @@ def test_a_failed_cast_leaves_the_service_principal_count_unknown(monkeypatch):
     assert roles["Security Reader"]["service_principal_members_read"] is False
     assert summary["service_principals_in_privileged_roles"] is None
     assert summary["groups_in_privileged_roles"] == 1
+    # Every count of all holders takes service principals from the cast, so it reads null too.
+    for key in ("total_role_assignments", "distinct_principals_with_a_directory_role",
+                "privileged_role_assignments", "distinct_privileged_principals", "privileged_roles_with_members",
+                "privileged_role_names_assigned", "roles_with_no_members", "privileged_assignment_percentage"):
+        assert summary[key] is None, key
+    assert summary["users_in_privileged_roles"] == 0 and summary["total_directory_roles_activated"] == 2
 
 
 def test_a_failed_members_read_leaves_the_figures_it_feeds_unknown(monkeypatch):

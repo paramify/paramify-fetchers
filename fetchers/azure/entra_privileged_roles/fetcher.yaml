@@ -63,6 +63,7 @@ evidence_set:
     /directoryRoles/{id}/members and /directoryRoles/{id}/members/microsoft.graph.servicePrincipal
     per role (v1.0 members can leave service principals out; the cast lists them); GET
     /organization. Collections paged via @odata.nextLink. A failed role list leaves every figure
-    null, and a failed members read the figures over that role; service_principals_in_privileged_roles
+    null, and a failed members or cast read the figures over that role (users_in_privileged_roles
+    and groups_in_privileged_roles need only the members); service_principals_in_privileged_roles
     is null when a privileged role's service principals can't be read. Each role record says
     which reads succeeded (members_read, service_principal_members_read).

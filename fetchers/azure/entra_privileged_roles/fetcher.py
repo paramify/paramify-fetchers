@@ -184,7 +184,7 @@ def summarize(roles: list[dict], roles_read: bool = True) -> dict:
     entra_global_admin_in_less_than_five_users are written against.
     `distinct_privileged_principals` sits alongside the raw assignment count because one
     person holding six privileged roles is one human to review, not six. A figure is None,
-    not 0, when the role list or a members read it depends on failed.
+    not 0, when the role list or a members or servicePrincipal-cast read it depends on failed.
     """
     privileged = [r for r in roles if r["is_privileged"]]
     global_admin_roles = [r for r in roles if r["is_global_administrator"]]
@@ -193,8 +193,9 @@ def summarize(roles: list[dict], roles_read: bool = True) -> dict:
     }
     all_principals = {m["id"] for r in roles for m in r["members"] if m.get("id")}
 
-    def known(value, rows=(), read="members_read"):
-        return value if roles_read and all(r[read] for r in rows) else None
+    # Counts of all holders take service principals from the cast, so they need both reads.
+    def known(value, rows=(), reads=("members_read", "service_principal_members_read")):
+        return value if roles_read and all(r[read] for r in rows for read in reads) else None
 
     return {
         # Activated roles only — see the module docstring on why that is complete.
@@ -217,13 +218,17 @@ def summarize(roles: list[dict], roles_read: bool = True) -> dict:
         "privileged_role_assignments": known(sum(r["member_count"] for r in privileged), privileged),
         "distinct_privileged_principals": known(len(privileged_principals), privileged),
         # --- what kind of principal holds the power ---
-        "users_in_privileged_roles": known(sum(r["user_member_count"] for r in privileged), privileged),
-        "groups_in_privileged_roles": known(sum(r["group_member_count"] for r in privileged), privileged),
+        "users_in_privileged_roles": known(
+            sum(r["user_member_count"] for r in privileged), privileged, ("members_read",)
+        ),
+        "groups_in_privileged_roles": known(
+            sum(r["group_member_count"] for r in privileged), privileged, ("members_read",)
+        ),
         # Only the servicePrincipal cast lists every service principal, so only it must be read.
         "service_principals_in_privileged_roles": known(
             sum(r["service_principal_member_count"] for r in privileged),
             privileged,
-            "service_principal_members_read",
+            ("service_principal_members_read",),
         ),
         "privileged_assignment_percentage": known(
             coverage_percentage(
