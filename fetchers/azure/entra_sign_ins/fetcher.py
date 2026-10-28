@@ -159,7 +159,7 @@ class Tally:
         flags = {
             "successful": ok,
             "failed": not ok,
-            "successful_windows_device_logon": ok and r["windows_device_logon"],
+            "successful_windows_device": ok and r["windows_device_logon"],
             "successful_single_factor": app_ok and r["authentication_requirement"] == SINGLE_FACTOR,
             "successful_multi_factor": app_ok and r["authentication_requirement"] == MULTI_FACTOR,
             "successful_unknown_requirement": app_ok
@@ -208,7 +208,7 @@ class Tally:
 COUNT_KEYS = (
     "sign_ins", "successful", "failed", "successful_single_factor", "successful_multi_factor",
     "successful_without_conditional_access", "conditional_access_failures",
-    "successful_phishing_resistant", "successful_legacy_authentication", "risky", "successful_windows_device_logon",
+    "successful_phishing_resistant", "successful_legacy_authentication", "risky", "successful_windows_device",
 )
 
 
@@ -248,7 +248,7 @@ def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, compl
         exceptions, key=lambda r: (r["created_date_time"] or "", r["id"] or ""), reverse=True
     )[:EXCEPTION_LIMIT]
     c = tally.counts
-    app_successful = c["successful"] - c["successful_windows_device_logon"]
+    app_successful = c["successful"] - c["successful_windows_device"]
     readable = status == "read"
 
     def when(value):
@@ -274,7 +274,7 @@ def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, compl
         "successful_single_factor_sign_ins": when(c["successful_single_factor"]),
         "successful_multi_factor_sign_ins": when(c["successful_multi_factor"]),
         "successful_sign_ins_with_unknown_requirement": when(c["successful_unknown_requirement"]),
-        "successful_windows_device_sign_ins": when(c["successful_windows_device_logon"]),
+        "successful_windows_device_sign_ins": when(c["successful_windows_device"]),
         "multi_factor_percentage": when(
             coverage_percentage(c["successful_multi_factor"], app_successful) if app_successful else None
         ),

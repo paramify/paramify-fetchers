@@ -153,7 +153,7 @@ def test_windows_device_logons_are_counted_apart_from_app_sign_ins(monkeypatch):
     reasons = {e["id"]: e["exception_reasons"] for e in results["exception_sign_ins"]}
     assert "w1" not in reasons and reasons["w2"] == ["risky"]
     users = {u["user_id"]: u for u in results["users"]}
-    assert users["u-6"]["successful_windows_device_logon"] == 2 and users["u-6"]["successful_single_factor"] == 0
+    assert users["u-6"]["successful_windows_device"] == 2 and users["u-6"]["successful_single_factor"] == 0
 
 
 def test_legacy_authentication_is_any_client_but_browser_and_modern_apps():

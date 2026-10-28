@@ -44,10 +44,9 @@ schemas and the `paramify` CLI — not the internal code.
   as Unknown. Windows device logons (the Windows Sign In app) are counted on
   their own, in `successful_windows_device_sign_ins`, and left out of the
   single-factor, multi-factor and no-Conditional-Access figures and the MFA
-  percentage. Sign-ins with no reported
-  MFA requirement are counted apart. `_shared/azure_rest.py` gains `graph_pages`
-  and `graph_list` for paged Graph reads on v1.0 or beta, and retries a GET that
-  times out, once.
+  percentage. Sign-ins with no reported MFA requirement are counted apart.
+  `_shared/azure_rest.py` gains `graph_pages` and `graph_list` for paged Graph
+  reads on v1.0 or beta, and retries a GET that times out, once.
 - **Oracle Cloud Infrastructure category** (`fetchers/oci/`, fifteen
   fetchers, `pip install -e '.[oci]'`). Authenticates with an API signing key
   the runner injects as a secret (`OCI_PRIVATE_KEY` carries the PEM content,
