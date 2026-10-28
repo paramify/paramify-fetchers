@@ -437,6 +437,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
+  unknown in the all-users coverage.** The authentication-methods registration
+  report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`
+  counted every one as without MFA. It is now taken over the users with a row,
+  and the new `users_with_registration_details` gives its denominator. The
+  figures over enabled users and admins are unchanged: there a user with no row
+  still counts as without MFA.
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
   collection as a success.** A 200 response that is not JSON, for example a
   single sign-on or instance hibernation page, and a response whose

@@ -155,6 +155,20 @@ def test_admin_without_registration_row_counts_as_admin_without_mfa():
     assert summary["admin_users_without_registration_details"] == 1
 
 
+def test_all_users_coverage_leaves_out_users_the_report_omits():
+    users = mfa_status.join_users(
+        USERS + [_user("u-gone", "disabled@contoso.test", enabled=False)], REGISTRATIONS, {}
+    )
+    summary = mfa_status.summarize(users)
+    # u-unreg and the disabled u-gone have no report row: unknown, not without MFA.
+    assert summary["users_with_registration_details"] == 2
+    assert summary["users_without_registration_details"] == 2
+    assert summary["mfa_capable_users"] == 1
+    assert summary["mfa_coverage_percentage_all_users"] == 50
+    # Enabled users without a row still count as uncovered.
+    assert summary["mfa_coverage_percentage"] == 33 and summary["enabled_users_without_mfa"] == 2
+
+
 def test_registration_report_admin_flag_still_counts():
     """A role this fetcher does not list (or a PIM-eligible one) is still an admin
     when the registration report says so."""

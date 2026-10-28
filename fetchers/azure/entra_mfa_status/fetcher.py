@@ -240,7 +240,9 @@ def summarize(users: list[dict], admin_roles_readable: bool = True) -> dict:
 
     A disabled account cannot sign in, so counting it as uncovered makes a well-run
     tenant with years of deprovisioned accounts look worse than a small neglected one.
-    Coverage over all users is reported too, so neither reading looks cherry-picked.
+    Coverage over all users is reported too, so neither reading looks cherry-picked. It
+    leaves out users with no registration-report row: the report omits disabled accounts,
+    so their MFA is unknown, not absent.
 
     The admin figures are None when directory-role membership could not be read in
     full: the registration report alone misses every admin without a report row, which
@@ -248,6 +250,7 @@ def summarize(users: list[dict], admin_roles_readable: bool = True) -> dict:
     """
     enabled = [u for u in users if u["account_enabled"]]
     enabled_members = [u for u in enabled if not u["is_guest"]]
+    reported = [u for u in users if u["has_registration_details"]]
     admins = [u for u in users if u["is_admin"]]
 
     def admin_figure(value):
@@ -265,7 +268,7 @@ def summarize(users: list[dict], admin_roles_readable: bool = True) -> dict:
             sum(1 for u in enabled if u["is_mfa_capable"]), len(enabled)
         ),
         "mfa_coverage_percentage_all_users": coverage_percentage(
-            sum(1 for u in users if u["is_mfa_capable"]), len(users)
+            sum(1 for u in reported if u["is_mfa_capable"]), len(reported)
         ),
         "enabled_users_without_mfa": sum(1 for u in enabled if not u["is_mfa_capable"]),
         "mfa_registered_enabled_users": sum(1 for u in enabled if u["is_mfa_registered"]),
@@ -299,8 +302,9 @@ def summarize(users: list[dict], admin_roles_readable: bool = True) -> dict:
         "admin_users_without_registration_details": admin_figure(
             sum(1 for u in admins if not u["has_registration_details"])
         ),
-        # A user missing from the report counts as uncovered above; this says how much of
-        # the denominator that assumption is carrying.
+        # A user missing from the report counts as uncovered in the enabled and admin figures
+        # and as unknown in the all-users one; this says how many that is.
+        "users_with_registration_details": len(reported),
         "users_without_registration_details": sum(
             1 for u in users if not u["has_registration_details"]
         ),
