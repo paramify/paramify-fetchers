@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
 sys.path.insert(0, str(AZURE / "_shared"))
 
-from resource_exclusions import ENV  # noqa: E402
+from resource_exclusions import ENV, ResourceExclusions  # noqa: E402
 
 SUB = "/subscriptions/s1"
 IN_RG = f"{SUB}/resourceGroups/rg-in"
@@ -148,6 +148,9 @@ DISK_IN = f"{IN_RG}/providers/Microsoft.Compute/disks/disk-in"
 DISK_EAST = f"{IN_RG}/providers/Microsoft.Compute/disks/disk-east"
 ID_IN = f"{IN_RG}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-in"
 ID_OUT = f"{OUT_RG}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-out"
+ID_FIC = f"{IN_RG}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-fic"
+# id-fic is attached to nothing and holds no role, but a federated credential keeps it in use.
+FEDERATED = {ID_FIC: 1}
 SITE = f"{IN_RG}/providers/Microsoft.Web/sites/app-in"
 ROLE = f"{SUB}/providers/Microsoft.Authorization/roleDefinitions/r1"
 
@@ -173,7 +176,8 @@ def _residual_rows():
                          _row(f"{SITE}/slots/old", "regioneast", state="Stopped", lastModified=recent)],
         rr.ASSIGNMENTS_QUERY: [_role_assignment(SUB, "ra-sub", "p-gone"), _role_assignment(IN_RG, "ra-in", "p-here"),
                                _role_assignment(OUT_RG, "ra-out", "p-gone-too")],
-        rr.IDENTITIES_QUERY: [_row(ID_IN, principalId="p-id-in"), _row(ID_OUT, principalId="p-id-out")],
+        rr.IDENTITIES_QUERY: [_row(ID_FIC, principalId="p-id-fic"), _row(ID_IN, principalId="p-id-in"),
+                              _row(ID_OUT, principalId="p-id-out")],
         # id-in is used only by a resource in the excluded group: still in use.
         rr.IDENTITY_REFERENCES_QUERY: [{"id": f"{OUT_RG}/providers/Microsoft.Web/sites/app-out",
                                         "identityId": ID_IN.lower()}],
@@ -181,8 +185,15 @@ def _residual_rows():
     }
 
 
-def _residual_fakes(monkeypatch):
+def _residual_fakes(monkeypatch, failing=()):
     rows = _residual_rows()
+    reads: list = []
+
+    def federated(arm, identity_id):
+        reads.append(identity_id)
+        if identity_id in failing:
+            raise RuntimeError("403 Forbidden")
+        return FEDERATED.get(identity_id, 0)
 
     async def principals(collector, cred, ids, home=None):
         return {"p-here"}
@@ -194,19 +205,20 @@ def _residual_fakes(monkeypatch):
     monkeypatch.setattr(rr, "role_definition_names", lambda sub, cred: {})
     monkeypatch.setattr(rr, "existing_principals", principals)
     monkeypatch.setattr(rr, "arm_rest_client", lambda cred: object())
-    monkeypatch.setattr(rr, "federated_credential_count", lambda arm, identity_id: 0)
+    monkeypatch.setattr(rr, "federated_credential_count", federated)
     monkeypatch.delenv("AZURE_STALE_SLOT_DAYS", raising=False)
+    return reads
 
 
-def run_residual(monkeypatch, tmp_path, patterns):
+def run_residual(monkeypatch, tmp_path, patterns, failing=()):
     _env(monkeypatch, tmp_path, rr, patterns)
-    _residual_fakes(monkeypatch)
+    reads = _residual_fakes(monkeypatch, failing)
     code = rr.main()
-    return code, json.loads((tmp_path / "azure_residual_resources_s1.json").read_text())
+    return code, json.loads((tmp_path / "azure_residual_resources_s1.json").read_text()), reads
 
 
 def test_residual_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
-    code, evidence = run_residual(monkeypatch, tmp_path, None)
+    code, evidence, _ = run_residual(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
     resources, assignments, _, check, checked = rr.collect("s1", object(), rr.Collector(logging.getLogger("t")))
@@ -214,13 +226,13 @@ def test_residual_without_patterns_adds_only_empty_exclusion_fields(monkeypatch,
                       "in_scope_role_assignments"}
     assert {k: v for k, v in summary.items() if k not in new} == rr.summarize(resources, assignments, check, checked)
     assert summary["resource_exclusion_patterns"] == summary["resource_exclusion_patterns_unmatched"] == []
-    assert (summary["total_orphans"], summary["identities_checked"], summary["slots_checked"]) == (7, 2, 2)
+    assert (summary["total_orphans"], summary["identities_checked"], summary["slots_checked"]) == (7, 3, 2)
     assert (summary["excluded_orphaned_resources"], summary["excluded_role_assignments"]) == (0, 0)
     assert (summary["in_scope_orphaned_resources"], summary["in_scope_role_assignments"]) == (5, 3)
 
 
 def test_residual_excludes_orphans_and_assignments_but_keeps_cross_references(monkeypatch, tmp_path):
-    code, evidence = run_residual(monkeypatch, tmp_path, PATTERNS)
+    code, evidence, _ = run_residual(monkeypatch, tmp_path, PATTERNS)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0
     assert [r["name"] for r in results["orphaned_resources"]] == ["disk-in"]
@@ -235,16 +247,33 @@ def test_residual_excludes_orphans_and_assignments_but_keeps_cross_references(mo
     assert summary["orphans_by_kind"] == {"deleted_principal_assignment": 1, "unattached_disk": 1}
     assert (summary["total_orphans"], summary["deleted_principal_assignments"], summary["principals_checked"]) == (
         2, 1, 2)
-    assert (summary["identities_checked"], summary["slots_checked"]) == (1, 1)
+    assert (summary["identities_checked"], summary["slots_checked"]) == (2, 1)
     assert (summary["excluded_orphaned_resources"], summary["excluded_role_assignments"]) == (4, 1)
     assert (summary["in_scope_orphaned_resources"], summary["in_scope_role_assignments"]) == (1, 2)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
 
 
 def test_residual_bare_pattern_fails_the_run(monkeypatch, tmp_path):
-    code, evidence = run_residual(monkeypatch, tmp_path, "rg-out")
+    code, evidence, _ = run_residual(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["summary"]["total_orphans"] == 7
+
+
+def test_residual_reads_federated_credentials_only_for_in_scope_unused_identities(monkeypatch, tmp_path):
+    # id-in is attached, so it is never read.
+    assert run_residual(monkeypatch, tmp_path, None)[2] == [ID_FIC, ID_OUT]
+    code, evidence, reads = run_residual(monkeypatch, tmp_path, PATTERNS)
+    assert code == 0 and reads == [ID_FIC]
+    assert ("orphaned_resource", "id-out", "rg:rg-out") in _entries(evidence["results"])
+    assert "id-fic" not in [r["name"] for r in evidence["results"]["orphaned_resources"]]
+
+
+def test_residual_failed_federated_read_on_an_excluded_identity_leaves_the_run_ok(monkeypatch, tmp_path):
+    code, evidence, reads = run_residual(monkeypatch, tmp_path, PATTERNS, failing={ID_OUT})
+    assert code == 0 and reads == [ID_FIC]
+    assert ("orphaned_resource", "id-out", "rg:rg-out") in _entries(evidence["results"])
+    # Without the pattern the same read fails the run.
+    assert run_residual(monkeypatch, tmp_path, None, failing={ID_OUT})[0] == 1
 
 
 # --- defender_assessments ---
@@ -253,10 +282,11 @@ APP_IN = f"{IN_RG}/providers/Microsoft.Web/sites/app-in"
 APP_OUT = f"{OUT_RG}/providers/Microsoft.Web/sites/app-out"
 
 
-def _defender_record(resource, check, status="Unhealthy"):
+def _defender_record(resource, check, status="Unhealthy", details=None, scope=None):
     return da.project_assessment(NS(
-        id=f"{resource}/providers/Microsoft.Security/assessments/{check}", name=check, display_name=f"check {check}",
-        resource_details=NS(source="Azure", id=resource, additional_properties={}),
+        id=f"{scope or resource}/providers/Microsoft.Security/assessments/{check}", name=check,
+        display_name=f"check {check}",
+        resource_details=details or NS(source="Azure", id=resource, additional_properties={}),
         status=NS(code=status, cause=None, description=None, status_change_date=None, first_evaluation_date=None),
         metadata=None))
 
@@ -265,10 +295,10 @@ DEFENDER_RECORDS = [_defender_record(APP_IN, "c1"), _defender_record(f"{APP_IN}/
                     _defender_record(APP_OUT, "c3"), _defender_record(SUB, "c4", "Healthy")]
 
 
-def run_defender(monkeypatch, tmp_path, patterns):
+def run_defender(monkeypatch, tmp_path, patterns, records=DEFENDER_RECORDS):
     _env(monkeypatch, tmp_path, da, patterns)
     monkeypatch.setattr(da, "credential", lambda: object())
-    monkeypatch.setattr(da, "collect_assessments", lambda sub, cred, collector: (list(DEFENDER_RECORDS), da.REGISTERED))
+    monkeypatch.setattr(da, "collect_assessments", lambda sub, cred, collector: (list(records), da.REGISTERED))
     code = da.main()
     return code, json.loads((tmp_path / "azure_defender_assessments_s1.json").read_text())
 
@@ -303,6 +333,32 @@ def test_defender_id_pattern_takes_the_resource_and_its_children(monkeypatch, tm
                                              ("assessment", "check c2", f"id:{APP_IN.upper()}")]
 
 
+def test_defender_on_premises_ids_never_match(monkeypatch, tmp_path):
+    records = [
+        _defender_record(None, "c5", scope=SUB, details=NS(source="OnPremise", machine_name="machine-01",
+                                                           additional_properties={})),
+        _defender_record(None, "c6", scope=SUB, details=NS(source="OnPremise", vmuuid="vm-uuid-01",
+                                                           additional_properties={})),
+        _defender_record(APP_OUT, "c3"),
+    ]
+    assert [r["resource_id"] for r in records[:2]] == ["machine-01", "vm-uuid-01"]
+    _, evidence = run_defender(monkeypatch, tmp_path, "rg:*, id:machine-01, id:*vm-uuid*", records)
+    assert [a["name"] for a in evidence["results"]["assessments"]] == ["c5", "c6"]
+    assert _entries(evidence["results"]) == [("assessment", "check c3", "rg:*")]
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] == ["id:machine-01", "id:*vm-uuid*"]
+
+
+def test_defender_raw_pascal_case_id_is_matched(monkeypatch, tmp_path):
+    # The SDK leaves .id None and parks the payload's PascalCase keys in additional_properties.
+    raw = _defender_record(None, "c7", scope=SUB, details=NS(additional_properties={"Source": "Azure", "Id": APP_OUT}))
+    assert raw["resource_id"] == APP_OUT
+    _, evidence = run_defender(monkeypatch, tmp_path, "rg:rg-out", [raw, _defender_record(APP_IN, "c1")])
+    assert [a["name"] for a in evidence["results"]["assessments"]] == ["c1"]
+    (entry,) = evidence["results"]["excluded"]
+    assert (entry["name"], entry["pattern"], entry["id"], entry["resource_group"]) == (
+        "check c7", "rg:rg-out", APP_OUT, "rg-out")
+
+
 def test_defender_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence = run_defender(monkeypatch, tmp_path, "rg-out")
     assert code == 1
@@ -335,47 +391,57 @@ def _policy_state(resource, location="regionwest", assignment=ASSIGN_SUB):
               policy_set_definition_name=None, timestamp=WHEN)
 
 
-def _group(resource, state, n=2):
-    return NS(resource_id=resource, policy_assignment_id=ASSIGN_SUB, policy_definition_id=DEF,
-              policy_definition_reference_id=None, compliance_state=state, additional_properties={"evaluations": n})
+HISTORY_GROUPS = ((VM_IN, "NonCompliant", "regionwest"), (VM_IN, "Compliant", "regionwest"),
+                  (VM_OUT, "NonCompliant", "regionwest"), (VM_OUT, "Compliant", "regionwest"),
+                  (VM_EAST2, "NonCompliant", "regioneast"))
 
 
-def _task(scope, name):
+def _group(resource, state, location, apply, n=2):
+    # A grouped row carries only the grouped keys, so the region comes back only when it is grouped on.
+    return NS(resource_id=resource, resource_location=location if "ResourceLocation" in apply else None,
+              policy_assignment_id=ASSIGN_SUB, policy_definition_id=DEF, policy_definition_reference_id=None,
+              compliance_state=state, additional_properties={"evaluations": n})
+
+
+def _task(scope, name, failed=0, total=2):
     return NS(id=f"{scope}/providers/Microsoft.PolicyInsights/remediations/{name}", name=name,
               policy_assignment_id=ASSIGN_SUB, policy_definition_reference_id=None, provisioning_state="Succeeded",
-              resource_discovery_mode=None, deployment_status=NS(total_deployments=2, successful_deployments=2,
-                                                                 failed_deployments=0),
+              resource_discovery_mode=None, deployment_status=NS(total_deployments=total,
+                                                                 successful_deployments=total - failed,
+                                                                 failed_deployments=failed),
               created_on=WHEN, last_updated_on=WHEN)
 
 
-def _deployment(resource, location):
-    return NS(remediated_resource_id=resource, deployment_id=None, status="Succeeded", resource_location=location,
+def _deployment(resource, location, status="Succeeded"):
+    return NS(remediated_resource_id=resource, deployment_id=None, status=status, resource_location=location,
               error=None, created_on=WHEN, last_updated_on=WHEN)
 
 
-def _policy_client(calls):
-    groups = [_group(VM_IN, "NonCompliant"), _group(VM_IN, "Compliant"), _group(VM_OUT, "NonCompliant"),
-              _group(VM_OUT, "Compliant"), _group(VM_EAST2, "NonCompliant")]
+def _policy_client(calls, refuse=()):
     timeline = [NS(timestamp=datetime(2026, 10, d, tzinfo=timezone.utc), compliance_state=s)
                 for d, s in ((1, "NonCompliant"), (2, "Compliant"), (3, "NonCompliant"))]
+    member = NS(policy_definition_id=DEF, policy_definition_reference_id=None, effect="deny", results=_results(3))
 
     def summarize_for_subscription(resource, sub):
         return NS(value=[NS(results=_results(3), policy_assignments=[
             NS(policy_assignment_id=ASSIGN_SUB, policy_set_definition_id=None, results=_results(3),
-               policy_definitions=[]),
+               policy_definitions=[member]),
             NS(policy_assignment_id=ASSIGN_OUT, policy_set_definition_id=None, results=_results(1),
                policy_definitions=[])])])
 
     def for_subscription(resource, sub, query_options):
         apply = getattr(query_options, "apply", None) or ""
         if apply.endswith("/aggregate($count as n)"):
-            return [NS(additional_properties={"n": len(groups)})]
+            return [NS(additional_properties={"n": len(HISTORY_GROUPS)})]
         if apply:
-            return groups
+            return [_group(*g, apply) for g in HISTORY_GROUPS]
         if resource == pc.HISTORY:
             calls.append(("timeline", query_options.filter))
             return timeline
         if getattr(query_options, "select", None):
+            calls.append(("state", query_options.filter))
+            if any(r.lower() in query_options.filter for r in refuse):
+                raise RuntimeError("403 Forbidden")
             return []
         return [_policy_state(VM_IN), _policy_state(VM_OUT), _policy_state(VM_EAST2, "regioneast"),
                 _policy_state(SUB, None)]
@@ -386,7 +452,7 @@ def _policy_client(calls):
 
     def at_subscription(name):
         calls.append(("deployments", name))
-        return [_deployment(VM_IN, "regionwest"), _deployment(VM_EAST2, "regioneast")]
+        return [_deployment(VM_EAST2, "regioneast", "Failed"), _deployment(VM_IN, "regionwest")]
 
     def at_resource_group(rg, name):
         calls.append(("deployments", name))
@@ -395,21 +461,24 @@ def _policy_client(calls):
     return NS(policy_states=NS(summarize_for_subscription=summarize_for_subscription,
                                list_query_results_for_subscription=for_subscription,
                                list_query_results_for_resource=for_resource),
-              remediations=NS(list_for_subscription=lambda: [_task(SUB, "t-sub"), _task(OUT_RG, "t-out")],
+              remediations=NS(list_for_subscription=lambda: [_task(SUB, "t-sub", failed=1), _task(OUT_RG, "t-out")],
                               list_deployments_at_subscription=at_subscription,
                               list_deployments_at_resource_group=at_resource_group))
 
 
-def run_policy(monkeypatch, tmp_path, patterns):
-    _env(monkeypatch, tmp_path, pc, patterns)
-    calls: list = []
-    client = _policy_client(calls)
+def _stub_policyinsights(monkeypatch, client):
     insights = ModuleType("azure.mgmt.policyinsights")
     insights.PolicyInsightsClient = lambda **kw: client
     models = ModuleType("azure.mgmt.policyinsights.models")
     models.QueryOptions = lambda **kw: NS(**kw)
     monkeypatch.setitem(sys.modules, "azure.mgmt.policyinsights", insights)
     monkeypatch.setitem(sys.modules, "azure.mgmt.policyinsights.models", models)
+
+
+def run_policy(monkeypatch, tmp_path, patterns, refuse=()):
+    _env(monkeypatch, tmp_path, pc, patterns)
+    calls: list = []
+    _stub_policyinsights(monkeypatch, _policy_client(calls, refuse))
     monkeypatch.setattr(pc, "credential", lambda: object())
     monkeypatch.setattr(pc, "provider_registration_status", lambda *a: "registered")
     for env in (pc.MAX_NON_COMPLIANT_ENV, pc.MAX_DETAIL_RESOURCES_ENV, pc.MAX_RECURRENCE_PAIRS_ENV,
@@ -452,14 +521,23 @@ def test_policy_records_follow_their_resource_and_tasks_their_scope(monkeypatch,
     ]
     # Excluded states are not read for details, nor an excluded task for its deployments.
     assert [c for c in calls if c[0] in ("details", "deployments")] == [("details", VM_IN), ("deployments", "t-sub")]
-    # History rows carry no region: the excluded group's pair goes, the east one stays.
+    # History pairs follow their resource's group and region: the excluded group's pair and the east one go.
     assert [r["resource_id"] for r in results["non_compliance_recurrence"]] == [VM_IN]
-    assert (summary["history_non_compliant_pairs"], summary["history_persistently_non_compliant_pairs"]) == (2, 1)
+    assert (summary["history_non_compliant_pairs"], summary["history_persistently_non_compliant_pairs"],
+            summary["max_non_compliant_episodes"]) == (1, 0, 2)
+    # Only in-scope remediated resources are read for their latest state.
+    assert [c for c in calls if c[0] == "state" and VM_EAST2.lower() in c[1]] == []
     assert (summary["assignments_evaluated"], summary["listed_non_compliant_states"],
             summary["listed_distinct_non_compliant_resources"], summary["remediation_tasks"],
             summary["remediation_deployments_listed"]) == (1, 2, 2, 1, 1)
-    # The service's subscription-wide counts cannot be split by resource.
-    assert summary["non_compliant_resources"] == 3
+    # The service's subscription-wide, per-assignment and task-level counts cannot be split by resource, so they
+    # still include excluded resources: the only failed deployment is the excluded east one.
+    assert (summary["non_compliant_resources"], summary["resource_compliance_percentage"]) == (3, 40)
+    assert (summary["non_compliant_assignments"], summary["compliant_assignments"]) == (1, 0)
+    assert [(m["effect"], m["non_compliant_resources"])
+            for m in results["assignment_compliance"][0]["non_compliant_member_policies"]] == [("deny", 3)]
+    assert summary["remediation_failed_deployments"] == 1
+    assert summary["remediation_deployments_by_status"] == {"Succeeded": 1}
     assert (summary["excluded_policy_assignments"], summary["excluded_policy_states"],
             summary["excluded_remediation_tasks"], summary["excluded_remediation_deployments"]) == (1, 2, 1, 1)
     assert (summary["in_scope_policy_assignments"], summary["in_scope_policy_states"],
@@ -471,3 +549,53 @@ def test_policy_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence, _ = run_policy(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["summary"]["listed_non_compliant_states"] == 4
+
+
+def test_policy_failed_state_read_on_an_excluded_deployment_leaves_the_run_ok(monkeypatch, tmp_path):
+    code, evidence, calls = run_policy(monkeypatch, tmp_path, PATTERNS, refuse=(VM_EAST2,))
+    assert code == 0
+    assert [c for c in calls if c[0] == "state"] == [
+        ("state", f"PolicyAssignmentId eq '{ASSIGN_SUB.lower()}' and (ResourceId eq '{VM_IN.lower()}')")]
+    # Without the pattern the same read fails the run.
+    assert run_policy(monkeypatch, tmp_path, None, refuse=(VM_EAST2,))[0] == 1
+
+
+def test_policy_deployment_limit_counts_only_in_scope_deployments(monkeypatch):
+    listed, states = [], []
+    by_task = {"t1": [_deployment(VM_EAST2, "regioneast"), _deployment(VM_OUT, "regionwest"),
+                      _deployment(VM_IN, "regionwest")],
+               "t2": [_deployment(VM_OUT, "regionwest")],
+               "t3": [_deployment(VM_IN, "regionwest")]}
+
+    def at_subscription(name):
+        listed.append(name)
+        return by_task[name]
+
+    def latest(resource, sub, query_options):
+        states.append(query_options.filter)
+        return []
+
+    client = NS(policy_states=NS(list_query_results_for_subscription=latest),
+                remediations=NS(list_deployments_at_subscription=at_subscription))
+    _stub_policyinsights(monkeypatch, client)
+    tasks = [pc.project_remediation(_task(SUB, name, total=len(rows))) for name, rows in by_task.items()]
+    collector = pc.Collector(logging.getLogger("t"))
+    exclusions = ResourceExclusions(["rg:rg-out", "location:regioneast"])
+
+    # Excluded rows don't use up the limit, and a later task holding only excluded ones is no truncation.
+    rows, truncated, excluded = pc.collect_remediation_deployments(client, "s1", tasks[:2], 1, collector, exclusions)
+    assert [d["remediated_resource_id"] for d in rows] == [VM_IN] and truncated is False
+    assert [(e["name"], e["id"], e["pattern"]) for e in excluded] == [
+        ("t1", VM_EAST2, "location:regioneast"), ("t1", VM_OUT, "rg:rg-out"), ("t2", VM_OUT, "rg:rg-out")]
+    assert listed == ["t1", "t2"] and len(states) == 1 and VM_IN.lower() in states[0]
+    assert collector.ok
+
+    # An in-scope deployment past the limit is truncation.
+    rows, truncated, _ = pc.collect_remediation_deployments(client, "s1", tasks, 1, collector, exclusions)
+    assert [d["remediated_resource_id"] for d in rows] == [VM_IN] and truncated is True
+
+    # Without patterns the limit is spent on the first row and later tasks are not listed.
+    listed.clear()
+    rows, truncated, excluded = pc.collect_remediation_deployments(client, "s1", tasks, 1, collector)
+    assert [d["remediated_resource_id"] for d in rows] == [VM_EAST2] and truncated is True
+    assert excluded == [] and listed == ["t1"]

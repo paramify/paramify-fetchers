@@ -94,7 +94,8 @@ HISTORY = "default"
 RECURRENCE_WINDOW_DAYS = 30
 # Grouped history rows read before stopping: one per (resource, policy, state).
 MAX_HISTORY_ROWS = 50000
-HISTORY_GROUP_KEYS = ("ResourceId, PolicyAssignmentId, PolicyDefinitionId, "
+# ResourceLocation adds no groups (a resource has one region); it lets location: patterns reach history.
+HISTORY_GROUP_KEYS = ("ResourceId, ResourceLocation, PolicyAssignmentId, PolicyDefinitionId, "
                       "PolicyDefinitionReferenceId, ComplianceState")
 # Pairs seen both compliant and non-compliant each cost one ordered-history query.
 DEFAULT_MAX_RECURRENCE_PAIRS = 100
@@ -259,6 +260,7 @@ def project_history_group(row) -> dict:
     extra = model_attr(row, "additional_properties") or {}
     return {
         "resource_id": model_attr(row, "resource_id"),
+        "resource_location": model_attr(row, "resource_location"),
         "policy_assignment_id": model_attr(row, "policy_assignment_id"),
         "policy_definition_id": model_attr(row, "policy_definition_id"),
         "policy_definition_reference_id": model_attr(row, "policy_definition_reference_id"),
@@ -875,8 +877,10 @@ def collect_recurrence(client, subscription_id, limit: int, collector: Collector
         truncated = True
     pairs = history_pairs(rows)
     if exclusions:
-        # A pair follows its resource; history rows carry no region, so only rg: and id: patterns reach them.
-        pairs = {key: pair for key, pair in pairs.items() if not exclusions.match(pair.get("resource_id"))}
+        # A pair follows its resource, matched by the resource's id, group and region.
+        regions = {pair_key(r): r["resource_location"] for r in rows if r.get("resource_location")}
+        pairs = {key: pair for key, pair in pairs.items()
+                 if not exclusions.match(pair.get("resource_id"), regions.get(key))}
     flipping = intermittent_pairs(pairs)
     records = []
     for pair in flipping[:limit]:
@@ -911,13 +915,15 @@ def collect_recurrence(client, subscription_id, limit: int, collector: Collector
 
 
 def collect_remediation_deployments(
-    client, subscription_id, remediations: list[dict], limit: int, collector: Collector
-) -> tuple[list[dict], bool]:
-    """Each task's per-resource deployments, checked against the latest states, up to `limit`."""
+    client, subscription_id, remediations: list[dict], limit: int, collector: Collector,
+    exclusions: ResourceExclusions | None = None,
+) -> tuple[list[dict], bool, list[dict]]:
+    """In-scope deployments up to `limit`, checked against the latest states; excluded ones come back as entries."""
     from azure.mgmt.policyinsights.models import QueryOptions  # lazy
 
+    exclusions = exclusions if exclusions is not None else ResourceExclusions()
     if limit <= 0:
-        return [], False
+        return [], False, []
     listers = {
         "subscription": lambda name, scope: client.remediations.list_deployments_at_subscription(name),
         "resource_group": lambda name, scope: client.remediations.list_deployments_at_resource_group(
@@ -928,6 +934,7 @@ def collect_remediation_deployments(
             scope.lstrip("/"), name),
     }
     deployments: list[dict] = []
+    excluded: list[tuple] = []
     truncated = False
 
     def _current(policy: tuple, resource_ids: list[str]) -> dict:
@@ -951,7 +958,8 @@ def collect_remediation_deployments(
     read_by_policy: dict[tuple, set] = {}
     for task in remediations:
         remaining = limit - len(deployments)
-        if remaining <= 0:
+        # Past the limit, and only with patterns set, a task is read to find whether it holds an in-scope deployment.
+        if remaining <= 0 and (not exclusions or task.get("total_deployments") == 0):
             truncated = truncated or task.get("total_deployments") != 0
             continue
         kind, scope = remediation_scope(task.get("id"))
@@ -960,14 +968,21 @@ def collect_remediation_deployments(
             logger.warning("remediation %s has an unrecognised scope; deployments not read", task.get("id"))
             continue
 
-        def _list(kind=kind, scope=scope, name=name, remaining=remaining):
+        def _list(kind=kind, scope=scope, name=name, remaining=remaining, task_id=task.get("id")):
             nonlocal truncated
             rows = []
             for deployment in listers[kind](name, scope):
+                row = project_remediation_deployment(deployment)
+                _, out = exclusions.split(
+                    [row], "remediation_deployment", resource_id=lambda d: d["remediated_resource_id"],
+                    location=lambda d: d["resource_location"], name=lambda d: basename(task_id))
+                if out:
+                    excluded.append((task_id or "", row["remediated_resource_id"] or "", out[0]))
+                    continue
                 if len(rows) >= remaining:
                     truncated = True
                     break
-                rows.append(project_remediation_deployment(deployment))
+                rows.append(row)
             return rows
 
         rows = collector.guard(f"policyinsights.remediations.list_deployments_at_{kind}({name})", _list,
@@ -989,8 +1004,9 @@ def collect_remediation_deployments(
                 default={},
             ) or {})
         deployments.extend(deployment_record(d, task, current) for d in rows)
-    return sorted(deployments, key=lambda d: (d.get("remediation_task_id") or "",
-                                              d.get("remediated_resource_id") or "")), truncated
+    deployments = sorted(deployments, key=lambda d: (d.get("remediation_task_id") or "",
+                                                     d.get("remediated_resource_id") or ""))
+    return deployments, truncated, [entry for *_, entry in sorted(excluded, key=lambda e: e[:2])]
 
 
 def collect_compliance(subscription_id, cred, collector: Collector, limits: dict,
@@ -1065,12 +1081,9 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
     details = collect_evaluation_details(client, states, limits["detail_resources"], collector)
     recurrence = collect_recurrence(client, subscription_id, limits["recurrence_pairs"], collector,
                                     exclusions=exclusions)
-    deployments, deployments_truncated = collect_remediation_deployments(
-        client, subscription_id, remediations, limits["remediation_deployments"], collector
+    deployments, deployments_truncated, excluded_deployments = collect_remediation_deployments(
+        client, subscription_id, remediations, limits["remediation_deployments"], collector, exclusions
     )
-    deployments, excluded_deployments = exclusions.split(
-        deployments, "remediation_deployment", resource_id=lambda d: d["remediated_resource_id"],
-        location=lambda d: d["resource_location"], name=lambda d: basename(d["remediation_task_id"]))
 
     logger.info(
         "Summarized %d assignment(s): %s non-compliant resource(s); itemized %d state(s)%s, "

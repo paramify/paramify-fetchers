@@ -243,8 +243,9 @@ def federated_credential_count(arm, identity_id: str) -> int:
     return len(list_all(arm, f"{identity_id}/federatedIdentityCredentials", FIC_API_VERSION)["items"])
 
 
-def identity_records(subscription_id, cred, collector: Collector, identities: list, references: list, assignments: list):
-    """Identity records; federated credentials are read only for identities nothing else uses."""
+def identity_records(subscription_id, cred, collector: Collector, identities: list, references: list, assignments: list,
+                     exclusions: ResourceExclusions | None = None):
+    """Identity records; federated credentials are read only for in-scope identities nothing else uses."""
     attached = Counter(identity for _, identity in {(r.get("id"), r.get("identityId")) for r in references})
     roles = Counter((a.get("principalId") or "").lower() for a in assignments)
     arm = None
@@ -254,6 +255,10 @@ def identity_records(subscription_id, cred, collector: Collector, identities: li
         n_roles = roles[(row.get("principalId") or "").lower()] if row.get("principalId") else 0
         federated = None
         if n_attached == 0 and n_roles == 0:
+            if exclusions and exclusions.match(row.get("id"), row.get("location"), row.get("resourceGroup")):
+                # Out of scope: listed under excluded without reading its federated credentials.
+                records.append({**identity_record(row, n_attached, n_roles, None), "orphan_kind": "unused_identity"})
+                continue
             if arm is None:
                 # Resource Graph does not index federatedIdentityCredentials.
                 arm = arm_rest_client(cred)
@@ -344,7 +349,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
     checked = {"slots": in_scope_count(slots, exclusions), "stale_slot_days": days,
                "identities": in_scope_count(identities or [], exclusions)}
     if identities is not None and references is not None and rows is not None:
-        identity_rows = identity_records(subscription_id, cred, collector, identities, references, rows)
+        identity_rows = identity_records(subscription_id, cred, collector, identities, references, rows, exclusions)
         resources.extend(r for r in identity_rows if r["orphan_kind"])
 
     role_names = collector.guard(

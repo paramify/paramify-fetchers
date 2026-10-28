@@ -51,9 +51,12 @@ config_schema:
       matches any run of characters and ? one character. A matching orphaned
       resource, or a role assignment made at a matching scope, is listed under
       excluded with the pattern and left out of every count; assignments made at
-      the subscription itself stay. Orphans and deleted principals are still
+      the subscription itself stay. A role assignment carries no region, so only
+      rg: and id: patterns reach it. Orphans and deleted principals are still
       worked out against every resource and role assignment, so an in-scope
-      identity used only by an excluded resource still reads as in use. A pattern
+      identity used only by an excluded resource still reads as in use. An
+      excluded identity that nothing attaches and that holds no role is listed
+      under excluded without its federated credentials being read. A pattern
       without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
       resource is in scope.
@@ -127,7 +130,7 @@ evidence_set:
     workload, such as a pipeline using workload identity federation, signs in as the
     identity. Resource Graph does not index federated credentials, so they are read
     with ARM GET <identity id>/federatedIdentityCredentials?api-version=2023-01-31
-    (following nextLink), only for identities with no attachment and no role; if
+    (following nextLink), only for in-scope identities with no attachment and no role; if
     that read fails, federated_credentials is null and the identity is not reported
     unused. Attachments and roles are read in this subscription only: an identity
     used solely by a resource or a role assignment in another subscription or a

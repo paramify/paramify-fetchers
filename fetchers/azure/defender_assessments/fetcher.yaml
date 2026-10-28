@@ -44,7 +44,9 @@ config_schema:
       resource_id is in a matching resource group or is, or sits under, a matching
       id is listed under excluded with the pattern and left out of every count and
       percentage. An assessment carries no region, so location: patterns never
-      match one, and assessments of the subscription itself stay in scope. A
+      match one, and assessments of the subscription itself stay in scope. An
+      on-premises assessment's resource_id is a machine name or VM UUID rather
+      than an Azure resource id, so no pattern matches it and it stays in scope. A
       pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
       resource is in scope.

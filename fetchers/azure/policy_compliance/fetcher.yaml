@@ -68,6 +68,7 @@ config_schema:
     description: >
       How many remediation deployments to itemize across all remediation tasks;
       remediation_deployments_truncated says when there were more. 0 skips them.
+      Deployments the resource_exclusions patterns take out don't count toward it.
       Azure deletes a task 60 days after its last change, so older ones are gone.
   resource_exclusions:
     type: string
@@ -85,10 +86,10 @@ config_schema:
       or remediation task follows the scope it was made at, so one made at the
       subscription or a management group stays. Each match is listed under
       excluded with the pattern and left out of every itemized count; an excluded
-      state is not read for evaluation details, nor an excluded task for its
-      deployments. 30-day history pairs follow
-      their resource too and are dropped before recurrence is read; they carry no
-      region, so only rg: and id: patterns reach them. The service's
+      state is not read for evaluation details, an excluded task is not read for
+      its deployments, and an excluded deployment's resource is not read for its
+      latest state. 30-day history pairs follow their resource too, by its id,
+      group and region, and are dropped before recurrence is read. The service's
       subscription-wide and per-assignment counts cannot be split by resource and
       still include excluded resources. A pattern without one of these prefixes
       fails the run. Set it once under platforms.azure.config for every Azure
@@ -132,7 +133,7 @@ evidence_set:
     <resource_id>, query_options=QueryOptions(filter="ComplianceState eq
     'NonCompliant'", expand="PolicyEvaluationDetails")),
     policy_states.list_query_results_for_subscription("default", ...) over the last 30
-    days grouped per (resource, policy, compliance state) and a count of those groups,
+    days grouped per (resource, region, policy, compliance state) and a count of those groups,
     and per intermittent pair the same query filtered to that pair and ordered by
     time, remediations.list_for_subscription(), and per task
     remediations.list_deployments_at_subscription / _at_resource_group /

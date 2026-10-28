@@ -688,7 +688,8 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit(monke
          "policy_assignment_id": ASSIGN, "policy_definition_reference_id": "r2", "total_deployments": 2},
     ]
     monkeypatch.setattr(fx, "RESOURCE_FILTER_BATCH", 1)
-    rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 10, fx.Collector(logging.getLogger("t")))
+    collector = fx.Collector(logging.getLogger("t"))
+    rows, truncated, _ = fx.collect_remediation_deployments(client, "s1", tasks, 10, collector)
     assert listed == [("subscription", "t1"), ("resource_group", "rg1", "t2"), ("subscription", "t3")]
 
     def query(ref, *resources):
@@ -707,14 +708,14 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit(monke
     assert filters == [query("r1", VM, NSG)]
 
     listed.clear()
-    rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 1, fx.Collector(logging.getLogger("t")))
+    rows, truncated, _ = fx.collect_remediation_deployments(client, "s1", tasks, 1, collector)
     assert len(rows) == 1 and truncated is True
     assert listed == [("subscription", "t1")]
 
     # 0 skips them: nothing is listed and nothing reads as truncated.
     listed.clear()
     assert fx.collect_remediation_deployments(client, "s1", tasks, 0, fx.Collector(logging.getLogger("t"))) == (
-        [], False)
+        [], False, [])
     assert listed == []
 
 
@@ -746,7 +747,7 @@ def test_collect_remediation_deployments_at_management_group_and_resource():
          "policy_assignment_id": ASSIGN},
     ]
     collector = fx.Collector(logging.getLogger("t"))
-    rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 10, collector)
+    rows, truncated, _ = fx.collect_remediation_deployments(client, "s1", tasks, 10, collector)
     assert listed == [("management_group", "mg1", "t3"), ("resource", NSG.lstrip("/"), "t4")]
     assert [(r["remediation_task_id"].rsplit("/", 1)[-1], r["error_code"], r["now_compliant"]) for r in rows] == [
         ("t3", "Denied", None), ("t4", "Denied", None)]
