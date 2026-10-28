@@ -4068,6 +4068,8 @@ def test_graph_pim_rule_models_present() -> None:
         model = _import(f"msgraph.generated.models.{module}", name)
         missing = [f for f in fields if f not in getattr(model, "__dataclass_fields__", {})]
         assert not missing, f"{name} lost {missing} (azure/entra_pim_assignments)"
+
+
 def test_graph_service_principal_access_builders_present() -> None:
     """The per-item builders azure/entra_service_principals reads past the $expand limit."""
     client = _build("msgraph", "GraphServiceClient")
