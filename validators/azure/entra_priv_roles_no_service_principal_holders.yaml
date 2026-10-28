@@ -1,28 +1,34 @@
 key: entra_priv_roles_no_service_principal_holders
-name: Entra No Service Principal Holds A Privileged Directory Role
+name: Entra No Unapproved Service Principal Holds A Privileged Directory Role
 type: AUTOMATED
 role: configuration
 statement: >-
-  No service principal (an app's or a managed identity's) actively holds a privileged Entra ID
-  directory role (Global Administrator, Privileged Role Administrator, Application Administrator,
-  Global Reader and the other admin and tenant-wide reader roles azure_entra_privileged_roles flags),
-  every role's members were read, and the roles read include the Global Administrator role, so an
-  empty read cannot pass. Substantiates non-user accounts holding only least-privilege directory
-  roles (KSI-IAM-SNU). An approved integration that needs one of these roles still fails here and must
-  be justified outside this evidence. Does NOT prove Microsoft Graph or other API permissions granted
-  to service principals (azure_entra_service_principals), Azure resource roles, that a service
-  principal is enabled only when required, a service principal reaching a role through a group, or
-  roles scoped to an administrative unit. Custom directory roles and built-in roles outside the
-  fetcher's list (results.privileged_role_names_checked) are not counted.
+  No service principal (an app's or a managed identity's) outside the approved list actively holds a
+  privileged Entra ID directory role (Global Administrator, Privileged Role Administrator, Application
+  Administrator, Global Reader and the other admin and tenant-wide reader roles
+  azure_entra_privileged_roles flags), every role's members and service principals were read, and the
+  roles read include the Global Administrator role, so an empty read cannot pass. The approved list
+  holds service principal object ids (the evidence records a member's object id, not its app id); as
+  shipped it holds only a placeholder that matches no real principal, so any service principal in a
+  privileged role fails until the tenant names its approved ones. Substantiates non-user accounts
+  holding only least-privilege directory roles (KSI-IAM-SNU). Does NOT prove that an approved
+  service principal needs its role, Microsoft Graph or other API permissions granted to service
+  principals (azure_entra_service_principals), Azure resource roles, that a service principal is
+  enabled only when required, a service principal reaching a role through a group, or roles scoped to
+  an administrative unit. Custom directory roles and built-in roles outside the fetcher's list
+  (results.privileged_role_names_checked) are not counted.
 
-regex: '"partial_failure":\s*false[\s\S]*?"global_administrator_role_activated":\s*true[\s\S]*?"service_principals_in_privileged_roles":\s*(?<service_principals_in_privileged_roles>\d+)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+# The approved list is the alternation in (?!(?:...)") below: lower-case service principal OBJECT ids
+# separated by |, e.g. (?!(?:<id-1>|<id-2>)"). 00000000-0000-0000-0000-000000000000 is a placeholder
+# Entra never issues. The scan from partial_failure to the summary may not cross a privileged role
+# (is_privileged true) whose members list a ServicePrincipal with any other id. The lookahead after
+# partial_failure fails the read when the summary counts service principals but no member record is
+# typed ServicePrincipal, so a renamed key or value can't pass.
+regex: '"partial_failure":\s*false(?=[\s\S]*?"service_principals_in_privileged_roles":\s*0\b|[\s\S]*?"principal_type":\s*"ServicePrincipal")(?:(?!"is_privileged":\s*true,(?:[^{}\[\]"]|"(?:[^"\\]|\\.)*")*?"members":\s*\[\s*(?:\{(?:[^{}"]|"(?:[^"\\]|\\.)*")*\}\s*,\s*)*?\{(?:[^{}"]|"(?:[^"\\]|\\.)*")*?"id":\s*"(?!(?:00000000-0000-0000-0000-000000000000)")[^"]*",\s*"principal_type":\s*"ServicePrincipal")[\s\S])*?"global_administrator_role_activated":\s*true[\s\S]*?"service_principals_in_privileged_roles":\s*(?<service_principals_in_privileged_roles>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
-    value: { type: CUSTOM_TEXT, customText: "0" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # service_principals_in_privileged_roles
-    criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:
