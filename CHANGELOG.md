@@ -41,7 +41,10 @@ schemas and the `paramify` CLI — not the internal code.
   as risky. A certificate counts as phishing-resistant only when it alone
   satisfied MFA, and any client but a browser or modern app counts as legacy
   authentication (a floor: interactive sign-ins only), except one Graph reports
-  as Unknown. Sign-ins with no reported
+  as Unknown. Windows device logons (the Windows Sign In app) are counted on
+  their own, in `successful_windows_device_sign_ins`, and left out of the
+  single-factor, multi-factor and no-Conditional-Access figures and the MFA
+  percentage. Sign-ins with no reported
   MFA requirement are counted apart. `_shared/azure_rest.py` gains `graph_pages`
   and `graph_list` for paged Graph reads on v1.0 or beta, and retries a GET that
   times out, once.

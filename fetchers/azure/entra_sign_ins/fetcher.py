@@ -60,6 +60,8 @@ NOT_A_METHOD = frozenset({"previously satisfied", "satisfied by token"})
 MODERN_CLIENTS = frozenset({"browser", "mobile apps and desktop clients", "modern clients"})
 # Graph's "Unknown" isn't a legacy protocol: real tenants show it on Azure portal and passkey sign-ins.
 NOT_LEGACY = MODERN_CLIENTS | {"unknown"}
+# The "Windows Sign In" app: a logon to a Windows device, counted apart from sign-ins to apps.
+WINDOWS_SIGN_IN_APP_ID = "38aa3b87-a06d-4817-b275-7a316988d93b"
 
 logger = logging.getLogger(NAME)
 
@@ -88,11 +90,12 @@ def sign_in_record(s: Dict[str, Any]) -> Dict[str, Any]:
     state = s.get("riskState")
     client = s.get("clientAppUsed") or ""
     policies = s.get("appliedConditionalAccessPolicies")
+    device_logon = (s.get("appId") or "").lower() == WINDOWS_SIGN_IN_APP_ID
     reasons = []
-    if succeeded and requirement == SINGLE_FACTOR:
+    if succeeded and requirement == SINGLE_FACTOR and not device_logon:
         # No policy required MFA either way, but a passkey alone isn't a password alone.
         reasons.append("single_factor_phishing_resistant" if phishing_resistant else "single_factor")
-    if succeeded and s.get("conditionalAccessStatus") == CA_NOT_APPLIED:
+    if succeeded and s.get("conditionalAccessStatus") == CA_NOT_APPLIED and not device_logon:
         reasons.append("no_conditional_access")
     if level in RISK_LEVELS or state in RISKY_STATES:
         reasons.append("risky")
@@ -106,6 +109,7 @@ def sign_in_record(s: Dict[str, Any]) -> Dict[str, Any]:
         # Kept only where a risky sign-in needs tracing; no figure uses it.
         "ip_address": s.get("ipAddress") if "risky" in reasons else None,
         "client_app_used": s.get("clientAppUsed"),
+        "windows_device_logon": device_logon,
         "succeeded": succeeded,
         "error_code": status.get("errorCode"),
         "authentication_requirement": requirement,
@@ -149,14 +153,18 @@ class Tally:
     def add(self, r: Dict[str, Any]) -> None:
         self.total += 1
         ok = r["succeeded"]
+        # A Windows device logon counts in the totals and on its own, never as a single-factor,
+        # multi-factor or no-Conditional-Access sign-in to an app.
+        app_ok = ok and not r["windows_device_logon"]
         flags = {
             "successful": ok,
             "failed": not ok,
-            "successful_single_factor": ok and r["authentication_requirement"] == SINGLE_FACTOR,
-            "successful_multi_factor": ok and r["authentication_requirement"] == MULTI_FACTOR,
-            "successful_unknown_requirement": ok
+            "successful_windows_device_logon": ok and r["windows_device_logon"],
+            "successful_single_factor": app_ok and r["authentication_requirement"] == SINGLE_FACTOR,
+            "successful_multi_factor": app_ok and r["authentication_requirement"] == MULTI_FACTOR,
+            "successful_unknown_requirement": app_ok
             and r["authentication_requirement"] not in (SINGLE_FACTOR, MULTI_FACTOR),
-            "successful_without_conditional_access": ok and r["conditional_access_status"] == CA_NOT_APPLIED,
+            "successful_without_conditional_access": app_ok and r["conditional_access_status"] == CA_NOT_APPLIED,
             "conditional_access_failures": r["conditional_access_status"] == CA_FAILURE,
             "successful_phishing_resistant": r["phishing_resistant"],
             "successful_legacy_authentication": ok and r["legacy_authentication"],
@@ -200,7 +208,7 @@ class Tally:
 COUNT_KEYS = (
     "sign_ins", "successful", "failed", "successful_single_factor", "successful_multi_factor",
     "successful_without_conditional_access", "conditional_access_failures",
-    "successful_phishing_resistant", "successful_legacy_authentication", "risky",
+    "successful_phishing_resistant", "successful_legacy_authentication", "risky", "successful_windows_device_logon",
 )
 
 
@@ -240,6 +248,7 @@ def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, compl
         exceptions, key=lambda r: (r["created_date_time"] or "", r["id"] or ""), reverse=True
     )[:EXCEPTION_LIMIT]
     c = tally.counts
+    app_successful = c["successful"] - c["successful_windows_device_logon"]
     readable = status == "read"
 
     def when(value):
@@ -265,8 +274,9 @@ def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, compl
         "successful_single_factor_sign_ins": when(c["successful_single_factor"]),
         "successful_multi_factor_sign_ins": when(c["successful_multi_factor"]),
         "successful_sign_ins_with_unknown_requirement": when(c["successful_unknown_requirement"]),
+        "successful_windows_device_sign_ins": when(c["successful_windows_device_logon"]),
         "multi_factor_percentage": when(
-            coverage_percentage(c["successful_multi_factor"], c["successful"]) if c["successful"] else None
+            coverage_percentage(c["successful_multi_factor"], app_successful) if app_successful else None
         ),
         "users_with_single_factor_sign_ins": when(sum(1 for u in users if u["successful_single_factor"])),
         "apps_with_single_factor_sign_ins": when(sum(1 for a in apps if a["successful_single_factor"])),

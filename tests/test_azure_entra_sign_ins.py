@@ -132,6 +132,30 @@ def test_sign_ins_summarized_per_user_and_app(monkeypatch):
     assert apps["app-mail"]["successful_legacy_authentication"] == 1
 
 
+def test_windows_device_logons_are_counted_apart_from_app_sign_ins(monkeypatch):
+    windows = sign_ins.WINDOWS_SIGN_IN_APP_ID
+    logons = [
+        _sign_in("w1", "u-6", app=windows, requirement="singleFactorAuthentication", steps=[_step("Password")],
+                 ca="notApplied", client="Mobile Apps and Desktop clients"),
+        _sign_in("w2", "u-6", app=windows.upper(), requirement="singleFactorAuthentication",
+                 steps=[_step("Password")], ca="notApplied", level="medium", state="atRisk"),
+        _sign_in("w3", "u-7", app=windows, error=50126, requirement="singleFactorAuthentication", ca="notApplied"),
+    ]
+    results, s = sign_ins.collect(FakeClient([SIGN_INS + logons]), _collector(), _window(monkeypatch))
+
+    assert (s["total_sign_ins"], s["successful_sign_ins"]) == (12, 10)
+    assert s["successful_windows_device_sign_ins"] == 2
+    # The app figures match the run without the logons.
+    assert s["successful_single_factor_sign_ins"] == 2 and s["successful_multi_factor_sign_ins"] == 6
+    assert s["multi_factor_percentage"] == 75
+    assert s["successful_sign_ins_without_conditional_access"] == 1
+    assert s["users_with_single_factor_sign_ins"] == 1 and s["users_with_sign_ins_without_conditional_access"] == 1
+    reasons = {e["id"]: e["exception_reasons"] for e in results["exception_sign_ins"]}
+    assert "w1" not in reasons and reasons["w2"] == ["risky"]
+    users = {u["user_id"]: u for u in results["users"]}
+    assert users["u-6"]["successful_windows_device_logon"] == 2 and users["u-6"]["successful_single_factor"] == 0
+
+
 def test_legacy_authentication_is_any_client_but_browser_and_modern_apps():
     for client, legacy in (("Browser", False), ("Mobile Apps and Desktop clients", False), ("Modern clients", False),
                            ("", False), ("Unknown", False),
