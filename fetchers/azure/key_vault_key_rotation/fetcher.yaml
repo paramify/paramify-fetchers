@@ -22,8 +22,10 @@ config_schema:
       resource group and region, so it leaves with its vault; a certificate, or a
       key with no management-plane id, is matched by its vault's id. An App
       Service certificate's key_vault_certificate_auto_renew is still read from
-      every vault, so an in-scope certificate's answer doesn't change. A pattern
-      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      every vault, so an in-scope certificate's answer doesn't change. An excluded
+      vault's keys, secrets, certificates and rotation policies are still read, so a
+      failed read there still fails the run. A pattern without one of these
+      prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
       resource is in scope.
 
