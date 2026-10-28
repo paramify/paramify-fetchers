@@ -29,7 +29,10 @@ schemas and the `paramify` CLI — not the internal code.
   - its linked TFVC changesets, Git commits, pull requests, builds and parent,
     child and related items.
 
-  Linked changesets are read for their date and author. The summary lists
+  Linked changesets are read for their date and author, and each project's
+  states for the types collected are recorded, naming any item state its type
+  no longer defines. A finished change item is one in a Completed state; a
+  Removed one is not. The summary lists
   finished change items without approval or a linked change, items changed
   before approval or approved by the change's author, and open, overdue,
   high-priority and unassigned security items. A summary field whose read
@@ -460,6 +463,10 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Azure DevOps: a TFVC "Access Denied" is `not_authorized`.** Azure DevOps
+  answers 500 TF14098 when the caller can't read an item in a changeset. The
+  shared client now reports it as `not_authorized` and doesn't retry it.
+  Before, it was retried and reported as `internal_error`.
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
   collection as a success.** A 200 response that is not JSON, for example a
   single sign-on or instance hibernation page, and a response whose

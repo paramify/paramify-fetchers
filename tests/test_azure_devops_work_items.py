@@ -239,6 +239,7 @@ def test_collects_change_and_security_items_and_exits_zero(tmp_path):
     assert s["projects_collected"] == 1 and s["work_item_types_missing"] == []
     assert s["work_items_total"] == 6 and s["work_items_by_type"] == {"Bug": 2, "Change Request": 3, "Task": 1}
     assert s["work_items_by_state_category"] == {"Completed": 3, "InProgress": 3}
+    assert s["work_item_states_undefined"] == []
     assert s["work_items_open"] == 3 and s["approval_history_collected"] is True
     assert (s["change_items"], s["change_items_finished"], s["change_items_approved"]) == (3, 2, 2)
     assert s["finished_change_items_without_approval"] == [103]
@@ -302,7 +303,7 @@ def test_the_query_selects_types_tags_the_window_and_open_states(tmp_path):
 
 
 def test_configured_types_tags_and_approval(tmp_path, monkeypatch):
-    monkeypatch.setenv(mod.TYPES_ENV, "Task, Hotfix")
+    monkeypatch.setenv(mod.TYPES_ENV, "Task, Release")
     monkeypatch.setenv(mod.TAGS_ENV, "none")
     monkeypatch.setenv(mod.APPROVAL_STATES_ENV, "none")
     monkeypatch.setenv(mod.APPROVAL_PATTERN_ENV, r"\bcab ok\b")
@@ -316,17 +317,17 @@ def test_configured_types_tags_and_approval(tmp_path, monkeypatch):
     wiql = next(body["query"] for _, path, _, body in fake.calls if path.endswith("/wiql"))
     assert "IN ('Task')" in wiql and "CONTAINS" not in wiql and "@Today - 30" in wiql
     s = evidence["summary"]
-    assert s["work_item_types_missing"] == ["Hotfix"] and s["change_items"] == 1 and s["tagged_items_open"] == 0
+    assert s["work_item_types_missing"] == ["Release"] and s["change_items"] == 1 and s["tagged_items_open"] == 0
     assert work_item(evidence, 202)["approval"]["source"] == "comment"
     assert evidence["results"]["selection"]["approval_states"] == []
 
 
 def test_no_selected_type_and_no_tag_skips_the_query(tmp_path, monkeypatch):
-    monkeypatch.setenv(mod.TYPES_ENV, "Hotfix")
+    monkeypatch.setenv(mod.TYPES_ENV, "Release")
     monkeypatch.setenv(mod.TAGS_ENV, "none")
     code, evidence, _, fake, _ = run(tmp_path)
     assert code == 0 and not any(path.endswith("/wiql") for _, path, _, _ in fake.calls)
-    assert evidence["summary"]["work_items_total"] == 0 and evidence["summary"]["work_item_types_missing"] == ["Hotfix"]
+    assert evidence["summary"]["work_items_total"] == 0 and evidence["summary"]["work_item_types_missing"] == ["Release"]
 
 
 @pytest.mark.parametrize("env_name, value", [(mod.APPROVAL_PATTERN_ENV, "(unclosed"), (mod.LOOKBACK_ENV, "soon"),
@@ -366,12 +367,44 @@ def test_unread_history_leaves_the_approval_figures_unknown(tmp_path):
 
 def test_an_unread_changeset_leaves_the_change_order_unknown(tmp_path):
     fake = FakeADO()
-    fake.routes[("GET", "/contoso/_apis/tfvc/changesets/502")] = err(403, "TF14098: Access Denied")
-    code, evidence, status, _, _ = run(tmp_path, fake)
+    # TFVC answers 500, not 403, when an item in the changeset can't be read.
+    fake.routes[("GET", "/contoso/_apis/tfvc/changesets/502")] = err(
+        500, "TF14098: Access Denied: User x needs Read permission(s) for at least one item in changeset 502.")
+    code, evidence, status, fake, _ = run(tmp_path, fake)
     assert code == 1 and status["code"] == "not_authorized" and "Code (Read)" in status["error"]
+    assert sum(1 for _, path, _, _ in fake.calls if path.endswith("/changesets/502")) == 1
     assert work_item(evidence, 102)["changed_before_approval"] is None
     assert evidence["summary"]["change_items_changed_before_approval"] is None
     assert evidence["summary"]["change_items_with_linked_changes"] == 2
+
+
+def test_a_removed_item_is_not_finished_and_an_undefined_state_is_named(tmp_path):
+    fake = FakeADO()
+    types = [dict(t) for t in TYPES]
+    types[0] = {**types[0], "states": types[0]["states"] + states(("Removed", "Removed"))}
+    fake.routes[("GET", f"/contoso/{P}/_apis/wit/workitemtypes")] = Resp(body={"value": types})
+    extra = {104: item(104, "Change Request", "Removed"), 105: item(105, "Change Request", "Awaiting Sign-off")}
+    fake.routes[("POST", f"/contoso/{P}/_apis/wit/wiql")] = Resp(body={"workItems": [
+        {"id": i} for i in [*ITEMS, *extra]]})
+    fake.routes[("POST", f"/contoso/{P}/_apis/wit/workitemsbatch")] = lambda params, body: Resp(body={
+        "value": [{**ITEMS, **extra}[i] for i in body["ids"]]})
+    for wid in extra:
+        fake.routes[("GET", f"/contoso/{P}/_apis/wit/workItems/{wid}/updates")] = Resp(body={"value": []})
+        fake.routes[("GET", f"/contoso/{P}/_apis/wit/workItems/{wid}/comments")] = Resp(body={"comments": []})
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert code == 0 and (s["change_items"], s["change_items_finished"]) == (5, 2)
+    assert s["finished_change_items_without_approval"] == [103]
+    assert s["finished_change_items_without_linked_change"] == [103]
+    assert s["work_items_by_state_category"] == {"Completed": 3, "InProgress": 3, "Removed": 1, "unknown": 1}
+    assert s["work_item_states_undefined"] == ["Change Request: Awaiting Sign-off"] and s["work_items_open"] == 3
+    assert work_item(evidence, 104)["open"] is False and work_item(evidence, 105)["open"] is None
+    project = evidence["results"]["projects"][0]
+    assert project["undefined_states"] == ["Change Request: Awaiting Sign-off"]
+    assert list(project["states_by_type"]) == ["Bug", "Change Request", "Task"]
+    assert project["states_by_type"]["Change Request"] == {"Proposed": "Proposed", "Approved": "InProgress",
+                                                           "Active": "InProgress", "Closed": "Completed",
+                                                           "Removed": "Removed"}
 
 
 @pytest.mark.parametrize("route", [("POST", f"/contoso/{P}/_apis/wit/wiql"),

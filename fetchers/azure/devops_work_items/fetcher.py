@@ -121,7 +121,7 @@ def call(collector: DevOpsCollector, operation: str, scope: str, fn: Callable[[]
         try:
             return fn()
         except DevOpsError as exc:
-            if exc.status in (401, 403):
+            if exc.status in (401, 403) or exc.failure_code == "not_authorized":
                 hint = (f"PAT scope needed: {scope}" if collector.auth_mode == "pat"
                         else f"the Entra identity lacks permission for this read; PAT equivalent: {scope}")
                 exc.args = (f"{exc} [{hint}]",)
@@ -261,8 +261,10 @@ def project_types(client: DevOpsClient, pid: str) -> Dict[str, Dict[str, Any]]:
         states = raw.get("states")
         if not isinstance(states, list):
             states = client.list(f"{pid}/_apis/wit/workitemtypes/{quote(raw['name'])}/states")
-        types[raw["name"].lower()] = {"name": raw["name"], "states": {
-            str(s["name"]).lower(): s.get("category") or "" for s in states if isinstance(s, dict) and s.get("name")}}
+        named = [s for s in states if isinstance(s, dict) and s.get("name")]
+        types[raw["name"].lower()] = {"name": raw["name"],
+                                      "states": {str(s["name"]).lower(): s.get("category") or "" for s in named},
+                                      "state_names": [str(s["name"]) for s in named]}
     return types
 
 
@@ -333,13 +335,14 @@ def item_record(raw: Dict[str, Any], pname: str, types: Dict[str, Dict[str, Any]
 def collect_project(client: DevOpsClient, collector: DevOpsCollector, project: Dict[str, Any], selection: Selection,
                     days: int, now: datetime) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     pid, pname = project["id"], project["name"]
-    record: Dict[str, Any] = {"id": pid, "name": pname, "work_item_types_missing": None, "work_items": None}
+    record: Dict[str, Any] = {"id": pid, "name": pname, "work_item_types_missing": None, "work_items": None,
+                              "states_by_type": None, "undefined_states": None}
     types = call(collector, f"wit.workitemtypes.list({pname})", SCOPE_WORK, lambda: project_types(client, pid))
     if types is None:
         return record, []
     record["work_item_types_missing"] = [t for t in selection.types if t.lower() not in types]
     if not selection.tags and len(record["work_item_types_missing"]) == len(selection.types):
-        record["work_items"] = 0
+        record.update(work_items=0, states_by_type={}, undefined_states=[])
         return record, []
     found = call(collector, f"wit.wiql({pname})", SCOPE_WORK, lambda: client.post(
         f"{pid}/_apis/wit/wiql", {"query": query(types, pname, selection, days)}))
@@ -372,6 +375,10 @@ def collect_project(client: DevOpsClient, collector: DevOpsCollector, project: D
         item["approval_read"] = updates is not None and comments is not None
         items.append(item)
     record["work_items"] = len(items) if complete else None
+    shown = {t.lower() for t in selection.types} | {str(i["type"]).lower() for i in items}
+    record["states_by_type"] = {types[t]["name"]: {n: types[t]["states"][n.lower()] for n in types[t]["state_names"]}
+                                for t in sorted(shown) if t in types}
+    record["undefined_states"] = undefined_states(items)
     return record, items
 
 
@@ -403,6 +410,11 @@ def link_changes(item: Dict[str, Any], changesets: Dict[int, Optional[Dict[str, 
         same_person(approval["by"], c["author"]) or same_person(approval["by"], c["checked_in_by"]) for c in known)
 
 
+def undefined_states(items: Iterable[Dict[str, Any]]) -> List[str]:
+    """Item states, as "type: state", that the item's type doesn't define now (a process change leaves these)."""
+    return sorted({f"{i['type']}: {i['state']}" for i in items if i["state_category"] is None})
+
+
 def has_change(item: Dict[str, Any]) -> bool:
     return any(item["links"][k] for k in ("changesets", "commits", "pull_requests"))
 
@@ -420,7 +432,7 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
         return value if queried and ok else None
 
     change = [i for i in items if "type" in i["selected_by"]]
-    finished = [i for i in change if i["open"] is False]
+    finished = [i for i in change if str(i["state_category"] or "").lower() == "completed"]
     tagged = [i for i in items if "tag" in i["selected_by"]]
     tagged_open = [i for i in tagged if i["open"]]
     history = all(i["approval_read"] for i in change)
@@ -433,6 +445,7 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
         "work_items_total": known(len(items)),
         "work_items_by_type": known(sorted_counts(Counter(str(i["type"] or "unknown") for i in items))),
         "work_items_by_state_category": known(sorted_counts(Counter(i["state_category"] or "unknown" for i in items))),
+        "work_item_states_undefined": known(undefined_states(items)),
         "work_items_open": known(sum(1 for i in items if i["open"])),
         "approval_history_collected": queried and all(i["approval_read"] for i in items),
         "change_items": known(len(change)),
@@ -469,10 +482,10 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
     items: List[Dict[str, Any]] = []
     for project in listed_projects:
         done = collector.guard(f"collect({project.get('name')})",
-                               lambda p=project: collect_project(client, collector, p, selection, days, now))
+                               partial(collect_project, client, collector, project, selection, days, now))
         if done is None:
             projects.append({"id": project.get("id"), "name": project.get("name"), "work_item_types_missing": None,
-                             "work_items": None})
+                             "work_items": None, "states_by_type": None, "undefined_states": None})
             continue
         projects.append(done[0])
         items += done[1]

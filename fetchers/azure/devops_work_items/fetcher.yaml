@@ -43,7 +43,7 @@ config_schema:
     env: AZURE_DEVOPS_WORK_ITEM_TYPES
     description: >
       Comma-separated work item types that record changes, such as
-      "Change Request" or "Task,Hotfix". Their approval and linked changes are
+      "Change Request" or "Change Request,Release". Their approval and linked changes are
       checked. "none" selects no type, leaving only tagged items.
   work_item_tags:
     type: string
@@ -68,7 +68,9 @@ config_schema:
     env: AZURE_DEVOPS_APPROVAL_STATES
     description: >
       Comma-separated states whose entry counts as approval, from each item's
-      state history. "none" leaves approval to comments alone.
+      state history. Only these count: an item that reached a state such as
+      "Awaiting Approval" but never one of these reads as unapproved. "none"
+      leaves approval to comments alone.
   approval_pattern:
     type: string
     required: false
@@ -109,14 +111,14 @@ evidence_set:
     Commands Executed:
     - GET _apis/connectionData — identifies the signed-in user
     - GET _apis/projects — lists projects
-    - GET {project}/_apis/wit/workitemtypes (per project) — the project's work item types and which of their states are finished
+    - GET {project}/_apis/wit/workitemtypes (per project) — the project's work item types, their states and which states are finished
     - POST {project}/_apis/wit/wiql (per project) — a read-only query for the selected types or tags, changed in the window or still open
     - POST {project}/_apis/wit/workitemsbatch (200 at a time) — each item's fields and links
     - GET {project}/_apis/wit/workItems/{id}/updates (per item) — its state history, to see when and by whom it was approved
     - GET {project}/_apis/wit/workItems/{id}/comments (per item) — who commented when, and whether a comment matches the approval pattern; the text is not kept
     - GET _apis/tfvc/changesets/{id} (per linked changeset) — when the change was made and by whom
 
-    Output: azure_devops_work_items_<organization>.json — every selected work item with its type, state, priority, severity, tags, owner, created, changed, closed and planned dates, state history, approval (state or comment, with who and when), and its linked changesets, commits, pull requests and builds; plus the linked changesets' dates and authors.
+    Output: azure_devops_work_items_<organization>.json — every selected work item with its title, type, state and reason, priority, severity, tags, area and iteration paths, who created, last changed, is assigned, resolved and closed it, its created, changed, activated, resolved, closed and planned dates, state history, approval (state or comment, with who and when), and its linked changesets, commits, pull requests and builds; plus each project's states for the types collected, and the linked changesets' dates and authors.
 
     Summary fields:
 
@@ -129,13 +131,14 @@ evidence_set:
     - work_items_total — Number of work items collected; null if a project's items couldn't be listed
     - work_items_by_type — Number of work items of each type; null if a project's items couldn't be listed
     - work_items_by_state_category — Number of work items in each state category (Proposed, InProgress, Resolved, Completed, Removed); null if a project's items couldn't be listed
-    - work_items_open — Number of work items whose state isn't Completed or Removed; null if a project's items couldn't be listed
+    - work_item_states_undefined — List of item states, as type: state, that the item's type no longer defines (as after a process change), so those items' state category reads unknown and they count as neither open nor finished; null if a project's items couldn't be listed
+    - work_items_open — Number of work items in a state whose category isn't Completed or Removed; null if a project's items couldn't be listed
     - approval_history_collected — True if every item's state history and comments were read; false if not
 
     Are changes approved and linked to what they changed?
     - change_items — Number of items of a configured change type; null if a project's items couldn't be listed
-    - change_items_finished — Number of change items in a Completed or Removed state; null if a project's items couldn't be listed
-    - change_items_approved — Number of change items approved: moved into an approval state, or given a comment matching the approval pattern; null if a project's items or a change item's history or comments couldn't be read
+    - change_items_finished — Number of change items in a Completed state; a Removed (cancelled) item isn't finished; null if a project's items couldn't be listed
+    - change_items_approved — Number of change items approved: moved into one of the configured approval states (a state such as Awaiting Approval doesn't count), or given a comment matching the approval pattern; null if a project's items or a change item's history or comments couldn't be read
     - finished_change_items_without_approval — List of finished change items (by id) never approved; null if a project's items or a change item's history or comments couldn't be read
     - change_items_with_linked_changes — Number of change items linked to a TFVC changeset, Git commit or pull request; null if a project's items couldn't be listed
     - finished_change_items_without_linked_change — List of finished change items (by id) linked to no changeset, commit or pull request; null if a project's items couldn't be listed
