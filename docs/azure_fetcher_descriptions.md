@@ -4990,7 +4990,7 @@ Short Description: Shows whether an Azure DevOps organization records audit even
 
 Script: fetchers/azure/devops_audit_streams/fetcher.py
 
-Access: A user with the View audit log permission, signed in with a personal access token that has Read Audit Log (vso.auditlog), or with Entra ID when no token is set. Only the Entra sign-in can read the Log Audit Events policy; with a token, auditing is judged from the audit log. Optional: Log Analytics Reader on a stream's workspace, for the ingestion check.
+Access: A user with the View audit log and Manage audit streams permissions, signed in with a personal access token that has Read Audit Log (vso.auditlog), or with Entra ID when no token is set. Listing audit streams needs Manage audit streams, as Azure DevOps has no read-only permission for it; without it, the stream fields are null and the run is not_authorized. Only the Entra sign-in can read the Log Audit Events policy; with a token, auditing is judged from the audit log. Optional: Log Analytics Reader on a stream's workspace, for the ingestion check.
 
 Commands Executed:
 - `GET _apis/connectionData` — identifies the signed-in user (token or Entra ID)
@@ -5350,14 +5350,14 @@ Access: A personal access token for the organization with Work Items, Code, and 
 Commands Executed:
 - `GET _apis/connectionData` — identifies the signed-in user (token or Entra ID)
 - `GET _apis/projects` — lists projects
-- `GET _apis/wit/workitemtypes` (per project) — the project's work item types and which of their states are finished
+- `GET _apis/wit/workitemtypes` (per project) — the project's work item types, their states and which states are finished
 - `POST _apis/wit/wiql` (per project) — a read-only query for the selected types or tags, changed in the window or still open
 - `POST _apis/wit/workitemsbatch` (200 items at a time) — each item's fields and links
 - `GET _apis/wit/workItems/{id}/updates` (per item) — its state history, to see when and by whom it was approved
 - `GET _apis/wit/workItems/{id}/comments` (per item) — who commented when, and whether a comment matches the approval pattern; the text isn't kept
 - `GET _apis/tfvc/changesets/{id}` (per linked changeset) — when the change was made and by whom
 
-Output: `azure_devops_work_items_<organization>.json` — every selected work item with its state, priority, owner, dates, state history and approval, and the changesets, commits, pull requests and builds linked to it.
+Output: `azure_devops_work_items_<organization>.json` — every selected work item with its title, type, state and reason, priority, tags, area and iteration paths, the people who created, changed, own, resolved and closed it, its dates, state history and approval, and the changesets, commits, pull requests and builds linked to it; plus each project's states for the types collected.
 
 Summary fields:
 
@@ -5375,13 +5375,14 @@ Summary fields:
   - Resolved (done, waiting to be closed)
   - Completed (finished)
   - Removed (dropped)
-- `work_items_open` — Number of collected work items that are open, meaning their state is in neither the Completed nor the Removed category; null if a project's items couldn't be listed
+- `work_item_states_undefined` — List of item states, as type: state, that the item's type no longer defines (as after a process change); an item in such a state has an unknown state category and counts as neither open nor finished; null if a project's items couldn't be listed
+- `work_items_open` — Number of collected work items that are open, meaning their state is in a category other than Completed and Removed; null if a project's items couldn't be listed
 - `approval_history_collected` — True if every collected item's state history and comments were read; false if not
 
 **Are changes approved and linked to what they changed?**
 - `change_items` — Number of collected items of a configured change type; null if a project's items couldn't be listed
-- `change_items_finished` — Number of change items in a Completed or Removed state; null if a project's items couldn't be listed
-- `change_items_approved` — Number of change items that were approved, meaning they moved into a configured approval state (default Approved) or got a comment whose text matches the approval pattern (by default, a line starting "Approved"); null if a project's items or a change item's history or comments couldn't be read
+- `change_items_finished` — Number of change items that are finished, meaning their state is in the Completed category; a Removed (cancelled) item isn't finished; null if a project's items couldn't be listed
+- `change_items_approved` — Number of change items that were approved, meaning they moved into a configured approval state (default Approved; a state such as Awaiting Approval doesn't count) or got a comment whose text matches the approval pattern (by default, a line starting "Approved"); null if a project's items or a change item's history or comments couldn't be read
 - `finished_change_items_without_approval` — List of finished change items (by id) that were never approved; null if a project's items or a change item's history or comments couldn't be read
 - `change_items_with_linked_changes` — Number of change items linked to a TFVC changeset, Git commit or pull request; null if a project's items couldn't be listed
 - `finished_change_items_without_linked_change` — List of finished change items (by id) linked to no changeset, commit or pull request; null if a project's items couldn't be listed
