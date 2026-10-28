@@ -9,8 +9,11 @@ statement: >
   noncompliant state those policies govern was denied, modified, deployed or
   remediated, and the latest evaluation revalidated it. A noncompliant policy whose
   effect the service did not report (null) is uncountable and fails too. Audit-effect
-  noncompliance is meant to be reported only and is not counted. Reads the service's
-  per-assignment summary, which is complete, not the bounded itemized list.
+  noncompliance is meant to be reported only and is not counted. Reads the
+  per-assignment summary: the service's own, which is complete, or with
+  resource_exclusions set, the fetcher's recount over the in-scope itemized states.
+  The recount's member list is null when that list was cut short or not read in full,
+  and a null member list fails rather than passing with nothing to count.
   Substantiates the KSI-CNA-EIS claim that the intended state is automatically
   enforced, for KSI-SVC-ACM that remediation where needed has taken effect, and for
   KSI-SVC-EIS that no automated enforcement failed: a deployIfNotExists or modify that
@@ -22,8 +25,9 @@ statement: >
 
 # Form B: counts violations, so it cannot guard itself. Partners:
 # azure_policy_noncompliant_effects_itemized (the effect key is there to count) and
-# azure_policy_compliance_evaluated (an evaluation happened at all).
-regex: '"effect":\s*"(?<enforcing_effect>[Dd][Ee][Nn][Yy](?:[Aa][Cc][Tt][Ii][Oo][Nn])?|[Mm][Oo][Dd][Ii][Ff][Yy]|[Dd][Ee][Pp][Ll][Oo][Yy][Ii][Ff][Nn][Oo][Tt][Ee][Xx][Ii][Ss][Tt][Ss]|[Aa][Pp][Pp][Ee][Nn][Dd]|[Mm][Uu][Tt][Aa][Tt][Ee]|[Aa][Dd][Dd][Tt][Oo][Nn][Ee][Tt][Ww][Oo][Rr][Kk][Gg][Rr][Oo][Uu][Pp]|[Ee][Nn][Ff][Oo][Rr][Cc][Ee][Ss][Ee][Tt][Tt][Ii][Nn][Gg])"|"effect":\s*null'
+# azure_policy_compliance_evaluated (an evaluation happened at all). A null member list
+# (the recount under resource_exclusions, cut short) counts as a violation.
+regex: '"effect":\s*"(?<enforcing_effect>[Dd][Ee][Nn][Yy](?:[Aa][Cc][Tt][Ii][Oo][Nn])?|[Mm][Oo][Dd][Ii][Ff][Yy]|[Dd][Ee][Pp][Ll][Oo][Yy][Ii][Ff][Nn][Oo][Tt][Ee][Xx][Ii][Ss][Tt][Ss]|[Aa][Pp][Pp][Ee][Nn][Dd]|[Mm][Uu][Tt][Aa][Tt][Ee]|[Aa][Dd][Dd][Tt][Oo][Nn][Ee][Tt][Ww][Oo][Rr][Kk][Gg][Rr][Oo][Uu][Pp]|[Ee][Nn][Ff][Oo][Rr][Cc][Ee][Ss][Ee][Tt][Tt][Ii][Nn][Gg])"|"effect":\s*null|"non_compliant_member_policies":\s*null'
 rules_summary: MATCH_COUNT EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

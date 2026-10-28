@@ -30,6 +30,11 @@ cases:
     note: a null effect is uncountable, so it reads as a violation rather than as audit
     artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"is_compliant":false,"non_compliant_member_policies":[{"effect":"audit","non_compliant_resources":12,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/a"},{"effect":null,"non_compliant_resources":2,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/f"}],"non_compliant_resources":14}]},"summary":{"non_compliant_assignments":1,"resources_evaluated":40}}}'
 
+  - name: member_list_null_when_recount_cut_short
+    expect: FAIL
+    note: with resource_exclusions set and the in-scope list cut short, the recount leaves the member lists null; with no effect to count, this must fail rather than pass
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"is_compliant":null,"non_compliant_member_policies":null,"non_compliant_resources":null},{"is_compliant":null,"non_compliant_member_policies":null,"non_compliant_resources":null}],"non_compliant_states":[{"policy_definition_action":"deployifnotexists"}],"non_compliant_states_truncated":true},"summary":{"non_compliant_assignments":null,"non_compliant_states_truncated":true,"resources_evaluated":40,"service_counts_include_excluded_resources":true}}}'
+
   - name: effect_renamed_ALONE_THIS_PASSES
     expect: PASS
     note: >
