@@ -173,10 +173,12 @@ def test_denied_policy_read_is_not_authorized_and_unknown_not_zero(monkeypatch):
     assert policies == [] and collector.failures
     assert collector.failures[0]["message"].endswith("(status 403)")
     assert classify_failure_code(collector.failures) == "not_authorized"
-    for key in ("enforced_policies_requiring_phishing_resistant_mfa",
-                "enforced_phishing_resistant_mfa_for_all_users_and_apps",
-                "phishing_resistant_mfa_role_template_ids"):
-        assert s[key] is None, key
+    # Every policy figure, not only the phishing-resistant ones, reads unknown.
+    assert s["authentication_strengths_readable"] is True
+    assert {k for k, v in s.items() if v is not None} == {"authentication_strengths_readable"}
+    for key in ("total_policies", "enforced_policies_requiring_mfa", "mfa_required_for_admin_portals",
+                "enforced_policies_requiring_phishing_resistant_mfa"):
+        assert key in s and s[key] is None, key
 
 
 def test_strengths_are_not_read_when_no_policy_uses_one(monkeypatch):

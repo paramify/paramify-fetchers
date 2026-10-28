@@ -345,7 +345,7 @@ def summarize(policies: list[dict], strengths_readable: bool = True, policies_re
     is reported separately so the gap stays visible.
     """
     enforced = [p for p in policies if p["is_enforced"]]
-    return {
+    summary = {
         "total_policies": len(policies),
         # --- state breakdown: report-only is never folded into enabled ---
         "enabled_policies": len(enforced),
@@ -398,6 +398,10 @@ def summarize(policies: list[dict], strengths_readable: bool = True, policies_re
             }
         ),
     }
+    if not policies_readable:
+        # Policies that weren't read are unknown, not absent.
+        summary = {k: v if k == "authentication_strengths_readable" else None for k, v in summary.items()}
+    return summary
 
 
 # --- collection (lazy msgraph imports) ---

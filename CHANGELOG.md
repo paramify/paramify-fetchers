@@ -215,6 +215,12 @@ schemas and the `paramify` CLI — not the internal code.
   `phishing_resistant_mfa_role_template_ids`. The evidence set adds KSI-IAM-APM, and
   its description and instructions use the plain-text layout.
 
+- **`azure_entra_conditional_access_policies` reads unread policies as unknown, not
+  absent.** When the policies can't be read, every summary figure except
+  `authentication_strengths_readable` is null; `total_policies` read 0 and
+  `mfa_required_for_admin_portals` read false before. A failed strength read leaves
+  `authentication_strengths` null rather than an empty list.
+
 - **`azure_sentinel_analytics_rules` 0.2.0: rule queries, suppression, the
   tables each rule reads and quiet incident-creation rules.** Each rule now carries its KQL query's
   `query_sha256` and `query_length` (the `query` text itself only with
