@@ -1,0 +1,202 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_devops_permissions",
+  "fetcher_version": "0.1.1",
+  "source": "live",
+  "captured_on": "2026-05-08",
+  "reviewed": true,
+  "collections": [
+    {
+      "path": "results.entries[]",
+      "records": 4,
+      "fields": {
+        "allow": 4,
+        "deny": 0,
+        "effective_allow": 4,
+        "effective_deny": 0,
+        "high_impact_allowed": 4,
+        "high_impact_from_defaults": 4,
+        "high_impact_outside_admin_groups": 4,
+        "identity": 4,
+        "inherit_permissions": 4,
+        "inherited_allow": 0,
+        "inherited_deny": 0,
+        "namespace": 4,
+        "project": 4,
+        "project_id": 4,
+        "resource": 2,
+        "scope": 4,
+        "token": 4
+      }
+    },
+    {
+      "path": "results.identities[]",
+      "records": 2,
+      "fields": {
+        "admin_group": 2,
+        "descriptor": 2,
+        "kind": 2,
+        "name": 2,
+        "resolved": 2,
+        "subject_descriptor": 2
+      }
+    },
+    {
+      "path": "results.namespaces[]",
+      "records": 12,
+      "fields": {
+        "acls": 12,
+        "acls_read": 12,
+        "actions": 12,
+        "entries": 12,
+        "id": 12,
+        "name": 12
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "auth_mode": "entra",
+      "collecting_identity": {
+        "display_name": "Evidence Reader",
+        "id": "00000000-0000-4000-8000-111111111111",
+        "login": "user1"
+      },
+      "datetime": "2026-05-08T12:46:27Z",
+      "organization": "example-organization",
+      "organization_url": "https://dev.azure.com/example-organization",
+      "partial_failure": false,
+      "projects_filter": null
+    },
+    "results": {
+      "entries": [
+        {
+          "allow": [
+            "ViewBuilds",
+            "EditBuildQuality",
+            "RetainIndefinitely"
+          ],
+          "deny": [],
+          "effective_allow": [
+            "ViewBuilds",
+            "EditBuildQuality",
+            "RetainIndefinitely"
+          ],
+          "effective_deny": [],
+          "high_impact_allowed": [
+            "DeleteBuildDefinition",
+            "EditBuildDefinition"
+          ],
+          "high_impact_from_defaults": true,
+          "high_impact_outside_admin_groups": false,
+          "identity": {
+            "admin_group": false,
+            "descriptor": "Microsoft.TeamFoundation.Identity;S-1-9-1551374245-1111111111-2222222222-3333333333-4000000001-1",
+            "kind": "group",
+            "name": "[Project1]\\Contributors",
+            "resolved": true,
+            "subject_descriptor": "vssgp.Uy0xLTktMTU1MTM3NDI0NS0xMTExMTExMTExLTIyMjIyMjIyMjItMzMzMzMzMzMzMy00MDAwMDAwMDAzLTEtMC0wLTAtMw"
+          },
+          "inherit_permissions": true,
+          "inherited_allow": [],
+          "inherited_deny": [],
+          "namespace": "Build",
+          "project": "Project1",
+          "project_id": "00000000-0000-4000-8000-222222222222",
+          "resource": null,
+          "scope": "project",
+          "token": "<redacted>"
+        }
+      ],
+      "identities": [
+        {
+          "admin_group": false,
+          "descriptor": "Microsoft.TeamFoundation.Identity;S-1-9-1551374245-1111111111-2222222222-3333333333-4000000001-1",
+          "kind": "group",
+          "name": "[Project1]\\Contributors",
+          "resolved": true,
+          "subject_descriptor": "vssgp.Uy0xLTktMTU1MTM3NDI0NS0xMTExMTExMTExLTIyMjIyMjIyMjItMzMzMzMzMzMzMy00MDAwMDAwMDAzLTEtMC0wLTAtMw"
+        }
+      ],
+      "namespaces": [
+        {
+          "acls": 0,
+          "acls_read": true,
+          "actions": {
+            "ADMINISTER_BUILD": "Administer a build",
+            "AGILETOOLS_BACKLOG": "Agile backlog management.",
+            "AGILETOOLS_PLANS": "Manage delivery plans",
+            "BYPASS_PROPERTY_CACHE": "Bypass project property cache",
+            "BYPASS_RULES": "Bypass rules on work item updates",
+            "CHANGE_PROCESS": "Change process of team project",
+            "DELETE": "Delete team project",
+            "DELETE_TEST_RESULTS": "Delete test runs",
+            "EDIT_BUILD_STATUS": "Edit build quality",
+            "GENERIC_READ": "View project-level information",
+            "GENERIC_WRITE": "Edit project-level information",
+            "MANAGE_PROPERTIES": "Manage project properties",
+            "MANAGE_SYSTEM_PROPERTIES": "Manage system project properties",
+            "MANAGE_TEST_CONFIGURATIONS": "Manage test configurations",
+            "MANAGE_TEST_ENVIRONMENTS": "Manage test environments",
+            "PUBLISH_TEST_RESULTS": "Create test runs",
+            "RENAME": "Rename team project",
+            "START_BUILD": "Start a build",
+            "SUPPRESS_NOTIFICATIONS": "Suppress notifications for work item updates",
+            "UPDATE_BUILD": "Write to build operational store",
+            "UPDATE_VISIBILITY": "Update project visibility",
+            "VIEW_TEST_RESULTS": "View test runs",
+            "WORK_ITEM_DELETE": "Delete and restore work items",
+            "WORK_ITEM_MOVE": "Move work items out of this project",
+            "WORK_ITEM_PERMANENTLY_DELETE": "Permanently delete work items"
+          },
+          "entries": 0,
+          "id": "00000000-0000-4000-8000-333333333333",
+          "name": "Project"
+        }
+      ],
+      "namespaces_not_found": []
+    },
+    "summary": {
+      "namespaces_collected": 12,
+      "namespaces_not_found": [],
+      "namespaces_not_read": [],
+      "acls_total": 4,
+      "acls_with_inheritance_off": 0,
+      "entries_total": 4,
+      "entries_by_scope": {
+        "environment": 1,
+        "pipeline": 1,
+        "project": 2
+      },
+      "entries_with_deny": 0,
+      "identities_with_explicit_entries": 2,
+      "unresolved_identities": 0,
+      "users_with_direct_entries": [
+        "User 1"
+      ],
+      "high_impact_grants": 4,
+      "high_impact_grants_outside_admin_groups": 2,
+      "identities_with_high_impact_rights_outside_admin_groups": [
+        "User 1"
+      ],
+      "high_impact_rights_outside_admin_groups_by_right": {
+        "Build: EditBuildDefinition": 1,
+        "Environment: Administer": 1,
+        "Environment: Manage": 1
+      },
+      "high_impact_grants_from_defaults": 2,
+      "identities_with_high_impact_rights_from_defaults": [
+        "[Project1]\\Contributors"
+      ],
+      "git_repositories": 0,
+      "branch_policy_bypass_holders": null,
+      "not_collected": {
+        "group_membership": "Who is in each group: see the Azure DevOps identities evidence.",
+        "resource_names": "Repositories, pipelines, environments, service connections and library items are named by id; the pipelines and service-connections evidence carries the same ids.",
+        "other_namespaces": "Permissions in namespaces other than those listed in results.namespaces (work items, boards, wiki, dashboards, analytics, agent pools).",
+        "inherited_grants": "High-impact rights are flagged where they are set explicitly; a right only inherited from a parent token is shown on that parent."
+      }
+    }
+  }
+}
