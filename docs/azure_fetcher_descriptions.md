@@ -11,6 +11,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Identity and access | [azure_entra_authentication_policy](#azure_entra_authentication_policy) | `EVD-AZURE-ENTRA-AUTH-METHODS-POLICY` |
 | Identity and access | [azure_entra_conditional_access_policies](#azure_entra_conditional_access_policies) | `EVD-AZURE-ENTRA-CA-POLICIES` |
 | Identity and access | [azure_entra_dormant_identities](#azure_entra_dormant_identities) | `EVD-AZURE-ENTRA-DORMANT-IDENTITIES` |
+| Identity and access | [azure_entra_emergency_accounts](#azure_entra_emergency_accounts) | `EVD-AZURE-ENTRA-EMERGENCY-ACCOUNTS` |
 | Identity and access | [azure_entra_groups](#azure_entra_groups) | `EVD-AZURE-ENTRA-GROUPS` |
 | Identity and access | [azure_entra_mfa_status](#azure_entra_mfa_status) | `EVD-AZURE-ENTRA-MFA` |
 | Identity and access | [azure_entra_pim_assignments](#azure_entra_pim_assignments) | `EVD-AZURE-ENTRA-PIM-ASSIGNMENTS` |
@@ -256,7 +257,7 @@ Summary fields:
 
 
 ### azure_entra_conditional_access_policies
-Short Description: Lists every Conditional Access policy with whether it's enforced, who and what it covers or excludes, and what it requires or blocks.
+Short Description: Lists every Conditional Access policy with whether it's enforced, who and what it covers or excludes, what it requires or blocks, and whether it requires phishing-resistant MFA.
 
 Script: fetchers/azure/entra_conditional_access_policies/fetcher.py (uses the shared Graph helpers fetchers/azure/_shared/entra_graph.py)
 
@@ -265,38 +266,46 @@ Access: Microsoft Graph application permission Policy.Read.All. Optional: Organi
 Commands Executed:
 - Microsoft Graph `GET /organization` — the tenant's name and domain
 - Microsoft Graph `GET /identity/conditionalAccess/policies` — every policy with its state, conditions, grant controls and session controls
+- Microsoft Graph `GET /policies/authenticationStrengthPolicies` (only when a policy uses an authentication strength) — each strength's allowed sign-in method combinations, read as raw JSON because the SDK drops combinations of two methods such as password and SMS
 
-Output: `azure_entra_conditional_access_policies_<tenant>.json` — each Conditional Access policy with its state, the users, groups, roles and apps it includes and excludes, its other conditions (client apps, risk levels, platforms, locations), what it grants or blocks, and its session controls.
+Output: `azure_entra_conditional_access_policies_<tenant>.json` — each Conditional Access policy with its state, the users, groups, roles and apps it includes and excludes, its other conditions (client apps, risk levels, platforms, locations), what it grants or blocks and its session controls, and each authentication strength the policies use with its allowed method combinations.
 
 Summary fields:
 
 **What policies exist, and which are enforced?**
-- `total_policies` — Number of Conditional Access policies in the tenant; also 0 when the tenant has no Entra ID P1 or P2 licence, since Graph then returns an empty list
-- `enabled_policies` — Number of enforced policies: state enabled, so they apply at sign-in (report-only policies aren't counted). Every count named `enforced_policies_…` or `enforced_mfa_…` counts only enforced policies
-- `disabled_policies` — Number of policies switched off; a policy whose state couldn't be read counts here
-- `report_only_policies` — Number of report-only policies, which log what they would have done but enforce nothing
-- `enforced_percentage` — Percentage of policies that are enforced = `enabled_policies` / `total_policies` × 100 (a whole number, 0–100); 0 when `total_policies` is 0. Disabled and report-only policies count in the total but not as enforced
+- `total_policies` — Number of Conditional Access policies in the tenant; also 0 when the tenant has no Entra ID P1 or P2 licence, since Graph then returns an empty list; null if the policies couldn't be read
+- `enabled_policies` — Number of enforced policies: state enabled, so they apply at sign-in (report-only policies aren't counted); null if the policies couldn't be read. Every count named `enforced_policies_…` or `enforced_mfa_…` counts only enforced policies
+- `disabled_policies` — Number of policies switched off; a policy whose state couldn't be read counts here; null if the policies couldn't be read
+- `report_only_policies` — Number of report-only policies, which log what they would have done but enforce nothing; null if the policies couldn't be read
+- `enforced_percentage` — Percentage of policies that are enforced = `enabled_policies` / `total_policies` × 100 (a whole number, 0–100); 0 when `total_policies` is 0; null if the policies couldn't be read. Disabled and report-only policies count in the total but not as enforced
 
 **What do enforced policies require?**
-- `enforced_policies_requiring_mfa` — Number of enforced policies that require MFA: the MFA grant control or an authentication strength is among their grant controls, even when the policy lets the user meet a different control instead
-- `enforced_policies_blocking_access` — Number of enforced policies that block access
-- `enforced_policies_requiring_compliant_device` — Number of enforced policies whose grant controls include a compliant device or a hybrid-joined device, even when the policy lets the user meet a different control instead
-- `enforced_policies_with_authentication_strength` — Number of enforced policies that require an authentication strength (a named set of allowed sign-in methods, such as phishing-resistant MFA)
-- `enforced_policies_with_session_controls` — Number of enforced policies with at least one session control: sign-in frequency, persistent browser session, app-enforced restrictions or Defender for Cloud Apps session control
+- `enforced_policies_requiring_mfa` — Number of enforced policies that require MFA: the MFA grant control, or an authentication strength that satisfies MFA (a custom strength that allows a password alone doesn't count), is among their grant controls, even when the policy lets the user meet a different control instead; null if the policies couldn't be read
+- `enforced_policies_blocking_access` — Number of enforced policies that block access; null if the policies couldn't be read
+- `enforced_policies_requiring_compliant_device` — Number of enforced policies whose grant controls include a compliant device or a hybrid-joined device, even when the policy lets the user meet a different control instead; null if the policies couldn't be read
+- `enforced_policies_with_authentication_strength` — Number of enforced policies that require an authentication strength (a named set of allowed sign-in methods, such as phishing-resistant MFA); null if the policies couldn't be read
+- `enforced_policies_with_session_controls` — Number of enforced policies with at least one session control: sign-in frequency, persistent browser session, app-enforced restrictions or Defender for Cloud Apps session control; null if the policies couldn't be read
+
+**Do enforced policies require phishing-resistant MFA?**
+- `authentication_strengths_readable` — True if the authentication strengths the policies use were read with their allowed combinations, or no policy uses one; false if the read failed, and the phishing-resistant figures read null
+- `enforced_policies_requiring_phishing_resistant_mfa` — Number of enforced policies that require phishing-resistant MFA: their authentication strength allows only FIDO2 security keys and passkeys, Windows Hello for Business or multi-factor certificate authentication, and the policy doesn't let the user meet another grant control instead; null if the policies or a policy's strength couldn't be read
+- `enforced_phishing_resistant_mfa_for_all_users_and_apps` — Number of enforced policies that require phishing-resistant MFA for all users on all cloud apps, before any exclusions; null if the policies or a policy's strength couldn't be read
+- `phishing_resistant_mfa_role_template_ids` — List of directory role template ids (Global Administrator is 62e90394-69f5-4237-9190-012177145e10) that an enforced policy requiring phishing-resistant MFA on all cloud apps includes; excluded users and groups aren't checked; null if the policies or a policy's strength couldn't be read
 
 **How widely do enforced policies apply?**
-- `enforced_policies_targeting_all_users` — Number of enforced policies that include all users; a policy can still exclude users, groups or roles
-- `enforced_policies_targeting_all_applications` — Number of enforced policies that include all cloud apps; a policy can still exclude apps
-- `enforced_mfa_for_all_users_and_apps` — Number of enforced policies that require MFA for all users on all cloud apps, before any exclusions
-- `enforced_policies_targeting_legacy_authentication` — Number of enforced policies whose conditions include legacy clients (Exchange ActiveSync or other older clients, which can't prompt for MFA), whether the policy blocks them or requires something else
+- `enforced_policies_targeting_all_users` — Number of enforced policies that include all users; a policy can still exclude users, groups or roles; null if the policies couldn't be read
+- `enforced_policies_targeting_all_applications` — Number of enforced policies that include all cloud apps; a policy can still exclude apps; null if the policies couldn't be read
+- `enforced_mfa_for_all_users_and_apps` — Number of enforced policies that require MFA for all users on all cloud apps, before any exclusions; null if the policies couldn't be read
+- `mfa_client_app_types_for_all_users_and_apps` — List of client app types (browser, mobileAppsAndDesktopClients, exchangeActiveSync, other) on which enforced policies, taken together, require MFA for all users on all cloud apps. A policy counts when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no risk, platform or location condition; a policy for all client app types adds all four. Excluded users, groups and roles, device filters and authentication flows aren't checked; null if the policies couldn't be read
+- `enforced_policies_targeting_legacy_authentication` — Number of enforced policies whose conditions include legacy clients (Exchange ActiveSync or other older clients, which can't prompt for MFA), whether the policy blocks them or requires something else; null if the policies couldn't be read
 
 **Do admin portals and Azure management require MFA?**
-- `mfa_required_for_admin_portals` — True if at least one enforced policy requires MFA for all users on Microsoft Admin Portals (the Microsoft admin centers) or on all cloud apps; false if no enforced policy does. Excluded users, groups, roles and apps aren't checked
-- `mfa_required_for_azure_management_api` — True if at least one enforced policy requires MFA for all users on Windows Azure Service Management API (the Azure portal, CLI and PowerShell) or on all cloud apps; false if no enforced policy does. Excluded users, groups, roles and apps aren't checked
+- `mfa_required_for_admin_portals` — True if at least one enforced policy requires MFA for all users on Microsoft Admin Portals (the Microsoft admin centers) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. Excluded users, groups, roles and apps aren't checked
+- `mfa_required_for_azure_management_api` — True if at least one enforced policy requires MFA for all users on Windows Azure Service Management API (the Azure portal, CLI and PowerShell) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. Excluded users, groups, roles and apps aren't checked
 
 **Who is left out?**
-- `enforced_policies_with_exclusions` — Number of enforced policies that exclude at least one user, group or directory role
-- `distinct_excluded_principals` — Number of distinct users, groups and directory roles excluded by at least one enforced policy
+- `enforced_policies_with_exclusions` — Number of enforced policies that exclude at least one user, group or directory role; null if the policies couldn't be read
+- `distinct_excluded_principals` — Number of distinct users, groups and directory roles excluded by at least one enforced policy; null if the policies couldn't be read
 
 
 ### azure_entra_dormant_identities
@@ -361,6 +370,67 @@ Summary fields:
 - `deleted_principals_holding_azure_roles` — Number of principals an Azure role assignment still names that the directory no longer has (deleted users, groups or apps); partner-tenant groups aren't checked; null if the Azure roles or the lookup weren't read
 - `azure_role_assignments_to_deleted_principals` — Number of Azure role assignments that name a deleted principal; null if the Azure roles or the lookup weren't read
 - `no_dormant_guest_or_deleted_identity_holds_a_role` — True if no dormant user, never-signed-in user (enabled and created more than `dormant_after_days` days ago; disabled accounts are counted apart in `disabled_users_holding_roles`), guest user, dormant service principal or deleted principal holds a role; false if any does; null if none was found but sign-in activity, the roles or the lookup couldn't be read, or a role-holding service principal's dormancy is unknown. Only active assignments are judged: an identity eligible (PIM) for a role, holding a role scoped to an administrative unit, or holding one through a partner-tenant group isn't checked
+
+
+### azure_entra_emergency_accounts
+Short Description: Shows whether the only enabled users that a Conditional Access exclusion leaves without MFA are named emergency accounts, and whether an enabled alert rule watches each one.
+
+Script: fetchers/azure/entra_emergency_accounts/fetcher.py (uses the shared REST client fetchers/azure/_shared/azure_rest.py)
+
+Access: Microsoft Graph Policy.Read.All, Directory.Read.All (or Organization.Read.All, User.Read.All, GroupMember.Read.All and RoleManagement.Read.Directory) and AuditLog.Read.All, with an Entra ID P1 or P2 licence, and Reader on the subscription. Without AuditLog.Read.All or the licence, the emergency accounts' last sign-in and registered methods read null and the exclusions are still judged. The credential must sign in to the subscription's own tenant; if Microsoft Graph answers for another tenant, the run fails without reading the directory. Emergency accounts are named in `ENTRA_EMERGENCY_ACCOUNTS`; without it, the enabled users excluded from every enforced MFA policy that includes all users are reported as candidates and none counts as approved.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET /subscriptions/{id}` — the subscription's tenant
+- Microsoft Graph `GET /organization` — the tenant Microsoft Graph is signed in to, which must be the subscription's
+- Microsoft Graph `GET /identity/conditionalAccess/policies` — the enforced policies that require MFA or an authentication strength, who each one includes and excludes, the apps it targets and its other conditions
+- Microsoft Graph `GET /users/{id}` (per directly excluded user) — the excluded user's sign-in name, type and enabled state
+- Microsoft Graph `GET /groups/{id}/transitiveMembers/microsoft.graph.user` (per excluded group, and per included group of a policy that counts for coverage) — the group's users, nested groups included
+- Microsoft Graph `GET /directoryRoles` and `GET /directoryRoles/{id}/members` (per excluded role, and per included role of a policy that counts for coverage) — the users holding the role now, directly or through a role-assignable group; PIM-eligible holders aren't read
+- Microsoft Graph `GET /users` filtered to guests (only when a policy excludes guests or external users) — every guest user, all treated as excluded by that policy
+- Microsoft Graph `GET /users/{id or user principal name}` (per named emergency account) — the account, or that the directory has no such user
+- Microsoft Graph `GET /users/{id}` with sign-in activity (per emergency account) — when it last signed in
+- Microsoft Graph `GET /reports/authenticationMethods/userRegistrationDetails/{id}` (per emergency account) — the sign-in methods it has registered
+- `GET Microsoft.OperationalInsights/workspaces` and `GET Microsoft.SecurityInsights/onboardingStates` — the subscription's Microsoft Sentinel workspaces
+- `GET Microsoft.SecurityInsights/alertRules` (per Sentinel workspace, at the stable and preview versions) — analytics rules and their queries; a failed preview read is logged, and near-real-time rules may then be missed
+- `GET Microsoft.Insights/scheduledQueryRules` — Azure Monitor log search alert rules and their queries
+
+Output: `azure_entra_emergency_accounts_<subscription>.json` — each emergency account (or candidate) with its MFA policy exclusions, whether another MFA policy still covers it, last sign-in, registered methods and the enabled alert rules that name it, each other user excluded from an MFA policy, each enforced MFA policy with its includes, excludes and conditions, and any named account the directory doesn't have.
+
+Summary fields:
+
+**What was checked?**
+- `emergency_accounts_source` — Whether the emergency accounts were named or are candidates:
+  - configured (named in `ENTRA_EMERGENCY_ACCOUNTS`)
+  - candidates (none named: the enabled users excluded from every enforced MFA policy that includes all users)
+- `emergency_accounts_named` — Number of accounts named in `ENTRA_EMERGENCY_ACCOUNTS`; 0 when none are
+- `conditional_access_readable` — True if the Conditional Access policies were read; false if not, and the exclusion figures read null
+- `exclusions_readable` — True if every user, group and role an MFA policy excludes, and every named account, was read; false if any read failed, and the exclusion figures read null
+- `coverage_readable` — True if every group and role that a policy counting for coverage includes was read; false if any read failed, and a user whose coverage rests on that read reads null
+- `alert_rules_readable` — True if every Sentinel workspace's analytics rules and the subscription's log search alert rules were read; false if not, and the monitoring figures read null
+- `user_sign_in_activity` — Whether the emergency accounts' sign-in activity was read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused, failed, or the accounts themselves weren't read)
+- `registration_details` — Whether the emergency accounts' registered methods were read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused, failed, or the accounts themselves weren't read)
+- `enforced_mfa_policies` — Number of enabled (not report-only) Conditional Access policies that require MFA or an authentication strength, even when another control can be met instead (their exclusions all count); null if the policies weren't read
+- `enforced_mfa_policies_for_all_users` — Number of enforced MFA policies that include all users; null if the policies weren't read
+- `mfa_policies_counting_for_coverage` — Number of enforced MFA policies that count for coverage: MFA is mandatory (the MFA control or an authentication strength that satisfies MFA, and, when any one control is enough, no compliant device, terms of use or other control that isn't MFA as an alternative), they target all cloud apps (app exclusions aren't judged), apply to browsers or to mobile and desktop apps (the two modern client app types), and have no other condition that limits when they apply (sign-in, user, insider or service principal risk, platforms, locations, a device filter or authentication flows); null if the policies weren't read
+- `legacy_authentication_blocked_for_all_users` — True if an enforced policy blocks Exchange ActiveSync and other legacy clients for all users on all cloud apps, with no risk, platform, location, device filter or authentication flow condition (excluded users, groups, roles and apps aren't checked); false if none does; null if the policies weren't read
+- `sentinel_workspaces_checked` — Number of Microsoft Sentinel workspaces in the subscription whose analytics rules were read; null if the rules weren't all read
+- `alert_rules_checked` — Number of Sentinel analytics rules and log search alert rules read; null if the rules weren't all read
+
+**Which emergency accounts are there?**
+- `emergency_accounts` — Number of emergency accounts found, or of candidates when none are named; null if a named account couldn't be read or, with none named, if the exclusions weren't read
+- `emergency_accounts_not_found` — Number of accounts named in `ENTRA_EMERGENCY_ACCOUNTS` that the directory has no user for; null if a named account couldn't be read or, with none named, if the exclusions weren't read
+- `emergency_accounts_enabled` — Number of emergency accounts whose account is enabled; null if a named account couldn't be read or, with none named, if the exclusions weren't read
+- `emergency_accounts_excluded_from_every_all_users_mfa_policy` — Number of emergency accounts excluded from every enforced MFA policy that includes all users (0 when no enforced MFA policy includes all users); null if the exclusions weren't read
+- `emergency_accounts_with_phishing_resistant_method` — Number of emergency accounts with a phishing-resistant method registered: a FIDO2 security key, a passkey, Windows Hello for Business or a macOS platform credential; null if the registration report or the accounts weren't read
+- `emergency_accounts_monitored` — Number of emergency accounts that are monitored: named, by whole sign-in name or object id, in the query of at least one enabled Sentinel analytics rule or log search alert rule in the subscription. A rule that finds the accounts through a watchlist, a group or a display name doesn't count, and whether the rule notifies anyone isn't checked; null if the rules or the accounts weren't read
+
+**Is anyone left without MFA who shouldn't be?**
+- `users_excluded_from_an_mfa_policy` — Number of enabled users at least one enforced MFA policy excludes, directly, through a group or role, or as a guest, whether or not another policy covers them. A policy that excludes guests or external users counts every guest user (user type Guest), whatever guest types or tenants it names, and external users who are members aren't counted; null if the exclusions weren't read
+- `users_excluded_from_mfa` — Number of enabled users an enforced MFA policy excludes that policies counting for coverage don't cover. A user is covered when browsers and mobile and desktop apps are each covered by a policy counting for coverage that applies to that client app type, includes the user (all users, the user, one of their groups or roles, or every guest when the user is a guest) and doesn't exclude them; one policy can cover both, or two policies one each. Legacy clients (Exchange ActiveSync and other) can't present MFA, so they aren't part of coverage; `legacy_authentication_blocked_for_all_users` shows whether they're blocked. Null if the exclusions weren't read or any such user's coverage rests on a read that failed
+- `excluded_users_not_emergency_accounts` — Number of enabled users excluded from MFA (as in `users_excluded_from_mfa`) who aren't named in `ENTRA_EMERGENCY_ACCOUNTS`; with no accounts named, every enabled user excluded from MFA; null as for `users_excluded_from_mfa`
+- `emergency_accounts_excluded_without_alert` — Number of enabled emergency accounts (or candidates) excluded from MFA (as in `users_excluded_from_mfa`) that aren't monitored; candidates are already counted in `excluded_users_not_emergency_accounts`; null as for `users_excluded_from_mfa`, or if the rules weren't read
+- `excluded_users_not_monitored_emergency_accounts` — Number of enabled users excluded from MFA (as in `users_excluded_from_mfa`) who aren't both named in `ENTRA_EMERGENCY_ACCOUNTS` and monitored: `excluded_users_not_emergency_accounts` plus, when accounts are named, `emergency_accounts_excluded_without_alert`. 0 means every user left without MFA by an exclusion is a named, monitored emergency account; null as for `users_excluded_from_mfa`, or if the rules weren't read
 
 
 ### azure_entra_groups
