@@ -286,7 +286,7 @@ Microsoft Sentinel:
 |---|---|
 | `azure_sentinel_analytics_rules` | Analytics rules per workspace: kind, state, severity, MITRE tactics and techniques, a hash of each query (the text is opt-in), suppression, the tables each reads and whether they got data, which incident-creation rules are quiet (no alert from a product whose alerts are wired up), and whether Fusion is on |
 | `azure_sentinel_automation_rules` | Automation rules per workspace: triggers, conditions, state and actions |
-| `azure_sentinel_data_sources` | Data connectors per workspace, and which tables received data in the ingestion window |
+| `azure_sentinel_data_sources` | Data connectors per workspace with each one's last data received and health, and which tables received data in the ingestion window. An alert-only connector (Defender for Endpoint, Office 365, Identity, Cloud, Cloud Apps or IoT, Entra ID Protection, Insider Risk Management) with no alert but a linked connection sending alerts reads quiet, not not connected, and still `connected: false`. `connectors_configured_without_data` counts connectors with a connection but no data that aren't quiet |
 | `azure_sentinel_incidents` | Incidents in the lookback plus every open one: severity, status, classification, owner and time to close |
 
 Defender for Cloud and Azure Policy:
