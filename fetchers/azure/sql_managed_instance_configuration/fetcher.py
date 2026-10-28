@@ -382,6 +382,7 @@ def summarize(instances: list[dict]) -> dict:
         ),
         "instances_audit_logs_exported": sum(1 for i in instances if i["audit_logs_exported"] is True),
         "instances_subnet_unknown": sum(1 for i in instances if i["subnet"] is None),
+        "instances_subnet_rules_unknown": sum(1 for i in instances if i["subnet_allow_any_to_any_rules"] is None),
         "instances_subnet_network_security_group": sum(
             1 for i in instances if i["subnet_has_network_security_group"] is True
         ),

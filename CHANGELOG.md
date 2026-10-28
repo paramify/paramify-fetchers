@@ -207,7 +207,8 @@ schemas and the `paramify` CLI — not the internal code.
   `subnet_allow_any_to_any_rules` names custom rules allowing every protocol and
   port from any address to any address, and
   `subnet_unrestricted_internet_outbound` reads the NSG the way
-  `azure_network_security_groups` does. The instance's
+  `azure_network_security_groups` does; `instances_subnet_rules_unknown` counts
+  the instances whose subnet or NSG couldn't be read for either. The instance's
   `maintenance_configuration_id` is resolved through
   `publicMaintenanceConfigurations` to its window (start, duration, time zone,
   recurrence), with `maintenance_window_default` for `SQL_Default`. Each user

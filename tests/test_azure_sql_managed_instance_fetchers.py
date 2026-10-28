@@ -319,6 +319,7 @@ def test_subnet_rules_and_routes_are_read_with_service_aided_ones_marked(monkeyp
     assert summary["instances_subnet_allow_any_to_any_rule"] == 2
     assert summary["instances_subnet_route_table"] == 2
     assert summary["instances_subnet_unknown"] == 0
+    assert summary["instances_subnet_rules_unknown"] == 0
 
 
 def test_custom_outbound_deny_overrides_the_default_internet_allow(monkeypatch):
@@ -341,6 +342,7 @@ def test_subnet_without_nsg_or_route_table_reads_false_not_null(monkeypatch):
     assert east["subnet_has_route_table"] is False
     assert summary["instances_subnet_network_security_group"] == 0
     assert summary["instances_subnet_unrestricted_internet_outbound"] == 2
+    assert summary["instances_subnet_rules_unknown"] == 0
 
 
 def test_failed_subnet_reads_leave_subnet_fields_null(monkeypatch):
@@ -359,6 +361,7 @@ def test_failed_subnet_reads_leave_subnet_fields_null(monkeypatch):
     assert west["subnet_unrestricted_internet_outbound"] is None
     assert west["subnet_route_table"]["name"] == "rt-mi"
     assert summary["instances_subnet_unknown"] == 1
+    assert summary["instances_subnet_rules_unknown"] == 2
     assert summary["instances_subnet_network_security_group"] == 1
     assert summary["instances_subnet_unrestricted_internet_outbound"] == 0
 
