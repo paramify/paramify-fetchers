@@ -495,6 +495,21 @@ def exclude_sites(scope: ResourceExclusions, sites, rows):
     return keep(sites), keep(rows), sorted(out.values(), key=lambda e: arm_id_key(e["id"]))
 
 
+def boundary_summary(scope: ResourceExclusions, excluded: list[dict], apps: list[dict], exclusions: dict) -> dict:
+    """Scope fields named boundary_excluded_*, since excluded_function_apps and excluded_deployment_slots count
+    in-scope items this fetcher does not assess; a count is null when the list showing that kind failed."""
+    def count(kind, listed=True):
+        return sum(1 for e in excluded if e["kind"] == kind) if listed else None
+
+    return {
+        **scope.summary(excluded, (), {}),
+        "boundary_excluded_web_apps": count(WEB_APP_KIND),
+        "boundary_excluded_function_apps": count(FUNCTION_APP_KIND, exclusions["function_apps"]["count"] is not None),
+        "boundary_excluded_deployment_slots": count(SLOT_KIND, exclusions["deployment_slots"]["count"] is not None),
+        "in_scope_web_apps": len(apps),
+    }
+
+
 # --- collection (lazy azure imports) ---
 
 def list_sites(client, collector: Collector):
@@ -702,7 +717,7 @@ def main() -> int:
         summary={
             **summarize(apps, inventory, exclusions, storage, settings),
             "provider_registration_status": registration,
-            **scope.summary(excluded, (WEB_APP_KIND,), {"web_apps": len(apps)}),
+            **boundary_summary(scope, excluded, apps, exclusions),
         },
     )
 

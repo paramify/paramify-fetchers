@@ -31,11 +31,11 @@ config_schema:
       prefix: rg:<resource group> (read from the resource id), location:<region>
       (the region's name without spaces, such as eastus2) or id:<resource id>
       (also matches that resource's child resources). * matches any run of
-      characters and ? one character. A matching plan or site (web app or
-      function app) is listed under excluded with the pattern and left out of
-      every count and verdict; sites are joined to every plan first, so a site in
-      scope on an excluded plan stays on that plan's excluded entry and keeps its
-      plan's zone redundancy and instance count. A pattern without one of these
+      characters and ? one character. A matching site (web app or function app)
+      is listed under excluded with the pattern and left out of every count and
+      verdict. A matching plan leaves scope only when no in-scope site runs on
+      it; while one does, the plan stays in the plan list and in every
+      plan-level count. A pattern without one of these
       prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in
       scope.
@@ -71,13 +71,17 @@ evidence_set:
     web_apps.list(); sites are joined to plans by server_farm_id. Reader is
     sufficient — all GETs. Maps to KSI-CNA-OFA. Plans and sites the
     resource_exclusions patterns take out are listed under excluded instead,
-    and each plan lists only its in-scope sites. Every count covers only what is
-    in scope: total_sites, sites_on_zone_redundant_plans and
-    sites_on_multi_instance_plans also count in-scope sites on an excluded plan,
-    which stay on that plan's excluded entry with its zone_redundant and
-    multi_instance, and empty_plans counts plans with no in-scope site.
+    and each plan lists only its in-scope sites; its number_of_sites counts
+    those listed sites, where Azure's own numberOfSites would also count
+    excluded ones. A plan a pattern matches is taken out only when no in-scope
+    site runs on it. While one does, the plan stays in app_service_plans and in
+    every plan-level count (total_app_service_plans, single_instance_plans,
+    no_sla_tier_plans, zone_redundant_percentage and the rest), is not listed
+    under excluded, and its pattern counts as matched. Every count covers only
+    what is in scope, and empty_plans counts plans with no in-scope site.
     resource_exclusion_patterns echoes the patterns,
     resource_exclusion_patterns_unmatched lists those that matched nothing,
     excluded_app_service_plans and excluded_sites count what was taken out, and
-    in_scope_app_service_plans and in_scope_sites what is left (0 means none was
-    read or the patterns took out everything).
+    in_scope_app_service_plans (plans kept for an in-scope site included) and
+    in_scope_sites what is left (0 means none was read or the patterns took out
+    everything).

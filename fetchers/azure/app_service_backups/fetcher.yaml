@@ -126,10 +126,15 @@ evidence_set:
     out (web apps, function apps and deployment slots, by resource group, region
     or id; a slot follows its app) are listed under `results.excluded` instead,
     with the pattern, get no backup calls, and are left out of the inventory
-    check, `results.exclusions` and every count. `summary.excluded_web_apps`
-    counts the web apps taken out and `in_scope_web_apps` those left (0 means
-    none was read or the patterns took out every app);
-    `resource_exclusion_patterns` echoes the patterns and
+    check, `results.exclusions` and every count. So `excluded_function_apps` and
+    `excluded_deployment_slots` count only in-scope items this fetcher does not
+    assess, while `summary.boundary_excluded_web_apps`,
+    `boundary_excluded_function_apps` and `boundary_excluded_deployment_slots`
+    count what a pattern took out (the function app and slot counts are null
+    when the list that shows them failed: slots come only from Resource Graph).
+    `in_scope_web_apps` counts the web apps left (0 means none was read or the
+    patterns took out every app); `resource_exclusion_patterns` echoes the
+    patterns and
     `resource_exclusion_patterns_unmatched` lists those that matched nothing,
     such as a mistyped name. Apps on a Free or Shared plan (`plan_tier`, the
     site's sku) get no backup calls: App Service backs up only Basic, Standard,

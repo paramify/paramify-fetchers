@@ -129,24 +129,29 @@ def test_configuration_bare_pattern_fails_the_run(monkeypatch, tmp_path):
 
 # --- azure_app_service_plans ---
 
-def _plan(rg, name, location, zone_redundant, capacity):
-    return ns(id=_plan_id(rg, name), name=name, location=location, kind="app", status="Ready",
-              sku=ns(name="P1v3", tier="PremiumV3", size="P1v3", family="Pv3", capacity=capacity),
-              zone_redundant=zone_redundant)
-
-
-def _plan_site(rg, name, location, plan):
-    return ns(id=_site_id(rg, name), name=name, location=location, kind="app", state="Running", server_farm_id=plan)
+PLAN_FREE = _plan_id(OUT_RG, "plan-free")
+PLAN_EAST = _plan_id(IN_RG, "plan-east")
+APP_EAST = _site_id(IN_RG, "app-east")
+# (group, plan, region, zone redundant, capacity, tier) -> the sites on it as (group, site, region).
+PLANS = [
+    (IN_RG, "plan-in", "regionwest", True, 3, "PremiumV3", [(IN_RG, "app-in", "regionwest"),
+                                                            (OUT_RG, "app-out", "regionwest")]),
+    (OUT_RG, "plan-out", "regionwest", True, 2, "PremiumV3", [(OUT_RG, "app-out2", "regionwest")]),
+    (OUT_RG, "plan-free", "regionwest", False, 1, "Free", [(IN_RG, "app-cross", "regionwest")]),
+    (IN_RG, "plan-east", "regioneast", False, 1, "PremiumV3", [(IN_RG, "app-east", "regioneast")]),
+    (IN_RG, "plan-orphan", "regionwest", False, 2, "PremiumV3", [(OUT_RG, "app-orphan", "regionwest")]),
+]
 
 
 def run_plans(monkeypatch, tmp_path, patterns):
-    plans = [_plan(IN_RG, "plan-in", "regionwest", True, 3), _plan(OUT_RG, "plan-out", "regionwest", True, 2),
-             _plan(IN_RG, "plan-east", "regioneast", False, 1)]
-    plan_in, plan_out, plan_east = (p.id for p in plans)
-    sites = [_plan_site(IN_RG, "app-in", "regionwest", plan_in), _plan_site(OUT_RG, "app-out", "regionwest", plan_in),
-             _plan_site(IN_RG, "app-cross", "regionwest", plan_out),
-             _plan_site(OUT_RG, "app-out2", "regionwest", plan_out),
-             _plan_site(IN_RG, "app-east", "regioneast", plan_east)]
+    # number_of_sites is Azure's count, excluded sites included.
+    plans = [ns(id=_plan_id(rg, name), name=name, location=location, kind="app", status="Ready",
+                sku=ns(name=tier, tier=tier, size=tier, family=tier, capacity=capacity),
+                zone_redundant=zone_redundant, number_of_sites=len(hosted))
+             for rg, name, location, zone_redundant, capacity, tier, hosted in PLANS]
+    sites = [ns(id=_site_id(site_rg, site), name=site, location=region, kind="app", state="Running",
+                server_farm_id=_plan_id(rg, name))
+             for rg, name, *_, hosted in PLANS for site_rg, site, region in hosted]
     client = ns(app_service_plans=ns(list=lambda detailed: plans), web_apps=ns(list=lambda: sites))
     m = plans_fetcher
     _common(m, monkeypatch, tmp_path, patterns)
@@ -156,6 +161,10 @@ def run_plans(monkeypatch, tmp_path, patterns):
     return code, json.loads((tmp_path / "azure_app_service_plans_s1.json").read_text())
 
 
+def _listed(results) -> dict:
+    return {p["name"]: (p["number_of_sites"], [s["name"] for s in p["sites"]]) for p in results["app_service_plans"]}
+
+
 def test_plans_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
     code, evidence = run_plans(monkeypatch, tmp_path, None)
     summary, results = evidence["summary"], evidence["results"]
@@ -163,39 +172,73 @@ def test_plans_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tm
     assert set(summary) - set(plans_fetcher.summarize(results["app_service_plans"])) == NEW_FIELDS | {
         "provider_registration_status", "excluded_app_service_plans", "excluded_sites",
         "in_scope_app_service_plans", "in_scope_sites"}
-    assert summary["total_app_service_plans"] == summary["in_scope_app_service_plans"] == 3
-    assert summary["total_sites"] == summary["in_scope_sites"] == 5
+    assert summary["total_app_service_plans"] == summary["in_scope_app_service_plans"] == 5
+    assert summary["total_sites"] == summary["in_scope_sites"] == 6
     assert summary["excluded_app_service_plans"] == summary["excluded_sites"] == 0
-    assert summary["sites_on_zone_redundant_plans"] == 4
+    assert (summary["single_instance_plans"], summary["no_sla_tier_plans"], summary["empty_plans"]) == (2, 1, 0)
+    assert summary["sites_on_zone_redundant_plans"] == 3
+    # Without patterns the listed sites are Azure's own count.
+    assert all(count == len(sites) for count, sites in _listed(results).values())
 
 
-def test_plans_exclude_by_group_and_region_but_keep_an_in_scope_site_on_an_excluded_plan(monkeypatch, tmp_path):
+def test_plans_keep_an_excluded_free_plan_while_an_in_scope_app_runs_on_it(monkeypatch, tmp_path):
     code, evidence = run_plans(monkeypatch, tmp_path, "rg:rg-out, location:regioneast, rg:typo")
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0
-    [plan] = results["app_service_plans"]
-    assert plan["name"] == "plan-in" and [s["name"] for s in plan["sites"]] == ["app-in"]
+    assert _listed(results) == {"plan-in": (1, ["app-in"]), "plan-orphan": (0, []), "plan-free": (1, ["app-cross"])}
     assert sorted((e["kind"], e["name"], e["pattern"]) for e in results["excluded"]) == [
         ("app_service_plan", "plan-east", "location:regioneast"),
         ("app_service_plan", "plan-out", "rg:rg-out"),
         ("site", "app-east", "location:regioneast"),
+        ("site", "app-orphan", "rg:rg-out"),
         ("site", "app-out", "rg:rg-out"),
         ("site", "app-out2", "rg:rg-out"),
     ]
-    out_plan = next(e for e in results["excluded"] if e["name"] == "plan-out")
-    assert [s["name"] for s in out_plan["sites"]] == ["app-cross"]
-    assert out_plan["zone_redundant"] is True and out_plan["multi_instance"] is True
-    assert (summary["total_app_service_plans"], summary["zone_redundant_plans"], summary["empty_plans"]) == (1, 1, 0)
-    assert (summary["total_sites"], summary["in_scope_sites"], summary["excluded_sites"]) == (2, 2, 3)
-    assert (summary["sites_on_zone_redundant_plans"], summary["sites_on_multi_instance_plans"]) == (2, 2)
-    assert (summary["in_scope_app_service_plans"], summary["excluded_app_service_plans"]) == (1, 2)
+    assert next(e for e in results["excluded"] if e["name"] == "plan-out") == {
+        "kind": "app_service_plan", "name": "plan-out", "pattern": "rg:rg-out", "reason": "resource_matched",
+        "id": _plan_id(OUT_RG, "plan-out"), "resource_group": "rg-out", "location": "regionwest"}
+    assert (summary["total_app_service_plans"], summary["in_scope_app_service_plans"],
+            summary["excluded_app_service_plans"]) == (3, 3, 2)
+    assert (summary["single_instance_plans"], summary["no_sla_tier_plans"]) == (1, 1)
+    assert (summary["zone_redundant_plans"], summary["zone_redundant_percentage"]) == (1, 33)
+    assert (summary["total_sites"], summary["in_scope_sites"], summary["excluded_sites"]) == (2, 2, 4)
+    assert (summary["sites_on_zone_redundant_plans"], summary["sites_on_multi_instance_plans"]) == (1, 1)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
+
+
+def test_plans_an_in_scope_plan_whose_sites_are_all_excluded_is_empty(monkeypatch, tmp_path):
+    code, evidence = run_plans(monkeypatch, tmp_path, "rg:rg-out")
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0
+    assert _listed(results)["plan-orphan"] == (0, [])
+    assert [e["name"] for e in results["excluded"] if e["kind"] == "app_service_plan"] == ["plan-out"]
+    assert (summary["total_app_service_plans"], summary["empty_plans"], summary["excluded_sites"]) == (4, 1, 3)
+
+
+def test_plans_id_patterns_take_out_a_plan_only_with_its_last_in_scope_site(monkeypatch, tmp_path):
+    code, evidence = run_plans(monkeypatch, tmp_path, f"id:{PLAN_EAST}, id:{APP_EAST.upper()}, id:{PLAN_FREE}")
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0
+    assert [(e["kind"], e["id"]) for e in results["excluded"]] == [("site", APP_EAST), ("app_service_plan", PLAN_EAST)]
+    assert "plan-free" in _listed(results) and "plan-east" not in _listed(results)
+    assert (summary["total_app_service_plans"], summary["single_instance_plans"], summary["no_sla_tier_plans"]) == (
+        4, 1, 1)
+    assert summary["resource_exclusion_patterns_unmatched"] == []
+
+
+def test_plans_an_id_pattern_on_a_plan_alone_keeps_it_for_its_in_scope_site(monkeypatch, tmp_path):
+    code, evidence = run_plans(monkeypatch, tmp_path, f"id:{PLAN_EAST}")
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0 and results["excluded"] == []
+    assert _listed(results)["plan-east"] == (1, ["app-east"])
+    assert summary["total_app_service_plans"] == summary["in_scope_app_service_plans"] == 5
+    assert summary["excluded_app_service_plans"] == 0
 
 
 def test_plans_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence = run_plans(monkeypatch, tmp_path, "rg-out")
     assert code == 1
-    assert evidence["summary"]["total_app_service_plans"] == 3
+    assert evidence["summary"]["total_app_service_plans"] == 5
 
 
 # --- azure_app_service_backups ---
@@ -209,6 +252,7 @@ BACKUP_SITES = [("rg-in", "web-in", "regionwest", "app"), ("rg-out", "web-out", 
                 ("rg-out", "func-out", "regionwest", "functionapp")]
 # Resource Graph rows carry no region here, so the regioneast slot can only follow its app.
 BACKUP_SLOTS = [("rg-in", "web-in"), ("rg-out", "web-out"), ("rg-in", "web-east")]
+BOUNDARY = ["boundary_excluded_web_apps", "boundary_excluded_function_apps", "boundary_excluded_deployment_slots"]
 
 
 def _table(values: dict):
@@ -220,7 +264,7 @@ def _table(values: dict):
     return fn
 
 
-def run_backups(monkeypatch, tmp_path, patterns, read=("web-in", "web-out", "web-east")):
+def run_backups(monkeypatch, tmp_path, patterns, read=("web-in", "web-out", "web-east"), graph_fails=False):
     sites = [ns(id=_site_id(f"{SUB}/resourceGroups/{rg}", name), name=name, kind=kind, location=location,
                 state="Running", sku="Standard") for rg, name, location, kind in BACKUP_SITES]
     graph = [{"id": s.id, "name": s.name, "kind": s.kind, "type": "microsoft.web/sites", "location": None}
@@ -241,6 +285,8 @@ def run_backups(monkeypatch, tmp_path, patterns, read=("web-in", "web-out", "web
     storage = [{"id": STORAGE_ID, "name": "stout", "location": "regionwest", "replication": "Standard_GRS"}]
 
     def query(_client, _sub, text):
+        if graph_fails and "storageaccounts" not in text:
+            raise RuntimeError("Resource Graph reported 8 rows but paging returned 7")
         found = storage if "storageaccounts" in text else graph
         return {"rows": found, "total_records": len(found), "pages": 1}
 
@@ -261,10 +307,10 @@ def test_backups_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, 
     assert code == 0 and results["excluded"] == []
     expected = backups_fetcher.summarize(results["web_apps"], results["inventory_check"], results["exclusions"],
                                          results["custom_backup_storage_accounts"], results["settings"])
-    assert set(summary) - set(expected) == NEW_FIELDS | {
-        "provider_registration_status", "excluded_web_apps", "in_scope_web_apps"}
+    assert set(summary) - set(expected) == NEW_FIELDS | {"provider_registration_status", *BOUNDARY, "in_scope_web_apps"}
+    assert "excluded_web_apps" not in summary
     assert summary["total_web_apps"] == summary["in_scope_web_apps"] == summary["resource_graph_web_apps"] == 3
-    assert summary["excluded_web_apps"] == 0
+    assert [summary[k] for k in BOUNDARY] == [0, 0, 0]
     assert (summary["excluded_function_apps"], summary["excluded_deployment_slots"]) == (2, 3)
 
 
@@ -285,11 +331,29 @@ def test_backups_exclude_sites_and_slots_but_keep_an_in_scope_apps_storage_accou
     assert [r["name"] for r in results["exclusions"]["deployment_slots"]["resources"]] == ["web-in/stage"]
     assert [s["name"] for s in results["custom_backup_storage_accounts"]] == ["stout"]
     assert results["custom_backup_storage_accounts"][0]["resolved"] is True
-    assert (summary["total_web_apps"], summary["in_scope_web_apps"], summary["excluded_web_apps"]) == (1, 1, 2)
+    assert (summary["total_web_apps"], summary["in_scope_web_apps"]) == (1, 1)
     assert (summary["apps_backed_up"], summary["backup_coverage_percentage"]) == (1, 100)
+    # Out of the boundary by pattern, versus in scope but not assessed by this fetcher.
+    assert [summary[k] for k in BOUNDARY] == [2, 1, 2]
     assert (summary["excluded_function_apps"], summary["excluded_deployment_slots"]) == (1, 1)
     assert summary["resource_graph_web_apps"] == 1
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
+
+
+def test_backups_resource_graph_failure_still_applies_the_patterns_to_the_site_list(monkeypatch, tmp_path):
+    code, evidence = run_backups(monkeypatch, tmp_path, "rg:rg-out, location:regioneast", read=("web-in",),
+                                 graph_fails=True)
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 1
+    assert [f["operation"] for f in evidence["metadata"]["api_failures"]] == [
+        "resourcegraph.resources (web sites and slots)"]
+    assert [a["name"] for a in results["web_apps"]] == ["web-in"] and results["inventory_check"] is None
+    assert sorted((e["kind"], e["name"]) for e in results["excluded"]) == [
+        ("function_app", "func-out"), ("web_app", "web-east"), ("web_app", "web-out")]
+    # Slots are listed only by Resource Graph, so neither slot count is known.
+    assert [summary[k] for k in BOUNDARY] == [2, 1, None]
+    assert (summary["excluded_function_apps"], summary["excluded_deployment_slots"]) == (1, None)
+    assert summary["in_scope_web_apps"] == 1 and summary["resource_graph_web_apps"] is None
 
 
 def test_backups_bare_pattern_fails_the_run(monkeypatch, tmp_path):

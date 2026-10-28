@@ -72,7 +72,6 @@ def project_plan(plan) -> dict:
         "maximum_elastic_worker_count": model_attr(plan, "maximum_elastic_worker_count"),
         "elastic_scale_enabled": model_attr(plan, "elastic_scale_enabled"),
         "per_site_scaling": model_attr(plan, "per_site_scaling"),
-        "number_of_sites": model_attr(plan, "number_of_sites"),
         "reserved": model_attr(plan, "reserved"),
     }
 
@@ -159,31 +158,29 @@ def plan_record(plan: dict, sites: list[dict]) -> dict:
         "elastic_scale_enabled": bool(plan.get("elastic_scale_enabled") or False),
         "per_site_scaling": bool(plan.get("per_site_scaling") or False),
         "linux": bool(plan.get("reserved") or False),
-        "number_of_sites": plan.get("number_of_sites"),
+        # The in-scope sites listed below; Azure's own numberOfSites also counts excluded ones.
+        "number_of_sites": len(attached),
         "sites": attached,
     }
 
 
 def plan_records(raw_plans: list[dict], raw_sites: list[dict], exclusions: ResourceExclusions):
-    """(in-scope plans, excluded entries). Sites are split first and joined to every plan, so an in-scope site on
-    an excluded plan stays on that plan's entry with the plan's zone redundancy and instance count."""
+    """(in-scope plans, excluded entries). Sites are split first; a plan a pattern matches leaves scope only when
+    no in-scope site runs on it, so in-scope workload keeps its plan in every plan-level count."""
     sites, excluded = exclusions.split(raw_sites, SITE_KIND)
     records = sorted((plan_record(p, sites) for p in raw_plans), key=lambda r: r.get("id") or "")
-    plans, excluded_plans = exclusions.split(records, PLAN_KIND)
-    by_id = {_arm_id_key(r["id"]): r for r in records}
-    for entry in excluded_plans:
-        plan = by_id[_arm_id_key(entry["id"])]
-        entry.update(zone_redundant=plan["zone_redundant"], multi_instance=plan["multi_instance"], sites=plan["sites"])
-    return plans, excluded + excluded_plans
+    _, matched = exclusions.split(records, PLAN_KIND)
+    hosting = {_arm_id_key(r["id"]) for r in records if r["sites"]}
+    excluded_plans = [e for e in matched if _arm_id_key(e["id"]) not in hosting]
+    out = {_arm_id_key(e["id"]) for e in excluded_plans}
+    return [r for r in records if _arm_id_key(r["id"]) not in out], excluded + excluded_plans
 
 
-def summarize(plans: list[dict], excluded_plans: list[dict] | None = None) -> dict:
-    """How many plans (and the sites on them) survive a zone or an instance failure; in-scope sites on an excluded
-    plan count with that plan."""
+def summarize(plans: list[dict]) -> dict:
+    """How many plans (and the sites on them) survive a zone or an instance failure."""
     total = len(plans)
     zone_redundant = sum(1 for p in plans if p["zone_redundant"])
-    hosts = plans + (excluded_plans or [])
-    sites = [s for p in hosts for s in p["sites"]]
+    sites = [s for p in plans for s in p["sites"]]
     return {
         "total_app_service_plans": total,
         "zone_redundant_plans": zone_redundant,
@@ -198,10 +195,10 @@ def summarize(plans: list[dict], excluded_plans: list[dict] | None = None) -> di
         "empty_plans": sum(1 for p in plans if not p["sites"]),
         "total_sites": len(sites),
         "sites_on_zone_redundant_plans": sum(
-            len(p["sites"]) for p in hosts if p["zone_redundant"]
+            len(p["sites"]) for p in plans if p["zone_redundant"]
         ),
         "sites_on_multi_instance_plans": sum(
-            len(p["sites"]) for p in hosts if p["multi_instance"]
+            len(p["sites"]) for p in plans if p["multi_instance"]
         ),
     }
 
@@ -285,7 +282,7 @@ def main() -> int:
     exclusions.record_invalid(collector)
     plans, excluded = plan_records(raw_plans, raw_sites, exclusions)
     exclusions.warn_unmatched(logger)
-    summary = summarize(plans, [e for e in excluded if e["kind"] == PLAN_KIND])
+    summary = summarize(plans)
 
     evidence = build_payload(
         subscription_id=subscription_id,
