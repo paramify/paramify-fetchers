@@ -26,6 +26,8 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 from sql_managed_instance import (  # noqa: E402
     list_databases,
     list_instances,
@@ -192,6 +194,25 @@ def instance_record(
     }
 
 
+def split_failover_groups(
+    groups: list[dict], listed: set, excluded: list[dict]
+) -> tuple[list[dict], list[dict]]:
+    """A group follows its instances: it leaves scope only when every instance of it this run listed is excluded."""
+    out = {lower(e["id"]): e for e in excluded}
+    kept, dropped = [], []
+    for group in groups:
+        local = sorted(instance_ids_in(group) & listed)
+        if local and all(i in out for i in local):
+            entry = out[local[0]]
+            dropped.append(excluded_item(
+                "instance_failover_group", group.get("name"), entry["pattern"], "managed_instance_matched",
+                id=group.get("id"), resource_group=group.get("resource_group"), location=group.get("location"),
+                matched_id=entry["id"]))
+        else:
+            kept.append(group)
+    return kept, dropped
+
+
 def summarize(
     instances: list[dict], failover_groups: list[dict], failover_groups_collected: bool
 ) -> dict:
@@ -348,6 +369,15 @@ def main() -> int:
             ),
         )
 
+    # Failover groups were read and matched against every instance first, so an in-scope instance keeps its verdict.
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    listed = {lower(i.get("id")) for i in instances}
+    instances, excluded = exclusions.split(instances, "managed_instance")
+    groups, excluded_groups = split_failover_groups(groups, listed, excluded)
+    excluded += excluded_groups
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -356,10 +386,13 @@ def main() -> int:
             "managed_instances": instances,
             "instance_failover_groups": groups,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(instances, groups, not unlisted),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("managed_instance", "instance_failover_group"), {
+                "managed_instances": len(instances), "instance_failover_groups": len(groups)}),
         },
     )
 

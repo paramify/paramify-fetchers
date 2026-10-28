@@ -25,6 +25,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from sql_managed_instance import (  # noqa: E402
     list_databases,
     list_instances,
@@ -194,6 +195,11 @@ def main() -> int:
             ),
         )
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    instances, excluded = exclusions.split(instances, "managed_instance")
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -201,8 +207,13 @@ def main() -> int:
         results={
             "managed_instances": instances,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(instances), "provider_registration_status": registration},
+        summary={
+            **summarize(instances),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("managed_instance",), {"managed_instances": len(instances)}),
+        },
     )
 
     filename = (
