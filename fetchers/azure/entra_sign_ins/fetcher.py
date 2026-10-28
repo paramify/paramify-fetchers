@@ -58,6 +58,8 @@ CERTIFICATE_MARKERS = ("x.509", "certificate")
 NOT_A_METHOD = frozenset({"previously satisfied", "satisfied by token"})
 # Microsoft's sign-in workbook rule: every clientAppUsed but these is legacy authentication.
 MODERN_CLIENTS = frozenset({"browser", "mobile apps and desktop clients", "modern clients"})
+# Graph's "Unknown" isn't a legacy protocol: real tenants show it on Azure portal and passkey sign-ins.
+NOT_LEGACY = MODERN_CLIENTS | {"unknown"}
 
 logger = logging.getLogger(NAME)
 
@@ -109,7 +111,7 @@ def sign_in_record(s: Dict[str, Any]) -> Dict[str, Any]:
         "authentication_requirement": requirement,
         "methods": methods,
         "phishing_resistant": succeeded and phishing_resistant,
-        "legacy_authentication": bool(client) and client.lower() not in MODERN_CLIENTS,
+        "legacy_authentication": bool(client) and client.lower() not in NOT_LEGACY,
         "conditional_access_status": s.get("conditionalAccessStatus"),
         # Graph leaves the property out without Policy.Read.ConditionalAccess; absent isn't "none applied".
         "applied_conditional_access_policies": None if policies is None else sorted(

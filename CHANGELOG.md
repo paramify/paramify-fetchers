@@ -40,7 +40,8 @@ schemas and the `paramify` CLI — not the internal code.
   Without P2 the risky sign-in figures read null, not 0, and no sign-in is listed
   as risky. A certificate counts as phishing-resistant only when it alone
   satisfied MFA, and any client but a browser or modern app counts as legacy
-  authentication (a floor: interactive sign-ins only). Sign-ins with no reported
+  authentication (a floor: interactive sign-ins only), except one Graph reports
+  as Unknown. Sign-ins with no reported
   MFA requirement are counted apart. `_shared/azure_rest.py` gains `graph_pages`
   and `graph_list` for paged Graph reads on v1.0 or beta, and retries a GET that
   times out, once.

@@ -134,7 +134,7 @@ def test_sign_ins_summarized_per_user_and_app(monkeypatch):
 
 def test_legacy_authentication_is_any_client_but_browser_and_modern_apps():
     for client, legacy in (("Browser", False), ("Mobile Apps and Desktop clients", False), ("Modern clients", False),
-                           ("", False),
+                           ("", False), ("Unknown", False),
                            ("Reporting Web Services", True), ("Universal Outlook", True), ("Other clients", True)):
         assert sign_ins.sign_in_record(_sign_in("s", "u", client=client))["legacy_authentication"] is legacy, client
 
