@@ -4648,7 +4648,7 @@ Summary fields:
 
 **What traffic do the instance's subnet rules and routes allow?**
 - `instances_subnet_unknown` — Number of instances whose subnet couldn't be read, so none of the subnet fields below count them
-- `instances_subnet_rules_unknown` — Number of instances whose subnet NSG rules couldn't be judged because the subnet or its NSG couldn't be read; neither `instances_subnet_allow_any_to_any_rule` nor `instances_subnet_unrestricted_internet_outbound` counts them, so a 0 in those two fields means none only when this field is 0
+- `instances_subnet_rules_unknown` — Number of instances whose subnet NSG rules couldn't be judged because the subnet or its NSG couldn't be read; neither `instances_subnet_allow_any_to_any_rule` nor `instances_subnet_unrestricted_internet_outbound` counts these instances, so a 0 in either field means none only when `instances_subnet_rules_unknown` is 0
 - `instances_subnet_network_security_group` — Number of instances whose subnet has a network security group (NSG)
 - `instances_subnet_allow_any_to_any_rule` — Number of instances whose subnet NSG has a custom rule that allows every protocol and port from any address (*, 0.0.0.0/0, Any or Internet) to any address; an instance whose NSG couldn't be read doesn't count
 - `instances_subnet_unrestricted_internet_outbound` — Number of instances whose subnet lets traffic out to the Internet on every port: the subnet has no NSG, or the first outbound rule by priority, custom or default, that covers every port and protocol to the Internet is an Allow (the default AllowInternetOutBound, unless a custom rule overrides it); routes are not considered, so traffic a route sends to a firewall still counts. An instance whose NSG couldn't be read doesn't count
