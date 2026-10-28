@@ -14,33 +14,17 @@ from azure_rest import (  # noqa: E402
     iso_duration_days,
     run_workspaces,
 )
+from sentinel_ingestion import (  # noqa: E402
+    ALERT_PRODUCTS_QUERY,
+    ALERTS_TABLE,
+    DEFAULT_WINDOW_DAYS,
+    INGESTION_QUERY,
+    NON_SOURCE_TABLES,
+    WINDOW_ENV,
+)
 
 NAME = "azure_sentinel_data_sources"
-WINDOW_ENV = "SENTINEL_INGESTION_WINDOW_DAYS"
-# Sentinel's own connector status calls a source connected if it ingested within 14 days.
-DEFAULT_WINDOW_DAYS = 14
-
-# Written by the workspace or by Sentinel itself (UEBA included), or agent liveness (Heartbeat): not monitored sources.
-NON_SOURCE_TABLES = frozenset({
-    "Usage", "Operation", "LAQueryLogs", "SentinelHealth", "SentinelAudit",
-    "SecurityIncident", "Watchlist", "ConfidentialWatchlist",
-    "Anomalies", "BehaviorAnalytics", "UserPeerAnalytics", "UserAccessAnalytics", "IdentityInfo",
-    "Heartbeat",
-})
-# SecurityAlert holds both other products' alerts (each a source) and Sentinel's own analytics alerts (not one).
-ALERTS_TABLE = "SecurityAlert"
 SENTINEL_PRODUCTS = frozenset({"azure sentinel", "microsoft sentinel"})
-
-INGESTION_QUERY = (
-    "union withsource=ParamifySourceTable * "
-    "| where TimeGenerated > ago({days}d) "
-    "| summarize LastIngested = max(TimeGenerated), Records = count() by ParamifySourceTable"
-)
-ALERT_PRODUCTS_QUERY = (
-    "SecurityAlert "
-    "| where TimeGenerated > ago({days}d) "
-    "| summarize LastIngested = max(TimeGenerated), Records = count() by ProductName"
-)
 
 logger = logging.getLogger(NAME)
 

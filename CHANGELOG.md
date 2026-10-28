@@ -12,6 +12,25 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_devops_identities`** (`EVD-AZURE-DEVOPS-IDENTITIES`): who can sign in to
+  an Azure DevOps organization and who holds its administrative groups. It records:
+  - every user, service principal and service identity, with access level,
+    origin, member or guest type, date added and last access (from user
+    entitlements);
+  - every group with its direct members, and each identity's direct and
+    inherited groups;
+  - the effective members of Project Collection Administrators, Project
+    Collection Service Accounts, Project Collection Build Administrators and each
+    project's Project, Build, Release and Endpoint Administrators, with the path
+    of nested groups to each and whether it is held only through an Entra group;
+  - users inactive past `AZURE_DEVOPS_INACTIVE_DAYS` (default 90), counting a
+    never-used account from the day it was added, and people deleted in Entra ID
+    who are still in the organization.
+
+  Azure DevOps memberships never expire; `entra_groups_granting_privilege` names
+  the Entra groups to check for PIM. A summary field whose read failed is null,
+  not 0 or empty. Read-only PAT scopes: Graph and Member Entitlement Management;
+  or an Entra identity that is an organization member.
 - **`azure_entra_dormant_identities`** (`EVD-AZURE-ENTRA-DORMANT-IDENTITIES`) —
   whether any dormant, never-used, guest or deleted user or service principal still
   holds an Entra directory role or an Azure role in the subscription. Lists each
@@ -146,9 +165,95 @@ schemas and the `paramify` CLI — not the internal code.
   as written, never its value, with whether it is set; the TUI and shared config
   checks compare what it reads, and `validate` names an issue-report reference
   unset in its shell.
+- **`azure_devops_permissions`** (`EVD-AZURE-DEVOPS-PERMISSIONS`): who may do what
+  in an Azure DevOps organization. Every explicit permission entry in the
+  namespaces that govern the organization, projects, Git and TFVC repositories,
+  build and release pipelines, environments, service connections, the library and
+  audit streams, read with `recurse` and `includeExtendedInfo`. Each entry records:
+  - the identity, resolved by descriptor (user, group, Entra group, service
+    principal or service identity);
+  - the scope its token denotes (organization, project, repository, branch, path,
+    pipeline, release stage, environment, service connection, variable group,
+    secure file) and the project;
+  - the allowed, denied, inherited and effective actions by name.
+
+  High-impact rights set on anyone other than the built-in admin groups are
+  flagged: managing permissions, deleting a project, editing or bypassing
+  policies, force-pushing, checking in other users' changes, administering
+  builds, releases, service connections, environments and the library, and
+  managing audit streams. The group named `[<project>]\Contributors` holding only
+  its default rights on that project (editing and deleting build and release
+  pipelines, managing release approvers) is counted apart, in
+  `high_impact_grants_from_defaults`, not in
+  `high_impact_grants_outside_admin_groups`. Rights given to whoever creates a
+  branch, environment or service connection can't be told apart and stay in the
+  outside-admin count. `branch_policy_bypass_holders` lists who may bypass Git
+  branch policies, and is null when the organization has no Git repositories the
+  identity can read (TFVC only, or none readable). A count reads null, not 0, when
+  a namespace, the repository list, the project list or an identity lookup it
+  depends on could not be read. `AZURE_DEVOPS_PROJECTS` limits
+  TFVC paths too. PAT scopes: Security (Manage), because Azure DevOps has no
+  read-only scope for access control lists (the fetcher only reads), plus
+  Identity (Read), Code (Read) and Project and Team (Read).
 
 ### Changed
 
+- **`azure_sentinel_analytics_rules` 0.2.0: rule queries, suppression, the
+  tables each rule reads and quiet incident-creation rules.** Each rule now carries its KQL query's
+  `query_sha256` and `query_length` (the `query` text itself only with
+  `SENTINEL_RULE_QUERY_TEXT=true`, since detection queries hold strings a web
+  firewall refuses), `suppression_enabled` and
+  `suppression_duration`, and `tables_read`: the local workspace tables its
+  query names, in code, bracket-quoted (`['T']`) or as a string passed to
+  `table()` or to a function the query defines (`tables_from: query`), else the
+  data types its template lists (`tables_from: template`). Templates are listed
+  at the stable api-version; a template a rule uses that only the preview
+  api-version has (an NRT rule's) is read from it by name. A name
+  that is also a column, such as `Operation`, or that the query assigns
+  (`extend Event = …`, `datatable(Event:string)`), counts only where a table can
+  stand; names the query binds (`mv-expand`, `mv-apply`, `as`, `withsource=`),
+  names after a `.` (`workspace("x").T`, `parse_json(c).Event`) and wildcard
+  unions don't count. A name the workspace doesn't list counts as a table it
+  never provisioned where only a table can stand, unless it is one of the
+  workspace's functions (read from saved searches); a template's data types
+  count whether or not the workspace lists them, except `_`-prefixed parsers.
+  When included, the `query` is
+  the rule's full KQL as written, so it can hold the user names, IP addresses
+  and file paths the rule names. Incident-creation rules read `SecurityAlert` and
+  have data only when their own product sent an alert. Each workspace lists the
+  tables enabled rules read with their last ingestion, the ingesting tables no
+  enabled rule reads (`SecurityAlert` left out, since it also holds Sentinel's
+  own alerts), the arriving tables enabled rules read only through their
+  templates' data types, and the enabled rules missing data: a table their query reads
+  got nothing in the window (`SENTINEL_INGESTION_WINDOW_DAYS`, default 14), or
+  none of their template's data types did, since a template lists alternative
+  sources. Fusion, ML Behavior Analytics and Threat Intelligence rules have no
+  query and read as `tables_read: null`, counted in
+  `enabled_rules_tables_unknown`. Each workspace also reports
+  `enabled_rules_suppressed`, `ingestion_window_days` and
+  `workspace_tables_listed`. The summary's counts are null, not 0, when no
+  workspace could be checked. `templates_available` and `templates_in_use` now
+  also count the preview-only templates rules use. The ingestion query
+  needs Log Analytics Reader as well as Microsoft Sentinel Reader. Also mapped
+  to `KSI-IAM-SUS`. An enabled incident-creation rule whose product sent no
+  alert in the window stays in `enabled_rules_missing_data`. Each workspace also
+  lists it in `enabled_rules_quiet`, with the connection kinds that have its
+  alerts enabled and the reason, when a data connection that sends that
+  product's alerts has alerts enabled: the product's own connection, or Defender
+  XDR's for Entra ID Protection and Defender for Identity, Endpoint, Office 365
+  and Cloud Apps. Defender XDR doesn't carry Defender for Cloud or Defender for
+  IoT alerts. No alert in the window is normal for these rules, so a summary
+  `enabled_rules_missing_data` equal to the new `enabled_rules_quiet` means
+  every rule missing data is quiet. A rule whose product has no connection with
+  alerts enabled, a scheduled rule reading `SecurityAlert`, and a rule reading
+  another table with no data are never quiet. The data connectors are listed
+  (stable and preview api-versions; only the preview returns Defender XDR's
+  connection) only when such a rule exists. A failed stable listing is an API
+  failure, a failed preview listing is a note, and either leaves
+  `enabled_rules_quiet` null unless each rule is quiet through a connection
+  that was read. The summary count is null if any workspace with a known
+  `enabled_rules_missing_data` has an unknown `enabled_rules_quiet`. Listing the
+  data connectors needs no access beyond Microsoft Sentinel Reader.
 - **`azure_key_vault_key_rotation` 0.2.0 covers certificates.** Each vault now
   lists its certificates with their expiry (`expired`, `days_until_expiry`),
   thumbprint and policy: issuer, validity, key shape and lifetime actions, read as
@@ -211,6 +316,37 @@ schemas and the `paramify` CLI — not the internal code.
     written only when it is a version number) to runtime support; without it, a Windows
     app on the default .NET Framework v4.0 reads as unknown rather than supported.
     Production sites only; deployment slots are not read.
+- **`azure_storage_encryption_status` 0.2.0 adds geo-replication, access-key age
+  and containers.** Each account now carries its primary and secondary region and
+  their status, and a geo-redundant account its replication health from
+  `get_properties(expand=geoReplicationStats)`: status, last sync time,
+  `sync_lag_minutes` (measured when each answer arrives, never below 0) and
+  whether it can fail over. A `LastSyncTimeUnavailable` answer reads
+  `stats_status: unavailable` rather than failing the run. Both access keys get an
+  age from `keyCreationTime`, judged to the moment against the key expiry policy
+  (`access_keys_within_expiration_period`); `listKeys` is never called. A key with
+  no `keyCreationTime` (an older account whose keys were never rotated since Azure
+  began recording it) has an unknown age, so the account's and the summary's
+  maximum age and the 90-day and beyond-policy counts read null rather than
+  leaving it out; the longest sync lag is null the same way while any
+  geo-redundant account's lag is unknown. Every blob container is listed with its
+  public access level, `anonymous_access_effective` (the account must not forbid
+  it: an unset `allowBlobPublicAccess` allows it, as Azure documents; and its
+  network must admit public clients, which public network access Disabled does
+  not, nor, outside `SecuredByPerimeter`, a firewall that denies by default with
+  no IP or virtual network rule), metadata keys (never values) and its immutability and legal-hold flags. The account's
+  tags are recorded with `owner_tag` and `classification_tag`, taken from tag keys
+  set by the new `owner_tag_keys` and `classification_tag_keys` config. Summary
+  adds geo-replication, key-age, container and tag counts. Any other error reading
+  geo stats or listing containers fails the run. Also maps to `KSI-CNA-OFA`,
+  `KSI-RPL-ABO` and `KSI-PIY-GIV`. One existing field changes:
+  `allow_blob_public_access` reads an unset `allowBlobPublicAccess` as true, as
+  Azure treats it (the same rule as shared-key and cross-tenant access), so
+  `public_blob_access_accounts` now counts those accounts.
+  A read-only run on a real subscription with Reader exercised geo stats, key ages
+  and container listing; `LastSyncTimeUnavailable`, key expiry policies,
+  immutability policies, legal holds and container metadata are proven by
+  synthetic tests only.
 - **`azure_front_door_origins` 0.5.0: Kudu and silent regions.** An app whose
   Kudu (scm) site has its own access restrictions
   (`scmIpSecurityRestrictionsUseMain` off) that let every public caller in is no
@@ -267,6 +403,37 @@ schemas and the `paramify` CLI — not the internal code.
   aliases, empty endpoint records and endpoints by failover method; zones whose
   record sets can't be read are null and fail the run. Adds KSI-CNA-MAT,
   KSI-RPL-ABO and KSI-RPL-TRC. Existing fields and keys are unchanged.
+
+- **`azure_resource_diagnostic_settings` 0.2.0 shows whether resource logs arrive.**
+  A diagnostic setting naming a workspace did not show that logs reach it. For
+  each Log Analytics workspace an exporting setting names, one query over
+  `INGESTION_LOOKBACK_DAYS` (default 7) gives every resource in the subscription
+  its newest record time and record count. Tables written whatever a setting
+  says are left out, because their rows name a resource without being its logs:
+  the activity log, metrics, monitoring agent tables (InsightsMetrics, Perf,
+  Heartbeat, Syslog, Event) and Container Insights. `union *` skips Basic and
+  Auxiliary plan tables, and querying them bills per GB scanned, so they are
+  skipped unless `BASIC_LOGS_LOOKBACK_HOURS` is set above 0 (default 0); then
+  each is queried on its own over that many hours through the query API's
+  `/search` endpoint, since `/query` refuses these tables (the shared
+  `AzureRestClient` gains `search()` for this), and one that fails stays
+  unqueried without failing the run. Each resource gains
+  `log_analytics_ingestion` per destination, `last_ingested` and
+  `ingested_in_window`: null when a destination refused the read or has an
+  unqueried table that could hold the resource's logs (a storage service's own
+  Storage*Logs table, or a resource-specific table unless every setting sending
+  there is explicitly in AzureDiagnostics mode); false when every destination
+  was read in full or was deleted. With `APPROVED_LOG_WORKSPACES` set, each
+  setting carries `workspace_approved` and each resource
+  `sends_to_approved_workspace`. `results.log_analytics_destinations` and new
+  summary keys (`resources_with_recent_ingestion`,
+  `resources_without_recent_ingestion`, `resources_ingestion_unknown`,
+  `no_recent_ingestion_by_type`, `settings_exporting_to_unapproved_workspace`,
+  and others) report the totals; `all_log_analytics_resources_ingesting` is
+  null, not true, when no setting exports to Log Analytics. A refused destination (401, 403, or a
+  subscription the caller can't see) does not fail the run. Checked read-only
+  against a production subscription. Existing fields and summary keys are
+  unchanged.
 
 ### Fixed
 
