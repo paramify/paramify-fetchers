@@ -256,6 +256,26 @@ schemas and the `paramify` CLI — not the internal code.
   as written, never its value, with whether it is set; the TUI and shared config
   checks compare what it reads, and `validate` names an issue-report reference
   unset in its shell.
+- **`azure_app_service_deployments`** (`EVD-AZURE-APPSVC-DEPLOYMENTS`) — how each App
+  Service web app and slot is deployed. Kudu's deployment records (id or commit, status,
+  author, deployer, message, times, the active deployment), counted separately so an empty
+  Kudu history is not read as "no deployments"; an author, deployer or message past 500
+  characters is cut and marked. From the Activity Log (Microsoft.Web over `activity_log_days`, 90 by
+  default, explicit start and end, paged to the end): slot swaps, publish-profile
+  downloads, publishing-credential reads and package deployments through Resource
+  Manager, one per request (correlation id, kept on each record) on the site of the event
+  that names the requester, with who asked and when. A request that finished keeps its
+  own status, so a callerless platform row can't flip it. A failed read leaves those
+  counts null rather than zero; a read cut at 200,000 events keeps the newest and says
+  so. Requests on sites not listed (deleted apps, function apps and other sites that
+  aren't web apps) are counted apart. Apps with, without and of unknown deployment
+  evidence add up to every web app. Also where each app deploys from (credentials and
+  query tokens in the URL removed, a failed read counted as unknown) and each slot's
+  configuration compared with production field by field, an unset FTPS state or default
+  action reading as what App Service applies.
+  `results.limitations` says what it cannot attribute: the content or commit a Web Deploy
+  or FTP push shipped, who used shared publishing credentials, and anything older than the
+  window. Reader only.
 - **`azure_entra_access_reviews`** (`EVD-AZURE-ENTRA-ACCESS-REVIEWS`) — Microsoft
   Entra ID access reviews over Microsoft Graph: every review series with what it
   reviews (group membership, app assignment, directory role, access package), its
