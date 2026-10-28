@@ -165,6 +165,30 @@ schemas and the `paramify` CLI — not the internal code.
   as written, never its value, with whether it is set; the TUI and shared config
   checks compare what it reads, and `validate` names an issue-report reference
   unset in its shell.
+- **`azure_entra_access_reviews`** (`EVD-AZURE-ENTRA-ACCESS-REVIEWS`) — Microsoft
+  Entra ID access reviews over Microsoft Graph: every review series with what it
+  reviews (group membership, app assignment, directory role, access package), its
+  recurrence, default decision, auto-apply setting and reviewers (per stage for a
+  multi-stage series), each run's status, and the decisions of each active
+  series' latest completed cycle with whether each denial was applied. A cycle is
+  the runs that started at the same time, taken once all have ended (Completing
+  and AutoReviewing count as ended). Lists follow
+  `@odata.nextLink`, and ask for the next page with `$top`/`$skip` when Graph
+  sends a full page without one. The summary says whether every active series
+  runs at least monthly, denies unanswered reviews and applies its decisions
+  automatically, and gives the auto-removal and the longest recurrence period
+  apart from monthly so a validator can set its own cadence; also how long since
+  each last finished a cycle, and how many denials were applied. A tenant without
+  Entra ID P2 or ID Governance reads `access_reviews_available: false` and the run
+  succeeds; only Graph's `AadPremiumLicenseRequired` code on the first read counts
+  as that, and any other refusal is a failure. When any read fails the summary
+  gives no figures, so a denied read never reads as no reviews. Decisions are
+  read two at a time, and a list Graph still throttles after the client's own
+  retries is read again after 5, 15 and 45 seconds (or a longer Retry-After, up
+  to 180) before it fails as `rate_limited`. A series whose runs weren't read
+  shows null in place of its in-progress and last-cycle figures. Needs
+  `AccessReview.Read.All`. Reviews of Azure resource roles are kept by Azure
+  Resource Manager, not Graph, and are not read.
 - **`azure_devops_permissions`** (`EVD-AZURE-DEVOPS-PERMISSIONS`): who may do what
   in an Azure DevOps organization. Every explicit permission entry in the
   namespaces that govern the organization, projects, Git and TFVC repositories,
