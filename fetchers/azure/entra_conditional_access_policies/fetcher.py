@@ -227,8 +227,9 @@ def policy_record(policy: dict, strengths: dict | None = None) -> dict:
     elif strength is None:
         phishing_resistant = None
     else:
-        # Under OR, any other grant control satisfies the policy instead of the strength.
-        either = str(policy.get("grant_controls_operator") or "").upper() == "OR" and bool(grant)
+        # Under OR, any other grant control, terms of use included, satisfies the policy instead of the strength.
+        either = str(policy.get("grant_controls_operator") or "").upper() == "OR" and bool(
+            grant or policy.get("terms_of_use"))
         phishing_resistant = strength["phishing_resistant"] and not either
 
     return {
@@ -417,7 +418,7 @@ async def read_strengths(client) -> list[dict]:
     return items
 
 
-async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[dict], bool, bool]:
+async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[dict] | None, bool, bool]:
     """identity.conditional_access.policies.get() paged to the end, then the strengths they use."""
 
     async def _work(client):
@@ -432,15 +433,16 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[d
             )
         ]
         policies_readable = len(collector.failures) == before
-        strengths: list[dict] = []
+        strengths: list[dict] | None = []
         readable = True
         if any(p.get("authentication_strength_id") for p in projected):
             raw = await aguard(collector, "graph.policies.authenticationStrengthPolicies.get",
                                lambda: read_strengths(client), default=None)
             readable = raw is not None
-            strengths = sorted((strength_record(s) for s in raw or []),
-                               key=lambda s: (s["display_name"] or "", s["id"] or ""))
-        by_id = {str(s["id"]).lower(): s for s in strengths} if readable else None
+            # None, not [], when the read failed: unread is not "no strengths".
+            strengths = None if raw is None else sorted(
+                (strength_record(s) for s in raw), key=lambda s: (s["display_name"] or "", s["id"] or ""))
+        by_id = {str(s["id"]).lower(): s for s in strengths or []} if readable else None
         policies = [policy_record(p, by_id) for p in projected]
         logger.info("Collected %d Conditional Access policy/policies", len(policies))
         # Sorted for byte-stable re-runs; Graph promises no stable policy order.
@@ -474,7 +476,7 @@ def main() -> int:
     if cred is None:
         policies: list[dict] = []
         tenant = {"tenant_source": "unresolved"}
-        strengths: list[dict] = []
+        strengths: list[dict] | None = []
         strengths_readable, policies_readable = True, False
     else:
         policies, tenant, strengths, strengths_readable, policies_readable = asyncio.run(_collect(collector, cred))

@@ -136,11 +136,24 @@ def test_strength_combinations_read_raw_and_judged(monkeypatch):
     assert s["phishing_resistant_mfa_role_template_ids"] == [GLOBAL_ADMIN]
 
 
+def test_strength_or_terms_of_use_is_not_phishing_resistant(monkeypatch):
+    either = _policy("p-pr-or-terms", "Strength or terms of use", strength=PHISHING_RESISTANT)
+    either["grantControls"]["termsOfUse"] = ["00000000-0000-0000-0000-0000000000b1"]
+    both = _policy("p-pr-and-terms", "Strength and terms of use", strength=PHISHING_RESISTANT, operator="AND")
+    both["grantControls"]["termsOfUse"] = ["00000000-0000-0000-0000-0000000000b1"]
+    policies, _strengths, s, _collector = _run(monkeypatch, _graph([either, both], [PHISHING_RESISTANT]))
+
+    by_id = {p["id"]: p for p in policies}
+    assert by_id["p-pr-or-terms"]["requires_phishing_resistant_mfa"] is False
+    assert by_id["p-pr-and-terms"]["requires_phishing_resistant_mfa"] is True
+    assert s["enforced_policies_requiring_phishing_resistant_mfa"] == 1
+
+
 def test_denied_strength_read_is_not_authorized_and_nulls_the_figures(monkeypatch):
     policies, strengths, s, collector = _run(monkeypatch, _graph(_tenant_policies(), strength_status=403))
 
     assert classify_failure_code(collector.failures) == "not_authorized"
-    assert strengths == []
+    assert strengths is None
     assert s["authentication_strengths_readable"] is False
     for key in ("enforced_policies_requiring_phishing_resistant_mfa",
                 "enforced_phishing_resistant_mfa_for_all_users_and_apps",
