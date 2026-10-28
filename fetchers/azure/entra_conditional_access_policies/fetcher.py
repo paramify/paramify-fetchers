@@ -318,9 +318,11 @@ def _protects(policy: dict, resource: str) -> bool:
     return resource in included or ALL_APPLICATIONS in included
 
 
-def phishing_resistant_summary(enforced: list[dict], strengths_readable: bool) -> dict:
-    """Null when any enforced policy's strength couldn't be judged, so an unread strength never reads as absent."""
-    known = strengths_readable and all(p["requires_phishing_resistant_mfa"] is not None for p in enforced)
+def phishing_resistant_summary(enforced: list[dict], strengths_readable: bool, policies_readable: bool) -> dict:
+    """Null when the policies or any enforced policy's strength couldn't be read, so unread never reads as absent."""
+    known = policies_readable and strengths_readable and all(
+        p["requires_phishing_resistant_mfa"] is not None for p in enforced
+    )
     strong = [p for p in enforced if p["requires_phishing_resistant_mfa"]]
     return {
         "authentication_strengths_readable": strengths_readable,
@@ -334,7 +336,7 @@ def phishing_resistant_summary(enforced: list[dict], strengths_readable: bool) -
     }
 
 
-def summarize(policies: list[dict], strengths_readable: bool = True) -> dict:
+def summarize(policies: list[dict], strengths_readable: bool = True, policies_readable: bool = True) -> dict:
     """Enforced policies are the denominator that matters.
 
     Every "enforced_policies_*" count is over enforced policies only, because a disabled
@@ -358,7 +360,7 @@ def summarize(policies: list[dict], strengths_readable: bool = True) -> dict:
         "enforced_policies_with_authentication_strength": sum(
             1 for p in enforced if p["access_controls"]["authentication_strength_id"]
         ),
-        **phishing_resistant_summary(enforced, strengths_readable),
+        **phishing_resistant_summary(enforced, strengths_readable, policies_readable),
         "enforced_policies_with_session_controls": sum(
             1 for p in enforced if any(p["session_controls"].values())
         ),
@@ -415,11 +417,12 @@ async def read_strengths(client) -> list[dict]:
     return items
 
 
-async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[dict], bool]:
+async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[dict], bool, bool]:
     """identity.conditional_access.policies.get() paged to the end, then the strengths they use."""
 
     async def _work(client):
         tenant = await resolve_tenant(collector, client)
+        before = len(collector.failures)
         projected = [
             project_conditional_access_policy(p)
             for p in await paginate(
@@ -428,6 +431,7 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[d
                 client.identity.conditional_access.policies,
             )
         ]
+        policies_readable = len(collector.failures) == before
         strengths: list[dict] = []
         readable = True
         if any(p.get("authentication_strength_id") for p in projected):
@@ -445,10 +449,11 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[d
             tenant,
             strengths,
             readable,
+            policies_readable,
         )
 
     result = await with_graph_client(collector, cred, _work, default=None)
-    return result if result is not None else ([], {"tenant_source": "unresolved"}, [], True)
+    return result if result is not None else ([], {"tenant_source": "unresolved"}, [], True, False)
 
 
 def main() -> int:
@@ -470,9 +475,9 @@ def main() -> int:
         policies: list[dict] = []
         tenant = {"tenant_source": "unresolved"}
         strengths: list[dict] = []
-        strengths_readable = True
+        strengths_readable, policies_readable = True, False
     else:
-        policies, tenant, strengths, strengths_readable = asyncio.run(_collect(collector, cred))
+        policies, tenant, strengths, strengths_readable, policies_readable = asyncio.run(_collect(collector, cred))
 
     # No `provider_registration_status()` call, deliberately: Graph is not an ARM
     # resource provider.
@@ -490,7 +495,7 @@ def main() -> int:
         subscription_source=scoping["subscription_source"],
         collector=collector,
         results={"conditional_access_policies": policies, "authentication_strengths": strengths},
-        summary=summarize(policies, strengths_readable),
+        summary=summarize(policies, strengths_readable, policies_readable),
     )
 
     filename = f"azure_entra_conditional_access_policies_{tenant_filename_key(tenant)}.json"

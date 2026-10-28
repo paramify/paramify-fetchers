@@ -50,7 +50,7 @@ def _policy(pid, name, strength=None, controls=(), operator="OR", users=None, ap
                            "applications": {"includeApplications": list(apps)}}}
 
 
-def _graph(policies, strengths=None, strength_status=200):
+def _graph(policies, strengths=None, strength_status=200, policies_status=200):
     routes = {
         "/v1.0/organization": {"value": [{"id": TENANT, "displayName": "Contoso", "verifiedDomains": []}]},
         "/v1.0/identity/conditionalAccess/policies": {"value": policies},
@@ -58,6 +58,10 @@ def _graph(policies, strengths=None, strength_status=200):
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = _path(request)
+        if path == "/v1.0/identity/conditionalAccess/policies" and policies_status != 200:
+            # The wording Graph sent a reader with no directory role: no status, no "privileges".
+            return httpx.Response(policies_status, json={"error": {
+                "code": "AccessDenied", "message": "Your account does not have access to this report or data."}})
         if path == "/v1.0/policies/authenticationStrengthPolicies":
             if strength_status != 200:
                 return httpx.Response(strength_status, json={"error": {
@@ -88,8 +92,8 @@ def _run(monkeypatch, handler):
 
     monkeypatch.setattr(ca, "with_graph_client", fake_with_graph_client)
     collector = Collector(logging.getLogger("test"))
-    policies, _tenant, strengths, readable = asyncio.run(ca._collect(collector, object()))
-    return policies, strengths, ca.summarize(policies, readable), collector
+    policies, _tenant, strengths, readable, policies_readable = asyncio.run(ca._collect(collector, object()))
+    return policies, strengths, ca.summarize(policies, readable, policies_readable), collector
 
 
 def _tenant_policies():
@@ -148,6 +152,18 @@ def test_denied_strength_read_is_not_authorized_and_nulls_the_figures(monkeypatc
     # requirementsSatisfied comes inline with the policy, so MFA is still judged.
     assert by_id["p-pr-all"]["requires_mfa"] is True and by_id["p-password"]["requires_mfa"] is False
     assert by_id["p-mfa"]["requires_phishing_resistant_mfa"] is False
+
+
+def test_denied_policy_read_is_not_authorized_and_unknown_not_zero(monkeypatch):
+    policies, strengths, s, collector = _run(monkeypatch, _graph([], policies_status=403))
+
+    assert policies == [] and collector.failures
+    assert collector.failures[0]["message"].endswith("(status 403)")
+    assert classify_failure_code(collector.failures) == "not_authorized"
+    for key in ("enforced_policies_requiring_phishing_resistant_mfa",
+                "enforced_phishing_resistant_mfa_for_all_users_and_apps",
+                "phishing_resistant_mfa_role_template_ids"):
+        assert s[key] is None, key
 
 
 def test_strengths_are_not_read_when_no_policy_uses_one(monkeypatch):

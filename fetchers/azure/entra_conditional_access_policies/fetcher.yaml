@@ -86,9 +86,9 @@ evidence_set:
 
     Do enforced policies require phishing-resistant MFA?
     - authentication_strengths_readable — True if the authentication strengths the policies use were read with their allowed combinations, or no policy uses one; false if the read failed, and the phishing-resistant figures read null
-    - enforced_policies_requiring_phishing_resistant_mfa — Number of enforced policies that require phishing-resistant MFA: their authentication strength allows only FIDO2 security keys and passkeys, Windows Hello for Business or multi-factor certificate authentication, and the policy doesn't let the user meet another grant control instead; null if a policy's strength couldn't be read
-    - enforced_phishing_resistant_mfa_for_all_users_and_apps — Number of enforced policies that require phishing-resistant MFA for all users on all cloud apps, before any exclusions; null if a policy's strength couldn't be read
-    - phishing_resistant_mfa_role_template_ids — List of directory role template ids (Global Administrator is 62e90394-69f5-4237-9190-012177145e10) that an enforced policy requiring phishing-resistant MFA on all cloud apps includes; excluded users and groups aren't checked; null if a policy's strength couldn't be read
+    - enforced_policies_requiring_phishing_resistant_mfa — Number of enforced policies that require phishing-resistant MFA: their authentication strength allows only FIDO2 security keys and passkeys, Windows Hello for Business or multi-factor certificate authentication, and the policy doesn't let the user meet another grant control instead; null if the policies or a policy's strength couldn't be read
+    - enforced_phishing_resistant_mfa_for_all_users_and_apps — Number of enforced policies that require phishing-resistant MFA for all users on all cloud apps, before any exclusions; null if the policies or a policy's strength couldn't be read
+    - phishing_resistant_mfa_role_template_ids — List of directory role template ids (Global Administrator is 62e90394-69f5-4237-9190-012177145e10) that an enforced policy requiring phishing-resistant MFA on all cloud apps includes; excluded users and groups aren't checked; null if the policies or a policy's strength couldn't be read
 
     How widely do enforced policies apply?
     - enforced_policies_targeting_all_users — Number of enforced policies that include all users; a policy can still exclude users, groups or roles
