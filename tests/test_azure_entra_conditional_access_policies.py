@@ -181,6 +181,57 @@ def test_denied_policy_read_is_not_authorized_and_unknown_not_zero(monkeypatch):
         assert key in s and s[key] is None, key
 
 
+def _with(policy, client_apps=None, locations=None, terms_of_use=None):
+    if client_apps is not None:
+        policy["conditions"]["clientAppTypes"] = list(client_apps)
+    if locations is not None:
+        policy["conditions"]["locations"] = locations
+    if terms_of_use is not None:
+        policy["grantControls"]["termsOfUse"] = list(terms_of_use)
+    return policy
+
+
+def _client_types(monkeypatch, *policies):
+    got, _strengths, s, _collector = _run(monkeypatch, _graph(list(policies), [PHISHING_RESISTANT, PASSWORD_ONLY]))
+    return s["mfa_client_app_types_for_all_users_and_apps"], {p["id"]: p for p in got}
+
+
+def test_mfa_client_types_combine_across_policies(monkeypatch):
+    apps = _with(_policy("p-apps", "MFA for apps", controls=("mfa",)), client_apps=("mobileAppsAndDesktopClients",))
+    web = _with(_policy("p-web", "MFA for browsers and legacy", controls=("mfa",)),
+                client_apps=("browser", "exchangeActiveSync", "other"))
+    assert _client_types(monkeypatch, apps, web)[0] == [
+        "browser", "exchangeActiveSync", "mobileAppsAndDesktopClients", "other"]
+    assert _client_types(monkeypatch, web)[0] == ["browser", "exchangeActiveSync", "other"]
+    assert _client_types(monkeypatch, _policy("p-mfa", "MFA", controls=("mfa",)))[0] == [
+        "browser", "exchangeActiveSync", "mobileAppsAndDesktopClients", "other"]
+
+
+def test_mfa_client_types_skip_alternatives_narrowing_and_partial_scope(monkeypatch):
+    browser = ("browser",)
+    types, by_id = _client_types(
+        monkeypatch,
+        _with(_policy("p-or-device", "MFA or device", controls=("mfa", "compliantDevice")), client_apps=browser),
+        _with(_policy("p-or-terms", "MFA or terms", controls=("mfa",)), client_apps=browser, terms_of_use=["t"]),
+        _with(_policy("p-or-weak", "MFA or password-only strength", controls=("mfa",), strength=PASSWORD_ONLY),
+              client_apps=browser),
+        _with(_policy("p-offsite", "MFA off the network", controls=("mfa",)), client_apps=browser,
+              locations={"includeLocations": ["All"], "excludeLocations": ["AllTrusted"]}),
+        _with(_policy("p-staff", "MFA for staff", controls=("mfa",), users={"includeGroups": ["g"]}), client_apps=browser),
+        _with(_policy("p-portal", "MFA for portals", controls=("mfa",), apps=("MicrosoftAdminPortals",)),
+              client_apps=browser),
+        _with(_policy("p-report", "Report only", controls=("mfa",), state="enabledForReportingButNotEnforced"),
+              client_apps=browser),
+        _with(_policy("p-and", "MFA and device", controls=("mfa", "compliantDevice"), operator="AND"),
+              client_apps=("mobileAppsAndDesktopClients",)),
+        _with(_policy("p-strong", "Phishing-resistant", strength=PHISHING_RESISTANT),
+              client_apps=("exchangeActiveSync",)),
+    )
+    assert types == ["exchangeActiveSync", "mobileAppsAndDesktopClients"]
+    assert by_id["p-or-weak"]["requires_mfa"] is True and by_id["p-or-weak"]["requires_mfa_without_alternative"] is False
+    assert by_id["p-and"]["requires_mfa_without_alternative"] is True
+
+
 def test_strengths_are_not_read_when_no_policy_uses_one(monkeypatch):
     seen = []
     inner = _graph([_policy("p-mfa", "Classic MFA", controls=("mfa",))])

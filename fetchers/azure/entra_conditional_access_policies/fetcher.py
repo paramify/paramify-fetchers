@@ -77,6 +77,8 @@ ALL_USERS = "All"
 # conditions.clientAppTypes values for the pre-modern-auth protocols, which cannot
 # present an MFA challenge at all.
 LEGACY_CLIENT_APP_TYPES = frozenset({"exchangeActiveSync", "other"})
+# Every conditions.clientAppTypes value by its lowercase form; unset or "all" means all four.
+CLIENT_APP_TYPES = {t.lower(): t for t in ("browser", "mobileAppsAndDesktopClients", "exchangeActiveSync", "other")}
 
 # authenticationMethodModes bound to the sign-in origin, so a look-alike site can't relay them.
 PHISHING_RESISTANT_MODES = frozenset({"fido2", "windowshelloforbusiness", "x509certificatemultifactor"})
@@ -219,9 +221,13 @@ def policy_record(policy: dict, strengths: dict | None = None) -> dict:
         (strength or {}).get("requirements_satisfied") or ""
     ).split(",")
     # A strength counts as MFA only when it says so; a custom one can allow a password alone.
-    requires_mfa = any(c.lower() in MFA_CONTROLS for c in grant) or (
-        bool(strength_id) and MFA_REQUIREMENT in {str(r).strip().lower() for r in requirements}
-    )
+    strength_mfa = bool(strength_id) and MFA_REQUIREMENT in {str(r).strip().lower() for r in requirements}
+    requires_mfa = any(c.lower() in MFA_CONTROLS for c in grant) or strength_mfa
+    # Under OR, every grant control, the strength and terms of use are alternatives; each must be MFA.
+    any_of = str(policy.get("grant_controls_operator") or "").upper() == "OR"
+    mfa_without_alternative = requires_mfa and (not any_of or (
+        all(c.lower() in MFA_CONTROLS for c in grant) and not policy.get("terms_of_use")
+        and (not strength_id or strength_mfa)))
     if not strength_id:
         phishing_resistant: bool | None = False
     elif strength is None:
@@ -280,6 +286,7 @@ def policy_record(policy: dict, strengths: dict | None = None) -> dict:
         },
         # --- derived flags ---
         "requires_mfa": requires_mfa,
+        "requires_mfa_without_alternative": mfa_without_alternative,
         "requires_phishing_resistant_mfa": phishing_resistant,
         "blocks_access": bool(access_controls["block"]),
         "requires_compliant_device": any(
@@ -317,6 +324,23 @@ def _protects(policy: dict, resource: str) -> bool:
         return False
     included = policy["target_resources"]["include"]
     return resource in included or ALL_APPLICATIONS in included
+
+
+def _client_app_types(policy: dict) -> set:
+    types = {str(t).lower() for t in policy["conditions"]["client_app_types"]}
+    if not types or "all" in types:
+        return set(CLIENT_APP_TYPES.values())
+    return {CLIENT_APP_TYPES.get(t, t) for t in types}
+
+
+def _mfa_for_everyone(policy: dict) -> bool:
+    """Enforced MFA with no alternative, for all users on all cloud apps with none excluded, unnarrowed."""
+    c = policy["conditions"]
+    return (policy["is_enforced"] and policy["requires_mfa_without_alternative"] and policy["targets_all_users"]
+            and policy["targets_all_applications"] and not policy["target_resources"]["exclude"]
+            and not c["sign_in_risk_levels"] and not c["user_risk_levels"]
+            and all(str(v).lower() == "all" for v in c["include_platforms"]) and not c["exclude_platforms"]
+            and all(str(v).lower() == "all" for v in c["include_locations"]) and not c["exclude_locations"])
 
 
 def phishing_resistant_summary(enforced: list[dict], strengths_readable: bool, policies_readable: bool) -> dict:
@@ -376,6 +400,10 @@ def summarize(policies: list[dict], strengths_readable: bool = True, policies_re
             1
             for p in enforced
             if p["requires_mfa"] and p["targets_all_users"] and p["targets_all_applications"]
+        ),
+        # Policies can split the client types between them, e.g. one for browsers and one for apps.
+        "mfa_client_app_types_for_all_users_and_apps": sorted(
+            {t for p in enforced if _mfa_for_everyone(p) for t in _client_app_types(p)}
         ),
         # --- the two resources the CIS Azure benchmark names ---
         "mfa_required_for_admin_portals": any(

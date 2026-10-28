@@ -94,6 +94,7 @@ evidence_set:
     - enforced_policies_targeting_all_users — Number of enforced policies that include all users; a policy can still exclude users, groups or roles; null if the policies couldn't be read
     - enforced_policies_targeting_all_applications — Number of enforced policies that include all cloud apps; a policy can still exclude apps; null if the policies couldn't be read
     - enforced_mfa_for_all_users_and_apps — Number of enforced policies that require MFA for all users on all cloud apps, before any exclusions; null if the policies couldn't be read
+    - mfa_client_app_types_for_all_users_and_apps — List of client app types (browser, mobileAppsAndDesktopClients, exchangeActiveSync, other) on which enforced policies, taken together, require MFA for all users on all cloud apps. A policy counts when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no risk, platform or location condition; a policy for all client app types adds all four. Excluded users, groups and roles, device filters and authentication flows aren't checked; null if the policies couldn't be read
     - enforced_policies_targeting_legacy_authentication — Number of enforced policies whose conditions include legacy clients (Exchange ActiveSync or other older clients, which can't prompt for MFA), whether the policy blocks them or requires something else; null if the policies couldn't be read
 
     Do admin portals and Azure management require MFA?

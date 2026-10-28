@@ -221,6 +221,15 @@ schemas and the `paramify` CLI — not the internal code.
   `mfa_required_for_admin_portals` read false before. A failed strength read leaves
   `authentication_strengths` null rather than an empty list.
 
+- **`azure_entra_conditional_access_policies` shows MFA coverage split across
+  policies.** A tenant can require MFA for all users with one policy for browsers
+  and another for mobile and desktop apps; no single policy then covers every
+  client. The new summary list `mfa_client_app_types_for_all_users_and_apps` holds
+  the client app types those policies cover together, counting only policies where
+  MFA has no alternative grant control and no risk, platform, location or app
+  exclusion narrows them. Each policy also carries
+  `requires_mfa_without_alternative`.
+
 - **`azure_sentinel_analytics_rules` 0.2.0: rule queries, suppression, the
   tables each rule reads and quiet incident-creation rules.** Each rule now carries its KQL query's
   `query_sha256` and `query_length` (the `query` text itself only with
