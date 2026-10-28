@@ -272,12 +272,54 @@ def test_policies_for_some_apps_or_with_conditions_do_not_cover(monkeypatch):
 
     by_id = {p["id"]: p for p in results["mfa_policies"]}
     assert by_id["p-offsite"]["narrowing_conditions"] == ["locations"]
-    assert by_id["p-modern"]["narrowing_conditions"] == ["client_app_types"]
+    assert by_id["p-modern"]["narrowing_conditions"] == []
+    assert by_id["p-modern"]["client_app_types"] == ["browser"]
+    assert by_id["p-modern"]["modern_client_types"] == ["browser"]
     assert by_id["p-portal"]["targets_all_applications"] is False
-    assert s["mfa_policies_counting_for_coverage"] == 2
+    assert s["mfa_policies_counting_for_coverage"] == 3
+    # Browsers alone leave desktop and mobile apps without MFA.
     svc = next(u for u in results["other_users_excluded_from_mfa"] if u["id"] == SVC)
     assert svc["covered_by_an_mfa_policy"] is False and svc["excluded_from_mfa"] is True
     assert s["users_excluded_from_mfa"] == 3
+
+
+def test_policies_split_by_client_type_cover_together(monkeypatch):
+    graph, arm = _tenant()
+    graph["/identity/conditionalAccess/policies"] += [
+        _policy("p-apps", "MFA for apps", client_apps=("mobileAppsAndDesktopClients",),
+                users={"includeUsers": ["All"], "excludeUsers": [OFF]}),
+        _policy("p-web", "MFA for browsers and legacy", client_apps=("browser", "exchangeActiveSync", "other"),
+                users={"includeUsers": ["All"], "excludeUsers": [OFF, ADMIN]}),
+    ]
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm), BG1)
+
+    assert collector.failures == []
+    by_id = {p["id"]: p for p in results["mfa_policies"]}
+    assert by_id["p-web"]["modern_client_types"] == ["browser"] and by_id["p-web"]["counts_for_coverage"] is True
+    # Excluded from the baseline, but the split pair covers both modern client types.
+    svc = next(u for u in results["other_users_excluded_from_mfa"] if u["id"] == SVC)
+    assert svc["covered_by_an_mfa_policy"] is True and svc["excluded_from_mfa"] is False
+    # Excluded from one half of the pair: browsers stay without MFA.
+    graph["/identity/conditionalAccess/policies"][-1]["conditions"]["users"]["excludeUsers"].append(SVC)
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm), BG1)
+    svc = next(u for u in results["other_users_excluded_from_mfa"] if u["id"] == SVC)
+    assert svc["covered_by_an_mfa_policy"] is False and svc["excluded_from_mfa"] is True
+
+
+def test_legacy_authentication_block_for_all_users(monkeypatch):
+    graph, arm = _tenant()
+    assert _collect(monkeypatch, FakeClient(graph, arm), BG1)[1]["legacy_authentication_blocked_for_all_users"] is False
+    graph["/identity/conditionalAccess/policies"].append(
+        _policy("p-geo", "Block outside the network", controls=("block",), locations=TRUSTED_LOCATIONS,
+                client_apps=("exchangeActiveSync", "other")))
+    assert _collect(monkeypatch, FakeClient(graph, arm), BG1)[1]["legacy_authentication_blocked_for_all_users"] is False
+    graph["/identity/conditionalAccess/policies"].append(
+        _policy("p-legacy", "Block legacy authentication", controls=("block",),
+                users={"includeUsers": ["All"], "excludeUsers": [BG1]}, client_apps=("exchangeActiveSync", "other")))
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm), BG1)
+    assert s["legacy_authentication_blocked_for_all_users"] is True
+    # A block policy isn't an MFA policy, so its exclusions don't leave anyone without MFA.
+    assert "p-legacy" not in {p["id"] for p in results["mfa_policies"]}
 
 
 def test_failed_include_read_leaves_coverage_unknown(monkeypatch):
@@ -368,6 +410,7 @@ def test_denied_conditional_access_is_not_authorized_and_nulls_the_exclusions(mo
     assert classify_failure_code(collector.failures) == "not_authorized"
     assert s["conditional_access_readable"] is False and s["exclusions_readable"] is False
     assert s["enforced_mfa_policies"] is None and results["mfa_policies"] is None
+    assert s["legacy_authentication_blocked_for_all_users"] is None
     for key in EXCLUSION_FIGURES:
         assert s[key] is None, key
     account = results["emergency_accounts"][0]

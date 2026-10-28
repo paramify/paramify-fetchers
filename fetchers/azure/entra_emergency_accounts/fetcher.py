@@ -28,7 +28,11 @@ LOG_ALERT_API = "2023-12-01"
 USER_SELECT = "id,displayName,userPrincipalName,accountEnabled,userType,createdDateTime"
 STATE_ENABLED = "enabled"
 MFA_CONTROL = "mfa"
+BLOCK_CONTROL = "block"
 ALL = "all"
+# clientAppTypes: a user signs in through both modern types; the legacy types can't present MFA.
+MODERN_CLIENT_TYPES = {"browser": "browser", "mobileappsanddesktopclients": "mobileAppsAndDesktopClients"}
+LEGACY_CLIENT_TYPES = frozenset({"exchangeactivesync", "other"})
 GUESTS = "GuestsOrExternalUsers"
 GUEST_FILTER = "userType eq 'Guest'"
 # guestOrExternalUserTypes that hold users of type Guest; an include naming both, for every tenant, covers them all.
@@ -80,11 +84,15 @@ def _lower(values) -> List[str]:
 
 # --- Conditional Access ---
 
+def client_types(conditions: Dict[str, Any]) -> set:
+    """The client app types a policy applies to, lowercased; unset or "all" is every type."""
+    types = set(_lower(conditions.get("clientAppTypes")))
+    return set(MODERN_CLIENT_TYPES) | LEGACY_CLIENT_TYPES if not types or ALL in types else types
+
+
 def narrowing_conditions(conditions: Dict[str, Any]) -> List[str]:
-    """The conditions that limit when a policy applies; a policy with any doesn't count as covering a user."""
+    """The conditions besides client app types that limit when a policy applies; a policy with any doesn't cover."""
     found = []
-    if any(str(t).lower() != ALL for t in conditions.get("clientAppTypes") or []):
-        found.append("client_app_types")
     for key, name in (("signInRiskLevels", "sign_in_risk"), ("userRiskLevels", "user_risk"),
                       ("servicePrincipalRiskLevels", "service_principal_risk"), ("insiderRiskLevels", "insider_risk")):
         if conditions.get(key):
@@ -123,6 +131,7 @@ def mfa_policy(policy: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     excluded = users.get("excludeUsers") or []
     all_apps = ALL in _lower((conditions.get("applications") or {}).get("includeApplications"))
     narrowing = narrowing_conditions(conditions)
+    modern = sorted(MODERN_CLIENT_TYPES[t] for t in client_types(conditions) if t in MODERN_CLIENT_TYPES)
     return {
         "id": policy.get("id"),
         "display_name": policy.get("displayName"),
@@ -136,9 +145,21 @@ def mfa_policy(policy: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "exclude_roles": sorted(users.get("excludeRoles") or []),
         "excludes_guests_or_external_users": GUESTS in excluded or bool(users.get("excludeGuestsOrExternalUsers")),
         "targets_all_applications": all_apps,
+        "client_app_types": sorted(conditions.get("clientAppTypes") or []),
+        "modern_client_types": modern,
         "narrowing_conditions": narrowing,
-        "counts_for_coverage": all_apps and not narrowing,
+        "counts_for_coverage": all_apps and not narrowing and bool(modern),
     }
+
+
+def blocks_legacy_for_all_users(policy: Dict[str, Any]) -> bool:
+    """An enforced policy that blocks Exchange ActiveSync and other legacy clients for all users on all apps, unnarrowed."""
+    grant = policy.get("grantControls") or {}
+    conditions = policy.get("conditions") or {}
+    return (policy.get("state") == STATE_ENABLED and BLOCK_CONTROL in _lower(grant.get("builtInControls"))
+            and ALL in _lower((conditions.get("users") or {}).get("includeUsers"))
+            and ALL in _lower((conditions.get("applications") or {}).get("includeApplications"))
+            and not narrowing_conditions(conditions) and LEGACY_CLIENT_TYPES <= client_types(conditions))
 
 
 def excluded_by(policies: List[dict], direct: Dict[str, Optional[dict]], groups: Dict[str, List[dict]],
@@ -170,21 +191,27 @@ def excluded_by(policies: List[dict], direct: Dict[str, Optional[dict]], groups:
 
 
 def covered(user: dict, excluded_from: set, policies: List[dict], included: Dict[str, Optional[set]]) -> Optional[bool]:
-    """True if a policy that counts for coverage includes the user and doesn't exclude it; None if that rests on a failed read."""
+    """True if each modern client type has a covering policy that includes the user and doesn't exclude them;
+    None if that rests on a failed read."""
     uid = (user.get("id") or "").lower()
     guest = str(user.get("userType") or "").lower() == "guest"
-    unknown = False
+    known: set = set()
+    maybe: set = set()
     for p in policies:
         if not p["counts_for_coverage"] or p["id"] in excluded_from:
             continue
         if p["includes_all_users"] or uid in _lower(p["include_users"]) or (guest and p["includes_every_guest"]):
-            return True
+            known |= set(p["modern_client_types"])
+            continue
         members = included.get(p["id"], set())
         if members is None:
-            unknown = True
+            maybe |= set(p["modern_client_types"])
         elif uid in members:
-            return True
-    return None if unknown else False
+            known |= set(p["modern_client_types"])
+    modern = set(MODERN_CLIENT_TYPES.values())
+    if known >= modern:
+        return True
+    return None if known | maybe >= modern else False
 
 
 # --- alert rules ---
@@ -287,7 +314,7 @@ def excluded_user_record(user: dict, exclusion_fields: dict) -> dict:
 
 def summarize(accounts: List[dict], not_found: List[str], others: List[dict], policies: Optional[List[dict]],
               rules: Optional[List[dict]], workspaces: Optional[int], status: Dict[str, str], source: str,
-              named: int) -> dict:
+              named: int, legacy_blocked: Optional[bool] = None) -> dict:
     accounts_ok = status["accounts"] == READ
     exclusions_ok = status["policies"] == READ and status["exclusions"] == READ and accounts_ok
     rules_ok = status["alert_rules"] == READ
@@ -317,6 +344,7 @@ def summarize(accounts: List[dict], not_found: List[str], others: List[dict], po
             sum(1 for p in policies if p["includes_all_users"]) if policies is not None else None),
         "mfa_policies_counting_for_coverage": (
             sum(1 for p in policies if p["counts_for_coverage"]) if policies is not None else None),
+        "legacy_authentication_blocked_for_all_users": legacy_blocked if policies is not None else None,
         "sentinel_workspaces_checked": workspaces if rules_ok else None,
         "alert_rules_checked": len(rules) if rules_ok and rules is not None else None,
         "emergency_accounts": count(len(accounts), accounts_ok),
@@ -547,6 +575,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
         status["policies"] = NOT_LICENSED
     policies = [p for p in (mfa_policy(r) for r in raw_policies or []) if p is not None]
     policies.sort(key=lambda p: ((p["display_name"] or "").lower(), p["id"] or ""))
+    legacy_blocked = any(blocks_legacy_for_all_users(r) for r in raw_policies or [])
     all_users_policies = {p["id"] for p in policies if p["includes_all_users"]}
 
     directory = Directory(client, collector)
@@ -612,7 +641,8 @@ def collect(client, subscription_id: str, collector) -> tuple:
                 len(accounts), source, len(others), len(policies), len(rules))
     read_policies = policies if status["policies"] == READ else None
     return (_results(tenant_id, source, accounts, not_found, others, read_policies, now),
-            summarize(accounts, not_found, others, read_policies, rules, workspaces, status, source, len(named)))
+            summarize(accounts, not_found, others, read_policies, rules, workspaces, status, source, len(named),
+                      legacy_blocked))
 
 
 def _results(tenant_id, source: str, accounts: List[dict], not_found: List[str], others: List[dict],
