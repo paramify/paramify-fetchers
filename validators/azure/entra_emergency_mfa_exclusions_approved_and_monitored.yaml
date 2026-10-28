@@ -7,10 +7,11 @@ statement: >-
   group or a directory role, or as a guest) and that no other enforced MFA policy covers is an
   emergency account named in the fetcher's ENTRA_EMERGENCY_ACCOUNTS setting and is named, by whole
   sign-in name or object id, in the query of an enabled Microsoft Sentinel analytics rule or Azure
-  Monitor log search alert rule in the subscription. A policy covers a user when it targets all cloud
-  apps, has no narrowing condition (client apps, risk, platforms, locations, device filter or
-  authentication flows), includes the user (all users, the user, a group or role they're in, or every
-  guest) and doesn't exclude them. At least one enforced MFA policy exists, and the policies, their
+  Monitor log search alert rule in the subscription. A user is covered when browsers and mobile and
+  desktop apps are each covered by a policy that targets all cloud apps, applies to that client app
+  type, has no other narrowing condition (risk, platforms, locations, device filter or authentication
+  flows), includes the user (all users, the user, a group or role they're in, or every guest) and
+  doesn't exclude them; one policy can cover both client types, or two policies one each. At least one enforced MFA policy exists, and the policies, their
   includes and exclusions, the named accounts and the alert rules were all read without a failure.
   Substantiates that enabled accounts are left without MFA by an exclusion only as approved, monitored
   emergency accounts (KSI-IAM-APM). With no accounts named, any uncovered exclusion fails. Does NOT
@@ -20,8 +21,9 @@ statement: >-
   the first place (entra_ca_mfa_required_all_users_all_apps), users held out of MFA by report-only,
   disabled or non-MFA policies, a covering policy's app exclusions, users excluded or covered through
   PIM-eligible role assignments, external users who are members under a guest exclusion, or the
-  emergency accounts' sign-in methods and last use. A user covered only by a policy with a narrowing
-  condition (for example MFA off the trusted network) counts as left without MFA.
+  emergency accounts' sign-in methods and last use, or legacy clients, which can't present MFA
+  (entra_ca_legacy_auth_blocked). A user covered only by a policy with a narrowing condition (for
+  example MFA off the trusted network) counts as left without MFA.
 
 regex: '"partial_failure":\s*false[\s\S]*?"enforced_mfa_policies":\s*(?<enforced_mfa_policies>[1-9]\d*)[\s\S]*?"excluded_users_not_monitored_emergency_accounts":\s*(?<excluded_users_not_monitored_emergency_accounts>\d+|null)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0
