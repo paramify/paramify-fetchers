@@ -45,6 +45,10 @@ APPLIED = {"AppliedSuccessfully", "AppliedSuccessfullyButObjectNotFound"}
 DECISIONS = ("Approve", "Deny", "NotReviewed", "DontKnow")
 SCOPE_TYPES = ("group_membership", "application", "entra_role", "access_package", "other")
 READ_CONCURRENCY = 8
+# Eight decision reads at once drew 429s that the client's own quick retries didn't clear; two at a time.
+DECISION_CONCURRENCY = 2
+# Seconds before reading a list again while Graph still throttles it after those retries; a longer Retry-After wins.
+THROTTLE_WAITS = (5, 15, 45)
 # Graph pages these lists 100 at a time and documents $top/$skip; a full page with no nextLink means ask for more.
 PAGE_SIZE = 100
 PAGE_LIMIT = 1000
@@ -399,17 +403,37 @@ def licence_refused(exc: BaseException) -> bool:
     return getattr(exc, "response_status_code", None) in LICENCE_STATUSES and code == LICENCE_ERROR_CODE
 
 
-async def _read(collector: Collector, operation: str, builder, unlicensed: Optional[List[str]] = None) -> Optional[List[Any]]:
-    """`_page`; None when the read failed. Only a read given `unlicensed` notes a licence refusal there instead of failing."""
-    probe = Collector(_probe_log)
+def retry_after(exc: BaseException) -> float:
+    """Graph's Retry-After in seconds; 0 when it sent none or not a number."""
+    headers = getattr(exc, "response_headers", None) or {}
+    value = next((v for k, v in headers.items() if str(k).lower() == "retry-after"), "")
     try:
-        items = await _page(probe, operation, builder)
-    except Exception as exc:  # noqa: BLE001 — boundary: a licence refusal or a failure, never a crash
-        if unlicensed is not None and licence_refused(exc):
-            unlicensed.append(f"{operation}: {exc}")
-            logger.info("Access reviews unavailable: %s (%s)", operation, exc)
-            return None
-        probe.record(operation, exc)
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+async def _read(collector: Collector, operation: str, builder, unlicensed: Optional[List[str]] = None) -> Optional[List[Any]]:
+    """`_page`, read again after a wait while Graph throttles it; None when the read failed.
+
+    Only a read given `unlicensed` notes a licence refusal there instead of failing.
+    """
+    for wait in (*THROTTLE_WAITS, None):
+        probe = Collector(_probe_log)
+        try:
+            items = await _page(probe, operation, builder)
+        except Exception as exc:  # noqa: BLE001 — boundary: a licence refusal or a failure, never a crash
+            if unlicensed is not None and licence_refused(exc):
+                unlicensed.append(f"{operation}: {exc}")
+                logger.info("Access reviews unavailable: %s (%s)", operation, exc)
+                return None
+            if wait is not None and getattr(exc, "response_status_code", None) == 429:
+                seconds = max(float(wait), retry_after(exc))
+                logger.warning("%s throttled (429); reading it again in %.0fs", operation, seconds)
+                await asyncio.sleep(seconds)
+                continue
+            probe.record(operation, exc)
+        break
     for failure in probe.failures:
         collector.failures.append(failure)
         logger.error("API call failed: %s (%s: %s)", operation, failure.get("type"), failure.get("message"))
@@ -440,9 +464,10 @@ async def _collect(collector: Collector, cred) -> tuple:
             instances[definition_id] = None if items is None else [project_instance(i) for i in items]
 
         await asyncio.gather(*(read_instances(d["id"]) for d in definitions))
+        decision_gate = asyncio.Semaphore(DECISION_CONCURRENCY)
 
         async def read_decisions(definition_id: str, instance_id: str):
-            async with gate:
+            async with decision_gate:
                 items = await _read(
                     collector,
                     f"graph.identityGovernance.accessReviews.definitions.instances.decisions.get ({instance_id})",

@@ -130,7 +130,10 @@ schemas and the `paramify` CLI — not the internal code.
   Entra ID P2 or ID Governance reads `access_reviews_available: false` and the run
   succeeds; only Graph's `AadPremiumLicenseRequired` code on the first read counts
   as that, and any other refusal is a failure. When any read fails the summary
-  gives no figures, so a denied read never reads as no reviews. Needs
+  gives no figures, so a denied read never reads as no reviews. Decisions are
+  read two at a time, and a list Graph still throttles after the client's own
+  retries is read again after 5, 15 and 45 seconds (or a longer Retry-After)
+  before it fails as `rate_limited`. Needs
   `AccessReview.Read.All`. Reviews of Azure resource roles are kept by Azure
   Resource Manager, not Graph, and are not read.
 

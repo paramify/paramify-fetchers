@@ -19,6 +19,7 @@ spec = importlib.util.spec_from_file_location("azure_entra_access_reviews_under_
 ar = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ar)
 REAL_QUERY = ar._query
+REAL_SLEEP = asyncio.sleep
 
 NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
 
@@ -27,6 +28,17 @@ NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
 def plain_queries(monkeypatch):
     """The fakes below take the $top/$skip a real request builder would."""
     monkeypatch.setattr(ar, "_query", lambda builder, **params: ns(query_parameters=ns(**params)))
+
+
+@pytest.fixture(autouse=True)
+def no_throttle_waits(monkeypatch):
+    waits = []
+
+    async def sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(ar.asyncio, "sleep", sleep)
+    return waits
 GROUP_QUERY = "/groups/g-finance/transitiveMembers"
 
 
@@ -384,6 +396,42 @@ def test_licence_wording_without_the_licence_code_and_status_is_a_failure(error)
     assert len(collector.failures) == 1
 
 
+class _Throttled(_Builder):
+    """Answers 429 to its first `times` requests, then lists its items."""
+
+    def __init__(self, times, items=(), retry_after=None):
+        super().__init__(items=items)
+        self.times = times
+        self.headers = {} if retry_after is None else {"Retry-After": retry_after}
+
+    async def get(self, request_configuration=None):
+        if self.times:
+            self.times -= 1
+            error = _ODataError("Too many requests. Please try again later.", 429, "TooManyRequests")
+            error.response_headers = self.headers
+            raise error
+        return await super().get(request_configuration)
+
+
+def test_a_throttled_read_is_read_again_after_a_wait(no_throttle_waits):
+    items, collector, _ = _read(_Throttled(2, items=[ns(id="d1")]))
+    assert collector.ok and [i.id for i in items] == ["d1"]
+    assert no_throttle_waits == list(ar.THROTTLE_WAITS[:2])
+
+
+def test_a_longer_retry_after_wins(no_throttle_waits):
+    _read(_Throttled(1, items=[ns(id="d1")], retry_after="120"))
+    assert no_throttle_waits == [120.0]
+
+
+def test_a_read_throttled_past_every_wait_fails_rate_limited(no_throttle_waits):
+    builder = _Throttled(len(ar.THROTTLE_WAITS) + 1)
+    items, collector, _ = _read(builder)
+    assert items is None and len(collector.failures) == 1 and builder.times == 0
+    assert no_throttle_waits == list(ar.THROTTLE_WAITS)
+    assert ar.classify_failure_code(collector.failures) == "rate_limited"
+
+
 class _Definitions(_Builder):
     """definitions → by id → instances → by id → decisions, recording which were read."""
 
@@ -439,6 +487,39 @@ def test_decisions_are_read_only_for_active_series_latest_cycle(monkeypatch):
     assert decisions["i-sep"][0]["decision"] == "Deny"
     _, summary = ar.build(definitions, instances, decisions, unlicensed, NOW)
     assert summary["last_cycle_denied_decisions_applied"] == 1
+
+
+def test_decisions_are_read_two_at_a_time(monkeypatch):
+    names = [f"d{n}" for n in range(5)]
+    graph = _Definitions(
+        [_raw_definition(n, "InProgress") for n in names],
+        {n: [_raw_instance(f"i-{n}", "Applied", SEPT)] for n in names},
+        {},
+    )
+    running, peak = [0], [0]
+
+    class _Slow(_Builder):
+        async def get(self, request_configuration=None):
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+            for _ in range(3):
+                await REAL_SLEEP(0)
+            running[0] -= 1
+            return await super().get(request_configuration)
+
+    original = graph.by_access_review_schedule_definition_id
+
+    def slow_decisions(def_id):
+        instances = original(def_id).instances
+        instances.by_access_review_instance_id = lambda inst_id: ns(decisions=_Slow())
+        return ns(instances=instances)
+
+    graph.by_access_review_schedule_definition_id = slow_decisions
+    _fake_graph(monkeypatch, graph)
+    collector = ar.Collector(logging.getLogger("test"))
+    _, _, _, decisions, _ = asyncio.run(ar._collect(collector, object()))
+    assert collector.ok and len(decisions) == 5
+    assert peak[0] == 2 == ar.DECISION_CONCURRENCY
 
 
 def test_a_credential_failure_writes_null_figures_and_fails_the_run(tmp_path, monkeypatch):
