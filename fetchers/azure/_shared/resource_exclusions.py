@@ -16,7 +16,7 @@ KINDS = ("rg", "location", "id")
 
 
 def _key(kind: Optional[str], value: Optional[str]) -> str:
-    # Regions compare without case or spaces, so "Canada East" and canadaeast are one region.
+    # Regions compare without case or spaces, so "East US 2" and eastus2 are one region.
     text = str(value or "").strip().lower()
     return text.replace(" ", "") if kind == "location" else text.rstrip("/")
 
