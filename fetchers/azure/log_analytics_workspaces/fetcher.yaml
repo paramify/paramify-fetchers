@@ -1,5 +1,5 @@
 name: azure_log_analytics_workspaces
-version: 0.1.0
+version: 0.2.0
 description: >
   Every Log Analytics workspace in the subscription with the configuration that
   decides how long log data is kept and who can read it: the pricing SKU, the
@@ -14,6 +14,24 @@ description: >
   tables, listed by name. Also each workspace's data export rules and whether
   Microsoft Sentinel is onboarded (the SecurityInsights solution is enabled).
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that resource's
+      child resources). * matches any run of characters and ? one character. A
+      matching workspace is listed under excluded with the pattern and left out of
+      every count and verdict, with its tables, data exports and solutions. A
+      pattern without one of these prefixes fails the run. Set it once for every
+      Azure fetcher under platforms.azure.config. Can be ${env:VAR}. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -58,3 +76,10 @@ evidence_set:
     data_exports.list_by_workspace(resource_group, workspace) and
     intelligence_packs.list(resource_group, workspace). Reader is sufficient — all
     GETs, and no log data is queried.
+    Resources the resource_exclusions patterns take out are listed under `excluded`
+    instead, each with the pattern that matched, and every count covers only the
+    workspaces in scope. The summary echoes `resource_exclusion_patterns`, lists
+    `resource_exclusion_patterns_unmatched` (patterns that matched no workspace,
+    such as a mistyped name), and counts `excluded_workspaces` and
+    `in_scope_workspaces` (0 when none was read or the patterns took out every
+    workspace, which a check can catch by requiring more than 0).

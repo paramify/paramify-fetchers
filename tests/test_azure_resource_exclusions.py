@@ -83,3 +83,20 @@ def test_no_patterns_keeps_everything():
     items = [{"id": VAULT, "name": "kv-out", "location": "regioneast"}]
     kept, excluded = ResourceExclusions().split(items, "vault")
     assert kept == items and excluded == []
+
+
+def test_platform_config_reaches_every_fetcher_that_declares_the_field(monkeypatch):
+    from framework.config_loader import discover_fetchers, discover_platforms
+    from framework.contract import ManifestEntry, PlatformConfig
+    from framework.runner.executor import _apply_config
+
+    fetchers, platforms = discover_fetchers(REPO_ROOT), discover_platforms(REPO_ROOT)
+    adopters = [f for f in fetchers.values() if f.category == "azure" and "resource_exclusions" in f.config_schema]
+    assert adopters
+    monkeypatch.setenv(ENV, "rg:rg-out, location:regioneast")
+    platform = PlatformConfig(config={"resource_exclusions": "${env:AZURE_RESOURCE_EXCLUSIONS}"})
+    for fetcher in adopters:
+        assert fetcher.config_schema["resource_exclusions"].env == ENV
+        env: dict = {}
+        _apply_config(env, fetcher, platforms.get("azure"), platform, ManifestEntry(use=fetcher.name))
+        assert env[ENV] == "rg:rg-out, location:regioneast", fetcher.name

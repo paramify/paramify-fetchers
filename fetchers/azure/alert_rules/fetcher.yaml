@@ -1,9 +1,28 @@
 name: azure_alert_rules
-version: 0.1.0
+version: 0.2.0
 description: >-
   Shows every metric, log search and smart detector alert rule and whether
   each one actually reaches a person.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching alert rule, action group or processing rule is listed
+      under excluded with the pattern and left out of every count and verdict;
+      routing is still worked out against every action group and processing rule,
+      so an in-scope rule's verdict doesn't change. A pattern without one of these
+      prefixes fails the run. Set it once for every Azure fetcher under
+      platforms.azure.config. Can be ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -55,7 +74,7 @@ evidence_set:
     - GET Microsoft.AlertsManagement/actionRules — processing rules that suppress or add action groups
     - GET {action group id} (groups in other subscriptions) — their receivers
 
-    Output: azure_alert_rules_<subscription>.json — each alert rule with its condition, the receivers it notifies (phone numbers cut to the last 4 digits, webhooks to their host, Logic Apps and Functions to their resource id), any processing rules that suppress or add groups to it, and whether it reaches a person; mute durations are recorded but not evaluated, and activity log alerts are in azure_activity_log_alerts.
+    Output: azure_alert_rules_<subscription>.json — each alert rule with its condition, the receivers it notifies (phone numbers cut to the last 4 digits, webhooks to their host, Logic Apps and Functions to their resource id), any processing rules that suppress or add groups to it, and whether it reaches a person; mute durations are recorded but not evaluated, and activity log alerts are in azure_activity_log_alerts. Resources the resource_exclusions patterns take out are listed under excluded instead.
 
     Summary fields:
 
@@ -67,6 +86,16 @@ evidence_set:
     - disabled_alerting_rules — Number of alerting rules that are disabled
     - log_search_rules_enabled — Number of enabled log search (KQL query) alert rules
     - provider_registration_status — Whether Microsoft.Insights and Microsoft.AlertsManagement are registered on the subscription: registered, not_registered or unknown for each
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no alert rule, action group or processing rule, such as a mistyped name
+    - excluded_alert_rules — Number of alert rules left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+    - excluded_action_groups — Number of action groups left out of scope the same way
+    - excluded_processing_rules — Number of alert processing rules left out of scope the same way
+    - in_scope_alert_rules — Number of alert rules read and in scope; 0 means none was read or the patterns took out every rule, which a check can catch by requiring more than 0
+    - in_scope_action_groups — Number of action groups read and in scope
+    - in_scope_processing_rules — Number of alert processing rules read and in scope
 
     Do enabled rules notify anyone?
     - enabled_rules_without_action_groups — Number of enabled rules with no action group to notify, either their own or one added by a processing rule

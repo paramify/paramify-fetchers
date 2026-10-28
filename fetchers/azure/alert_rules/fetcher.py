@@ -35,6 +35,7 @@ from alert_routing import (  # noqa: E402
     tri_state,
 )
 from arm_rest import arm_rest_client, list_all  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_alert_rules")
 
@@ -192,6 +193,7 @@ def main() -> int:
     group_records: list[dict] = []
     processing_rules: list[dict] = []
     pages: dict = {}
+    locations: dict = {}
     registration = {ns: REGISTRATION_UNKNOWN for ns in ("Microsoft.Insights", "Microsoft.AlertsManagement")}
     if subscription_id and cred is not None:
         for ns in registration:
@@ -225,6 +227,7 @@ def main() -> int:
             referenced += [gid for p in processing_rules for gid in p["added_action_group_ids"]]
             add_referenced_groups(rest, referenced, by_id, collector)
             rules = [rule_record(t, r, by_id, processing_rules) for t, r in raw_rules]
+            locations = {(r.get("id") or "").lower(): r.get("location") for _, r in raw_rules}
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -233,6 +236,15 @@ def main() -> int:
                 "ambient Azure credential that can list subscriptions)"
             ),
         )
+
+    # Routing is resolved against every group and processing rule first, so an in-scope rule keeps its verdict.
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    rules, excluded = exclusions.split(rules, "alert_rule", location=lambda r: locations.get((r["id"] or "").lower()))
+    group_records, excluded_groups = exclusions.split(group_records, "action_group")
+    processing_rules, excluded_processing = exclusions.split(processing_rules, "processing_rule")
+    excluded += excluded_groups + excluded_processing
+    exclusions.warn_unmatched(logger)
 
     rules.sort(key=lambda r: (r["id"] or "").lower())
     evidence = build_payload(
@@ -246,8 +258,14 @@ def main() -> int:
             "pages_read": pages,
             "evaluated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(rules, group_records, processing_rules), "provider_registration_status": registration},
+        summary={
+            **summarize(rules, group_records, processing_rules),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("alert_rule", "action_group", "processing_rule"), {
+                "alert_rules": len(rules), "action_groups": len(group_records), "processing_rules": len(processing_rules)}),
+        },
     )
 
     filename = f"azure_alert_rules_{sanitize_for_filename(subscription_id or 'unknown')}.json"

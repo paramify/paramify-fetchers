@@ -40,6 +40,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
     report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_log_analytics_workspaces")
 
@@ -405,6 +406,11 @@ def main() -> int:
             ),
         )
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    workspaces, excluded = exclusions.split(workspaces, "workspace")
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -412,8 +418,13 @@ def main() -> int:
         results={
             "workspaces": workspaces,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(workspaces), "provider_registration_status": registration},
+        summary={
+            **summarize(workspaces),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("workspace",), {"workspaces": len(workspaces)}),
+        },
     )
 
     filename = (
