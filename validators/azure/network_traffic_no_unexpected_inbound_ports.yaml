@@ -1,0 +1,31 @@
+key: network_traffic_no_unexpected_inbound_ports
+name: Network Traffic Reaches Only Expected Inbound Ports From The Internet
+type: AUTOMATED
+role: configuration
+statement: >-
+  Traffic Analytics was read in full for every flow log that sends to it (at least one NSG or VNet flow
+  log has Traffic Analytics on, and every one of its tables was queried), and over the window no
+  allowed inbound flow from the internet (Traffic Analytics flow types ExternalPublic and MaliciousFlow)
+  reached a destination port outside the fetcher's expected inbound ports setting (default 80 and 443).
+  Substantiates that unwanted inbound traffic is limited to the services meant to be reachable
+  (KSI-CNA-ULN). Does NOT prove that the expected-ports list is the approved one (it is the fetcher's
+  configuration), that subnets without a flow log or without Traffic Analytics see no such traffic
+  (azure_network_flow_logs shows what is logged), that denied inbound attempts are harmless, that
+  traffic reaching an expected port is wanted, or anything about outbound traffic. An approved exception
+  for a port is the organization's own record and isn't read; any unexpected port fails.
+
+regex: '"summary":\s*\{[^{}]*?"traffic_read_in_full":\s*(?<traffic_read_in_full>true|false)[^{}]*?"unexpected_inbound_ports_count":\s*(?<unexpected_inbound_ports_count>\d+|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # traffic_read_in_full
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # unexpected_inbound_ports_count
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-NETWORK-TRAFFIC-ACTIVITY

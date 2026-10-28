@@ -61,6 +61,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Network and edge | [azure_front_door_waf_coverage](#azure_front_door_waf_coverage) | `EVD-AZURE-FRONTDOOR-WAF-COVERAGE` |
 | Network and edge | [azure_front_door_waf_policies](#azure_front_door_waf_policies) | `EVD-AZURE-FRONTDOOR-WAF` |
 | Network and edge | [azure_network_security_groups](#azure_network_security_groups) | `EVD-AZURE-NSG` |
+| Network and edge | [azure_network_traffic_activity](#azure_network_traffic_activity) | `EVD-AZURE-NETWORK-TRAFFIC-ACTIVITY` |
 | Network and edge | [azure_private_dns_zone_configuration](#azure_private_dns_zone_configuration) | `EVD-AZURE-PRIVATE-DNS-ZONE-CONFIG` |
 | Network and edge | [azure_private_endpoint_configuration](#azure_private_endpoint_configuration) | `EVD-AZURE-PRIVATE-ENDPOINT-CONFIG` |
 | Network and edge | [azure_virtual_wan_configuration](#azure_virtual_wan_configuration) | `EVD-AZURE-VIRTUAL-WAN-CONFIG` |
@@ -3132,6 +3133,85 @@ Summary fields:
 - `total_virtual_networks` — Number of virtual networks (VNets)
 - `ddos_protected_virtual_networks` — Number of VNets with DDoS protection turned on
 - `provider_registration_status` — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+
+### azure_network_traffic_activity
+Short Description: Shows the network traffic actually seen over a window: flows to unexpected ports or new destinations, denied-flow spikes, Front Door requests, and requests reaching origins outside Front Door.
+
+Script: fetchers/azure/network_traffic_activity/fetcher.py
+
+Access: Reader on the subscription. Optional: Log Analytics Reader on the workspaces that receive Traffic Analytics, Front Door access logs and App Service HTTP logs; without it, that workspace's figures read unknown.
+
+Commands Executed:
+- `GET networkWatchers`, then `GET flowLogs` (per watcher) — each flow log, its target and whether Traffic Analytics sends it to a workspace
+- `GET Microsoft.Cdn/profiles`, then `GET originGroups` and `GET origins` (per profile) — Front Door Standard and Premium profiles and the host each origin points at
+- `GET Microsoft.Web/sites` (and `GET slots` per app, only when an origin names an App Service host no app claims) — which App Service app each origin is
+- `GET diagnosticSettings` (per profile and per origin app) — which workspaces receive the Front Door access log and the App Service HTTP log
+- `GET Microsoft.Network/locations/<region>/serviceTags` — Front Door's back-end address ranges (AzureFrontDoor.Backend)
+- `GET` the workspace and `GET tables/<table>` (per workspace) — the workspace's query id, and each table's plan and retention
+- KQL on `AzureNetworkAnalytics_CL` (NSG flow logs) and `NTANetAnalytics` (VNet flow logs), over twice the window — flows per day, allowed ports, outbound destinations and the top flows, now and in the prior window
+- KQL on `AzureDiagnostics` (category FrontDoorAccessLog) — requests, status classes, hosts, origins and client IPs per profile
+- KQL on `AppServiceHTTPLogs` — requests to each origin app by where they came from
+
+Output: `azure_network_traffic_activity_<subscription>.json` — every flow log, the traffic Traffic Analytics saw, each Front Door profile's requests, each App Service origin's requests from outside Front Door, and each workspace read.
+
+Summary fields:
+
+**What was checked?**
+- `lookback_days` — Days in the window; flows are compared against the same number of days before it (the prior window)
+- `expected_inbound_ports` — List of the configured ports that inbound internet traffic is expected to reach
+- `flow_logs` — Number of flow logs in the subscription
+- `enabled_flow_logs` — Number of enabled flow logs
+- `flow_logs_with_traffic_analytics` — Number of enabled flow logs with Traffic Analytics on
+- `nsg_flow_logs_with_traffic_analytics` — Number of enabled NSG flow logs with Traffic Analytics on, read from AzureNetworkAnalytics_CL
+- `vnet_flow_logs_with_traffic_analytics` — Number of enabled VNet, subnet or network interface flow logs with Traffic Analytics on, read from NTANetAnalytics
+- `traffic_tables` — Number of Traffic Analytics tables to read, one per workspace and table
+- `traffic_tables_read` — Number of Traffic Analytics tables read
+- `traffic_tables_skipped_basic_plan` — Number of Traffic Analytics tables skipped because they are on the Basic or Auxiliary plan, which bills per GB scanned, and query_basic_tables is off
+- `traffic_tables_not_present` — Number of Traffic Analytics tables that don't exist in their workspace yet, because Traffic Analytics has written nothing there
+- `traffic_read_in_full` — True if every Traffic Analytics table was read; false if any wasn't, or there is no table to read
+
+**What traffic did the flow logs see?**
+- `flows` — Number of flows in the window, with each public address in a Traffic Analytics record counted on its own; null when no Traffic Analytics table was read
+- `allowed_flows` — Number of allowed flows in the window; null when no Traffic Analytics table was read
+- `denied_flows` — Number of denied flows in the window; null when no Traffic Analytics table was read
+- `internet_inbound_allowed_flows` — Number of allowed inbound flows from the internet in the window (Traffic Analytics flow types ExternalPublic and MaliciousFlow); null when no Traffic Analytics table was read
+- `malicious_allowed_flows` — Number of allowed flows in the window to or from an address Microsoft's threat intelligence reports as malicious (flow type MaliciousFlow); null when no Traffic Analytics table was read
+
+**Is there traffic that shouldn't be there?**
+- `unexpected_inbound_ports` — List of destination ports outside `expected_inbound_ports` that allowed inbound internet flows reached in the window; null when no Traffic Analytics table was read
+- `unexpected_inbound_ports_count` — Number of destination ports outside `expected_inbound_ports` that allowed inbound internet flows reached in the window; null when no Traffic Analytics table was read
+- `traffic_baseline_available` — True if the prior window has any flows; false if it has none; null when no Traffic Analytics table was read. Without a baseline, `new_ports_count`, `new_outbound_destinations` and `denied_spike_days` read null
+- `new_ports_count` — Number of direction, protocol and destination port combinations with allowed flows in the window and none in the prior window; null without a baseline
+- `outbound_destinations` — Number of destination addresses that allowed outbound flows reached in the window, counted once per flow type and Traffic Analytics table; null when no Traffic Analytics table was read
+- `new_outbound_destinations` — Number of destination addresses that allowed outbound flows reached in the window but not in the prior window, counted once per flow type and Traffic Analytics table; null without a baseline
+- `denied_spike_days` — List of days in the window whose denied flows exceed the spike threshold: `denied_spike_factor` times the prior window's daily average of denied flows, or 100 flows if that is higher; null without a baseline
+- `denied_spike_days_count` — Number of days in the window whose denied flows exceed the spike threshold; null without a baseline
+
+**Do Front Door's access logs show its requests?**
+- `front_door_profiles` — Number of Front Door Standard and Premium profiles
+- `front_door_profiles_exporting_access_log` — Number of Front Door profiles with a diagnostic setting that sends FrontDoorAccessLog to a workspace, by name or through allLogs
+- `front_door_profiles_with_requests` — Number of Front Door profiles whose access log has records in the window
+- `front_door_profiles_without_access_log_records` — Number of Front Door profiles that export the access log to workspaces that were read and hold no records in the window
+- `front_door_profiles_access_log_unknown` — Number of Front Door profiles that export the access log to a workspace that couldn't be read
+- `front_door_requests` — Number of client requests across the profiles that export the access log, counting the edge's copy of each request and not the origin shield's; null when any of these profiles' logs couldn't be read
+- `front_door_5xx_responses` — Number of client requests answered with a 5xx status across the profiles that export the access log; null when any of these profiles' logs couldn't be read
+
+**Is any origin reached without going through Front Door?**
+- `origin_apps` — Number of App Service apps or slots that a Front Door origin points at, matched by the origin's Azure resource or its host name
+- `origin_apps_exporting_http_logs` — Number of origin apps that send AppServiceHTTPLogs to a workspace, by name or through allLogs
+- `origin_apps_without_http_log_export` — Number of origin apps that send no AppServiceHTTPLogs to a workspace, so whether they were reached directly is unknown
+- `origin_apps_bypass_unknown` — Number of origin apps that export HTTP logs but whose records couldn't be read or classified (a workspace refused the read, or Front Door's address ranges couldn't be read)
+- `origin_apps_reached_outside_front_door` — Number of origin apps that export HTTP logs and received at least one request from outside Front Door: from a public address outside the AzureFrontDoor.Backend ranges (private, loopback, link-local and shared addresses count as internal, not outside)
+- `origin_apps_served_outside_front_door` — Number of origin apps that export HTTP logs and served (status under 400) at least one request from outside Front Door
+- `origin_requests_outside_front_door` — Number of requests from outside Front Door across the origin apps that export HTTP logs; null when any of these apps' records are unknown
+- `origin_requests_outside_front_door_served` — Number of requests from outside Front Door that the origin apps exporting HTTP logs served with a status under 400; null when any of these apps' records are unknown
+
+**Which workspaces were read?**
+- `log_workspaces` — Number of Log Analytics workspaces queried
+- `log_workspaces_queried` — Number of Log Analytics workspaces read
+- `log_workspaces_not_authorized` — Number of Log Analytics workspaces that refused the read
+- `log_workspaces_not_found` — Number of Log Analytics workspaces that no longer exist
 
 
 ### azure_private_dns_zone_configuration
