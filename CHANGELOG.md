@@ -96,6 +96,27 @@ schemas and the `paramify` CLI — not the internal code.
   User.Read.All, Member.Read.Hidden and Application.Read.All are optional, and
   without User.Read.All the guest, disabled-user and disabled-owner figures read
   null.
+- **`azure_entra_sign_ins`** (`EVD-AZURE-ENTRA-SIGN-INS`) — how users actually
+  sign in over a lookback (`ENTRA_SIGN_IN_LOOKBACK_DAYS`, 7 by default, at most
+  the 30 days Entra keeps): whether each interactive sign-in required and passed
+  MFA, which methods were used and whether any was phishing-resistant, whether
+  Conditional Access applied, and which sign-ins Entra rated risky. Summarized for
+  the tenant and per app, and per user for users with an exception; only the
+  exceptions (successful single-factor, no Conditional Access, risky) are listed
+  one by one, at most 1000. Reads the beta `/auditLogs/signIns`, since v1.0 has no
+  `authenticationRequirement` or `authenticationDetails`. Refused or unlicensed
+  logs leave every count null; a tenant without Entra ID P1 or P2 (the first
+  page's 403 with that exact code) reads `not_licensed` and isn't a failed run.
+  Without P2 the risky sign-in figures read null, not 0, and no sign-in is listed
+  as risky. A certificate counts as phishing-resistant only when it alone
+  satisfied MFA, and any client but a browser or modern app counts as legacy
+  authentication (a floor: interactive sign-ins only), except one Graph reports
+  as Unknown. Windows device logons (the Windows Sign In app) are counted on
+  their own, in `successful_windows_device_sign_ins`, and left out of the
+  single-factor, multi-factor and no-Conditional-Access figures and the MFA
+  percentage. Sign-ins with no reported MFA requirement are counted apart.
+  `_shared/azure_rest.py` gains `graph_pages` and `graph_list` for paged Graph
+  reads on v1.0 or beta, and retries a GET that times out, once.
 - **Oracle Cloud Infrastructure category** (`fetchers/oci/`, fifteen
   fetchers, `pip install -e '.[oci]'`). Authenticates with an API signing key
   the runner injects as a secret (`OCI_PRIVATE_KEY` carries the PEM content,
@@ -183,6 +204,30 @@ schemas and the `paramify` CLI — not the internal code.
   as written, never its value, with whether it is set; the TUI and shared config
   checks compare what it reads, and `validate` names an issue-report reference
   unset in its shell.
+- **`azure_entra_access_reviews`** (`EVD-AZURE-ENTRA-ACCESS-REVIEWS`) — Microsoft
+  Entra ID access reviews over Microsoft Graph: every review series with what it
+  reviews (group membership, app assignment, directory role, access package), its
+  recurrence, default decision, auto-apply setting and reviewers (per stage for a
+  multi-stage series), each run's status, and the decisions of each active
+  series' latest completed cycle with whether each denial was applied. A cycle is
+  the runs that started at the same time, taken once all have ended (Completing
+  and AutoReviewing count as ended). Lists follow
+  `@odata.nextLink`, and ask for the next page with `$top`/`$skip` when Graph
+  sends a full page without one. The summary says whether every active series
+  runs at least monthly, denies unanswered reviews and applies its decisions
+  automatically, and gives the auto-removal and the longest recurrence period
+  apart from monthly so a validator can set its own cadence; also how long since
+  each last finished a cycle, and how many denials were applied. A tenant without
+  Entra ID P2 or ID Governance reads `access_reviews_available: false` and the run
+  succeeds; only Graph's `AadPremiumLicenseRequired` code on the first read counts
+  as that, and any other refusal is a failure. When any read fails the summary
+  gives no figures, so a denied read never reads as no reviews. Decisions are
+  read two at a time, and a list Graph still throttles after the client's own
+  retries is read again after 5, 15 and 45 seconds (or a longer Retry-After, up
+  to 180) before it fails as `rate_limited`. A series whose runs weren't read
+  shows null in place of its in-progress and last-cycle figures. Needs
+  `AccessReview.Read.All`. Reviews of Azure resource roles are kept by Azure
+  Resource Manager, not Graph, and are not read.
 - **`azure_devops_permissions`** (`EVD-AZURE-DEVOPS-PERMISSIONS`): who may do what
   in an Azure DevOps organization. Every explicit permission entry in the
   namespaces that govern the organization, projects, Git and TFVC repositories,
