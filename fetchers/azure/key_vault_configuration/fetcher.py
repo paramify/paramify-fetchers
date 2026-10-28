@@ -43,6 +43,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
     report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_key_vault_configuration")
 
@@ -525,6 +526,11 @@ def main() -> int:
             ),
         )
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    vaults, excluded = exclusions.split(vaults, "key_vault")
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -532,8 +538,13 @@ def main() -> int:
         results={
             "key_vaults": vaults,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(vaults), "provider_registration_status": registration},
+        summary={
+            **summarize(vaults),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("key_vault",), {"key_vaults": len(vaults)}),
+        },
     )
 
     filename = (

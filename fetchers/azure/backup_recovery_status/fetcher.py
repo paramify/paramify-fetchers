@@ -39,6 +39,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
     report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_backup_recovery_status")
 
@@ -483,6 +484,29 @@ def summarize(vaults: list[dict]) -> dict:
     }
 
 
+def exclude_vaults(exclusions: ResourceExclusions, vaults: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(in-scope vaults holding only their in-scope protected items, excluded entries). An item leaves with its vault
+    (it takes the vault's resource group and region) or when a pattern matches the resource it protects, whose id its
+    entry then carries; a vault whose items all leave stays in scope."""
+    kept, excluded = exclusions.split(vaults, "recovery_services_vault")
+    items = [(vault, item) for vault in vaults for item in vault["backup_protected_items"]]
+    items, by_vault = exclusions.split(
+        items, "protected_item", resource_id=lambda p: p[1].get("id") or p[0].get("id"),
+        location=lambda p: p[0].get("location"), resource_group=lambda p: p[0].get("resource_group"),
+        name=lambda p: p[1].get("name"))
+    items, by_source = exclusions.split(
+        items, "protected_item", resource_id=lambda p: p[1].get("source_resource_id"), location=lambda p: None,
+        resource_group=lambda p: None, name=lambda p: p[1].get("name"))
+    in_scope: dict = {id(vault): [] for vault in kept}
+    for vault, item in items:
+        if id(vault) in in_scope:
+            in_scope[id(vault)].append(item)
+    copies = [
+        {**v, "backup_protected_items": in_scope[id(v)], "total_protected_items": len(in_scope[id(v)])} for v in kept
+    ]
+    return copies, excluded + by_vault + by_source
+
+
 # --- collection (lazy azure imports) ---
 
 def _backup_client(cred, subscription_id):
@@ -609,6 +633,11 @@ def main() -> int:
             ),
         )
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    vaults, excluded = exclude_vaults(exclusions, vaults)
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -616,8 +645,16 @@ def main() -> int:
         results={
             "recovery_services_vaults": vaults,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(vaults), "provider_registration_status": registration},
+        summary={
+            **summarize(vaults),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("recovery_services_vault", "protected_item"), {
+                "recovery_services_vaults": len(vaults),
+                "protected_items": sum(v["total_protected_items"] for v in vaults),
+            }),
+        },
     )
 
     filename = (

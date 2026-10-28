@@ -40,6 +40,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from azure_rest import parse_time  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_storage_encryption_status")
 
@@ -589,6 +590,24 @@ def summarize_replication_keys_containers(accounts: list[dict]) -> dict:
     }
 
 
+def exclude_accounts(exclusions: ResourceExclusions, accounts: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(in-scope accounts holding only their in-scope containers, excluded entries); a container takes its account's
+    resource group and region, so it leaves with its account."""
+    kept, excluded = exclusions.split(accounts, "storage_account")
+    children = [(account, c) for account in accounts for c in account.get("containers") or []]
+    in_scope, out = exclusions.split(
+        children, "container", resource_id=lambda p: p[1].get("id") or p[0].get("id"),
+        location=lambda p: p[0].get("location"), resource_group=lambda p: p[0].get("resource_group"),
+        name=lambda p: p[1].get("name"))
+    copies = {
+        id(a): {**a, "containers": None if a.get("containers") is None else []} for a in kept
+    }
+    for account, container in in_scope:
+        if id(account) in copies:
+            copies[id(account)]["containers"].append(container)
+    return list(copies.values()), excluded + out
+
+
 # --- collection (lazy azure imports) ---
 
 def _is_benign_unsupported(exc: BaseException) -> bool:
@@ -766,6 +785,11 @@ def main() -> int:
             ),
         )
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    accounts, excluded = exclude_accounts(exclusions, accounts)
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -773,8 +797,16 @@ def main() -> int:
         results={
             "storage_accounts": accounts,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(accounts), "provider_registration_status": registration},
+        summary={
+            **summarize(accounts),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("storage_account", "container"), {
+                "storage_accounts": len(accounts),
+                "containers": sum(len(a.get("containers") or []) for a in accounts),
+            }),
+        },
     )
 
     filename = (

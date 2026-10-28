@@ -1,5 +1,5 @@
 name: azure_storage_encryption_status
-version: 0.2.0
+version: 0.3.0
 description: >-
   Shows how each storage account is encrypted and exposed, how old its access keys are, whether it replicates to a healthy second region, which containers are public, and its owner.
 category: azure
@@ -33,6 +33,23 @@ config_schema:
     description: >
       Comma-separated tag keys that give an account's data classification, tried in
       order and matched the same way. The first one present fills classification_tag.
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching storage account or blob container is listed under
+      excluded with the pattern and left out of every count and verdict; a
+      container takes its account's resource group and region, so it leaves with
+      its account. A pattern without one of these prefixes fails the run. Set it
+      once for every Azure fetcher under platforms.azure.config. Can be
+      ${env:VAR}. Empty: every resource is in scope.
 
 target_schema:
   subscription_id:
@@ -76,13 +93,21 @@ evidence_set:
     - storage_accounts.get_properties(expand="geoReplicationStats") (per geo-redundant account) — replication health and last sync time; LastSyncTimeUnavailable reads as unavailable, any other error fails the run
     - blob_containers.list() (per account) — each container's access level and immutability; an account kind with no Blob service reads not_supported, any other error fails the run
 
-    Output: azure_storage_encryption_status_<subscription>.json — every storage account's encryption, network exposure, access-key age, replication to a second region, blob containers (with metadata keys only, never values, and null when the list returns no metadata) and tags.
+    Output: azure_storage_encryption_status_<subscription>.json — every storage account's encryption, network exposure, access-key age, replication to a second region, blob containers (with metadata keys only, never values, and null when the list returns no metadata) and tags. Resources the resource_exclusions patterns take out are listed under excluded instead.
 
     Summary fields:
 
     What was checked?
     - total_storage_accounts — Number of storage accounts in the subscription
     - provider_registration_status — Whether Azure Storage (Microsoft.Storage) is registered on the subscription: registered, not_registered or unknown
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no storage account or blob container, such as a mistyped name
+    - excluded_storage_accounts — Number of storage accounts left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their containers
+    - excluded_containers — Number of blob containers left out of scope, those in an excluded account included; each is listed under excluded
+    - in_scope_storage_accounts — Number of storage accounts read and in scope; 0 means none was read or the patterns took out every account, which a check can catch by requiring more than 0
+    - in_scope_containers — Number of blob containers listed and in scope
 
     Who holds the encryption keys?
     - customer_managed_key_storage — Number of storage accounts encrypted with a customer-managed key held in Key Vault
