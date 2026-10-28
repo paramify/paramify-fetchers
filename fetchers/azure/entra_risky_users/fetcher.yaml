@@ -56,10 +56,11 @@ evidence_set:
   instructions: >
     Script: azure/entra_risky_users/fetcher.py. Microsoft Graph v1.0, every @odata.nextLink followed:
     identityProtection/riskyUsers, directoryRoles, each role's members
-    (directoryRoles/{id}/members), and users/{id} for privileged users at open
-    risk (riskState atRisk or confirmedCompromised). Roles are active assignments
-    held directly; PIM-eligible and group-held roles are not expanded. Unreadable
-    roles leave each user's roles and the privileged counts null. Requires
+    (directoryRoles/{id}/members and its microsoft.graph.servicePrincipal cast),
+    and users/{id} for privileged users at open risk (riskState atRisk or
+    confirmedCompromised). Roles are direct active assignments; PIM-eligible
+    and group-held roles are not expanded. Unreadable roles leave every role
+    figure null. Requires
     IdentityRiskyUser.Read.All, RoleManagement.Read.Directory (or
     Directory.Read.All) and Entra ID P2. Optional User.Read.All (or
     Directory.Read.All): without it account_enabled is null, counted as

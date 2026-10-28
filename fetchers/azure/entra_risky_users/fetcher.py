@@ -37,11 +37,13 @@ def directory_roles(client) -> Dict[str, List[Dict[str, Any]]]:
     """Principal id -> the activated directory roles it holds directly, each flagged privileged or not."""
     held: Dict[str, List[Dict[str, Any]]] = {}
     for role in client.graph_list("/directoryRoles"):
+        members = f"/directoryRoles/{role.get('id')}/members"
         # $expand=members on the collection caps at 20 members per role, so each role's members are paged.
-        for member in client.graph_list(f"/directoryRoles/{role.get('id')}/members", params={"$select": "id"}):
-            held.setdefault(member.get("id"), []).append(
-                {"name": role.get("displayName"), "privileged": is_privileged(role)}
-            )
+        ids = {m.get("id") for m in client.graph_list(members, params={"$select": "id"})}
+        # The v1.0 members list leaves out service principals; the servicePrincipal cast returns them.
+        ids |= {m.get("id") for m in client.graph_list(f"{members}/microsoft.graph.servicePrincipal", params={"$select": "id"})}
+        for member_id in sorted(i for i in ids if i):
+            held.setdefault(member_id, []).append({"name": role.get("displayName"), "privileged": is_privileged(role)})
     return held
 
 

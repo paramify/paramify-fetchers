@@ -1811,6 +1811,9 @@ EXTRA_ARM = {
         "@odata.nextLink": "https://graph.microsoft.com/v1.0/directoryRoles/role-ga/members?$skiptoken=p2"},
     ("/v1.0/directoryRoles/role-ga/members", None, "p2"): {"value": [{"id": "u-admin"}]},
     ("/v1.0/directoryRoles/role-dr/members", None): {"value": [{"id": "u-reader"}, {"id": "u-admin"}]},
+    # v1.0's members list leaves service principals out; only the cast returns them.
+    ("/v1.0/directoryRoles/role-ga/members/microsoft.graph.servicePrincipal", None): {"value": [{"id": "sp-deploy"}]},
+    ("/v1.0/directoryRoles/role-dr/members/microsoft.graph.servicePrincipal", None): {"value": []},
     ("/v1.0/users/u-admin", None): {"id": "u-admin", "accountEnabled": True},
 }
 
@@ -1919,7 +1922,8 @@ def test_entra_risky_users(azure, tmp_path):
     s = ev["summary"]
     assert s["risky_users_total"] == 3 and s["by_risk_state"] == {"atRisk": 2, "remediated": 1}
     assert s["privileged_open_risk_users"] == 1 and s["privileged_open_risk_users_enabled"] == 1
-    assert s["privileged_principals"] == 21
+    # 20 fillers, the admin and the service principal only the cast returns.
+    assert s["privileged_principals"] == 22
 
 
 def test_entra_risky_users_refused_account_read_is_unknown(azure, tmp_path):
@@ -1946,6 +1950,13 @@ def test_entra_risky_users_unread_roles_leave_privileged_figures_unknown(azure, 
     assert s["privileged_open_risk_users"] is None and s["privileged_open_risk_users_enabled"] is None
     assert s["privileged_principals"] is None
     assert all(u["privileged_roles"] is None and "account_enabled" not in u for u in ev["results"]["risky_users"])
+
+
+def test_entra_risky_users_failed_service_principal_read_leaves_privileged_figures_unknown(azure, tmp_path):
+    azure.arm[("/v1.0/directoryRoles/role-ga/members/microsoft.graph.servicePrincipal", None)] = Resp(
+        403, {"error": {"code": "Authorization_RequestDenied", "message": "Insufficient privileges to complete the operation."}})
+    code, ev = run("entra_risky_users", tmp_path)
+    assert code == 1 and ev["summary"]["privileged_principals"] is None
 
 
 def test_entra_risky_users_without_p2_is_a_state(azure, tmp_path):
