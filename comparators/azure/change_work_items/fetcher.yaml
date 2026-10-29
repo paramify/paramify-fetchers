@@ -98,7 +98,8 @@ config_schema:
     description: >
       How many days after a work item that is still open, or whose state the fetcher couldn't place, was
       created or last changed a change it records can be made. Keeps an item left open from recording every
-      later change.
+      later change. Last changed is as of the run, so an edit to an open item, even one made after the change,
+      renews its window back to its creation.
 
 ksis:
   - KSI-CMT-RMV      # changes made outside a pipeline, each traced to the work item that records it or flagged
