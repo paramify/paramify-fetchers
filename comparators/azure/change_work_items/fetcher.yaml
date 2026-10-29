@@ -1,0 +1,121 @@
+name: azure_change_work_items
+version: 0.1.0
+description: >-
+  Shows whether each direct Azure change, made from the portal or the command line rather than a deployment, is
+  recorded by an Azure DevOps work item.
+category: azure
+
+depends_on:
+  - azure_change_provenance
+  - azure_devops_work_items
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_change_work_items.json
+
+secrets: []
+
+config_schema:
+  origins:
+    type: string
+    required: false
+    default: direct
+    env: CHANGE_RECORD_ORIGINS
+    description: >
+      Comma-separated azure_change_provenance origins that need a record. The default, direct, is an edit
+      made outside any deployment or pipeline; add manual_deployment to also check deployments a person ran
+      by hand.
+  excluded_callers:
+    type: string
+    required: false
+    env: CHANGE_RECORD_EXCLUDED_CALLERS
+    description: >
+      Comma-separated callers (application ids or user principal names) whose changes need no record, such
+      as a Microsoft service that manages resources on your behalf. Matched without regard to case.
+  environments:
+    type: string
+    required: false
+    env: CHANGE_RECORD_ENVIRONMENTS
+    description: >
+      Comma-separated azure_change_provenance environment target labels to check. Leave empty to check every
+      target.
+  record_types:
+    type: string
+    required: false
+    env: CHANGE_RECORD_TYPES
+    description: >
+      Comma-separated work item types that record a change. Leave empty to use the types
+      azure_devops_work_items selected (its work_item_types setting).
+  record_people:
+    type: string
+    required: false
+    default: assigned_to,created_by,resolved_by,closed_by,state_history
+    env: CHANGE_RECORD_PEOPLE
+    description: >
+      Which people on a work item count as the person who made the change: any of assigned_to, created_by,
+      changed_by (who last changed it), resolved_by, closed_by, state_history (anyone who moved it between
+      states) and approver. A change matches when its caller's user principal name equals one of their logins.
+  hours_before:
+    type: integer
+    required: false
+    default: 24
+    env: CHANGE_RECORD_HOURS_BEFORE
+    description: >
+      How many hours before a work item was created a change it records can be made.
+  hours_after:
+    type: integer
+    required: false
+    default: 24
+    env: CHANGE_RECORD_HOURS_AFTER
+    description: >
+      How many hours after a work item was finished a change it records can be made. An item that is still
+      open, or whose state the fetcher couldn't place, covers every change after it was created.
+
+ksis:
+  - KSI-CMT-RMV      # direct edits, each traced to the work item that records it or flagged as unrecorded
+  - KSI-CMT-LMC      # each change recorded in the change log (a work item), with its approval
+  - KSI-SVC-ACM      # configuration changes made outside deployments are accounted for
+
+evidence_set:
+  reference_id: EVD-AZURE-CHANGE-WORK-ITEMS
+  name: Azure Direct Changes and Their Work Items
+  instructions: |
+    Script: azure/change_work_items/fetcher.py
+
+    Access: None of its own. It reads azure_change_provenance and azure_devops_work_items evidence from the same run, which need their own access.
+
+    Commands Executed:
+    - Read azure_change_provenance from the same run — every Azure change with its origin, caller and time
+    - Read azure_devops_work_items from the same run — each work item's type, state, people, dates and approval
+
+    Output: azure_change_work_items.json — each direct Azure change with its status, the work items that record it, and whether they are approved.
+
+    Summary fields:
+
+    What was checked?
+    - changes_checked — Number of changes whose origin is in the origins setting (direct by default: an edit made outside any deployment or pipeline)
+    - changes_excluded — Number of checked changes made by an excluded caller (the excluded_callers setting), which need no record
+    - changes_excluded_by_caller — Number of excluded changes for each excluded caller
+    - changes_needing_record — Number of checked changes that need a record: changes_checked minus changes_excluded
+    - record_types — List of work item types that record a change: the record_types setting, or else the types azure_devops_work_items selected
+    - record_types_not_selected — List of record types azure_devops_work_items didn't select by type, so it collected them only when they carried one of its tags
+    - record_work_items — Number of collected work items of a record type that aren't Removed (cancelled)
+    - work_items_cover_changes — True if the work items cover the whole change window: every work items file's collection window starts at least hours_after hours before the earliest change needing a record; false if not
+
+    Is each change recorded by a work item?
+    - changes_matched — Number of changes recorded by exactly one work item. A work item records a change when its caller, a person, is one of the item's people (the record_people setting, matched by login) and the change was made between hours_before hours before the item was created and hours_after hours after it was finished; an open item covers every later change
+    - changes_ambiguous — Number of changes recorded by more than one work item, none picked
+    - changes_unmatched — Number of changes made by a person that no work item records
+    - changes_not_by_a_person — Number of changes made by an application or other identity that isn't a user, which a work item can't name
+    - changes_without_caller — Number of changes Azure recorded no caller for, with no named change to the same resource within 10 minutes to take one from
+    - changes_recorded — Number of changes recorded by one or more work items: changes_matched plus changes_ambiguous
+    - changes_without_record — Number of changes needing a record that no work item records: changes_unmatched plus changes_not_by_a_person plus changes_without_caller
+    - changes_without_record_by_caller — Number of changes without a record for each caller, with unknown for no caller
+    - percent_recorded — Percentage of changes needing a record that a work item records = changes_recorded / changes_needing_record × 100 (a whole number, 0–100); 0 when changes_needing_record is 0
+
+    Are the records approved?
+    - changes_without_approved_record — Number of changes needing a record with no approved work item: no record at all, or a record never approved (moved into an approval state or given an approval comment, as azure_devops_work_items reads it); a change recorded by several items counts as approved only if every one is approved

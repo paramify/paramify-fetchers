@@ -12,6 +12,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
+  matches each direct Azure change in `azure_change_provenance` (an edit made
+  outside any deployment or pipeline) to the `azure_devops_work_items` records
+  that name its caller and were open when it was made. Each change is
+  `matched`, `ambiguous`, `unmatched`, `excluded` (a caller in
+  `CHANGE_RECORD_EXCLUDED_CALLERS`), `not_a_person` (an application), or
+  `no_caller`. A callerless row takes its caller from the nearest named change
+  to the same resource within 10 minutes, as `azure_change_provenance` takes
+  its origin. The checked origins, record types, which people on an item count,
+  and the hours before creation and after finishing that an item covers are
+  settings. The summary counts each status, the changes without a record and
+  without an approved record, and `work_items_cover_changes`, false when the
+  work items window starts too late for the earliest change.
 - **`azure_devops_work_items`** (`EVD-AZURE-DEVOPS-WORK-ITEMS`): Azure DevOps
   work items that record changes and security work. The types that record
   changes (`AZURE_DEVOPS_WORK_ITEM_TYPES`, default `Change Request`) and the
