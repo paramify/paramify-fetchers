@@ -70,7 +70,8 @@ def inv(path, target=None):
 
 def index(tmp_path, changes, items, *, types=("Task", "Hotfix"), window=WINDOW, partial=False,
           change_files=None, work_items_in_manifest=True) -> Path:
-    change_invs = change_files or [inv(envelope(tmp_path / "changes.json", mod.CHANGES, {"changes": changes}))]
+    change_invs = change_files or [inv(envelope(tmp_path / "changes.json", mod.CHANGES,
+                                                {"lookback_days": 14, "changes": changes}))]
     work = envelope(tmp_path / "work.json", mod.WORK_ITEMS,
                     {"window": window, "selection": {"work_item_types": list(types)}, "work_items": items},
                     partial=partial, target={"organization_url": "https://dev.azure.com/contoso"})
@@ -126,7 +127,7 @@ def test_every_status_and_the_counts_a_validator_reads(tmp_path, monkeypatch):
     assert results["ambiguous"]["approved"] is False  # one of the two candidates was never approved
     assert results["unmatched"]["work_items"] == [] and results["unmatched"]["approved"] is None
     assert summary == {
-        "changes_checked": 6, "changes_excluded": 1, "changes_needing_record": 5,
+        "changes_read": 7, "change_lookback_days": 14, "origins": ["direct"], "changes_checked": 6, "changes_excluded": 1, "changes_needing_record": 5,
         "changes_matched": 1, "changes_ambiguous": 1, "changes_unmatched": 1, "changes_not_by_a_person": 1,
         "changes_without_caller": 1, "changes_recorded": 2, "changes_without_record": 3,
         "changes_without_approved_record": 4, "percent_recorded": 40,
@@ -240,6 +241,19 @@ def test_environments_pick_which_change_targets_are_checked(tmp_path, monkeypatc
     results, _ = compare(tmp_path, monkeypatch, [], [item(1)], change_files=files,
                          env={"CHANGE_RECORD_ENVIRONMENTS": "PROD"})
     assert set(results) == {"prod"}
+
+
+@pytest.mark.parametrize(("lookbacks", "environments", "expect"), [
+    ((14, 7), None, 7),           # the shortest window read
+    ((14, None), None, None),     # a file that doesn't say makes it unknown
+    ((14, 14), "staging", None),  # no target picked: nothing read
+])
+def test_change_lookback_days_is_the_shortest_window_read(tmp_path, monkeypatch, lookbacks, environments, expect):
+    files = [inv(envelope(tmp_path / f"c{n}.json", mod.CHANGES, {"lookback_days": days, "changes": []}),
+                 {"environment": "prod"}) for n, days in enumerate(lookbacks)]
+    env = {"CHANGE_RECORD_ENVIRONMENTS": environments} if environments else {}
+    _, summary = compare(tmp_path, monkeypatch, [], [], change_files=files, env=env)
+    assert summary["change_lookback_days"] == expect
 
 
 def test_work_items_that_start_too_late_do_not_cover_the_changes(tmp_path, monkeypatch):

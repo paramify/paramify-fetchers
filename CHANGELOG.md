@@ -23,8 +23,10 @@ schemas and the `paramify` CLI — not the internal code.
   its origin. The checked origins, record types, which people on an item count,
   and the hours before creation and after finishing that an item covers are
   settings. The summary counts each status, the changes without a record and
-  without an approved record, and `work_items_cover_changes`, false when the
-  work items window starts too late for the earliest change.
+  without an approved record, the changes read and the shortest change window
+  read (`change_lookback_days`), so a narrow window can't pass as no changes,
+  and `work_items_cover_changes`, false when the work items window starts too
+  late for the earliest change.
 - **`azure_devops_work_items`** (`EVD-AZURE-DEVOPS-WORK-ITEMS`): Azure DevOps
   work items that record changes and security work. The types that record
   changes (`AZURE_DEVOPS_WORK_ITEM_TYPES`, default `Change Request`) and the

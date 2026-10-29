@@ -97,6 +97,9 @@ evidence_set:
     Summary fields:
 
     What was checked?
+    - changes_read — Number of changes read from azure_change_provenance, of any origin, on the targets the environments setting picks
+    - change_lookback_days — Number of days of change history read: the shortest lookback of the azure_change_provenance files read; null if none was read or one doesn't give it
+    - origins — List of azure_change_provenance origins checked, as configured
     - changes_checked — Number of changes whose origin is in the origins setting (direct by default: an edit made outside any deployment or pipeline)
     - changes_excluded — Number of checked changes made by an excluded caller (the excluded_callers setting), which need no record
     - changes_excluded_by_caller — Number of excluded changes for each excluded caller

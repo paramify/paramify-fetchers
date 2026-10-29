@@ -34,6 +34,7 @@ NO_CALLER = {"system", "unspecified"}
 SAME_RESOURCE = timedelta(minutes=10)
 
 SUMMARY_KEYS = (
+    "changes_read", "change_lookback_days", "origins",
     "changes_checked", "changes_excluded", "changes_needing_record",
     "changes_matched", "changes_ambiguous", "changes_unmatched", "changes_not_by_a_person", "changes_without_caller",
     "changes_recorded", "changes_without_record", "changes_without_approved_record", "percent_recorded",
@@ -158,10 +159,11 @@ def records(files, cfg):
 
 def check_with(cfg):
     def check(inputs):
-        changes = [c for f in inputs[CHANGES].files
-                   if not cfg["environments"] or str((f.target or {}).get("environment") or "").lower()
-                   in cfg["environments"]
-                   for c in (f.payload.get("results") or {}).get("changes") or []]
+        files = [f for f in inputs[CHANGES].files
+                 if not cfg["environments"] or str((f.target or {}).get("environment") or "").lower()
+                 in cfg["environments"]]
+        changes = [c for f in files for c in (f.payload.get("results") or {}).get("changes") or []]
+        lookbacks = [(f.payload.get("results") or {}).get("lookback_days") for f in files]
         by_resource = {}
         for c in changes:
             if named(c):
@@ -195,7 +197,14 @@ def check_with(cfg):
                 "approved": all(w["approved"] for w in found) if found else None,
             })
         results.sort(key=lambda r: (str(r["timestamp"]), str(r["change_id"])))
-        return results, summarize(results, items, types, unselected, cover_from)
+        read = {
+            "changes_read": len(changes),
+            # The shortest window any change file covers; null when none was read or one doesn't say.
+            "change_lookback_days": min(lookbacks) if lookbacks and all(isinstance(n, int) for n in lookbacks)
+            else None,
+            "origins": sorted(cfg["origins"]),
+        }
+        return results, {**read, **summarize(results, items, types, unselected, cover_from)}
     return check
 
 
