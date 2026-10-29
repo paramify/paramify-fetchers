@@ -5,14 +5,15 @@ role: configuration
 statement: >
   No MongoDB vCore cluster's firewall rules together admit every IPv4 address or more than a /8, and
   every cluster's firewall rules were read. A cluster with public access disabled, no rules, or a
-  /8-or-smaller allow-list passes. Also requires exactly 1 cluster with public network access
-  disabled, the count the organization asked for: change it when a cluster is added, removed or
-  opened. Does not assert that the admitted ranges are approved
-  interconnections. Supports Coverage row 104 (Trusted Connection Review / KSI-CNA-RNT) (proposed
-  mapping, not yet audited).
+  /8-or-smaller allow-list passes those checks. Also requires public network access disabled on
+  every cluster (mongo_clusters_public_access_disabled equals total_mongo_clusters), the
+  organization's request, so a cluster opened to the internet fails even behind narrow rules;
+  passes with no clusters. Does not assert that the admitted ranges are approved interconnections.
+  Supports Coverage row 104 (Trusted Connection Review / KSI-CNA-RNT) (proposed mapping, not yet
+  audited).
 
-regex: '"mongo_clusters_firewall_allow_all":\s*(?<mongo_clusters_firewall_allow_all>\d+)[\s\S]*?"mongo_clusters_firewall_broad":\s*(?<mongo_clusters_firewall_broad>\d+)[\s\S]*?"mongo_clusters_public_access_disabled":\s*(?<mongo_clusters_public_access_disabled>\d+)[\s\S]*?"mongo_clusters_public_access_unknown":\s*(?<mongo_clusters_public_access_unknown>\d+)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 1; MATCH_GROUP[4] EQUALS 0
+regex: '"mongo_clusters_firewall_allow_all":\s*(?<mongo_clusters_firewall_allow_all>\d+)[\s\S]*?"mongo_clusters_firewall_broad":\s*(?<mongo_clusters_firewall_broad>\d+)[\s\S]*?"mongo_clusters_public_access_disabled":\s*(?<mongo_clusters_public_access_disabled>\d+)[\s\S]*?"mongo_clusters_public_access_unknown":\s*(?<mongo_clusters_public_access_unknown>\d+)[\s\S]*?"total_mongo_clusters":\s*(?<total_mongo_clusters>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[5]; MATCH_GROUP[4] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
@@ -23,9 +24,9 @@ validation_rules:
   - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # disabled equals total_mongo_clusters
     criteria: EQUALS
-    value: { type: CUSTOM_TEXT, customText: "1" }
+    value: { type: MATCH_GROUP, groupNumber: 5 }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
