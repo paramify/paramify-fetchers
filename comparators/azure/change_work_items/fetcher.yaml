@@ -88,8 +88,16 @@ config_schema:
     default: 24
     env: CHANGE_RECORD_HOURS_AFTER
     description: >
-      How many hours after a work item was finished a change it records can be made. An item that is still
-      open, or whose state the fetcher couldn't place, covers every change after it was created.
+      How many hours after a work item was finished a change it records can be made.
+  open_item_days:
+    type: integer
+    required: false
+    default: 30
+    env: CHANGE_RECORD_OPEN_ITEM_DAYS
+    description: >
+      How many days after a work item that is still open, or whose state the fetcher couldn't place, was
+      created or last changed a change it records can be made. Keeps an item left open from recording every
+      later change.
 
 ksis:
   - KSI-CMT-RMV      # changes made outside a pipeline, each traced to the work item that records it or flagged
@@ -129,7 +137,7 @@ evidence_set:
     - work_items_cover_changes — True if the work items cover the whole change window: every work items file's collection window starts at least hours_after hours before the earliest change needing a record; false if not
 
     Is each change recorded by a work item?
-    - changes_matched — Number of changes recorded by exactly one work item. A work item records a change when the change's caller, a person, is one of the item's people (the record_people setting, matched by login) and the change was made between hours_before hours before the item was created (emergency_hours_before for an emergency type) and hours_after hours after it was finished; an open item covers every later change
+    - changes_matched — Number of changes recorded by exactly one work item. A work item records a change when the change's caller, a person, is one of the item's people (the record_people setting, matched by login) and the change was made between hours_before hours before the item was created (emergency_hours_before for an emergency type) and hours_after hours after it was finished, or, for an item still open or in a state the fetcher couldn't place, open_item_days days after it was created or last changed
     - changes_ambiguous — Number of changes recorded by more than one work item, none picked
     - changes_unmatched — Number of changes made by a person that no work item records
     - changes_without_caller — Number of changes Azure recorded no caller for, with no named change to the same resource within 10 minutes, or in the same deployment, to take one from

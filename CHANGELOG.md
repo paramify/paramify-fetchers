@@ -15,7 +15,7 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
   matches each Azure change made outside a pipeline in `azure_change_provenance`
   (by default, direct edits and ARM deployments a person ran) to the
-  `azure_devops_work_items` records that name its caller and were open when it
+  `azure_devops_work_items` records that name its caller and cover the time it
   was made. Each change is `matched`, `ambiguous`, `unmatched`, `excluded` (a
   caller in `CHANGE_RECORD_EXCLUDED_CALLERS`), `application` (reported apart,
   needing no record), or `no_caller`. A callerless row takes its caller from the
@@ -24,7 +24,9 @@ schemas and the `paramify` CLI — not the internal code.
   checked origins, record types, which people on an item count (by default its
   assignee, creator or closer), and the hours before creation and after
   finishing that an item covers are settings; an emergency type (default
-  `Hotfix`) may be filed up to 72 hours after the change. The summary counts
+  `Hotfix`) may be filed up to 72 hours after the change, and an item still
+  open covers changes only up to `CHANGE_RECORD_OPEN_ITEM_DAYS` (30) days after
+  it was created or last changed. The summary counts
   each status, overall and by origin, the changes without a record, recorded
   without approval and without an approved record, the changes read and the
   shortest change window read (`change_lookback_days`), so a narrow window

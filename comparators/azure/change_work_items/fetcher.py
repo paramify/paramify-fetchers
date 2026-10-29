@@ -4,7 +4,7 @@ KSI-CMT-RMV / KSI-CMT-LMC: Azure changes made outside a pipeline and the work it
 
 Reads azure_change_provenance and azure_devops_work_items from the same run and
 matches each direct edit, and each deployment a person ran by hand, to the record
-work items that name its caller and were open when it was made. A change is
+work items that name its caller and cover the time it was made. A change is
 excluded when its caller is a configured excluded caller, matched to one record,
 ambiguous between several, unmatched, application when an application made it,
 or no_caller when Azure recorded no caller for it.
@@ -50,11 +50,11 @@ def csv_env(env, default=""):
     return [v.strip() for v in os.environ.get(env, default).split(",") if v.strip()]
 
 
-def hours_env(env, default):
+def span_env(env, default, unit="hours"):
     raw = os.environ.get(env, "").strip() or str(default)
     if not raw.isdigit():
-        raise ValueError(f"{env} must be a whole number of hours, 0 or more, got {raw!r}")
-    return timedelta(hours=int(raw))
+        raise ValueError(f"{env} must be a whole number of {unit}, 0 or more, got {raw!r}")
+    return timedelta(**{unit: int(raw)})
 
 
 def settings():
@@ -69,9 +69,10 @@ def settings():
         "types": [t.lower() for t in csv_env("CHANGE_RECORD_TYPES")],
         "emergency_types": {t.lower() for t in csv_env("CHANGE_RECORD_EMERGENCY_TYPES", "Hotfix")},
         "people": people,
-        "before": hours_env("CHANGE_RECORD_HOURS_BEFORE", 24),
-        "emergency_before": hours_env("CHANGE_RECORD_EMERGENCY_HOURS_BEFORE", 72),
-        "after": hours_env("CHANGE_RECORD_HOURS_AFTER", 24),
+        "before": span_env("CHANGE_RECORD_HOURS_BEFORE", 24),
+        "emergency_before": span_env("CHANGE_RECORD_EMERGENCY_HOURS_BEFORE", 72),
+        "after": span_env("CHANGE_RECORD_HOURS_AFTER", 24),
+        "open_days": span_env("CHANGE_RECORD_OPEN_ITEM_DAYS", 30, "days"),
     }
 
 
@@ -157,12 +158,14 @@ def records(files, cfg):
                 continue
             # An emergency record may be filed after the change it records.
             before = max(cfg["before"], cfg["emergency_before"]) if kind in cfg["emergency_types"] else cfg["before"]
-            end = None if item.get("open") is not False else finished_at(item)
+            end = finished_at(item) if item.get("open") is False else None
+            # An open item, or one in a state the fetcher couldn't place, covers changes only so long after it last moved.
+            last = max(t for t in (created, when(item.get("changed_date"))) if t)
             approval = item.get("approval")
             out.append({
                 "logins": logins(item, cfg["people"]),
                 "from": created - before,
-                "to": end + cfg["after"] if end else None,
+                "to": end + cfg["after"] if end else last + cfg["open_days"],
                 "ref": {
                     "organization": org, "project": item.get("project"), "id": item.get("id"),
                     "type": item.get("type"), "state": item.get("state"),
@@ -202,8 +205,7 @@ def check_with(cfg):
             elif caller_type != "User":
                 status = "application"
             else:
-                found = [i["ref"] for i in items if caller.lower() in i["logins"] and at and i["from"] <= at
-                         and (i["to"] is None or at <= i["to"])]
+                found = [i["ref"] for i in items if caller.lower() in i["logins"] and at and i["from"] <= at <= i["to"]]
                 status = "unmatched" if not found else "matched" if len(found) == 1 else "ambiguous"
             results.append({
                 "change_id": c.get("change_id"), "timestamp": c.get("timestamp"),

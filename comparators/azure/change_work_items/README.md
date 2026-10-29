@@ -36,8 +36,10 @@ A record work item is one of `record_types` (by default, the types
 the caller's user principal name equals the login of one of the people in
 `record_people` (by default its assignee, creator or closer). It covers a change
 made from `hours_before` hours before the item was created to `hours_after`
-hours after it was finished; an item still open, or in a state its type no
-longer defines, covers every later change. An item of one of `emergency_types`
+hours after it was finished. An item still open, or in a state its type no
+longer defines, covers changes up to `open_item_days` days (30) after it was
+created or last changed, so an item left open doesn't record every later
+change. An item of one of `emergency_types`
 may be filed later, up to `emergency_hours_before` hours after the change.
 
 A matched or ambiguous change is approved when every work item that records it

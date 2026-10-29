@@ -96,7 +96,8 @@ def compare(tmp_path, monkeypatch, changes, items, env=None, **kw):
 def clean_env(monkeypatch):
     for env in ("CHANGE_RECORD_ORIGINS", "CHANGE_RECORD_EXCLUDED_CALLERS", "CHANGE_RECORD_ENVIRONMENTS",
                 "CHANGE_RECORD_TYPES", "CHANGE_RECORD_EMERGENCY_TYPES", "CHANGE_RECORD_PEOPLE",
-                "CHANGE_RECORD_HOURS_BEFORE", "CHANGE_RECORD_EMERGENCY_HOURS_BEFORE", "CHANGE_RECORD_HOURS_AFTER"):
+                "CHANGE_RECORD_HOURS_BEFORE", "CHANGE_RECORD_EMERGENCY_HOURS_BEFORE", "CHANGE_RECORD_HOURS_AFTER",
+                "CHANGE_RECORD_OPEN_ITEM_DAYS"):
         monkeypatch.delenv(env, raising=False)
 
 
@@ -217,12 +218,25 @@ def test_the_window_hours_come_from_config(tmp_path, monkeypatch):
     assert (results["before"]["status"], results["after"]["status"]) == ("unmatched", "matched")
 
 
-def test_an_open_item_or_one_in_an_unknown_state_covers_every_later_change(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("at", "env", "status"), [
+    ("2026-10-27T00:00:00Z", {}, "matched"),
+    ("2026-10-31T09:00:00Z", {}, "matched"),        # 30 days after it was created
+    ("2026-10-31T09:00:01Z", {}, "unmatched"),
+    ("2026-10-31T09:00:01Z", {"CHANGE_RECORD_OPEN_ITEM_DAYS": "31"}, "matched"),
+])
+def test_an_open_item_or_one_in_an_unknown_state_covers_open_item_days_after_creation(
+        tmp_path, monkeypatch, at, env, status):
     items = [item(1, state="Doing", open_=True, closed=None),
              item(2, assigned=BOB, state="Initial scoping", open_=None, closed=None)]
-    results, _ = compare(tmp_path, monkeypatch, [change("a", "2026-10-27T00:00:00Z"),
-                                                 change("b", "2026-10-27T00:00:00Z", by=BOB)], items)
-    assert results["a"]["status"] == results["b"]["status"] == "matched"
+    results, _ = compare(tmp_path, monkeypatch, [change("a", at), change("b", at, by=BOB)], items, env=env)
+    assert results["a"]["status"] == results["b"]["status"] == status
+
+
+def test_an_open_items_window_runs_from_its_last_change(tmp_path, monkeypatch):
+    items = [item(1, state="Doing", open_=True, closed=None, changed_date="2026-10-20T00:00:00Z")]
+    results, _ = compare(tmp_path, monkeypatch, [change("in", "2026-11-19T00:00:00Z"),
+                                                 change("out", "2026-11-19T00:00:01Z")], items)
+    assert (results["in"]["status"], results["out"]["status"]) == ("matched", "unmatched")
 
 
 def test_a_finished_item_without_a_closed_date_ends_when_it_entered_its_state(tmp_path, monkeypatch):
@@ -417,6 +431,7 @@ def test_the_runner_runs_it_after_its_inputs_with_its_entrys_config(tmp_path):
     ("CHANGE_RECORD_PEOPLE", " , ", "nothing"),
     ("CHANGE_RECORD_HOURS_BEFORE", "-1", "whole number"),
     ("CHANGE_RECORD_HOURS_AFTER", "a day", "whole number"),
+    ("CHANGE_RECORD_OPEN_ITEM_DAYS", "30d", "whole number of days"),
 ])
 def test_a_bad_setting_is_bad_config(tmp_path, monkeypatch, run_env, env, value, message):
     monkeypatch.setenv(ci.INPUTS_ENV, str(index(tmp_path, [], [])))
