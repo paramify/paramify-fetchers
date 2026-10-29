@@ -333,6 +333,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
+  risk.** Users at open risk or with a high risk level now carry their risk
+  history (`risk_history`, oldest first, with what changed and who initiated it)
+  and the last time their risk was closed (`last_closed_risk`), plus the Entra ID
+  Protection alerts whose user evidence names them (`alerts`: owner, status,
+  classification and the Defender XDR incident id, which a Sentinel incident
+  records as its provider incident id). The summary adds
+  `open_or_high_risk_users`, `risk_histories_read`,
+  `identity_protection_alerts`, `alerts_for_open_or_high_risk_users`,
+  `open_high_risk_users_without_alert`, `alerts_without_owner` and
+  `alerts_without_incident`, each described in the instructions. Needs
+  `SecurityAlert.Read.All` as well: without it the run fails as
+  `not_authorized`, and the risky users and their history are still written.
+  The 0.2.0 fields are unchanged.
 - **`azure_entra_service_principals` 0.2.0: owners and granted API permissions.**
   Each service principal now lists its owners and its application's owners
   (`has_owner`), its application permissions named from the resource's app roles,

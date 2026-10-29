@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entra ID Protection risky users, joined to directory roles: which privileged accounts are at risk and what was done about it."""
+"""Entra ID Protection risky users, joined to directory roles, risk history and the alerts naming them: which accounts are at risk and what was done about it."""
 
 import logging
 import sys
@@ -15,6 +15,7 @@ from entra_graph import is_privileged_role  # noqa: E402
 NAME = "azure_entra_risky_users"
 OPEN_STATES = frozenset({"atRisk", "confirmedCompromised"})
 CLOSED_STATES = frozenset({"remediated", "dismissed", "confirmedSafe"})
+ALERTS_FILTER = "serviceSource eq 'azureAdIdentityProtection'"
 
 logger = logging.getLogger(NAME)
 
@@ -74,6 +75,69 @@ def project_user(user: Dict[str, Any], roles: Optional[Roles], now: datetime) ->
     }
 
 
+def followed_up(user: Dict[str, Any]) -> bool:
+    return user["risk_state"] in OPEN_STATES or user["risk_level"] == "high"
+
+
+def project_history(item: Dict[str, Any]) -> Dict[str, Any]:
+    activity = item.get("activity") or {}
+    return {
+        "risk_last_updated": item.get("riskLastUpdatedDateTime"),
+        "risk_level": item.get("riskLevel"),
+        "risk_state": item.get("riskState"),
+        "risk_detail": item.get("riskDetail"),
+        "activity_detail": activity.get("detail"),
+        "risk_event_types": sorted(activity.get("riskEventTypes") or []),
+        "initiated_by": item.get("initiatedBy"),
+    }
+
+
+def risk_history(client, user_id: str) -> List[Dict[str, Any]]:
+    items = (project_history(i) for i in client.graph_list(f"/identityProtection/riskyUsers/{user_id}/history"))
+    return sorted(items, key=lambda i: i["risk_last_updated"] or "")
+
+
+def last_closed_risk(history: Optional[List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
+    closed = [h for h in history or [] if h["risk_state"] in CLOSED_STATES]
+    return closed[-1] if closed else None
+
+
+def project_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": alert.get("id"),
+        "title": alert.get("title"),
+        "severity": alert.get("severity"),
+        "status": alert.get("status"),
+        "classification": alert.get("classification"),
+        "determination": alert.get("determination"),
+        "assigned_to": alert.get("assignedTo"),
+        "incident_id": alert.get("incidentId"),
+        "created": alert.get("createdDateTime"),
+        "resolved": alert.get("resolvedDateTime"),
+    }
+
+
+def alerts_by_user(alerts: List[Dict[str, Any]]) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Lower-cased user object id or UPN -> the alerts whose user evidence names it, by alert id."""
+    named: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for alert in alerts:
+        for evidence in alert.get("evidence") or []:
+            if not str(evidence.get("@odata.type") or "").endswith("userEvidence"):
+                continue
+            account = evidence.get("userAccount") or {}
+            for key in (account.get("azureAdUserId"), account.get("userPrincipalName")):
+                if key:
+                    named.setdefault(str(key).lower(), {})[str(alert.get("id"))] = project_alert(alert)
+    return named
+
+
+def user_alerts(named: Dict[str, Dict[str, Dict[str, Any]]], user: Dict[str, Any]) -> List[Dict[str, Any]]:
+    found: Dict[str, Dict[str, Any]] = {}
+    for key in (user["id"], user["user_principal_name"]):
+        found.update(named.get(str(key or "").lower(), {}))
+    return sorted(found.values(), key=lambda a: a["created"] or "")
+
+
 def account_enabled(client, user_id: str) -> Optional[bool]:
     """None when Graph refuses the read: User.Read.All is optional, so that is unknown, not a failed run."""
     try:
@@ -107,6 +171,20 @@ def collect(client, collector) -> tuple:
                 f"graph.users.get({user['id']})", lambda u=user: account_enabled(client, u["id"])
             )
 
+    followed = [u for u in users if followed_up(u)]
+    for user in followed:
+        user["risk_history"] = collector.guard(
+            f"graph.identityProtection.riskyUsers.history({user['id']})", lambda u=user: risk_history(client, u["id"])
+        )
+        user["last_closed_risk"] = last_closed_risk(user["risk_history"])
+    raw_alerts = collector.guard(
+        "graph.security.alerts_v2.list", lambda: client.graph_list("/security/alerts_v2", params={"$filter": ALERTS_FILTER})
+    )
+    named = alerts_by_user(raw_alerts) if raw_alerts is not None else None
+    for user in followed:
+        user["alerts"] = user_alerts(named, user) if named is not None else None
+    alerts = list({a["id"]: a for u in followed for a in u["alerts"] or []}.values())
+
     open_ = [u for u in users if u["risk_state"] in OPEN_STATES]
     privileged_open = [u for u in open_ if u["privileged_roles"]]
     by_state: Dict[str, int] = {}
@@ -129,6 +207,15 @@ def collect(client, collector) -> tuple:
         ),
         # Members of these groups hold the role too but aren't in privileged_open_risk_users.
         "privileged_role_groups": None if held_by_groups is None else len(held_by_groups),
+        "open_or_high_risk_users": len(followed),
+        "risk_histories_read": sum(1 for u in followed if u["risk_history"] is not None),
+        "identity_protection_alerts": len(raw_alerts) if raw_alerts is not None else None,
+        "open_high_risk_users_without_alert": None if named is None else sum(
+            1 for u in open_ if u["risk_level"] == "high" and not u["alerts"]
+        ),
+        "alerts_for_open_or_high_risk_users": None if named is None else len(alerts),
+        "alerts_without_owner": None if named is None else sum(1 for a in alerts if not a["assigned_to"]),
+        "alerts_without_incident": None if named is None else sum(1 for a in alerts if not a["incident_id"]),
     }
     return {"identity_protection_available": True, "risky_users": users, "privileged_role_groups": held_by_groups}, summary
 
