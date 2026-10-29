@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-resource diagnostic settings for every resource in a subscription, and whether each log-emitting resource exports its logs."""
+"""Per-resource diagnostic settings for every resource in a subscription, whether each log-emitting resource exports its logs, and whether they arrive."""
 
 import logging
 import os
@@ -17,16 +17,25 @@ from azure_common import (  # noqa: E402
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
+    basename,
     build_payload,
     classify_failure_code,
     coverage_percentage,
     credential,
     failure_reason,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     sanitize_for_filename,
+    sorted_counts,
     write_evidence,
-    report_failure,
+)
+from azure_rest import (  # noqa: E402
+    LAW_API,
+    AzureRestClient,
+    int_config,
+    iso_duration_days,
+    parse_time,
 )
 from diagnostics import (  # noqa: E402
     CATEGORY_TYPE_LOGS,
@@ -68,6 +77,50 @@ UNSUPPORTED_MARKERS = ("resourcetypenotsupported", "does not support diagnostic 
 
 # Measured ~14 resources/s on ~1,000 resources; ARM refills reads at ~25/s per principal, and 429s are retried.
 WORKERS = 4
+
+INGESTION_LOOKBACK_ENV = "INGESTION_LOOKBACK_DAYS"
+DEFAULT_INGESTION_LOOKBACK_DAYS = 7
+APPROVED_WORKSPACES_ENV = "APPROVED_LOG_WORKSPACES"
+# Written whatever a diagnostic setting says (the activity log, metrics, monitoring agents, Container Insights), so a
+# row there does not show a resource's logs arriving. Application Insights tables stay: their rows are the component's own.
+NOT_RESOURCE_LOG_TABLES = (
+    "AzureActivity", "AzureMetrics", "InsightsMetrics", "Perf", "Heartbeat", "Syslog", "Event",
+    "ContainerLog", "ContainerLogV2", "ContainerInventory", "ContainerNodeInventory", "ContainerImageInventory",
+    "ContainerServiceLog", "KubePodInventory", "KubeNodeInventory", "KubeEvents", "KubeServices", "KubePVInventory",
+    "KubeMonAgentEvents", "KubeHealth",
+)
+INGESTION_QUERY = (
+    "union withsource=ParamifySourceTable * "
+    "| where TimeGenerated > ago({days}d) "
+    "| where _ResourceId startswith '/subscriptions/{subscription_id}/' "
+    "| where ParamifySourceTable !in (" + ", ".join(f"'{t}'" for t in NOT_RESOURCE_LOG_TABLES) + ") "
+    "| summarize LastIngested = max(TimeGenerated), Records = count() "
+    "by ResourceId = tolower(_ResourceId), Table = ParamifySourceTable"
+)
+# Each storage service writes only its own resource-specific table.
+STORAGE_LOG_TABLES = {
+    "storagebloblogs": f"{STORAGE_ACCOUNT_TYPE}/blobservices",
+    "storagefilelogs": f"{STORAGE_ACCOUNT_TYPE}/fileservices",
+    "storagequeuelogs": f"{STORAGE_ACCOUNT_TYPE}/queueservices",
+    "storagetablelogs": f"{STORAGE_ACCOUNT_TYPE}/tableservices",
+}
+AZURE_DIAGNOSTICS_MODE = "azurediagnostics"
+_NOT_RESOURCE_LOG_KEYS = frozenset(t.lower() for t in NOT_RESOURCE_LOG_TABLES)
+# union * skips Basic and Auxiliary tables; querying them bills per GB scanned, so it is off unless hours are set.
+BASIC_LOOKBACK_ENV = "BASIC_LOGS_LOOKBACK_HOURS"
+DEFAULT_BASIC_LOOKBACK_HOURS = 0
+BASIC_TABLE_QUERY = (
+    "['{table}'] "
+    "| where TimeGenerated > ago({hours}h) "
+    "| where _ResourceId startswith '/subscriptions/{subscription_id}/' "
+    "| summarize LastIngested = max(TimeGenerated), Records = count() by ResourceId = tolower(_ResourceId) "
+    "| extend Table = '{table}'"
+)
+
+INGESTION_QUERIED = "queried"
+INGESTION_NOT_AUTHORIZED = "not_authorized"
+INGESTION_NOT_FOUND = "not_found"
+INGESTION_ERROR = "error"
 
 
 # --- pure transforms ---
@@ -208,6 +261,224 @@ def classify_error(exc: BaseException):
     return None
 
 
+# --- log ingestion and approved destinations ---
+
+def workspace_key(workspace_id: str) -> str:
+    return (workspace_id or "").lower().rstrip("/")
+
+
+def approved_workspaces() -> list[str]:
+    raw = os.environ.get(APPROVED_WORKSPACES_ENV) or ""
+    return sorted({workspace_key(w.strip()) for w in raw.split(",") if w.strip()})
+
+
+def workspace_approved(workspace_id, approved: list[str]):
+    """Matched by resource id or bare name; None when no list is configured or there is no workspace."""
+    if not approved or not workspace_id:
+        return None
+    key = workspace_key(workspace_id)
+    return key in approved or key.rsplit("/", 1)[-1] in approved
+
+
+def basic_lookback_hours() -> int:
+    """0, the default, leaves the Basic and Auxiliary tables unqueried."""
+    raw = (os.environ.get(BASIC_LOOKBACK_ENV) or "").strip()
+    try:
+        hours = int(raw) if raw else DEFAULT_BASIC_LOOKBACK_HOURS
+    except ValueError:
+        logger.warning("%s=%r is not an integer; using %d", BASIC_LOOKBACK_ENV, raw, DEFAULT_BASIC_LOOKBACK_HOURS)
+        return DEFAULT_BASIC_LOOKBACK_HOURS
+    return max(hours, 0)
+
+
+def resource_log_table(name: str) -> bool:
+    """Custom (_CL) and agent or platform tables never hold what a diagnostic setting exports."""
+    return not name.lower().endswith("_cl") and name.lower() not in _NOT_RESOURCE_LOG_KEYS
+
+
+def could_hold_logs(table: str, record: dict, settings: list[dict]) -> bool:
+    """Whether an unqueried Basic or Auxiliary table could hold this resource's logs from these settings."""
+    name, rtype = table.lower(), record["type"] or ""
+    if not resource_log_table(table):
+        return False
+    if name in STORAGE_LOG_TABLES:
+        return STORAGE_LOG_TABLES[name] == rtype
+    if rtype in STORAGE_LOG_TABLES.values():
+        return False
+    # Most settings leave the mode unset, and many types write resource-specific tables anyway; only an explicit
+    # AzureDiagnostics mode rules a resource-specific table out.
+    modes = {(s.get("log_analytics_destination_type") or "").lower() for s in settings}
+    return name == AZURE_DIAGNOSTICS_MODE or modes != {AZURE_DIAGNOSTICS_MODE}
+
+
+def non_analytics_tables(tables: list[dict]) -> list[dict]:
+    """Basic and Auxiliary plan tables, which union * leaves out."""
+    out = []
+    for table in tables:
+        plan = (table.get("properties") or {}).get("plan")
+        if plan and plan.lower() != "analytics" and table.get("name"):
+            out.append({"name": table["name"], "plan": plan})
+    return sorted(out, key=lambda t: t["name"].lower())
+
+
+def exporting_workspaces(record: dict) -> list[str]:
+    """Distinct Log Analytics destinations of the settings that export logs."""
+    seen: dict = {}
+    for setting in record["diagnostic_settings"]:
+        if setting["exports_logs"] and setting.get("workspace_id"):
+            seen.setdefault(workspace_key(setting["workspace_id"]), setting["workspace_id"])
+    return [seen[k] for k in sorted(seen)]
+
+
+def ingestion_status(exc: BaseException) -> str:
+    message = str(exc).lower()
+    status = getattr(exc, "status", None)
+    # ARM answers SubscriptionNotFound (404) for a subscription the caller holds no role in.
+    if "subscriptionnotfound" in message:
+        return INGESTION_NOT_AUTHORIZED
+    if status == 404 or "resourcenotfound" in message or "workspacenotfound" in message:
+        return INGESTION_NOT_FOUND
+    if status in (401, 403) or any(
+        m in message for m in ("(401)", "(403)", "authorizationfailed", "insufficientaccess", "forbidden")
+    ):
+        return INGESTION_NOT_AUTHORIZED
+    return INGESTION_ERROR
+
+
+def _latest(times) -> str | None:
+    parsed = [(parse_time(t), t) for t in times if t]
+    parsed = [p for p in parsed if p[0] is not None]
+    return max(parsed)[1] if parsed else None
+
+
+def ingestion_by_resource(rows: list[dict]) -> dict:
+    """Query rows (one per resource and table) folded per lower-cased resource id."""
+    grouped: dict = {}
+    for row in rows:
+        rid = (row.get("ResourceId") or "").lower()
+        if rid:
+            grouped.setdefault(rid, []).append(row)
+    return {
+        rid: {
+            "last_ingested": _latest(r.get("LastIngested") for r in group),
+            "records": sum(r.get("Records") or 0 for r in group),
+            "tables": sorted({r["Table"] for r in group if r.get("Table")}),
+        }
+        for rid, group in grouped.items()
+    }
+
+
+def with_ingestion(record: dict, workspaces: dict, approved: list[str]) -> dict:
+    """ingested_in_window: True once any destination holds records; False only when every destination was read in full or is gone."""
+    settings = [
+        {**s, "workspace_approved": workspace_approved(s.get("workspace_id"), approved)}
+        for s in record["diagnostic_settings"]
+    ]
+    rid = (record["id"] or "").lower()
+    destinations = []
+    for workspace_id in exporting_workspaces(record):
+        ws = workspaces.get(workspace_key(workspace_id)) or {}
+        status = ws.get("status")
+        seen = (ws.get("resources") or {}).get(rid) or {}
+        to_ws = [s for s in record["diagnostic_settings"]
+                 if s["exports_logs"] and workspace_key(s.get("workspace_id")) == workspace_key(workspace_id)]
+        skipped = [t for t in ws.get("unqueried_tables") or [] if could_hold_logs(t, record, to_ws)]
+        destinations.append({
+            "workspace_id": workspace_id,
+            "status": status,
+            "read_in_full": not skipped if status == INGESTION_QUERIED else None,
+            "unqueried_tables": skipped if status == INGESTION_QUERIED else None,
+            "last_ingested": seen.get("last_ingested"),
+            "records": seen.get("records", 0) if status == INGESTION_QUERIED else None,
+            "tables": seen.get("tables", []),
+        })
+    if not destinations:
+        ingested = None
+    elif any(d["records"] for d in destinations):
+        ingested = True
+    elif all(d["status"] == INGESTION_NOT_FOUND or d["read_in_full"] for d in destinations):
+        ingested = False
+    else:
+        ingested = None
+    exporting = [s for s in settings if s["exports_logs"]]
+    return {
+        **record,
+        "diagnostic_settings": settings,
+        "log_analytics_ingestion": destinations,
+        "last_ingested": _latest(d["last_ingested"] for d in destinations),
+        "ingested_in_window": ingested,
+        "sends_to_approved_workspace": (
+            any(s["workspace_approved"] for s in exporting)
+            if approved and record["has_enabled_log_setting"] is not None else None
+        ),
+    }
+
+
+def destination_records(workspaces: dict, records: list[dict], approved: list[str]) -> list[dict]:
+    out = []
+    for key in sorted(workspaces):
+        ws = workspaces[key]
+        reads = [
+            d for r in records for d in r["log_analytics_ingestion"] if workspace_key(d["workspace_id"]) == key
+        ]
+        out.append({
+            "workspace_id": ws["workspace_id"],
+            "name": ws["name"],
+            "customer_id": ws["customer_id"],
+            "status": ws["status"],
+            "error": ws["error"],
+            "non_analytics_tables": ws["non_analytics_tables"],
+            "unqueried_tables": ws.get("unqueried_tables", []) if ws["status"] == INGESTION_QUERIED else None,
+            "table_errors": ws.get("table_errors", []),
+            "all_tables_queried": ws["all_tables_queried"] if ws["status"] == INGESTION_QUERIED else None,
+            "approved": workspace_approved(ws["workspace_id"], approved),
+            "resources_exporting": len(reads),
+            "resources_with_records": sum(1 for d in reads if d["records"]),
+        })
+    return out
+
+
+def summarize_ingestion(
+    records: list[dict], destinations: list[dict], days: int, hours: int, approved: list[str]
+) -> dict:
+    sending = [r for r in records if r["emits_resource_logs"] and r["sends_to_log_analytics"]]
+    recent = [r for r in sending if r["ingested_in_window"] is True]
+    stale = [r for r in sending if r["ingested_in_window"] is False]
+    status = Counter(d["status"] for d in destinations)
+    emitting = [r for r in records if r["emits_resource_logs"]]
+    exporting = [s for r in records for s in r["diagnostic_settings"] if s["exports_logs"] and s.get("workspace_id")]
+    return {
+        "ingestion_lookback_days": days,
+        "basic_logs_lookback_hours": hours,
+        "log_analytics_destinations": len(destinations),
+        "log_analytics_destinations_queried": status[INGESTION_QUERIED],
+        "log_analytics_destinations_not_authorized": status[INGESTION_NOT_AUTHORIZED],
+        "log_analytics_destinations_not_found": status[INGESTION_NOT_FOUND],
+        "log_analytics_destinations_errored": status[INGESTION_ERROR],
+        "log_analytics_destinations_with_unqueried_tables": sum(
+            1 for d in destinations if d["all_tables_queried"] is False
+        ),
+        "resources_with_recent_ingestion": len(recent),
+        "resources_without_recent_ingestion": len(stale),
+        "resources_ingestion_unknown": len(sending) - len(recent) - len(stale),
+        "recent_ingestion_percentage": coverage_percentage(len(recent), len(sending)),
+        "no_recent_ingestion_by_type": sorted_counts(Counter(r["type"] or "unknown" for r in stale)),
+        "all_log_analytics_resources_ingesting": len(recent) == len(sending) if sending else None,
+        "approved_workspaces_configured": bool(approved),
+        "settings_exporting_to_unapproved_workspace": (
+            sum(1 for s in exporting if s["workspace_approved"] is False) if approved else None
+        ),
+        "resources_sending_to_approved_workspace": (
+            sum(1 for r in emitting if r["sends_to_approved_workspace"]) if approved else None
+        ),
+        "resources_exporting_to_unapproved_workspace": (
+            sum(1 for r in records if any(
+                s["exports_logs"] and s["workspace_approved"] is False for s in r["diagnostic_settings"]
+            )) if approved else None
+        ),
+    }
+
+
 # --- collection (lazy azure imports) ---
 
 def enumerate_resources(subscription_id, cred, collector: Collector) -> dict:
@@ -269,6 +540,54 @@ def assess(monitor, collector: Collector, base: dict, unsupported_types: set) ->
     return resource_record(base, STATUS_ASSESSED, categories, settings)
 
 
+def read_workspace_ingestion(
+    client, workspace_id: str, subscription_id: str, days: int, hours: int, collector: Collector
+) -> dict:
+    """A refused or deleted destination is evidence, any other destination failure fails the run; a failing Basic table only stays unqueried."""
+    out = {"workspace_id": workspace_id, "name": basename(workspace_id), "customer_id": None,
+           "status": INGESTION_QUERIED, "error": None, "non_analytics_tables": [], "unqueried_tables": [],
+           "table_errors": [], "all_tables_queried": False, "resources": {}}
+    try:
+        out["customer_id"] = ((client.get(workspace_id, LAW_API) or {}).get("properties") or {}).get("customerId")
+        if not out["customer_id"]:
+            raise LookupError(f"no customerId on workspace {workspace_id}")
+        out["non_analytics_tables"] = non_analytics_tables(client.list(f"{workspace_id}/tables", LAW_API))
+        query = INGESTION_QUERY.format(days=days, subscription_id=subscription_id)
+        rows = client.query(out["customer_id"], query, iso_duration_days(days))
+    except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
+        status = ingestion_status(exc)
+        if status == INGESTION_ERROR:
+            collector.record(f"loganalytics.query(ingestion, {workspace_id})", exc)
+        else:
+            logger.warning("Log Analytics destination %s: %s (%s)", workspace_id, status, exc)
+        return {**out, "status": status, "error": " ".join(str(exc).split())[:300]}
+    unqueried = [t["name"] for t in out["non_analytics_tables"] if resource_log_table(t["name"])]
+    for name in list(unqueried) if hours else []:
+        query = BASIC_TABLE_QUERY.format(table=name, hours=hours, subscription_id=subscription_id)
+        try:
+            rows += client.search(out["customer_id"], query, f"PT{hours}H")
+            unqueried.remove(name)
+        except Exception as exc:  # noqa: BLE001 — one table's failure leaves it unqueried, not the run failed
+            logger.warning("Basic table %s in %s not queried: %s", name, workspace_id, exc)
+            out["table_errors"].append({"table": name, "error": " ".join(str(exc).split())[:300]})
+    return {**out, "unqueried_tables": unqueried, "all_tables_queried": not unqueried,
+            "resources": ingestion_by_resource(rows)}
+
+
+def collect_ingestion(cred, subscription_id: str, records: list[dict], days: int, hours: int, collector) -> dict:
+    wanted: dict = {}
+    for record in records:
+        for workspace_id in exporting_workspaces(record):
+            wanted.setdefault(workspace_key(workspace_id), workspace_id)
+    if not wanted:
+        return {}
+    client = AzureRestClient(cred)
+    return {
+        key: read_workspace_ingestion(client, wanted[key], subscription_id, days, hours, collector)
+        for key in sorted(wanted)
+    }
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -288,6 +607,10 @@ def main() -> int:
     records: list[dict] = []
     inventory = {"rows": [], "total_records": None, "pages": 0}
     registration = REGISTRATION_UNKNOWN
+    days = int_config(INGESTION_LOOKBACK_ENV, DEFAULT_INGESTION_LOOKBACK_DAYS)
+    hours = basic_lookback_hours()
+    approved = approved_workspaces()
+    workspaces: dict = {}
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Insights")
         if registration == NOT_REGISTERED:
@@ -306,6 +629,7 @@ def main() -> int:
                 records = list(pool.map(lambda r: assess(monitor, collector, r, unsupported_types), resources))
         elif resources:
             records = [resource_record(r, STATUS_ERROR) for r in resources]
+        workspaces = collect_ingestion(cred, subscription_id, records, days, hours, collector)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -315,7 +639,8 @@ def main() -> int:
             ),
         )
 
-    records.sort(key=lambda r: (r["id"] or "").lower())
+    records = sorted((with_ingestion(r, workspaces, approved) for r in records), key=lambda r: (r["id"] or "").lower())
+    destinations = destination_records(workspaces, records, approved)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -325,10 +650,15 @@ def main() -> int:
             "inventory_source": "azure_resource_graph",
             "query": INVENTORY_QUERY,
             "provider_registration_status": registration,
+            "log_analytics_destinations": destinations,
+            "ingestion_query": INGESTION_QUERY,
+            "basic_table_query": BASIC_TABLE_QUERY,
+            "approved_log_workspaces": approved or None,
         },
         summary={
             **summarize(records, len(inventory["rows"]), inventory["total_records"], inventory["pages"]),
             "provider_registration_status": registration,
+            **summarize_ingestion(records, destinations, days, hours, approved),
         },
     )
 
