@@ -1,8 +1,8 @@
 name: azure_change_work_items
 version: 0.1.0
 description: >-
-  Shows whether each direct Azure change, made from the portal or the command line rather than a deployment, is
-  recorded by an Azure DevOps work item.
+  Shows whether each direct Azure change, made outside any deployment, is recorded by an Azure DevOps work item, and
+  whether that record is approved.
 category: azure
 
 depends_on:
