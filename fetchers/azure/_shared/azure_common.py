@@ -269,6 +269,8 @@ def classify_failure_code(failures: List[Dict[str, str]]) -> str:
         return "partial_failure"
     types = {(f.get("type") or "").lower() for f in failures}
     messages = " ".join((f.get("message") or "").lower() for f in failures)
+    # msgraph renders a status as "<message> (status 403)"; the markers use ARM's "(403)".
+    messages = re.sub(r"\(status (\d{3})\)", r"(\1)", messages)
     for code, type_markers, message_markers in _CODE_RULES:
         if any(marker in t for t in types for marker in type_markers):
             return code
