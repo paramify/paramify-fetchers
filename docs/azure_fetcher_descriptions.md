@@ -661,26 +661,34 @@ Commands Executed:
 - Microsoft Graph `GET /directoryRoles` — activated directory roles
 - Microsoft Graph `GET /directoryRoles/{id}/members` — who holds each role
 - Microsoft Graph `GET /directoryRoles/{id}/members/microsoft.graph.servicePrincipal` — the service principals holding each role, which the members list leaves out
+- Microsoft Graph `GET /directoryRoles/{id}/members/microsoft.graph.group` (per role) — the role-assignable groups holding each role
 - Microsoft Graph `GET /users/{id}?$select=accountEnabled` (privileged users at open risk) — whether the account is enabled (a 403 means User.Read.All isn't granted, and the status reads unknown)
 
-Output: `azure_entra_risky_users_<tenant>.json` — whether Identity Protection is available, and each risky user with their risk level, state and any privileged roles, plus the risk history and alerts of users at open or high risk.
+Output: `azure_entra_risky_users_<tenant>.json` — whether Identity Protection is available, and each risky user with their risk level, state and any privileged roles, plus the risk history and alerts of users at open or high risk and the groups that hold a privileged role.
 
 Summary fields:
 
 **Is Identity Protection available?**
-- `identity_protection_available` — Whether Entra ID Identity Protection is available; false means the tenant has no Entra ID P2 licence, and no other field is written
+- `identity_protection_available` — Whether Entra ID Identity Protection is available; false means Graph refused the risky users list with a 403 that mentions licensing, read as a tenant without Entra ID P2, and no other field is written
 
 **How many users are at risk, and for how long?**
 - `risky_users_total` — Number of users Identity Protection lists as risky, in any state
-- `by_risk_state` — Number of risky users in each risk state (for example, at risk, remediated or dismissed)
+- `by_risk_state` — Number of risky users in each risk state; a state no user is in is left out:
+  - atRisk (open risk, not yet handled)
+  - confirmedCompromised (open risk, confirmed by an admin)
+  - remediated (closed, for example by a secure password change)
+  - dismissed (closed by an admin)
+  - confirmedSafe (closed, confirmed safe by an admin)
+  - unknown (no risk state returned)
 - `open_risk_users` — Number of users with open risk (still at risk, or confirmed compromised)
 - `open_high_risk_users` — Number of users with open risk whose risk level is high
-- `oldest_open_risk_days` — Days since the oldest open risk was last updated
+- `oldest_open_risk_days` — Days since the least recently updated open risk was last updated; that time moves whenever the risk changes, so this isn't how long the risk has been open; null when no user has open risk
 
 **Are privileged accounts at risk?**
-- `privileged_open_risk_users` — Number of users with open risk who hold a privileged admin role; null if the directory roles couldn't be read
-- `privileged_open_risk_users_enabled` — Number of users with open risk who hold a privileged role and whose account isn't known to be disabled; an account reads unknown when User.Read.All isn't granted, and unknown counts as enabled; null if the directory roles couldn't be read
-- `privileged_principals` — Number of users, groups or apps that directly hold at least one privileged role; null if the directory roles couldn't be read
+- `privileged_principals` — Number of users, groups or apps that directly hold at least one privileged directory role, meaning one of the tenant-wide admin roles in the shared list in `_shared/entra_graph.py` (Global Administrator, Privileged Role Administrator, Security Administrator and others); roles a user is only eligible for through PIM (Privileged Identity Management) aren't read; null if the directory roles couldn't be read
+- `privileged_role_groups` — Number of role-assignable groups that directly hold a privileged directory role; their members hold the role too but aren't read, as that would need GroupMember.Read.All; null if the directory roles couldn't be read
+- `privileged_open_risk_users` — Number of users with open risk who directly hold a privileged directory role; members of the groups `privileged_role_groups` counts aren't included, so 0 shows no privileged user has open risk only when `privileged_role_groups` is also 0, and users only eligible for a privileged role through PIM aren't included; null if the directory roles couldn't be read
+- `privileged_open_risk_users_enabled` — Number of users with open risk who directly hold a privileged directory role and whose account isn't known to be disabled; an account reads unknown when User.Read.All isn't granted, and unknown counts as enabled; null if the directory roles couldn't be read
 
 **Did every serious risk raise an alert that someone owns?**
 - `open_or_high_risk_users` — Number of risky users at open or high risk: risk still open (at risk, or confirmed compromised), or a high risk level in any state. Their risk history and alerts are read
