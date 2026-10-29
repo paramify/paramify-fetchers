@@ -1,0 +1,37 @@
+key: azure_changes_outside_pipeline_recorded
+name: Azure Changes Outside a Pipeline Each Recorded by a Work Item
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Azure change in the comparator's window that needs a record is recorded by an
+  Azure DevOps work item of a record type: summary.changes_without_record is 0. A change
+  needs a record when it was made outside a pipeline (a direct edit from the portal,
+  CLI, PowerShell or an SDK, or an ARM deployment a person ran, by default), by a person,
+  a caller of unknown type or a caller Azure didn't record, and not by an excluded
+  caller. A work item records a change when the change's caller is one of the item's
+  people (by default its assignee, creator or closer, by login) and the change falls
+  between the item's creation and its finish, widened by the configured hours (an
+  emergency type such as a Hotfix may be filed after the change); a change several items
+  could record counts as recorded. Substantiates KSI-CMT-RMV and KSI-CMT-LMC: changes
+  made by direct modification are logged in the change record. Does NOT prove the record
+  is approved (azure_changes_outside_pipeline_approved), that the work item describes
+  this particular change (matching is by person and time, and an item left open covers
+  changes by its people for the configured days, 30 by default, after it last changed),
+  anything about changes by applications (counted apart in
+  summary.changes_by_application and not checked here), or anything outside the change
+  window (azure_changes_outside_pipeline_full_window).
+
+# Reads one value, so it guards itself: a renamed or null field matches nothing and
+# the MATCH_COUNT rule fails.
+regex: '"changes_without_record":\s*(?<changes_without_record>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # changes_without_record
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-CHANGE-WORK-ITEMS

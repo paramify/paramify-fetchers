@@ -1,0 +1,21 @@
+# Set-level: every validator naming EVD-AZURE-CHANGE-WORK-ITEMS, combined the way
+# Paramify combines them.
+evidence_set: EVD-AZURE-CHANGE-WORK-ITEMS
+cases:
+  - name: every_change_has_an_approved_record
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"change_lookback_days":14,"changes_read":40,"origins":["direct","manual_deployment"],"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":0,"inputs_complete":true}}}'
+
+  - name: recorded_but_one_unapproved
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"change_lookback_days":14,"changes_read":40,"origins":["direct","manual_deployment"],"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":1,"inputs_complete":true}}}'
+
+  - name: one_day_window_with_nothing_unrecorded
+    expect: FAIL
+    note: Only azure_changes_outside_pipeline_full_window fails here; without it a narrowed window passes as every change recorded.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"change_lookback_days":1,"changes_read":2,"origins":["direct","manual_deployment"],"changes_needing_record":0,"changes_without_record":0,"changes_without_approved_record":0,"inputs_complete":true}}}'
+
+  - name: an_input_was_partial
+    expect: FAIL
+    note: The comparator exits 1 with input_failed when an input is partial or failed, even though it still compares; the completeness check fails the set.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error_code":"input_failed"},"payload":{"summary":{"change_lookback_days":14,"changes_read":40,"origins":["direct","manual_deployment"],"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":0,"inputs_complete":false}}}'

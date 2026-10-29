@@ -99,6 +99,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Azure DevOps and code scanning | [azure_devops_pipelines](#azure_devops_pipelines) | `EVD-AZURE-DEVOPS-PIPELINES` |
 | Azure DevOps and code scanning | [azure_devops_service_connections](#azure_devops_service_connections) | `EVD-AZURE-DEVOPS-SERVICE-CONNECTIONS` |
 | Azure DevOps and code scanning | [azure_devops_work_items](#azure_devops_work_items) | `EVD-AZURE-DEVOPS-WORK-ITEMS` |
+| Azure DevOps and code scanning | [azure_change_work_items](#azure_change_work_items) | `EVD-AZURE-CHANGE-WORK-ITEMS` |
 | Azure DevOps and code scanning | [checkov_bicep](#checkov_bicep) | `EVD-CHECKOV-BICEP` |
 
 ## Identity and access
@@ -5657,6 +5658,55 @@ Summary fields:
   - git_change_dates (linked Git commits and pull requests are kept by id only);
   - items_outside_selection (other types without a configured tag, and finished items not changed in the window);
   - projects_not_visible (projects and items the identity can't see).
+
+
+### azure_change_work_items
+Short Description: Shows whether each direct edit or manual deployment in Azure is recorded by an Azure DevOps work item, and whether that record is approved.
+
+Script: comparators/azure/change_work_items/fetcher.py (a comparator; uses the shared reader comparators/_lib/comparator_inputs.py)
+
+Access: None of its own. It reads `azure_change_provenance` and `azure_devops_work_items` evidence from the same run, which need their own access.
+
+Commands Executed:
+- Read `azure_change_provenance` evidence from the same run — every Azure change with its origin, caller, time and deployment
+- Read `azure_devops_work_items` evidence from the same run — each work item's type, state, people, dates and approval
+
+Output: `azure_change_work_items.json` — each Azure change made outside a pipeline with its status, the work items that record it, and whether they are approved.
+
+Summary fields:
+
+**What was checked?**
+- `changes_read` — Number of changes read from `azure_change_provenance`, of any origin, on the targets the `environments` setting picks
+- `change_lookback_days` — Number of days of change history read: the shortest lookback of the `azure_change_provenance` files read; null if none was read or one doesn't give it
+- `origins` — List of `azure_change_provenance` origins checked, as configured (`direct` and `manual_deployment` by default: direct edits and deployments a person ran)
+- `changes_checked` — Number of changes whose origin is in `origins`
+- `changes_excluded` — Number of checked changes made by an excluded caller (the `excluded_callers` setting), which need no record
+- `changes_excluded_by_caller` — Number of excluded changes for each excluded caller
+- `changes_by_application` — Number of checked changes made by an application or other identity whose caller type is given and isn't a user, and that isn't excluded; a work item can't name one, so these need no record and are reported apart
+- `changes_by_application_by_caller` — Number of application changes for each application id
+- `changes_needing_record` — Number of checked changes that need a record: `changes_checked` minus `changes_excluded` minus `changes_by_application`
+- `changes_needing_record_by_origin` — Number of changes needing a record for each checked origin
+- `record_types` — List of work item types that record a change: the `record_types` setting, or else the types `azure_devops_work_items` selected
+- `record_types_not_selected` — List of record types `azure_devops_work_items` didn't select by type, so it collected them only when they carried one of its tags
+- `record_work_items` — Number of collected work items of a record type that aren't Removed (cancelled)
+- `work_items_cover_changes` — True if the work items cover the whole change window: every work items file's collection window starts at least `hours_after` hours before the earliest change needing a record; false if not
+
+**Is each change recorded by a work item?**
+- `changes_matched` — Number of changes recorded by exactly one work item. A work item records a change when the change's caller, a person, is one of the item's people (the `record_people` setting, matched by login) and the change was made between `hours_before` hours before the item was created (`emergency_hours_before` for an emergency type) and `hours_after` hours after it was finished, or, for an item still open or in a state the fetcher couldn't place, `open_item_days` days after it was created or last changed
+- `changes_ambiguous` — Number of changes recorded by more than one work item, none picked
+- `changes_unmatched` — Number of changes made by a person, or by a caller of unknown type, that no work item records
+- `changes_without_caller` — Number of changes Azure recorded no caller for, with no named change to the same resource within 10 minutes, or in the same deployment, to take one from
+- `changes_recorded` — Number of changes recorded by one or more work items: `changes_matched` plus `changes_ambiguous`
+- `changes_without_record` — Number of changes needing a record that no work item records: `changes_unmatched` plus `changes_without_caller`
+- `changes_without_record_by_origin` — Number of changes without a record for each checked origin
+- `changes_without_record_by_caller` — Number of changes without a record for each caller, with `unknown` for no caller
+- `percent_recorded` — Percentage of changes needing a record that a work item records = `changes_recorded` / `changes_needing_record` × 100 (a whole number, 0–100); 0 when `changes_needing_record` is 0
+
+**Are the records approved?**
+- `changes_recorded_without_approval` — Number of recorded changes whose record isn't approved (moved into an approval state or given an approval comment, as `azure_devops_work_items` reads it, and a record whose approval couldn't be read counts as not approved); a change several items could record counts as approved only if every one is approved
+- `changes_without_approved_record` — Number of changes needing a record with no approved work item: `changes_without_record` plus `changes_recorded_without_approval`
+- `changes_without_approved_record_by_origin` — Number of changes without an approved record for each checked origin
+- `changes_approved_after_change` — Number of changes with an approved record where a record that isn't an emergency type (`emergency_types`) was approved after the change was made; counted, not treated as unapproved
 
 
 ### checkov_bicep

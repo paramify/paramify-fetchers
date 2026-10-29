@@ -1,0 +1,35 @@
+key: azure_changes_outside_pipeline_approved
+name: Azure Changes Outside a Pipeline Each Recorded by an Approved Work Item
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Azure change in the comparator's window that needs a record (made outside a
+  pipeline, by a person, a caller of unknown type or an unrecorded caller, and not by an
+  excluded caller) is recorded by an approved Azure DevOps work item:
+  summary.changes_without_approved_record is 0, which is the changes without a record
+  plus the recorded changes whose record isn't approved. Approved means
+  azure_devops_work_items found a move into one of its approval states or a comment
+  matching its approval pattern, and a record whose approval couldn't be read is not
+  approved; a change several items could record counts as approved only when every one
+  of them is. Changes by applications are counted apart (summary.changes_by_application)
+  and not checked. Substantiates KSI-CMT-LMC: changes are logged with an approved change
+  or emergency-change record. Does NOT prove the approval came before the change: an
+  approval given after it still counts, and summary.changes_approved_after_change counts
+  those, emergency types aside, without failing this. Nor does it prove who approved it,
+  or anything azure_changes_outside_pipeline_recorded does not prove about the match
+  itself.
+
+# Reads one value, so it guards itself: a renamed or null field matches nothing and
+# the MATCH_COUNT rule fails.
+regex: '"changes_without_approved_record":\s*(?<changes_without_approved_record>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # changes_without_approved_record
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-CHANGE-WORK-ITEMS

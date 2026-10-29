@@ -1,0 +1,30 @@
+validator: azure_changes_outside_pipeline_approved
+cases:
+  - name: every_change_has_an_approved_record
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":0}}}'
+
+  - name: approved_after_the_change_still_passes
+    expect: PASS
+    note: An approval given after the change is counted in changes_approved_after_change, not failed.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":0,"changes_approved_after_change":2}}}'
+
+  - name: no_changes_outside_a_pipeline
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":0,"changes_without_record":0,"changes_without_approved_record":0}}}'
+
+  - name: recorded_but_not_approved
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":3,"changes_without_record":0,"changes_recorded_without_approval":1,"changes_without_approved_record":1}}}'
+
+  - name: unrecorded_counts_as_unapproved
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":3,"changes_without_record":2,"changes_without_approved_record":2}}}'
+
+  - name: missing_input_nulls_the_count
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"summary":{"changes_without_approved_record":null,"inputs_complete":false}}}'
+
+  - name: count_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":3,"changes_without_approved_records":1}}}'

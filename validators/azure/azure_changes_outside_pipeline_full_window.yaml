@@ -1,0 +1,35 @@
+key: azure_changes_outside_pipeline_full_window
+name: Azure Change Records Checked Over a Full 14-Day Window
+type: AUTOMATED
+role: integrity
+statement: >
+  The change-record check read Resource Graph's full 14-day change history
+  (summary.change_lookback_days is 14), read at least one change (summary.changes_read
+  is not 0), and checked both direct edits and deployments a person ran
+  (summary.origins includes direct and manual_deployment), so a narrowed window, an
+  empty read, an environment filter that picked no target, or a setting that skips
+  either kind cannot pass as "every change is recorded". A tenant-tuned copy can match
+  change_lookback_days to the run cadence instead, as long as runs leave no gap. Does
+  not prove the comparator runs at least every 14 days, that the change reader sees
+  every resource, that the excluded callers are only services that need no record, or
+  that the work items cover the window (summary.work_items_cover_changes; a gap there
+  reads as unrecorded changes, which fails, rather than as a pass).
+
+# Guards the population azure_changes_outside_pipeline_recorded and _approved count
+# over. Each group, and each origin, is matched inside a lookahead, so keys and list
+# items may appear in any order.
+regex: '^\s*\{(?=[\s\S]*?"change_lookback_days":\s*(?<change_lookback_days>\d+))(?=[\s\S]*?"changes_read":\s*(?<changes_read>\d+))(?=[\s\S]*?"origins":\s*\[[^\]]*?"direct")(?=[\s\S]*?"origins":\s*\[[^\]]*?"manual_deployment")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 14; MATCH_GROUP[2] NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # change_lookback_days
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "14" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # changes_read
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-CHANGE-WORK-ITEMS
