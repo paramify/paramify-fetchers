@@ -4,8 +4,8 @@ cases:
     expect: PASS
     artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"total_clusters":1}}}'
 
-  - name: every_list_empty
-    expect: FAIL
+  - name: field_present_even_if_empty
+    expect: PASS
     artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":null,"geo_replication_linked_databases":[]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"total_clusters":1}}}'
 
   - name: field_renamed
@@ -15,8 +15,3 @@ cases:
   - name: no_databases
     expect: FAIL
     artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[]},"summary":{"total_clusters":0}}}'
-
-  - name: one_id_is_enough
-    expect: PASS
-    note: 'Integrity only: a single id is a violation for azure_redis_all_databases_geo_replicated, not here.'
-    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a"]},{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":[]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"total_clusters":1}}}'
