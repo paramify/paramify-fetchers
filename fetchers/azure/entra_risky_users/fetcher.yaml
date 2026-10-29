@@ -75,10 +75,10 @@ evidence_set:
       - unknown (no risk state returned)
     - open_risk_users — Number of users with open risk: risk state atRisk or confirmedCompromised
     - open_high_risk_users — Number of users with open risk whose risk level is high
-    - oldest_open_risk_days — Days since the risk of the open-risk user updated longest ago was last updated; it counts from riskLastUpdatedDateTime, which moves whenever the risk is updated, not from when the risk first appeared; null when no user has open risk
+    - oldest_open_risk_days — Days since the least recently updated open risk was last updated (riskLastUpdatedDateTime). That time moves whenever the risk is updated, so this is not how long the risk has been open; null when no user has open risk
 
     Do privileged users have open risk?
     - privileged_principals — Number of users, groups and apps that hold a privileged directory role directly; privileged means one of the tenant-wide admin roles in the shared list in _shared/entra_graph.py (Global Administrator, Privileged Role Administrator, Security Administrator and others), matched by name, and Global Administrator by template id too; PIM-eligible roles aren't read; null when the roles couldn't be read
     - privileged_role_groups — Number of role-assignable groups that hold a privileged directory role; their members hold the role too but aren't read, as that would need GroupMember.Read.All; null when the roles couldn't be read
-    - privileged_open_risk_users — Number of users with open risk who hold a privileged directory role directly; members of privileged_role_groups aren't counted, so a 0 here shows no privileged user has open risk only when privileged_role_groups is also 0; null when the roles couldn't be read
+    - privileged_open_risk_users — Number of users with open risk who hold a privileged directory role directly; members of privileged_role_groups aren't counted, so a 0 here shows no privileged user has open risk only when privileged_role_groups is also 0; users eligible for a privileged role through PIM aren't counted either; null when the roles couldn't be read
     - privileged_open_risk_users_enabled — Number of users counted in privileged_open_risk_users whose account is enabled, so they can still sign in; an account whose state couldn't be read counts as enabled; null when the roles couldn't be read
