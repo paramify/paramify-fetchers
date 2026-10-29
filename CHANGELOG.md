@@ -13,20 +13,23 @@ schemas and the `paramify` CLI — not the internal code.
 ### Added
 
 - **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
-  matches each direct Azure change in `azure_change_provenance` (an edit made
-  outside any deployment or pipeline) to the `azure_devops_work_items` records
-  that name its caller and were open when it was made. Each change is
-  `matched`, `ambiguous`, `unmatched`, `excluded` (a caller in
-  `CHANGE_RECORD_EXCLUDED_CALLERS`), `not_a_person` (an application), or
-  `no_caller`. A callerless row takes its caller from the nearest named change
-  to the same resource within 10 minutes, as `azure_change_provenance` takes
-  its origin. The checked origins, record types, which people on an item count,
-  and the hours before creation and after finishing that an item covers are
-  settings. The summary counts each status, the changes without a record and
-  without an approved record, the changes read and the shortest change window
-  read (`change_lookback_days`), so a narrow window can't pass as no changes,
-  and `work_items_cover_changes`, false when the work items window starts too
-  late for the earliest change.
+  matches each Azure change made outside a pipeline in `azure_change_provenance`
+  (by default, direct edits and ARM deployments a person ran) to the
+  `azure_devops_work_items` records that name its caller and were open when it
+  was made. Each change is `matched`, `ambiguous`, `unmatched`, `excluded` (a
+  caller in `CHANGE_RECORD_EXCLUDED_CALLERS`), `application` (reported apart,
+  needing no record), or `no_caller`. A callerless row takes its caller from the
+  nearest named change to the same resource within 10 minutes, as
+  `azure_change_provenance` takes its origin, or else from its deployment. The
+  checked origins, record types, which people on an item count (by default its
+  assignee, creator or closer), and the hours before creation and after
+  finishing that an item covers are settings; an emergency type (default
+  `Hotfix`) may be filed up to 72 hours after the change. The summary counts
+  each status, overall and by origin, the changes without a record, recorded
+  without approval and without an approved record, the changes read and the
+  shortest change window read (`change_lookback_days`), so a narrow window
+  can't pass as no changes, and `work_items_cover_changes`, false when the work
+  items window starts too late for the earliest change.
 - **`azure_devops_work_items`** (`EVD-AZURE-DEVOPS-WORK-ITEMS`): Azure DevOps
   work items that record changes and security work. The types that record
   changes (`AZURE_DEVOPS_WORK_ITEM_TYPES`, default `Change Request`) and the

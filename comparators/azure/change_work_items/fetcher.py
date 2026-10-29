@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-KSI-CMT-RMV / KSI-CMT-LMC: direct Azure changes and the work items that record them
+KSI-CMT-RMV / KSI-CMT-LMC: Azure changes made outside a pipeline and the work items that record them
 
 Reads azure_change_provenance and azure_devops_work_items from the same run and
-matches each direct change (an edit made outside any deployment or pipeline) to
-the record work items that name its caller and were open when it was made. A
-change is excluded when its caller is a configured excluded caller, matched to
-one record, ambiguous between several, unmatched, not_a_person when an
-application made it, or no_caller when Azure recorded no caller for it.
+matches each direct edit, and each deployment a person ran by hand, to the record
+work items that name its caller and were open when it was made. A change is
+excluded when its caller is a configured excluded caller, matched to one record,
+ambiguous between several, unmatched, application when an application made it,
+or no_caller when Azure recorded no caller for it.
 """
 
 import os
@@ -25,20 +25,23 @@ CHANGES = "azure_change_provenance"
 WORK_ITEMS = "azure_devops_work_items"
 OUTPUT = "azure_change_work_items.json"
 
-STATUSES = ("matched", "ambiguous", "unmatched", "excluded", "not_a_person", "no_caller")
+STATUSES = ("matched", "ambiguous", "unmatched", "excluded", "application", "no_caller")
 RECORDED = ("matched", "ambiguous")
+WITHOUT_RECORD = ("unmatched", "no_caller")
 PEOPLE = ("assigned_to", "created_by", "changed_by", "resolved_by", "closed_by", "state_history", "approver")
-DEFAULT_PEOPLE = "assigned_to,created_by,resolved_by,closed_by,state_history"
+DEFAULT_PEOPLE = "assigned_to,created_by,closed_by"
 NO_CALLER = {"system", "unspecified"}
 # change_provenance gives a callerless row the origin of the nearest named change to the same resource this close.
 SAME_RESOURCE = timedelta(minutes=10)
 
 SUMMARY_KEYS = (
     "changes_read", "change_lookback_days", "origins",
-    "changes_checked", "changes_excluded", "changes_needing_record",
-    "changes_matched", "changes_ambiguous", "changes_unmatched", "changes_not_by_a_person", "changes_without_caller",
-    "changes_recorded", "changes_without_record", "changes_without_approved_record", "percent_recorded",
-    "changes_without_record_by_caller", "changes_excluded_by_caller",
+    "changes_checked", "changes_excluded", "changes_by_application", "changes_needing_record",
+    "changes_matched", "changes_ambiguous", "changes_unmatched", "changes_without_caller",
+    "changes_recorded", "changes_without_record", "changes_recorded_without_approval",
+    "changes_without_approved_record", "percent_recorded",
+    "changes_needing_record_by_origin", "changes_without_record_by_origin", "changes_without_approved_record_by_origin",
+    "changes_without_record_by_caller", "changes_by_application_by_caller", "changes_excluded_by_caller",
     "record_types", "record_types_not_selected", "record_work_items", "work_items_cover_changes",
 )
 
@@ -60,12 +63,14 @@ def settings():
     if unknown or not people:
         raise ValueError(f"CHANGE_RECORD_PEOPLE names {unknown or 'nothing'}; use any of {', '.join(PEOPLE)}")
     return {
-        "origins": {o.lower() for o in csv_env("CHANGE_RECORD_ORIGINS", "direct")},
+        "origins": {o.lower() for o in csv_env("CHANGE_RECORD_ORIGINS", "direct,manual_deployment")},
         "excluded": {c.lower() for c in csv_env("CHANGE_RECORD_EXCLUDED_CALLERS")},
         "environments": {e.lower() for e in csv_env("CHANGE_RECORD_ENVIRONMENTS")},
         "types": [t.lower() for t in csv_env("CHANGE_RECORD_TYPES")],
+        "emergency_types": {t.lower() for t in csv_env("CHANGE_RECORD_EMERGENCY_TYPES", "Hotfix")},
         "people": people,
         "before": hours_env("CHANGE_RECORD_HOURS_BEFORE", 24),
+        "emergency_before": hours_env("CHANGE_RECORD_EMERGENCY_HOURS_BEFORE", 72),
         "after": hours_env("CHANGE_RECORD_HOURS_AFTER", 24),
     }
 
@@ -87,18 +92,26 @@ def resource(change):
     return str(change.get("target_resource_id") or "").lower()
 
 
-def caller_of(change, by_resource):
-    """(caller, caller type, where the caller came from), taking a callerless row's caller from the same resource."""
+def nearest(change, candidates, within=None):
+    at = when(change.get("timestamp"))
+    near = [(abs(when(c["timestamp"]) - at), str(c.get("change_id")), c) for c in candidates
+            if at and when(c.get("timestamp"))]
+    near = [n for n in near if within is None or n[0] <= within]
+    return min(near, key=lambda n: n[:2])[2] if near else None
+
+
+def caller_of(change, by_resource, by_deployment):
+    """(caller, caller type, where it came from). A callerless row takes the caller of the nearest named change to
+    the same resource, as change_provenance takes its origin, or else of the deployment it was attributed to."""
     if named(change):
         return change["changed_by"], change.get("changed_by_type"), "changed_by"
-    at = when(change.get("timestamp"))
-    near = [(abs(when(c["timestamp"]) - at), c) for c in by_resource.get(resource(change), [])
-            if at and when(c.get("timestamp"))]
-    near = [(gap, c) for gap, c in near if gap <= SAME_RESOURCE]
-    if not near:
+    partner = nearest(change, by_resource.get(resource(change), []), SAME_RESOURCE)
+    source = "same_resource"
+    if partner is None and change.get("deployment_id"):
+        partner, source = nearest(change, by_deployment.get(change["deployment_id"], [])), "deployment"
+    if partner is None:
         return None, None, None
-    partner = min(near, key=lambda pair: (pair[0], str(pair[1].get("change_id"))))[1]
-    return partner["changed_by"], partner.get("changed_by_type"), "same_resource"
+    return partner["changed_by"], partner.get("changed_by_type"), source
 
 
 def logins(item, fields):
@@ -136,16 +149,19 @@ def records(files, cfg):
         cover_from.append(start + cfg["after"] if start else None)
         org = (f.target or {}).get("organization_url") or (f.metadata.get("target") or {}).get("organization_url")
         for item in results.get("work_items") or []:
-            if str(item.get("type")).lower() not in wanted or item.get("state_category") == "Removed":
+            kind = str(item.get("type")).lower()
+            if kind not in wanted or item.get("state_category") == "Removed":
                 continue
             created = when(item.get("created_date"))
             if created is None:
                 continue
+            # An emergency record may be filed after the change it records.
+            before = max(cfg["before"], cfg["emergency_before"]) if kind in cfg["emergency_types"] else cfg["before"]
             end = None if item.get("open") is not False else finished_at(item)
             approval = item.get("approval")
             out.append({
                 "logins": logins(item, cfg["people"]),
-                "from": created - cfg["before"],
+                "from": created - before,
                 "to": end + cfg["after"] if end else None,
                 "ref": {
                     "organization": org, "project": item.get("project"), "id": item.get("id"),
@@ -164,17 +180,19 @@ def check_with(cfg):
                  in cfg["environments"]]
         changes = [c for f in files for c in (f.payload.get("results") or {}).get("changes") or []]
         lookbacks = [(f.payload.get("results") or {}).get("lookback_days") for f in files]
-        by_resource = {}
+        by_resource, by_deployment = {}, {}
         for c in changes:
             if named(c):
                 by_resource.setdefault(resource(c), []).append(c)
+                if c.get("deployment_id"):
+                    by_deployment.setdefault(c["deployment_id"], []).append(c)
         items, types, unselected, cover_from = records(inputs[WORK_ITEMS].files, cfg)
 
         results = []
         for c in changes:
             if str(c.get("origin") or "").lower() not in cfg["origins"]:
                 continue
-            caller, caller_type, source = caller_of(c, by_resource)
+            caller, caller_type, source = caller_of(c, by_resource, by_deployment)
             at = when(c.get("timestamp"))
             found = []
             if caller is None:
@@ -182,7 +200,7 @@ def check_with(cfg):
             elif caller.lower() in cfg["excluded"]:
                 status = "excluded"
             elif caller_type != "User":
-                status = "not_a_person"
+                status = "application"
             else:
                 found = [i["ref"] for i in items if caller.lower() in i["logins"] and at and i["from"] <= at
                          and (i["to"] is None or at <= i["to"])]
@@ -190,7 +208,7 @@ def check_with(cfg):
             results.append({
                 "change_id": c.get("change_id"), "timestamp": c.get("timestamp"),
                 "target_resource_id": c.get("target_resource_id"), "operation": c.get("operation"),
-                "client_type": c.get("client_type"), "origin": c.get("origin"),
+                "client_type": c.get("client_type"), "origin": c.get("origin"), "deployment_id": c.get("deployment_id"),
                 "caller": caller, "caller_type": caller_type, "caller_from": source,
                 "status": status, "work_items": found,
                 # Several candidates count as approved only when every one of them is.
@@ -204,32 +222,52 @@ def check_with(cfg):
             else None,
             "origins": sorted(cfg["origins"]),
         }
-        return results, {**read, **summarize(results, items, types, unselected, cover_from)}
+        return results, {**read, **summarize(results, items, types, unselected, cover_from, cfg["origins"])}
     return check
 
 
-def summarize(results, items, types, unselected, cover_from):
+def needs_record(r):
+    return r["status"] not in ("excluded", "application")
+
+
+def approved_record(r):
+    return r["status"] in RECORDED and bool(r["approved"])
+
+
+def summarize(results, items, types, unselected, cover_from, origins):
     count = {s: sum(1 for r in results if r["status"] == s) for s in STATUSES}
-    needing = len(results) - count["excluded"]
+    needing = [r for r in results if needs_record(r)]
     recorded = count["matched"] + count["ambiguous"]
-    approved = sum(1 for r in results if r["status"] in RECORDED and r["approved"])
-    earliest = min((when(r["timestamp"]) for r in results if r["status"] != "excluded" and when(r["timestamp"])),
-                   default=None)
+    approved = sum(1 for r in needing if approved_record(r))
+    earliest = min((when(r["timestamp"]) for r in needing if when(r["timestamp"])), default=None)
+
+    def by_origin(keep):
+        counts = dict.fromkeys(sorted(origins), 0)
+        for r in needing:
+            if keep(r):
+                key = str(r["origin"]).lower()
+                counts[key] = counts.get(key, 0) + 1
+        return counts
+
     return {
         "changes_checked": len(results),
         "changes_excluded": count["excluded"],
-        "changes_needing_record": needing,
+        "changes_by_application": count["application"],
+        "changes_needing_record": len(needing),
         "changes_matched": count["matched"],
         "changes_ambiguous": count["ambiguous"],
         "changes_unmatched": count["unmatched"],
-        "changes_not_by_a_person": count["not_a_person"],
         "changes_without_caller": count["no_caller"],
         "changes_recorded": recorded,
-        "changes_without_record": needing - recorded,
-        "changes_without_approved_record": needing - approved,
-        "percent_recorded": recorded * 100 // needing if needing else 0,
-        "changes_without_record_by_caller": by_caller(r for r in results
-                                                      if r["status"] not in RECORDED + ("excluded",)),
+        "changes_without_record": count["unmatched"] + count["no_caller"],
+        "changes_recorded_without_approval": recorded - approved,
+        "changes_without_approved_record": len(needing) - approved,
+        "percent_recorded": recorded * 100 // len(needing) if needing else 0,
+        "changes_needing_record_by_origin": by_origin(lambda r: True),
+        "changes_without_record_by_origin": by_origin(lambda r: r["status"] in WITHOUT_RECORD),
+        "changes_without_approved_record_by_origin": by_origin(lambda r: not approved_record(r)),
+        "changes_without_record_by_caller": by_caller(r for r in results if r["status"] in WITHOUT_RECORD),
+        "changes_by_application_by_caller": by_caller(r for r in results if r["status"] == "application"),
         "changes_excluded_by_caller": by_caller(r for r in results if r["status"] == "excluded"),
         "record_types": types,
         # Selected by tag at most, so the work items fetcher may have left some out.

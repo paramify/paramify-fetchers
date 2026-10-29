@@ -31,9 +31,10 @@ SITE = f"{RG}/Microsoft.Web/sites/app-1"
 WINDOW = {"start": "2026-08-01T00:00:00Z", "end": "2026-10-28T00:00:00Z", "lookback_days": 90}
 
 
-def change(cid, at, by=ALICE, by_type="User", origin="direct", target=SITE, client="Azure Portal"):
+def change(cid, at, by=ALICE, by_type="User", origin="direct", target=SITE, client="Azure Portal", deployment=None):
     return {"change_id": cid, "timestamp": at, "changed_by": by, "changed_by_type": by_type, "origin": origin,
-            "target_resource_id": target, "operation": "Microsoft.Web/sites/write", "client_type": client}
+            "target_resource_id": target, "operation": "Microsoft.Web/sites/write", "client_type": client,
+            "deployment_id": deployment}
 
 
 def who(login):
@@ -94,8 +95,8 @@ def compare(tmp_path, monkeypatch, changes, items, env=None, **kw):
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
     for env in ("CHANGE_RECORD_ORIGINS", "CHANGE_RECORD_EXCLUDED_CALLERS", "CHANGE_RECORD_ENVIRONMENTS",
-                "CHANGE_RECORD_TYPES", "CHANGE_RECORD_PEOPLE", "CHANGE_RECORD_HOURS_BEFORE",
-                "CHANGE_RECORD_HOURS_AFTER"):
+                "CHANGE_RECORD_TYPES", "CHANGE_RECORD_EMERGENCY_TYPES", "CHANGE_RECORD_PEOPLE",
+                "CHANGE_RECORD_HOURS_BEFORE", "CHANGE_RECORD_EMERGENCY_HOURS_BEFORE", "CHANGE_RECORD_HOURS_AFTER"):
         monkeypatch.delenv(env, raising=False)
 
 
@@ -105,7 +106,7 @@ def test_every_status_and_the_counts_a_validator_reads(tmp_path, monkeypatch):
         change("ambiguous", "2026-10-12T12:00:00Z", by=BOB),
         change("unmatched", "2026-10-20T12:00:00Z"),
         change("excluded", "2026-10-02T12:00:00Z", by=SERVICE, by_type="Application", target=NIC),
-        change("not_a_person", "2026-10-02T12:00:00Z", by=APP, by_type="Application", client=".NET SDK"),
+        change("application", "2026-10-02T12:00:00Z", by=APP, by_type="Application", client=".NET SDK"),
         change("no_caller", "2026-10-02T12:00:00Z", by="Unspecified", by_type="Unspecified",
                target=f"{RG}/Microsoft.Web/serverfarms/plan-1"),
         change("deployment", "2026-10-02T12:00:00Z", origin="deployment"),
@@ -126,12 +127,18 @@ def test_every_status_and_the_counts_a_validator_reads(tmp_path, monkeypatch):
     assert [w["id"] for w in results["ambiguous"]["work_items"]] == [2, 3]
     assert results["ambiguous"]["approved"] is False  # one of the two candidates was never approved
     assert results["unmatched"]["work_items"] == [] and results["unmatched"]["approved"] is None
+    assert results["application"]["caller"] == APP
     assert summary == {
-        "changes_read": 7, "change_lookback_days": 14, "origins": ["direct"], "changes_checked": 6, "changes_excluded": 1, "changes_needing_record": 5,
-        "changes_matched": 1, "changes_ambiguous": 1, "changes_unmatched": 1, "changes_not_by_a_person": 1,
-        "changes_without_caller": 1, "changes_recorded": 2, "changes_without_record": 3,
-        "changes_without_approved_record": 4, "percent_recorded": 40,
-        "changes_without_record_by_caller": {APP: 1, ALICE: 1, "unknown": 1},
+        "changes_read": 7, "change_lookback_days": 14, "origins": ["direct", "manual_deployment"],
+        "changes_checked": 6, "changes_excluded": 1, "changes_by_application": 1, "changes_needing_record": 4,
+        "changes_matched": 1, "changes_ambiguous": 1, "changes_unmatched": 1, "changes_without_caller": 1,
+        "changes_recorded": 2, "changes_without_record": 2, "changes_recorded_without_approval": 1,
+        "changes_without_approved_record": 3, "percent_recorded": 50,
+        "changes_needing_record_by_origin": {"direct": 4, "manual_deployment": 0},
+        "changes_without_record_by_origin": {"direct": 2, "manual_deployment": 0},
+        "changes_without_approved_record_by_origin": {"direct": 3, "manual_deployment": 0},
+        "changes_without_record_by_caller": {ALICE: 1, "unknown": 1},
+        "changes_by_application_by_caller": {APP: 1},
         "changes_excluded_by_caller": {SERVICE: 1},
         "record_types": ["hotfix", "task"], "record_types_not_selected": [], "record_work_items": 3,
         "work_items_cover_changes": True,
@@ -156,6 +163,24 @@ def test_a_callerless_row_takes_its_caller_from_the_same_resource(tmp_path, monk
     assert summary["changes_excluded_by_caller"] == {SERVICE: 2}
 
 
+def test_a_callerless_deployment_row_takes_its_caller_from_the_deployment(tmp_path, monkeypatch):
+    plan = f"{RG}/Microsoft.Web/serverfarms/plan-1"
+    changes = [
+        change("site", "2026-10-02T12:00:00Z", origin="manual_deployment", deployment="d1"),
+        # No named change to the plan itself: the deployment that made both names the person.
+        change("plan", "2026-10-02T12:01:00Z", by="System", by_type="System", target=plan,
+               origin="manual_deployment", deployment="d1"),
+        change("orphan", "2026-10-02T12:01:00Z", by="System", by_type="System", target=plan,
+               origin="manual_deployment", deployment="d2"),
+    ]
+    results, summary = compare(tmp_path, monkeypatch, changes, [item(1)])
+    assert (results["plan"]["status"], results["plan"]["caller"], results["plan"]["caller_from"]) == \
+        ("matched", ALICE, "deployment")
+    assert results["orphan"]["status"] == "no_caller"
+    assert summary["changes_needing_record_by_origin"] == {"direct": 0, "manual_deployment": 3}
+    assert summary["changes_without_record_by_origin"] == {"direct": 0, "manual_deployment": 1}
+
+
 @pytest.mark.parametrize(("at", "status"), [
     ("2026-09-30T09:00:00Z", "matched"),     # 24 hours before the item was created
     ("2026-09-30T08:59:59Z", "unmatched"),
@@ -165,6 +190,24 @@ def test_a_callerless_row_takes_its_caller_from_the_same_resource(tmp_path, monk
 def test_the_window_runs_from_hours_before_creation_to_hours_after_finishing(tmp_path, monkeypatch, at, status):
     results, _ = compare(tmp_path, monkeypatch, [change("c", at)], [item(1)])
     assert results["c"]["status"] == status
+
+
+@pytest.mark.parametrize(("type_", "env", "status"), [
+    ("Hotfix", {}, "matched"),                                                  # filed 70 hours after the change
+    ("Task", {}, "unmatched"),                                                  # only 24 hours for other types
+    ("Hotfix", {"CHANGE_RECORD_EMERGENCY_TYPES": "none"}, "unmatched"),
+    ("Task", {"CHANGE_RECORD_EMERGENCY_TYPES": "task"}, "matched"),
+    ("Hotfix", {"CHANGE_RECORD_EMERGENCY_HOURS_BEFORE": "48"}, "unmatched"),
+])
+def test_an_emergency_record_may_be_filed_after_the_change(tmp_path, monkeypatch, type_, env, status):
+    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-09-28T11:00:00Z")], [item(1, type_=type_)],
+                         env=env)
+    assert results["c"]["status"] == status
+
+
+def test_an_emergency_record_filed_more_than_72_hours_later_does_not_count(tmp_path, monkeypatch):
+    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-09-28T08:59:59Z")], [item(1, type_="Hotfix")])
+    assert results["c"]["status"] == "unmatched"
 
 
 def test_the_window_hours_come_from_config(tmp_path, monkeypatch):
@@ -196,17 +239,26 @@ def test_removed_items_and_other_types_never_record_a_change(tmp_path, monkeypat
     assert results["c"]["status"] == "unmatched" and summary["record_work_items"] == 1
 
 
-@pytest.mark.parametrize(("people", "status"), [
-    (None, "matched"),                     # the default includes state_history
-    ("assigned_to", "unmatched"),
-    ("approver", "matched"),
-    ("assigned_to,changed_by", "unmatched"),
+@pytest.mark.parametrize(("field", "people", "status"), [
+    ("assigned_to", None, "matched"),       # the default: assignee, creator or closer
+    ("created_by", None, "matched"),
+    ("closed_by", None, "matched"),
+    ("history", None, "unmatched"),         # someone who only moved it between states
+    ("approver", None, "unmatched"),
+    ("history", "state_history", "matched"),
+    ("approver", "approver", "matched"),
+    ("closed_by", "assigned_to,changed_by", "unmatched"),
 ])
-def test_which_people_count_comes_from_config(tmp_path, monkeypatch, people, status):
-    history = [{"at": "2026-10-01T09:00:00Z", "to": "Done", "by": who(ALICE)}]
+def test_which_people_count_comes_from_config(tmp_path, monkeypatch, field, people, status):
+    record = item(1, assigned=BOB)  # the caller is ALICE, named only in `field`
+    if field == "history":
+        record["state_history"] = [{"at": "2026-10-01T09:00:00Z", "to": "Done", "by": who(ALICE)}]
+    elif field == "approver":
+        record["approval"] = approved(ALICE)
+    else:
+        record[field] = who(ALICE)
     env = {"CHANGE_RECORD_PEOPLE": people} if people else {}
-    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")],
-                         [item(1, assigned=BOB, history=history, approval=approved(ALICE))], env=env)
+    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], [record], env=env)
     assert results["c"]["status"] == status
 
 
@@ -227,12 +279,16 @@ def test_record_types_default_to_the_fetchers_selection_and_config_overrides_the
     assert summary["record_types"] == ["hotfix"] and summary["record_types_not_selected"] == ["hotfix"]
 
 
-def test_origins_come_from_config(tmp_path, monkeypatch):
-    changes = [change("direct", "2026-10-02T12:00:00Z"), change("manual", "2026-10-02T12:00:00Z",
-                                                                origin="manual_deployment")]
-    results, summary = compare(tmp_path, monkeypatch, changes, [item(1)],
-                               env={"CHANGE_RECORD_ORIGINS": "direct,manual_deployment"})
+def test_direct_edits_and_manual_deployments_are_checked_by_default_and_origins_come_from_config(
+        tmp_path, monkeypatch):
+    changes = [change("direct", "2026-10-02T12:00:00Z"),
+               change("manual", "2026-10-02T12:00:00Z", origin="manual_deployment"),
+               change("pipeline", "2026-10-02T12:00:00Z", origin="deployment")]
+    results, summary = compare(tmp_path, monkeypatch, changes, [item(1)])
     assert set(results) == {"direct", "manual"} and summary["changes_checked"] == 2
+
+    results, summary = compare(tmp_path, monkeypatch, changes, [item(1)], env={"CHANGE_RECORD_ORIGINS": "direct"})
+    assert set(results) == {"direct"} and summary["changes_needing_record_by_origin"] == {"direct": 1}
 
 
 def test_environments_pick_which_change_targets_are_checked(tmp_path, monkeypatch):
