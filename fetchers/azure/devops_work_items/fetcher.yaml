@@ -1,0 +1,157 @@
+name: azure_devops_work_items
+version: 0.1.0
+description: >-
+  Shows Azure DevOps change and security work items with their state, owner,
+  planned date and approval, the changesets, commits and pull requests linked to
+  them, and which security work is open, overdue or unassigned.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 3600
+
+output:
+  type: json
+  path: azure_devops_work_items.json
+  aggregation: per_target
+
+target_schema:
+  organization_url:
+    type: string
+    required: true
+    env: AZURE_DEVOPS_ORG_URL
+    description: >
+      The Azure DevOps organization, as https://dev.azure.com/<org>,
+      https://<org>.visualstudio.com or just <org>. One target per organization.
+  projects:
+    type: string
+    required: false
+    env: AZURE_DEVOPS_PROJECTS
+    description: >
+      Comma-separated project names or ids to limit collection to. Optional:
+      omit to collect every project the identity can read. A named project that is
+      missing fails the run.
+
+config_schema:
+  work_item_types:
+    type: string
+    required: false
+    default: Change Request
+    env: AZURE_DEVOPS_WORK_ITEM_TYPES
+    description: >
+      Comma-separated work item types that record changes, such as
+      "Change Request" or "Change Request,Release". Their approval and linked changes are
+      checked. "none" selects no type, leaving only tagged items.
+  work_item_tags:
+    type: string
+    required: false
+    default: Security
+    env: AZURE_DEVOPS_WORK_ITEM_TAGS
+    description: >
+      Comma-separated tags that mark security work, of any type. Their owner,
+      priority and planned date are checked. "none" selects no tag.
+  lookback_days:
+    type: integer
+    required: false
+    default: 90
+    env: AZURE_DEVOPS_LOOKBACK_DAYS
+    description: >
+      Selected items changed in this many days are collected, along with every
+      selected item still open however old.
+  approval_states:
+    type: string
+    required: false
+    default: Approved
+    env: AZURE_DEVOPS_APPROVAL_STATES
+    description: >
+      Comma-separated states whose entry counts as approval, from each item's
+      state history. Only these count: an item that reached a state such as
+      "Awaiting Approval" but never one of these reads as unapproved. "none"
+      leaves approval to comments alone.
+  approval_pattern:
+    type: string
+    required: false
+    default: ^\W*approved\b
+    env: AZURE_DEVOPS_APPROVAL_PATTERN
+    description: >
+      A regular expression, matched without regard to case against each line of
+      a comment's text; a matching comment counts as approval by its author.
+      The default matches a comment that starts with "Approved". The text
+      itself is never written.
+
+secrets:
+  - name: pat
+    env: AZURE_DEVOPS_PAT
+    per_target: true
+    required: false
+    description: >
+      Read-only personal access token for the organization with Work Items
+      (Read), Code (Read) for linked TFVC changesets, and Project and Team
+      (Read). Optional: without it the fetcher signs in as the ambient Entra
+      identity (az login, managed or workload identity, or the category's
+      service principal added to the organization), which needs to be a reader
+      in each project. Collection covers what the signed-in identity can see,
+      recorded as metadata.collecting_identity.
+
+ksis:
+  - KSI-CMT-LMC      # change records: approval, planned date, status and the changes linked to them
+  - KSI-PIY-RES      # security backlog: owner, priority, due date and status
+
+evidence_set:
+  reference_id: EVD-AZURE-DEVOPS-WORK-ITEMS
+  name: Azure DevOps Work Items
+  instructions: |
+    Script: azure/devops_work_items/fetcher.py
+
+    Access: A personal access token for the organization with Work Items, Code, and Project and Team (all Read), or an Entra identity that is a reader in each project.
+
+    Commands Executed:
+    - GET _apis/connectionData — identifies the signed-in user
+    - GET _apis/projects — lists projects
+    - GET {project}/_apis/wit/workitemtypes (per project) — the project's work item types, their states and which states are finished
+    - POST {project}/_apis/wit/wiql (per project) — a read-only query for the selected types or tags, changed in the window or still open
+    - POST {project}/_apis/wit/workitemsbatch (200 at a time) — each item's fields and links
+    - GET {project}/_apis/wit/workItems/{id}/updates (per item) — its state history, to see when and by whom it was approved
+    - GET {project}/_apis/wit/workItems/{id}/comments (per item) — who commented when, and whether a comment matches the approval pattern; the text is not kept
+    - GET _apis/tfvc/changesets/{id} (per linked changeset) — when the change was made and by whom
+
+    Output: azure_devops_work_items_<organization>.json — every selected work item with its title, type, state and reason, priority, severity, tags, area and iteration paths, who created, last changed, is assigned, resolved and closed it, its created, changed, activated, resolved, closed and planned dates, state history, approval (state or comment, with who and when), and its linked changesets, commits, pull requests and builds; plus each project's states for the types collected, and the linked changesets' dates and authors.
+
+    Summary fields:
+
+    What was collected?
+    - lookback_days — Number of days back that changed items are collected; open items are collected however old
+    - work_item_types — List of work item types that record changes, as configured
+    - work_item_tags — List of tags that mark security work, as configured
+    - projects_collected — Number of projects whose work items were read
+    - work_item_types_missing — List of configured types that no project defines; null if a project's items couldn't be listed
+    - work_items_total — Number of work items collected; null if a project's items couldn't be listed
+    - work_items_by_type — Number of work items of each type; null if a project's items couldn't be listed
+    - work_items_by_state_category — Number of work items in each state category (Proposed, InProgress, Resolved, Completed, Removed); null if a project's items couldn't be listed
+    - work_item_states_undefined — List of item states, as type: state, that the item's type no longer defines (as after a process change); an item in such a state has an unknown state category and counts as neither open nor finished; null if a project's items couldn't be listed
+    - work_items_open — Number of work items in a state whose category isn't Completed or Removed; null if a project's items couldn't be listed
+    - approval_history_collected — True if every item's state history and comments were read; false if not
+
+    Are changes approved and linked to what they changed?
+    - change_items — Number of items of a configured change type; null if a project's items couldn't be listed
+    - change_items_finished — Number of change items in a Completed state; a Removed (cancelled) item isn't finished; null if a project's items couldn't be listed
+    - change_items_approved — Number of change items approved: moved into one of the configured approval states (a state such as Awaiting Approval doesn't count), or given a comment matching the approval pattern; null if a project's items or a change item's history or comments couldn't be read
+    - finished_change_items_without_approval — List of finished change items (by id) never approved; null if a project's items or a change item's history or comments couldn't be read
+    - change_items_with_linked_changes — Number of change items linked to a TFVC changeset, Git commit or pull request; null if a project's items couldn't be listed
+    - finished_change_items_without_linked_change — List of finished change items (by id) linked to no changeset, commit or pull request; null if a project's items couldn't be listed
+    - change_items_changed_before_approval — List of change items (by id) with a linked changeset made before the item was approved; null if a project's items, a change item's history or comments, or a linked changeset couldn't be read
+    - change_items_approved_by_change_author — List of change items (by id) approved by the person who made or checked in a linked changeset; null if a project's items, a change item's history or comments, or a linked changeset couldn't be read
+
+    Is security work owned and on time?
+    - tagged_items_open — Number of open items with a configured tag; null if a project's items couldn't be listed
+    - tagged_items_open_by_priority — Number of open tagged items at each priority (1 highest), with unset for none; null if a project's items couldn't be listed
+    - tagged_items_overdue — List of open tagged items (by id) whose planned date (due, target or finish date, the first one set) has passed; null if a project's items couldn't be listed
+    - tagged_items_overdue_high_priority — List of overdue tagged items (by id) at priority 1 or 2, or severity 1 or 2; null if a project's items couldn't be listed
+    - tagged_items_open_unassigned — List of open tagged items (by id) assigned to no one; null if a project's items couldn't be listed
+    - tagged_items_open_without_planned_date — Number of open tagged items with no due, target or finish date; null if a project's items couldn't be listed
+
+    What isn't collected?
+    - not_collected — What the fetcher deliberately doesn't collect, by area: descriptions, comment text and attachments; the dates of linked Git commits and pull requests; items outside the selection; and projects the identity can't see
