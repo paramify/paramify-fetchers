@@ -3,12 +3,14 @@ name: Azure Managed Redis Redundancy Fields Present
 type: AUTOMATED
 role: integrity
 statement: >
-  At least one Azure Managed Redis cluster in the evidence carries both high_availability and
-  redundancy_mode, so the zero-violation count in azure_redis_all_clusters_zone_redundant reflects
-  posture rather than renamed or missing fields. Integrity partner supporting Coverage row 40
-  (KSI-CNA-OFA). Fails on a subscription with no Managed Redis clusters.
+  At least one Azure Managed Redis cluster in the evidence carries non-empty values for both
+  high_availability and redundancy_mode, so the zero-violation count in
+  azure_redis_all_clusters_zone_redundant reflects posture rather than renamed or missing fields.
+  Integrity partner supporting Coverage row 40 (KSI-CNA-OFA). Asserts nothing about which values
+  they hold. Fails on a subscription with no Managed Redis clusters.
 
-regex: '"high_availability":[\s\S]*?"redundancy_mode":'
+# Both values must sit in the same cluster: the scan may not cross the next cluster's high_availability.
+regex: '"high_availability":\s*"[^"]+"(?:(?!"high_availability")[\s\S])*?"redundancy_mode":\s*"[^"]+"'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

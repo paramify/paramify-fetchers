@@ -12,3 +12,11 @@ cases:
     expect: PASS
     note: 'Form B cannot guard itself; its integrity partner fails here, as the set-level case shows.'
     artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"clientProtocol":"Plaintext","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"total_clusters":1}}}'
+
+  - name: one_protocol_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]},{"client_protocol":null,"geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"total_clusters":1}}}'
+
+  - name: one_protocol_other_value
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]},{"client_protocol":"Unknown","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"total_clusters":1}}}'

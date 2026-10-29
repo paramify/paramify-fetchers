@@ -15,3 +15,11 @@ cases:
   - name: no_vpn_gateways
     expect: FAIL
     artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"gateway_type":"ExpressRoute","sku_name":"Standard"}]},"summary":{"vpn_gateways":1}}}'
+
+  - name: sku_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"active_active":true,"gateway_type":"Vpn","sku_name":null}]},"summary":{"vpn_gateways":1}}}'
+
+  - name: sku_empty
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"active_active":true,"gateway_type":"Vpn","sku_name":""}]},"summary":{"vpn_gateways":1}}}'

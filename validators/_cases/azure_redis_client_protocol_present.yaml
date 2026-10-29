@@ -11,3 +11,11 @@ cases:
   - name: no_databases
     expect: FAIL
     artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[]},"summary":{"total_clusters":0}}}'
+
+  - name: protocol_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":null,"geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"total_clusters":1}}}'
+
+  - name: protocol_empty
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"total_clusters":1}}}'

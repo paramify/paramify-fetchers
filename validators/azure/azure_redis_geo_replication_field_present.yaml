@@ -4,12 +4,13 @@ type: AUTOMATED
 role: integrity
 statement: >
   At least one Azure Managed Redis database in the evidence carries a
-  geo_replication_linked_databases list, so the zero-violation count in
-  azure_redis_all_databases_geo_replicated reflects posture rather than a renamed or missing field.
-  Integrity partner supporting Coverage row 2 (Alternate Processing Sites / KSI-CNA-OFA). Fails on a
-  subscription with no Managed Redis databases.
+  geo_replication_linked_databases list with at least one database id in it, so the zero-violation
+  count in azure_redis_all_databases_geo_replicated reflects posture rather than a renamed or missing
+  field. Integrity partner supporting Coverage row 2 (Alternate Processing Sites / KSI-CNA-OFA).
+  Fails on a subscription with no Managed Redis databases, or when no database lists a linked
+  database.
 
-regex: '"geo_replication_linked_databases":\s*\['
+regex: '"geo_replication_linked_databases":\s*\[\s*"'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
