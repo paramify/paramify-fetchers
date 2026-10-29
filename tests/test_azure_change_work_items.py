@@ -70,7 +70,7 @@ def inv(path, target=None):
 
 
 def index(tmp_path, changes, items, *, types=("Task", "Hotfix"), window=WINDOW, partial=False,
-          change_files=None, work_items_in_manifest=True) -> Path:
+          change_files=None, work_files=None, work_items_in_manifest=True) -> Path:
     change_invs = change_files or [inv(envelope(tmp_path / "changes.json", mod.CHANGES,
                                                 {"lookback_days": 14, "changes": changes}))]
     work = envelope(tmp_path / "work.json", mod.WORK_ITEMS,
@@ -80,7 +80,7 @@ def index(tmp_path, changes, items, *, types=("Task", "Hotfix"), window=WINDOW, 
     path.write_text(json.dumps({"run_id": "r1", "inputs": {
         mod.CHANGES: {"in_manifest": True, "invocations": change_invs},
         mod.WORK_ITEMS: {"in_manifest": work_items_in_manifest,
-                         "invocations": [inv(work)] if work_items_in_manifest else []},
+                         "invocations": (work_files or [inv(work)]) if work_items_in_manifest else []},
     }}))
     return path
 
@@ -134,7 +134,7 @@ def test_every_status_and_the_counts_a_validator_reads(tmp_path, monkeypatch):
         "changes_checked": 6, "changes_excluded": 1, "changes_by_application": 1, "changes_needing_record": 4,
         "changes_matched": 1, "changes_ambiguous": 1, "changes_unmatched": 1, "changes_without_caller": 1,
         "changes_recorded": 2, "changes_without_record": 2, "changes_recorded_without_approval": 1,
-        "changes_without_approved_record": 3, "percent_recorded": 50,
+        "changes_without_approved_record": 3, "changes_approved_after_change": 0, "percent_recorded": 50,
         "changes_needing_record_by_origin": {"direct": 4, "manual_deployment": 0},
         "changes_without_record_by_origin": {"direct": 2, "manual_deployment": 0},
         "changes_without_approved_record_by_origin": {"direct": 3, "manual_deployment": 0},
@@ -206,6 +206,12 @@ def test_an_emergency_record_may_be_filed_after_the_change(tmp_path, monkeypatch
     assert results["c"]["status"] == status
 
 
+def test_a_larger_hours_before_applies_to_an_emergency_record_too(tmp_path, monkeypatch):
+    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-09-27T15:00:00Z")], [item(1, type_="Hotfix")],
+                         env={"CHANGE_RECORD_HOURS_BEFORE": "96"})   # 90 hours before it was created
+    assert results["c"]["status"] == "matched"
+
+
 def test_an_emergency_record_filed_more_than_72_hours_later_does_not_count(tmp_path, monkeypatch):
     results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-09-28T08:59:59Z")], [item(1, type_="Hotfix")])
     assert results["c"]["status"] == "unmatched"
@@ -236,6 +242,13 @@ def test_an_open_items_window_runs_from_its_last_change(tmp_path, monkeypatch):
     items = [item(1, state="Doing", open_=True, closed=None, changed_date="2026-10-20T00:00:00Z")]
     results, _ = compare(tmp_path, monkeypatch, [change("in", "2026-11-19T00:00:00Z"),
                                                  change("out", "2026-11-19T00:00:01Z")], items)
+    assert (results["in"]["status"], results["out"]["status"]) == ("matched", "unmatched")
+
+
+def test_a_finished_item_with_no_finish_date_is_capped_like_an_open_one(tmp_path, monkeypatch):
+    results, _ = compare(tmp_path, monkeypatch, [change("in", "2026-10-31T09:00:00Z"),
+                                                 change("out", "2026-10-31T09:00:01Z")],
+                         [item(1, closed=None, changed_date=None)])
     assert (results["in"]["status"], results["out"]["status"]) == ("matched", "unmatched")
 
 
@@ -274,6 +287,20 @@ def test_which_people_count_comes_from_config(tmp_path, monkeypatch, field, peop
     env = {"CHANGE_RECORD_PEOPLE": people} if people else {}
     results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], [record], env=env)
     assert results["c"]["status"] == status
+
+
+@pytest.mark.parametrize(("by", "by_type", "status"), [
+    (ALICE, None, "matched"),          # a named caller with no type is matched, not taken for an application
+    (BOB, None, "unmatched"),
+    (ALICE, "user", "matched"),
+    (APP, "servicePrincipal", "application"),
+])
+def test_a_caller_with_no_type_needs_a_record_and_the_type_is_read_without_regard_to_case(
+        tmp_path, monkeypatch, by, by_type, status):
+    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T09:00:00Z", by=by, by_type=by_type)],
+                               [item(1)])
+    assert results["c"]["status"] == status
+    assert summary["changes_needing_record"] == (status != "application")
 
 
 def test_logins_match_without_regard_to_case(tmp_path, monkeypatch):
@@ -326,6 +353,22 @@ def test_change_lookback_days_is_the_shortest_window_read(tmp_path, monkeypatch,
     assert summary["change_lookback_days"] == expect
 
 
+def test_each_work_items_file_names_its_own_organization_and_each_must_cover_the_changes(tmp_path, monkeypatch):
+    def work(name, org, items, start=WINDOW["start"]):
+        return inv(envelope(tmp_path / f"{name}.json", mod.WORK_ITEMS,
+                            {"window": {**WINDOW, "start": start}, "selection": {"work_item_types": ["Task"]},
+                             "work_items": items}, target={"organization_url": f"https://dev.azure.com/{org}"}))
+    changes = [change("a", "2026-10-02T09:00:00Z"), change("b", "2026-10-02T09:00:00Z", by=BOB)]
+    both = [work("one", "one", [item(1)]), work("two", "two", [item(2, assigned=BOB)])]
+    results, summary = compare(tmp_path, monkeypatch, changes, [], work_files=both)
+    assert [w["organization"] for w in results["a"]["work_items"]] == ["https://dev.azure.com/one"]
+    assert [w["organization"] for w in results["b"]["work_items"]] == ["https://dev.azure.com/two"]
+    assert summary["work_items_cover_changes"] is True
+    one_late = [both[0], work("late", "two", [item(2, assigned=BOB)], start="2026-10-02T00:00:00Z")]
+    _, summary = compare(tmp_path, monkeypatch, changes, [], work_files=one_late)
+    assert summary["work_items_cover_changes"] is False
+
+
 def test_work_items_that_start_too_late_do_not_cover_the_changes(tmp_path, monkeypatch):
     window = {**WINDOW, "start": "2026-10-02T00:00:00Z"}
     _, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], [item(1)], window=window)
@@ -337,6 +380,19 @@ def test_an_unread_approval_is_not_counted_as_approved(tmp_path, monkeypatch):
                                [item(1, approval=None, approval_read=False)])
     assert results["c"]["work_items"][0]["approved"] is None and results["c"]["approved"] is False
     assert summary["changes_without_approved_record"] == 1
+
+
+@pytest.mark.parametrize(("type_", "approved_at", "late"), [
+    ("Task", "2026-10-02T08:00:00Z", False),     # approved before the change
+    ("Task", "2026-10-02T10:00:00Z", True),      # approved after it
+    ("Hotfix", "2026-10-02T10:00:00Z", False),   # an emergency record may be approved after the fact
+])
+def test_an_approval_after_the_change_is_counted_but_still_approved(tmp_path, monkeypatch, type_, approved_at, late):
+    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T09:00:00Z")],
+                               [item(1, type_=type_, approval=approved(at=approved_at))])
+    assert results["c"]["approved"] is True and results["c"]["approved_after_change"] is late
+    assert summary["changes_approved_after_change"] == late
+    assert summary["changes_without_approved_record"] == 0
 
 
 def test_nothing_to_check_reads_zero_not_null(tmp_path, monkeypatch):
@@ -429,6 +485,8 @@ def test_the_runner_runs_it_after_its_inputs_with_its_entrys_config(tmp_path):
 @pytest.mark.parametrize(("env", "value", "message"), [
     ("CHANGE_RECORD_PEOPLE", "assigned_to,owner", "['owner']"),
     ("CHANGE_RECORD_PEOPLE", " , ", "nothing"),
+    ("CHANGE_RECORD_ORIGINS", "direct,drect", "['drect']"),
+    ("CHANGE_RECORD_ORIGINS", ",", "nothing"),
     ("CHANGE_RECORD_HOURS_BEFORE", "-1", "whole number"),
     ("CHANGE_RECORD_HOURS_AFTER", "a day", "whole number"),
     ("CHANGE_RECORD_OPEN_ITEM_DAYS", "30d", "whole number of days"),

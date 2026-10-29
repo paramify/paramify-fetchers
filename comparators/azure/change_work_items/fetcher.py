@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""
-KSI-CMT-RMV / KSI-CMT-LMC: Azure changes made outside a pipeline and the work items that record them
-
-Reads azure_change_provenance and azure_devops_work_items from the same run and
-matches each direct edit, and each deployment a person ran by hand, to the record
-work items that name its caller and cover the time it was made. A change is
-excluded when its caller is a configured excluded caller, matched to one record,
-ambiguous between several, unmatched, application when an application made it,
-or no_caller when Azure recorded no caller for it.
-"""
+"""Azure changes made outside a pipeline, each matched to the Azure DevOps work items that record it."""
 
 import os
 import sys
@@ -25,6 +16,7 @@ CHANGES = "azure_change_provenance"
 WORK_ITEMS = "azure_devops_work_items"
 OUTPUT = "azure_change_work_items.json"
 
+ORIGINS = ("direct", "manual_deployment", "deployment", "pipeline", "platform", "unattributed")
 STATUSES = ("matched", "ambiguous", "unmatched", "excluded", "application", "no_caller")
 RECORDED = ("matched", "ambiguous")
 WITHOUT_RECORD = ("unmatched", "no_caller")
@@ -39,7 +31,7 @@ SUMMARY_KEYS = (
     "changes_checked", "changes_excluded", "changes_by_application", "changes_needing_record",
     "changes_matched", "changes_ambiguous", "changes_unmatched", "changes_without_caller",
     "changes_recorded", "changes_without_record", "changes_recorded_without_approval",
-    "changes_without_approved_record", "percent_recorded",
+    "changes_without_approved_record", "changes_approved_after_change", "percent_recorded",
     "changes_needing_record_by_origin", "changes_without_record_by_origin", "changes_without_approved_record_by_origin",
     "changes_without_record_by_caller", "changes_by_application_by_caller", "changes_excluded_by_caller",
     "record_types", "record_types_not_selected", "record_work_items", "work_items_cover_changes",
@@ -50,6 +42,14 @@ def csv_env(env, default=""):
     return [v.strip() for v in os.environ.get(env, default).split(",") if v.strip()]
 
 
+def listed_env(env, default, allowed):
+    values = [v.lower() for v in csv_env(env, default)]
+    unknown = sorted(set(values) - set(allowed))
+    if unknown or not values:
+        raise ValueError(f"{env} names {unknown or 'nothing'}; use any of {', '.join(allowed)}")
+    return values
+
+
 def span_env(env, default, unit="hours"):
     raw = os.environ.get(env, "").strip() or str(default)
     if not raw.isdigit():
@@ -58,17 +58,13 @@ def span_env(env, default, unit="hours"):
 
 
 def settings():
-    people = [p.lower() for p in csv_env("CHANGE_RECORD_PEOPLE", DEFAULT_PEOPLE)]
-    unknown = sorted(set(people) - set(PEOPLE))
-    if unknown or not people:
-        raise ValueError(f"CHANGE_RECORD_PEOPLE names {unknown or 'nothing'}; use any of {', '.join(PEOPLE)}")
     return {
-        "origins": {o.lower() for o in csv_env("CHANGE_RECORD_ORIGINS", "direct,manual_deployment")},
+        "origins": set(listed_env("CHANGE_RECORD_ORIGINS", "direct,manual_deployment", ORIGINS)),
         "excluded": {c.lower() for c in csv_env("CHANGE_RECORD_EXCLUDED_CALLERS")},
         "environments": {e.lower() for e in csv_env("CHANGE_RECORD_ENVIRONMENTS")},
         "types": [t.lower() for t in csv_env("CHANGE_RECORD_TYPES")],
         "emergency_types": {t.lower() for t in csv_env("CHANGE_RECORD_EMERGENCY_TYPES", "Hotfix")},
-        "people": people,
+        "people": listed_env("CHANGE_RECORD_PEOPLE", DEFAULT_PEOPLE, PEOPLE),
         "before": span_env("CHANGE_RECORD_HOURS_BEFORE", 24),
         "emergency_before": span_env("CHANGE_RECORD_EMERGENCY_HOURS_BEFORE", 72),
         "after": span_env("CHANGE_RECORD_HOURS_AFTER", 24),
@@ -176,6 +172,12 @@ def records(files, cfg):
     return out, sorted(types), sorted(unselected), cover_from
 
 
+def approved_after(found, at, emergency_types):
+    """Whether a record approved after the change isn't an emergency type, which may be approved after the fact."""
+    return any(str(w["type"]).lower() not in emergency_types and when(w["approved_at"]) and at
+               and when(w["approved_at"]) > at for w in found)
+
+
 def check_with(cfg):
     def check(inputs):
         files = [f for f in inputs[CHANGES].files
@@ -202,19 +204,20 @@ def check_with(cfg):
                 status = "no_caller"
             elif caller.lower() in cfg["excluded"]:
                 status = "excluded"
-            elif caller_type != "User":
+            elif str(caller_type or "").lower() not in ("", "user"):
                 status = "application"
             else:
                 found = [i["ref"] for i in items if caller.lower() in i["logins"] and at and i["from"] <= at <= i["to"]]
                 status = "unmatched" if not found else "matched" if len(found) == 1 else "ambiguous"
+            # Several candidates count as approved only when every one of them is.
+            approved = all(w["approved"] for w in found) if found else None
             results.append({
                 "change_id": c.get("change_id"), "timestamp": c.get("timestamp"),
                 "target_resource_id": c.get("target_resource_id"), "operation": c.get("operation"),
                 "client_type": c.get("client_type"), "origin": c.get("origin"), "deployment_id": c.get("deployment_id"),
                 "caller": caller, "caller_type": caller_type, "caller_from": source,
-                "status": status, "work_items": found,
-                # Several candidates count as approved only when every one of them is.
-                "approved": all(w["approved"] for w in found) if found else None,
+                "status": status, "work_items": found, "approved": approved,
+                "approved_after_change": approved_after(found, at, cfg["emergency_types"]) if approved else None,
             })
         results.sort(key=lambda r: (str(r["timestamp"]), str(r["change_id"])))
         read = {
@@ -264,6 +267,7 @@ def summarize(results, items, types, unselected, cover_from, origins):
         "changes_without_record": count["unmatched"] + count["no_caller"],
         "changes_recorded_without_approval": recorded - approved,
         "changes_without_approved_record": len(needing) - approved,
+        "changes_approved_after_change": sum(1 for r in needing if r["approved_after_change"]),
         "percent_recorded": recorded * 100 // len(needing) if needing else 0,
         "changes_needing_record_by_origin": by_origin(lambda r: True),
         "changes_without_record_by_origin": by_origin(lambda r: r["status"] in WITHOUT_RECORD),

@@ -25,7 +25,7 @@ Each gets one status:
 | Status | When |
 |---|---|
 | `excluded` | Its caller is in `excluded_callers`, such as a Microsoft service that manages resources for you. |
-| `application` | Its caller is an application or another identity that isn't a user. Reported apart, with the application id; it needs no record, since a work item can't name it. |
+| `application` | Its caller's type is given and isn't a user: an application or another identity. A named caller with no type is matched like a person. Reported apart, with the application id; it needs no record, since a work item can't name it. |
 | `no_caller` | Azure recorded no caller, and neither a named change to the same resource within 10 minutes (the rule `azure_change_provenance` uses to give such a row its origin) nor a named change in the same deployment gives one. |
 | `matched` | Exactly one record work item names the caller and covers the change's time. |
 | `ambiguous` | Several do; none is picked. |
@@ -44,7 +44,10 @@ may be filed later, up to `emergency_hours_before` hours after the change.
 
 A matched or ambiguous change is approved when every work item that records it
 is approved, as `azure_devops_work_items` reads approval (an approval state or
-an approval comment).
+an approval comment); a record whose approval couldn't be read is not approved.
+An approval may come after the change: such a change still counts as approved,
+and `changes_approved_after_change` counts it unless the late record is one of
+`emergency_types`, which are approved after the fact.
 
 `work_items_cover_changes` is false when a work items file's collection window
 starts too late to hold every record a change could have: its start plus

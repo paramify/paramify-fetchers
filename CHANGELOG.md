@@ -28,7 +28,8 @@ schemas and the `paramify` CLI — not the internal code.
   open covers changes only up to `CHANGE_RECORD_OPEN_ITEM_DAYS` (30) days after
   it was created or last changed. The summary counts
   each status, overall and by origin, the changes without a record, recorded
-  without approval and without an approved record, the changes read and the
+  without approval and without an approved record, the approved changes whose
+  non-emergency record was approved after the change, the changes read and the
   shortest change window read (`change_lookback_days`), so a narrow window
   can't pass as no changes, and `work_items_cover_changes`, false when the work
   items window starts too late for the earliest change.

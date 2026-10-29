@@ -28,7 +28,8 @@ config_schema:
     description: >
       Comma-separated azure_change_provenance origins that need a record. direct is an edit made outside any
       deployment or pipeline; manual_deployment is an ARM deployment a person ran, from the CLI or through the
-      Portal's create wizards.
+      Portal's create wizards. The others are deployment, pipeline, platform and unattributed; any other name
+      is bad_config.
   excluded_callers:
     type: string
     required: false
@@ -127,7 +128,7 @@ evidence_set:
     - changes_checked — Number of changes whose origin is in origins
     - changes_excluded — Number of checked changes made by an excluded caller (the excluded_callers setting), which need no record
     - changes_excluded_by_caller — Number of excluded changes for each excluded caller
-    - changes_by_application — Number of checked changes made by an application or other identity that isn't a user and isn't excluded; a work item can't name one, so these need no record and are reported apart
+    - changes_by_application — Number of checked changes made by an application or other identity whose caller type is given and isn't a user, and that isn't excluded; a work item can't name one, so these need no record and are reported apart
     - changes_by_application_by_caller — Number of application changes for each application id
     - changes_needing_record — Number of checked changes that need a record: changes_checked minus changes_excluded minus changes_by_application
     - changes_needing_record_by_origin — Number of changes needing a record for each checked origin
@@ -139,7 +140,7 @@ evidence_set:
     Is each change recorded by a work item?
     - changes_matched — Number of changes recorded by exactly one work item. A work item records a change when the change's caller, a person, is one of the item's people (the record_people setting, matched by login) and the change was made between hours_before hours before the item was created (emergency_hours_before for an emergency type) and hours_after hours after it was finished, or, for an item still open or in a state the fetcher couldn't place, open_item_days days after it was created or last changed
     - changes_ambiguous — Number of changes recorded by more than one work item, none picked
-    - changes_unmatched — Number of changes made by a person that no work item records
+    - changes_unmatched — Number of changes made by a person, or by a caller of unknown type, that no work item records
     - changes_without_caller — Number of changes Azure recorded no caller for, with no named change to the same resource within 10 minutes, or in the same deployment, to take one from
     - changes_recorded — Number of changes recorded by one or more work items: changes_matched plus changes_ambiguous
     - changes_without_record — Number of changes needing a record that no work item records: changes_unmatched plus changes_without_caller
@@ -148,6 +149,7 @@ evidence_set:
     - percent_recorded — Percentage of changes needing a record that a work item records = changes_recorded / changes_needing_record × 100 (a whole number, 0–100); 0 when changes_needing_record is 0
 
     Are the records approved?
-    - changes_recorded_without_approval — Number of recorded changes whose record isn't approved (moved into an approval state or given an approval comment, as azure_devops_work_items reads it); a change several items could record counts as approved only if every one is approved
+    - changes_recorded_without_approval — Number of recorded changes whose record isn't approved (moved into an approval state or given an approval comment, as azure_devops_work_items reads it, and a record whose approval couldn't be read counts as not approved); a change several items could record counts as approved only if every one is approved
     - changes_without_approved_record — Number of changes needing a record with no approved work item: changes_without_record plus changes_recorded_without_approval
     - changes_without_approved_record_by_origin — Number of changes without an approved record for each checked origin
+    - changes_approved_after_change — Number of changes with an approved record where a record that isn't an emergency type (emergency_types) was approved after the change was made; counted, not treated as unapproved
