@@ -12,6 +12,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
+  Identity Management for Entra ID directory roles: who is eligible to activate
+  each role, every active assignment marked `permanent`, `time_bound` or
+  `pim_activated`, and each privileged role's activation rules (MFA or an
+  authentication context, justification, approval and `activation_approver_sets`,
+  the users and groups named as approvers, maximum activation hours) and whether
+  it allows permanent eligible or active assignments. Privileged counts take
+  direct grants of privileged roles held tenant-wide, as
+  `azure_entra_privileged_roles` does; grants scoped below the tenant are counted
+  apart in `privileged_assignments_scoped_below_tenant`. A privileged grant with no
+  scope at all could be tenant-wide, so it makes those counts null rather than
+  clean. A tenant without Entra ID P2 reads
+  `pim_available: false`, keeps the role names, skips the other PIM reads, and the
+  run succeeds; only Graph's `AadPremiumLicenseRequired` code on the first PIM read
+  counts as that, and any other refusal is a failure. When any read fails the
+  summary gives no figures, so a denied read never reads as zero standing admins,
+  and a failed role-definitions read leaves `is_privileged` null. A holder whose
+  type wasn't returned, a privileged role's policy missing a rule, or a held
+  privileged role with no policy (`privileged_roles_without_policy`) makes the
+  matching user count or role lists null rather than clean. Needs
+  `RoleManagement.Read.Directory`.
 - **`azure_service_log_records`** (`EVD-AZURE-SERVICE-LOG-RECORDS`) — whether App
   Service HTTP logs and SQL Managed Instance audit events actually reach Log
   Analytics, read from the records: per app and slot, its state, the
@@ -170,6 +191,22 @@ schemas and the `paramify` CLI — not the internal code.
   for commands and options. `paramify samples show <Tab>` completes the names of
   the fetchers that have a sample. See
   [`docs/cli_guide.md`](docs/cli_guide.md#tab-completion).
+- **Three more fetchers on `_shared/azure_rest`: `azure_sentinel_playbooks`,
+  `azure_entra_diagnostic_settings` and `azure_entra_risky_users`.** Per
+  subscription, `azure_sentinel_playbooks` reports what each Logic App Sentinel
+  can run does (disable an account, isolate a device, notify) and who it
+  notifies, Standard workflows included when an automation rule runs them. Per
+  tenant, `azure_entra_diagnostic_settings` reports which Entra log categories
+  reach a Sentinel workspace (unknown where a destination can't be read), and
+  `azure_entra_risky_users` joins Identity Protection risky users to privileged
+  directory roles; a tenant without Entra ID P2 reports that as a state, not a
+  failure. It keys on the privileged-role list in `_shared/entra_graph`, the
+  one `azure_entra_privileged_roles` and `azure_entra_mfa_status` use. Each
+  role's service principals come from the members list's `servicePrincipal`
+  cast, since the v1.0 list leaves them out, and unread directory roles leave
+  the risky-user privileged figures null. `azure_entra_diagnostic_settings`
+  reads the category list at api-version 2017-04-01-preview, the only one it
+  answers; an unread category list leaves `categories_not_exported` null.
 - **Scope exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/scope_exclusions.py`, takes case-insensitive glob
   patterns (comma- or space-separated) and answers whether a name is excluded and
@@ -219,6 +256,26 @@ schemas and the `paramify` CLI — not the internal code.
   as written, never its value, with whether it is set; the TUI and shared config
   checks compare what it reads, and `validate` names an issue-report reference
   unset in its shell.
+- **`azure_app_service_deployments`** (`EVD-AZURE-APPSVC-DEPLOYMENTS`) — how each App
+  Service web app and slot is deployed. Kudu's deployment records (id or commit, status,
+  author, deployer, message, times, the active deployment), counted separately so an empty
+  Kudu history is not read as "no deployments"; an author, deployer or message past 500
+  characters is cut and marked. From the Activity Log (Microsoft.Web over `activity_log_days`, 90 by
+  default, explicit start and end, paged to the end): slot swaps, publish-profile
+  downloads, publishing-credential reads and package deployments through Resource
+  Manager, one per request (correlation id, kept on each record) on the site of the event
+  that names the requester, with who asked and when. A request that finished keeps its
+  own status, so a callerless platform row can't flip it. A failed read leaves those
+  counts null rather than zero; a read cut at 200,000 events keeps the newest and says
+  so. Requests on sites not listed (deleted apps, function apps and other sites that
+  aren't web apps) are counted apart. Apps with, without and of unknown deployment
+  evidence add up to every web app. Also where each app deploys from (credentials and
+  query tokens in the URL removed, a failed read counted as unknown) and each slot's
+  configuration compared with production field by field, an unset FTPS state or default
+  action reading as what App Service applies.
+  `results.limitations` says what it cannot attribute: the content or commit a Web Deploy
+  or FTP push shipped, who used shared publishing credentials, and anything older than the
+  window. Reader only.
 - **`azure_entra_access_reviews`** (`EVD-AZURE-ENTRA-ACCESS-REVIEWS`) — Microsoft
   Entra ID access reviews over Microsoft Graph: every review series with what it
   reviews (group membership, app assignment, directory role, access package), its
@@ -275,6 +332,85 @@ schemas and the `paramify` CLI — not the internal code.
   Identity (Read), Code (Read) and Project and Team (Read).
 
 ### Changed
+
+- **`azure_entra_service_principals` 0.2.0: owners and granted API permissions.**
+  Each service principal now lists its owners and its application's owners
+  (`has_owner`), its application permissions named from the resource's app roles,
+  and its delegated grants, with privileged Microsoft Graph permissions flagged.
+  Tenant-wide data permissions (mail, files, sites, chats) count as privileged only
+  as application permissions, since delegated they reach only what the signed-in
+  user can open; a permission that can't be named reads unknown and is counted.
+  Only Graph permissions are judged: one on any other API (Exchange, SharePoint)
+  reads `privileged: null` with `judged: false`, and leaves the principal's
+  `has_privileged_permission` null unless it also holds a privileged Graph one.
+  The summary adds ownerless principals holding credentials, principals whose
+  only owners are disabled, principals holding privileged Graph permissions and
+  `delegated_grants_status`; the existing fields are unchanged. Delegated grants
+  need DelegatedPermissionGrant.Read.All (or Directory.Read.All) and read null
+  without it (`delegated_grants_status: not_authorized`, told by the 401 or 403
+  status). User owners' names and account state need User.Read.All (or
+  Directory.Read.All); without it they read null, and so does the disabled-owner
+  count. A principal deleted between reads reads null alone. Also maps to
+  KSI-PIY-GIV and KSI-IAM-ELP.
+- **One privileged Graph permission judgment.** `azure_entra_service_principals` and
+  `azure_managed_identity_configuration` (0.1.1) now share it: any application
+  permission with ReadWrite or FullControl in its name, tenant-wide reads, and a
+  list of permissions that grant access, take over sign-in or change the tenant's
+  controls, matched in any case. For managed identities the only newly flagged
+  permission is User.ManageIdentities.All.
+- **`azure_sentinel_data_sources` 0.2.0: last data received per connector.**
+  Each workspace gains `connectors`: every connector definition installed from
+  Content Hub (returned by the preview `dataConnectors` listing), every codeless
+  definition (`dataConnectorDefinitions`), and each built-in connection kind
+  whose definition isn't installed. Each data type carries its last data
+  received in the window, measured with the definition's own
+  `lastDataReceivedQuery` as the Sentinel portal does, or a built-in query for a
+  connection without one. A data type that is a whole table takes its time from
+  the per-table ingestion query, and the rest, parser functions and unions
+  included, run as one union per 100. A query that starts with `let` can't sit
+  inside a union, so it runs on its own, as written, and so does each query of
+  a batch that fails as malformed. Tables on the Basic or Auxiliary plan,
+  which the query API can't read, are listed in `tables_not_measured`, and data
+  types on them read as unmeasured. A connector is `connected` when any data
+  type received data, and lists the connections that feed it, including the
+  Defender XDR connection for alert products it carries (definitions whose
+  `MtpAlerts` values are all in Defender XDR's own list, so not tenant-based
+  Defender for Cloud or Defender for IoT). An `alert_only`
+  connector, whose data types are all SecurityAlert queries (Defender for
+  Endpoint, Defender for Office 365, Defender for Identity, Defender for Cloud,
+  Defender for Cloud Apps, Defender for IoT, Entra ID Protection and Insider
+  Risk Management), is quiet rather than not connected when no alert fired in
+  the window and a linked connection, its own or Defender XDR's, has alerts
+  enabled. One never connected, or whose connection has alerts Disabled, stays
+  not connected. A quiet connector still reads `connected: false`. The Cloud
+  Discovery table counts against Defender for Cloud Apps only when its
+  connection turns Cloud Discovery logs on. Where
+  Sentinel health monitoring is on, `connector_health` holds each connection's
+  latest SentinelHealth status and reason, and each connector shows the worst of
+  its connections; `connectors_unhealthy` counts the connections whose latest
+  status is Failure or Warning. The status is read from Data fetch status change
+  events (Success or Failure) only, so the hourly Informational failure summary,
+  written only after polling errors, can't hide a Failure.
+  `data_connectors` now also lists kinds only the preview
+  listing returns, such as Defender XDR (`MicrosoftThreatProtection`), with
+  `seen_in` saying which listing returned each.
+  `data_connectors_total` now includes these preview-only kinds, so its value
+  rises on an existing workspace that has one.
+  `connectors_configured_without_data` lists the connectors that have at
+  least one connection, their own or a linked one such as Defender XDR, but
+  received no data in the window and aren't quiet: unlike
+  `connectors_not_connected`, it leaves out connectors installed from Content Hub
+  with no connection, so a validator can require it to be 0, and the summary
+  reads null if any workspace's connectors couldn't all be listed and measured,
+  not just when none could. Workspaces also gain
+  `connectors_total`, `connectors_connected`, `connectors_not_connected`,
+  `connectors_quiet`, `connectors_configured_without_data`,
+  `connectors_unhealthy`, `health_monitoring` and `notes`. The summary gains
+  `connectors_connected`, `connectors_not_connected`, `connectors_quiet`,
+  `connectors_configured_without_data`, `workspaces_with_health_monitoring` and
+  `connectors_unhealthy`, each null when nothing could be measured, and
+  `data_connectors_total` is now null rather than 0 in that case. The
+  description and instructions use the plain-text layout.
 
 - **`azure_sentinel_analytics_rules` 0.2.0: rule queries, suppression, the
   tables each rule reads and quiet incident-creation rules.** Each rule now carries its KQL query's
@@ -515,6 +651,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
+  msgraph renders an HTTP status as `<message> (status 403)`, which matched none
+  of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
+  refused, throttled or unreachable failed as `partial_failure`. These now read
+  `not_authorized`, `rate_limited` and `target_unreachable`.
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
   collection as a success.** A 200 response that is not JSON, for example a
   single sign-on or instance hibernation page, and a response whose
