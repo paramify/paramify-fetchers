@@ -1,6 +1,6 @@
 name: datadog_siem_configuration
-version: 0.1.0
-description: Retrieves Datadog SIEM operational state including suppression rules and notification integrations.
+version: 0.2.0
+description: Retrieves Datadog Cloud SIEM operational state - whether Cloud SIEM is active, suppression rules, and where security signal notifications go.
 category: datadog
 
 supports_targets: false
@@ -27,4 +27,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-SIEM-CONFIG
   name: Datadog SIEM Configuration
-  instructions: 'Script: datadog/siem_configuration/fetcher.py. Calls GET /api/v2/security_monitoring/suppressions and GET /api/v1/integration/webhooks. Writes JSON SIEM config summary.'
+  instructions: 'Script: datadog/siem_configuration/fetcher.py. Calls GET /api/v2/security_monitoring/content_packs/states (Cloud SIEM active or not), GET /api/v2/security_monitoring/configuration/suppressions, GET /api/v2/security/signals/notification_rules, GET /api/v2/security_monitoring/rules (case notification targets), and GET /api/v1/integration/webhooks/configuration/webhooks/{name} for each webhook a target names. Writes JSON SIEM config summary.'
