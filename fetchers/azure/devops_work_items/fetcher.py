@@ -47,11 +47,14 @@ DEFAULT_TYPES = ("Change Request",)
 DEFAULT_TAGS = ("Security",)
 DEFAULT_LOOKBACK_DAYS = 90
 DEFAULT_APPROVAL_STATES = ("Approved",)
-DEFAULT_APPROVAL_PATTERN = r"^\W*approved\b"
+# A line starting "Approved" with no question mark, so "Approved?" doesn't count.
+DEFAULT_APPROVAL_PATTERN = r"^\W*approved\b[^?\n]*$"
 COMMENTS_API = "7.1-preview.4"
 BATCH_SIZE = 200
 UPDATES_PAGE = 200
 DONE_CATEGORIES = frozenset({"completed", "removed"})
+CATEGORY_ORDER = {"proposed": 0, "inprogress": 1, "resolved": 2, "completed": 3, "removed": 4}
+REJECTED = re.compile(r"reject", re.IGNORECASE)
 
 SCOPE_WORK = "Work Items (Read)"
 SCOPE_CODE = "Code (Read)"
@@ -72,9 +75,11 @@ WORK_ITEM_LINKS = {"System.LinkTypes.Hierarchy-Reverse": "parent", "System.LinkT
 # Keyed by area, not a list, so an evidence sample keeps every entry.
 NOT_COLLECTED = {
     "text": "Descriptions, comment text, discussion history and attachments are never written; a comment counts as "
-            "an approval when its text matches approval_pattern, and only its author and time are kept.",
+            "an approval when a line of its text, quoted text left out, matches approval_pattern, and only its "
+            "author and time are kept.",
     "git_change_dates": "Linked Git commits and pull requests are recorded by id only; only TFVC changesets are "
-                        "read for their date and author.",
+                        "read for their date and author, so an item linked to a commit or pull request isn't "
+                        "checked for changes made before approval or by its approver.",
     "items_outside_selection": "Work items of other types and without the configured tags, and finished items not "
                                "changed in the window.",
     "projects_not_visible": "Projects and work items the collecting identity (metadata.collecting_identity) "
@@ -205,8 +210,14 @@ def _int(value: Any) -> Any:
 
 
 def comment_text(raw: Any) -> str:
-    text = re.sub(r"<br\s*/?>|</(?:div|p|li)>", "\n", str(raw or ""), flags=re.IGNORECASE)
-    return html.unescape(re.sub(r"<[^>]+>", " ", text))
+    """The comment's plain text without quoted text: a blockquote, or a line starting ">"."""
+    text, before = str(raw or ""), None
+    while text != before:  # innermost blockquote first, so nested quotes go too
+        before, text = text, re.sub(r"<blockquote\b[^>]*>(?:(?!<blockquote\b).)*?</blockquote>", "\n", text,
+                                    flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<br\s*/?>|</(?:div|p|li)>", "\n", text, flags=re.IGNORECASE)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
 
 
 def state_history(updates: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -217,20 +228,34 @@ def state_history(updates: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not isinstance(change, dict) or "newValue" not in change:
             continue
         at = when(((fields or {}).get("System.ChangedDate") or {}).get("newValue")) or when(update.get("revisedDate"))
-        history.append({"from": change.get("oldValue"), "to": change.get("newValue"), "at": iso(at),
+        reason = (fields or {}).get("System.Reason")
+        history.append({"from": change.get("oldValue"), "to": change.get("newValue"),
+                        "reason": reason.get("newValue") if isinstance(reason, dict) else None, "at": iso(at),
                         "by": person(update.get("revisedBy"))})
     return history
 
 
-def first_approval(history: Optional[List[Dict[str, Any]]], comments: Optional[List[Dict[str, Any]]],
-                   states: Sequence[str]) -> Optional[Dict[str, Any]]:
-    """Earliest move into an approval state, or comment matching the approval pattern."""
+def current_approval(history: Optional[List[Dict[str, Any]]], comments: Optional[List[Dict[str, Any]]],
+                     states: Sequence[str], ranks: Dict[str, Tuple[int, int]]) -> Optional[Dict[str, Any]]:
+    """The approval in effect: the earliest move into an approval state, or comment matching the approval pattern,
+    since the last reversal (a move back before the approval states, or to a state or with a reason naming Rejected)."""
     wanted = {s.lower() for s in states}
     found = [{"at": h["at"], "by": h["by"], "source": "state", "state": h["to"]}
              for h in history or [] if str(h["to"] or "").lower() in wanted and h["at"]]
     found += [{"at": c["at"], "by": c["by"], "source": "comment", "state": None}
               for c in comments or [] if c["approval"] and c["at"]]
-    return min(found, key=lambda a: a["at"]) if found else None
+    first = min((ranks[s] for s in wanted if s in ranks), default=None)
+
+    def reverses(h: Dict[str, Any]) -> bool:
+        old, new = str(h["from"] or "").lower(), str(h["to"] or "").lower()
+        if new in wanted:
+            return False
+        back = first is not None and old in ranks and new in ranks and ranks[old] >= first > ranks[new]
+        return back or bool(REJECTED.search(new) or REJECTED.search(str(h["reason"] or "")))
+
+    last = max((h["at"] for h in history or [] if h["at"] and reverses(h)), default="")
+    standing = [a for a in found if a["at"] > last]
+    return min(standing, key=lambda a: a["at"]) if standing else None
 
 
 def read_updates(client: DevOpsClient, pid: str, wid: int) -> List[Dict[str, Any]]:
@@ -262,9 +287,15 @@ def project_types(client: DevOpsClient, pid: str) -> Dict[str, Dict[str, Any]]:
         if not isinstance(states, list):
             states = client.list(f"{pid}/_apis/wit/workitemtypes/{quote(raw['name'])}/states")
         named = [s for s in states if isinstance(s, dict) and s.get("name")]
-        types[raw["name"].lower()] = {"name": raw["name"],
-                                      "states": {str(s["name"]).lower(): s.get("category") or "" for s in named},
-                                      "state_names": [str(s["name"]) for s in named]}
+        types[raw["name"].lower()] = {
+            "name": raw["name"],
+            "states": {str(s["name"]).lower(): s.get("category") or "" for s in named},
+            "state_names": [str(s["name"]) for s in named],
+            # Workflow order: by category, then as the type lists its states.
+            "ranks": {str(s["name"]).lower(): (CATEGORY_ORDER.get(str(s.get("category") or "").lower(),
+                                                                  len(CATEGORY_ORDER)), n)
+                      for n, s in enumerate(named)},
+        }
     return types
 
 
@@ -359,7 +390,13 @@ def collect_project(client: DevOpsClient, collector: DevOpsCollector, project: D
         if body is None:
             complete = False
             continue
-        raws += [w for w in body.get("value") or [] if isinstance(w, dict) and w.get("id") is not None]
+        got = [w for w in body.get("value") or [] if isinstance(w, dict) and w.get("id") is not None]
+        raws += got
+        # errorPolicy "Omit" answers null for an item it can't return, such as one deleted since the query.
+        for wid in sorted(set(chunk) - {w["id"] for w in got}):
+            complete = False
+            collector.record(f"wit.workitemsbatch({pname}/{wid})", DevOpsError(
+                None, "WorkItemNotReturned", f"work item {wid} was listed by the query but not returned"))
 
     items = []
     for raw in raws:
@@ -371,8 +408,11 @@ def collect_project(client: DevOpsClient, collector: DevOpsCollector, project: D
                         partial(read_comments, client, pid, wid, selection.pattern))
         item["state_history"] = None if updates is None else state_history(updates)
         item["comments"] = None if comments is None else len(comments)
-        item["approval"] = first_approval(item["state_history"], comments, selection.approval_states)
+        ranks = (types.get(str(item["type"]).lower()) or {}).get("ranks") or {}
+        item["approval"] = current_approval(item["state_history"], comments, selection.approval_states, ranks)
         item["approval_read"] = updates is not None and comments is not None
+        item["approved_by_requester"] = None if not item["approval"] else \
+            same_person(item["approval"]["by"], item["created_by"])
         items.append(item)
     record["work_items"] = len(items) if complete else None
     shown = {t.lower() for t in selection.types} | {str(i["type"]).lower() for i in items}
@@ -401,7 +441,9 @@ def link_changes(item: Dict[str, Any], changesets: Dict[int, Optional[Dict[str, 
     """When the item's linked changesets were made, against when it was approved and by whom."""
     linked = [changesets.get(c) for c in item["links"]["changesets"] if isinstance(c, int)]
     known = [c for c in linked if c]
-    complete = bool(linked) and len(known) == len(item["links"]["changesets"])
+    # Git commits and pull requests aren't read, so an item linked to one can't be checked.
+    complete = bool(linked) and len(known) == len(item["links"]["changesets"]) and \
+        not item["links"]["commits"] and not item["links"]["pull_requests"]
     approval = item["approval"]
     item["first_linked_change"] = min((c["created_date"] for c in known if c["created_date"]), default=None)
     item["changed_before_approval"] = None if not approval or not complete else any(
@@ -423,8 +465,8 @@ def ids_of(items: Iterable[Dict[str, Any]]) -> List[Any]:
     return sorted((i["id"] for i in items), key=lambda v: (str(type(v)), v))
 
 
-def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], listed: bool, changes_read: bool,
-              selection: Selection, days: int) -> Dict[str, Any]:
+def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], listed: bool, selection: Selection,
+              days: int) -> Dict[str, Any]:
     """Counts read null when a project's items couldn't be listed; approval figures when an item's history couldn't."""
     queried = listed and all(p["work_items"] is not None for p in projects)
 
@@ -436,6 +478,10 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
     tagged = [i for i in items if "tag" in i["selected_by"]]
     tagged_open = [i for i in tagged if i["open"]]
     history = all(i["approval_read"] for i in change)
+    # Approved items with linked changes, and those whose every linked change was read.
+    linked = [i for i in change if i["approval"] and has_change(i)]
+    checked = [i for i in linked if i["changed_before_approval"] is not None]
+    every = history and len(checked) == len(linked)
     return {
         "lookback_days": days,
         "work_item_types": selection.types,
@@ -452,12 +498,13 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
         "change_items_finished": known(len(finished)),
         "change_items_approved": known(sum(1 for i in change if i["approval"]), history),
         "finished_change_items_without_approval": known(ids_of(i for i in finished if not i["approval"]), history),
+        "change_items_approved_by_requester": known(ids_of(i for i in change if i["approved_by_requester"]), history),
         "change_items_with_linked_changes": known(sum(1 for i in change if has_change(i))),
         "finished_change_items_without_linked_change": known(ids_of(i for i in finished if not has_change(i))),
-        "change_items_changed_before_approval": known(
-            ids_of(i for i in change if i["changed_before_approval"]), history and changes_read),
+        "change_items_linked_changes_checked": known(len(checked), history),
+        "change_items_changed_before_approval": known(ids_of(i for i in change if i["changed_before_approval"]), every),
         "change_items_approved_by_change_author": known(
-            ids_of(i for i in change if i["approved_by_change_author"]), history and changes_read),
+            ids_of(i for i in change if i["approved_by_change_author"]), every),
         "tagged_items_open": known(len(tagged_open)),
         "tagged_items_open_by_priority": known(sorted_counts(Counter(
             "unset" if i["priority"] in (None, "") else str(i["priority"]) for i in tagged_open))),
@@ -490,7 +537,6 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         projects.append(done[0])
         items += done[1]
 
-    failures = len(collector.failures)
     changesets = read_changesets(client, collector, (c for i in items for c in i["links"]["changesets"]
                                                      if isinstance(c, int)))
     for item in items:
@@ -504,7 +550,7 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         "work_items": items,
         "changesets": [c for _, c in sorted(changesets.items()) if c],
     }
-    return results, summarize(items, projects, listed, len(collector.failures) == failures, selection, days)
+    return results, summarize(items, projects, listed, selection, days)
 
 
 if __name__ == "__main__":
