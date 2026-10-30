@@ -3,20 +3,26 @@ name: Entra Risky-User Alerts Are Owned And In An Incident
 type: AUTOMATED
 role: configuration
 statement: >-
-  Every Entra ID Protection alert that names a user at open risk (atRisk or confirmedCompromised) or
-  at high risk is assigned to an owner (assignedTo) and belongs to an incident (incidentId: the
-  Defender XDR incident a Sentinel incident records as its provider incident id), and the alerts
-  were read. Assigning an incident gives its alerts the same owner, so an owned alert in an incident
-  is an owned investigation. Supports KSI-IAM-SUS for Entra ID Protection alerts;
-  entra_risky_users_open_high_risk_all_alerted asserts each open high-risk user has such an alert.
-  Passes when no such alert exists. Fails without Entra ID P2, or when the alerts can't be read
-  (SecurityAlert.Read.All). Does NOT prove: that the owner is a person on the security team; that
-  the investigation is progressing, overdue or closed within an SLA; alerts for users whose risk is
-  closed and was not high; risky sign-in alerts or insider-threat alerts from Purview Insider Risk
-  Management, Defender for Cloud Apps or Sentinel analytics rules (azure_sentinel_incidents); or an
-  alert whose user evidence names the user by neither object id nor user principal name.
+  Every Entra ID Protection alert that isn't resolved and was raised on the current risk of a user
+  at open risk (atRisk or confirmedCompromised) or at high risk is assigned to an owner (assignedTo)
+  and belongs to an incident (incidentId: the Defender XDR incident a Sentinel incident records as
+  its provider incident id), and the alerts were read. An alert is on the current risk when the
+  alert's user evidence names the user and it was created at or after the first risk-history entry
+  after the last closure, or the oldest entry when the risk was never closed. Assigning an incident
+  gives its alerts the same owner, so an owned alert in an incident is an owned investigation.
+  Supports KSI-IAM-SUS for Entra ID Protection alerts; entra_risky_users_open_high_risk_all_alerted
+  asserts each open high-risk user has such an alert. Passes when no such alert exists. Fails
+  without Entra ID P2, when the alerts can't be read (SecurityAlert.Read.All), or when the risk
+  history of a user at open or high risk can't be read. Does NOT prove: resolved alerts (they need
+  no owner or incident); alerts from a user's earlier, closed risk; that the owner is a person on
+  the security team; that the investigation is progressing, overdue or closed within an SLA; alerts
+  for users whose risk is closed and was not high; risky sign-in alerts or insider-threat alerts
+  from Purview Insider Risk Management, Defender for Cloud Apps or Sentinel analytics rules
+  (azure_sentinel_incidents); or an alert whose user evidence names the user by neither object id
+  nor user principal name.
 
-# The three figures are null when the alerts can't be read, so \d+ fails rather than reading unknown as 0.
+# The three figures are null when the alerts, or the risk history of a user at open or high risk, can't be
+# read, so \d+ fails rather than reading unknown as 0.
 regex: '"alerts_for_open_or_high_risk_users":\s*(?<alerts_for_open_or_high_risk_users>\d+)[\s\S]*?"alerts_without_incident":\s*(?<alerts_without_incident>\d+)[\s\S]*?"alerts_without_owner":\s*(?<alerts_without_owner>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0
 validation_rules:

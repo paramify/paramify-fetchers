@@ -4,19 +4,23 @@ type: AUTOMATED
 role: configuration
 statement: >-
   Every user Entra ID Protection holds at open high risk (risk state atRisk or confirmedCompromised,
-  risk level high) is named in at least one Entra ID Protection alert (Microsoft Graph
-  security/alerts_v2, serviceSource azureAdIdentityProtection, matched on the alert's user evidence
-  by object id or user principal name), and the alerts were read, so no high-risk user is left
-  without an alert to investigate. Supports the part of KSI-IAM-SUS this evidence can see;
-  entra_risky_users_alerts_owned_and_in_incident asserts those alerts are owned and in an incident.
-  A tenant with no user at open high risk passes. Fails without Entra ID P2, or when the alerts
-  can't be read (SecurityAlert.Read.All). Does NOT prove: risky sign-ins (only risky users are
-  read); insider-threat alerts from Purview Insider Risk Management, Defender for Cloud Apps or
-  Sentinel analytics rules (azure_sentinel_incidents); users whose high risk has since been
-  remediated or dismissed; open risk below high; that the alert was raised promptly; or that the
-  account was disabled or otherwise secured.
+  risk level high) is named in at least one Entra ID Protection alert raised on that user's current
+  risk (Microsoft Graph security/alerts_v2, serviceSource azureAdIdentityProtection, matched on the
+  alert's user evidence by object id or user principal name, and created at or after the first
+  risk-history entry after the last closure, or the oldest entry when the risk was never closed),
+  and the alerts were read, so no high-risk user is left without an alert to investigate. An alert
+  from an earlier, closed risk doesn't count; a resolved alert on the current risk does. Supports
+  the part of KSI-IAM-SUS this evidence can see; entra_risky_users_alerts_owned_and_in_incident
+  asserts those alerts are owned and in an incident. A tenant with no user at open high risk passes.
+  Fails without Entra ID P2, when the alerts can't be read (SecurityAlert.Read.All), or when the
+  risk history of a user at open high risk can't be read. Does NOT prove: risky sign-ins (only risky
+  users are read); insider-threat alerts from Purview Insider Risk Management, Defender for Cloud
+  Apps or Sentinel analytics rules (azure_sentinel_incidents); users whose high risk has since been
+  remediated or dismissed; open risk below high; that a resolved alert was resolved correctly; that
+  the alert was raised promptly; or that the account was disabled or otherwise secured.
 
-# Both figures are null when the alerts can't be read, so \d+ fails rather than reading unknown as 0.
+# Both figures are null when the alerts can't be read, and the second also when an open high-risk user's
+# risk history can't be read, so \d+ fails rather than reading unknown as 0.
 regex: '"identity_protection_alerts":\s*(?<identity_protection_alerts>\d+)[\s\S]*?"open_high_risk_users_without_alert":\s*(?<open_high_risk_users_without_alert>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0
 validation_rules:
