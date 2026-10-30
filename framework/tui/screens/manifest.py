@@ -370,9 +370,14 @@ class ManifestPage(ButtonRowNav, Vertical):
             # is only needed for the edge case where a name differs. (Per-target
             # secrets are not wired here — each target usually needs its own cred.)
             descriptors = self._descriptors()
+            try:
+                fetchers = api.discover(self.app.root_path)["fetchers"]
+            except Exception:  # never let a discovery failure kill the UI
+                fetchers = {}
+            # A comparator brings its inputs with it.
+            added = [a for name in names for a in api.add_entry(m, name, fetchers)]
             wired = False
-            for name in names:
-                api.add_entry(m, name)
+            for name in added:
                 d = descriptors.get(name)
                 if d:
                     for s in d.get("secrets", []):
@@ -382,7 +387,7 @@ class ManifestPage(ButtonRowNav, Vertical):
             self._selected = names[-1]
             self._autosave()
             self.rebuild()
-            n = len(names)
+            n = len(added)
             noun = "fetcher" if n == 1 else "fetchers"
             if wired:
                 self.notify(f"Added {n} {noun} — secrets wired to default env vars (e to change).")

@@ -1,5 +1,5 @@
 name: azure_resource_diagnostic_settings
-version: 0.2.0
+version: 0.3.0
 description: >-
   Shows which resources export their logs through a diagnostic setting, where those logs go, whether they actually arrive in Log Analytics, and which log categories nothing captures.
 category: azure
@@ -70,6 +70,25 @@ config_schema:
       a storage service is affected only by its own table (StorageBlobLogs for
       blob), and a resource whose settings are all in AzureDiagnostics mode only
       by AzureDiagnostics.
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that resource's
+      child resources). * matches any run of characters and ? one character. A
+      matching resource is listed under excluded with the pattern, is not read, and
+      is left out of every count and verdict; a storage account's blob, file, queue
+      and table services go with it, and a subscription-level resource (no resource
+      group) matches only an id: pattern. An in-scope resource's logs are still
+      checked at every destination it sends to, an excluded workspace included, so
+      its verdict doesn't change. A pattern without one of these prefixes fails the
+      run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
+      ${env:VAR}. Empty: every resource is in scope.
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
@@ -95,7 +114,7 @@ evidence_set:
     - KQL union * on each destination workspace (text in results.ingestion_query) — newest event time (TimeGenerated) and record count for each resource over the lookback. One query per workspace; it costs nothing on Analytics tables but scans them all, so a large workspace can take minutes. A query that hits a service limit fails the run. One that runs past the 600-second wait is retried up to 4 more times, and destinations are read one after another, so a slow destination can push the run past its 3600-second timeout. It leaves out tables written whatever a diagnostic setting says: AzureActivity, AzureMetrics, InsightsMetrics, Perf, Heartbeat, Syslog, Event and the Container Insights tables (ContainerLog, ContainerLogV2, ContainerInventory, ContainerNodeInventory, ContainerImageInventory, ContainerServiceLog and the Kube tables). Application Insights tables stay, since their rows are the component's own telemetry; a component whose linked workspace is also its destination reads arrived, whatever its setting does
     - KQL on each Basic or Auxiliary table through the /search endpoint, since /query refuses these tables (text in results.basic_table_query), only when basic_logs_lookback_hours is above 0 — newest event time and record count over that many hours for the tables union * skips; off by default because these queries bill per GB scanned. Custom (_CL) tables and the left-out tables above are never queried, and a table whose query fails stays unqueried without failing the run
 
-    Output: azure_resource_diagnostic_settings_<subscription>.json — each resource with its diagnostic settings, where its logs go, which log and audit categories aren't exported, and per destination workspace whether anything from it arrived (log_analytics_ingestion, last_ingested, ingested_in_window), plus each destination workspace's status, unqueried_tables and table_errors (the Basic or Auxiliary queries that failed) in log_analytics_destinations.
+    Output: azure_resource_diagnostic_settings_<subscription>.json — each resource with its diagnostic settings, where its logs go, which log and audit categories aren't exported, and per destination workspace whether anything from it arrived (log_analytics_ingestion, last_ingested, ingested_in_window), plus each destination workspace's status, unqueried_tables and table_errors (the Basic or Auxiliary queries that failed) in log_analytics_destinations. Resources the resource_exclusions patterns take out are listed under excluded instead.
 
     Summary fields:
 
@@ -110,6 +129,12 @@ evidence_set:
     - resources_not_found — Number of resources deleted between being listed and being checked
     - resources_errored — Number of resources that couldn't be read (any makes the run fail)
     - provider_registration_status — Whether the Azure Monitor provider (Microsoft.Insights) is registered on the subscription: registered, not_registered or unknown
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource, such as a mistyped name
+    - excluded_resources — Number of resources left out of scope because a pattern matched their resource group, region or id, a storage account's added services included; each is listed under excluded with the pattern, is not read, and no other count includes them
+    - in_scope_resources — Number of resources in scope and checked, the added storage services included, so it equals resources_evaluated; 0 means none was found or the patterns took out every resource, which a check can catch by requiring more than 0. resources_enumerated and resource_graph_total_records still count every resource Resource Graph returned, so they stay equal
 
     Do resources export their logs?
     - resources_emitting_logs — Number of log-producing resources (resources whose type produces resource logs). A SQL server's master database counts like any database: its setting is where server-level auditing is exported, while the server itself has metrics only

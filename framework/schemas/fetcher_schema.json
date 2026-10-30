@@ -95,7 +95,9 @@
 
     "depends_on": {
       "type": "array",
-      "items": { "type": "string" }
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "The fetchers whose evidence from the same run this one reads. A non-empty list makes this a comparator: it lives under comparators/<category>/<name>/, runs after its inputs, gets their files through $COMPARATOR_INPUTS, and is given no credentials. Inputs must be JSON evidence (kind evidence or inventory). See docs/comparators.md."
     },
 
     "evidence_set": {
@@ -225,6 +227,23 @@
       "then": {
         "not": { "anyOf": [{ "required": ["evidence_set"] }, { "required": ["ksis"] }, { "required": ["validators"] }] },
         "properties": {
+          "output": { "properties": { "type": { "const": "json" } } }
+        }
+      }
+    },
+    {
+      "$comment": "A comparator reads files the run already holds, so it takes no credentials and no targets, and writes one JSON evidence file to its own evidence set.",
+      "if": {
+        "properties": { "depends_on": { "minItems": 1 } },
+        "required": ["depends_on"]
+      },
+      "then": {
+        "required": ["evidence_set"],
+        "not": { "required": ["target_schema"] },
+        "properties": {
+          "kind": { "const": "evidence" },
+          "secrets": { "maxItems": 0 },
+          "supports_targets": { "const": false },
           "output": { "properties": { "type": { "const": "json" } } }
         }
       }

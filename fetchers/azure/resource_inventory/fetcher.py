@@ -38,6 +38,7 @@ from azure_common import (  # noqa: E402
     sorted_counts,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_resource_inventory")
@@ -221,6 +222,19 @@ def _count_state(counts: Counter, row: dict) -> None:
         counts["non_compliant"] += 1
 
 
+def drop_excluded(rows, target_of, inventory, locations, excluded_keys, exclusions) -> list:
+    """Results about an excluded resource or its children, or about anything else a pattern names, leave every count."""
+    if not exclusions:
+        return rows
+    kept = []
+    for row in rows:
+        target = target_of(row)
+        key = inventory_key(target, inventory)
+        if key not in excluded_keys and not exclusions.match(target, locations.get(key)):
+            kept.append(row)
+    return kept
+
+
 def tally_defender(rows: list[dict], inventory: set[str], subscription_id: str | None = None) -> dict:
     """Assessed (Healthy or Unhealthy), not applicable, unhealthy and unhealthy High/Critical counts per resource."""
     return _tally(rows, inventory, subscription_id, assessment_target, _count_assessment, DEFENDER_FIELDS,
@@ -381,14 +395,15 @@ def _query_status(query: str, result: dict | None, tally: dict | None) -> dict:
     }
 
 
-def collect(subscription_id, cred, collector: Collector) -> dict:
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None) -> dict:
     """Page the inventory and both coverage queries to the end, then join them by resource id.
 
     A coverage query that fails or comes back truncated is recorded as a failure and
     its counts stay null, rather than every resource reading as uncovered.
     """
+    exclusions = exclusions if exclusions is not None else ResourceExclusions()
     empty: dict = {"resources": [], "total_records": None, "pages": 0, "defender": None, "policy": None,
-                   "coverage_queries": {}}
+                   "coverage_queries": {}, "excluded": []}
     client = collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
     if client is None:
         return empty
@@ -397,16 +412,24 @@ def collect(subscription_id, cred, collector: Collector) -> dict:
     )
     if inventory is None:
         return empty
-    resources = sorted((resource_record(row) for row in inventory["rows"]), key=lambda r: r.get("id") or "")
-    keys = {(r["id"] or "").lower() for r in resources if r["id"]}
+    everything = sorted((resource_record(row) for row in inventory["rows"]), key=lambda r: r.get("id") or "")
+    keys = {(r["id"] or "").lower() for r in everything if r["id"]}
+    locations = {(r["id"] or "").lower(): r["location"] for r in everything if r["id"]}
+    resources, excluded = exclusions.split(everything, "resource")
+    excluded_keys = {(e["id"] or "").lower() for e in excluded if e["id"]}
 
     def _read(label: str, query: str) -> dict | None:
         return collector.guard(f"resourcegraph.resources ({label})", lambda: query_all(client, subscription_id, query))
 
     assessments = _read("SecurityResources", DEFENDER_QUERY)
     states = _read("PolicyResources", POLICY_QUERY)
-    defender = None if assessments is None else tally_defender(assessments["rows"], keys, subscription_id)
-    policy = None if states is None else tally_policy(states["rows"], keys, subscription_id)
+    # Results are resolved against the whole inventory, then those about anything excluded are dropped.
+    defender = None if assessments is None else tally_defender(
+        drop_excluded(assessments["rows"], assessment_target, keys, locations, excluded_keys, exclusions),
+        keys, subscription_id)
+    policy = None if states is None else tally_policy(
+        drop_excluded(states["rows"], lambda row: row.get("resourceId"), keys, locations, excluded_keys, exclusions),
+        keys, subscription_id)
     return {
         "resources": with_coverage(resources, defender, policy),
         "total_records": inventory["total_records"],
@@ -417,6 +440,7 @@ def collect(subscription_id, cred, collector: Collector) -> dict:
             "defender_assessments": _query_status(DEFENDER_QUERY, assessments, defender),
             "policy_states": _query_status(POLICY_QUERY, states, policy),
         },
+        "excluded": excluded,
     }
 
 
@@ -435,11 +459,13 @@ def main() -> int:
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
 
     collected: dict = {"resources": [], "total_records": None, "pages": 0, "defender": None, "policy": None,
-                       "coverage_queries": {}}
+                       "coverage_queries": {}, "excluded": []}
     if subscription_id and cred is not None:
-        collected = collect(subscription_id, cred, collector)
+        collected = collect(subscription_id, cred, collector, exclusions)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -449,7 +475,9 @@ def main() -> int:
             ),
         )
 
-    resources = collected["resources"]
+    exclusions.warn_unmatched(logger)
+
+    resources, excluded = collected["resources"], collected["excluded"]
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -461,8 +489,12 @@ def main() -> int:
             "pages_read": collected["pages"],
             "total_records_reported": collected["total_records"],
             "coverage_queries": collected["coverage_queries"],
+            "excluded": excluded,
         },
-        summary=summarize(resources, collected["defender"], collected["policy"]),
+        summary={
+            **summarize(resources, collected["defender"], collected["policy"]),
+            **exclusions.summary(excluded, ("resource",), {"resources": len(resources)}),
+        },
     )
 
     filename = (
