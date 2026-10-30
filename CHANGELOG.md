@@ -907,6 +907,41 @@ schemas and the `paramify` CLI — not the internal code.
   - `datadog_siem_signals` 0.1.1: `severity`, `status` (the triage state) and
     the rule come from the nested `attributes` of each signal, where the
     search endpoint puts them.
+- **`datadog_siem_configuration` reads the documented endpoints and no longer
+  reports Cloud SIEM as off by mistake** (0.1.0 → 0.2.0). It called
+  `/api/v2/security_monitoring/configuration/suppression_rules`, which Datadog
+  does not document, and read the 404 as "Security Monitoring (SIEM) is not
+  enabled". Organizations with Cloud SIEM on got evidence that said it was off.
+  It now reads `/configuration/suppressions`. Cloud SIEM is reported as not
+  active only when Datadog's content pack states endpoint (in preview) returns
+  `onboarding` content packs, the documented signal. If that read fails,
+  `summary.siem_enabled` is `null`. A 403 or 404 on any other read now fails
+  the run (exit 1) with the error in `errors`, and the evidence is still
+  written. The webhook list came from an endpoint that does not exist, so it
+  was always empty. Datadog has no endpoint that lists webhooks, so the fetcher
+  now reads only the webhooks that a notification target names
+  (`@webhook-<name>`), and flags those that do not exist. `notification_types`
+  came from words in webhook names. It now comes from the targets of enabled
+  signal notification rules and of enabled Cloud SIEM detection rules (`email`,
+  `slack`, `pagerduty`, `webhook`, `teams`, `team`, `opsgenie`, `jira`,
+  `servicenow`, `incident` or `other`), and is `null` when either source can't
+  be read. Output changes: new `data.siem_state`, `data.notification_rules`,
+  `data.detection_rule_notifications`, `data.referenced_webhooks`,
+  `summary.siem_enabled`, `summary.notification_rules_count`,
+  `summary.enabled_notification_rules`,
+  `summary.detection_rules_with_notifications`,
+  `summary.referenced_webhooks_count`, `summary.missing_webhooks` and `errors`;
+  `data.notification_integrations` and `summary.notification_integrations_count`
+  are removed; each suppression rule now has Datadog's own field names
+  (`enabled`, `start_date`, `expiration_date`, `rule_query`,
+  `suppression_query`, `data_exclusion_query`, `version`) in place of
+  `isEnabled`, `startDate`, `expirationDate` and `rule_id`. The not-active
+  result has `status: not_available` as before, with a new message. The
+  fetcher needs `security_monitoring_suppressions_read`,
+  `security_monitoring_notification_profiles_read`,
+  `security_monitoring_filters_read` (or `logs_read_index_data`) and
+  `integrations_read`. **Re-check any validator or query that reads this
+  evidence.**
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
