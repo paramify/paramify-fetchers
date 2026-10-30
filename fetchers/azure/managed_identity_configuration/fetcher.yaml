@@ -1,5 +1,5 @@
 name: azure_managed_identity_configuration
-version: 0.1.0
+version: 0.1.1
 description: >
   Inventories the Azure managed identities in the subscription — the non-user accounts Azure
   resources sign in as. For every user-assigned identity: the resources it is attached to, its
@@ -87,9 +87,12 @@ evidence_set:
     identity's graph_app_roles is then null and counted in identities_graph_roles_unknown), failed, or
     not_read when there were no identities to look up. Each
     Graph permission records its resource, the resource's app id and the permission name. privileged is
-    judged only for Microsoft Graph's own permissions: true for ReadWrite or FullControl permissions,
-    Mail.Send, and tenant-wide reads of mail, files, sites, chats, calendars, contacts and notes (such as
-    Mail.Read, Files.Read.All, Sites.Read.All); false for other Graph permissions and for any other API;
+    judged only for Microsoft Graph's own permissions, the same way azure_entra_service_principals judges
+    an application permission, ignoring case: true for ReadWrite or FullControl permissions, Mail.Send,
+    tenant-wide reads of mail, files, sites, chats, calendars, contacts and notes (such as Mail.Read,
+    Files.Read.All, Sites.Read.All), and permissions that let the holder grant itself more access, take
+    over users' sign-in or change the tenant's security controls (such as User.ManageIdentities.All);
+    false for other Graph permissions and for any other API;
     null when the permission or its resource could not be resolved, which also counts the identity in
     identities_graph_roles_unknown. Default access (no app role) is not privileged.
     Role assignments are those visible from this subscription; assignments the same identity holds in
