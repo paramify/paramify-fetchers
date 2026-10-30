@@ -1,0 +1,68 @@
+name: sophos_agent_updates
+version: 0.1.0
+description: >-
+  Shows, for every computer and server in Sophos Central, the days since its agent last updated and whether Sophos offers a newer protection package.
+category: sophos
+
+supports_targets: true
+
+target_schema:
+  tenant_id:
+    type: string
+    required: false
+    env: SOPHOS_TENANT_ID
+    description: >-
+      Sophos Central tenant id. Leave it out for a tenant-level credential; set
+      it to pick a tenant when the credential is partner- or organization-level.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: sophos_agent_updates.json
+  aggregation: per_target
+
+secrets: []          # client_id / client_secret, per target, from _categories/sophos.yaml
+
+ksis:
+  - KSI-CNA-IBP
+  - KSI-SVC-PRR
+
+evidence_set:
+  reference_id: EVD-SOPHOS-AGENT-UPDATES
+  name: Sophos Central Agent Updates
+  instructions: |
+    Script: sophos/agent_updates/fetcher.py
+
+    Access: A Sophos Central API credential with the Service Principal Read-Only role.
+
+    Commands Executed:
+    - GET /whoami/v1 — finds the tenant and its data-region host
+    - GET /endpoint/v1/endpoints (full view, every page) — every computer and server with its last agent update and protection package
+
+    Output: sophos_agent_updates_<tenant>.json — one item per endpoint with when its agent last updated, the days since then, its protection package and that package's status, and the version of each installed Sophos product; Sophos returns no threat definition version, so none is reported.
+
+    Summary fields:
+
+    Which endpoints does Sophos Central manage?
+    - total_endpoints — Number of computers and servers the tenant lists
+
+    Is the agent current?
+    - endpoints_by_protection_package_status — Number of endpoints for each protection package status that Sophos reports:
+      - assigned (the assigned package is installed)
+      - upgradable (Sophos offers a newer package)
+      - unassigned (no protection package is assigned)
+      - unlicensed (the tenant has no licence for it)
+      - unsupported (the endpoint cannot run it)
+      - not_returned (Sophos gave no status)
+    - endpoints_package_not_upgradable — Number of endpoints whose protection package status is anything other than upgradable
+    - endpoints_package_upgradable — Number of endpoints whose protection package status is upgradable
+    - endpoints_package_unread — Number of endpoints where Sophos returned no protection package status
+    - max_days_since_agent_update — Days since the least recently updated agent last updated; null if no endpoint has an update time
+    - endpoints_agent_update_unread — Number of endpoints with no readable last agent update time
+  description: >-
+    Shows, for every computer and server in Sophos Central, the days since its
+    agent last updated and whether Sophos offers a newer protection package.

@@ -1,0 +1,49 @@
+name: sophos_endpoint_inventory
+version: 0.1.0
+description: >-
+  Lists every computer and server that Sophos Central manages, one record each, with the attributes Sophos records for it.
+category: sophos
+
+kind: inventory
+supports_targets: true
+
+target_schema:
+  tenant_id:
+    type: string
+    required: false
+    env: SOPHOS_TENANT_ID
+    description: >-
+      Sophos Central tenant id. Leave it out for a tenant-level credential; set
+      it to pick a tenant when the credential is partner- or organization-level.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: sophos_endpoint_inventory.json
+  aggregation: per_target
+
+secrets: []          # client_id / client_secret, per target, from _categories/sophos.yaml
+
+ksis:
+  - KSI-PIY-GIV
+
+evidence_set:
+  reference_id: EVD-SOPHOS-ENDPOINT-INVENTORY
+  name: Sophos Central Endpoint Inventory
+  instructions: |
+    Script: sophos/endpoint_inventory/fetcher.py
+
+    Access: A Sophos Central API credential with the Service Principal Read-Only role.
+
+    Commands Executed:
+    - GET /whoami/v1 — finds the tenant and its data-region host
+    - GET /endpoint/v1/endpoints (full view, every page) — every computer and server Sophos Central manages
+
+    Output: sophos_endpoint_inventory_<tenant>.json — one record per endpoint, keyed by its Sophos endpoint id, with hostname, serial number, type, operating system, first IP and MAC address, group, associated login and last-seen time, plus every attribute Sophos returns except the associated person's display name; a run that could not collect every endpoint writes no records, and the uploader does not send it.
+  description: >-
+    Lists every computer and server that Sophos Central manages, one record each,
+    with the attributes Sophos records for it.

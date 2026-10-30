@@ -56,7 +56,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-17.3`, `cm-2`, `pl-10`
 
-*6 fetchers:* [`aws_config_conformance_packs`](../fetchers/aws/config_conformance_packs), [`aws_securityhub_status`](../fetchers/aws/securityhub_status), [`azure_defender_regulatory_compliance`](../fetchers/azure/defender_regulatory_compliance), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`crowdstrike_zero_trust_assessment`](../fetchers/crowdstrike/zero_trust_assessment), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration)
+*7 fetchers:* [`aws_config_conformance_packs`](../fetchers/aws/config_conformance_packs), [`aws_securityhub_status`](../fetchers/aws/securityhub_status), [`azure_defender_regulatory_compliance`](../fetchers/azure/defender_regulatory_compliance), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`crowdstrike_zero_trust_assessment`](../fetchers/crowdstrike/zero_trust_assessment), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`sophos_agent_updates`](../fetchers/sophos/agent_updates)
 
 #### `KSI-CNA-MAT` — Minimizing Attack Surface
 
@@ -86,7 +86,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `sc-5`, `si-8`, `si-8.2`
 
-*8 fetchers:* [`aws_cloudfront_distribution_security`](../fetchers/aws/cloudfront_distribution_security), [`aws_shield_dos_protection`](../fetchers/aws/shield_dos_protection), [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules), [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules), [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf), [`azure_ddos_protection`](../fetchers/azure/ddos_protection), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies)
+*11 fetchers:* [`aws_cloudfront_distribution_security`](../fetchers/aws/cloudfront_distribution_security), [`aws_shield_dos_protection`](../fetchers/aws/shield_dos_protection), [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules), [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules), [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf), [`azure_ddos_protection`](../fetchers/azure/ddos_protection), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies), [`sophos_endpoint_check_in`](../fetchers/sophos/endpoint_check_in), [`sophos_endpoint_protection`](../fetchers/sophos/endpoint_protection), [`sophos_threat_protection_policies`](../fetchers/sophos/threat_protection_policies)
 
 #### `KSI-CNA-ULN` — Using Logical Networking
 
@@ -120,7 +120,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-7.1`, `cm-12.1`, `ma-2`, `pl-8`, `sc-7`, `sc-39`, `si-2.2`, `si-4`, `sr-10`
 
-*19 fetchers:* [`aws_guard_duty_findings`](../fetchers/aws/guard_duty_findings), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), [`aws_ssm_patch_compliance`](../fetchers/aws/ssm_patch_compliance), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_defender_assessments`](../fetchers/azure/defender_assessments), [`azure_defender_plans`](../fetchers/azure/defender_plans), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`crowdstrike_spotlight_vulnerabilities`](../fetchers/crowdstrike/spotlight_vulnerabilities), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`paramify_accepted_vulnerabilities`](../fetchers/paramify/accepted_vulnerabilities), [`paramify_historical_ver_activity`](../fetchers/paramify/historical_ver_activity), [`paramify_vulnerability_detail_report`](../fetchers/paramify/vulnerability_detail_report), [`wiz_attack_surface_findings`](../fetchers/wiz/attack_surface_findings), [`wiz_container_vulnerabilities`](../fetchers/wiz/container_vulnerabilities), [`wiz_infrastructure_vulnerabilities`](../fetchers/wiz/infrastructure_vulnerabilities), [`wiz_posture_issues`](../fetchers/wiz/posture_issues)
+*21 fetchers:* [`aws_guard_duty_findings`](../fetchers/aws/guard_duty_findings), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), [`aws_ssm_patch_compliance`](../fetchers/aws/ssm_patch_compliance), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_defender_assessments`](../fetchers/azure/defender_assessments), [`azure_defender_plans`](../fetchers/azure/defender_plans), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`crowdstrike_spotlight_vulnerabilities`](../fetchers/crowdstrike/spotlight_vulnerabilities), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`paramify_accepted_vulnerabilities`](../fetchers/paramify/accepted_vulnerabilities), [`paramify_historical_ver_activity`](../fetchers/paramify/historical_ver_activity), [`paramify_vulnerability_detail_report`](../fetchers/paramify/vulnerability_detail_report), [`sophos_endpoint_protection`](../fetchers/sophos/endpoint_protection), [`sophos_threat_protection_policies`](../fetchers/sophos/threat_protection_policies), [`wiz_attack_surface_findings`](../fetchers/wiz/attack_surface_findings), [`wiz_container_vulnerabilities`](../fetchers/wiz/container_vulnerabilities), [`wiz_infrastructure_vulnerabilities`](../fetchers/wiz/infrastructure_vulnerabilities), [`wiz_posture_issues`](../fetchers/wiz/posture_issues)
 
 #### `KSI-SVC-PRR` — Preventing Residual Risk *(optional at Low)*
 
@@ -128,7 +128,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `sc-4`
 
-*2 fetchers:* [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_residual_resources`](../fetchers/azure/residual_resources)
+*3 fetchers:* [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_residual_resources`](../fetchers/azure/residual_resources), [`sophos_agent_updates`](../fetchers/sophos/agent_updates)
 
 #### ⬜ `KSI-SVC-RUD` — Removing Unwanted Data *(optional at Low)*
 
@@ -330,7 +330,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2.2`, `cm-7.5`, `cm-8`, `cm-8.1`, `cm-12`, `cm-12.1`, `cp-2.8`
 
-*15 fetchers:* [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`aws_resource_inventory`](../fetchers/aws/resource_inventory), [`azure_entra_service_principals`](../fetchers/azure/entra_service_principals), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`crowdstrike_hosts`](../fetchers/crowdstrike/hosts), [`datadog_agent_hosts`](../fetchers/datadog/agent_hosts), [`datadog_apm_services`](../fetchers/datadog/apm_services), [`datadog_containers`](../fetchers/datadog/containers), [`gitlab_project_summary`](../fetchers/gitlab/project_summary), [`k8s_eks_pod_inventory`](../fetchers/k8s/eks_pod_inventory), [`rippling_devices`](../fetchers/rippling/devices), [`sentinelone_agents`](../fetchers/sentinelone/agents), [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets), [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage)
+*16 fetchers:* [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`aws_resource_inventory`](../fetchers/aws/resource_inventory), [`azure_entra_service_principals`](../fetchers/azure/entra_service_principals), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`crowdstrike_hosts`](../fetchers/crowdstrike/hosts), [`datadog_agent_hosts`](../fetchers/datadog/agent_hosts), [`datadog_apm_services`](../fetchers/datadog/apm_services), [`datadog_containers`](../fetchers/datadog/containers), [`gitlab_project_summary`](../fetchers/gitlab/project_summary), [`k8s_eks_pod_inventory`](../fetchers/k8s/eks_pod_inventory), [`rippling_devices`](../fetchers/rippling/devices), [`sentinelone_agents`](../fetchers/sentinelone/agents), [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets), [`sophos_endpoint_inventory`](../fetchers/sophos/endpoint_inventory), [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage)
 
 #### ⬜ `KSI-PIY-RES` — Reviewing Executive Support
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-286 of 298 fetchers carry a mapping.
+291 of 303 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -777,6 +777,16 @@ python tools/gen_ksi_mapping.py
 | [`sentinelone_cloud_detection_rules`](../fetchers/sentinelone/cloud_detection_rules) | `KSI-MLA-RVL` |
 | [`sentinelone_user_config`](../fetchers/sentinelone/user_config) | `KSI-IAM-APM`, `KSI-IAM-ELP` |
 | [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets) | `KSI-PIY-GIV` |
+
+### sophos  (5)
+
+| Fetcher | Indicators |
+|---|---|
+| [`sophos_agent_updates`](../fetchers/sophos/agent_updates) | `KSI-CNA-IBP`, `KSI-SVC-PRR` |
+| [`sophos_endpoint_check_in`](../fetchers/sophos/endpoint_check_in) | `KSI-CNA-RVP` |
+| [`sophos_endpoint_inventory`](../fetchers/sophos/endpoint_inventory) | `KSI-PIY-GIV` |
+| [`sophos_endpoint_protection`](../fetchers/sophos/endpoint_protection) | `KSI-CNA-RVP`, `KSI-SVC-EIS` |
+| [`sophos_threat_protection_policies`](../fetchers/sophos/threat_protection_policies) | `KSI-CNA-RVP`, `KSI-SVC-EIS` |
 
 ### splunk  (7)
 

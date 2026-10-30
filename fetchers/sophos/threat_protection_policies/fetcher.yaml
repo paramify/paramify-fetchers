@@ -1,0 +1,73 @@
+name: sophos_threat_protection_policies
+version: 0.1.0
+description: >-
+  Shows what every Sophos Central threat protection policy, for computers and servers, sets for scheduled scans and on-access scanning.
+category: sophos
+
+supports_targets: true
+
+target_schema:
+  tenant_id:
+    type: string
+    required: false
+    env: SOPHOS_TENANT_ID
+    description: >-
+      Sophos Central tenant id. Leave it out for a tenant-level credential; set
+      it to pick a tenant when the credential is partner- or organization-level.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: sophos_threat_protection_policies.json
+  aggregation: per_target
+
+secrets: []          # client_id / client_secret, per target, from _categories/sophos.yaml
+
+ksis:
+  - KSI-SVC-EIS
+  - KSI-CNA-RVP
+
+evidence_set:
+  reference_id: EVD-SOPHOS-THREAT-PROTECTION-POLICIES
+  name: Sophos Central Threat Protection Policies
+  instructions: |
+    Script: sophos/threat_protection_policies/fetcher.py
+
+    Access: A Sophos Central API credential with the Service Principal Read-Only role.
+
+    Commands Executed:
+    - GET /whoami/v1 — finds the tenant and its data-region host
+    - GET /endpoint/v1/policies (types threat-protection and server-threat-protection, every page) — every threat protection policy with its settings
+    - GET /endpoint/v1/policies/{type}/base — the base policy of each type
+    - GET /endpoint/v1/policies/settings — Sophos's setting metadata, to find the on-access scanning setting
+    - GET /endpoint/v1/policies/{id} — a policy's settings, when the list leaves them out
+
+    Output: sophos_threat_protection_policies_<tenant>.json — one item per policy with its settings exactly as Sophos returns them, and facts read from them: whether it is enabled, its scheduled scan days and hour, whether on-access scanning is on, and the settings that differ from Sophos's recommended value; it shows that scanning is configured, not that a scan ran.
+
+    Summary fields:
+
+    Which threat protection policies exist?
+    - total_policies — Number of threat protection policies, base policies included
+    - policies_by_type — Number of policies for each type:
+      - threat-protection (applies to computers)
+      - server-threat-protection (applies to servers)
+    - base_policies — Number of base policies (the policy that applies when no other one does)
+    - policies_enabled — Number of policies that are enabled
+    - policies_disabled — Number of policies that are disabled
+    - policies_enabled_unread — Number of policies where Sophos returned no enabled value
+
+    Is scanning configured?
+    - policies_scheduled_scan_configured — Number of policies with at least one scheduled scan day
+    - policies_no_scheduled_scan — Number of policies with no scheduled scan day, or with scheduled scans turned off
+    - policies_scheduled_scan_unread — Number of policies where Sophos returned no scheduled scan setting
+    - policies_on_access_scanning_on — Number of policies with on-access scanning on
+    - policies_on_access_scanning_off — Number of policies with on-access scanning off
+    - policies_on_access_scanning_unread — Number of policies where the on-access setting could not be read
+    - policies_with_settings_off_vendor_baseline — Number of policies with at least one setting whose value differs from Sophos's recommended value
+  description: >-
+    Shows what every Sophos Central threat protection policy, for computers and
+    servers, sets for scheduled scans and on-access scanning.

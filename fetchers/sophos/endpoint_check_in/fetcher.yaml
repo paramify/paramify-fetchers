@@ -1,0 +1,65 @@
+name: sophos_endpoint_check_in
+version: 0.1.0
+description: >-
+  Shows, for every computer and server in Sophos Central, how many hours have passed since its agent last communicated and whether it is online.
+category: sophos
+
+supports_targets: true
+
+target_schema:
+  tenant_id:
+    type: string
+    required: false
+    env: SOPHOS_TENANT_ID
+    description: >-
+      Sophos Central tenant id. Leave it out for a tenant-level credential; set
+      it to pick a tenant when the credential is partner- or organization-level.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: sophos_endpoint_check_in.json
+  aggregation: per_target
+
+secrets: []          # client_id / client_secret, per target, from _categories/sophos.yaml
+
+ksis:
+  - KSI-CNA-RVP
+
+evidence_set:
+  reference_id: EVD-SOPHOS-ENDPOINT-CHECK-IN
+  name: Sophos Central Endpoint Check-In
+  instructions: |
+    Script: sophos/endpoint_check_in/fetcher.py
+
+    Access: A Sophos Central API credential with the Service Principal Read-Only role.
+
+    Commands Executed:
+    - GET /whoami/v1 — finds the tenant and its data-region host
+    - GET /endpoint/v1/endpoints (full view, every page) — every computer and server with the time it last communicated
+
+    Output: sophos_endpoint_check_in_<tenant>.json — one item per endpoint with when it last communicated with Sophos Central, the hours since then, whether it is online, and its isolation and lockdown status; no endpoint is left out for being stale, and a fact Sophos did not return is null and named in the item's unread_facts.
+
+    Summary fields:
+
+    Which endpoints does Sophos Central manage?
+    - total_endpoints — Number of computers and servers the tenant lists
+    - endpoints_by_type — Number of endpoints for each type:
+      - computer (a workstation or laptop)
+      - server (a server)
+      - securityVm (a security virtual machine; Sophos no longer uses this type)
+      - not_returned (Sophos gave no type)
+
+    Are the agents reporting in?
+    - endpoints_online — Number of endpoints Sophos reports as online at collection time
+    - endpoints_offline — Number of endpoints Sophos reports as offline at collection time
+    - endpoints_online_unread — Number of endpoints where Sophos returned no online value
+    - max_hours_since_last_seen — Hours since the least recently seen endpoint last communicated with Sophos Central; null if no endpoint has a last-seen time
+    - endpoints_last_seen_unread — Number of endpoints with no readable last-seen time
+  description: >-
+    Shows, for every computer and server in Sophos Central, how many hours have
+    passed since its agent last communicated and whether it is online.
