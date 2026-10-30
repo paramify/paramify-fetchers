@@ -1,8 +1,33 @@
 name: azure_key_vault_key_rotation
-version: 0.2.0
+version: 0.3.0
 description: >-
   Shows whether Key Vault keys rotate, whether keys and secrets have an expiry and when certificates expire, whether certificates renew themselves, and where each App Service certificate comes from.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching key vault, key, secret, Key Vault certificate or App
+      Service certificate is listed under excluded with the pattern and left out
+      of every count and verdict. A key, secret or certificate takes its vault's
+      resource group and region, so it leaves with its vault; a certificate, or a
+      key with no management-plane id, is matched by its vault's id. An App
+      Service certificate's key_vault_certificate_auto_renew is still read from
+      every vault, so an in-scope certificate's answer doesn't change. An excluded
+      vault's keys, secrets, certificates and rotation policies are still read, so a
+      failed read there still fails the run. A pattern without one of these
+      prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -55,7 +80,7 @@ evidence_set:
     - CertificateClient.list_properties_of_certificates() and get_certificate_policy() (per vault, per certificate) — certificate expiry and renewal policy; certificates not yet issued (still pending) are not listed; on the list, a 401 or 403 is that vault's not_authorized answer and any other error fails the run; on a policy read, a 401, 403 or 404 leaves that one certificate with policy_readable false and auto_renew_enabled null, and any other error fails the run
     - certificates.list() (App Service) — App Service certificates, their expiry and source; a failure fails the run
 
-    Output: azure_key_vault_key_rotation_<subscription>.json — every key vault's keys with their rotation policies, secrets with their expiry, and certificates with their expiry and renewal policy, plus every App Service certificate with its expiry and where it comes from; no key material, secret value, certificate body or PFX password is read.
+    Output: azure_key_vault_key_rotation_<subscription>.json — every key vault's keys with their rotation policies, secrets with their expiry, and certificates with their expiry and renewal policy, plus every App Service certificate with its expiry and where it comes from; no key material, secret value, certificate body or PFX password is read. Resources the resource_exclusions patterns take out are listed under excluded instead.
 
     Summary fields:
 
@@ -68,6 +93,20 @@ evidence_set:
     - certificate_not_authorized_vaults — Number of key vaults that refused to list their certificates (HTTP 401 or 403, read as not_authorized); their certificates are unknown, not zero. Vaults whose certificate list failed, or that had no data-plane address, are in neither this count nor certificate_accessible_vaults
     - provider_registration_status — Whether Key Vault (Microsoft.KeyVault) is registered on the subscription: registered, not_registered or unknown
     - web_provider_registration_status — Whether App Service (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown; not_registered means no App Service in use rather than zero certificates
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no key vault, key, secret, Key Vault certificate or App Service certificate, such as a mistyped name
+    - excluded_key_vaults — Number of key vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their keys, secrets and certificates
+    - excluded_keys — Number of keys left out of scope, those in an excluded vault included; each is listed under excluded
+    - excluded_secrets — Number of secrets left out of scope the same way
+    - excluded_certificates — Number of Key Vault certificates left out of scope the same way
+    - excluded_app_service_certificates — Number of App Service certificates left out of scope because a pattern matched their resource group, region or id
+    - in_scope_key_vaults — Number of key vaults read and in scope; 0 means none was read or the patterns took out every vault, which a check can catch by requiring more than 0
+    - in_scope_keys — Number of keys read and in scope
+    - in_scope_secrets — Number of secrets read and in scope
+    - in_scope_certificates — Number of Key Vault certificates read and in scope
+    - in_scope_app_service_certificates — Number of App Service certificates read and in scope
 
     Do keys rotate?
     - total_keys — Number of keys across all key vaults
