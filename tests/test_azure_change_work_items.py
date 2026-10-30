@@ -1,0 +1,499 @@
+"""azure_change_work_items, on fake azure_change_provenance and azure_devops_work_items evidence.
+
+Each test writes the two inputs' envelopes and the runner's index to tmp_path and
+calls the comparator's check through the shared reader, or its main() for what
+reaches the file and the status file.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+COMPARATOR = REPO_ROOT / "comparators" / "azure" / "change_work_items" / "fetcher.py"
+spec = importlib.util.spec_from_file_location("azure_change_work_items_under_test", COMPARATOR)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+ci = sys.modules["comparator_inputs"]
+
+SERVICE = "11111111-2222-3333-4444-555555555555"  # a service that manages resources for the customer
+APP = "99999999-8888-7777-6666-555555555555"
+ALICE, BOB = "alice@contoso.com", "bob@contoso.com"
+RG = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers"
+NIC = f"{RG}/Microsoft.Network/networkInterfaces/nic-1"
+SITE = f"{RG}/Microsoft.Web/sites/app-1"
+WINDOW = {"start": "2026-08-01T00:00:00Z", "end": "2026-10-28T00:00:00Z", "lookback_days": 90}
+
+
+def change(cid, at, by=ALICE, by_type="User", origin="direct", target=SITE, client="Azure Portal", deployment=None):
+    return {"change_id": cid, "timestamp": at, "changed_by": by, "changed_by_type": by_type, "origin": origin,
+            "target_resource_id": target, "operation": "Microsoft.Web/sites/write", "client_type": client,
+            "deployment_id": deployment}
+
+
+def who(login):
+    return {"display_name": login.split("@")[0].title(), "login": login}
+
+
+def item(wid, created="2026-10-01T09:00:00Z", assigned=ALICE, type_="Task", state="Done", open_=False,
+         closed="2026-10-03T17:00:00Z", approval=None, approval_read=True, history=None, **extra):
+    category = {"Done": "Completed", "Removed": "Removed", "Doing": "InProgress"}.get(state)
+    return {"id": wid, "project": "web", "type": type_, "state": state, "state_category": category, "open": open_,
+            "created_date": created, "closed_date": closed, "resolved_date": None, "changed_date": closed or created,
+            "assigned_to": who(assigned) if assigned else None, "created_by": None, "changed_by": None,
+            "resolved_by": None, "closed_by": None, "state_history": history or [],
+            "approval": approval, "approval_read": approval_read, **extra}
+
+
+def approved(by=BOB, at="2026-10-01T10:00:00Z"):
+    return {"at": at, "by": who(by), "source": "comment", "state": None}
+
+
+def envelope(path: Path, name, results, partial=False, target=None) -> str:
+    path.write_text(json.dumps({"schema_version": "1.0",
+                                "metadata": {"fetcher_name": name, "run_id": "r1", "status": "success",
+                                             "target": target},
+                                "payload": {"metadata": {"partial_failure": partial}, "results": results,
+                                            "summary": {}}}))
+    return str(path)
+
+
+def inv(path, target=None):
+    return {"target": target, "status": "success", "exit_code": 0, "error": None, "error_code": None,
+            "files": [path]}
+
+
+def index(tmp_path, changes, items, *, types=("Task", "Hotfix"), window=WINDOW, partial=False,
+          change_files=None, work_files=None, work_items_in_manifest=True) -> Path:
+    change_invs = change_files or [inv(envelope(tmp_path / "changes.json", mod.CHANGES,
+                                                {"lookback_days": 14, "changes": changes}))]
+    work = envelope(tmp_path / "work.json", mod.WORK_ITEMS,
+                    {"window": window, "selection": {"work_item_types": list(types)}, "work_items": items},
+                    partial=partial, target={"organization_url": "https://dev.azure.com/contoso"})
+    path = tmp_path / "index.json"
+    path.write_text(json.dumps({"run_id": "r1", "inputs": {
+        mod.CHANGES: {"in_manifest": True, "invocations": change_invs},
+        mod.WORK_ITEMS: {"in_manifest": work_items_in_manifest,
+                         "invocations": (work_files or [inv(work)]) if work_items_in_manifest else []},
+    }}))
+    return path
+
+
+def compare(tmp_path, monkeypatch, changes, items, env=None, **kw):
+    for key, value in (env or {}).items():
+        monkeypatch.setenv(key, value)
+    results, summary = mod.check_with(mod.settings())(ci.load_inputs(index(tmp_path, changes, items, **kw)))
+    return {r["change_id"]: r for r in results}, summary
+
+
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch):
+    for env in ("CHANGE_RECORD_ORIGINS", "CHANGE_RECORD_EXCLUDED_CALLERS", "CHANGE_RECORD_ENVIRONMENTS",
+                "CHANGE_RECORD_TYPES", "CHANGE_RECORD_EMERGENCY_TYPES", "CHANGE_RECORD_PEOPLE",
+                "CHANGE_RECORD_HOURS_BEFORE", "CHANGE_RECORD_EMERGENCY_HOURS_BEFORE", "CHANGE_RECORD_HOURS_AFTER",
+                "CHANGE_RECORD_OPEN_ITEM_DAYS"):
+        monkeypatch.delenv(env, raising=False)
+
+
+def test_every_status_and_the_counts_a_validator_reads(tmp_path, monkeypatch):
+    changes = [
+        change("matched", "2026-10-02T12:00:00Z"),
+        change("ambiguous", "2026-10-12T12:00:00Z", by=BOB),
+        change("unmatched", "2026-10-20T12:00:00Z"),
+        change("excluded", "2026-10-02T12:00:00Z", by=SERVICE, by_type="Application", target=NIC),
+        change("application", "2026-10-02T12:00:00Z", by=APP, by_type="Application", client=".NET SDK"),
+        change("no_caller", "2026-10-02T12:00:00Z", by="Unspecified", by_type="Unspecified",
+               target=f"{RG}/Microsoft.Web/serverfarms/plan-1"),
+        change("deployment", "2026-10-02T12:00:00Z", origin="deployment"),
+    ]
+    items = [
+        item(1, approval=approved()),
+        item(2, assigned=BOB, created="2026-10-10T09:00:00Z", closed="2026-10-14T09:00:00Z"),
+        item(3, assigned=BOB, type_="Hotfix", created="2026-10-11T09:00:00Z", closed="2026-10-13T09:00:00Z",
+             approval=approved(ALICE)),
+    ]
+    results, summary = compare(tmp_path, monkeypatch, changes, items, env={"CHANGE_RECORD_EXCLUDED_CALLERS": SERVICE})
+
+    assert {cid: r["status"] for cid, r in results.items()} == {s: s for s in mod.STATUSES}
+    assert results["matched"]["work_items"] == [{
+        "organization": "https://dev.azure.com/contoso", "project": "web", "id": 1, "type": "Task",
+        "state": "Done", "approved": True, "approved_at": "2026-10-01T10:00:00Z"}]
+    assert results["matched"]["approved"] is True
+    assert [w["id"] for w in results["ambiguous"]["work_items"]] == [2, 3]
+    assert results["ambiguous"]["approved"] is False  # one of the two candidates was never approved
+    assert results["unmatched"]["work_items"] == [] and results["unmatched"]["approved"] is None
+    assert results["application"]["caller"] == APP
+    assert summary == {
+        "changes_read": 7, "change_lookback_days": 14, "origins": ["direct", "manual_deployment"],
+        "changes_checked": 6, "changes_excluded": 1, "changes_by_application": 1, "changes_needing_record": 4,
+        "changes_matched": 1, "changes_ambiguous": 1, "changes_unmatched": 1, "changes_without_caller": 1,
+        "changes_recorded": 2, "changes_without_record": 2, "changes_recorded_without_approval": 1,
+        "changes_without_approved_record": 3, "changes_approved_after_change": 0, "percent_recorded": 50,
+        "changes_needing_record_by_origin": {"direct": 4, "manual_deployment": 0},
+        "changes_without_record_by_origin": {"direct": 2, "manual_deployment": 0},
+        "changes_without_approved_record_by_origin": {"direct": 3, "manual_deployment": 0},
+        "changes_without_record_by_caller": {ALICE: 1, "unknown": 1},
+        "changes_by_application_by_caller": {APP: 1},
+        "changes_excluded_by_caller": {SERVICE: 1},
+        "record_types": ["hotfix", "task"], "record_types_not_selected": [], "record_work_items": 3,
+        "work_items_cover_changes": True,
+    }
+
+
+def test_a_callerless_row_takes_its_caller_from_the_same_resource(tmp_path, monkeypatch):
+    changes = [
+        change("named", "2026-10-02T12:00:00Z", by=SERVICE, by_type="Application", target=NIC),
+        # Same resource id in another case, 9 minutes later: the service's own change, so excluded too.
+        change("system", "2026-10-02T12:09:00Z", by="System", by_type="System", target=NIC.upper()),
+        change("too_late", "2026-10-02T12:11:00Z", by="System", by_type="System", target=NIC),
+        change("user_partner", "2026-10-02T13:00:00Z", target=SITE),
+        change("empty", "2026-10-02T13:05:00Z", by="", by_type="", target=SITE),
+    ]
+    results, summary = compare(tmp_path, monkeypatch, changes, [item(1)],
+                               env={"CHANGE_RECORD_EXCLUDED_CALLERS": SERVICE.upper()})
+    assert (results["system"]["status"], results["system"]["caller"], results["system"]["caller_from"]) == \
+        ("excluded", SERVICE, "same_resource")
+    assert results["too_late"]["status"] == "no_caller" and results["too_late"]["caller"] is None
+    assert (results["empty"]["status"], results["empty"]["caller"]) == ("matched", ALICE)
+    assert summary["changes_excluded_by_caller"] == {SERVICE: 2}
+
+
+def test_a_callerless_deployment_row_takes_its_caller_from_the_deployment(tmp_path, monkeypatch):
+    plan = f"{RG}/Microsoft.Web/serverfarms/plan-1"
+    changes = [
+        change("site", "2026-10-02T12:00:00Z", origin="manual_deployment", deployment="d1"),
+        # No named change to the plan itself: the deployment that made both names the person.
+        change("plan", "2026-10-02T12:01:00Z", by="System", by_type="System", target=plan,
+               origin="manual_deployment", deployment="d1"),
+        change("orphan", "2026-10-02T12:01:00Z", by="System", by_type="System", target=plan,
+               origin="manual_deployment", deployment="d2"),
+    ]
+    results, summary = compare(tmp_path, monkeypatch, changes, [item(1)])
+    assert (results["plan"]["status"], results["plan"]["caller"], results["plan"]["caller_from"]) == \
+        ("matched", ALICE, "deployment")
+    assert results["orphan"]["status"] == "no_caller"
+    assert summary["changes_needing_record_by_origin"] == {"direct": 0, "manual_deployment": 3}
+    assert summary["changes_without_record_by_origin"] == {"direct": 0, "manual_deployment": 1}
+
+
+@pytest.mark.parametrize(("at", "status"), [
+    ("2026-09-30T09:00:00Z", "matched"),     # 24 hours before the item was created
+    ("2026-09-30T08:59:59Z", "unmatched"),
+    ("2026-10-04T17:00:00Z", "matched"),     # 24 hours after it was closed
+    ("2026-10-04T17:00:01Z", "unmatched"),
+])
+def test_the_window_runs_from_hours_before_creation_to_hours_after_finishing(tmp_path, monkeypatch, at, status):
+    results, _ = compare(tmp_path, monkeypatch, [change("c", at)], [item(1)])
+    assert results["c"]["status"] == status
+
+
+@pytest.mark.parametrize(("type_", "env", "status"), [
+    ("Hotfix", {}, "matched"),                                                  # filed 70 hours after the change
+    ("Task", {}, "unmatched"),                                                  # only 24 hours for other types
+    ("Hotfix", {"CHANGE_RECORD_EMERGENCY_TYPES": "none"}, "unmatched"),
+    ("Task", {"CHANGE_RECORD_EMERGENCY_TYPES": "task"}, "matched"),
+    ("Hotfix", {"CHANGE_RECORD_EMERGENCY_HOURS_BEFORE": "48"}, "unmatched"),
+])
+def test_an_emergency_record_may_be_filed_after_the_change(tmp_path, monkeypatch, type_, env, status):
+    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-09-28T11:00:00Z")], [item(1, type_=type_)],
+                         env=env)
+    assert results["c"]["status"] == status
+
+
+def test_a_larger_hours_before_applies_to_an_emergency_record_too(tmp_path, monkeypatch):
+    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-09-27T15:00:00Z")], [item(1, type_="Hotfix")],
+                         env={"CHANGE_RECORD_HOURS_BEFORE": "96"})   # 90 hours before it was created
+    assert results["c"]["status"] == "matched"
+
+
+def test_an_emergency_record_filed_more_than_72_hours_later_does_not_count(tmp_path, monkeypatch):
+    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-09-28T08:59:59Z")], [item(1, type_="Hotfix")])
+    assert results["c"]["status"] == "unmatched"
+
+
+def test_the_window_hours_come_from_config(tmp_path, monkeypatch):
+    env = {"CHANGE_RECORD_HOURS_BEFORE": "0", "CHANGE_RECORD_HOURS_AFTER": "72"}
+    results, _ = compare(tmp_path, monkeypatch, [change("before", "2026-10-01T08:00:00Z"),
+                                                 change("after", "2026-10-06T16:00:00Z")], [item(1)], env=env)
+    assert (results["before"]["status"], results["after"]["status"]) == ("unmatched", "matched")
+
+
+@pytest.mark.parametrize(("at", "env", "status"), [
+    ("2026-10-27T00:00:00Z", {}, "matched"),
+    ("2026-10-31T09:00:00Z", {}, "matched"),        # 30 days after it was created
+    ("2026-10-31T09:00:01Z", {}, "unmatched"),
+    ("2026-10-31T09:00:01Z", {"CHANGE_RECORD_OPEN_ITEM_DAYS": "31"}, "matched"),
+])
+def test_an_open_item_or_one_in_an_unknown_state_covers_open_item_days_after_creation(
+        tmp_path, monkeypatch, at, env, status):
+    items = [item(1, state="Doing", open_=True, closed=None),
+             item(2, assigned=BOB, state="Initial scoping", open_=None, closed=None)]
+    results, _ = compare(tmp_path, monkeypatch, [change("a", at), change("b", at, by=BOB)], items, env=env)
+    assert results["a"]["status"] == results["b"]["status"] == status
+
+
+def test_an_open_items_window_runs_from_its_last_change(tmp_path, monkeypatch):
+    items = [item(1, state="Doing", open_=True, closed=None, changed_date="2026-10-20T00:00:00Z")]
+    results, _ = compare(tmp_path, monkeypatch, [change("in", "2026-11-19T00:00:00Z"),
+                                                 change("out", "2026-11-19T00:00:01Z")], items)
+    assert (results["in"]["status"], results["out"]["status"]) == ("matched", "unmatched")
+
+
+def test_a_finished_item_with_no_finish_date_is_capped_like_an_open_one(tmp_path, monkeypatch):
+    results, _ = compare(tmp_path, monkeypatch, [change("in", "2026-10-31T09:00:00Z"),
+                                                 change("out", "2026-10-31T09:00:01Z")],
+                         [item(1, closed=None, changed_date=None)])
+    assert (results["in"]["status"], results["out"]["status"]) == ("matched", "unmatched")
+
+
+def test_a_finished_item_without_a_closed_date_ends_when_it_entered_its_state(tmp_path, monkeypatch):
+    history = [{"at": "2026-10-01T09:00:00Z", "to": "To Do", "by": who(ALICE)},
+               {"at": "2026-10-02T09:00:00Z", "to": "Done", "by": who(ALICE)}]
+    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-10-03T10:00:00Z")],
+                         [item(1, closed=None, history=history, changed_date="2026-10-20T00:00:00Z")])
+    assert results["c"]["status"] == "unmatched"
+
+
+def test_removed_items_and_other_types_never_record_a_change(tmp_path, monkeypatch):
+    items = [item(1, state="Removed"), item(2, type_="Bug"), item(3, assigned=None)]
+    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], items)
+    assert results["c"]["status"] == "unmatched" and summary["record_work_items"] == 1
+
+
+@pytest.mark.parametrize(("field", "people", "status"), [
+    ("assigned_to", None, "matched"),       # the default: assignee, creator or closer
+    ("created_by", None, "matched"),
+    ("closed_by", None, "matched"),
+    ("history", None, "unmatched"),         # someone who only moved it between states
+    ("approver", None, "unmatched"),
+    ("history", "state_history", "matched"),
+    ("approver", "approver", "matched"),
+    ("closed_by", "assigned_to,changed_by", "unmatched"),
+])
+def test_which_people_count_comes_from_config(tmp_path, monkeypatch, field, people, status):
+    record = item(1, assigned=BOB)  # the caller is ALICE, named only in `field`
+    if field == "history":
+        record["state_history"] = [{"at": "2026-10-01T09:00:00Z", "to": "Done", "by": who(ALICE)}]
+    elif field == "approver":
+        record["approval"] = approved(ALICE)
+    else:
+        record[field] = who(ALICE)
+    env = {"CHANGE_RECORD_PEOPLE": people} if people else {}
+    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], [record], env=env)
+    assert results["c"]["status"] == status
+
+
+@pytest.mark.parametrize(("by", "by_type", "status"), [
+    (ALICE, None, "matched"),          # a named caller with no type is matched, not taken for an application
+    (BOB, None, "unmatched"),
+    (ALICE, "user", "matched"),
+    (APP, "servicePrincipal", "application"),
+])
+def test_a_caller_with_no_type_needs_a_record_and_the_type_is_read_without_regard_to_case(
+        tmp_path, monkeypatch, by, by_type, status):
+    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T09:00:00Z", by=by, by_type=by_type)],
+                               [item(1)])
+    assert results["c"]["status"] == status
+    assert summary["changes_needing_record"] == (status != "application")
+
+
+def test_logins_match_without_regard_to_case(tmp_path, monkeypatch):
+    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z", by=ALICE.upper())], [item(1)])
+    assert results["c"]["status"] == "matched"
+
+
+def test_record_types_default_to_the_fetchers_selection_and_config_overrides_them(tmp_path, monkeypatch):
+    items = [item(1, type_="Change Request")]
+    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], items,
+                               types=("Change Request",))
+    assert results["c"]["status"] == "matched" and summary["record_types"] == ["change request"]
+
+    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], items,
+                               types=("Change Request",), env={"CHANGE_RECORD_TYPES": "Hotfix"})
+    assert results["c"]["status"] == "unmatched"
+    assert summary["record_types"] == ["hotfix"] and summary["record_types_not_selected"] == ["hotfix"]
+
+
+def test_direct_edits_and_manual_deployments_are_checked_by_default_and_origins_come_from_config(
+        tmp_path, monkeypatch):
+    changes = [change("direct", "2026-10-02T12:00:00Z"),
+               change("manual", "2026-10-02T12:00:00Z", origin="manual_deployment"),
+               change("pipeline", "2026-10-02T12:00:00Z", origin="deployment")]
+    results, summary = compare(tmp_path, monkeypatch, changes, [item(1)])
+    assert set(results) == {"direct", "manual"} and summary["changes_checked"] == 2
+
+    results, summary = compare(tmp_path, monkeypatch, changes, [item(1)], env={"CHANGE_RECORD_ORIGINS": "direct"})
+    assert set(results) == {"direct"} and summary["changes_needing_record_by_origin"] == {"direct": 1}
+
+
+def test_environments_pick_which_change_targets_are_checked(tmp_path, monkeypatch):
+    files = [inv(envelope(tmp_path / f"{env}.json", mod.CHANGES, {"changes": [change(env, "2026-10-02T12:00:00Z")]},
+                          target={"environment": env}), {"environment": env}) for env in ("prod", "test")]
+    results, _ = compare(tmp_path, monkeypatch, [], [item(1)], change_files=files,
+                         env={"CHANGE_RECORD_ENVIRONMENTS": "PROD"})
+    assert set(results) == {"prod"}
+
+
+@pytest.mark.parametrize(("lookbacks", "environments", "expect"), [
+    ((14, 7), None, 7),           # the shortest window read
+    ((14, None), None, None),     # a file that doesn't say makes it unknown
+    ((14, 14), "staging", None),  # no target picked: nothing read
+])
+def test_change_lookback_days_is_the_shortest_window_read(tmp_path, monkeypatch, lookbacks, environments, expect):
+    files = [inv(envelope(tmp_path / f"c{n}.json", mod.CHANGES, {"lookback_days": days, "changes": []}),
+                 {"environment": "prod"}) for n, days in enumerate(lookbacks)]
+    env = {"CHANGE_RECORD_ENVIRONMENTS": environments} if environments else {}
+    _, summary = compare(tmp_path, monkeypatch, [], [], change_files=files, env=env)
+    assert summary["change_lookback_days"] == expect
+
+
+def test_each_work_items_file_names_its_own_organization_and_each_must_cover_the_changes(tmp_path, monkeypatch):
+    def work(name, org, items, start=WINDOW["start"]):
+        return inv(envelope(tmp_path / f"{name}.json", mod.WORK_ITEMS,
+                            {"window": {**WINDOW, "start": start}, "selection": {"work_item_types": ["Task"]},
+                             "work_items": items}, target={"organization_url": f"https://dev.azure.com/{org}"}))
+    changes = [change("a", "2026-10-02T09:00:00Z"), change("b", "2026-10-02T09:00:00Z", by=BOB)]
+    both = [work("one", "one", [item(1)]), work("two", "two", [item(2, assigned=BOB)])]
+    results, summary = compare(tmp_path, monkeypatch, changes, [], work_files=both)
+    assert [w["organization"] for w in results["a"]["work_items"]] == ["https://dev.azure.com/one"]
+    assert [w["organization"] for w in results["b"]["work_items"]] == ["https://dev.azure.com/two"]
+    assert summary["work_items_cover_changes"] is True
+    one_late = [both[0], work("late", "two", [item(2, assigned=BOB)], start="2026-10-02T00:00:00Z")]
+    _, summary = compare(tmp_path, monkeypatch, changes, [], work_files=one_late)
+    assert summary["work_items_cover_changes"] is False
+
+
+def test_work_items_that_start_too_late_do_not_cover_the_changes(tmp_path, monkeypatch):
+    window = {**WINDOW, "start": "2026-10-02T00:00:00Z"}
+    _, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], [item(1)], window=window)
+    assert summary["work_items_cover_changes"] is False
+
+
+def test_an_unread_approval_is_not_counted_as_approved(tmp_path, monkeypatch):
+    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")],
+                               [item(1, approval=None, approval_read=False)])
+    assert results["c"]["work_items"][0]["approved"] is None and results["c"]["approved"] is False
+    assert summary["changes_without_approved_record"] == 1
+
+
+@pytest.mark.parametrize(("type_", "approved_at", "late"), [
+    ("Task", "2026-10-02T08:00:00Z", False),     # approved before the change
+    ("Task", "2026-10-02T10:00:00Z", True),      # approved after it
+    ("Hotfix", "2026-10-02T10:00:00Z", False),   # an emergency record may be approved after the fact
+])
+def test_an_approval_after_the_change_is_counted_but_still_approved(tmp_path, monkeypatch, type_, approved_at, late):
+    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T09:00:00Z")],
+                               [item(1, type_=type_, approval=approved(at=approved_at))])
+    assert results["c"]["approved"] is True and results["c"]["approved_after_change"] is late
+    assert summary["changes_approved_after_change"] == late
+    assert summary["changes_without_approved_record"] == 0
+
+
+def test_nothing_to_check_reads_zero_not_null(tmp_path, monkeypatch):
+    _, summary = compare(tmp_path, monkeypatch, [], [])
+    assert summary["changes_needing_record"] == 0 and summary["percent_recorded"] == 0
+    assert summary["work_items_cover_changes"] is True
+
+
+# --------------------------------------------------------------------------- #
+# main(): the file, the status file and the shared input policy
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def run_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path / "evidence"))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+
+    def written():
+        status = tmp_path / "status.json"
+        out = tmp_path / "evidence" / mod.OUTPUT
+        return (json.loads(out.read_text()) if out.exists() else None,
+                json.loads(status.read_text()) if status.exists() else None)
+    return written
+
+
+def test_main_writes_the_verdicts(tmp_path, monkeypatch, run_env):
+    monkeypatch.setenv(ci.INPUTS_ENV, str(index(tmp_path, [change("c", "2026-10-02T12:00:00Z")], [item(1)])))
+    assert mod.main() == 0
+    payload, status = run_env()
+    assert status is None and payload["summary"]["changes_matched"] == 1 and payload["summary"]["inputs_complete"]
+
+
+def test_a_partial_input_is_compared_and_reported_as_input_failed(tmp_path, monkeypatch, run_env):
+    monkeypatch.setenv(ci.INPUTS_ENV, str(index(tmp_path, [change("c", "2026-10-02T12:00:00Z")], [item(1)],
+                                                partial=True)))
+    assert mod.main() == 1
+    payload, status = run_env()
+    assert payload["summary"]["changes_matched"] == 1 and payload["summary"]["inputs_complete"] is False
+    assert status["code"] == "input_failed" and mod.WORK_ITEMS in status["error"]
+
+
+def test_a_missing_input_nulls_every_count(tmp_path, monkeypatch, run_env):
+    monkeypatch.setenv(ci.INPUTS_ENV, str(index(tmp_path, [change("c", "2026-10-02T12:00:00Z")], [],
+                                                work_items_in_manifest=False)))
+    assert mod.main() == 1
+    payload, status = run_env()
+    assert payload["results"] == [] and set(payload["summary"]) == {*mod.SUMMARY_KEYS, "inputs_complete"}
+    assert all(payload["summary"][k] is None for k in mod.SUMMARY_KEYS)
+    assert status["code"] == "input_failed"
+
+
+def _staged_input(root: Path, short: str, results) -> None:
+    d = root / "fetchers" / "azure" / short
+    d.mkdir(parents=True)
+    (d / "fetcher.yaml").write_text(
+        f"name: azure_{short}\nversion: 0.1.0\ndescription: d\ncategory: azure\n"
+        "runtime:\n  type: python\n  entry: fetcher.py\n"
+        f"output:\n  type: json\n  path: azure_{short}.json\nsecrets: []\n"
+        f"evidence_set:\n  reference_id: EVD-{short.upper()}\n  name: {short}\n")
+    body = json.dumps({"metadata": {"partial_failure": False, "api_failures": []}, "results": results})
+    (d / "fetcher.py").write_text(
+        f"import os, pathlib\npathlib.Path(os.environ['EVIDENCE_DIR'], 'azure_{short}.json').write_text({body!r})\n")
+
+
+def test_the_runner_runs_it_after_its_inputs_with_its_entrys_config(tmp_path):
+    from framework import api
+
+    for sub in ("framework/schemas", "fetchers/_lib", "comparators/_lib", "comparators/azure/change_work_items"):
+        shutil.copytree(REPO_ROOT / sub, tmp_path / sub)
+    _staged_input(tmp_path, "change_provenance", {"changes": [
+        change("person", "2026-10-02T12:00:00Z"),
+        change("service", "2026-10-02T12:00:00Z", by=SERVICE, by_type="Application", target=NIC)]})
+    _staged_input(tmp_path, "devops_work_items", {"window": WINDOW, "selection": {"work_item_types": ["Task"]},
+                                                  "work_items": [item(1)]})
+    m = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "azure_change_work_items", "config": {"excluded_callers": SERVICE}},
+        {"use": mod.CHANGES}, {"use": mod.WORK_ITEMS}]}}
+
+    assert api.validate(m, tmp_path) == []
+    summary = api.run(m, tmp_path)
+    assert summary["ok"], summary
+    out = json.loads((Path(summary["run_dir"]) / mod.OUTPUT).read_text())
+    assert [i["fetcher_name"] for i in out["metadata"]["inputs"]] == [mod.CHANGES, mod.WORK_ITEMS]
+    assert {r["change_id"]: r["status"] for r in out["payload"]["results"]} == {"person": "matched",
+                                                                                 "service": "excluded"}
+    assert out["payload"]["summary"]["inputs_complete"] is True
+
+
+@pytest.mark.parametrize(("env", "value", "message"), [
+    ("CHANGE_RECORD_PEOPLE", "assigned_to,owner", "['owner']"),
+    ("CHANGE_RECORD_PEOPLE", " , ", "nothing"),
+    ("CHANGE_RECORD_ORIGINS", "direct,drect", "['drect']"),
+    ("CHANGE_RECORD_ORIGINS", ",", "nothing"),
+    ("CHANGE_RECORD_HOURS_BEFORE", "-1", "whole number"),
+    ("CHANGE_RECORD_HOURS_AFTER", "a day", "whole number"),
+    ("CHANGE_RECORD_OPEN_ITEM_DAYS", "30d", "whole number of days"),
+])
+def test_a_bad_setting_is_bad_config(tmp_path, monkeypatch, run_env, env, value, message):
+    monkeypatch.setenv(ci.INPUTS_ENV, str(index(tmp_path, [], [])))
+    monkeypatch.setenv(env, value)
+    assert mod.main() == 1
+    payload, status = run_env()
+    assert payload is None and status["code"] == "bad_config" and env in status["error"] and message in status["error"]
