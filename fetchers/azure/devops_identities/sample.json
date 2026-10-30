@@ -1,0 +1,235 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_devops_identities",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-05-08",
+  "reviewed": true,
+  "collections": [
+    {
+      "path": "results.groups[]",
+      "records": 4,
+      "fields": {
+        "computed": 4,
+        "descriptor": 4,
+        "direct_members": 4,
+        "display_name": 4,
+        "entra_group": 4,
+        "members_read": 4,
+        "name": 4,
+        "origin": 4,
+        "privileged": 4,
+        "project": 2
+      }
+    },
+    {
+      "path": "results.identities[]",
+      "records": 4,
+      "fields": {
+        "access_level": 2,
+        "application_id": 1,
+        "can_sign_in": 2,
+        "date_created": 2,
+        "days_since_last_access": 1,
+        "deleted_in_origin": 4,
+        "descriptor": 4,
+        "direct_groups": 4,
+        "display_name": 4,
+        "groups": 4,
+        "guest": 2,
+        "inactive": 2,
+        "kind": 4,
+        "last_accessed": 1,
+        "license_status": 2,
+        "license_type": 2,
+        "login": 2,
+        "meta_type": 3,
+        "never_accessed": 2,
+        "origin": 4,
+        "origin_id": 4,
+        "principal_name": 4,
+        "privileged_groups": 1
+      }
+    },
+    {
+      "path": "results.privileged_groups[]",
+      "records": 2,
+      "fields": {
+        "computed": 2,
+        "descriptor": 2,
+        "display_name": 2,
+        "effective_members": 2,
+        "entra_group": 2,
+        "entra_groups": 0,
+        "members_complete": 2,
+        "name": 2,
+        "origin": 2,
+        "privileged": 2,
+        "project": 1
+      }
+    },
+    {
+      "path": "results.privileged_groups[].effective_members[]",
+      "records": 2,
+      "fields": {
+        "descriptor": 2,
+        "direct": 2,
+        "guest": 2,
+        "inactive": 2,
+        "kind": 2,
+        "name": 2,
+        "through_entra_group": 2,
+        "via": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "auth_mode": "entra",
+      "collecting_identity": {
+        "display_name": "Evidence Reader",
+        "id": "00000000-0000-4000-8000-111111111111",
+        "login": "user1"
+      },
+      "datetime": "2026-05-08T12:12:46Z",
+      "organization": "example-organization",
+      "organization_url": "https://dev.azure.com/example-organization",
+      "partial_failure": false,
+      "projects_filter": null
+    },
+    "results": {
+      "groups": [
+        {
+          "computed": false,
+          "descriptor": "vssgp.Uy0xLTktMTU1MTM3NDI0NS0xMTExMTExMTExLTIyMjIyMjIyMjItMzMzMzMzMzMzMy00MDAwMDAwMDAyLTEtMC0wLTAtMg",
+          "direct_members": 1,
+          "display_name": "Project Administrators",
+          "entra_group": false,
+          "members_read": true,
+          "name": "[Project1]\\Project Administrators",
+          "origin": "vsts",
+          "privileged": true,
+          "project": "Project1"
+        }
+      ],
+      "identities": [
+        {
+          "access_level": "Visual Studio Professional subscription",
+          "application_id": null,
+          "can_sign_in": true,
+          "date_created": "2019-06-23T17:02:05Z",
+          "days_since_last_access": 0,
+          "deleted_in_origin": false,
+          "descriptor": "aad.MDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA1",
+          "direct_groups": [
+            "[Project1]\\Project1 Team",
+            "[Project1]\\Project Administrators",
+            "[Project2]\\Project2 Team"
+          ],
+          "display_name": "Person1",
+          "groups": [
+            "[Project1]\\Project1 Team",
+            "[Project1]\\Contributors",
+            "[Project1]\\Project Administrators"
+          ],
+          "guest": false,
+          "inactive": false,
+          "kind": "user",
+          "last_accessed": "2026-05-08T11:21:22Z",
+          "license_status": "active",
+          "license_type": "none",
+          "login": "user1@example.com",
+          "meta_type": "member",
+          "never_accessed": false,
+          "origin": "aad",
+          "origin_id": "00000000-0000-4000-8000-222222222222",
+          "principal_name": "user1@example.com",
+          "privileged_groups": [
+            "[Project1]\\Project Administrators",
+            "[Project2]\\Project Administrators",
+            "[Project3]\\Project Administrators"
+          ]
+        }
+      ],
+      "inactivity_threshold_days": 90,
+      "privileged_groups": [
+        {
+          "computed": false,
+          "descriptor": "vssgp.Uy0xLTktMTU1MTM3NDI0NS0xMTExMTExMTExLTIyMjIyMjIyMjItMzMzMzMzMzMzMy00MDAwMDAwMDAyLTEtMC0wLTAtMg",
+          "display_name": "Project Administrators",
+          "effective_members": [
+            {
+              "descriptor": "aad.MDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA1",
+              "direct": true,
+              "guest": false,
+              "inactive": false,
+              "kind": "user",
+              "name": "user1@example.com",
+              "through_entra_group": false,
+              "via": [
+                "[Project1]\\Project Administrators"
+              ]
+            }
+          ],
+          "entra_group": false,
+          "entra_groups": [],
+          "members_complete": true,
+          "name": "[Project1]\\Project Administrators",
+          "origin": "vsts",
+          "privileged": true,
+          "project": "Project1"
+        }
+      ]
+    },
+    "summary": {
+      "inactivity_threshold_days": 90,
+      "users_total": 2,
+      "guest_users": 0,
+      "users_by_access_level": {
+        "Stakeholder": 1,
+        "Visual Studio Professional subscription": 1
+      },
+      "users_by_origin": {
+        "aad": 2
+      },
+      "users_with_sign_in_disabled": 0,
+      "users_deleted_in_origin": [],
+      "service_principals_total": 1,
+      "service_identities_total": 1,
+      "groups_total": 4,
+      "entra_groups_total": 1,
+      "groups_not_read": [],
+      "last_access_collected": true,
+      "inactive_users": [
+        "user2@example.com"
+      ],
+      "users_never_accessed": [
+        "user2@example.com"
+      ],
+      "privileged_groups": 2,
+      "privileged_groups_not_fully_read": [
+        "[example-organization]\\Project Collection Administrators"
+      ],
+      "privileged_members_by_group": {
+        "[example-organization]\\Project Collection Administrators": 1,
+        "[Project1]\\Project Administrators": 1
+      },
+      "privileged_identities": 1,
+      "privileged_users": [
+        "user1@example.com"
+      ],
+      "privileged_service_principals": [],
+      "privileged_identities_only_through_entra_groups": 0,
+      "entra_groups_granting_privilege": [],
+      "inactive_privileged_users": [],
+      "guest_privileged_users": [],
+      "not_collected": {
+        "time_bound_access": "Azure DevOps group memberships never expire; access is time-bound only where the Entra group holding it is PIM-managed, which the Entra PIM evidence shows.",
+        "entra_group_members": "Members of an Entra group are those Azure DevOps has seen (usually after they sign in); the Entra group's full membership is in Entra ID.",
+        "permissions": "What each group may do: see the Azure DevOps permissions evidence.",
+        "service_principal_last_access": "When a service principal or managed identity last used the organization."
+      }
+    }
+  }
+}
