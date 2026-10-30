@@ -1,0 +1,90 @@
+name: github_deployment_controls
+version: 0.1.0
+description: >-
+  Deployment controls and history: each environment's required reviewers,
+  self-review prevention, wait timer, branch policy, custom protection rules
+  and admin bypass, and every deployment to a production environment in the
+  window with its ref, creator, the app that made it and its latest status.
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: github_deployment_controls.json
+  aggregation: per_target
+
+config_schema:
+  production_environments:
+    type: string
+    required: false
+    default: prod*,prd*,live
+    env: GITHUB_PRODUCTION_ENVIRONMENTS
+    description: >-
+      Comma-separated, case-insensitive globs naming production environments.
+      GitHub has no production flag on an environment.
+  days_back:
+    type: integer
+    required: false
+    default: 30
+    env: GITHUB_DEPLOYMENT_DAYS_BACK
+    description: Days of production deployment history to collect (1-366).
+  max_deployments:
+    type: integer
+    required: false
+    default: 500
+    env: GITHUB_MAX_DEPLOYMENTS
+    description: >-
+      Most deployments read per production environment; more in the window
+      fails the run rather than cutting the history short.
+
+secrets: []
+
+ksis:
+  - KSI-CMT-RMV
+  - KSI-CMT-VTD
+  - KSI-CMT-LMC
+
+evidence_set:
+  reference_id: EVD-GITHUB-DEPLOYMENT-CONTROLS
+  name: GitHub Deployment Controls
+  instructions: >-
+    Script: github/deployment_controls/fetcher.py. Per repository, every environment with its required reviewers, self-review
+    prevention, wait timer, deployment branch policy and allowed refs, custom
+    protection rules and admin bypass; for production environments (by name),
+    the deployments in the window with ref, commit, creator, whether GitHub
+    Actions made it, and latest status.

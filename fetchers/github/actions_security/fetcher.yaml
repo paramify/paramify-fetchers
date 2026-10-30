@@ -1,0 +1,81 @@
+name: github_actions_security
+version: 0.1.0
+description: >-
+  GitHub Actions supply-chain controls: which actions may run and whether
+  they must be pinned to a commit, the workflow token's default access, fork
+  pull request approval, self-hosted runners, and what every workflow file on
+  the default branch does (unpinned actions, missing permissions blocks,
+  privileged triggers that check out pull request code, untrusted input in
+  scripts, OIDC).
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: github_actions_security.json
+  aggregation: per_target
+
+config_schema:
+  include_self_hosted_runners:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_INCLUDE_SELF_HOSTED_RUNNERS
+    description: >-
+      List self-hosted runners. The organization's runners need the
+      Self-hosted runners (organization) read permission; set false to run
+      without it, and runner fields are null.
+
+secrets: []
+
+ksis:
+  - KSI-SCR-MIT
+  - KSI-CMT-VTD
+  - KSI-IAM-SNU
+  - KSI-CNA-MAT
+
+evidence_set:
+  reference_id: EVD-GITHUB-ACTIONS-SECURITY
+  name: GitHub Actions Security
+  instructions: >-
+    Script: github/actions_security/fetcher.py. Organization and repository Actions policy (allowed actions, SHA pinning
+    required, workflow token default and PR approval, fork PR approval,
+    retention, self-hosted runners), and per workflow file on the default
+    branch: action references not pinned to a full commit SHA, permissions
+    blocks, privileged triggers that check out pull request code, untrusted
+    event fields in scripts, OIDC, and self-hosted runner use.

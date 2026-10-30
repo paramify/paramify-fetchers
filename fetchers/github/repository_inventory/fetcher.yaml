@@ -1,0 +1,78 @@
+name: github_repository_inventory
+version: 0.1.0
+description: >-
+  Every repository in a GitHub organization as one Inventory record: its
+  visibility, archive and fork state, default branch, language, which code
+  security features are on, and the organization's custom property values.
+category: github
+
+kind: inventory
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: github_repository_inventory.json
+  aggregation: per_target
+
+config_schema:
+  include_custom_properties:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_INCLUDE_CUSTOM_PROPERTIES
+    description: >-
+      Add one property_<name> field per organization custom property. Needs
+      the organization's Custom properties read permission; false skips it.
+
+secrets: []
+
+ksis:
+  - KSI-PIY-GIV
+
+evidence_set:
+  reference_id: EVD-GITHUB-REPOSITORY-INVENTORY
+  name: GitHub Repository Inventory
+  instructions: >-
+    Script: github/repository_inventory/fetcher.py. Lists the organization's repositories (checked against
+    the organization's own count) and its custom property values; one record
+    per repository, keyed by its numeric-id API URL. Archived repositories
+    are left out unless include_archived is true. A run that could not collect
+    every repository writes no records, and the uploader does not send it.
+  description: >-
+    Every source code repository in the GitHub organization, for Paramify's
+    Inventory.

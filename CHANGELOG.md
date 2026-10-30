@@ -12,6 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **GitHub fetchers (15).** Branch protection, pull request reviews and
+  checks, Actions security, release integrity, deployment controls,
+  Dependabot, code scanning and secret scanning alerts, vulnerability
+  disclosure, organization security settings, access review, non-user
+  credentials, the audit log (Enterprise Cloud), significant change
+  notifications, and `github_repository_inventory`. One target per
+  organization, on github.com, GHE.com or GitHub Enterprise Server. See
+  `fetchers/github/README.md`.
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are

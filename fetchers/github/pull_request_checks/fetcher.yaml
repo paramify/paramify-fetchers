@@ -1,0 +1,89 @@
+name: github_pull_request_checks
+version: 0.1.0
+description: >-
+  How changes reached each repository's default branch in a recent window:
+  every merged pull request with its approvals and check results, and every
+  commit that arrived without a pull request.
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 3600
+
+output:
+  type: json
+  path: github_pull_request_checks.json
+  aggregation: per_target
+
+config_schema:
+  days_back:
+    type: integer
+    required: false
+    default: 30
+    env: GITHUB_PR_DAYS_BACK
+    description: How many days of merges and pushes to collect.
+  max_pull_requests:
+    type: integer
+    required: false
+    default: 2000
+    env: GITHUB_PR_MAX_PER_REPOSITORY
+    description: >-
+      Merged pull requests per repository before the run fails as truncated
+      rather than publishing part of the window. Read 50 to a GraphQL page.
+  max_commits:
+    type: integer
+    required: false
+    default: 5000
+    env: GITHUB_MAX_COMMITS_PER_REPOSITORY
+    description: Default-branch commits per repository before the run fails as truncated.
+
+secrets: []
+
+ksis:
+  - KSI-CMT-LMC
+  - KSI-CMT-VTD
+
+evidence_set:
+  reference_id: EVD-GITHUB-PR-CHECKS
+  name: GitHub Pull Request Reviews and Checks
+  instructions: >-
+    Script: github/pull_request_checks/fetcher.py. Per repository, pull
+    requests merged into the default branch within days_back, each with
+    approvals (latest review per reviewer before the merge, author excluded,
+    bots marked), who merged it, labels, the outcome of every check and commit
+    status on the merged head, and which failed or missing checks the branch
+    requires at collection time. `direct_pushes` lists default-branch commits
+    no merged pull request brought in. A window larger than the configured
+    maximums fails as truncated.

@@ -263,7 +263,7 @@ collection is still readable.
 
 ## Vendored schema
 
-[`schemas/fedramp_scn_2026-06-24.json`](schemas/fedramp_scn_2026-06-24.json) is
+[`fetchers/_lib/schemas/fedramp_scn_2026-06-24.json`](../../_lib/schemas/fedramp_scn_2026-06-24.json) is
 FedRAMP's schema with one edit: the remote `$ref` for
 `certificationPackageOverviewUri` (into
 `fedramp-common-definitions-schema-2026-06-24.json`) is inlined verbatim, so

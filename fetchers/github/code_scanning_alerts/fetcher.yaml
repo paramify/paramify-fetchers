@@ -1,0 +1,74 @@
+name: github_code_scanning_alerts
+version: 0.1.0
+description: >-
+  Code scanning for every repository: whether the default branch is analysed,
+  by which tools and how recently, and every alert with its severity, age and
+  outcome.
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: github_code_scanning_alerts.json
+  aggregation: per_target
+
+config_schema:
+  max_analysis_age_days:
+    type: integer
+    required: false
+    default: 7
+    env: GITHUB_CODE_SCANNING_MAX_AGE_DAYS
+    description: >-
+      A default branch whose latest analysis is older than this is reported in
+      repositories_analysis_stale.
+
+secrets: []
+
+ksis:
+  - KSI-SVC-EIS
+  - KSI-MLA-EVC
+
+evidence_set:
+  reference_id: EVD-GITHUB-CODE-SCANNING
+  name: GitHub Code Scanning Alerts
+  instructions: >-
+    Script: github/code_scanning_alerts/fetcher.py. Per repository, code scanning analyses on the default branch (any tool,
+    default setup or uploaded SARIF), the latest analysis time, and every
+    alert with security severity, age while open and days to close.
+    Repositories never analysed are in repositories_not_analysed; those whose
+    latest analysis is older than max_analysis_age_days in
+    repositories_analysis_stale.

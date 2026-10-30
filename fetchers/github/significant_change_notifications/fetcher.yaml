@@ -1,0 +1,132 @@
+name: github_significant_change_notifications
+version: 0.1.0
+description: >-
+  FedRAMP Significant Change Notifications from pull requests flagged as
+  significant changes (a ticked "Significant Change — SCN required" checkbox
+  or a configured label). Each flagged pull request's Significant Change
+  section becomes one SCN object, validated against FedRAMP's SCN schema
+  2026-06-24 and against SCN-CSO-INF. Uses the same parser as
+  gitlab_significant_change_notifications, so one template yields the same
+  notification on either platform.
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: github_significant_change_notifications.json
+  aggregation: per_target
+
+config_schema:
+  days_back:
+    type: integer
+    required: false
+    default: 30
+    env: GITHUB_SCN_DAYS_BACK
+    description: >-
+      Days of pull request activity to scan (1-366). Cover the notification
+      cadence with margin: SCN-ADP-NTF allows 10 business days after an
+      adaptive change finishes, so a 30-day window run weekly leaves no gap.
+  state:
+    type: string
+    required: false
+    default: merged
+    env: GITHUB_SCN_STATE
+    description: >-
+      Pull requests to scan: merged, open, closed (unmerged) or all. A
+      transformative change needs notice before it ships; scan open pull
+      requests for those.
+  marker_label:
+    type: string
+    required: false
+    env: GITHUB_SCN_MARKER_LABEL
+    description: >-
+      A label (e.g. significant-change) that flags a pull request as an
+      alternative to the ticked checkbox.
+  section_heading:
+    type: string
+    required: false
+    default: Significant Change
+    env: GITHUB_SCN_SECTION_HEADING
+    description: Markdown heading whose body holds the SCN content.
+  strict:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_SCN_STRICT
+    description: >-
+      Fail the run when a flagged pull request does not produce a
+      schema-valid SCN. The evidence is written either way.
+  require_scn_cso_inf_complete:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_SCN_REQUIRE_COMPLETE
+    description: >-
+      Fail the run when a notification omits what SCN-CSO-INF requires
+      (impacted controls, planned dates, approver name and title), which
+      FedRAMP's schema itself does not enforce.
+  fedramp_cert_package_uri:
+    type: string
+    required: false
+    env: FEDRAMP_CERT_PACKAGE_URI
+    description: >-
+      The Certification Package Overview URI every notification cites.
+      Overrides cert_package_uri for a run targeting a different service
+      offering. One of the two must be set.
+  cert_package_uri:
+    type: string
+    required: false
+    env: PARAMIFY_CERT_PACKAGE_URI
+    description: >-
+      Shared fallback for the Certification Package Overview URI, the same
+      setting the paramify VER fetchers and the GitLab SCN fetcher read.
+
+secrets: []
+
+ksis:
+  - KSI-CMT-LMC
+
+evidence_set:
+  reference_id: EVD-GITHUB-SCN
+  name: GitHub FedRAMP Significant Change Notifications
+  instructions: >-
+    Script: github/significant_change_notifications/fetcher.py. Pull requests updated in the window, per repository, newest first over
+    GraphQL; those with a ticked "Significant Change — SCN required" checkbox
+    or the marker label have their Significant Change section parsed into a
+    FedRAMP SCN, validated against schema 2026-06-24 and checked against
+    SCN-CSO-INF, with the pull request's author, approvers and merge commit.
