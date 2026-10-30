@@ -1,9 +1,21 @@
 name: datadog_log_indexes
-version: 0.1.0
+version: 0.2.0
 description: Retrieves Datadog log index retention configurations to prove what log data is retained and for how long.
 category: datadog
 
 supports_targets: false
+
+config_schema:
+  audit_indexes:
+    type: string
+    required: false
+    env: DATADOG_AUDIT_INDEXES
+    description: >
+      Names of the log indexes that hold audit logs, comma- or space-separated.
+      Datadog has no field that marks an index as an audit index, so the
+      audit-retention summary counts every index unless this is set. Set it to
+      leave short-lived indexes (debug, sampling) out of the audit figures. A
+      name with no matching index is listed in summary.audit_indexes_not_found.
 
 runtime:
   type: python
@@ -27,4 +39,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-LOG-INDEXES
   name: Datadog Log Indexes
-  instructions: 'Script: datadog/log_indexes/fetcher.py. Calls GET /api/v1/logs/config/indexes. Extracts index name, retention days, and filter query. Writes JSON index config list.'
+  instructions: 'Script: datadog/log_indexes/fetcher.py. Calls GET /api/v1/logs/config/indexes. Extracts index name, retention days, filter query, daily limit and tags. Reports every index''s retention; the audit-index figures cover the indexes named in DATADOG_AUDIT_INDEXES, or every index when it is not set (summary.audit_index_selection says which). Writes JSON index config list.'

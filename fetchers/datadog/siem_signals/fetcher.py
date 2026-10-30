@@ -82,15 +82,46 @@ def fetch_all_signals(
     )
 
 
+def _dict(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _first(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def extract_signal_fields(signal: Dict[str, Any]) -> Dict[str, Any]:
-    attrs = signal.get("attributes", {})
+    """Read one signal from POST /api/v2/security_monitoring/signals/search.
+
+    A search result keeps the signal's own attributes one level down, in
+    ``attributes.attributes``; ``attributes.custom`` holds the same data for a
+    single-signal read. In both, the signal's ``status`` is its severity (info,
+    low, medium, high, critical), ``workflow.rule`` names the rule that raised
+    it, and ``workflow.triage.state`` is where review stands (open,
+    under_review, archived). Each value is looked up in that order, then at the
+    top of ``attributes``.
+    """
+    outer = _dict(signal.get("attributes"))
+    inner = _dict(outer.get("attributes"))
+    custom = _dict(outer.get("custom")) or _dict(inner.get("custom"))
+    layers = [inner, custom, outer]
+
+    workflows = [_dict(layer.get("workflow")) for layer in layers]
+    rules = [_dict(w.get("rule")) for w in workflows] + [_dict(outer.get("rule"))]
+    triages = [_dict(w.get("triage")) for w in workflows]
+
     return {
         "id": signal.get("id"),
-        "status": attrs.get("status"),
-        "severity": attrs.get("severity"),
-        "timestamp": attrs.get("timestamp"),
-        "rule_name": attrs.get("rule", {}).get("name"),
-        "rule_id": attrs.get("rule", {}).get("id"),
+        # Triage state: open, under_review or archived.
+        "status": _first(*(t.get("state") for t in triages)),
+        # The signal's status attribute is its severity.
+        "severity": _first(*(layer.get("status") for layer in layers), outer.get("severity")),
+        "timestamp": _first(outer.get("timestamp"), inner.get("timestamp")),
+        "rule_name": _first(*(r.get("name") for r in rules)),
+        "rule_id": _first(*(r.get("id") for r in rules)),
     }
 
 

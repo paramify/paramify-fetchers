@@ -76,9 +76,31 @@ def fetch_all_rules(base_url: str, headers: Dict[str, str]) -> List[Dict[str, An
     )
 
 
+def _extract_query(query: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "name": query.get("name"),
+        "query": query.get("query"),
+        "data_source": query.get("dataSource"),
+        "aggregation": query.get("aggregation"),
+        "group_by_fields": query.get("groupByFields") or [],
+        "distinct_fields": query.get("distinctFields") or [],
+        "metrics": query.get("metrics") or ([query["metric"]] if query.get("metric") else []),
+    }
+
+
+def _extract_case(case: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "name": case.get("name"),
+        "status": case.get("status"),
+        "condition": case.get("condition"),
+        "notifications": case.get("notifications") or [],
+    }
+
+
 def extract_rule_fields(rule: Dict[str, Any]) -> Dict[str, Any]:
-    cases = rule.get("cases", [])
+    cases = rule.get("cases") or []
     severities = [c.get("status", "").lower() for c in cases if c.get("status")]
+    options = rule.get("options") or {}
     return {
         "id": rule.get("id"),
         "name": rule.get("name"),
@@ -89,7 +111,41 @@ def extract_rule_fields(rule: Dict[str, Any]) -> Dict[str, Any]:
         "updatedAt": rule.get("updatedAt"),
         "hasExtendedTitle": rule.get("hasExtendedTitle"),
         "severities": severities,
+        # How the rule detects: options.detectionMethod (threshold, new_value,
+        # anomaly_detection, impossible_travel, ...), plus what it searches and
+        # the conditions that raise a signal.
+        "detection_method": options.get("detectionMethod"),
+        "queries": [_extract_query(q) for q in rule.get("queries") or [] if isinstance(q, dict)],
+        "cases": [_extract_case(c) for c in cases if isinstance(c, dict)],
     }
+
+
+def parse_rule_time(value: Any) -> Optional[datetime]:
+    """createdAt and updatedAt are epoch milliseconds (int64) in the v2 API.
+    An ISO 8601 string is also accepted."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def count_rules_updated_since(rules: List[Dict[str, Any]], cutoff: datetime) -> int:
+    count = 0
+    for r in rules:
+        updated = parse_rule_time(r.get("updatedAt"))
+        if updated is not None and updated >= cutoff:
+            count += 1
+    return count
 
 
 def get_siem_detection_rules() -> Dict[str, Any]:
@@ -112,16 +168,7 @@ def get_siem_detection_rules() -> Dict[str, Any]:
                 severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-        rules_updated_recently = 0
-        for r in extracted:
-            updated_at = r.get("updatedAt")
-            if updated_at:
-                try:
-                    dt = datetime.strptime(updated_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-                    if dt >= cutoff:
-                        rules_updated_recently += 1
-                except ValueError:
-                    pass
+        rules_updated_recently = count_rules_updated_since(extracted, cutoff)
 
         return with_paging_status({
             "status": "success",
@@ -132,7 +179,6 @@ def get_siem_detection_rules() -> Dict[str, Any]:
                 "total_rules": len(extracted),
                 "enabled_rules": len(enabled_rules),
                 "disabled_rules": len(disabled_rules),
-                "rules_never_triggered_count": 0,
                 "rules_updated_last_90_days": rules_updated_recently,
                 "rules_by_type": type_counts,
                 "rules_by_severity": severity_counts,

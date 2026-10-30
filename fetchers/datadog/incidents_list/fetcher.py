@@ -79,34 +79,74 @@ def fetch_all_incidents(
     )
 
 
-def parse_resolution_hours(detected: Optional[str], resolved: Optional[str]) -> Optional[float]:
-    if not detected or not resolved:
+def parse_timestamp(value: Optional[str]) -> Optional[datetime]:
+    """Parse a Datadog ISO 8601 timestamp, with or without fractional seconds.
+
+    The v2 incidents API returns values such as ``2019-09-19T10:00:00.000Z``.
+    A value with no offset is read as UTC.
+    """
+    if not value or not isinstance(value, str):
         return None
     try:
-        fmt = "%Y-%m-%dT%H:%M:%SZ"
-        d = datetime.strptime(detected, fmt)
-        r = datetime.strptime(resolved, fmt)
-        delta = r - d
-        return round(delta.total_seconds() / 3600, 2)
-    except Exception:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
         return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def parse_resolution_hours(detected: Optional[str], resolved: Optional[str]) -> Optional[float]:
+    d = parse_timestamp(detected)
+    r = parse_timestamp(resolved)
+    if d is None or r is None:
+        return None
+    return round((r - d).total_seconds() / 3600, 2)
+
+
+def _incident_state(attrs: Dict[str, Any]) -> Optional[str]:
+    """The incident's state (for example active, stable or resolved).
+
+    The v2 API reports it as ``attributes.state``. Older responses carried it
+    only as the ``state`` entry of ``attributes.fields``.
+    """
+    state = attrs.get("status") or attrs.get("state")
+    if state:
+        return state
+    field = (attrs.get("fields") or {}).get("state")
+    if isinstance(field, dict):
+        value = field.get("value")
+        return value if isinstance(value, str) else None
+    return None
+
+
+def _related_id(container: Dict[str, Any], key: str) -> Optional[str]:
+    rel = container.get(key)
+    if not isinstance(rel, dict):
+        return None
+    data = rel.get("data")
+    return data.get("id") if isinstance(data, dict) else None
 
 
 def extract_incident_fields(incident: Dict[str, Any]) -> Dict[str, Any]:
-    attrs = incident.get("attributes", {})
+    attrs = incident.get("attributes") or {}
+    relationships = incident.get("relationships") or {}
     detected = attrs.get("detected")
     resolved = attrs.get("resolved")
+    # The commander is a relationship (relationships.commander_user) in the v2
+    # API; attributes.commander is kept only as a fallback for older payloads.
+    commander_id = _related_id(relationships, "commander_user") or _related_id(attrs, "commander")
     return {
         "id": incident.get("id"),
         "title": attrs.get("title"),
         "severity": attrs.get("severity"),
-        "status": attrs.get("status"),
+        "status": _incident_state(attrs),
         "detected": detected,
         "resolved": resolved,
         "resolution_hours": parse_resolution_hours(detected, resolved),
         "customer_impact_scope": attrs.get("customer_impact_scope"),
         "customer_impact_duration": attrs.get("customer_impact_duration"),
-        "commander_id": attrs.get("commander", {}).get("data", {}).get("id"),
+        "commander_id": commander_id,
         "postmortem_id": attrs.get("postmortem_id"),
     }
 
