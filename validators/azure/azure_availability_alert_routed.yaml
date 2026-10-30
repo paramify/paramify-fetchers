@@ -3,16 +3,14 @@ name: Azure Availability Alert Enabled and Routed
 type: AUTOMATED
 role: configuration
 statement: >
-  At least one enabled availability alert routes to an active action group (an enabled
-  group with an enabled receiver on every notification) and no processing rule suppresses
-  it. Availability alert: a metric alert on Availability (any metric containing it),
-  HealthCheckStatus, OriginHealthPercentage or Healthy/UnhealthyHostCount; an Application
-  Insights availability-test alert; or a log search alert reading availabilityResults.
-  Substantiates the availability half of KSI-CNA-RVP (Baseline Configuration
-  Standard): "availability alerts are enabled and routed to an active
-  action group". Does not prove every availability alert is routed (see
-  azure_availability_rate_limit_alerts_none_unrouted), that every production endpoint has
-  one, or Front Door WAF and scaling settings (other fetchers). Also proves the keys
+  At least one enabled availability alert routes to an active action group (an enabled group with an
+  enabled receiver on every notification) and no processing rule suppresses it. Availability alert:
+  a metric alert on Availability (any metric containing it), HealthCheckStatus,
+  OriginHealthPercentage or Healthy/UnhealthyHostCount; an Application Insights availability-test
+  alert; or a log search alert reading availabilityResults. Supports the availability half of
+  KSI-CNA-RVP. Does not prove every availability alert is routed (see
+  azure_availability_rate_limit_alerts_none_unrouted), that every production endpoint has one, or
+  Front Door WAF and scaling settings (other fetchers). Also proves the keys
   azure_availability_rate_limit_alerts_none_unrouted counts are present.
 
 regex: '(?:(?:"metricName":\s*"[^"]*(?:[Aa]vailability|[Hh]ealth[Cc]heck[Ss]tatus|[Oo]rigin[Hh]ealth[Pp]ercentage|[Hh]ealthy[Hh]ost[Cc]ount)[^"]*"|"query":\s*"(?:[^"\\]|\\.)*?[Aa]vailability[Rr]esults)(?:(?!"action_group_ids")[\s\S])*?"enabled":\s*true,\s*"evaluation_frequency"|"enabled":\s*true,\s*"evaluation_frequency"(?:(?!"action_group_ids")[\s\S])*?"kind":\s*"Microsoft\.Azure\.Monitor\.WebtestLocationAvailabilityCriteria")(?:(?!"action_group_ids")[\s\S])*?"routes_to_enabled_receiver":\s*true,(?:(?!"action_group_ids")[\s\S])*?"suppressed":\s*false'

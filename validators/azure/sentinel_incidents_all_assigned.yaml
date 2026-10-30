@@ -4,10 +4,8 @@ type: AUTOMATED
 role: configuration
 statement: >
   Every Sentinel incident in scope (created in the lookback, default 90 days, or still open however
-  old) has an owner. Substantiates the owner/assigned part of KSI-MLA-RVL, KSI-INR-RIR, KSI-IAM-SUS
-  and KSI-CNA-ULN (Audit Log Collection and Alerts, Continuous Monitoring, Continuous Monitoring
-  Strategy, Security Event Notifications, Incident Response Plan Improvement, Incident Response Plan
-  Objectives, Insider Threat Escalation, Internal Connections, Trusted Connection Review). Counts violations, so it relies on sentinel_incident_fields_present.
+  old) has an owner. Supports the owner/assigned part of KSI-MLA-RVL, KSI-INR-RIR, KSI-IAM-SUS and
+  KSI-CNA-ULN. Counts violations, so it relies on sentinel_incident_fields_present.
 
 regex: '"owner_assigned_to":\s*null'
 rules_summary: MATCH_COUNT EQUALS 0

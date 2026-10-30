@@ -3,17 +3,13 @@ name: Front Door Origins Use Private Link Or Origin Auth
 type: AUTOMATED
 role: configuration
 statement: >
-  Every serving Front Door (Standard/Premium) origin group reaches its origins
-  either entirely over Private Link or with managed-identity origin
-  authentication, and at least one origin group serves traffic. The
-  "unauthenticated Front Door origins" part of the origin check, and Front
-  Door's share of "backends are reachable only through approved paths"
-  (KSI-SVC-VCM). It treats Private Link as an authenticated path: Private Link
-  restricts the network path to the origin, but the origin does not authenticate
-  the caller. It does not assert that the origin validates the managed
-  identity token, that Private Link connections are approved by the right
-  owner, that no shared secret (e.g. a custom header) is used, or that the
-  backend is not also reachable directly (the App Service share).
+  Every serving Front Door (Standard/Premium) origin group reaches its origins either entirely over
+  Private Link or with managed-identity origin authentication, and at least one origin group serves
+  traffic. Supports KSI-SVC-VCM for Front Door origins. It treats Private Link as an authenticated
+  path: Private Link restricts the network path to the origin, but the origin does not authenticate
+  the caller. It does not assert that the origin validates the managed identity token, that Private
+  Link connections are approved by the right owner, that no shared secret (e.g. a custom header) is
+  used, or that the backend is not also reachable directly (the App Service share).
 
 regex: '"serving_groups_without_private_link_or_origin_auth":\s*(?<serving_groups_without_private_link_or_origin_auth>\d+),[^{}]*?"serving_origin_groups":\s*(?<serving_origin_groups>[1-9]\d*)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

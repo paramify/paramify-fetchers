@@ -5,8 +5,7 @@ role: configuration
 statement: >
   Every collected Log Analytics workspace exports its query audit (Audit category) through a
   diagnostic setting, and at least one does: without it there are no reviewer/query records to show
-  review frequency. Substantiates the 'reviewer/query records exist' half of KSI-MLA-RVL (Continuous
-  Monitoring, Continuous Monitoring Strategy, Security Event Notifications).
+  review frequency. Supports the reviewer and query records half of KSI-MLA-RVL.
 
 regex: '"workspaces_with_query_auditing":\s*[1-9]\d*,[^{}]*?"workspaces_without_query_auditing":\s*0\b'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

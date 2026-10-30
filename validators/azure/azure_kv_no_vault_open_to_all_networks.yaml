@@ -3,13 +3,12 @@ name: Key Vaults Not Open To All Networks
 type: AUTOMATED
 role: configuration
 statement: >
-  No key vault has public network access enabled together with a firewall
-  default action of Allow, the combination that accepts calls from any network.
-  A vault passes with public access Disabled (private endpoints only) or with
-  the firewall defaulting to Deny. The Key Vault share of "Fail … public bypass
-  paths" (KSI-SVC-SIN). It does not judge the IP and virtual network rules on a
-  Deny vault, the trusted-services bypass, or approved exceptions (the
-  client's list). azure_kv_network_fields_present proves the fields were there to count.
+  No key vault has public network access enabled together with a firewall default action of Allow,
+  the combination that accepts calls from any network. A vault passes with public access Disabled
+  (private endpoints only) or with the firewall defaulting to Deny. Supports KSI-SVC-SIN for public
+  bypass paths to Key Vault. It does not judge the IP and virtual network rules on a Deny vault, the
+  trusted-services bypass, or approved exceptions (the client's list).
+  azure_kv_network_fields_present proves the fields were there to count.
 
 # Violation count: default_deny false, then that same vault's public_network_access_disabled false, without crossing into the next vault.
 regex: '"network_acl_default_deny":\s*false,(?:(?!"network_acl_default_deny")[\s\S])*?"public_network_access_disabled":\s*false'

@@ -3,14 +3,12 @@ name: No Failed Azure Policy Remediation
 type: AUTOMATED
 role: configuration
 statement: >
-  No Azure Policy remediation task in Azure's 60-day retention window failed: no task
-  reports a failed deployment and no task's provisioning state is Failed. Substantiates
-  "remediation succeeds" (KSI-SVC-ACM) and the "fail failed automated remediation" part
-  of KSI-SVC-EIS. Does NOT prove that remediation ran where it was needed, that the
-  corrected state was revalidated (azure_policy_remediated_resources_revalidated), or
-  deployIfNotExists and modify actions taken at resource create or update time, which
-  are not remediation tasks. With no remediation tasks in the window it passes
-  vacuously.
+  No Azure Policy remediation task in Azure's 60-day retention window failed: no task reports a
+  failed deployment and no task's provisioning state is Failed. Supports KSI-SVC-ACM and the
+  failed-remediation part of KSI-SVC-EIS. Does NOT prove that remediation ran where it was needed,
+  that the corrected state was revalidated (azure_policy_remediated_resources_revalidated), or
+  deployIfNotExists and modify actions taken at resource create or update time, which are not
+  remediation tasks. With no remediation tasks in the window it passes vacuously.
 
 # Form B over the service's own per-task counts, which are complete (not the itemized list).
 # Integrity partner: azure_policy_remediation_fields_present.

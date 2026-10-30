@@ -3,20 +3,17 @@ name: Defender Core Workload Plans Standard and Fully Covered
 type: AUTOMATED
 role: configuration
 statement: >
-  The Microsoft Defender for Cloud plans for the workloads the system runs on
-  (App Service, Storage, Key Vault, SQL (which covers SQL Managed Instance) and
-  Resource Manager) are each on the Standard tier and report FullyCovered, so each plan
-  reports every resource it supports as covered. Substantiates "no disabled Defender
-  coverage" (KSI-CNA-EIS) and the Defender half of "every in-scope resource has
-  applicable Defender coverage" (KSI-SVC-EIS) at plan level. Does NOT prove
-  per-resource coverage or that each resource was assessed
-  (azure_resource_inventory), finding severity or SLA (azure_defender_assessments), Policy
-  enforcement (azure_policy_assignments), that function apps get threat detection
-  (Microsoft's support matrix lists Azure Functions apps with recommendations but no
-  security alerts, so FullyCovered on the App Service plan does not mean they are
-  watched), which sub-plan each plan runs (Microsoft's 2026-07-05 notice lists the Key
-  Vault and Resource Manager plans as deprecated with "Fixed pricing model" as the
-  migration path), or that this list is the complete set of plans the system needs.
+  The Microsoft Defender for Cloud plans for the workloads the system runs on (App Service, Storage,
+  Key Vault, SQL (which covers SQL Managed Instance) and Resource Manager) are each on the Standard
+  tier and report FullyCovered, so each plan reports every resource it supports as covered. Supports
+  KSI-CNA-EIS and the Defender half of KSI-SVC-EIS at plan level. Does NOT prove per-resource
+  coverage or that each resource was assessed (azure_resource_inventory), finding severity or SLA
+  (azure_defender_assessments), Policy enforcement (azure_policy_assignments), that function apps
+  get threat detection (Microsoft's support matrix lists Azure Functions apps with recommendations
+  but no security alerts, so FullyCovered on the App Service plan does not mean they are watched),
+  which sub-plan each plan runs (Microsoft's 2026-07-05 notice lists the Key Vault and Resource
+  Manager plans as deprecated with "Fixed pricing model" as the migration path), or that this list
+  is the complete set of plans the system needs.
 
 # One lookahead per plan on the summary's enabled_plans list (Standard tier), then one
 # per plan record for coverage: resource_name and resources_coverage_status are

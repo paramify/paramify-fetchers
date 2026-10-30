@@ -3,16 +3,13 @@ name: Azure Rate-Limit Alert Enabled and Routed
 type: AUTOMATED
 role: configuration
 statement: >
-  At least one enabled rate-limit alert routes to an active action group and no
-  processing rule suppresses it. Rate-limit alert: a metric alert on WAF request counts
-  (WebApplicationFirewallRequestCount, AzwafCustomRule) or a RateLimit/Throttle metric, or
-  a log search alert whose query reads WAF logs or mentions rate limiting, throttling or
-  HTTP 429. Substantiates the rate-limit half of KSI-CNA-RVP (Baseline Configuration
-  Standard): "rate-limit
-  alerts are enabled and routed to an active action group". Does not prove the alert
-  filters on the rate-limit rule itself: the evidence has no metric dimensions, so any
-  alert on WAF matches counts. Does not prove the WAF rate-limit rules exist (Front Door
-  WAF fetcher).
+  At least one enabled rate-limit alert routes to an active action group and no processing rule
+  suppresses it. Rate-limit alert: a metric alert on WAF request counts
+  (WebApplicationFirewallRequestCount, AzwafCustomRule) or a RateLimit/Throttle metric, or a log
+  search alert whose query reads WAF logs or mentions rate limiting, throttling or HTTP 429.
+  Supports the rate-limit half of KSI-CNA-RVP. Does not prove the alert filters on the rate-limit
+  rule itself: the evidence has no metric dimensions, so any alert on WAF matches counts. Does not
+  prove the WAF rate-limit rules exist (Front Door WAF fetcher).
 
 regex: '(?:"metricName":\s*"[^"]*(?:[Ww]eb[Aa]pplication[Ff]irewall[Rr]equest[Cc]ount|[Aa]zwaf[Cc]ustom[Rr]ule|[Rr]ate[Ll]imit|[Tt]hrottl)[^"]*"|"query":\s*"(?:[^"\\]|\\.)*?(?:[Rr]ate[ _-]?[Ll]imit|[Tt]hrottl|(?<![0-9])429(?![0-9])|[Ww]eb[Aa]pplication[Ff]irewall[Ll]og|AGWFirewallLogs|[Aa]pplication[Gg]ateway[Ff]irewall[Ll]og))(?:(?!"action_group_ids")[\s\S])*?"enabled":\s*true,\s*"evaluation_frequency"(?:(?!"action_group_ids")[\s\S])*?"routes_to_enabled_receiver":\s*true,(?:(?!"action_group_ids")[\s\S])*?"suppressed":\s*false'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

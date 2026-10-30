@@ -3,17 +3,16 @@ name: Azure Sentinel Enabled Rules Read Required Log Sources
 type: AUTOMATED
 role: configuration
 statement: >
-  One Sentinel workspace has, for each required table, at least one enabled analytics rule that reads it
-  and data in that table within the ingestion window (a non-null last_ingested in
-  tables_read_by_enabled_rules), and the collection had no partial failure. The required tables are a
-  placeholder baseline for an Azure and Entra ID estate: Entra ID audit logs (AuditLogs) and sign-in logs
-  (SigninLogs), and the Azure activity log (AzureActivity); the organization adds or removes tables. Each
-  table is a lookahead inside one workspace's list, so order does not matter. A rule counts when its
-  query names the table or, if the fetcher finds no table in the query, when its template's required
-  data types do (enabled_rules_by_template in later fetchers). Substantiates KSI-MLA-RVL
-  (Continuous Monitoring; Continuous Monitoring Strategy; Security Event Notifications): "enabled
-  analytics rules cover the required log sources". Does not prove what the rules detect, or tables read
-  only through parser functions, which the fetcher cannot see.
+  One Sentinel workspace has, for each required table, at least one enabled analytics rule that
+  reads it and data in that table within the ingestion window (a non-null last_ingested in
+  tables_read_by_enabled_rules), and the collection had no partial failure. The required tables are
+  a placeholder baseline for an Azure and Entra ID estate: Entra ID audit logs (AuditLogs) and
+  sign-in logs (SigninLogs), and the Azure activity log (AzureActivity); the organization adds or
+  removes tables. Each table is a lookahead inside one workspace's list, so order does not matter. A
+  rule counts when its query names the table or, if the fetcher finds no table in the query, when
+  its template's required data types do (enabled_rules_by_template in later fetchers). Supports
+  KSI-MLA-RVL. Does not prove what the rules detect, or tables read only through parser functions,
+  which the fetcher cannot see.
 
 # enabled_rules counts every rule reading the table, its query or its template; later fetchers also
 # give enabled_rules_by_template, the template-only part, which sorts between it and last_ingested.

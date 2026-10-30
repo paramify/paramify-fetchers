@@ -3,13 +3,11 @@ name: Azure SQL MI Failover Groups Synchronized
 type: AUTOMATED
 role: configuration
 statement: >
-  Every instance failover group reports replication state CATCH_UP (or the
-  CATCHUP spelling of the same state), meaning the
-  secondary is transactionally consistent and continuously synchronized with the
-  primary; SEEDING, PENDING, SUSPENDED or a missing state fails. Substantiates the
-  "healthy synchronized" half of the recovery claim (KSI-CNA-OFA). Does not prove
-  replication lag, a tested failover, or that every instance is in a group
-  (sqlmi_instances_all_in_failover_group).
+  Every instance failover group reports replication state CATCH_UP (or the CATCHUP spelling of the
+  same state), meaning the secondary is transactionally consistent and continuously synchronized
+  with the primary; SEEDING, PENDING, SUSPENDED or a missing state fails. Supports the
+  healthy-synchronized half of KSI-CNA-OFA. Does not prove replication lag, a tested failover, or
+  that every instance is in a group (sqlmi_instances_all_in_failover_group).
 
 # Counts violations; sqlmi_backups_failover_fields_present proves the key was there.
 regex: '"replication_state":\s*(?:null|"(?!CATCH_?UP")[^"]*")'

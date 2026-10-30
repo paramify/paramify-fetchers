@@ -3,14 +3,12 @@ name: Every Azure Workload Subnet Has an NSG
 type: AUTOMATED
 role: configuration
 statement: >
-  Every workload subnet has an NSG attached. A subnet with none filters nothing, so
-  its traffic, egress included, is unrestricted at the NSG layer. Platform subnets
-  (GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet,
-  AzureFirewallManagementSubnet, RouteServerSubnet) are exempt, since Azure manages
-  or forbids their NSGs. Substantiates KSI-CNA-RNT, "fail unrestricted egress unless
-  covered by an approved unexpired exception". Does not read the exception list;
-  does not credit a NIC-level NSG, so a subnet filtered only per NIC fails; a
-  private-endpoint-only subnet without an NSG fails too.
+  Every workload subnet has an NSG attached. A subnet with none filters nothing, so its traffic,
+  egress included, is unrestricted at the NSG layer. Platform subnets (GatewaySubnet,
+  AzureBastionSubnet, AzureFirewallSubnet, AzureFirewallManagementSubnet, RouteServerSubnet) are
+  exempt, since Azure manages or forbids their NSGs. Supports KSI-CNA-RNT for unrestricted egress.
+  Does not read the exception list; does not credit a NIC-level NSG, so a subnet filtered only per
+  NIC fails; a private-endpoint-only subnet without an NSG fails too.
 
 # Counts violations, so it cannot guard itself: azure_nsg_subnet_fields_present is
 # its integrity partner. Each match is one subnet record.

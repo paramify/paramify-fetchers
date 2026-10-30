@@ -3,14 +3,13 @@ name: Azure SQL MI TDE Protector Uses An Approved Key Source
 type: AUTOMATED
 role: configuration
 statement: >
-  Every SQL Managed Instance's TDE protector is one of the approved key sources,
-  ServiceManaged (Microsoft-managed) or AzureKeyVault (customer-managed); an unread
-  protector or any other type fails. Substantiates "an approved key source" for SQL
-  MI (KSI-SVC-SIN). The allowlist holds both protector types Azure offers, so this
-  only fails on an unread or unknown protector unless the list is narrowed. Does not
-  prove key rotation, that a customer-managed key's Key Vault key is reachable and
-  valid, or that the organization's Cryptographic Modules Table approves both sources; drop
-  ServiceManaged from the regex to require customer-managed keys.
+  Every SQL Managed Instance's TDE protector is one of the approved key sources, ServiceManaged
+  (Microsoft-managed) or AzureKeyVault (customer-managed); an unread protector or any other type
+  fails. Supports KSI-SVC-SIN for SQL MI key sources. The allowlist holds both protector types Azure
+  offers, so this only fails on an unread or unknown protector unless the list is narrowed. Does not
+  prove key rotation, that a customer-managed key's Key Vault key is reachable and valid, or that
+  the organization's Cryptographic Modules Table approves both sources; drop ServiceManaged from the
+  regex to require customer-managed keys.
 
 # Counts violations; sqlmi_encryption_fields_present proves the key was there.
 regex: '"encryption_protector":\s*null|"server_key_type":\s*(?:null|"(?!(?:ServiceManaged|AzureKeyVault)")[^"]*")'

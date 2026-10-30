@@ -3,13 +3,11 @@ name: Azure Resources Only In Approved Regions
 type: AUTOMATED
 role: configuration
 statement: >
-  Every resource in the subscription's Resource Graph inventory sits in a US
-  Azure region or is global (summary resources_by_location has no other key),
-  and the inventory is not empty. The "out-of-region" part of "Fail unowned,
-  untagged, orphaned, out-of-region or unapproved resources" (KSI-CNA-MAT). The
-  approved set is a placeholder (every US region plus global); a resource with no
-  location reads "unknown" and fails. It does not assert that resources match an
-  approved inventory record, ownership or tags.
+  Every resource in the subscription's Resource Graph inventory sits in a US Azure region or is
+  global (summary resources_by_location has no other key), and the inventory is not empty. Supports
+  KSI-CNA-MAT for out-of-region resources. The approved set is a placeholder (every US region plus
+  global); a resource with no location reads "unknown" and fails. It does not assert that resources
+  match an approved inventory record, ownership or tags.
 
 # The whole location object must be approved keys; one other key, or an empty object, is no match.
 regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"resources_by_location":\s*\{(?:\s*"(?:global|(?:east|west|central|northcentral|southcentral|westcentral)us[23]?|usgov(?:arizona|iowa|texas|virginia)|usdod(?:central|east))":\s*\d+\s*,?)+\s*\})'

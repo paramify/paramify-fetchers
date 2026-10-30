@@ -3,17 +3,13 @@ name: No Azure Log Category Left Unexported
 type: AUTOMATED
 role: configuration
 statement: >
-  Every log category every resource emits is exported by an enabled diagnostic setting
-  (by name, by category group, or allLogs): zero resources with a non-empty
-  uncaptured_log_categories. Substantiates KSI-MLA-OSM (Audit Log Collection and
-  Alerts): "each resource type has all required audit/security categories enabled",
-  including security categories outside Azure's audit group; KSI-MLA-LET (Audit Logging
-  Criteria): "enabled diagnostic categories match the required categories for each
-  resource type"; and the "undocumented excluded categories" half of KSI-MLA-LET (Logged
-  Event Type Inventory), taking every available category as required. Does not prove a narrower
-  per-type required list or the organization's documented exclusions (a documented exclusion
-  still fails here), or the destination. Counts violations, so
-  azure_diag_uncaptured_category_lists_present must pass alongside it.
+  Every log category every resource emits is exported by an enabled diagnostic setting (by name, by
+  category group, or allLogs): zero resources with a non-empty uncaptured_log_categories. Supports
+  KSI-MLA-OSM, including security categories outside Azure's audit group, and KSI-MLA-LET, taking
+  every available category as required. Does not prove a narrower per-type required list or the
+  organization's documented exclusions (a documented exclusion still fails here), or the
+  destination. Counts violations, so azure_diag_uncaptured_category_lists_present must pass
+  alongside it.
 
 regex: '"uncaptured_log_categories":\s*\[\s*"'
 rules_summary: MATCH_COUNT EQUALS 0

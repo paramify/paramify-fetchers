@@ -3,17 +3,15 @@ name: Defender AI Services and APIs Plans Standard and Fully Covered
 type: AUTOMATED
 role: configuration
 statement: >
-  The Microsoft Defender for Cloud plans for AI services (AI) and APIs (Api) are on the
-  Standard tier and report FullyCovered. They are required on every in-scope subscription,
-  whether or not it holds Azure AI services accounts or API Management services, since the
-  evidence does not show which do; these plans are what give those resources Defender threat
-  protection (on the Free tier they still get foundational CSPM recommendations). Drop this
-  validator if no in-scope subscription holds such resources. Substantiates "no disabled
-  Defender coverage" (KSI-CNA-EIS) and the Defender half of "every in-scope resource has
-  applicable Defender coverage" (KSI-SVC-EIS) for those resource types. Does NOT prove those
-  AI services accounts and API Management services are inside the system boundary (the system
-  owner confirms; drop this validator if they are not), that each API is onboarded to Defender
-  for APIs, or per-resource coverage (azure_resource_inventory).
+  The Microsoft Defender for Cloud plans for AI services (AI) and APIs (Api) are on the Standard
+  tier and report FullyCovered. They are required on every in-scope subscription, whether or not it
+  holds Azure AI services accounts or API Management services, since the evidence does not show
+  which do; these plans are what give those resources Defender threat protection (on the Free tier
+  they still get foundational CSPM recommendations). Drop this validator if no in-scope subscription
+  holds such resources. Supports KSI-CNA-EIS and the Defender half of KSI-SVC-EIS for those resource
+  types. Does NOT prove those AI services accounts and API Management services are inside the system
+  boundary (the system owner confirms; drop this validator if they are not), that each API is
+  onboarded to Defender for APIs, or per-resource coverage (azure_resource_inventory).
 
 regex: '^\s*\{(?=[\s\S]*?"enabled_plans":\s*\[[^\]]*"AI")(?=[\s\S]*?"enabled_plans":\s*\[[^\]]*"Api")(?=[\s\S]*?"resource_name":\s*"AI",\s*"resources_coverage_status":\s*"[Ff]ully[Cc]overed")(?=[\s\S]*?"resource_name":\s*"Api",\s*"resources_coverage_status":\s*"[Ff]ully[Cc]overed")'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

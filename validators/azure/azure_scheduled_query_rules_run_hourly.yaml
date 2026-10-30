@@ -3,12 +3,10 @@ name: Azure Scheduled-Query Alert Rules Evaluate at Least Hourly
 type: AUTOMATED
 role: configuration
 statement: >
-  Every enabled scheduled-query (log search) alert rule, LogToMetric rules aside,
-  evaluates at least hourly (evaluation_frequency PT1M to PT60M, or PT1H; null fails). Substantiates
-  the scheduled-query half of KSI-MLA-RVL (Audit Log Collection and Alerts): rules "run
-  at the approved
-  frequency", with hourly as a placeholder until the organization names its approved frequency
-  (change the lookahead to tighten it). Does not prove Sentinel analytics rule schedules,
+  Every enabled scheduled-query (log search) alert rule, LogToMetric rules aside, evaluates at least
+  hourly (evaluation_frequency PT1M to PT60M, or PT1H; null fails). Supports the scheduled-query
+  half of KSI-MLA-RVL, with hourly as a placeholder until the organization names its approved
+  frequency (change the lookahead to tighten it). Does not prove Sentinel analytics rule schedules,
   the lookback window, or that runs succeed. Counts violations, so
   azure_scheduled_query_rules_enabled_present must pass alongside it.
 

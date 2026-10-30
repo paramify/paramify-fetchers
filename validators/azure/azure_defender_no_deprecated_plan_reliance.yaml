@@ -3,17 +3,15 @@ name: No Reliance on a Deprecated Defender Plan
 type: AUTOMATED
 role: configuration
 statement: >
-  Every Microsoft Defender for Cloud plan that Azure marks deprecated and that is still
-  on the Standard tier has each of its replacement plans (Azure's replacedBy list) on
-  Standard as well, and the deprecated DNS plan is backed by Defender for Servers Plan 2
-  (the plan that now carries DNS alerts), so no coverage rests on a retired plan alone. A
-  deprecated plan left on beside its replacement is redundant and passes. The plan list
-  is non-empty. Substantiates the "no disabled or outdated controls" part of KSI-SVC-EIS
-  at plan level. Does NOT prove the replacement plan reports FullyCovered, that the
-  redundant legacy plan was turned off, or anything Azure does not flag as deprecated:
-  the fetcher reads an absent flag as not deprecated, and Microsoft's 2026-07-05 notice
-  deprecating the Key Vault and Resource Manager plans in favour of fixed pricing is not
-  reflected in the API's flag.
+  Every Microsoft Defender for Cloud plan that Azure marks deprecated and that is still on the
+  Standard tier has each of its replacement plans (Azure's replacedBy list) on Standard as well, and
+  the deprecated DNS plan is backed by Defender for Servers Plan 2 (the plan that now carries DNS
+  alerts), so no coverage rests on a retired plan alone. A deprecated plan left on beside its
+  replacement is redundant and passes. The plan list is non-empty. Supports KSI-SVC-EIS for outdated
+  controls, at plan level. Does NOT prove the replacement plan reports FullyCovered, that the
+  redundant legacy plan was turned off, or anything Azure does not flag as deprecated: the fetcher
+  reads an absent flag as not deprecated, and Microsoft's 2026-07-05 notice deprecating the Key
+  Vault and Resource Manager plans in favour of fixed pricing is not reflected in the API's flag.
 
 # Form A, self-guarding. The map must be present; no entry may name an empty
 # replacement list or a replacement missing from summary.enabled_plans (named

@@ -3,14 +3,12 @@ name: No Disabled Azure Scheduled-Query Alert Rules
 type: AUTOMATED
 role: configuration
 statement: >
-  No scheduled-query (log search) alert rule in the subscription is disabled (LogToMetric
-  rules, which never notify, are left out). Substantiates the scheduled-query half of
-  KSI-MLA-RVL (Audit Log Collection and Alerts): "required Sentinel and
-  scheduled-query rules are enabled", treating every scheduled-query rule as required
-  because the organization's required list is not in the evidence (a rule disabled on purpose fails
-  too). Does not prove Sentinel analytics rules (a different fetcher), that the rules'
-  queries detect the right events, or that they reach anyone. Counts violations, so
-  azure_scheduled_query_rules_enabled_present must pass alongside it.
+  No scheduled-query (log search) alert rule in the subscription is disabled (LogToMetric rules,
+  which never notify, are left out). Supports the scheduled-query half of KSI-MLA-RVL, treating
+  every scheduled-query rule as required because the organization's required list is not in the
+  evidence (a rule disabled on purpose fails too). Does not prove Sentinel analytics rules (a
+  different fetcher), that the rules' queries detect the right events, or that they reach anyone.
+  Counts violations, so azure_scheduled_query_rules_enabled_present must pass alongside it.
 
 regex: '"enabled":\s*false,\s*"evaluation_frequency":\s*(?:null|"[^"]*"),\s*"id":\s*"[^"]*/[Mm]icrosoft\.[Ii]nsights/[Ss]cheduled[Qq]uery[Rr]ules/[^"]*",\s*"is_alerting_rule":\s*true'
 rules_summary: MATCH_COUNT EQUALS 0

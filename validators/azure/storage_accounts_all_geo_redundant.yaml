@@ -3,13 +3,11 @@ name: Azure Storage Accounts All Geo-Redundant
 type: AUTOMATED
 role: configuration
 statement: >
-  Every storage account in the subscription replicates to a paired region (SKU
-  GRS, RA-GRS, GZRS or RA-GZRS), and there is at least one account. The storage
-  share of "Fail single-region dependencies" (KSI-CNA-OFA) and "Fail
-  dependencies without regional redundancy" (KSI-RPL-ABO). Every account counts,
-  including diagnostic and log accounts. It does not assert that the secondary
-  is in sync or within an RPO, that failover was tested, or the redundancy of
-  SQL MI, Redis, App Service or other data stores.
+  Every storage account in the subscription replicates to a paired region (SKU GRS, RA-GRS, GZRS or
+  RA-GZRS), and there is at least one account. Supports KSI-CNA-OFA and KSI-RPL-ABO for storage.
+  Every account counts, including diagnostic and log accounts. It does not assert that the secondary
+  is in sync or within an RPO, that failover was tested, or the redundancy of SQL MI, Redis, App
+  Service or other data stores.
 
 # Backreference: geo_redundant_accounts must equal a non-zero total_storage_accounts.
 regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_storage_accounts":\s*(?<total_storage_accounts>[1-9]\d*)\b)(?=[\s\S]*?"geo_redundant_accounts":\s*\k<total_storage_accounts>(?!\d))'

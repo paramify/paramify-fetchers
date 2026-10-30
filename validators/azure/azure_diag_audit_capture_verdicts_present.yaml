@@ -4,10 +4,9 @@ type: AUTOMATED
 role: integrity
 statement: >
   At least one resource carries a true/false captures_all_audit_categories verdict, so
-  azure_diag_audit_categories_all_captured's zero count reflects posture, not a renamed
-  key or an inventory with no audit-capable resource. Integrity partner for the
-  audit-category check of KSI-MLA-OSM (Audit Log Collection and Alerts); asserts nothing
-  about compliance on its own.
+  azure_diag_audit_categories_all_captured's zero count reflects posture, not a renamed key or an
+  inventory with no audit-capable resource. Integrity partner for the audit-category check of
+  KSI-MLA-OSM; asserts nothing about compliance on its own.
 
 regex: '"captures_all_audit_categories":\s*(?:true|false)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

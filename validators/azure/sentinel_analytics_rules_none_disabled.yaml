@@ -4,11 +4,11 @@ type: AUTOMATED
 role: configuration
 statement: >
   No Microsoft Sentinel workspace has a disabled analytics (detection) rule: every workspace reports
-  disabled_rules 0. Substantiates that the detections the organization relies on are switched on
-  (KSI-MLA-RVL, Audit Log Collection and Alerts) and fails on a disabled detection rule (KSI-IAM-SUS,
-  Insider Threat Escalation). It does not say which rules the organization requires; a
-  required rule that was deleted rather than disabled is not seen. Counts violations, so it relies on
-  sentinel_analytics_rule_counts_present to prove the count was there.
+  disabled_rules 0. Supports KSI-MLA-RVL, that the detections the organization relies on are
+  switched on, and KSI-IAM-SUS, failing on a disabled detection rule. It does not say which rules
+  the organization requires; a required rule that was deleted rather than disabled is not seen.
+  Counts violations, so it relies on sentinel_analytics_rule_counts_present to prove the count was
+  there.
 
 regex: '"disabled_rules":\s*[1-9]'
 rules_summary: MATCH_COUNT EQUALS 0

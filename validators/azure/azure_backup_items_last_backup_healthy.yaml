@@ -3,12 +3,10 @@ name: Azure Backup Protected Items Last Backup Healthy
 type: AUTOMATED
 role: configuration
 statement: >
-  Every item protected by a Recovery Services vault reports a healthy last
-  backup (Completed, Success, Succeeded or Healthy), and there is at least one
-  protected item. The Azure Backup share of "measured recovery results meet each
-  function's objectives" (KSI-RPL-ABO). It does not assert when that backup ran
-  or that it meets an RPO (the fetcher has no backup-age field), retention, or
-  that a restore was tested.
+  Every item protected by a Recovery Services vault reports a healthy last backup (Completed,
+  Success, Succeeded or Healthy), and there is at least one protected item. Supports KSI-RPL-ABO for
+  Azure Backup. It does not assert when that backup ran or that it meets an RPO (the fetcher has no
+  backup-age field), retention, or that a restore was tested.
 
 # Backreference: healthy-last-backup items must equal a non-zero total_protected_items.
 regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_protected_items":\s*(?<total_protected_items>[1-9]\d*),\s*"total_recovery_services_vaults")(?=[\s\S]*?"protected_items_with_healthy_last_backup":\s*\k<total_protected_items>(?!\d))'

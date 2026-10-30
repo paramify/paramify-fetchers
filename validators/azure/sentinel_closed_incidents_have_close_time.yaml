@@ -3,11 +3,10 @@ name: Azure Sentinel Closed Incidents Have Close Time
 type: AUTOMATED
 role: configuration
 statement: >
-  Every closed incident in scope has a proven close time from the SecurityIncident table. A close time
-  that is missing, or no longer retained because SecurityIncident keeps less than the lookback, counts
-  against it: an unprovable closure time is not a pass. Substantiates the closure time for KSI-MLA-RVL
-  (Audit Log Collection and Alerts) and the response timestamps for KSI-INR-RIR (Incident Response
-  Plan Improvement, Incident Response Plan Objectives). Counts violations, so it relies on
+  Every closed incident in scope has a proven close time from the SecurityIncident table. A close
+  time that is missing, or no longer retained because SecurityIncident keeps less than the lookback,
+  counts against it: an unprovable closure time is not a pass. Supports the closure time for
+  KSI-MLA-RVL and the response timestamps for KSI-INR-RIR. Counts violations, so it relies on
   sentinel_incident_closure_counts_present.
 
 regex: '"closed_(?:missing_close_time|close_time_not_retained)":\s*[1-9]'

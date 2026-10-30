@@ -3,14 +3,11 @@ name: Front Door WAF Policies Have Rate-Limit Rules
 type: AUTOMATED
 role: configuration
 statement: >
-  Every Front Door (Standard/Premium) WAF policy has at least one enabled
-  rate-limit custom rule, and there is at least one policy. Partial, the
-  precondition only, of "rate-limit and availability alerts are enabled and
-  routed to an active action group" (KSI-CNA-RVP): rate limiting is in place to
-  alert on. It does not
-  assert that any alert fires on rate-limit hits or availability, or that alerts
-  route to an active action group (Azure Monitor alert evidence), nor that the
-  thresholds are sensible.
+  Every Front Door (Standard/Premium) WAF policy has at least one enabled rate-limit custom rule,
+  and there is at least one policy. Partially supports KSI-CNA-RVP, the precondition only: rate
+  limiting is in place to alert on. It does not assert that any alert fires on rate-limit hits or
+  availability, or that alerts route to an active action group (Azure Monitor alert evidence), nor
+  that the thresholds are sensible.
 
 # Backreference: matches only when policies with rate-limit rules equal a non-zero total.
 regex: '"total_waf_policies":\s*(?<total_waf_policies>[1-9]\d*),[\s\S]*?"waf_policies_with_rate_limit_rules":\s*\k<total_waf_policies>(?!\d)'

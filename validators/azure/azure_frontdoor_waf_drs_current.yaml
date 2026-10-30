@@ -3,15 +3,13 @@ name: Front Door WAF On Latest Default Rule Set
 type: AUTOMATED
 role: configuration
 statement: >
-  Every Front Door WAF policy's Default Rule Set is the newest version Microsoft
-  publishes for that rule-set type, none runs a 0.x/1.x Default Rule Set (which
-  would otherwise read as current because the legacy DefaultRuleSet type only has
-  1.0), and none has a Default Rule Set whose latest version could not be read
-  (unknown never reads as current). The "current managed rules" part of the
-  WAF check for KSI-CNA-RVP (Baseline Configuration Standard). It does not assert that the Bot Manager or
-  other non-default rule sets are current, that rule overrides are justified, or
-  that a policy has a Default Rule Set at all (azure_frontdoor_waf_policies_blocking
-  fails that).
+  Every Front Door WAF policy's Default Rule Set is the newest version Microsoft publishes for that
+  rule-set type, none runs a 0.x/1.x Default Rule Set (which would otherwise read as current because
+  the legacy DefaultRuleSet type only has 1.0), and none has a Default Rule Set whose latest version
+  could not be read (unknown never reads as current). Supports KSI-CNA-RVP for current WAF managed
+  rules. It does not assert that the Bot Manager or other non-default rule sets are current, that
+  rule overrides are justified, or that a policy has a Default Rule Set at all
+  (azure_frontdoor_waf_policies_blocking fails that).
 
 # Violation count (partner: azure_frontdoor_waf_drs_fields_present): version differs from latest, latest unknown, or a 0.x/1.x version.
 regex: '"default_rule_set_latest_version":\s*"(?<default_rule_set_latest_version>[^"]+)",[^{}\[\]]*?"default_rule_set_version":\s*"(?!\k<default_rule_set_latest_version>")|"default_rule_set_latest_version":\s*null,[^{}\[\]]*?"default_rule_set_version":\s*"|"default_rule_set_version":\s*"(?<legacy_default_rule_set_version>[01]\.[^"]*)"'

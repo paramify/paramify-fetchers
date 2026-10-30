@@ -3,14 +3,12 @@ name: Azure NSGs Have No Any-to-Any Allow Rules
 type: AUTOMATED
 role: configuration
 statement: >
-  No custom NSG rule, inbound or outbound, allows traffic from any source to any
-  destination on every port. Any source or destination is *, Internet, 0.0.0.0/0 or
-  ::/0 (as the single prefix or one of the listed prefixes); every port is *, 0-65535
-  or 1-65535; any protocol but Icmp counts. Default (platform) rules are excluded,
-  since every NSG carries them; their AllowInternetOutBound is judged by
-  azure_nsg_internet_egress_restricted. Substantiates KSI-CNA-RNT, "fail any/any
-  rules unless covered by an approved unexpired exception". Does not read the
-  exception list, does not merge split port ranges (0-1023 plus 1024-65535 is not
+  No custom NSG rule, inbound or outbound, allows traffic from any source to any destination on
+  every port. Any source or destination is *, Internet, 0.0.0.0/0 or ::/0 (as the single prefix or
+  one of the listed prefixes); every port is *, 0-65535 or 1-65535; any protocol but Icmp counts.
+  Default (platform) rules are excluded, since every NSG carries them; their AllowInternetOutBound
+  is judged by azure_nsg_internet_egress_restricted. Supports KSI-CNA-RNT for any/any rules. Does
+  not read the exception list, does not merge split port ranges (0-1023 plus 1024-65535 is not
   caught), and does not see Azure Firewall rules.
 
 # Counts violations, so it cannot guard itself: azure_nsg_rule_fields_present is

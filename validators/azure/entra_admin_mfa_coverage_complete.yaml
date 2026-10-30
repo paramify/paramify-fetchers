@@ -3,13 +3,12 @@ name: Entra Admin MFA Coverage Is Complete
 type: AUTOMATED
 role: configuration
 statement: >-
-  Every administrator in the Entra tenant is MFA-capable. Substantiates KSI-IAM-APM
-  ("phishing-resistant MFA is used") for the highest-risk subset: admin accounts carry the
-  most privilege per account, and a single admin without MFA contradicts the narrative
+  Every administrator in the Entra tenant is MFA-capable. Supports KSI-IAM-APM for the highest-risk
+  subset: admin accounts carry the most privilege per account, and a single admin without MFA fails
   regardless of overall coverage. Does NOT assert coverage over non-admin users (that is
-  entra_mfa_coverage_meets_threshold). Fails when no admin was found, and when directory
-  role membership couldn't be read (the admin counts read null). An admin with no row in
-  the registration report counts as without MFA.
+  entra_mfa_coverage_meets_threshold). Fails when no admin was found, and when directory role
+  membership couldn't be read (the admin counts read null). An admin with no row in the registration
+  report counts as without MFA.
 
 # admin_users must be at least 1; admin_users_without_mfa counts admins that are not MFA-capable.
 regex: '"admin_users":\s*(?<admin_users>[1-9]\d*)[\s\S]*?"admin_users_without_mfa":\s*(?<admin_users_without_mfa>\d+)'

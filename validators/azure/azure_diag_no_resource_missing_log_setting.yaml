@@ -3,13 +3,12 @@ name: No Azure Log-Emitting Resource Without a Diagnostic Setting
 type: AUTOMATED
 role: configuration
 statement: >
-  No resource that emits resource logs, new or old, lacks an enabled diagnostic setting
-  exporting logs to some destination (resources_emitting_logs_without_setting is 0).
-  Substantiates the "missing diagnostics" half of KSI-MLA-LET (Logged Event Type
-  Inventory): "fail new resources with missing diagnostics". Does not prove
-  which destination receives the logs (see azure_diag_log_analytics_coverage_complete),
-  that every category is exported, or anything about resource age: the fetcher has no
-  creation date, so every resource is held to the rule, not only new ones.
+  No resource that emits resource logs, new or old, lacks an enabled diagnostic setting exporting
+  logs to some destination (resources_emitting_logs_without_setting is 0). Supports the
+  missing-diagnostics half of KSI-MLA-LET. Does not prove which destination receives the logs (see
+  azure_diag_log_analytics_coverage_complete), that every category is exported, or anything about
+  resource age: the fetcher has no creation date, so every resource is held to the rule, not only
+  new ones.
 
 regex: '"resources_emitting_logs_without_setting":\s*(?<resources_emitting_logs_without_setting>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

@@ -3,20 +3,17 @@ name: Azure NSGs Restrict Internet Egress
 type: AUTOMATED
 role: configuration
 statement: >
-  No NSG leaves Internet egress unrestricted: in every NSG, the first rule by
-  priority that covers every port and protocol toward the Internet (*, Internet or
-  0.0.0.0/0) is a Deny. An NSG nobody overrode fails, because its default
-  AllowInternetOutBound (65001) is that first rule. Reads the fetcher's
-  unrestricted_internet_outbound_groups, which must be present and 0. Substantiates
-  KSI-CNA-RNT, "fail unrestricted egress rules unless covered by an approved unexpired
-  exception". Does not read the exception list; does not judge narrower allows above
-  the Deny (port 443 to the Internet still passes); a catch-all Deny written as
-  0-65535 rather than * is not recognised, so that NSG fails. Egress through a
-  subnet with no NSG is azure_nsg_workload_subnets_all_filtered. The catch-all test
-  ignores the rule's source, so a catch-all Deny scoped to one narrow source reads as
-  restricted while other sources still egress. Unattached NSGs count too. On an App
-  Service VNet-integration subnet the NSG sees only traffic the app routes into the
-  VNet.
+  No NSG leaves Internet egress unrestricted: in every NSG, the first rule by priority that covers
+  every port and protocol toward the Internet (*, Internet or 0.0.0.0/0) is a Deny. An NSG nobody
+  overrode fails, because its default AllowInternetOutBound (65001) is that first rule. Reads the
+  fetcher's unrestricted_internet_outbound_groups, which must be present and 0. Supports KSI-CNA-RNT
+  for unrestricted egress rules. Does not read the exception list; does not judge narrower allows
+  above the Deny (port 443 to the Internet still passes); a catch-all Deny written as 0-65535 rather
+  than * is not recognised, so that NSG fails. Egress through a subnet with no NSG is
+  azure_nsg_workload_subnets_all_filtered. The catch-all test ignores the rule's source, so a
+  catch-all Deny scoped to one narrow source reads as restricted while other sources still egress.
+  Unattached NSGs count too. On an App Service VNet-integration subnet the NSG sees only traffic the
+  app routes into the VNet.
 
 regex: '"unrestricted_internet_outbound_groups":\s*(?<unrestricted_internet_outbound_groups>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

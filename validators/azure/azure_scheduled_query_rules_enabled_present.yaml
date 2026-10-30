@@ -3,12 +3,10 @@ name: Enabled Azure Scheduled-Query Alert Rules Present
 type: AUTOMATED
 role: integrity
 statement: >
-  At least one enabled scheduled-query (log search) alert rule is present with the
-  enabled / evaluation_frequency / id structure the two scheduled-query validators read, so
-  their zero counts reflect posture, not renamed keys or an empty rule list. Integrity
-  partner for the scheduled-query checks of KSI-MLA-RVL (Audit Log Collection and
-  Alerts); on its own it shows only that
-  scheduled-query alerting is in use.
+  At least one enabled scheduled-query (log search) alert rule is present with the enabled /
+  evaluation_frequency / id structure the two scheduled-query validators read, so their zero counts
+  reflect posture, not renamed keys or an empty rule list. Integrity partner for the scheduled-query
+  checks of KSI-MLA-RVL; on its own it shows only that scheduled-query alerting is in use.
 
 regex: '"enabled":\s*true,\s*"evaluation_frequency":\s*(?:null|"[^"]*"),\s*"id":\s*"[^"]*/[Mm]icrosoft\.[Ii]nsights/[Ss]cheduled[Qq]uery[Rr]ules/[^"]*",\s*"is_alerting_rule":\s*true'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

@@ -3,13 +3,11 @@ name: Azure Resource Inventory Fully Assessed for Logging
 type: AUTOMATED
 role: configuration
 statement: >
-  Every resource Azure Resource Graph lists for the subscription appears in the logging
-  inventory with a verdict: the resources read equal Resource Graph's reported total (at least
-  one), and no resource's diagnostic-settings read failed. Substantiates KSI-MLA-LET
-  (Audit Logging Criteria): "every resource in the Azure inventory appears in
-  the logging inventory". Does not prove that a logging inventory kept outside
-  Azure matches, that subscriptions not targeted are covered, or that the inventory
-  review is current.
+  Every resource Azure Resource Graph lists for the subscription appears in the logging inventory
+  with a verdict: the resources read equal Resource Graph's reported total (at least one), and no
+  resource's diagnostic-settings read failed. Supports KSI-MLA-LET. Does not prove that a logging
+  inventory kept outside Azure matches, that subscriptions not targeted are covered, or that the
+  inventory review is current.
 
 # The three summary keys are adjacent in the fetcher's sorted output; a reorder stops the match and fails, never passes.
 regex: '"resource_graph_total_records":\s*(?<resource_graph_total_records>[1-9]\d*),[^{}]*?"resources_enumerated":\s*(?<resources_enumerated>\d+),\s*"resources_errored":\s*(?<resources_errored>\d+)'

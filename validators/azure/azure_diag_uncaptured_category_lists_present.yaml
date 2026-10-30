@@ -4,10 +4,9 @@ type: AUTOMATED
 role: integrity
 statement: >
   The per-resource uncaptured_log_categories list is present in the evidence, so
-  azure_diag_no_uncaptured_log_categories' zero count reflects posture, not a renamed
-  key. Integrity partner for the category checks of KSI-MLA-OSM (Audit Log Collection
-  and Alerts) and KSI-MLA-LET (Audit Logging Criteria, Logged Event Type Inventory);
-  asserts nothing about compliance on its own.
+  azure_diag_no_uncaptured_log_categories' zero count reflects posture, not a renamed key. Integrity
+  partner for the category checks of KSI-MLA-OSM and KSI-MLA-LET; asserts nothing about compliance
+  on its own.
 
 regex: '"uncaptured_log_categories":\s*\['
 rules_summary: MATCH_COUNT NOT_EQUALS 0

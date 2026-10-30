@@ -3,13 +3,13 @@ name: Azure SQL MI Audit Events Arriving From Every Instance
 type: AUTOMATED
 role: configuration
 statement: >
-  Every SQL managed instance in the subscription (at least one) has SQL security audit events arriving in a
-  Log Analytics workspace within the lookback (7 days by default): instances_with_audit_records equals
-  managed_instances, none is without records or unknown, and the collection had no partial failure. An
-  arriving event shows a T-SQL server audit is running, which ARM cannot read. Substantiates KSI-MLA-OSM
-  (Audit Log Collection and Alerts): "every SQL MI and database has auditing enabled or inherited as
-  intended", at the instance level. Does not prove each database is audited (per-database events depend
-  on activity), what the audit specification captures, or audit retention.
+  Every SQL managed instance in the subscription (at least one) has SQL security audit events
+  arriving in a Log Analytics workspace within the lookback (7 days by default):
+  instances_with_audit_records equals managed_instances, none is without records or unknown, and the
+  collection had no partial failure. An arriving event shows a T-SQL server audit is running, which
+  ARM cannot read. Supports KSI-MLA-OSM at the instance level. Does not prove each database is
+  audited (per-database events depend on activity), what the audit specification captures, or audit
+  retention.
 
 regex: '"partial_failure":\s*false\b[\s\S]*?"instances_audit_unknown":\s*0,\s*"instances_exporting_audit":\s*\d+,\s*"instances_with_audit_records":\s*(?<instances_with_audit_records>[1-9]\d*),\s*"instances_without_audit_records":\s*0,[\s\S]*?"managed_instances":\s*(?<managed_instances>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]

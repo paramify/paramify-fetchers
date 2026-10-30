@@ -3,14 +3,12 @@ name: Azure Storage Accounts Use An Approved Encryption Key Source
 type: AUTOMATED
 role: configuration
 statement: >
-  Every storage account encrypts at rest with an approved key source,
-  Microsoft.Storage (Microsoft-managed) or Microsoft.Keyvault (customer-managed);
-  any other or missing key source fails. Substantiates "storage encrypted at rest
-  with an approved key source" (KSI-SVC-SIN). Azure Storage always encrypts, so this
-  only fails on an unexpected source unless the list is narrowed. Does not prove key
-  rotation, infrastructure (double) encryption, or that the organization's Cryptographic
-  Modules Table approves both sources; drop Storage from the regex to require
-  customer-managed keys.
+  Every storage account encrypts at rest with an approved key source, Microsoft.Storage
+  (Microsoft-managed) or Microsoft.Keyvault (customer-managed); any other or missing key source
+  fails. Supports KSI-SVC-SIN for storage encryption at rest. Azure Storage always encrypts, so this
+  only fails on an unexpected source unless the list is narrowed. Does not prove key rotation,
+  infrastructure (double) encryption, or that the organization's Cryptographic Modules Table
+  approves both sources; drop Storage from the regex to require customer-managed keys.
 
 # Counts violations; storage_encryption_fields_present proves the key was there.
 regex: '"encryption_type":\s*(?:null|"(?!Microsoft\.(?:Storage|Keyvault|KeyVault)")[^"]*")'

@@ -3,14 +3,12 @@ name: App Service Web Apps Use Managed Identity
 type: AUTOMATED
 role: configuration
 statement: >
-  Every App Service web app in the subscription has a managed identity
-  (system- or user-assigned), and there is at least one web app. The App Service
-  share of "each application/service account uses managed identity or federation
-  where supported" (KSI-IAM-SNU). It does not assert that the app actually
-  authenticates to its dependencies with that identity rather than with secrets
-  in app settings or connection strings (not readable with Reader), and it does
-  not cover Entra app registrations, service principals or federated
-  credentials, which are the Entra ID share of the check.
+  Every App Service web app in the subscription has a managed identity (system- or user-assigned),
+  and there is at least one web app. Supports KSI-IAM-SNU for App Service. It does not assert that
+  the app actually authenticates to its dependencies with that identity rather than with secrets in
+  app settings or connection strings (not readable with Reader), and it does not cover Entra app
+  registrations, service principals or federated credentials, which are the Entra ID share of the
+  check.
 
 # Backreference: matches only when managed_identity_apps equals a non-zero total_web_apps.
 regex: '"managed_identity_apps":\s*(?<managed_identity_apps>[1-9]\d*),[^{}]*?"total_web_apps":\s*\k<managed_identity_apps>(?!\d)'

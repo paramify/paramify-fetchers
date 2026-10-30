@@ -3,14 +3,11 @@ name: Azure No Orphaned Resources Or Assignments
 type: AUTOMATED
 role: configuration
 statement: >
-  The subscription has no orphaned resources (unattached disks, NICs, NSGs,
-  public IPs and NAT gateways, disconnected private endpoints, empty App Service
-  plans and resource groups, unused user-assigned identities, stale deployment
-  slots) and no role assignments to
-  deleted principals, and the principal lookup completed. The "orphaned" part of
-  "Fail unowned, untagged, orphaned, out-of-region or unapproved resources"
-  (KSI-CNA-MAT). It does not assert ownership, tags, or approval of resources
-  that are in use.
+  The subscription has no orphaned resources (unattached disks, NICs, NSGs, public IPs and NAT
+  gateways, disconnected private endpoints, empty App Service plans and resource groups, unused
+  user-assigned identities, stale deployment slots) and no role assignments to deleted principals,
+  and the principal lookup completed. Supports KSI-CNA-MAT for orphaned resources. It does not
+  assert ownership, tags, or approval of resources that are in use.
 
 # principal_check "complete" keeps an unrun lookup from reading as zero deleted-principal assignments.
 regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"principal_check":\s*"complete")(?=[\s\S]*?"total_orphans":\s*0\b)'

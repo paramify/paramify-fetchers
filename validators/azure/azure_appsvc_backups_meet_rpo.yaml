@@ -3,13 +3,11 @@ name: App Service Web Apps Backed Up Within RPO
 type: AUTOMATED
 role: configuration
 statement: >
-  The fetcher's recovery point objective (AZURE_APP_SERVICE_RPO_HOURS) is set,
-  every App Service web app has a restore point, and every app's newest restore
-  point and largest gap between restore points are within that RPO. Fails until
-  an RPO is configured. Substantiates "measured recovery results meet each
-  function's objectives" for App Service (KSI-RPL-ABO). It does not check that
-  the configured RPO is the approved one, that a restore was ever tested, the
-  RTO, function apps, or other data stores.
+  The fetcher's recovery point objective (AZURE_APP_SERVICE_RPO_HOURS) is set, every App Service web
+  app has a restore point, and every app's newest restore point and largest gap between restore
+  points are within that RPO. Fails until an RPO is configured. Supports KSI-RPL-ABO for App
+  Service. It does not check that the configured RPO is the approved one, that a restore was ever
+  tested, the RTO, function apps, or other data stores.
 
 # all_web_apps_meet_recovery_point_objective is null, not true, while no RPO is set or no apps were found.
 regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"recovery_point_objective_hours":\s*[1-9])(?=[\s\S]*?"all_web_apps_backed_up":\s*true)(?=[\s\S]*?"all_web_apps_meet_recovery_point_objective":\s*true)'

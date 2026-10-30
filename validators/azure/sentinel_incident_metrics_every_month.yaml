@@ -3,14 +3,14 @@ name: Azure Sentinel Incident Metrics for Every Month
 type: AUTOMATED
 role: configuration
 statement: >
-  Every Sentinel workspace has monthly incident metrics (time to detect, acknowledge and close, and the
-  month-end backlog) for every calendar month of the lookback, each computed from retained incident
-  history: no workspace's incident list or monthly list is null (unread) and no month has updates_retained
-  false (it starts before SecurityIncident's retention, so its acknowledgement times and backlog are unknown).
-  Substantiates KSI-INR-RPI (Incident Response Post-mortem; Incident Response Process): "incident metrics
-  are calculated for every reporting period", taking the calendar month as the period. Does not prove the
-  metrics are reviewed, trend well or lead to improvement actions; a month with no closed incident has a
-  null MTTR and still passes. Counts violations, so it relies on sentinel_incident_monthly_metrics_present.
+  Every Sentinel workspace has monthly incident metrics (time to detect, acknowledge and close, and
+  the month-end backlog) for every calendar month of the lookback, each computed from retained
+  incident history: no workspace's incident list or monthly list is null (unread) and no month has
+  updates_retained false (it starts before SecurityIncident's retention, so its acknowledgement
+  times and backlog are unknown). Supports KSI-INR-RPI, taking the calendar month as the reporting
+  period. Does not prove the metrics are reviewed, trend well or lead to improvement actions; a
+  month with no closed incident has a null MTTR and still passes. Counts violations, so it relies on
+  sentinel_incident_monthly_metrics_present.
 
 # A workspace whose incident list failed carries incidents null and no monthly key at all.
 regex: '"monthly":\s*null|"updates_retained":\s*false|"incidents":\s*null'

@@ -3,18 +3,16 @@ name: Azure Sentinel Configured Connectors All Receiving Data
 type: AUTOMATED
 role: configuration
 statement: >
-  Across every Sentinel workspace, every data connector that has a connection (its own, or a linked one
-  such as Defender XDR) received data in the ingestion window (default 14 days): the summary's
+  Across every Sentinel workspace, every data connector that has a connection (its own, or a linked
+  one such as Defender XDR) received data in the ingestion window (default 14 days): the summary's
   connectors_configured_without_data is 0, and the collection had no partial failure. A null count,
   when connectors couldn't all be listed and measured, fails. Two kinds don't count: an alert-only
   connector that is quiet (a linked connection has alerts on, but no alert arrived), and a connector
   installed from Content Hub with no connection, which connectors_not_connected lists instead.
   sentinel_connectors_listed_every_workspace must pass alongside it, because it proves there were
-  connectors to judge and that every workspace's connectors were listed. Substantiates KSI-MLA-OSM
-  (Continuous Monitoring Strategy): "each required connector is connected" and "fail any log source
-  with stale SIEM data". Does not prove which connectors are required, connector health
-  (connectors_unhealthy), or connectors whose data couldn't be measured (a Basic or Auxiliary table) or
-  that define no data types.
+  connectors to judge and that every workspace's connectors were listed. Supports KSI-MLA-OSM. Does
+  not prove which connectors are required, connector health (connectors_unhealthy), or connectors
+  whose data couldn't be measured (a Basic or Auxiliary table) or that define no data types.
 
 regex: '"partial_failure":\s*false\b[\s\S]*?"summary":\s*\{[^{}]*?"connectors_configured_without_data":\s*0\b'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

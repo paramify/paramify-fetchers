@@ -3,20 +3,16 @@ name: Front Door WAF Policies Enforcing In Prevention Mode
 type: AUTOMATED
 role: configuration
 statement: >
-  Every Front Door (Standard/Premium) WAF policy in the subscription is blocking
-  (enabled, Prevention mode, a Default Rule Set that blocks with every rule group
-  that blocks by default still blocking, and no allow-all custom rule), and at
-  least one policy is attached to Front Door. The "enabled in Prevention mode"
-  part of "every Front Door WAF policy is enabled in Prevention mode with current
-  managed rules" (KSI-CNA-RVP); the rule-set version is
-  azure_frontdoor_waf_drs_current. Blocking is stricter than "enabled in
-  Prevention mode": a Prevention-mode policy also fails with a log-only or
-  missing Default Rule Set, an unfound rule definition, a by-default blocking
-  rule group with every blocking rule off, or an allow-all custom rule. It does
-  not assert which endpoints and
-  domains a policy covers (azure_front_door_waf_coverage), that disabled
-  individual rules or exclusions are justified, or anything about classic Front
-  Door policies (counted as skipped, not evaluated).
+  Every Front Door (Standard/Premium) WAF policy in the subscription is blocking (enabled,
+  Prevention mode, a Default Rule Set that blocks with every rule group that blocks by default still
+  blocking, and no allow-all custom rule), and at least one policy is attached to Front Door.
+  Supports KSI-CNA-RVP for WAF policies in Prevention mode; the rule-set version is
+  azure_frontdoor_waf_drs_current. Blocking is stricter than "enabled in Prevention mode": a
+  Prevention-mode policy also fails with a log-only or missing Default Rule Set, an unfound rule
+  definition, a by-default blocking rule group with every blocking rule off, or an allow-all custom
+  rule. It does not assert which endpoints and domains a policy covers
+  (azure_front_door_waf_coverage), that disabled individual rules or exclusions are justified, or
+  anything about classic Front Door policies (counted as skipped, not evaluated).
 
 regex: '"associated_waf_policies":\s*(?<associated_waf_policies>[1-9]\d*),[\s\S]*?"waf_policies_not_blocking":\s*(?<waf_policies_not_blocking>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0

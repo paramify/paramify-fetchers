@@ -3,16 +3,14 @@ name: App Service No Web App Open To All Public Callers
 type: AUTOMATED
 role: configuration
 statement: >
-  No App Service web app is reachable by every caller on the public network: an
-  app whose main or SCM (deployment) site's access restrictions let all traffic
-  through must have public network access Disabled. The App Service share of
-  "backends are reachable only through approved paths" (KSI-SVC-VCM). It does
-  not assert that the IP / service-tag rules an app does have are the approved
-  ones: an app restricted to the AzureFrontDoor.Backend service tag reads as
-  restricted even without an X-Azure-FDID header check, though any customer's
-  Front Door can then reach it (the fetcher reduces header conditions to a
-  boolean). Nor does it assert that private endpoints exist or are approved, or
-  anything about SQL MI's Entra authentication (the SQL MI share).
+  No App Service web app is reachable by every caller on the public network: an app whose main or
+  SCM (deployment) site's access restrictions let all traffic through must have public network
+  access Disabled. Supports KSI-SVC-VCM for App Service. It does not assert that the IP /
+  service-tag rules an app does have are the approved ones: an app restricted to the
+  AzureFrontDoor.Backend service tag reads as restricted even without an X-Azure-FDID header check,
+  though any customer's Front Door can then reach it (the fetcher reduces header conditions to a
+  boolean). Nor does it assert that private endpoints exist or are approved, or anything about SQL
+  MI's Entra authentication (the SQL MI share).
 
 # Violation count (partner: azure_appsvc_site_exposure_fields_present); each sorted app record starts with "authentication", which fences a match to one app.
 regex: '"(?:main|scm)_site_allows_all_traffic":\s*true(?:(?!"authentication":)[\s\S])*?"public_network_access":\s*(?<public_network_access>null|"(?!Disabled")[^"]*")'

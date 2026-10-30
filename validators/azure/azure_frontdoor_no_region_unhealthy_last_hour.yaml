@@ -3,14 +3,12 @@ name: Front Door No Serving Region Unhealthy In Last Hour
 type: AUTOMATED
 role: configuration
 statement: >
-  No serving Front Door origin group had an enabled region whose origins were
-  below the health threshold in the last hour with health data, and origin
-  health metrics were read for at least one serving group. The "healthy" part
-  of "Front Door has healthy enabled origins in both US regions" (KSI-CNA-OFA).
-  "Last hour" is the latest hour with health data, if it falls within the last
-  3 hours. A group with no health data (no probe, or no traffic) reads unknown
-  and is not judged; it does not assert health over the whole metrics window,
-  or that both regions were serving.
+  No serving Front Door origin group had an enabled region whose origins were below the health
+  threshold in the last hour with health data, and origin health metrics were read for at least one
+  serving group. Supports KSI-CNA-OFA for origin health. "Last hour" is the latest hour with health
+  data, if it falls within the last 3 hours. A group with no health data (no probe, or no traffic)
+  reads unknown and is not judged; it does not assert health over the whole metrics window, or that
+  both regions were serving.
 
 # Positive lookaheads; with_health_data >= 1 keeps an unread metrics query from passing on unhealthy = 0.
 regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"serving_groups_region_unhealthy_last_hour":\s*0\b)(?=[\s\S]*?"serving_groups_with_health_data":\s*[1-9])'

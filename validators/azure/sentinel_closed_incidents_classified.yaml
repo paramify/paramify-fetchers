@@ -4,10 +4,9 @@ type: AUTOMATED
 role: configuration
 statement: >
   No closed incident in scope is left without a determination: every closed incident is classified
-  True Positive, Benign Positive or False Positive, not Undetermined or empty. Substantiates incident
-  classification for KSI-MLA-RVL (Audit Log Collection and Alerts) and that closed incidents were
-  investigated for KSI-CNA-ULN (Internal Connections, Trusted Connection Review). Counts violations, so it
-  relies on sentinel_incident_closure_counts_present.
+  True Positive, Benign Positive or False Positive, not Undetermined or empty. Supports incident
+  classification for KSI-MLA-RVL, and that closed incidents were investigated for KSI-CNA-ULN.
+  Counts violations, so it relies on sentinel_incident_closure_counts_present.
 
 regex: '"closed_undetermined":\s*[1-9]'
 rules_summary: MATCH_COUNT EQUALS 0
