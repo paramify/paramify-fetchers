@@ -1,5 +1,5 @@
 name: datadog_monitors_list
-version: 0.1.0
+version: 0.1.1
 description: Retrieves Datadog monitor configurations to prove persistent alerting is defined for infrastructure and security events.
 category: datadog
 

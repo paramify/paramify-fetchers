@@ -14,17 +14,30 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import requests
 from dotenv import load_dotenv
 
 # The shared failure-reporting helper lives in fetchers/_lib/ — the same import
 # mechanism as a category `_shared` module, one directory up.
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+# Paging shared by the Datadog fetchers lives in the category's _shared/.
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 
+from datadog_paging import (  # noqa: E402
+    PagingError,
+    failure_result,
+    paginate_page_number,
+    with_paging_status,
+)
 from fetcher_status import report_failure  # noqa: E402
 
 logger = logging.getLogger("datadog_siem_detection_rules")
+
+
+# Cloud SIEM answers 403 or 404 on the FIRST page when the product is not
+# enabled for the organization. Only that case reads as "not_available"; the
+# same status on a later page is a partial failure, and a 401 is a failure.
+SIEM_NOT_ENABLED_STATUSES = (403, 404)
 
 
 def current_timestamp() -> str:
@@ -51,38 +64,16 @@ def get_base_url() -> str:
 
 
 def fetch_all_rules(base_url: str, headers: Dict[str, str]) -> List[Dict[str, Any]]:
-    all_rules: List[Dict[str, Any]] = []
-    page_number = 0
-    page_size = 100
-    endpoint = f"{base_url}/api/v2/security_monitoring/rules"
-
-    while True:
-        params = {
-            "page[number]": page_number,
-            "page[size]": page_size,
-            "is_default": "false",
-        }
-        try:
-            response = requests.get(endpoint, headers=headers, params=params, timeout=30)
-            response.raise_for_status()
-            payload = response.json()
-            data = payload.get("data", [])
-            if not data:
-                break
-            all_rules.extend(data)
-            if len(data) < page_size:
-                break
-            page_number += 1
-        except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code in (403, 404):
-                raise
-            logger.warning("Pagination interrupted at page %s: %s", page_number, e)
-            break
-        except requests.exceptions.RequestException as e:
-            logger.warning("Pagination interrupted at page %s: %s", page_number, e)
-            break
-
-    return all_rules
+    """Every custom detection rule. GET /api/v2/security_monitoring/rules pages
+    with `page[size]` (max 100) and `page[number]`. Raises PagingError if the
+    first page fails; a later failure comes back on the returned list's `.error`."""
+    return paginate_page_number(
+        f"{base_url}/api/v2/security_monitoring/rules",
+        headers,
+        operation="Datadog list security monitoring rules",
+        page_size=100,
+        params={"is_default": "false"},
+    )
 
 
 def extract_rule_fields(rule: Dict[str, Any]) -> Dict[str, Any]:
@@ -132,7 +123,7 @@ def get_siem_detection_rules() -> Dict[str, Any]:
                 except ValueError:
                     pass
 
-        return {
+        return with_paging_status({
             "status": "success",
             "api_endpoint": endpoint,
             "record_count": len(extracted),
@@ -147,17 +138,17 @@ def get_siem_detection_rules() -> Dict[str, Any]:
                 "rules_by_severity": severity_counts,
             },
             "retrieved_at": current_timestamp(),
-        }
+        }, rules)
 
-    except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code in (403, 404):
+    except PagingError as e:
+        if e.status_code in SIEM_NOT_ENABLED_STATUSES:
             return {
                 "status": "not_available",
                 "message": "Security Monitoring (SIEM) is not enabled for this organization",
                 "api_endpoint": endpoint,
                 "retrieved_at": current_timestamp(),
             }
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+        return failure_result(e, endpoint, current_timestamp())
     except RuntimeError as e:
         return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
     except Exception as e:
@@ -185,7 +176,7 @@ def main() -> int:
     # Last line on stderr wins: the runner reads its tail into the envelope's metadata.error.
     if result.get("status") not in {"success", "partial_or_empty", "not_available"}:
         reason = result.get("message", "unknown error")
-        report_failure(reason)
+        report_failure(reason, result.get("error_code"))
         return 1
     return 0
 

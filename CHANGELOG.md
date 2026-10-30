@@ -852,6 +852,26 @@ schemas and the `paramify` CLI — not the internal code.
 ### Fixed
 
 
+- **Datadog: a failed page no longer reads as a complete collection.** Before,
+  a request error on any page stopped the walk, and the fetcher reported
+  `success` with the records it had. An auth error on the first page read as
+  "no monitors" or "no hosts", with exit 0. Paging now uses one shared helper,
+  `fetchers/datadog/_shared/datadog_paging.py`. An error on the first page
+  fails the run with `auth_failed`, `not_authorized`, `rate_limited` or
+  `target_unreachable`. An error on a later page keeps the records collected,
+  sets `status: partial_failure`, records the page reached in
+  `metadata.api_failures`, and exits 1 with `partial_failure`. Every result now
+  carries `metadata.partial_failure` and `metadata.api_failures`. Cloud SIEM's
+  403 or 404 on the first page still reads as `not_available`. On a later page,
+  it is a partial failure. Changed: `datadog_apm_services`,
+  `datadog_incidents_list`, `datadog_infra_agent_checks`,
+  `datadog_monitors_list`, `datadog_siem_detection_rules` and
+  `datadog_siem_signals` (0.1.0 → 0.1.1). Also:
+  - `datadog_incidents_list` read only the first 100 incidents. It stopped on a
+    `meta.pagination.total` field that the API doesn't return. It now reads
+    pages until a short page.
+  - `datadog_infra_agent_checks` reported "No hosts found" when the host count
+    request timed out or returned a body that is not JSON. That is now a failure.
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was

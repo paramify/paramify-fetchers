@@ -1,5 +1,5 @@
 name: datadog_apm_services
-version: 0.1.0
+version: 0.1.1
 description: Retrieves the Datadog APM service catalog to prove application services are registered and monitored with assigned owners.
 category: datadog
 

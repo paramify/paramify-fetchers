@@ -1,5 +1,5 @@
 name: datadog_incidents_list
-version: 0.1.0
+version: 0.1.1
 description: Retrieves incident records from Datadog for after-action review and pattern analysis within a configurable lookback window.
 category: datadog
 

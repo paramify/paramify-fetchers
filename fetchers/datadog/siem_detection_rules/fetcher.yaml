@@ -1,5 +1,5 @@
 name: datadog_siem_detection_rules
-version: 0.1.0
+version: 0.1.1
 description: Retrieves custom Datadog SIEM detection rules to prove active threat detection is configured.
 category: datadog
 
