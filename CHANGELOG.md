@@ -97,6 +97,16 @@ schemas and the `paramify` CLI — not the internal code.
     (null when the list that shows them failed); `excluded_function_apps` and
     `excluded_deployment_slots` keep their meaning and now count only in-scope
     items this fetcher doesn't assess.
+  - `azure_app_service_deployments` 0.2.0: web apps, function apps and
+    deployment slots (a slot follows its app), taken out before the per-app
+    reads, so an excluded app's slots are neither read nor compared with
+    production. Activity Log deployment events on an excluded app or slot, or on
+    a site the run didn't list whose resource group or id a pattern matches,
+    leave every count; `results.activity_log.requests_on_excluded_sites` counts
+    their requests. As in `azure_app_service_backups`, the counts are
+    `boundary_excluded_web_apps`, `boundary_excluded_function_apps` and
+    `boundary_excluded_deployment_slots`; `excluded_function_apps` keeps its
+    meaning and now counts only in-scope sites that aren't web apps.
   - `azure_network_security_groups` 0.4.0: network security groups, virtual
     networks (with their subnets) and network interfaces; a NIC also leaves with
     the virtual network its subnets sit in, or with a subnet an `id:` pattern
