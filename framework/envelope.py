@@ -10,6 +10,7 @@ adds the envelope, not the fetcher. See docs/envelope_guide.md.
 import json
 import logging
 from pathlib import Path
+from typing import Any, Dict
 
 from framework import inventory
 from framework.contract import Fetcher, InvocationResult
@@ -30,7 +31,7 @@ def is_enveloped(obj) -> bool:
 
 
 def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> dict:
-    meta = {
+    meta: Dict[str, Any] = {
         "fetcher_name": result.fetcher_name,
         "fetcher_version": result.fetcher_version,
         "category": fetcher.category,
@@ -60,6 +61,8 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
         if es.description is not None:
             es_meta["description"] = es.description
         meta["evidence_set"] = es_meta
+    if result.inputs is not None:
+        meta["inputs"] = result.inputs
     return meta
 
 
