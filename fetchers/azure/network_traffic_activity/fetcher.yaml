@@ -1,0 +1,162 @@
+name: azure_network_traffic_activity
+version: 0.1.0
+description: >-
+  Shows the network traffic actually seen over a window: flows to unexpected ports or new destinations, denied-flow spikes, Front Door requests, and requests reaching origins outside Front Door.
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 7
+    env: NETWORK_TRAFFIC_LOOKBACK_DAYS
+    description: >
+      Days in the window, from 1 to 30; a larger value is clamped to 30 with a
+      warning. Flows are compared against the same number of days before the
+      window, so Traffic Analytics tables need twice this much retention.
+  expected_inbound_ports:
+    type: string
+    required: false
+    default: "80,443"
+    env: NETWORK_TRAFFIC_EXPECTED_INBOUND_PORTS
+    description: >
+      Ports that inbound traffic from the internet is expected to reach, separated
+      by commas or spaces. Any other port with an allowed inbound internet flow is
+      listed in unexpected_inbound_ports. Empty: 80 and 443.
+  denied_spike_factor:
+    type: integer
+    required: false
+    default: 3
+    env: NETWORK_TRAFFIC_DENIED_SPIKE_FACTOR
+    description: >
+      A day in the window is a denied-flow spike when its denied flows exceed this
+      many times the larger of the prior window's daily average and 100 flows
+      (300 at the default factor).
+  sample_size:
+    type: integer
+    required: false
+    default: 10
+    env: NETWORK_TRAFFIC_SAMPLE_SIZE
+    description: >
+      How many entries each top list (flows, ports, destinations, hosts, origins,
+      client IPs) keeps. Counts always cover everything.
+  query_basic_tables:
+    type: boolean
+    required: false
+    default: false
+    env: NETWORK_TRAFFIC_QUERY_BASIC_TABLES
+    description: >
+      Also query tables on the Basic or Auxiliary plan, which bill per GB scanned.
+      Off: those tables are listed as skipped and their figures read unknown.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_network_traffic_activity.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-ULN   # the traffic actually seen: new destinations, unexpected ports, denied-flow spikes and origin traffic that bypassed Front Door
+
+evidence_set:
+  reference_id: EVD-AZURE-NETWORK-TRAFFIC-ACTIVITY
+  name: Azure Network Traffic Activity
+  instructions: |
+    Script: azure/network_traffic_activity/fetcher.py
+
+    Access: Reader on the subscription. Optional: Log Analytics Reader on the workspaces that receive Traffic Analytics, Front Door access logs and App Service HTTP logs; without it, that workspace's figures read unknown.
+
+    Commands Executed:
+    - GET networkWatchers, then GET flowLogs (per watcher) — each flow log, its target and whether Traffic Analytics sends it to a workspace
+    - GET Microsoft.Cdn/profiles, then GET originGroups and GET origins (per profile) — Front Door Standard and Premium profiles, the host each origin points at, and whether it connects over Private Link
+    - GET Microsoft.Web/sites (and GET slots per app, only when an origin names an App Service host no app claims) — which App Service app each origin is
+    - GET diagnosticSettings (per profile and per origin app) — which workspaces receive the Front Door access log and the App Service HTTP log
+    - GET Microsoft.Network/locations/<region>/serviceTags — Front Door's back-end address ranges (AzureFrontDoor.Backend)
+    - GET the workspace and GET tables/<table> (per workspace) — the workspace's query id, and each table's plan and retention
+    - KQL on AzureNetworkAnalytics_CL (NSG flow logs) and NTANetAnalytics (VNet flow logs), over twice the window — flows per day, allowed ports, outbound destinations and the top flows, now and in the prior window
+    - KQL on AzureDiagnostics (category FrontDoorAccessLog) — requests, status classes, hosts, origins and client IPs per profile
+    - KQL on AppServiceHTTPLogs — requests to each origin app by where they came from
+
+    Output: azure_network_traffic_activity_<subscription>.json — every flow log, the traffic Traffic Analytics saw, each Front Door profile's requests, each App Service origin's requests from outside Front Door, and each workspace read.
+
+    Summary fields:
+
+    What was checked?
+    - lookback_days — Days in the window; flows are compared against the same number of days before it (the prior window)
+    - expected_inbound_ports — List of the configured ports that inbound internet traffic is expected to reach
+    - flow_logs — Number of flow logs in the subscription
+    - enabled_flow_logs — Number of enabled flow logs
+    - flow_logs_with_traffic_analytics — Number of enabled flow logs with Traffic Analytics on
+    - nsg_flow_logs_with_traffic_analytics — Number of enabled NSG flow logs with Traffic Analytics on, read from AzureNetworkAnalytics_CL
+    - vnet_flow_logs_with_traffic_analytics — Number of enabled VNet, subnet or network interface flow logs with Traffic Analytics on, read from NTANetAnalytics
+    - traffic_tables — Number of Traffic Analytics tables to read, one per workspace and table
+    - traffic_tables_read — Number of Traffic Analytics tables read
+    - traffic_tables_skipped_basic_plan — Number of Traffic Analytics tables skipped because they are on the Basic or Auxiliary plan, which bills per GB scanned, and query_basic_tables is off
+    - traffic_tables_not_present — Number of Traffic Analytics tables that don't exist in their workspace yet, because Traffic Analytics has written nothing there
+    - traffic_read_in_full — True if every Traffic Analytics table was read; false if any wasn't, or there is no table to read
+
+    What traffic did the flow logs see?
+    - flows — Number of flows in the window, with each public address in a Traffic Analytics record counted on its own; null when no Traffic Analytics table was read
+    - allowed_flows — Number of allowed flows in the window; null when no Traffic Analytics table was read
+    - denied_flows — Number of denied flows in the window; null when no Traffic Analytics table was read
+    - internet_inbound_allowed_flows — Number of allowed inbound flows from the internet in the window (Traffic Analytics flow types ExternalPublic and MaliciousFlow); null when no Traffic Analytics table was read
+    - malicious_allowed_flows — Number of allowed flows in the window to or from an address Microsoft's threat intelligence reports as malicious (flow type MaliciousFlow); null when no Traffic Analytics table was read
+
+    Is there traffic that shouldn't be there?
+    - unexpected_inbound_ports — List of destination ports outside expected_inbound_ports that allowed inbound internet flows reached in the window; null when no Traffic Analytics table was read
+    - unexpected_inbound_ports_count — Number of destination ports outside expected_inbound_ports that allowed inbound internet flows reached in the window; null when no Traffic Analytics table was read
+    - traffic_baseline_available — True if the prior window has any flows; false if it has none; null when no Traffic Analytics table was read. Without a baseline, new_ports_count, new_outbound_destinations and denied_spike_days read null
+    - new_ports_count — Number of direction, protocol and destination port combinations with allowed flows in the window and none in the prior window; null without a baseline
+    - outbound_destinations — Number of destination addresses that allowed outbound flows reached in the window, counted once per flow type and Traffic Analytics table; null when no Traffic Analytics table was read
+    - new_outbound_destinations — Number of destination addresses that allowed outbound flows reached in the window but not in the prior window, counted once per flow type and Traffic Analytics table; null without a baseline
+    - denied_spike_days — List of days in the window whose denied flows exceed the spike threshold: denied_spike_factor times the larger of the prior window's daily average of denied flows and 100 flows (300 at the default factor), averaged over the prior-window days that hold records; null without a baseline
+    - denied_spike_days_count — Number of days in the window whose denied flows exceed the spike threshold; null without a baseline
+
+    Do Front Door's access logs show its requests?
+    - front_door_profiles — Number of Front Door Standard and Premium profiles
+    - front_door_profiles_exporting_access_log — Number of Front Door profiles with a diagnostic setting that sends FrontDoorAccessLog to a workspace, by name or through allLogs
+    - front_door_profiles_with_requests — Number of Front Door profiles whose access log has records in the window
+    - front_door_profiles_without_access_log_records — Number of Front Door profiles that export the access log to workspaces that were read and hold no records in the window
+    - front_door_profiles_access_log_unknown — Number of Front Door profiles that export the access log to a workspace that couldn't be read
+    - front_door_requests — Number of client requests across the profiles that export the access log, one per access-log record, so it can include a small share of duplicate copies of a request; null when any of these profiles' logs couldn't be read
+    - front_door_5xx_responses — Number of client requests answered with a 5xx status across the profiles that export the access log; null when any of these profiles' logs couldn't be read
+
+    Is any origin reached without going through Front Door?
+    - origin_apps — Number of App Service apps or slots that a Front Door origin points at, matched by the origin's Azure resource or its host name
+    - origin_apps_exporting_http_logs — Number of origin apps that send AppServiceHTTPLogs to a workspace, by name or through allLogs
+    - origin_apps_without_http_log_export — Number of origin apps that send no AppServiceHTTPLogs to a workspace, so whether they were reached directly is unknown
+    - origin_apps_private_link — Number of origin apps that every Front Door origin naming them reaches over Private Link; Front Door's requests to these apps arrive from private addresses
+    - origin_apps_bypass_unknown — Number of origin apps that export HTTP logs but whose records couldn't be read or classified (a workspace refused the read, Front Door's address ranges couldn't be read, or a request's caller address is empty or not an IP address)
+    - origin_apps_reached_outside_front_door — Number of origin apps that export HTTP logs and received at least one request from outside Front Door: from a public address outside the AzureFrontDoor.Backend ranges. Private, loopback, link-local and shared addresses count as internal, not outside, and so do Front Door's requests over Private Link. Every other public caller counts as outside, including Azure-hosted monitors
+    - origin_apps_served_outside_front_door — Number of origin apps that export HTTP logs and served (status under 400) at least one request from outside Front Door
+    - origin_requests_outside_front_door — Number of requests from outside Front Door across the origin apps that export HTTP logs; null when any of these apps' records are unknown
+    - origin_requests_outside_front_door_served — Number of requests from outside Front Door that the origin apps exporting HTTP logs served with a status under 400; null when any of these apps' records are unknown
+
+    Which workspaces were read?
+    - log_workspaces — Number of Log Analytics workspaces queried
+    - log_workspaces_queried — Number of Log Analytics workspaces read
+    - log_workspaces_not_authorized — Number of Log Analytics workspaces that refused the read
+    - log_workspaces_not_found — Number of Log Analytics workspaces that no longer exist

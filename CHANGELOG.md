@@ -12,6 +12,22 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_network_traffic_activity`** (`EVD-AZURE-NETWORK-TRAFFIC-ACTIVITY`): the
+  network traffic actually seen over a window, read from Log Analytics.
+  - Traffic Analytics flows (`AzureNetworkAnalytics_CL` for NSG flow logs,
+    `NTANetAnalytics` for VNet flow logs): flows allowed and denied per day and flow
+    type, allowed inbound internet flows on ports outside
+    `NETWORK_TRAFFIC_EXPECTED_INBOUND_PORTS`, ports and outbound destinations new
+    against the prior window, and days whose denied flows spike past
+    `NETWORK_TRAFFIC_DENIED_SPIKE_FACTOR` times the prior daily average.
+  - Front Door access logs: requests, status classes, top hosts, origins and client
+    IPs per profile.
+  - Front Door's App Service origins: requests from public addresses outside the
+    `AzureFrontDoor.Backend` ranges, which reached the origin without Front Door.
+  - Tables on the Basic or Auxiliary plan are queried only when
+    `NETWORK_TRAFFIC_QUERY_BASIC_TABLES` is on. A workspace that refuses the read
+    reads unknown and doesn't fail the run.
+
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
