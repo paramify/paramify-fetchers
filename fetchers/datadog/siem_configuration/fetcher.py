@@ -39,12 +39,19 @@ from dotenv import load_dotenv
 # mechanism as a category `_shared` module, one directory up.
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+# The Cloud SIEM state rule shared by the Datadog SIEM fetchers lives in _shared/.
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 
+from datadog_siem_state import (  # noqa: E402
+    CONTENT_PACKS_PATH,
+    NOT_ACTIVE_MESSAGE,
+    siem_state_from_content_packs,
+    unknown_siem_state,
+)
 from fetcher_status import report_failure  # noqa: E402
 
 logger = logging.getLogger("datadog_siem_configuration")
 
-CONTENT_PACKS_PATH = "/api/v2/security_monitoring/content_packs/states"
 SUPPRESSIONS_PATH = "/api/v2/security_monitoring/configuration/suppressions"
 NOTIFICATION_RULES_PATH = "/api/v2/security/signals/notification_rules"
 DETECTION_RULES_PATH = "/api/v2/security_monitoring/rules"
@@ -150,37 +157,11 @@ def get_paged(base_url: str, path: str, headers: Dict[str, str]) -> List[Dict[st
 
 def read_siem_state(base_url: str, headers: Dict[str, str]) -> Dict[str, Any]:
     """`enabled` is True, False, or None (unknown). Never False without the signal."""
-    state: Dict[str, Any] = {
-        "enabled": None,
-        "basis": "content_pack_states",
-        "sku": None,
-        "content_pack_detail_types": [],
-        "error": None,
-        "status_code": None,
-    }
     try:
         payload = api_get(base_url, CONTENT_PACKS_PATH, headers)
     except ApiError as e:
-        state["error"] = str(e)
-        state["status_code"] = e.status_code
-        return state
-
-    meta = payload.get("meta") or {}
-    state["sku"] = meta.get("sku")
-    detail_types = sorted({
-        ((item.get("attributes") or {}).get("details") or {}).get("type") or "unknown"
-        for item in payload.get("data") or []
-    })
-    state["content_pack_detail_types"] = detail_types
-    if not detail_types:
-        state["error"] = "content pack states returned no content packs; Cloud SIEM state unknown"
-    elif detail_types == ["onboarding"]:
-        state["enabled"] = False
-    elif "onboarding" not in detail_types:
-        state["enabled"] = True
-    else:
-        state["error"] = "content pack states mix onboarding and active types; Cloud SIEM state unknown"
-    return state
+        return unknown_siem_state(str(e), e.status_code)
+    return siem_state_from_content_packs(payload)
 
 
 # --------------------------------------------------------------------------- #
@@ -296,8 +277,7 @@ def get_siem_configuration() -> Dict[str, Any]:
     if siem_state["enabled"] is False:
         return {
             "status": "not_available",
-            "message": "Cloud SIEM is not active for this organization "
-                       "(content pack states report onboarding)",
+            "message": NOT_ACTIVE_MESSAGE,
             "api_endpoint": f"{base_url}{CONTENT_PACKS_PATH}",
             "data": {"siem_state": siem_state},
             "summary": {"siem_enabled": False},

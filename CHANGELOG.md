@@ -861,9 +861,12 @@ schemas and the `paramify` CLI — not the internal code.
   `target_unreachable`. An error on a later page keeps the records collected,
   sets `status: partial_failure`, records the page reached in
   `metadata.api_failures`, and exits 1 with `partial_failure`. Every result now
-  carries `metadata.partial_failure` and `metadata.api_failures`. Cloud SIEM's
-  403 or 404 on the first page still reads as `not_available`. On a later page,
-  it is a partial failure. Changed: `datadog_apm_services`,
+  carries `metadata.partial_failure` and `metadata.api_failures`. In the SIEM
+  fetchers, a 403 or 404 on the first page reads as `not_available` only when
+  the content pack states endpoint reports `onboarding` content packs, the same
+  rule as `datadog_siem_configuration` below. Otherwise it is a failure, with
+  the check's result in `siem_state`. On a later page, it is a partial failure.
+  The rule lives in `fetchers/datadog/_shared/datadog_siem_state.py`. Changed: `datadog_apm_services`,
   `datadog_incidents_list`, `datadog_infra_agent_checks`,
   `datadog_monitors_list`, `datadog_siem_detection_rules` and
   `datadog_siem_signals` (0.1.0 → 0.1.1, and 0.2.0 for

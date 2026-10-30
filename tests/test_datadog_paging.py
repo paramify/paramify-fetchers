@@ -12,8 +12,9 @@ What this proves, for every fetcher that pages:
     evidence partial_failure with the page reached, and exits 1 with the
     partial_failure code;
   - a 401 on the first page is a failure (auth_failed, exit 1), never "empty";
-  - Cloud SIEM's 403 on the first page still reads as "not enabled", but the
-    same 403 on a later page is a partial failure.
+  - a Cloud SIEM 403 or 404 on the first page reads as "not enabled" only when
+    the content pack states report onboarding; otherwise it is a failure, and
+    the same status on a later page is a partial failure.
 
 What it cannot prove: that a live Datadog tenant pages exactly the way the API
 reference says it does. That needs one run against a real organization.
@@ -358,16 +359,57 @@ def test_genuinely_empty_is_still_partial_or_empty(short: str, env: Path, monkey
     assert evidence["status"] == "partial_or_empty"
 
 
+CONTENT_PACKS = "/api/v2/security_monitoring/content_packs/states"
+
+
+def with_content_packs(fake: FakeDatadog, detail_type: str = "", status: int = 200) -> Callable[..., FakeResponse]:
+    """`fake`, plus a content pack states endpoint that reports `detail_type`."""
+    def call(method: str, url: str, headers: Any = None, params: Any = None,
+             json: Any = None, timeout: Any = None) -> FakeResponse:
+        if url == BASE_URL + CONTENT_PACKS:
+            if status != 200:
+                return FakeResponse(status, {"errors": ["synthetic failure"]})
+            pack = {"attributes": {"details": {"type": detail_type}}}
+            return FakeResponse(200, {"data": [pack, pack], "meta": {"sku": "test"}})
+        return fake(method, url, headers, params, json, timeout)
+    return call
+
+
 @pytest.mark.parametrize("short", ["siem_detection_rules", "siem_signals"])
 @pytest.mark.parametrize("http_status", [403, 404])
-def test_siem_not_enabled_on_first_page_is_not_available(
+def test_siem_off_on_first_page_is_not_available_only_on_the_onboarding_signal(
     short: str, http_status: int, env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    code, evidence, status = run(short, fake_for(short, fail_at=0, fail_status=http_status), monkeypatch, env)
+    fake = with_content_packs(fake_for(short, fail_at=0, fail_status=http_status), "onboarding")
+    code, evidence, status = run(short, fake, monkeypatch, env)
 
     assert code == 0
     assert status is None
     assert evidence["status"] == "not_available"
+    assert evidence["data"]["siem_state"]["enabled"] is False
+
+
+@pytest.mark.parametrize("short", ["siem_detection_rules", "siem_signals"])
+def test_siem_403_with_siem_active_is_not_authorized(short: str, env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = with_content_packs(fake_for(short, fail_at=0, fail_status=403), "security_monitoring")
+    code, evidence, status = run(short, fake, monkeypatch, env)
+
+    assert code == 1
+    assert evidence["status"] == "error"
+    assert evidence["error_code"] == "not_authorized"
+    assert evidence["siem_state"]["enabled"] is True
+    assert status is not None and status["code"] == "not_authorized"
+
+
+@pytest.mark.parametrize("short", ["siem_detection_rules", "siem_signals"])
+def test_siem_404_with_unknown_siem_state_is_a_failure(short: str, env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = with_content_packs(fake_for(short, fail_at=0, fail_status=404), status=404)
+    code, evidence, _status = run(short, fake, monkeypatch, env)
+
+    assert code == 1
+    assert evidence["status"] == "error"
+    assert evidence["siem_state"]["enabled"] is None
+    assert evidence["siem_state"]["status_code"] == 404
 
 
 @pytest.mark.parametrize("short", ["siem_detection_rules", "siem_signals"])

@@ -29,15 +29,18 @@ from datadog_paging import (  # noqa: E402
     paginate_cursor,
     with_paging_status,
 )
+from datadog_siem_state import NOT_ACTIVE_MESSAGE, read_siem_state  # noqa: E402
 from fetcher_status import report_failure  # noqa: E402
 
 logger = logging.getLogger("datadog_siem_signals")
 
 
-# Cloud SIEM answers 403 or 404 on the FIRST page when the product is not
-# enabled for the organization. Only that case reads as "not_available"; the
-# same status on a later page is a partial failure, and a 401 is a failure.
-SIEM_NOT_ENABLED_STATUSES = (403, 404)
+# A 403 or 404 on the FIRST page may mean Cloud SIEM is not active, but a
+# missing permission answers the same way. Only then is the content pack states
+# signal read (see _shared/datadog_siem_state.py). It alone decides
+# "not_available"; otherwise the status is a failure. On a later page, the same
+# status is a partial failure, and a 401 is always a failure.
+SIEM_GATE_STATUSES = (403, 404)
 
 
 def current_timestamp() -> str:
@@ -172,13 +175,19 @@ def get_siem_signals() -> Dict[str, Any]:
         }, signals)
 
     except PagingError as e:
-        if e.status_code in SIEM_NOT_ENABLED_STATUSES:
-            return {
-                "status": "not_available",
-                "message": "Security Monitoring (SIEM) is not enabled for this organization",
-                "api_endpoint": endpoint,
-                "retrieved_at": current_timestamp(),
-            }
+        if e.status_code in SIEM_GATE_STATUSES:
+            siem_state = read_siem_state(base_url, headers)
+            if siem_state["enabled"] is False:
+                return {
+                    "status": "not_available",
+                    "message": NOT_ACTIVE_MESSAGE,
+                    "api_endpoint": endpoint,
+                    "data": {"siem_state": siem_state},
+                    "retrieved_at": current_timestamp(),
+                }
+            result = failure_result(e, endpoint, current_timestamp())
+            result["siem_state"] = siem_state
+            return result
         return failure_result(e, endpoint, current_timestamp())
     except RuntimeError as e:
         return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
