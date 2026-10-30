@@ -33,32 +33,6 @@ schemas and the `paramify` CLI — not the internal code.
   shortest change window read (`change_lookback_days`), so a narrow window
   can't pass as no changes, and `work_items_cover_changes`, false when the work
   items window starts too late for the earliest change.
-- **`azure_devops_work_items`** (`EVD-AZURE-DEVOPS-WORK-ITEMS`): Azure DevOps
-  work items that record changes and security work. The types that record
-  changes (`AZURE_DEVOPS_WORK_ITEM_TYPES`, default `Change Request`) and the
-  tags that mark security work (`AZURE_DEVOPS_WORK_ITEM_TAGS`, default
-  `Security`) are set per manifest. Items changed in the last
-  `AZURE_DEVOPS_LOOKBACK_DAYS` (default 90) are collected, along with every
-  selected item still open. Per item it records:
-  - type, state and its category, priority, severity, tags, owner, and the
-    created, changed, closed and planned dates;
-  - the state history;
-  - when and by whom it was approved: the first move into an
-    `AZURE_DEVOPS_APPROVAL_STATES` state, or the first comment matching
-    `AZURE_DEVOPS_APPROVAL_PATTERN` (default: a comment starting "Approved"),
-    with only the author and time kept;
-  - its linked TFVC changesets, Git commits, pull requests, builds and parent,
-    child and related items.
-
-  Linked changesets are read for their date and author, and each project's
-  states for the types collected are recorded, naming any item state its type
-  no longer defines. A finished change item is one in a Completed state; a
-  Removed one is not. The summary lists
-  finished change items without approval or a linked change, items changed
-  before approval or approved by the change's author, and open, overdue,
-  high-priority and unassigned security items. A summary field whose read
-  failed is null. Read-only PAT scopes: Work Items, Code, and Project and Team;
-  or an Entra identity that is a reader in each project.
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
@@ -227,6 +201,41 @@ schemas and the `paramify` CLI — not the internal code.
   (`all_alerts_listed`). Counts and close times that need an alert list, a rule list
   or a history that wasn't read are null, never 0 or partial. Descriptions and
   comments are capped at 500 characters, marked when cut.
+- **`azure_devops_work_items`** (`EVD-AZURE-DEVOPS-WORK-ITEMS`): Azure DevOps
+  work items that record changes and security work. The types that record
+  changes (`AZURE_DEVOPS_WORK_ITEM_TYPES`, default `Change Request`) and the
+  tags that mark security work (`AZURE_DEVOPS_WORK_ITEM_TAGS`, default
+  `Security`) are set per manifest. Items changed in the last
+  `AZURE_DEVOPS_LOOKBACK_DAYS` (default 90) are collected, along with every
+  selected item still open. Per item it records:
+  - type, state and its category, priority, severity, tags, owner, and the
+    created, changed, closed and planned dates;
+  - the state history, with each move's reason;
+  - the approval in effect, with who and when: the first move into an
+    `AZURE_DEVOPS_APPROVAL_STATES` state, or the first comment matching
+    `AZURE_DEVOPS_APPROVAL_PATTERN` (default: a line starting "Approved" with
+    no question mark; quoted text is left out), since the last withdrawal. A
+    move back to a state before the approval states, or to a state or with a
+    reason naming Rejected, withdraws the approvals before it. Only the
+    comment's author and time are kept;
+  - whether the item's creator gave that approval;
+  - its linked TFVC changesets, Git commits, pull requests, builds and parent,
+    child and related items.
+
+  Linked changesets are read for their date and author, and each project's
+  states for the types collected are recorded, naming any item state its type
+  no longer defines. A finished change item is one in a Completed state; a
+  Removed one is not. The summary lists
+  finished change items without approval or a linked change, items approved by
+  their creator, items changed before approval or approved by the change's
+  author, and open, overdue, high-priority and unassigned security items. Git
+  commits and pull requests aren't read, so the two change checks count the
+  approved items they cover (`change_items_linked_changes_checked`) and read
+  null when any approved item with linked changes isn't covered: it links a
+  Git commit or pull request, or a changeset that couldn't be read. An item
+  the query listed but the batch read didn't return is a failure. A summary
+  field whose read failed is null. Read-only PAT scopes: Work Items, Code, and
+  Project and Team; or an Entra identity that is a reader in each project.
 - **`azure_devops_identities`** (`EVD-AZURE-DEVOPS-IDENTITIES`): who can sign in to
   an Azure DevOps organization and who holds its administrative groups. It records:
   - every user, service principal and service identity, with access level,
@@ -863,15 +872,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
-- **Azure DevOps: a TFVC "Access Denied" is `not_authorized`.** Azure DevOps
-  answers 500 TF14098 when the caller can't read an item in a changeset. The
-  shared client now reports it as `not_authorized` and doesn't retry it.
-  Before, it was retried and reported as `internal_error`.
+
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
   refused, throttled or unreachable failed as `partial_failure`. These now read
   `not_authorized`, `rate_limited` and `target_unreachable`.
+- **Azure DevOps: a TFVC "Access Denied" is `not_authorized`.** Azure DevOps
+  answers 500 TF14098 when the caller can't read an item in a changeset. The
+  shared client now reports it as `not_authorized` and doesn't retry it.
+  Before, it was retried and reported as `internal_error`.
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
   collection as a success.** A 200 response that is not JSON, for example a
   single sign-on or instance hibernation page, and a response whose
