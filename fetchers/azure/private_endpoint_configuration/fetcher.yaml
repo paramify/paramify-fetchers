@@ -1,5 +1,5 @@
 name: azure_private_endpoint_configuration
-version: 0.1.1
+version: 0.2.0
 description: >
   Inventories Azure private endpoints (Microsoft.Network/privateEndpoints) in the subscription. For
   every endpoint: the target resource and sub-resource (group id) it connects to, the connection's
@@ -9,6 +9,28 @@ description: >
   so the evidence shows that traffic to the service stays on the private network. For every endpoint
   subnet: whether its network security group and route table apply to private endpoint traffic.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching private endpoint is listed under excluded with the
+      pattern and left out of every count and verdict, and so is a target resource
+      only excluded endpoints connect to. An excluded endpoint gets none of the
+      per-endpoint reads (zone groups, Resource Graph lookups), so a failure
+      reading it cannot fail the run. The patterns are matched against the
+      endpoints only: an in-scope endpoint whose target resource a pattern would
+      match stays in scope with its verdicts, and that target still counts. A
+      pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
+      ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -97,3 +119,16 @@ evidence_set:
     the share of private-linked services closed to the public internet;
     summary.target_resources_public_access_enabled and summary.target_resources_public_access_unset
     split the remainder.
+
+    Resources the resource_exclusions patterns take out are listed under excluded
+    instead, each with the pattern that matched; every summary count, target
+    resources and endpoint subnets included, covers only the in-scope endpoints.
+    total_target_resources and the target_resources_* counts still include a target
+    in an excluded resource group or region when an in-scope endpoint connects to it:
+    they describe what the in-scope endpoints reach.
+
+    Which resources are left out of scope?
+      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no private endpoint, such as a mistyped name
+      - excluded_private_endpoints — Number of private endpoints left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or the target resources only they connect to
+      - in_scope_private_endpoints — Number of private endpoints read and in scope; 0 means none was read or the patterns took out every one, which a check can catch by requiring more than 0

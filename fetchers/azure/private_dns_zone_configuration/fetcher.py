@@ -35,6 +35,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from private_dns import project_vnet_link, project_zone_group  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import (  # noqa: E402
     lookup_by_ids,
     query_all,
@@ -861,14 +862,24 @@ def main() -> int:
             ),
         )
 
+    # Records were classified and duplicates found against every zone first, so in-scope verdicts don't change.
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    # A private DNS zone is global, so only rg: and id: patterns can take one out.
+    zones, excluded = exclusions.split(zones, "private_dns_zone", location=lambda z: None)
+    in_scope_names = {z["name"].lower() for z in zones}
+    duplicates = [d for d in duplicates if d["name"] in in_scope_names]
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"private_zones": zones, "provider_registration_status": registration},
+        results={"private_zones": zones, "provider_registration_status": registration, "excluded": excluded},
         summary={
             **summarize(zones, duplicates, duplicates_scope),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("private_dns_zone",), {"private_dns_zones": len(zones)}),
         },
     )
     filename = f"azure_private_dns_zone_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
