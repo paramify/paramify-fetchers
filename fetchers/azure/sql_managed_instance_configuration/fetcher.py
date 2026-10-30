@@ -24,7 +24,7 @@ from azure_common import (  # noqa: E402
     credential,
     dig,
     failure_reason,
-    get_optional,
+    is_not_found,
     list_diagnostic_settings,
     model_attr,
     monitor_client,
@@ -388,6 +388,12 @@ def database_classification(database: dict, labels: list[dict] | None) -> dict:
     }
 
 
+def unregistered(exc) -> bool:
+    """ARM's 409 MissingSubscriptionRegistration: the provider was never registered on the subscription."""
+    code = getattr(getattr(exc, "error", None), "code", None) or ""
+    return "missingsubscriptionregistration" in f"{code} {exc}".lower()
+
+
 def classification_fields(databases: list[dict] | None) -> dict:
     """Per-instance counts, null when the database list failed; a database whose labels failed counts as unknown."""
     counts = [d["sensitivity_labeled_columns"] for d in databases or []]
@@ -441,6 +447,11 @@ def instance_record(
 def summarize(instances: list[dict]) -> dict:
     listed = all(i["user_databases"] is not None for i in instances)
     columns = [i["sensitivity_labeled_columns"] for i in instances]
+
+    def databases(field):
+        """Null with total_user_databases, so a count is never partial."""
+        return sum(i[field] for i in instances) if listed else None
+
     return {
         "total_managed_instances": len(instances),
         "instances_public_data_endpoint_enabled": sum(
@@ -477,16 +488,11 @@ def summarize(instances: list[dict]) -> dict:
         "instances_custom_maintenance_window": sum(
             1 for i in instances if i["maintenance_window_default"] is False
         ),
+        "instances_maintenance_window_unknown": sum(1 for i in instances if i["maintenance_window_default"] is None),
         "total_user_databases": sum(len(i["user_databases"]) for i in instances) if listed else None,
-        "user_databases_with_sensitivity_labels": sum(
-            i["user_databases_with_sensitivity_labels"] or 0 for i in instances
-        ),
-        "user_databases_without_sensitivity_labels": sum(
-            i["user_databases_without_sensitivity_labels"] or 0 for i in instances
-        ),
-        "user_databases_sensitivity_labels_unknown": sum(
-            i["user_databases_sensitivity_labels_unknown"] or 0 for i in instances
-        ),
+        "user_databases_with_sensitivity_labels": databases("user_databases_with_sensitivity_labels"),
+        "user_databases_without_sensitivity_labels": databases("user_databases_without_sensitivity_labels"),
+        "user_databases_sensitivity_labels_unknown": databases("user_databases_sensitivity_labels_unknown"),
         "sensitivity_labeled_columns": None if None in columns else sum(columns),
     }
 
@@ -527,22 +533,40 @@ def read_subnet(network, collector: Collector, instance: dict) -> dict:
     return subnet_fields(subnet, group, table)
 
 
-def read_maintenance_windows(cred, collector: Collector, configuration_ids) -> dict:
-    """Each public maintenance configuration once, keyed by lower-cased id; a 404 reads as no window, not a failure."""
+def read_maintenance_windows(subscription_id, cred, collector: Collector, configuration_ids) -> tuple[dict, str | None]:
+    """Each configuration once by lower-cased id, and Microsoft.Maintenance's registration (None: nothing to read)."""
     ids = {cid.lower(): cid for cid in configuration_ids if cid}
-    rest = collector.guard("arm_rest.ARMPipelineClient (init)", lambda: arm_rest_client(cred)) if ids else None
+    if not ids:
+        return {}, None
+    registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Maintenance")
+    if registration == NOT_REGISTERED:
+        logger.warning(
+            "Microsoft.Maintenance is not registered on subscription %s; maintenance windows are not read",
+            subscription_id,
+        )
+        return {}, registration
+    rest = collector.guard("arm_rest.ARMPipelineClient (init)", lambda: arm_rest_client(cred))
     if rest is None:
-        return {}
-    return {
-        key: get_optional(
-            collector,
-            f"maintenance.publicMaintenanceConfigurations.get ({basename(cid)})",
-            lambda: project_maintenance_configuration(
-                get_json(rest, f"{cid}?api-version={MAINTENANCE_API_VERSION}")
-            ),
-        )[0]
+        return {}, registration
+
+    refused: list = []
+
+    def read(cid):
+        try:
+            return project_maintenance_configuration(get_json(rest, f"{cid}?api-version={MAINTENANCE_API_VERSION}"))
+        except Exception as exc:  # noqa: BLE001 — a missing configuration or provider is no window, not a failure
+            if unregistered(exc):
+                refused.append(cid)
+                return None
+            if is_not_found(exc):
+                return None
+            raise
+
+    windows = {
+        key: collector.guard(f"maintenance.publicMaintenanceConfigurations.get ({basename(cid)})", lambda: read(cid))
         for key, cid in sorted(ids.items())
     }
+    return windows, NOT_REGISTERED if refused else registration
 
 
 def classify_databases(client, collector: Collector, instance: dict) -> list[dict] | None:
@@ -568,11 +592,11 @@ def classify_databases(client, collector: Collector, instance: dict) -> list[dic
 
 
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-            excluded: list | None = None) -> list[dict]:
+            excluded: list | None = None) -> tuple[list[dict], str | None]:
     """Instances the exclusions take out are appended to `excluded` and get none of the per-instance reads."""
     client = sql_client(subscription_id, cred, collector)
     if client is None:
-        return []
+        return [], None
     instances = list_instances(client, collector, project_instance)
     if exclusions and excluded is not None:
         instances, out = exclusions.split(instances, "managed_instance")
@@ -594,8 +618,8 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
             )
         return networks[sub]
 
-    windows = read_maintenance_windows(
-        cred, collector, [i.get("maintenance_configuration_id") for i in instances]
+    windows, maintenance_registration = read_maintenance_windows(
+        subscription_id, cred, collector, [i.get("maintenance_configuration_id") for i in instances]
     )
 
     records = []
@@ -633,7 +657,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
             **classification_fields(classify_databases(client, collector, instance)),
         })
 
-    return sorted(records, key=lambda i: i.get("id") or "")
+    return sorted(records, key=lambda i: i.get("id") or ""), maintenance_registration
 
 
 def main() -> int:
@@ -654,6 +678,7 @@ def main() -> int:
     instances: list[dict] = []
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
+    maintenance_registration = None
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(
@@ -665,7 +690,7 @@ def main() -> int:
                 "Instance in use; reporting status not_registered",
                 subscription_id,
             )
-        instances = collect(subscription_id, cred, collector, exclusions, excluded)
+        instances, maintenance_registration = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -685,6 +710,7 @@ def main() -> int:
         results={
             "managed_instances": instances,
             "provider_registration_status": registration,
+            "maintenance_provider_registration_status": maintenance_registration,
             "excluded": excluded,
         },
         summary={

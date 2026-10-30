@@ -46,6 +46,16 @@ class ResourceNotFoundError(Exception):
     pass
 
 
+class HttpResponseError(Exception):
+    def __init__(self, code, message):
+        super().__init__(f"({code}) {message}")
+        self.error = ns(code=code)
+
+
+UNREGISTERED = HttpResponseError("MissingSubscriptionRegistration",
+                                 "The subscription is not registered to use namespace 'Microsoft.Maintenance'.")
+
+
 def call(table):
     def fn(*args, **kwargs):
         value = table[args or tuple(kwargs.values())]
@@ -247,7 +257,8 @@ def maintenance_config(name, recur):
                 "duration": "08:00", "timeZone": "Eastern Standard Time", "recurEvery": recur}}}
 
 
-def run_configuration(monkeypatch, client, settings=None, net=None, windows=None, reads=None):
+def run_configuration(monkeypatch, client, settings=None, net=None, windows=None, reads=None,
+                      registration="registered", maintenance=None):
     settings = settings or {(MI_EAST.lstrip("/"),): [], (MI_WEST.lstrip("/"),): []}
     windows = windows or {
         WINDOWS["mi-east"]: maintenance_config("SQL_EastUS_MI_1", "Week Monday,Tuesday,Wednesday,Thursday"),
@@ -269,8 +280,12 @@ def run_configuration(monkeypatch, client, settings=None, net=None, windows=None
     monkeypatch.setattr(configuration, "network_client", lambda *a: net or network())
     monkeypatch.setattr(configuration, "arm_rest_client", lambda *a: object())
     monkeypatch.setattr(configuration, "get_json", get_json)
+    monkeypatch.setattr(configuration, "provider_registration_status", lambda *a: registration)
     collector = configuration.Collector(logging.getLogger("test"))
-    instances = {i["name"]: i for i in configuration.collect(SUB, object(), collector)}
+    records, maintenance_registration = configuration.collect(SUB, object(), collector)
+    if maintenance is not None:
+        maintenance.append(maintenance_registration)
+    instances = {i["name"]: i for i in records}
     return instances, configuration.summarize(list(instances.values())), collector
 
 
@@ -460,6 +475,36 @@ def test_default_maintenance_window_and_unread_configurations(monkeypatch):
     assert summary["instances_custom_maintenance_window"] == 1
 
 
+def test_unregistered_maintenance_provider_skips_the_window_read(monkeypatch):
+    reads, maintenance = [], []
+    instances, summary, collector = run_configuration(monkeypatch, sql_client(), reads=reads,
+                                                      registration="not_registered", maintenance=maintenance)
+    assert collector.ok and reads == [] and maintenance == ["not_registered"]
+    assert [instances[mi]["maintenance_window"] for mi in ("mi-east", "mi-west")] == [None, None]
+    assert (instances["mi-east"]["maintenance_window_default"], instances["mi-west"]["maintenance_window_default"]) \
+        == (False, True)
+    assert summary["instances_custom_maintenance_window"] == 1
+
+
+def test_missing_subscription_registration_reads_as_not_registered_not_a_failure(monkeypatch):
+    windows = {WINDOWS["mi-east"]: UNREGISTERED, WINDOWS["mi-west"]: UNREGISTERED}
+    maintenance = []
+    instances, summary, collector = run_configuration(monkeypatch, sql_client(), windows=windows,
+                                                      maintenance=maintenance)
+    assert collector.ok and maintenance == ["not_registered"]
+    assert [instances[mi]["maintenance_window"] for mi in ("mi-east", "mi-west")] == [None, None]
+    assert instances["mi-west"]["maintenance_window_default"] is True
+    assert summary["instances_custom_maintenance_window"] == 1
+
+
+def test_instance_without_a_maintenance_configuration_counts_as_unknown(monkeypatch):
+    monkeypatch.setitem(WINDOWS, "mi-west", None)
+    instances, summary, collector = run_configuration(monkeypatch, sql_client())
+    assert collector.ok
+    assert instances["mi-west"]["maintenance_window_default"] is None
+    assert (summary["instances_custom_maintenance_window"], summary["instances_maintenance_window_unknown"]) == (1, 1)
+
+
 def test_sensitivity_labels_are_counted_per_user_database(monkeypatch):
     labels = {("rg-east", "mi-east", "app"): [
         ns(label_name="Confidential", information_type="Financial", column_name="card"),
@@ -484,6 +529,15 @@ def test_sensitivity_labels_are_counted_per_user_database(monkeypatch):
     assert summary["sensitivity_labeled_columns"] == 3
 
 
+def test_one_failed_database_list_leaves_every_database_count_null(monkeypatch):
+    labels = {("rg-east", "mi-east", "app"): [ns(label_name="Confidential", information_type="Financial")]}
+    client = sql_client(labels=labels, databases={("rg-west", "mi-west"): DENIED})
+    instances, summary, _ = run_configuration(monkeypatch, client)
+    assert instances["mi-east"]["user_databases_with_sensitivity_labels"] == 1
+    assert (summary["total_user_databases"], summary["user_databases_with_sensitivity_labels"],
+            summary["user_databases_without_sensitivity_labels"]) == (None, None, None)
+
+
 def test_failed_label_or_database_reads_are_unknown_not_unlabeled(monkeypatch):
     client = sql_client(labels={("rg-east", "mi-east", "app"): DENIED},
                         databases={("rg-west", "mi-west"): DENIED})
@@ -497,7 +551,7 @@ def test_failed_label_or_database_reads_are_unknown_not_unlabeled(monkeypatch):
     assert east["sensitivity_labeled_columns"] is None
     assert west["user_databases"] is None
     assert west["user_databases_with_sensitivity_labels"] is None
-    assert summary["total_user_databases"] is None
-    assert summary["user_databases_sensitivity_labels_unknown"] == 1
-    assert summary["user_databases_without_sensitivity_labels"] == 0
-    assert summary["sensitivity_labeled_columns"] is None
+    for field in ("total_user_databases", "user_databases_with_sensitivity_labels",
+                  "user_databases_without_sensitivity_labels", "user_databases_sensitivity_labels_unknown",
+                  "sensitivity_labeled_columns"):
+        assert summary[field] is None, field
