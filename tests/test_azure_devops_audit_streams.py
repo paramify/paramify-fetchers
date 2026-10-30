@@ -184,7 +184,7 @@ def stream(results, sid):
 def test_fetcher_yaml_follows_the_shape():
     spec = yaml.safe_load((FETCHER_DIR / "fetcher.yaml").read_text())
     assert spec["name"] == mod.NAME == "azure_devops_audit_streams"
-    assert spec["category"] == "azure" and spec["version"] == "0.1.0"
+    assert spec["category"] == "azure" and spec["version"] == "0.1.1"
     assert spec["evidence_set"]["reference_id"] == "EVD-AZURE-DEVOPS-AUDIT-STREAMS"
     assert len(spec["evidence_set"]["instructions"].split()) <= 80
     assert spec["config_schema"]["audit_window_days"]["env"] == mod.WINDOW_ENV
@@ -451,7 +451,8 @@ def test_a_refused_workspace_query_fails_the_run(fakes):
     results, summary, collector = run(devops)
     assert not collector.ok and "AzureDevOpsAuditing" in collector.failures[0]["operation"]
     assert stream(results, 2)["ingestion"] is None
-    assert summary["azure_monitor_streams_with_rows"] == 0
+    assert summary["streams"] == 3 and summary["streams_delivering"] == 2
+    assert summary["azure_monitor_streams_with_rows"] is None and summary["azure_monitor_streams_missing_rows"] is None
 
 
 def test_a_workspace_id_only_stream_queries_it_directly(fakes):
@@ -478,9 +479,10 @@ def test_a_stream_naming_no_workspace_is_a_note(fakes):
     devops, logs, _ = fakes
     devops.routes["_apis/audit/streams"] = [{"id": 8, "consumerType": "AzureMonitorLogs", "status": 1,
                                             "consumerInputs": {"SharedKey": LAW_KEY}}]
-    results, _, collector = run(devops)
+    results, summary, collector = run(devops)
     assert collector.ok and logs.calls == [] and stream(results, 8)["ingestion"] is None
     assert results["notes"] == ["stream 8 names no workspace in its inputs; ingestion not checked"]
+    assert summary["azure_monitor_streams_missing_rows"] is None
 
 
 def test_an_unreadable_policy_falls_back_to_the_audit_log(fakes):
@@ -545,12 +547,17 @@ def test_auditing_off_is_evidence_not_a_failure(fakes):
     assert summary["auditing_enabled"] is False and summary["streams"] is None
 
 
+STREAM_COUNTS = ("streams", "streams_delivering", "streams_not_delivering", "streams_by_target",
+                 "azure_monitor_streams_with_rows", "azure_monitor_streams_missing_rows")
+
+
 def test_audit_api_failures_fail_the_run_when_auditing_is_on(fakes):
     devops, _, _ = fakes
     devops.routes["_apis/audit/streams"] = ado_error(403, "VS403436: view audit log permission")
     results, summary, collector = run(devops)
     assert [f["operation"] for f in collector.failures] == ["audit.streams.list"]
-    assert results["streams"] is None and summary["streams"] is None
+    assert results["streams"] is None and {k: summary[k] for k in STREAM_COUNTS} == dict.fromkeys(STREAM_COUNTS)
+    assert summary["newest_audit_event"] is not None
 
 
 def test_an_auth_failure_fails_the_run_even_with_auditing_off(fakes):
@@ -646,6 +653,16 @@ def test_main_reports_a_refused_workspace_as_not_authorized(ado, fakes, tmp_path
     code, _ = run_main(tmp_path)
     status = json.loads((tmp_path / "status.json").read_text())
     assert code == 1 and status["code"] == "not_authorized" and "AzureDevOpsAuditing" in status["error"]
+
+
+def test_main_reports_refused_streams_as_not_authorized_not_as_none(ado, tmp_path):
+    ado.routes[f"auditservice.dev.azure.com/{ORG}/_apis/audit/streams"] = Resp(
+        403, {"message": "VS403436: You do not have permission to view audit streams.", "typeKey": "AccessCheckException"})
+    code, text = run_main(tmp_path)
+    status = json.loads((tmp_path / "status.json").read_text())
+    summary = json.loads(text)["summary"]
+    assert code == 1 and status["code"] == "not_authorized" and "audit.streams.list" in status["error"]
+    assert {k: summary[k] for k in STREAM_COUNTS} == dict.fromkeys(STREAM_COUNTS)
 
 
 def test_main_treats_a_sign_in_page_as_a_failure(ado, tmp_path):
