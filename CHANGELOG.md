@@ -514,6 +514,38 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_entra_conditional_access_policies` judges authentication strengths by
+  their allowed sign-in methods** (0.1.0 → 0.2.0). Only a strength's name was kept,
+  and any strength counted as MFA, so phishing-resistant enforcement couldn't be
+  shown and a custom strength that allows a password alone read as MFA. The fetcher
+  now reads `/policies/authenticationStrengthPolicies` (only when a policy uses a
+  strength) as raw JSON, because the SDK reads a two-method combination such as
+  `password,sms` as null. Each policy carries its strength's id and allowed
+  combinations and `requires_phishing_resistant_mfa` (true only when every allowed
+  combination is FIDO2 or a passkey, Windows Hello for Business or multi-factor
+  certificate authentication, and no other grant control can be met instead; null
+  when the strength couldn't be read). `requires_mfa` now counts a strength only
+  when it satisfies MFA. New summary fields: `authentication_strengths_readable`,
+  `enforced_policies_requiring_phishing_resistant_mfa`,
+  `enforced_phishing_resistant_mfa_for_all_users_and_apps` and
+  `phishing_resistant_mfa_role_template_ids`. The evidence set adds KSI-IAM-APM, and
+  its description and instructions use the plain-text layout.
+
+- **`azure_entra_conditional_access_policies` reads unread policies as unknown, not
+  absent.** When the policies can't be read, every summary figure except
+  `authentication_strengths_readable` is null; `total_policies` read 0 and
+  `mfa_required_for_admin_portals` read false before. A failed strength read leaves
+  `authentication_strengths` null rather than an empty list.
+
+- **`azure_entra_conditional_access_policies` shows MFA coverage split across
+  policies.** A tenant can require MFA for all users with one policy for browsers
+  and another for mobile and desktop apps; no single policy then covers every
+  client. The new summary list `mfa_client_app_types_for_all_users_and_apps` holds
+  the client app types those policies cover together, counting only policies where
+  MFA has no alternative grant control and no risk, platform, location or app
+  exclusion narrows them. Each policy also carries
+  `requires_mfa_without_alternative`.
+
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
   history (`risk_history`, oldest first, with what changed and who initiated it)
