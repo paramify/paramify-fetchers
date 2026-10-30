@@ -7,8 +7,8 @@ statement: >
   geo_replicated_caches equals total_caches, with at least one cache): it has a linked server in
   another region. summary.exceptions.unknown_state must be empty, so unknown is never compliant.
   Supports KSI-CNA-OFA: fails any single-region cache. Does NOT assert active-active processing
-  (classic geo-replication is passive), replication health, or a tested failover within the one-hour
-  RTO.
+  (classic geo-replication is passive), replication health, or a tested failover within the recovery
+  time objective.
 
 regex: '"unknown_state":\s*\[\s*\][\s\S]*?"geo_replicated_caches":\s*(?<geo_replicated_caches>\d+)[\s\S]*?"total_caches":\s*(?<total_caches>[1-9]\d*)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
