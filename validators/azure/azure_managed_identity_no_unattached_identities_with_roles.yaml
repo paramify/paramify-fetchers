@@ -6,8 +6,7 @@ statement: >
   No user-assigned managed identity that no resource in the subscription names still holds a role
   assignment (standing access with no visible owner). Does not assert that attached identities are
   least privilege, and cannot see a resource in another subscription that may use the identity.
-  Supports Coverage row 78 (Logical Access Review / KSI-IAM-ELP) (proposed mapping, not yet
-  audited).
+  Supports KSI-IAM-ELP.
 
 regex: '"unattached_identities_with_roles":\s*(?<unattached_identities_with_roles>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

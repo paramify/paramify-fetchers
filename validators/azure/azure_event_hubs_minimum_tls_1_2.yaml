@@ -6,8 +6,7 @@ statement: >
   No Event Hubs namespace sets a minimum TLS version below 1.2 (1.0 or 1.1). An unset minimum TLS
   version is not counted as below 1.2 by the fetcher. Does not assert FIPS validation of the
   modules, encryption at rest, or TLS on MongoDB or Data Explorer (MongoDB vCore has no setting to
-  weaken TLS 1.2). Supports Coverage row 14 (Authorized Cryptographic Modules / KSI-SVC-SIN)
-  (proposed mapping, not yet audited).
+  weaken TLS 1.2). Supports KSI-SVC-SIN.
 
 regex: '"event_hub_namespaces_tls_below_1_2":\s*(?<event_hub_namespaces_tls_below_1_2>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

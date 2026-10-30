@@ -7,8 +7,7 @@ statement: >
   the storage account key (workspaces_identity_based_datastore_access equals total_workspaces), no
   datastore keeps a stored credential (account key, SAS token, service principal, certificate or
   Kerberos secret), no datastore's credential type is unknown, and every workspace's datastores were
-  read. Does not assert the RBAC granted to the identities used. Supports Coverage row 5
-  (Application Access / KSI-IAM-SNU) (proposed mapping, not yet audited).
+  read. Does not assert the RBAC granted to the identities used. Supports KSI-IAM-SNU.
 
 regex: '"datastores_credentials_unknown":\s*(?<datastores_credentials_unknown>\d+)[\s\S]*?"datastores_with_stored_credentials":\s*(?<datastores_with_stored_credentials>\d+)[\s\S]*?"total_workspaces":\s*(?<total_workspaces>\d+)[\s\S]*?"workspaces_datastores_unknown":\s*(?<workspaces_datastores_unknown>\d+)[\s\S]*?"workspaces_identity_based_datastore_access":\s*(?<workspaces_identity_based_datastore_access>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[4] EQUALS 0; MATCH_GROUP[5] EQUALS MATCH_GROUP[3]

@@ -3,13 +3,12 @@ name: Key Vault Keys And Certificates Use No Weak Key Sizes
 type: AUTOMATED
 role: configuration
 statement: >
-  No Key Vault RSA key and no RSA certificate policy is smaller than 2048 bits,
-  and no key or certificate policy uses the P-256K curve. The "insufficient key
-  sizes" part of row 106 (KSI-SVC-VRI). Reads the management-plane key size and
-  type and, for readable vaults, the certificate policy. It does not assert that
-  a module is CMVP-validated, App Service or storage keys outside Key Vault, or
-  secrets. azure_kv_key_sizes_present and azure_kv_certificates_readable_all_vaults
-  prove the fields were there to count.
+  No Key Vault RSA key and no RSA certificate policy is smaller than 2048 bits, and no key or
+  certificate policy uses the P-256K curve. Supports KSI-SVC-VRI for insufficient key sizes. Reads
+  the management-plane key size and type and, for readable vaults, the certificate policy. It does
+  not assert that a module is CMVP-validated, App Service or storage keys outside Key Vault, or
+  secrets. azure_kv_key_sizes_present and azure_kv_certificates_readable_all_vaults prove the fields
+  were there to count.
 
 # Violation count; key_size sits right before key_type in both the sorted key record and the certificate policy.
 regex: '"key_size":\s*(?:[1-9]\d{0,2}|1\d{3}|20[0-3]\d|204[0-7]),\s*"key_type":\s*"RSA(?:-HSM)?"|"(?:key_)?curve_name":\s*"P-256K"'

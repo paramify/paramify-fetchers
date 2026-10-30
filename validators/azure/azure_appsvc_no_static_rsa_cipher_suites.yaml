@@ -3,16 +3,14 @@ name: App Service Web Apps Allow No Static-RSA Ciphers
 type: AUTOMATED
 role: configuration
 statement: >
-  No App Service web app still allows a static-RSA TLS cipher suite (TLS_RSA_*,
-  no forward secrecy), judged from each app's minimum TLS version and minimum
-  cipher suite; every app's verdict was computed, and there is at least one web
-  app. The "weak TLS/ciphers" part of row 14 for App Service
-  (KSI-SVC-SIN). An app with no minimum cipher suite set allows
-  every suite and fails; TLS 1.3, or a minimum suite at or above
-  TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, passes. It does not judge CBC-mode suites
-  (NIST SP 800-52r2 allows AES-CBC, and Azure's order leaves no CBC-free floor
-  short of TLS 1.3 or an ECDSA-only suite), the SCM site, Front Door, SQL MI or
-  storage ciphers, or FIPS validation of the modules.
+  No App Service web app still allows a static-RSA TLS cipher suite (TLS_RSA_*, no forward secrecy),
+  judged from each app's minimum TLS version and minimum cipher suite; every app's verdict was
+  computed, and there is at least one web app. Supports KSI-SVC-SIN for weak TLS and ciphers on App
+  Service. An app with no minimum cipher suite set allows every suite and fails; TLS 1.3, or a
+  minimum suite at or above TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, passes. It does not judge CBC-mode
+  suites (NIST SP 800-52r2 allows AES-CBC, and Azure's order leaves no CBC-free floor short of TLS
+  1.3 or an ECDSA-only suite), the SCM site, Front Door, SQL MI or storage ciphers, or FIPS
+  validation of the modules.
 
 # Summary count at 0, plus per-app verdicts present and none null (a null verdict or config is not counted in the rollup).
 regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_web_apps":\s*[1-9])(?=[\s\S]*?"non_forward_secret_cipher_suites_allowed_apps":\s*0\b)(?=[\s\S]*?"allows_non_forward_secret_cipher_suites":\s*false)(?![\s\S]*?"(?:allows_non_forward_secret_cipher_suites|configuration)":\s*null)'

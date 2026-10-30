@@ -5,8 +5,7 @@ role: configuration
 statement: >
   No API accepts plain HTTP or unencrypted WebSocket (ws) calls, and no backend is reached over a
   plain HTTP URL. Does not assert TLS versions or certificate validation; zero APIs and zero
-  backends pass vacuously (nothing is exposed yet). Supports Coverage row 14 (Authorized
-  Cryptographic Modules / KSI-SVC-SIN) (proposed mapping, not yet audited).
+  backends pass vacuously (nothing is exposed yet). Supports KSI-SVC-SIN.
 
 regex: '"apis_accepting_http":\s*(?<apis_accepting_http>\d+)[\s\S]*?"backends_using_http":\s*(?<backends_using_http>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0

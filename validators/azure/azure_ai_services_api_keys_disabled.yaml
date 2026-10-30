@@ -6,7 +6,7 @@ statement: >
   No AI services account and no AI Search service still accepts API keys, so every caller must sign
   in with Microsoft Entra ID. Does not assert how Foundry connections sign in (see
   azure_ai_services_connections_keyless) or role assignments; zero accounts passes vacuously.
-  Supports Coverage row 5 (Application Access / KSI-IAM-SNU) (proposed mapping, not yet audited).
+  Supports KSI-IAM-SNU.
 
 regex: '"accounts_with_api_keys_enabled":\s*(?<accounts_with_api_keys_enabled>\d+)[\s\S]*?"search_services_with_api_keys_enabled":\s*(?<search_services_with_api_keys_enabled>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0

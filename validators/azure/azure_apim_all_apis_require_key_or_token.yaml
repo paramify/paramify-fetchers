@@ -8,9 +8,8 @@ statement: >
   validate-azure-ad-token policy applies), and no API's access control is unknown. Does not assert
   network restriction of the gateway; zero APIs passes vacuously (nothing to protect yet). API
   Management is a policy enforcement point, so an API it lets through without a key or token is an
-  exception to its policy. Supports Coverage row 84 (Policy Enforcement Point Exceptions /
-  KSI-CNA-RNT); it shows access control, not network limits (see
-  azure_apim_no_public_network_access) (proposed mapping, not yet audited).
+  exception to its policy. Supports KSI-CNA-RNT; it shows access control, not network limits (see
+  azure_apim_no_public_network_access).
 
 regex: '"apis_access_control_unknown":\s*(?<apis_access_control_unknown>\d+)[\s\S]*?"apis_without_access_control":\s*(?<apis_without_access_control>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0

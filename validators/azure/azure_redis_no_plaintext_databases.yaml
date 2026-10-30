@@ -5,10 +5,9 @@ role: configuration
 statement: >
   Every Azure Managed Redis database in the evidence has client_protocol Encrypted (TLS), read per
   database from the raw API value rather than the fetcher's rollup: Plaintext, a null value or any
-  other value counts as a violation, so unknown is never compliant. Supports Coverage row 14
-  (Authorized Cryptographic Modules / KSI-SVC-SIN). Does NOT assert the cluster TLS floor (see
-  azure_redis_all_clusters_tls_only) or FIPS validation. Paired with
-  azure_redis_client_protocol_present so a renamed key cannot read as zero violations.
+  other value counts as a violation, so unknown is never compliant. Supports KSI-SVC-SIN. Does NOT
+  assert the cluster TLS floor (see azure_redis_all_clusters_tls_only) or FIPS validation. Paired
+  with azure_redis_client_protocol_present so a renamed key cannot read as zero violations.
 
 regex: '"client_protocol":(?!\s*"Encrypted")'
 rules_summary: MATCH_COUNT EQUALS 0

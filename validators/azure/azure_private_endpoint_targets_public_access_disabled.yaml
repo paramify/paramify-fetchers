@@ -8,8 +8,7 @@ statement: >
   reached by a public path that bypasses the private connection. Enabled and unset both count as not
   disabled; a firewall with default action Deny is NOT credited as disabled. Does not assert
   anything about targets that could not be looked up (see the target lookup validator). Supports
-  Coverage rows 74 (Internal Connections), 84 (Policy Enforcement Point Exceptions) and 104 (Trusted
-  Connection Review) / KSI-CNA-RNT (proposed mapping, not yet audited).
+  KSI-CNA-RNT.
 
 regex: '"target_resources_public_access_not_disabled":\s*(?<target_resources_public_access_not_disabled>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

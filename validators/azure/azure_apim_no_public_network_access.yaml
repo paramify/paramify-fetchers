@@ -6,10 +6,9 @@ statement: >
   No API Management service has public network access on (summary
   services_with_public_network_access is 0, and a service with no value set counts as on), so the
   gateway cannot be reached on a public path that bypasses the approved front end and private
-  connectivity. A service that must stay public is an exception that row 84 requires to be approved
-  through change management; it still fails here and is justified outside this evidence. Does NOT
-  assert IP filtering policies or VNet mode. Zero services passes vacuously. Supports Coverage row
-  84 (Policy Enforcement Point Exceptions / KSI-CNA-RNT) (proposed mapping, not yet audited).
+  connectivity. A service that must stay public is an exception that must be approved through change
+  management; it still fails here and is justified outside this evidence. Does NOT assert IP
+  filtering policies or VNet mode. Zero services passes vacuously. Supports KSI-CNA-RNT.
 
 regex: '"services_with_public_network_access":\s*(?<services_with_public_network_access>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

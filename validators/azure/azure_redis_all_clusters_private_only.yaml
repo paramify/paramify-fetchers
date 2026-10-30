@@ -6,9 +6,9 @@ statement: >
   Every Azure Managed Redis cluster in the evidence is private-only (summary private_only_clusters
   equals total_clusters, with at least one cluster): public network access is Disabled and at least
   one private endpoint connection is Approved. A cluster whose public_network_access Azure did not
-  return counts as not disabled, so unknown is never compliant. Supports Coverage row 104 (Trusted
-  Connection Review / KSI-CNA-RNT). Does NOT assert which systems connect, that the private paths
-  are approved interconnections, or that they are reviewed monthly.
+  return counts as not disabled, so unknown is never compliant. Supports KSI-CNA-RNT. Does NOT
+  assert which systems connect, that the private paths are approved interconnections, or that they
+  are reviewed monthly.
 
 regex: '"private_only_clusters":\s*(?<private_only_clusters>\d+)[\s\S]*?"total_clusters":\s*(?<total_clusters>[1-9]\d*)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]

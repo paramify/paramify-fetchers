@@ -6,9 +6,7 @@ statement: >
   Every private DNS zone is linked to at least one virtual network and every link is healthy:
   summary links_not_completed, links_to_deleted_virtual_networks and
   zones_without_virtual_network_links are all 0. Does not assert which VNets should be linked, and
-  does not judge registrationEnabled (auto-registration) on links. Supports Coverage rows 74
-  (Internal Connections), 84 (Policy Enforcement Point Exceptions) and 104 (Trusted Connection
-  Review) / KSI-CNA-RNT (proposed mapping, not yet audited).
+  does not judge registrationEnabled (auto-registration) on links. Supports KSI-CNA-RNT.
 
 regex: '"links_not_completed":\s*(?<links_not_completed>\d+)[\s\S]*?"links_to_deleted_virtual_networks":\s*(?<links_to_deleted_virtual_networks>\d+)[\s\S]*?"zones_without_virtual_network_links":\s*(?<zones_without_virtual_network_links>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0

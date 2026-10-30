@@ -7,9 +7,7 @@ statement: >
   summary privatelink_records_ip_mismatch (IP held by an endpoint serving a different name),
   privatelink_records_partially_backed (some IPs not backed) and privatelink_records_stale (IP in a
   readable VNet with no private endpoint behind it) are all 0. Does not assert anything about
-  records the collector could not verify (see the readability validator). Supports Coverage rows 74
-  (Internal Connections), 84 (Policy Enforcement Point Exceptions) and 104 (Trusted Connection
-  Review) / KSI-CNA-RNT (proposed mapping, not yet audited).
+  records the collector could not verify (see the readability validator). Supports KSI-CNA-RNT.
 
 regex: '"privatelink_records_ip_mismatch":\s*(?<privatelink_records_ip_mismatch>\d+)[\s\S]*?"privatelink_records_partially_backed":\s*(?<privatelink_records_partially_backed>\d+)[\s\S]*?"privatelink_records_stale":\s*(?<privatelink_records_stale>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0

@@ -7,9 +7,7 @@ statement: >
   provider is deployed in it), and at least one hub exists. Reads the summary rollups secured_hubs =
   total_virtual_hubs. Does NOT assert that hub traffic is actually routed through that firewall
   (routing intent), that its rules restrict traffic, or that each interconnection was approved or
-  reviewed monthly. Supports Coverage rows 104 (Trusted Connection Review / KSI-CNA-RNT), 105
-  (Trusted Connection Review / KSI-CNA-ULN), 74 (Internal Connections / KSI-CNA-RNT) and 75
-  (Internal Connections / KSI-CNA-ULN).
+  reviewed monthly. Supports KSI-CNA-RNT and KSI-CNA-ULN.
 
 regex: '"secured_hubs":\s*(?<secured_hubs>\d+)[\s\S]*?"total_virtual_hubs":\s*(?<total_virtual_hubs>[1-9]\d*)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]

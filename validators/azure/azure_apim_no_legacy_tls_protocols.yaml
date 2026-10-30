@@ -6,8 +6,7 @@ statement: >
   No API Management service has TLS 1.0, TLS 1.1 or SSL 3.0 on for clients or backends (including
   the pre-2018 default-on case), so the gateway accepts only TLS 1.2 or higher. Does not assert
   cipher suites or FIPS validation of the modules; zero API Management services passes vacuously.
-  Supports Coverage row 14 (Authorized Cryptographic Modules / KSI-SVC-SIN) (proposed mapping, not
-  yet audited).
+  Supports KSI-SVC-SIN.
 
 regex: '"services_with_legacy_tls_or_ssl_enabled":\s*(?<services_with_legacy_tls_or_ssl_enabled>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

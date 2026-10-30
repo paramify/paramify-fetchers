@@ -6,8 +6,8 @@ statement: >
   At least one VPN-type virtual network gateway in the evidence carries a non-empty sku_name after
   its gateway_type, so the zero-violation count in azure_vpn_gateways_zone_redundant_sku reflects
   posture rather than a renamed or missing field. The SKU's value is judged by
-  azure_vpn_gateways_zone_redundant_sku, not here. Integrity partner supporting Coverage row 40
-  (Contingency Plan / KSI-CNA-OFA). Fails when the subscription has no VPN gateways.
+  azure_vpn_gateways_zone_redundant_sku, not here. Integrity partner supporting KSI-CNA-OFA. Fails
+  when the subscription has no VPN gateways.
 
 regex: '"gateway_type":\s*"Vpn"(?:(?!"gateway_type")[\s\S])*?"sku_name":\s*"[^"]+"'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

@@ -6,8 +6,7 @@ statement: >
   No AI hub, project or Machine Learning workspace is open to all networks: each either disables
   public network access or limits it with an IP allow-list. Does not assert that an allow-list
   contains only approved addresses, nor that workspace compute outbound traffic is restricted.
-  Supports Coverage row 104 (Trusted Connection Review / KSI-CNA-RNT) (proposed mapping, not yet
-  audited).
+  Supports KSI-CNA-RNT.
 
 regex: '"workspaces_open_to_all_networks":\s*(?<workspaces_open_to_all_networks>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

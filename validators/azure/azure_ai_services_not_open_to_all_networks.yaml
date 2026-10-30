@@ -6,8 +6,7 @@ statement: >
   No AI services account and no AI Search service is open to all networks: each has public network
   access disabled or network rules that default to deny (IP rules for Search). Does not assert that
   a restricted allow-list is appropriate or that private endpoints exist; zero accounts passes
-  vacuously. Supports Coverage row 104 (Trusted Connection Review / KSI-CNA-RNT) (proposed mapping,
-  not yet audited).
+  vacuously. Supports KSI-CNA-RNT.
 
 regex: '"accounts_open_to_all_networks":\s*(?<accounts_open_to_all_networks>\d+)[\s\S]*?"search_services_open_to_all_networks":\s*(?<search_services_open_to_all_networks>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0

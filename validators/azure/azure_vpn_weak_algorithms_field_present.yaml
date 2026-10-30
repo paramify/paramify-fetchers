@@ -6,8 +6,7 @@ statement: >
   At least one connection, site link or server configuration in the evidence carries a
   weak_ipsec_algorithms list, so the zero count in azure_vpn_no_weak_ipsec_algorithms reflects
   posture rather than a renamed field. Fails when the subscription has no VPN connections. Supports
-  Coverage row 14 (Authorized Cryptographic Modules / KSI-SVC-SIN) for the VPN gateway and Virtual
-  WAN sets.
+  KSI-SVC-SIN for the VPN gateway and Virtual WAN sets.
 
 regex: '"weak_ipsec_algorithms":\s*\['
 rules_summary: MATCH_COUNT NOT_EQUALS 0

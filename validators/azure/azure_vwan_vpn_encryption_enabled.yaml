@@ -7,7 +7,7 @@ statement: >
   exists, so branch tunnels through its hubs are IPsec-encrypted. Reads the summary rollups
   total_virtual_wans >= 1 and vpn_encryption_disabled_wans = 0. Does NOT assert IKE version
   (azure_vwan_all_links_ikev2), the IPsec algorithms (azure_vpn_no_weak_ipsec_algorithms) or CMVP
-  validation. Supports Coverage row 14 (Authorized Cryptographic Modules / KSI-SVC-SIN).
+  validation. Supports KSI-SVC-SIN.
 
 regex: '"total_virtual_wans":\s*[1-9]\d*\s*,[\s\S]*?"vpn_encryption_disabled_wans":\s*(?<vpn_encryption_disabled_wans>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

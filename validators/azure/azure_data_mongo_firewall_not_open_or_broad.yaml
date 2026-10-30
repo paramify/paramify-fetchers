@@ -7,10 +7,9 @@ statement: >
   every cluster's firewall rules were read. A cluster with public access disabled, no rules, or a
   /8-or-smaller allow-list passes those checks. Also requires public network access disabled on
   every cluster (mongo_clusters_public_access_disabled equals total_mongo_clusters), the
-  organization's request, so a cluster opened to the internet fails even behind narrow rules;
-  passes with no clusters. Does not assert that the admitted ranges are approved interconnections.
-  Supports Coverage row 104 (Trusted Connection Review / KSI-CNA-RNT) (proposed mapping, not yet
-  audited).
+  organization's request, so a cluster opened to the internet fails even behind narrow rules; passes
+  with no clusters. Does not assert that the admitted ranges are approved interconnections. Supports
+  KSI-CNA-RNT.
 
 regex: '"mongo_clusters_firewall_allow_all":\s*(?<mongo_clusters_firewall_allow_all>\d+)[\s\S]*?"mongo_clusters_firewall_broad":\s*(?<mongo_clusters_firewall_broad>\d+)[\s\S]*?"mongo_clusters_public_access_disabled":\s*(?<mongo_clusters_public_access_disabled>\d+)[\s\S]*?"mongo_clusters_public_access_unknown":\s*(?<mongo_clusters_public_access_unknown>\d+)[\s\S]*?"total_mongo_clusters":\s*(?<total_mongo_clusters>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[5]; MATCH_GROUP[4] EQUALS 0

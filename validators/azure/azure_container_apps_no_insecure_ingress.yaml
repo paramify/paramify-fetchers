@@ -5,8 +5,7 @@ role: configuration
 statement: >
   No Container App's ingress accepts plain HTTP (allowInsecure is off on every app). Passes with
   zero Container Apps. Does not assert the TLS version, whether ingress is external, or anything
-  about Container Instances. Supports Coverage row 14 (Authorized Cryptographic Modules /
-  KSI-SVC-SIN), which fails HTTP (proposed mapping, not yet audited).
+  about Container Instances. Supports KSI-SVC-SIN.
 
 regex: '"container_apps_allow_insecure":\s*(?<container_apps_allow_insecure>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

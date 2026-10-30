@@ -7,8 +7,7 @@ statement: >
   Control Administrator anywhere visible from the subscription, every identity's role assignments
   were read, and every role assigned to an identity resolved to a known definition. An approved
   exception still fails here and must be justified outside this evidence. Does not assert narrower
-  over-grants (key-reading or full data roles). Supports Coverage row 78 (Logical Access Review /
-  KSI-IAM-ELP) (proposed mapping, not yet audited).
+  over-grants (key-reading or full data roles). Supports KSI-IAM-ELP.
 
 regex: '"identities_role_assignments_unknown":\s*(?<identities_role_assignments_unknown>\d+)[\s\S]*?"identities_with_broad_role":\s*(?<identities_with_broad_role>\d+)[\s\S]*?"role_assignments_unresolved_role":\s*(?<role_assignments_unresolved_role>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0

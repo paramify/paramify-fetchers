@@ -7,10 +7,8 @@ statement: >
   with IKEv2, and at least one tunnel exists. Reads the summary rollups ikev2_connections =
   ipsec_connections, which also leaves no IKEv1 or unknown-version tunnel. Does NOT assert the IPsec
   algorithms (see azure_vpn_no_weak_ipsec_algorithms), CMVP validation, or Virtual WAN gateways
-  (separate evidence set). Supports Coverage row 14 (Authorized Cryptographic Modules / KSI-SVC-SIN)
-  and the IPsec security requirements of boundary links in rows 104 (Trusted Connection Review /
-  KSI-CNA-RNT) and 74 (Internal Connections / KSI-CNA-RNT); it does not show those links were
-  approved or reviewed.
+  (separate evidence set). Supports KSI-SVC-SIN, and the IPsec security requirements of boundary
+  links in KSI-CNA-RNT; it does not show those links were approved or reviewed.
 
 regex: '"ikev2_connections":\s*(?<ikev2_connections>\d+)[\s\S]*?"ipsec_connections":\s*(?<ipsec_connections>[1-9]\d*)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]

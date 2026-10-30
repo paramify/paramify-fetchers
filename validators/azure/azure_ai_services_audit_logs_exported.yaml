@@ -6,8 +6,7 @@ statement: >
   Every AI services account and every AI Search service exports audit logs (a diagnostic setting
   with a destination that enables the Audit category or the audit or allLogs category group), and no
   account's diagnostic settings are unknown. Does not assert the destination workspace or retention;
-  zero accounts passes vacuously. Supports Coverage row 76 (Logged Event Type Inventory /
-  KSI-MLA-LET) (proposed mapping, not yet audited).
+  zero accounts passes vacuously. Supports KSI-MLA-LET.
 
 regex: '"accounts_audit_logs_exported":\s*(?<accounts_audit_logs_exported>\d+)[\s\S]*?"accounts_audit_logs_unknown":\s*(?<accounts_audit_logs_unknown>\d+)[\s\S]*?"search_services_audit_logs_exported":\s*(?<search_services_audit_logs_exported>\d+)[\s\S]*?"total_accounts":\s*(?<total_accounts>\d+)[\s\S]*?"total_search_services":\s*(?<total_search_services>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[4]; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[5]

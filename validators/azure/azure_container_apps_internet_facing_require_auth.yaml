@@ -7,8 +7,7 @@ statement: >
   through without sign-in: each has Easy Auth on and set to redirect or reject unauthenticated
   callers, and no app's authentication state is unknown. Passes with zero Container Apps. Does not
   assert IP restrictions, nor authentication implemented inside the container itself, and does not
-  cover Container Instances. Supports Coverage row 84 (Policy Enforcement Point Exceptions /
-  KSI-CNA-RNT) (proposed mapping, not yet audited).
+  cover Container Instances. Supports KSI-CNA-RNT.
 
 regex: '"container_apps_auth_unknown":\s*(?<container_apps_auth_unknown>\d+)[\s\S]*?"container_apps_internet_facing_without_auth":\s*(?<container_apps_internet_facing_without_auth>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0

@@ -6,8 +6,7 @@ statement: >
   No VPN-type virtual network gateway runs on a SKU without availability-zone support: every gateway
   with gateway_type Vpn has an AZ SKU (VpnGw1AZ to VpnGw5AZ), so its instances are spread across
   availability zones. Basic and non-AZ VpnGw SKUs count as violations. ExpressRoute gateways are not
-  judged. Supports Coverage row 40 (Contingency Plan / KSI-CNA-OFA), whose capability claims the
-  system uses multiple availability zones. Does NOT assert active-active mode (see
+  judged. Supports KSI-CNA-OFA. Does NOT assert active-active mode (see
   azure_vpn_gateways_active_active), a second region, or a tested failover. Paired with
   azure_vpn_gateway_sku_present so a renamed key cannot read as zero violations.
 

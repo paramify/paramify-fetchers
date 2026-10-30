@@ -6,8 +6,7 @@ statement: >
   Every AI hub, project and Machine Learning workspace has a diagnostic setting that exports at
   least one log category or category group to a destination, and no workspace's diagnostic settings
   were unreadable. Does not assert which categories are exported, the destination, or retention.
-  Supports Coverage row 76 (Logged Event Type Inventory / KSI-MLA-LET) (proposed mapping, not yet
-  audited).
+  Supports KSI-MLA-LET.
 
 regex: '"total_workspaces":\s*(?<total_workspaces>\d+)[\s\S]*?"workspaces_diagnostic_logs_exported":\s*(?<workspaces_diagnostic_logs_exported>\d+)[\s\S]*?"workspaces_diagnostic_logs_unknown":\s*(?<workspaces_diagnostic_logs_unknown>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS MATCH_GROUP[1]; MATCH_GROUP[3] EQUALS 0

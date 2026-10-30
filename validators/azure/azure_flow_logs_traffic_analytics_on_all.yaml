@@ -6,10 +6,7 @@ statement: >
   At least one flow log is enabled, and every enabled flow log has Traffic Analytics on, so its
   records are sent to a Log Analytics workspace for analysis. Does not assert which workspace, the
   processing interval, or that every network is covered (see
-  azure_flow_logs_all_vnets_fully_covered). Supports Coverage rows 8 (Audit Log Collection and
-  Alerts / KSI-MLA-OSM), 10 (Audit Logging Criteria / KSI-MLA-LET), 76 (Logged Event Type Inventory
-  / KSI-MLA-LET), 75 (Internal Connections / KSI-CNA-ULN) and 105 (Trusted Connection Review /
-  KSI-CNA-ULN) (proposed mapping, not yet audited).
+  azure_flow_logs_all_vnets_fully_covered). Supports KSI-MLA-OSM, KSI-MLA-LET and KSI-CNA-ULN.
 
 regex: '"enabled_flow_logs":\s*(?<enabled_flow_logs>[1-9]\d*)[\s\S]*?"enabled_flow_logs_with_traffic_analytics":\s*(?<enabled_flow_logs_with_traffic_analytics>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS MATCH_GROUP[1]

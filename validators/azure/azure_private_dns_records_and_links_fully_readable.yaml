@@ -8,8 +8,7 @@ statement: >
   and privatelink_records_unverified (IP outside every VNet the credential can read) are all 0.
   Unknown is never compliant, so a stale-record count of 0 only means something when every record
   could be checked. Does not assert the records are backed (see the stale-record validator).
-  Supports Coverage rows 74 (Internal Connections), 84 (Policy Enforcement Point Exceptions) and 104
-  (Trusted Connection Review) / KSI-CNA-RNT (proposed mapping, not yet audited).
+  Supports KSI-CNA-RNT.
 
 regex: '"links_to_unreadable_virtual_networks":\s*(?<links_to_unreadable_virtual_networks>\d+)[\s\S]*?"links_virtual_network_unknown":\s*(?<links_virtual_network_unknown>\d+)[\s\S]*?"privatelink_records_unknown":\s*(?<privatelink_records_unknown>\d+)[\s\S]*?"privatelink_records_unverified":\s*(?<privatelink_records_unverified>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1..4] EQUALS 0

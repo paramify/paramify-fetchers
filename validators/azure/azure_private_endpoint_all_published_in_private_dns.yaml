@@ -7,8 +7,7 @@ statement: >
   endpoints_without_private_dns_zone_group is 0), so clients resolve the service name to the private
   IP rather than falling through to its public address. Does not assert that the zone is linked to
   the client VNets or that its records are current (see the private DNS zone validators). Supports
-  Coverage rows 74 (Internal Connections), 84 (Policy Enforcement Point Exceptions) and 104 (Trusted
-  Connection Review) / KSI-CNA-RNT (proposed mapping, not yet audited).
+  KSI-CNA-RNT.
 
 regex: '"endpoints_without_private_dns_zone_group":\s*(?<endpoints_without_private_dns_zone_group>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

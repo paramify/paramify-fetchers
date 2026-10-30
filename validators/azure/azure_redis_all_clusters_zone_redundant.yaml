@@ -5,11 +5,10 @@ role: configuration
 statement: >
   No Azure Managed Redis cluster in the evidence has high_availability other than Enabled or
   redundancy_mode other than ZR (zone redundant); a null value counts as a violation, so unknown is
-  never compliant. Counted per cluster from the raw API values. Supports Coverage row 40
-  (Contingency Plan / KSI-CNA-OFA): fails single-zone cache dependencies. Does NOT assert
-  cross-region replication (see azure_redis_all_databases_geo_replicated) or that operations
-  continued through an actual outage. Paired with azure_redis_redundancy_fields_present so renamed
-  keys cannot read as zero violations.
+  never compliant. Counted per cluster from the raw API values. Supports KSI-CNA-OFA: fails
+  single-zone cache dependencies. Does NOT assert cross-region replication (see
+  azure_redis_all_databases_geo_replicated) or that operations continued through an actual outage.
+  Paired with azure_redis_redundancy_fields_present so renamed keys cannot read as zero violations.
 
 regex: '"high_availability":(?!\s*"Enabled")|"redundancy_mode":(?!\s*"ZR")'
 rules_summary: MATCH_COUNT EQUALS 0

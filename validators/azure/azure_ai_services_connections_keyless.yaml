@@ -7,8 +7,7 @@ statement: >
   password, SAS, account key, service principal secret or OAuth2) or sends no credential at all,
   every connection's sign-in type is recognised, and every account's connections were read;
   connections sign in with Microsoft Entra ID or managed identity. Does not assert what the
-  connections reach; zero connections passes vacuously. Supports Coverage row 5 (Application Access
-  / KSI-IAM-SNU) (proposed mapping, not yet audited).
+  connections reach; zero connections passes vacuously. Supports KSI-IAM-SNU.
 
 regex: '"connections_auth_type_unrecognized":\s*(?<connections_auth_type_unrecognized>\d+)[\s\S]*?"connections_unauthenticated":\s*(?<connections_unauthenticated>\d+)[\s\S]*?"connections_unknown_accounts":\s*(?<connections_unknown_accounts>\d+)[\s\S]*?"connections_using_stored_secrets":\s*(?<connections_using_stored_secrets>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1..4] EQUALS 0

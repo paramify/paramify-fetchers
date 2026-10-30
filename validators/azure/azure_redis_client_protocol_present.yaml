@@ -5,9 +5,8 @@ role: integrity
 statement: >
   At least one Azure Managed Redis database in the evidence carries a non-empty client_protocol
   value, so the zero-violation count in azure_redis_no_plaintext_databases reflects posture rather
-  than a renamed or missing field. Supports Coverage row 14 (KSI-SVC-SIN) as the integrity partner.
-  Asserts nothing about which protocol is used. Fails on a subscription with no Managed Redis
-  databases.
+  than a renamed or missing field. Supports KSI-SVC-SIN as the integrity partner. Asserts nothing
+  about which protocol is used. Fails on a subscription with no Managed Redis databases.
 
 regex: '"client_protocol":\s*"[^"]+"'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

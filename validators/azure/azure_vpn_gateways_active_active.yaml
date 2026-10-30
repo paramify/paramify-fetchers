@@ -7,8 +7,7 @@ statement: >
   least one exists, so hybrid connectivity survives the loss of one gateway instance. Reads the
   summary rollups active_active_gateways = vpn_gateways. Does NOT assert a zone-redundant (AZ) SKU,
   BGP, a second region, workload redundancy or tested failover; an ExpressRoute gateway flagged
-  active-active would also be counted in the numerator. Supports Coverage row 40 (Contingency Plan /
-  KSI-CNA-OFA).
+  active-active would also be counted in the numerator. Supports KSI-CNA-OFA.
 
 regex: '"active_active_gateways":\s*(?<active_active_gateways>\d+)[\s\S]*?"vpn_gateways":\s*(?<vpn_gateways>[1-9]\d*)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]

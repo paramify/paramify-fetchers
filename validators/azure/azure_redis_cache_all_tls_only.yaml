@@ -5,10 +5,10 @@ role: configuration
 statement: >
   Every classic Azure Cache for Redis cache in the evidence is TLS-only (summary tls_only_caches
   equals total_caches, with at least one cache): minimum TLS version 1.2 or higher and the non-TLS
-  port 6379 disabled. Supports Coverage row 14 (Authorized Cryptographic Modules / KSI-SVC-SIN).
-  Does NOT assert FIPS validation of the cryptographic module or encryption at rest, and covers this
-  one data store only. Also requires summary.exceptions.unknown_state to be empty, so unknown is
-  never compliant. Per-cache read failures fail the run and are caught by collection_succeeded.
+  port 6379 disabled. Supports KSI-SVC-SIN. Does NOT assert FIPS validation of the cryptographic
+  module or encryption at rest, and covers this one data store only. Also requires
+  summary.exceptions.unknown_state to be empty, so unknown is never compliant. Per-cache read
+  failures fail the run and are caught by collection_succeeded.
 
 regex: '"unknown_state":\s*\[\s*\][\s\S]*?"tls_only_caches":\s*(?<tls_only_caches>\d+)[\s\S]*?"total_caches":\s*(?<total_caches>[1-9]\d*)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]

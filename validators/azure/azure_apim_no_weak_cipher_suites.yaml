@@ -6,8 +6,7 @@ statement: >
   No API Management service has a weak cipher suite on (a CBC-mode suite, one without forward
   secrecy, or 3DES); Azure leaves the CBC and RSA key-exchange suites on until they are explicitly
   turned off. Does not assert protocol versions or FIPS validation; zero API Management services
-  passes vacuously. Supports Coverage row 14 (Authorized Cryptographic Modules / KSI-SVC-SIN)
-  (proposed mapping, not yet audited).
+  passes vacuously. Supports KSI-SVC-SIN.
 
 regex: '"services_with_weak_ciphers_enabled":\s*(?<services_with_weak_ciphers_enabled>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

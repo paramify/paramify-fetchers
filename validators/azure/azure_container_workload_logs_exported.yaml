@@ -7,8 +7,7 @@ statement: >
   with a diagnostic setting enabling system, console, audit or allLogs categories) and every
   Container Instances group exports ContainerInstanceLog, ContainerEvent, audit or allLogs to a
   destination; no diagnostic settings were unreadable. Does not assert the destination workspace,
-  retention, or that the logs are reviewed. Supports Coverage row 76 (Logged Event Type Inventory /
-  KSI-MLA-LET) (proposed mapping, not yet audited).
+  retention, or that the logs are reviewed. Supports KSI-MLA-LET.
 
 regex: '"container_groups_logs_exported":\s*(?<container_groups_logs_exported>\d+)[\s\S]*?"container_groups_logs_unknown":\s*(?<container_groups_logs_unknown>\d+)[\s\S]*?"environments_audit_logs_exported":\s*(?<environments_audit_logs_exported>\d+)[\s\S]*?"environments_audit_logs_unknown":\s*(?<environments_audit_logs_unknown>\d+)[\s\S]*?"total_container_groups":\s*(?<total_container_groups>\d+)[\s\S]*?"total_environments":\s*(?<total_environments>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[5]; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[6]; MATCH_GROUP[4] EQUALS 0

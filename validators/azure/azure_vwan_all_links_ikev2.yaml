@@ -7,8 +7,7 @@ statement: >
   IKEv2, and at least one link exists. Reads the summary rollups ikev2_link_connections =
   total_vpn_link_connections, which also leaves no IKEv1 or unknown-version link. Does NOT assert
   the IPsec algorithms or CMVP validation; classic VNet gateway tunnels are covered by
-  azure_vpn_all_tunnels_ikev2. Supports Coverage row 14 (Authorized Cryptographic Modules /
-  KSI-SVC-SIN).
+  azure_vpn_all_tunnels_ikev2. Supports KSI-SVC-SIN.
 
 regex: '"ikev2_link_connections":\s*(?<ikev2_link_connections>\d+)[\s\S]*?"total_vpn_link_connections":\s*(?<total_vpn_link_connections>[1-9]\d*)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]

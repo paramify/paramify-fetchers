@@ -3,12 +3,11 @@ name: Key Vault And App Service Certificates Not Expired
 type: AUTOMATED
 role: configuration
 statement: >
-  No Key Vault certificate and no App Service certificate is past its expiry
-  date. The "expired certificates" part of rows 14 and 106 (KSI-SVC-SIN,
-  KSI-SVC-VRI). Key Vault certificates are counted only in vaults whose
-  certificate list was readable, so azure_kv_certificates_readable_all_vaults
-  must pass alongside it. It does not assert renewal policy, certificates
-  expiring soon, or certificates held outside Key Vault and App Service.
+  No Key Vault certificate and no App Service certificate is past its expiry date. Supports
+  KSI-SVC-SIN and KSI-SVC-VRI for expired certificates. Key Vault certificates are counted only in
+  vaults whose certificate list was readable, so azure_kv_certificates_readable_all_vaults must pass
+  alongside it. It does not assert renewal policy, certificates expiring soon, or certificates held
+  outside Key Vault and App Service.
 
 # Counts over readable vaults only; the integrity partner proves every vault was readable.
 regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"expired_certificates":\s*0\b)(?=[\s\S]*?"expired_app_service_certificates":\s*0\b)'
