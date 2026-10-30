@@ -7,6 +7,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from urllib.parse import quote
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
@@ -23,6 +24,8 @@ from devops_rest import (  # noqa: E402
 NAME = "azure_devops_permissions"
 SECURITY_API = "7.1"
 IDENTITY_BATCH = 50
+# Measured: a 6,100-character descriptors query answered 404 and a 3,000-character one was read.
+IDENTITY_QUERY_CHARS = 2000
 GRAPH = "vssps"
 
 SCOPE_SECURITY = "Security (Manage)"
@@ -176,15 +179,41 @@ def parse_token(namespace: str, token: str, projects_by_name: Dict[str, str]) ->
     return "other", None, token
 
 
+def batches(descriptors: List[str]) -> List[List[str]]:
+    """Consecutive batches of at most IDENTITY_BATCH descriptors and IDENTITY_QUERY_CHARS URL-encoded characters."""
+    out: List[List[str]] = []
+    size = 0
+    for descriptor in descriptors:
+        length = len(quote(descriptor, safe="")) + 3  # and its encoded comma
+        if not out or len(out[-1]) >= IDENTITY_BATCH or size + length > IDENTITY_QUERY_CHARS:
+            out.append([])
+            size = 0
+        out[-1].append(descriptor)
+        size += length
+    return out
+
+
+def read_identities(client, batch: List[str]) -> List[Any]:
+    """One batch; a 404 is split until it names one descriptor, which then reads as not found."""
+    try:
+        return client.list("_apis/identities", SECURITY_API, params={
+            "descriptors": ",".join(batch), "queryMembership": "None"}, service=GRAPH)
+    except DevOpsError as exc:
+        if exc.status != 404:
+            raise
+        if len(batch) == 1:
+            return []
+        half = len(batch) // 2
+        return read_identities(client, batch[:half]) + read_identities(client, batch[half:])
+
+
 def resolve(client, collector, descriptors: List[str]) -> Tuple[Dict[str, Dict[str, Any]], Set[str]]:
     """(lowercased descriptor -> identity, lowercased descriptors whose batch failed); unresolved ones are left out."""
     found: Dict[str, Dict[str, Any]] = {}
     unread: Set[str] = set()
-    for start in range(0, len(descriptors), IDENTITY_BATCH):
-        batch = descriptors[start:start + IDENTITY_BATCH]
-        rows = call(collector, f"identities.read({start // IDENTITY_BATCH + 1})", SCOPE_IDENTITY,
-                    lambda batch=batch: client.list("_apis/identities", SECURITY_API, params={
-                        "descriptors": ",".join(batch), "queryMembership": "None"}, service=GRAPH))
+    for number, batch in enumerate(batches(descriptors), 1):
+        rows = call(collector, f"identities.read({number})", SCOPE_IDENTITY,
+                    lambda batch=batch: read_identities(client, batch))
         if rows is None:
             unread |= {d.lower() for d in batch}
         for row in rows or []:

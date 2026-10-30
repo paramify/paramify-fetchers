@@ -688,6 +688,13 @@ schemas and the `paramify` CLI — not the internal code.
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
   refused, throttled or unreachable failed as `partial_failure`. These now read
   `not_authorized`, `rate_limited` and `target_unreachable`.
+- **`azure_devops_permissions` resolves every identity in a large
+  organization** (0.1.0 → 0.1.1). Identities were looked up 50 descriptors per
+  request, and Azure DevOps answers 404 when that query string runs to several
+  thousand characters. The failed batches left their identities unresolved, so
+  every admin-group figure read null and the run failed. Batches now also stop
+  at 2,000 encoded characters, and a batch that still answers 404 is split
+  until a single descriptor that answers 404 reads as not found.
 - **`servicenow_cases` and `servicenow_changes` no longer report a failed
   collection as a success.** A 200 response that is not JSON, for example a
   single sign-on or instance hibernation page, and a response whose
