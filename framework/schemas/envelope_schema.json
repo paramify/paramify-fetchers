@@ -37,6 +37,22 @@
             "description": { "type": "string" },
             "frequency": { "type": "string" }
           }
+        },
+        "inputs": {
+          "type": "array",
+          "description": "A comparator's inputs, written by the runner from its own records: one row per input file from the same run, or one per input that wrote none. Present only on a comparator's envelope. See docs/comparators.md.",
+          "items": {
+            "type": "object",
+            "required": ["fetcher_name", "status"],
+            "properties": {
+              "fetcher_name": { "type": "string" },
+              "target": { "type": ["object", "null"] },
+              "run_id": { "type": ["string", "null"] },
+              "collected_at": { "type": ["string", "null"] },
+              "status": { "type": "string", "enum": ["success", "failed", "missing"] },
+              "file": { "type": ["string", "null"], "description": "Path relative to the run directory." }
+            }
+          }
         }
       }
     },
