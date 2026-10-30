@@ -1,0 +1,83 @@
+name: sophos_endpoint_protection
+version: 0.1.0
+description: >-
+  Shows, for every computer and server in Sophos Central, whether its protection
+  services run, tamper protection is on, and Intercept X is installed.
+category: sophos
+
+supports_targets: true
+
+target_schema:
+  tenant_id:
+    type: string
+    required: false
+    env: SOPHOS_TENANT_ID
+    description: >-
+      Sophos Central tenant id. Leave it out for a tenant-level credential; set
+      it to pick a tenant when the credential is partner- or organization-level.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: sophos_endpoint_protection.json
+  aggregation: per_target
+
+secrets: []          # client_id / client_secret, per target, from _categories/sophos.yaml
+
+ksis:
+  - KSI-CNA-RVP
+  - KSI-SVC-EIS
+
+evidence_set:
+  reference_id: EVD-SOPHOS-ENDPOINT-PROTECTION
+  name: Sophos Central Endpoint Protection
+  instructions: |
+    Script: sophos/endpoint_protection/fetcher.py
+
+    Access: A Sophos Central API credential with the Service Principal Read-Only role.
+
+    Commands Executed:
+    - GET /whoami/v1 — finds the tenant and its data-region host
+    - GET /endpoint/v1/endpoints (full view, every page) — every computer and server with its health, services, tamper protection and products
+    - GET /endpoint/v1/settings/tamper-protection — the tenant-wide tamper protection switch
+
+    Output: sophos_endpoint_protection_<tenant>.json — one item per endpoint with its health, the services that are not running, tamper protection, installed Sophos products, and threat status; a fact Sophos did not return is null and named in the item's unread_facts, and the run then exits non-zero.
+
+    Summary fields:
+
+    Which endpoints does Sophos Central manage?
+    - total_endpoints — Number of computers and servers the tenant lists
+    - endpoints_by_type — Number of endpoints for each type:
+      - computer (a workstation or laptop)
+      - server (a server)
+      - securityVm (a security virtual machine; Sophos no longer uses this type)
+      - not_returned (Sophos gave no type)
+    - endpoints_by_health_overall — Number of endpoints for each overall health that Sophos reports: good, suspicious, bad, unknown, or not_returned (Sophos gave none)
+
+    Are the protection services running?
+    - endpoints_all_services_running — Number of endpoints where every Sophos service reports running
+    - endpoints_service_not_running — Number of endpoints where at least one Sophos service reports stopped or missing
+    - endpoints_services_unread — Number of endpoints where Sophos returned no service details
+
+    Is tamper protection on?
+    - endpoints_tamper_protection_enabled — Number of endpoints with tamper protection on
+    - endpoints_tamper_protection_disabled — Number of endpoints with tamper protection off
+    - endpoints_tamper_protection_unread — Number of endpoints where Sophos returned no tamper protection value
+    - tenant_tamper_protection_enabled — True if the tenant-wide tamper protection switch is on; false if it is off; null if it could not be read
+
+    Is the protection product installed?
+    - endpoints_protection_product_installed — Number of endpoints where Intercept X or Endpoint Protection has the status installed
+    - endpoints_protection_product_not_installed — Number of endpoints where neither has the status installed
+    - endpoints_protection_product_unread — Number of endpoints where Sophos returned no product list
+
+    Does Sophos report threats?
+    - endpoints_threats_status_good — Number of endpoints whose threat status is good
+    - endpoints_threats_status_not_good — Number of endpoints whose threat status is anything other than good
+    - endpoints_threats_status_unread — Number of endpoints where Sophos returned no threat status
+  description: >-
+    Shows, for every computer and server in Sophos Central, whether its protection
+    services run, tamper protection is on, and Intercept X is installed.

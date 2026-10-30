@@ -1,0 +1,36 @@
+display_name: Sophos Central
+description: >-
+  Sophos Central endpoint protection. Per-endpoint protection state, check-in
+  and agent update status, the scan settings in threat protection policies, and
+  the endpoint inventory. One read-only API credential per tenant.
+
+# Python (requests) against the Sophos Central REST APIs. OAuth client
+# credentials, one per tenant; no ambient identity, so no passthrough_env.
+secrets:
+  - name: client_id
+    env: SOPHOS_CLIENT_ID
+    per_target: true
+    description: >-
+      Client ID of a Sophos Central API credential with the Service Principal
+      Read-Only role (Global Settings > API Credentials Management; a Super
+      Admin creates it).
+  - name: client_secret
+    env: SOPHOS_CLIENT_SECRET
+    per_target: true
+    description: Client secret of the same API credential. Sophos shows it once.
+
+config_schema:
+  auth_url:
+    type: string
+    required: false
+    env: SOPHOS_AUTH_URL
+    description: >-
+      OAuth token URL. Defaults to https://id.sophos.com/api/v2/oauth2/token.
+      Set it only to point the fetchers at a test double.
+  global_url:
+    type: string
+    required: false
+    env: SOPHOS_GLOBAL_URL
+    description: >-
+      Sophos Central global API host, used for whoami and tenant lookup.
+      Defaults to https://api.central.sophos.com. Set it only for a test double.
