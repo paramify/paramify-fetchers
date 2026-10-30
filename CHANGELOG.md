@@ -12,6 +12,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_waf_ddos_activity`** (`EVD-AZURE-WAF-DDOS-ACTIVITY`): whether DoS protection is
+  watched, not only switched on, over a window (default 30 days).
+  - WAF: each Front Door profile with a WAF policy and each WAF-tier App Gateway, with
+    its WAF log export and, from Log Analytics, requests blocked, logged only and
+    allowed per policy, the most-matched rules and the last event. A request that
+    matched several rules counts once. Detection-mode policies are flagged.
+  - Alerts: rules on WAF metrics or logs and on `IfUnderDDoSAttack` or DDoS logs,
+    resolved to their receivers through `_shared/alert_routing.py`.
+  - DDoS: each internet-facing public IP's own protection mode, DDoS log export,
+    attack alert, hours under attack and mitigations. Without known DDoS Protection
+    the attack and mitigation figures read null, not 0.
+  - Basic and Auxiliary plan tables are queried only when
+    `WAF_DDOS_QUERY_BASIC_TABLES` is on. Request URIs, client addresses and match
+    details are never read into the evidence.
+
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
