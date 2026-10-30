@@ -5595,7 +5595,7 @@ Summary fields:
 
 
 ### azure_devops_work_items
-Short Description: Shows Azure DevOps change and security work items with their state, owner, planned date and approval, the changes linked to them, and which security work is open, overdue or unassigned.
+Short Description: Shows Azure DevOps change and security work items: state, owner, planned date, approval and who gave it, linked changes, and which security work is open, overdue or unassigned.
 
 Script: fetchers/azure/devops_work_items/fetcher.py (uses the shared Azure DevOps client fetchers/azure/_shared/devops_rest.py)
 
@@ -5606,12 +5606,12 @@ Commands Executed:
 - `GET _apis/projects` — lists projects
 - `GET _apis/wit/workitemtypes` (per project) — the project's work item types, their states and which states are finished
 - `POST _apis/wit/wiql` (per project) — a read-only query for the selected types or tags, changed in the window or still open
-- `POST _apis/wit/workitemsbatch` (200 items at a time) — each item's fields and links
-- `GET _apis/wit/workItems/{id}/updates` (per item) — its state history, to see when and by whom it was approved
-- `GET _apis/wit/workItems/{id}/comments` (per item) — who commented when, and whether a comment matches the approval pattern; the text isn't kept
+- `POST _apis/wit/workitemsbatch` (200 items at a time) — each item's fields and links; an item the query listed but this doesn't return is a failure
+- `GET _apis/wit/workItems/{id}/updates` (per item) — its state history, to see when and by whom it was approved and whether that approval was withdrawn
+- `GET _apis/wit/workItems/{id}/comments` (per item) — who commented when, and whether a comment, quoted text left out, matches the approval pattern; the text isn't kept
 - `GET _apis/tfvc/changesets/{id}` (per linked changeset) — when the change was made and by whom
 
-Output: `azure_devops_work_items_<organization>.json` — every selected work item with its title, type, state and reason, priority, tags, area and iteration paths, the people who created, changed, own, resolved and closed it, its dates, state history and approval, and the changesets, commits, pull requests and builds linked to it; plus each project's states for the types collected.
+Output: `azure_devops_work_items_<organization>.json` — every selected work item with its title, type, state and reason, priority, tags, area and iteration paths, the people who created, changed, own, resolved and closed it, its dates, state history with each move's reason, the approval in effect and whether its creator gave it, and the changesets, commits, pull requests and builds linked to it; plus each project's states for the types collected.
 
 Summary fields:
 
@@ -5636,12 +5636,14 @@ Summary fields:
 **Are changes approved and linked to what they changed?**
 - `change_items` — Number of collected items of a configured change type; null if a project's items couldn't be listed
 - `change_items_finished` — Number of change items that are finished, meaning their state is in the Completed category; a Removed (cancelled) item isn't finished; null if a project's items couldn't be listed
-- `change_items_approved` — Number of change items that were approved, meaning they moved into a configured approval state (default Approved; a state such as Awaiting Approval doesn't count) or got a comment whose text matches the approval pattern (by default, a line starting "Approved"); null if a project's items or a change item's history or comments couldn't be read
-- `finished_change_items_without_approval` — List of finished change items (by id) that were never approved; null if a project's items or a change item's history or comments couldn't be read
+- `change_items_approved` — Number of change items with an approval in effect, meaning they moved into a configured approval state (default Approved; a state such as Awaiting Approval doesn't count) or got a comment whose text, quoted text left out, matches the approval pattern (by default, a line starting "Approved" with no question mark), and the approval wasn't withdrawn since. A later move back to a state before the approval states, or to a state or with a reason naming Rejected, withdraws every approval before it; null if a project's items or a change item's history or comments couldn't be read
+- `finished_change_items_without_approval` — List of finished change items (by id) that were never approved, or whose approval was withdrawn and not given again; null if a project's items or a change item's history or comments couldn't be read
+- `change_items_approved_by_requester` — List of change items (by id) whose approval in effect (the first approval since any withdrawal) was given by the person who created the item; null if a project's items or a change item's history or comments couldn't be read
 - `change_items_with_linked_changes` — Number of change items linked to a TFVC changeset, Git commit or pull request; null if a project's items couldn't be listed
 - `finished_change_items_without_linked_change` — List of finished change items (by id) linked to no changeset, commit or pull request; null if a project's items couldn't be listed
-- `change_items_changed_before_approval` — List of change items (by id) with a linked TFVC changeset made before the item was approved; null if a project's items, a change item's history or comments, or a linked changeset couldn't be read
-- `change_items_approved_by_change_author` — List of change items (by id) approved by the person who made or checked in one of its linked changesets; null if a project's items, a change item's history or comments, or a linked changeset couldn't be read
+- `change_items_linked_changes_checked` — Number of approved change items with linked changes whose changes were checked against the approval, meaning every linked change is a TFVC changeset that was read for its date and author; an item linked to a Git commit or pull request is never checked, as their dates and authors aren't read; null if a project's items or a change item's history or comments couldn't be read
+- `change_items_changed_before_approval` — List of change items (by id) with a linked TFVC changeset made before the item's approval in effect; null if a project's items or a change item's history or comments couldn't be read, or if any approved change item with linked changes wasn't checked (linked to a Git commit or pull request, or to a changeset that couldn't be read)
+- `change_items_approved_by_change_author` — List of change items (by id) whose approval in effect was given by the person who made or checked in one of its linked changesets; null if a project's items or a change item's history or comments couldn't be read, or if any approved change item with linked changes wasn't checked (linked to a Git commit or pull request, or to a changeset that couldn't be read)
 
 **Is security work owned and on time?**
 - `tagged_items_open` — Number of open items with a configured tag; null if a project's items couldn't be listed
@@ -5653,8 +5655,8 @@ Summary fields:
 
 **What isn't collected?**
 - `not_collected` — What the fetcher deliberately doesn't collect, by area:
-  - text (descriptions, comment text and attachments; a comment is only checked against the approval pattern);
-  - git_change_dates (linked Git commits and pull requests are kept by id only);
+  - text (descriptions, comment text and attachments; a comment, quoted text left out, is only checked against the approval pattern);
+  - git_change_dates (linked Git commits and pull requests are kept by id only, so an item linked to one isn't checked for changes before approval or by its approver);
   - items_outside_selection (other types without a configured tag, and finished items not changed in the window);
   - projects_not_visible (projects and items the identity can't see).
 
@@ -5702,7 +5704,7 @@ Summary fields:
 - `percent_recorded` — Percentage of changes needing a record that a work item records = `changes_recorded` / `changes_needing_record` × 100 (a whole number, 0–100); 0 when `changes_needing_record` is 0
 
 **Are the records approved?**
-- `changes_recorded_without_approval` — Number of recorded changes whose record isn't approved (moved into an approval state or given an approval comment, as `azure_devops_work_items` reads it, and a record whose approval couldn't be read counts as not approved); a change several items could record counts as approved only if every one is approved
+- `changes_recorded_without_approval` — Number of recorded changes whose record isn't approved (has no approval in effect as `azure_devops_work_items` reads it: moved into an approval state or given an approval comment, quoted text left out, and not withdrawn since; and a record whose approval couldn't be read counts as not approved); a change several items could record counts as approved only if every one is approved
 - `changes_without_approved_record` — Number of changes needing a record with no approved work item: `changes_without_record` plus `changes_recorded_without_approval`
 - `changes_without_approved_record_by_origin` — Number of changes without an approved record for each checked origin
 - `changes_approved_after_change` — Number of changes with an approved record where a record that isn't an emergency type (`emergency_types`) was approved after the change was made; counted, not treated as unapproved

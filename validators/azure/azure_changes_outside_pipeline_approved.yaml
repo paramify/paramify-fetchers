@@ -8,8 +8,10 @@ statement: >
   excluded caller) is recorded by an approved Azure DevOps work item:
   summary.changes_without_approved_record is 0, which is the changes without a record
   plus the recorded changes whose record isn't approved. Approved means
-  azure_devops_work_items found a move into one of its approval states or a comment
-  matching its approval pattern, and a record whose approval couldn't be read is not
+  azure_devops_work_items found an approval in effect: a move into one of its approval
+  states, or a comment matching its approval pattern with quoted text left out, not
+  withdrawn since by a move back to a state before its approval states or to a state or
+  with a reason naming Rejected. A record whose approval couldn't be read is not
   approved; a change several items could record counts as approved only when every one
   of them is. Changes by applications are counted apart (summary.changes_by_application)
   and not checked. Substantiates KSI-CMT-LMC: changes are logged with an approved change
