@@ -797,10 +797,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
-- **Invalid Azure exclusion patterns fail as `bad_config`.** A bad
-  `resource_exclusions` pattern, and a bad `scope_exclusions` pattern in the
-  Front Door and DNS fetchers, now classify as `bad_config` instead of a generic
-  failure.
+
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
