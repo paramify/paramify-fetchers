@@ -514,6 +514,41 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_sql_managed_instance_configuration` 0.3.0: subnet rules and routes,
+  maintenance window and data classification.** Each instance now carries its
+  `subnet_id` and subnet (address range, delegation), the subnet NSG's custom and
+  default rules and the route table's routes, read by id with
+  `subnets.get()`, `network_security_groups.get()` and `route_tables.get()`;
+  rules and routes Azure adds for the instance are marked `service_aided`.
+  `subnet_allow_any_to_any_rules` names custom rules, service-aided ones
+  included, allowing every protocol and port from any address to any address, and
+  `subnet_unrestricted_internet_outbound` reads the NSG the way
+  `azure_network_security_groups` does. `subnet_smb_outbound_allow_rules` names
+  custom rules allowing TCP 445 out to any address, and
+  `subnet_public_all_ports_inbound_allow_rules` names custom rules allowing every
+  port in from a source list that includes public addresses; both leave the
+  service-aided rules out. `instances_subnet_rules_unknown` counts the instances
+  whose subnet or NSG couldn't be read, so none of these rule fields could be
+  judged. The instance's
+  `maintenance_configuration_id` is resolved through
+  `publicMaintenanceConfigurations` to its window (start, duration, time zone,
+  recurrence), with `maintenance_window_default` for `SQL_Default` and
+  `instances_maintenance_window_unknown` counting instances with no configuration
+  id. The window is read only when `providers.get()` finds `Microsoft.Maintenance`
+  registered (reported as `maintenance_provider_registration_status`); unregistered,
+  or a 409 `MissingSubscriptionRegistration` on the read, leaves the window null
+  without failing the run, and `maintenance_window_default` still comes from the
+  id. Each user
+  database lists how many columns carry each sensitivity label and information
+  type from `managed_database_sensitivity_labels.list_current_by_database()`,
+  without column names. A read that failed leaves the fields built from it
+  null; summary counts count only known values, and the user-database counts are
+  null, like `total_user_databases`, when any instance's database list failed.
+  Like the other per-instance
+  reads, these skip an instance the `resource_exclusions` patterns take out, and
+  the new counts cover only in-scope instances. Reader is still enough. Adds
+  KSI-CNA-DFP, KSI-CNA-RNT, KSI-SVC-PRR and KSI-PIY-GIV, and the fetcher's
+  `description` and `instructions` now follow the plain-text format.
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
   history (`risk_history`, oldest first, with what changed and who initiated it)

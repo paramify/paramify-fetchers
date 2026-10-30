@@ -68,6 +68,13 @@ MI_SOUTH = f"{IN_RG}/providers/Microsoft.Sql/managedInstances/mi-south"
 MI_OUT = f"{OUT_RG}/providers/Microsoft.Sql/managedInstances/mi-out"
 LOCATIONS = {MI_IN: "regioneast", MI_OUT: "regionwest", MI_SOUTH: "regionsouth"}
 WORKSPACE_OUT = f"{OUT_RG}/providers/Microsoft.OperationalInsights/workspaces/law-out"
+# Each instance gets its own network resources and maintenance configuration, named so a read shows whose it is.
+MAINTENANCE = {rid: f"{SUB}/providers/Microsoft.Maintenance/publicMaintenanceConfigurations/SQL_{loc}_MI_1"
+               for rid, loc in LOCATIONS.items()}
+
+
+def _network_id(rid, kind):
+    return f"{rid.split('/providers/')[0]}/providers/Microsoft.Network/{kind}/{rid.rsplit('/', 1)[1]}"
 
 
 def _key(rid):
@@ -113,7 +120,9 @@ def _sql_client(failover=None, reads=None, deny=()):
     return ns(
         managed_instances=ns(list=lambda: [
             ns(id=rid, name=_key(rid)[1], location=loc, state="Ready", current_backup_storage_redundancy="Geo",
-               public_data_endpoint_enabled=rid != MI_IN, minimal_tls_version="1.2")
+               public_data_endpoint_enabled=rid != MI_IN, minimal_tls_version="1.2",
+               subnet_id=f"{_network_id(rid, 'virtualNetworks')}/subnets/mi",
+               maintenance_configuration_id=MAINTENANCE[rid])
             for rid, loc in LOCATIONS.items()]),
         managed_databases=ns(list_by_instance=per_instance("databases", {
             _key(rid): [ns(id=f"{rid}/databases/app", name="app", status="Online")] for rid in LOCATIONS})),
@@ -132,7 +141,37 @@ def _sql_client(failover=None, reads=None, deny=()):
             k: [ns(administrator_type="ActiveDirectory", login="dba")] for k in keys})),
         managed_instance_azure_ad_only_authentications=ns(list_by_instance=per_instance("entra_only", {
             k: [ns(azure_ad_only_authentication=True)] for k in keys})),
+        managed_database_sensitivity_labels=ns(list_current_by_database=per_instance("sensitivity_labels", {
+            (*k, "app"): [ns(label_name="Confidential", information_type="Financial")] for k in keys})),
     )
+
+
+def _network_client(reads, deny):
+    subnets, groups, tables = {}, {}, {}
+    for rid in LOCATIONS:
+        rg, name = _key(rid)
+        nsg, table = _network_id(rid, "networkSecurityGroups"), _network_id(rid, "routeTables")
+        subnets[(rg, name, "mi")] = ns(id=f"{_network_id(rid, 'virtualNetworks')}/subnets/mi", name="mi",
+                                       address_prefix="10.0.0.0/27", network_security_group=ns(id=nsg),
+                                       route_table=ns(id=table))
+        groups[(rg, name)] = ns(id=nsg, name=name, security_rules=[], default_security_rules=[])
+        tables[(rg, name)] = ns(id=table, name=name, routes=[])
+    return ns(subnets=ns(get=_call(subnets, "subnets", reads, deny)),
+              network_security_groups=ns(get=_call(groups, "network_security_groups", reads, deny)),
+              route_tables=ns(get=_call(tables, "route_tables", reads, deny)))
+
+
+def _maintenance_get_json(reads, deny):
+    owners = {cid: _key(rid)[1] for rid, cid in MAINTENANCE.items()}
+
+    def get_json(rest, url):
+        path = url.split("?")[0]
+        reads.append(("maintenance", ("", owners[path])))
+        if owners[path] in deny:
+            raise DENIED
+        return {"id": path, "name": path.rsplit("/", 1)[1], "properties": {"maintenanceWindow": {"duration": "08:00"}}}
+
+    return get_json
 
 
 def run_sql_reads(monkeypatch, tmp_path, module, patterns, failover=None, deny=()):
@@ -151,6 +190,9 @@ def run_sql_reads(monkeypatch, tmp_path, module, patterns, failover=None, deny=(
             return [audit]
 
         monkeypatch.setattr(module, "monitor_client", lambda *a: ns(diagnostic_settings=ns(list=diagnostic_settings)))
+        monkeypatch.setattr(module, "network_client", lambda *a: _network_client(reads, deny))
+        monkeypatch.setattr(module, "arm_rest_client", lambda *a: object())
+        monkeypatch.setattr(module, "get_json", _maintenance_get_json(reads, deny))
     code = module.main()
     name = module.logger.name
     return code, json.loads((tmp_path / f"{name}_s1.json").read_text()), reads
@@ -190,6 +232,12 @@ def test_sql_configuration_excludes_by_group_and_region_and_keeps_an_excluded_au
     assert (summary["total_managed_instances"], summary["in_scope_managed_instances"],
             summary["excluded_managed_instances"]) == (1, 1, 2)
     assert (summary["instances_public_data_endpoint_enabled"], summary["instances_audit_logs_exported"]) == (0, 1)
+    assert instance["subnet_network_security_group"]["name"] == "mi-in"
+    assert instance["maintenance_window"]["name"] == "SQL_regioneast_MI_1"
+    assert (summary["instances_subnet_network_security_group"], summary["instances_subnet_route_table"],
+            summary["instances_custom_maintenance_window"]) == (1, 1, 1)
+    assert (summary["total_user_databases"], summary["user_databases_with_sensitivity_labels"],
+            summary["sensitivity_labeled_columns"]) == (1, 1, 1)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
 
 
