@@ -2216,6 +2216,8 @@ EXTRA_ARM = {
     # v1.0's members list leaves service principals out; only the cast returns them.
     ("/v1.0/directoryRoles/role-ga/members/microsoft.graph.servicePrincipal", None): {"value": [{"id": "sp-deploy"}]},
     ("/v1.0/directoryRoles/role-dr/members/microsoft.graph.servicePrincipal", None): {"value": []},
+    ("/v1.0/directoryRoles/role-ga/members/microsoft.graph.group", None): {"value": []},
+    ("/v1.0/directoryRoles/role-dr/members/microsoft.graph.group", None): {"value": []},
     ("/v1.0/users/u-admin", None): {"id": "u-admin", "accountEnabled": True},
 }
 
@@ -2310,6 +2312,7 @@ def test_sentinel_playbooks(azure, tmp_path):
     s = ev["summary"]
     assert s["run_by_active_automation_rule"] == 1 and s["live_account_containment_playbooks"] == 1
     assert s["notification_recipients"] == ["secops@contoso.com"] and s["logic_apps_scanned"] == 2
+    assert s["live_playbooks_without_definition"] == 0 and ev["results"]["notes"] == []
 
 
 def test_entra_risky_users(azure, tmp_path):
@@ -2326,6 +2329,29 @@ def test_entra_risky_users(azure, tmp_path):
     assert s["privileged_open_risk_users"] == 1 and s["privileged_open_risk_users_enabled"] == 1
     # 20 fillers, the admin and the service principal only the cast returns.
     assert s["privileged_principals"] == 22
+    assert s["privileged_role_groups"] == 0 and ev["results"]["privileged_role_groups"] == []
+
+
+def test_entra_risky_users_counts_groups_holding_a_privileged_role(azure, tmp_path):
+    # Members of a role-assignable group hold its roles but aren't expanded, so the summary shows the group.
+    azure.arm[("/v1.0/directoryRoles/role-ga/members/microsoft.graph.group", None)] = {"value": [
+        {"id": "g-admins", "displayName": "Tier 0 admins"}]}
+    azure.arm[("/v1.0/directoryRoles/role-dr/members/microsoft.graph.group", None)] = {"value": [
+        {"id": "g-readers", "displayName": "Readers"}]}
+    code, ev = run("entra_risky_users", tmp_path)
+    s = ev["summary"]
+    assert code == 0 and s["privileged_role_groups"] == 1 and s["privileged_principals"] == 23
+    assert ev["results"]["privileged_role_groups"] == [
+        {"id": "g-admins", "display_name": "Tier 0 admins", "privileged_roles": ["Company Admin"]}]
+
+
+def test_entra_risky_users_failed_group_read_leaves_privileged_figures_unknown(azure, tmp_path):
+    azure.arm[("/v1.0/directoryRoles/role-dr/members/microsoft.graph.group", None)] = Resp(
+        403, {"error": {"code": "Authorization_RequestDenied", "message": "Insufficient privileges to complete the operation."}})
+    code, ev = run("entra_risky_users", tmp_path)
+    s = ev["summary"]
+    assert code == 1 and s["privileged_role_groups"] is None and s["privileged_open_risk_users"] is None
+    assert ev["results"]["privileged_role_groups"] is None
 
 
 def test_entra_risky_users_refused_account_read_is_unknown(azure, tmp_path):
@@ -2423,10 +2449,17 @@ def test_log_storage_account_default_version_policy(azure, tmp_path):
 STD = f"{RG}/providers/Microsoft.Web/sites/la-std/workflows/contain"
 
 
-def _run_standard_playbook(azure, envelope):
+OTHER_SUB_PB = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-soc/providers/Microsoft.Logic/workflows/contain"
+
+
+def _rule_runs(azure, playbook_id):
     rules = azure.arm[(f"{SI_A}/automationRules", "2025-09-01")]["value"]
     rules[0]["properties"]["actions"].append(
-        {"order": 2, "actionType": "RunPlaybook", "actionConfiguration": {"logicAppResourceId": STD}})
+        {"order": 2, "actionType": "RunPlaybook", "actionConfiguration": {"logicAppResourceId": playbook_id}})
+
+
+def _run_standard_playbook(azure, envelope):
+    _rule_runs(azure, STD)
     azure.arm[(STD, "2024-04-01")] = envelope
 
 
@@ -2448,7 +2481,34 @@ def test_sentinel_playbooks_standard_workflow(azure, tmp_path):
 def test_sentinel_playbooks_standard_workflow_without_definition(azure, tmp_path):
     _run_standard_playbook(azure, {"id": STD, "name": "la-std/contain", "properties": {"flowState": "Enabled"}})
     code, ev = run("sentinel_playbooks", tmp_path)
-    assert code == 0 and ev["summary"]["playbooks_without_definition"] == [STD]
+    std = next(p for p in ev["results"]["playbooks"] if p["id"] == STD)
+    s = ev["summary"]
+    assert code == 0 and s["playbooks_without_definition"] == [STD]
+    assert std["definition_read"] is False and std["capabilities"] is None and std["email_recipients"] is None
+    # It is live, so the counts it could change read unknown rather than leaving it out.
+    assert s["run_by_active_automation_rule"] == 2 and s["live_playbooks_without_definition"] == 1
+    assert s["live_account_containment_playbooks"] is None and s["live_notifying_playbooks"] is None
+    assert s["notification_recipients"] is None
+
+
+@pytest.mark.parametrize("status, error", [
+    (401, "InvalidAuthenticationToken"), (403, "AuthorizationFailed"), (404, "ResourceNotFound"), (404, "SubscriptionNotFound")])
+def test_sentinel_playbooks_unreadable_playbook_is_unresolved(azure, tmp_path, status, error):
+    _rule_runs(azure, OTHER_SUB_PB)
+    azure.arm[(OTHER_SUB_PB, "2019-05-01")] = Resp(status, {"error": {"code": error, "message": "no"}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    s = ev["summary"]
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    assert s["automation_rule_references_unresolved"] == [OTHER_SUB_PB.lower()]
+    assert OTHER_SUB_PB in ev["results"]["notes"][0] and s["run_by_active_automation_rule"] == 1
+
+
+def test_sentinel_playbooks_other_playbook_read_errors_fail(azure, tmp_path):
+    _rule_runs(azure, OTHER_SUB_PB)
+    azure.arm[(OTHER_SUB_PB, "2019-05-01")] = Resp(400, {"error": {"code": "BadRequest", "message": "bad"}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and ev["results"]["notes"] == []
+    assert ev["summary"]["automation_rule_references_unresolved"] == [OTHER_SUB_PB.lower()]
 
 
 def test_throttling_is_retried_after_retry_after(azure, tmp_path):

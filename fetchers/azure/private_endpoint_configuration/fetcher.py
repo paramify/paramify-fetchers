@@ -32,6 +32,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from private_dns import project_zone_group  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import (  # noqa: E402
     lookup_by_ids,
     quoted_ids,
@@ -334,7 +335,10 @@ def truncated_vnets(subnet_rows: dict) -> set:
     return {v for v, n in seen.items() if isinstance(expected[v], int) and n < expected[v]}
 
 
-def collect_endpoints(subscription_id, cred, collector: Collector) -> list[dict]:
+def collect_endpoints(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+                      excluded: list | None = None) -> list[dict]:
+    """Endpoints the exclusions take out are appended to `excluded` and get none of the per-endpoint reads."""
+
     def _client():
         from azure.mgmt.network import NetworkManagementClient  # lazy
 
@@ -348,6 +352,10 @@ def collect_endpoints(subscription_id, cred, collector: Collector) -> list[dict]
         lambda: [project_endpoint(pe) for pe in client.private_endpoints.list_by_subscription()],
         default=[],
     )
+    if exclusions:
+        endpoints, out = exclusions.split(sorted(endpoints, key=lambda r: r.get("id") or ""), "private_endpoint")
+        if excluded is not None:
+            excluded += out
     zone_groups = {}
     for pe in endpoints:
         rg = resource_group_from_id(pe.get("id"))
@@ -393,6 +401,9 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     endpoints: list[dict] = []
+    excluded: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Network")
@@ -401,7 +412,7 @@ def main() -> int:
                 "Microsoft.Network is not registered on subscription %s — reporting status not_registered",
                 subscription_id,
             )
-        endpoints = collect_endpoints(subscription_id, cred, collector)
+        endpoints = collect_endpoints(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -411,12 +422,18 @@ def main() -> int:
             ),
         )
 
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"private_endpoints": endpoints, "provider_registration_status": registration},
-        summary={**summarize(endpoints), "provider_registration_status": registration},
+        results={"private_endpoints": endpoints, "provider_registration_status": registration, "excluded": excluded},
+        summary={
+            **summarize(endpoints),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("private_endpoint",), {"private_endpoints": len(endpoints)}),
+        },
     )
     filename = f"azure_private_endpoint_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

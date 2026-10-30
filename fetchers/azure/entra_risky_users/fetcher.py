@@ -5,15 +5,12 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_rest import ArmError, parse_time, run_tenant  # noqa: E402
-from entra_graph import (  # noqa: E402
-    GLOBAL_ADMINISTRATOR_TEMPLATE_ID,
-    PRIVILEGED_ROLE_NAMES,
-)
+from entra_graph import is_privileged_role  # noqa: E402
 
 NAME = "azure_entra_risky_users"
 OPEN_STATES = frozenset({"atRisk", "confirmedCompromised"})
@@ -27,27 +24,39 @@ def not_licensed(exc: BaseException) -> bool:
     return isinstance(exc, ArmError) and exc.status == 403 and "licens" in str(exc).lower()
 
 
-def is_privileged(role: Dict[str, Any]) -> bool:
-    return role.get("displayName") in PRIVILEGED_ROLE_NAMES or (
-        str(role.get("roleTemplateId") or "").lower() == GLOBAL_ADMINISTRATOR_TEMPLATE_ID
-    )
+Roles = Dict[str, List[Dict[str, Any]]]
 
 
-def directory_roles(client) -> Dict[str, List[Dict[str, Any]]]:
-    """Principal id -> the activated directory roles it holds directly, each flagged privileged or not."""
-    held: Dict[str, List[Dict[str, Any]]] = {}
+def directory_roles(client) -> Tuple[Roles, Dict[str, Any]]:
+    """Principal id -> the activated directory roles it holds directly, each flagged privileged or not; and group id -> name."""
+    held: Roles = {}
+    groups: Dict[str, Any] = {}
     for role in client.graph_list("/directoryRoles"):
         members = f"/directoryRoles/{role.get('id')}/members"
         # $expand=members on the collection caps at 20 members per role, so each role's members are paged.
         ids = {m.get("id") for m in client.graph_list(members, params={"$select": "id"})}
         # The v1.0 members list leaves out service principals; the servicePrincipal cast returns them.
         ids |= {m.get("id") for m in client.graph_list(f"{members}/microsoft.graph.servicePrincipal", params={"$select": "id"})}
+        # Role-assignable groups; their members aren't expanded, as that needs GroupMember.Read.All.
+        for group in client.graph_list(f"{members}/microsoft.graph.group", params={"$select": "id,displayName"}):
+            groups[group.get("id")] = group.get("displayName")
+            ids.add(group.get("id"))
+        privileged = is_privileged_role({"display_name": role.get("displayName"), "role_template_id": role.get("roleTemplateId")})
         for member_id in sorted(i for i in ids if i):
-            held.setdefault(member_id, []).append({"name": role.get("displayName"), "privileged": is_privileged(role)})
-    return held
+            held.setdefault(member_id, []).append({"name": role.get("displayName"), "privileged": privileged})
+    return held, groups
 
 
-def project_user(user: Dict[str, Any], roles: Optional[Dict[str, List[Dict[str, Any]]]], now: datetime) -> Dict[str, Any]:
+def privileged_groups(roles: Roles, groups: Dict[str, Any]) -> List[Dict[str, Any]]:
+    out = []
+    for group_id, name in groups.items():
+        names = sorted(r["name"] for r in roles.get(group_id, []) if r["privileged"])
+        if names:
+            out.append({"id": group_id, "display_name": name, "privileged_roles": names})
+    return sorted(out, key=lambda g: ((g["display_name"] or "").lower(), g["id"]))
+
+
+def project_user(user: Dict[str, Any], roles: Optional[Roles], now: datetime) -> Dict[str, Any]:
     updated = parse_time(user.get("riskLastUpdatedDateTime"))
     held = None if roles is None else roles.get(cast(str, user.get("id")), [])
     return {
@@ -86,7 +95,9 @@ def collect(client, collector) -> tuple:
         collector.record("graph.identityProtection.riskyUsers.list", exc)
         return {"risky_users": None}, {}
     # None when the roles can't be read, so the privileged figures read unknown rather than 0.
-    roles = collector.guard("graph.directoryRoles.members.list", lambda: directory_roles(client))
+    read = collector.guard("graph.directoryRoles.members.list", lambda: directory_roles(client))
+    roles, groups = read if read is not None else (None, {})
+    held_by_groups = None if roles is None else privileged_groups(roles, groups)
 
     now = datetime.now(timezone.utc)
     users = sorted((project_user(u, roles, now) for u in raw), key=lambda u: (u["user_principal_name"] or "").lower())
@@ -116,8 +127,10 @@ def collect(client, collector) -> tuple:
         "privileged_principals": None if roles is None else sum(
             1 for held in roles.values() if any(r["privileged"] for r in held)
         ),
+        # Members of these groups hold the role too but aren't in privileged_open_risk_users.
+        "privileged_role_groups": None if held_by_groups is None else len(held_by_groups),
     }
-    return {"identity_protection_available": True, "risky_users": users}, summary
+    return {"identity_protection_available": True, "risky_users": users, "privileged_role_groups": held_by_groups}, summary
 
 
 def main() -> int:
