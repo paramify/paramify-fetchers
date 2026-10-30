@@ -99,7 +99,7 @@ jobs:
       # surface the fetchers read. Runs unconditionally rather than behind a path
       # filter — a gate that only sometimes runs is not a gate.
       - name: pytest (azure SDK surface)
-        run: pytest -q tests/test_azure_sdk_surface.py
+        run: pytest -q tests/test_azure_sdk_surface.py tests/test_azure_entra_conditional_access_policies.py
 
   oci-sdk:
     name: oci (fetchers + SDK surface)

@@ -12,7 +12,10 @@ import logging
 import sys
 from pathlib import Path
 
-import httpx
+import pytest
+
+httpx = pytest.importorskip("httpx")  # azure extra; runs in the azure-sdk CI job
+pytest.importorskip("msgraph")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER = REPO_ROOT / "fetchers" / "azure" / "entra_conditional_access_policies" / "fetcher.py"

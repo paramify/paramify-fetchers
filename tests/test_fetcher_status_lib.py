@@ -26,6 +26,7 @@ CODES = {
     "bad_config",
     "partial_failure",
     "internal_error",
+    "input_failed",
 }
 
 

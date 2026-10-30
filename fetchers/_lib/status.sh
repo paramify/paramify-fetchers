@@ -75,7 +75,7 @@ report_failure() {
   # Only the contract's closed set is allowed through; anything else is dropped
   # rather than written, so a typo can't invent a category downstream code reads.
   case "$code" in
-    auth_failed|not_authorized|target_unreachable|rate_limited|bad_config|partial_failure|internal_error) ;;
+    auth_failed|not_authorized|target_unreachable|rate_limited|bad_config|partial_failure|internal_error|input_failed) ;;
     "") ;;
     *)
       printf '%s WARNING %s dropping unrecognized status code %s\n' \
