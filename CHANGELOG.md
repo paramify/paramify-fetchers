@@ -852,6 +852,40 @@ schemas and the `paramify` CLI — not the internal code.
 ### Fixed
 
 
+- **Datadog fetchers read fields where the API puts them.** Several evidence
+  fields were always null, 0 or a constant, so a validator that read them
+  failed, or passed on a value that never changed:
+  - `datadog_incidents_list` 0.1.1: `commander_id` comes from
+    `relationships.commander_user`. `resolution_hours` and
+    `summary.avg_resolution_hours` parse timestamps with fractional seconds
+    (`…00.000Z`). `status` reads the incident `state`.
+  - `datadog_incident_timelines` 0.1.1: each timeline cell keeps its `content`
+    text, `important` flag and `id`. An after-action review can now read what
+    each entry says.
+  - `datadog_log_archives` 0.1.1: `summary.enabled_archives` counts archives in
+    state `WORKING` or `WORKING_AUTH_LEGACY`. The API has no `ENABLED` state.
+    The new `summary.archives_by_state` counts each state. `includeTags`
+    reads `include_tags`, and Azure archives show `storage_account`.
+  - `datadog_log_indexes` 0.2.0: the audit-index figures do not pick indexes
+    by keywords in the filter query, because that left other audit indexes
+    out. They cover every index, or only the indexes in the new optional
+    `audit_indexes` config (`DATADOG_AUDIT_INDEXES`).
+    `summary.audit_index_selection`, `summary.audit_indexes`,
+    `summary.audit_indexes_not_found` and the `is_audit_index` flag on each
+    index show which indexes the figures count.
+  - `datadog_monitors_list` 0.1.1: `thresholds`, `notify_no_data` and
+    `no_data_timeframe` come from `options`. `query` and `message` keep their
+    full text, not the first 200 characters. The new `notification_targets`
+    lists the @-mentions in the message.
+  - `datadog_siem_detection_rules` 0.2.0: each rule keeps its
+    `detection_method`, `queries` and `cases`.
+    `summary.rules_updated_last_90_days` reads `updatedAt` as epoch
+    milliseconds. We removed `summary.rules_never_triggered_count`. It was
+    always 0, and the rules API gives no data about when a rule fired.
+  - `datadog_siem_signals` 0.1.1: `severity`, `status` (the triage state) and
+    the rule come from the nested `attributes` of each signal, where the
+    search endpoint puts them.
+
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was

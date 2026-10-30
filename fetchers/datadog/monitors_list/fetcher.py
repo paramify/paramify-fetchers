@@ -8,6 +8,7 @@ Purpose: Retrieve monitor configurations to prove persistent alerting is defined
 import json
 import logging
 import os
+import re
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -75,6 +76,34 @@ def fetch_all_monitors(base_url: str, headers: Dict[str, str]) -> List[Dict[str,
     return all_monitors
 
 
+# An @-mention in a monitor message names a notification target, for example
+# @pagerduty-Service, @slack-channel, @webhook-name or @user@example.com. Often
+# it sits inside a template block, as in {{#is_alert}}@pagerduty-Infra{{/is_alert}}.
+# The @ must not follow a word character or an email local-part character, so
+# the domain of a plain email address in the text is not read as a target.
+_MENTION = re.compile(r"(?<![\w@.+\-])@([^\s{}()<>\[\],;'\"`]+)")
+_MENTION_TRAILING = ".:!?"
+
+
+def extract_notification_targets(message: str) -> List[str]:
+    """The distinct @-mentions in a monitor message, in the order they appear."""
+    targets: List[str] = []
+    for match in _MENTION.finditer(message or ""):
+        target = match.group(1).rstrip(_MENTION_TRAILING)
+        if target and target not in targets:
+            targets.append(target)
+    return targets
+
+
+def _option(monitor: Dict[str, Any], key: str) -> Any:
+    """A v1 monitor option. The API nests these under ``options``; a top-level
+    key is read only as a fallback for older payloads."""
+    options = monitor.get("options") or {}
+    if key in options:
+        return options[key]
+    return monitor.get(key)
+
+
 def extract_monitor_fields(monitor: Dict[str, Any]) -> Dict[str, Any]:
     message = monitor.get("message", "") or ""
     return {
@@ -82,12 +111,14 @@ def extract_monitor_fields(monitor: Dict[str, Any]) -> Dict[str, Any]:
         "name": monitor.get("name"),
         "type": monitor.get("type"),
         "overall_state": monitor.get("overall_state"),
-        "query": (monitor.get("query") or "")[:200],
-        "message": message[:200],
+        # Kept whole: a cut message drops the @-mentions that name who is paged.
+        "query": monitor.get("query") or "",
+        "message": message,
+        "notification_targets": extract_notification_targets(message),
         "tags": monitor.get("tags", []),
-        "thresholds": monitor.get("thresholds"),
-        "notify_no_data": monitor.get("notify_no_data"),
-        "no_data_timeframe": monitor.get("no_data_timeframe"),
+        "thresholds": _option(monitor, "thresholds"),
+        "notify_no_data": _option(monitor, "notify_no_data"),
+        "no_data_timeframe": _option(monitor, "no_data_timeframe"),
     }
 
 
