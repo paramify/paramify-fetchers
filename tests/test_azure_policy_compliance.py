@@ -777,7 +777,7 @@ def test_in_scope_compliance_recounts_initiative_members_and_falls_back_to_the_e
     assert [(m["policy_definition_reference_id"], m["effect"], m["non_compliant_resources"])
             for m in rebuilt["non_compliant_member_policies"]] == [("R1", "deny", 2), ("r3", "modify", 1)]
     assert (rebuilt["non_compliant_resources"], rebuilt["non_compliant_policies"], rebuilt["is_compliant"],
-            rebuilt["member_policy_count"], rebuilt["compliance_percentage"]) == (2, 2, False, 2, 25)
+            rebuilt["member_policy_count"], rebuilt["compliance_percentage"]) == (2, 2, False, 2, None)
     assert (results["non_compliant_resources"], results["non_compliant_policies"], results["resource_details"]) == (
         2, 2, {"NonCompliant": 2})
     results, (unknown,) = fx.in_scope_compliance(service, [record], rows, known=False)

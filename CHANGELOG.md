@@ -26,8 +26,8 @@ schemas and the `paramify` CLI — not the internal code.
   wanted. Its evidence keeps every excluded item in `results.excluded` with the
   pattern that matched, echoes the patterns, lists the ones that matched
   nothing, and counts each excluded kind and what stayed in scope
-  (`in_scope_<kind>s`). Every verdict, count and percentage covers only what
-  remains in scope; cross-references (routing, endpoint targets, failover
+  (`in_scope_<kind>s`). Every verdict and count covers only what remains in
+  scope, or reads null where a fetcher can't recount it (see `azure_policy_compliance`); cross-references (routing, endpoint targets, failover
   partners, egress paths) are still worked out against every record, so an
   in-scope item keeps its verdict. With no patterns set the output is unchanged
   apart from those empty, zero or total fields. Adopted by:
@@ -54,10 +54,13 @@ schemas and the `paramify` CLI — not the internal code.
     each assignment's non-compliant counts, `is_compliant` and failing members,
     and `non_compliant_assignments` / `compliant_assignments`) and the remediation
     deployment totals are recounted over the in-scope lists, and read null when
-    a list is cut short or a read for it fails. The compliant side (`compliant_resources`,
-    `resources_evaluated`, the percentages) is still the service's
-    subscription-wide count, which `service_counts_include_excluded_resources`
-    marks true.
+    a list is cut short or a read for it fails. The service can't split its
+    compliant side by resource, so with patterns set `compliant_resources`,
+    `resources_evaluated` and `resource_compliance_percentage` (summary), and each
+    assignment's `compliant_resources` and `compliance_percentage`, read null,
+    and the by-state maps keep only their `NonCompliant` entry. No record mixes
+    in-scope and subscription-wide counts, so there is no
+    `service_counts_include_excluded_resources` field.
   - `azure_key_vault_configuration` 0.3.0: key vaults; an excluded vault's
     diagnostic settings are not read.
   - `azure_key_vault_key_rotation` 0.3.0: key vaults and App Service certificates;

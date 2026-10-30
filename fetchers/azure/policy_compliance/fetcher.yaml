@@ -103,8 +103,11 @@ config_schema:
       each assignment's non-compliant counts, is_compliant and failing members) is
       recounted from the in-scope listed states, and the failed and successful
       deployment totals from the in-scope listed deployments; each is null when its
-      list is truncated or a read for it fails. The compliant side (compliant_resources,
-      resources_evaluated, the percentages and the other by-state entries) and
+      list is truncated or a read for it fails. The compliant side cannot be
+      recounted, so it is null rather than mixed with these: compliant_resources,
+      resources_evaluated, resource_compliance_percentage, each assignment's
+      compliant_resources and compliance_percentage, and the Compliant entries of
+      the by-state maps. policy_group_details and
       remediation_tasks_by_provisioning_state still come from the service and
       include excluded resources. A pattern without one of these prefixes
       fails the run. Set it once under platforms.azure.config for every Azure
@@ -178,9 +181,12 @@ evidence_set:
     recounted over the in-scope itemized records, and are null when the list they
     come from is truncated, skipped or not read in full (a failed states read, task
     list or deployment list). A failing member the service did not list
-    takes the effect its evaluation ran under. service_counts_include_excluded_resources
-    is true when any pattern is set: compliant_resources, resources_evaluated,
-    resource_compliance_percentage, each assignment's compliant_resources and
-    compliance_percentage, the other by-state entries, policy_group_details and
-    remediation_tasks_by_provisioning_state are still the service's and include
+    takes the effect its evaluation ran under. With patterns set the service's
+    compliant side cannot be split by resource, so compliant_resources,
+    resources_evaluated and resource_compliance_percentage, each assignment's
+    compliant_resources and compliance_percentage are null, and the by-state maps
+    (resources_by_compliance_state, policies_by_compliance_state, each resource_details and the
+    same in results.subscription_compliance) keep only their NonCompliant entry,
+    so no record mixes in-scope and subscription-wide counts. policy_group_details
+    and remediation_tasks_by_provisioning_state are still the service's and include
     excluded resources. Without patterns every count is the service's own.

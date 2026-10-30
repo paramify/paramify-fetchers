@@ -531,7 +531,7 @@ def test_policy_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, t
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0 and results["excluded"] == []
     assert summary["resource_exclusion_patterns"] == summary["resource_exclusion_patterns_unmatched"] == []
-    assert summary["service_counts_include_excluded_resources"] is False
+    assert "service_counts_include_excluded_resources" not in summary
     assert (summary["assignments_evaluated"], summary["listed_non_compliant_states"], summary["remediation_tasks"],
             summary["remediation_deployments_listed"], summary["history_non_compliant_pairs"],
             summary["recurrence_pairs_read"]) == (3, 5, 2, 4, 3, 2)
@@ -588,7 +588,7 @@ def test_policy_records_follow_their_resource_and_tasks_their_scope(monkeypatch,
 def test_policy_non_compliant_side_is_recounted_over_in_scope_states(monkeypatch, tmp_path):
     _, evidence, calls = run_policy(monkeypatch, tmp_path, PATTERNS)
     summary, results = evidence["summary"], evidence["results"]
-    assert summary["service_counts_include_excluded_resources"] is True
+    assert "service_counts_include_excluded_resources" not in summary
     # With patterns set the service can't cap the list, which counts in-scope states only.
     assert [c for c in calls if c[0] == "states"] == [("states", None)]
     deny, sub = results["assignment_compliance"]
@@ -596,17 +596,21 @@ def test_policy_non_compliant_side_is_recounted_over_in_scope_states(monkeypatch
     assert (deny["is_compliant"], deny["non_compliant_resources"], deny["non_compliant_policies"], _members(deny)) == (
         True, 0, 0, [])
     assert (sub["is_compliant"], sub["non_compliant_resources"], _members(sub)) == (False, 2, [("d1", "audit", 2)])
-    assert deny["resource_details"] == {"Compliant": 2, "NonCompliant": 0}
+    assert deny["resource_details"] == {"NonCompliant": 0}
     assert (summary["non_compliant_assignments"], summary["compliant_assignments"]) == (1, 1)
     assert (summary["non_compliant_resources"], summary["non_compliant_policies"]) == (2, 1)
-    assert summary["resources_by_compliance_state"] == {"Compliant": 2, "NonCompliant": 2}
-    assert summary["policies_by_compliance_state"] == {"Compliant": 5, "NonCompliant": 1}
+    assert summary["resources_by_compliance_state"] == {"NonCompliant": 2}
+    assert summary["policies_by_compliance_state"] == {"NonCompliant": 1}
     compliance = results["subscription_compliance"]
     assert (compliance["non_compliant_resources"], compliance["non_compliant_policies"],
-            compliance["resource_details"]) == (2, 1, {"Compliant": 2, "NonCompliant": 2})
-    # The compliant side is still the service's, as are the percentages.
-    assert (summary["compliant_resources"], summary["resources_evaluated"],
-            summary["resource_compliance_percentage"], deny["compliance_percentage"]) == (2, 5, 40, 66)
+            compliance["resource_details"]) == (2, 1, {"NonCompliant": 2})
+    assert compliance["policy_details"] == {"NonCompliant": 1}
+    # The compliant side can't be recounted in scope, so no record mixes it with the in-scope side.
+    for key in ("compliant_resources", "resources_evaluated", "resource_compliance_percentage"):
+        assert summary[key] is None, key
+    for record in results["assignment_compliance"]:
+        assert (record["compliant_resources"], record["compliance_percentage"]) == (None, None)
+        assert list(record["resource_details"]) == ["NonCompliant"]
     # The only failed deployment is on the excluded east VM.
     assert (summary["remediation_failed_deployments"], summary["remediation_successful_deployments"]) == (0, 2)
     assert summary["remediation_tasks_by_provisioning_state"] == {"Succeeded": 1}
@@ -627,7 +631,9 @@ def test_policy_recounts_are_null_when_a_list_is_cut_short(monkeypatch, tmp_path
     for key in ("non_compliant_resources", "non_compliant_policies", "non_compliant_assignments",
                 "compliant_assignments", "remediation_failed_deployments", "remediation_successful_deployments"):
         assert summary[key] is None, key
-    assert summary["resources_by_compliance_state"] == {"Compliant": 2, "NonCompliant": None}
+    for key in ("compliant_resources", "resources_evaluated", "resource_compliance_percentage"):
+        assert summary[key] is None, key
+    assert summary["resources_by_compliance_state"] == {"NonCompliant": None}
     for assignment in results["assignment_compliance"]:
         assert (assignment["is_compliant"], assignment["non_compliant_resources"],
                 assignment["non_compliant_member_policies"]) == (None, None, None)

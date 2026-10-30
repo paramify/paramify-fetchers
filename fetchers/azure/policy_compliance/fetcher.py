@@ -682,14 +682,15 @@ def _member_key(record: dict) -> tuple:
 
 
 def _with_non_compliant(details: dict | None, count) -> dict:
-    """A {state: count} map with only its NonCompliant entry replaced."""
-    return {state: count if str(state).lower() == NON_COMPLIANT else n for state, n in (details or {}).items()}
+    """A {state: count} map cut to its NonCompliant entry, the only one recounted in scope."""
+    return {state: count for state in (details or {}) if str(state).lower() == NON_COMPLIANT}
 
 
 def in_scope_assignment(record: dict, states: list[dict], known: bool) -> dict:
     """An assignment's non-compliant side recounted over its in-scope listed states; None throughout when unknown."""
     if not known:
         return {**record, "non_compliant_resources": None, "non_compliant_policies": None, "is_compliant": None,
+                "compliant_resources": None, "compliance_percentage": None,
                 "resource_details": _with_non_compliant(record["resource_details"], None),
                 "non_compliant_member_policies": None}
     service = {_member_key(m): m for m in record["non_compliant_member_policies"]}
@@ -708,6 +709,7 @@ def in_scope_assignment(record: dict, states: list[dict], known: bool) -> dict:
     ]
     resources = len({arm_id_key(s.get("resource_id")) for s in states})
     return {**record, "non_compliant_resources": resources, "non_compliant_policies": len(by_member),
+            "compliant_resources": None, "compliance_percentage": None,
             "resource_details": _with_non_compliant(record["resource_details"], resources),
             "is_compliant": resources == 0, "non_compliant_member_policies": sorted(members, key=_member_order)}
 
@@ -730,12 +732,16 @@ def in_scope_compliance(results: dict, assignments: list[dict], states: list[dic
 
 
 def in_scope_summary(results: dict, assignments: list[dict], deployments: list[dict] | None) -> dict:
-    """The summary fields recounted over in-scope records; deployments is None when that list is incomplete."""
+    """The summary fields recounted over in-scope records, the compliant side null; deployments is None when that list is incomplete."""
     known = results.get("non_compliant_resources") is not None
     statuses = Counter(str(d.get("status") or "").lower() for d in deployments or [])
     return {
         "non_compliant_resources": results.get("non_compliant_resources"),
         "non_compliant_policies": results.get("non_compliant_policies"),
+        # The service's compliant side can't be split by resource, so it is null rather than subscription-wide.
+        "compliant_resources": None,
+        "resources_evaluated": None,
+        "resource_compliance_percentage": None,
         "resources_by_compliance_state": results.get("resource_details") or {},
         "policies_by_compliance_state": results.get("policy_details") or {},
         "non_compliant_assignments": sum(1 for a in assignments if a["is_compliant"] is False) if known else None,
@@ -1324,8 +1330,6 @@ def main() -> int:
                 "policy_assignments": len(collected["assignments"]), "policy_states": len(collected["states"]),
                 "remediation_tasks": len(collected["remediations"]),
                 "remediation_deployments": len(collected["deployments"])}),
-            # The compliant side (compliant_resources, resources_evaluated, the percentages) is still the service's.
-            "service_counts_include_excluded_resources": bool(exclusions),
         },
     )
 
