@@ -1,0 +1,122 @@
+name: azure_devops_service_connections
+version: 0.1.0
+description: >-
+  Shows how each Azure DevOps service connection authenticates, which service
+  principal it uses and which pipeline runs used it, and whether variable group
+  secrets live in Key Vault.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: azure_devops_service_connections.json
+  aggregation: per_target
+
+target_schema:
+  organization_url:
+    type: string
+    required: true
+    env: AZURE_DEVOPS_ORG_URL
+    description: >
+      The Azure DevOps organization, as https://dev.azure.com/<org>,
+      https://<org>.visualstudio.com or just <org>. One target per organization.
+  projects:
+    type: string
+    required: false
+    env: AZURE_DEVOPS_PROJECTS
+    description: >
+      Comma-separated project names or ids to limit collection to. Optional:
+      omit to collect every project the identity can read. A named project that is
+      missing fails the run.
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 30
+    env: AZURE_DEVOPS_LOOKBACK_DAYS
+    description: >
+      Service connection executions from this many days back are collected.
+
+secrets:
+  - name: pat
+    env: AZURE_DEVOPS_PAT
+    per_target: true
+    required: false
+    description: >
+      Read-only personal access token for the organization with Service
+      Connections (Read), Variable Groups (Read), Secure Files (Read), Build
+      (Read) for pipeline permissions, and Project and Team (Read). Optional:
+      without it the fetcher signs in as the ambient Entra identity (az login,
+      managed or workload identity, or the category's service principal added to
+      the organization). That identity needs read access to each project, the
+      Reader role on the service connections (by default only Endpoint
+      Administrators, Endpoint Creators and each connection's creator hold a
+      role there) and Reader on the Library (Project Valid Users hold it by
+      default). Collection covers what the signed-in identity can see, recorded
+      as metadata.collecting_identity.
+
+ksis:
+  - KSI-SVC-ASM      # pipeline secrets: federated or stored, Key Vault-backed variable groups and their expiry
+  - KSI-IAM-SNU      # non-user authentication from pipelines to Azure, and where it is used
+
+evidence_set:
+  reference_id: EVD-AZURE-DEVOPS-SERVICE-CONNECTIONS
+  name: Azure DevOps Service Connections
+  instructions: |
+    Script: azure/devops_service_connections/fetcher.py
+
+    Access: A personal access token for the organization with Service Connections, Variable Groups, Secure Files, Build, and Project and Team (all Read), or an Entra identity in the organization with Reader on the service connections and on the Library.
+
+    Commands Executed:
+    - GET _apis/connectionData — identifies the signed-in user
+    - GET _apis/projects — lists projects
+    - GET {project}/_apis/serviceendpoint/endpoints (per project) — service connections, failed ones included, with their sign-in scheme and service principal and tenant ids
+    - GET {project}/_apis/pipelines/pipelinepermissions/endpoint/{id} (per connection and project; preview API) — which YAML pipelines may use it
+    - GET {project}/_apis/serviceendpoint/{id}/executionhistory (per connection and project; preview API missing from Microsoft's REST reference, so its newest-first order is checked rather than assumed) — the runs that used it
+    - GET {project}/_apis/distributedtask/variablegroups (per project) — variable groups, their secret counts and Key Vault links
+    - GET {project}/_apis/distributedtask/securefiles (per project; preview API) — secure files, by name
+
+    Output: azure_devops_service_connections_<organization>.json — each service connection with how it authenticates, its service principal and tenant ids exactly as Azure DevOps gives them, the pipelines allowed to use it and the runs that used it, the connections grouped by service principal to join an Azure change to the run that made it, and each variable group's secret counts and Key Vault link and each secure file, with no credential or secret value.
+
+    Summary fields:
+
+    What was collected?
+    - lookback_days — Number of days back the fetcher looks for runs that used a service connection
+    - projects_collected — Number of projects read
+    - service_connections_total — Number of service connections, each counted once however many projects share it
+    - service_connections_by_type — Number of service connections of each type (for example azurerm for Azure Resource Manager, Generic, GitHub, kubernetes)
+    - secure_files_total — Number of secure files (certificates, keys and other files pipelines download)
+
+    How do service connections authenticate?
+    - service_connections_by_auth_method — Number of service connections using each sign-in method: workload_identity_federation (a short-lived token, no stored secret), managed_identity (the build agent's Azure identity, no stored secret), github_app (a GitHub App installation, no stored secret), service_principal_secret (a stored client secret), service_principal_certificate (a stored certificate), service_principal (a stored secret or certificate; Azure DevOps didn't say which), username_password, token, personal_access_token, oauth, certificate, publish_profile and kubernetes (other stored credentials), none (no sign-in scheme, though the connection can still keep a key such as a NuGet API key), or the raw scheme name for one the fetcher doesn't recognise
+    - azure_service_connections — Number of Azure Resource Manager (azurerm) service connections
+    - azure_service_connections_using_workload_identity_federation — Number of Azure Resource Manager service connections that use workload identity federation
+    - azure_service_connections_with_stored_secret — List of Azure Resource Manager service connections that hold a stored credential, meaning a secret, certificate, password, token, key, publish profile or kubeconfig kept in Azure DevOps
+    - service_connections_with_stored_credential — List of service connections of any type that hold a stored credential; a connection with no sign-in scheme counts when it keeps any parameter besides the service principal and tenant ids, and one with a scheme the fetcher doesn't recognise is left out
+    - service_connections_not_ready — List of service connections Azure DevOps reports as not ready (creation failed or incomplete)
+
+    Who may use them, and were they used?
+    - service_connections_open_to_all_pipelines — List of service connections that any YAML pipeline in at least one project may use without being authorised one by one (classic pipelines aren't limited by this); a connection whose pipeline permissions couldn't be read in some project, and that isn't open in another, is left out and the run reports the failure
+    - service_principals — Number of distinct service principals behind the service connections, told apart by tenant id and app id, both compared ignoring case and surrounding spaces
+    - service_connections_used_in_window — Number of service connections used by at least one pipeline run in the lookback period; a pipeline run is a build or a classic release, and the records a release logs for each of its stages count as one run
+    - service_connections_unused_in_window — List of service connections whose history was read in every project and shows no pipeline run in the lookback period
+    - pipeline_runs_using_service_connections — Number of pipeline runs in the lookback period that used at least one service connection, each run counted once however many connections or stages it used
+
+    Are pipeline secrets kept in Key Vault?
+    - variable_groups_total — Number of variable groups, each counted once however many projects share it
+    - variable_groups_key_vault_linked — Number of variable groups whose variables come from an Azure Key Vault
+    - variable_groups_with_secrets_outside_key_vault — List of variable groups holding secret variables stored in Azure DevOps itself rather than Key Vault
+    - secret_variables_total — Number of secret variables across all variable groups, Key Vault-linked secrets included
+    - secret_variables_outside_key_vault — Number of secret variables stored in Azure DevOps itself rather than Key Vault
+    - key_vault_secrets_expired — Number of Key Vault-linked secrets whose expiry date, as Azure DevOps last read it, has passed
+    - key_vault_secrets_without_expiry — Number of Key Vault-linked secrets with no expiry date set
+
+    What isn't collected?
+    - not_collected — What the fetcher deliberately doesn't collect, by area: secret values (credentials, secret variables and secure file contents; of a connection's sign-in parameters only the service principal and tenant ids are kept, and its URL is cut to scheme and host); when a service principal's secret or certificate expires (Azure DevOps doesn't expose it); which classic pipelines may use a connection (pipeline permissions limit YAML pipelines only); who holds the User, Creator and Administrator roles on each connection; and projects the identity can't see

@@ -112,7 +112,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-17.2`, `ia-5.2`, `ia-5.6`, `sc-12`, `sc-17`
 
-*16 fetchers:* [`aws_acm_certificate_status`](../fetchers/aws/acm_certificate_status), [`aws_kms_key_rotation`](../fetchers/aws/kms_key_rotation), [`aws_secrets_manager_rotation`](../fetchers/aws/secrets_manager_rotation), [`azure_ai_services_configuration`](../fetchers/azure/ai_services_configuration), [`azure_api_management_configuration`](../fetchers/azure/api_management_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration), [`azure_entra_app_registrations`](../fetchers/azure/entra_app_registrations), [`azure_key_vault_key_rotation`](../fetchers/azure/key_vault_key_rotation), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`gcp_api_keys_inventory`](../fetchers/gcp/api_keys_inventory), [`gcp_iam_service_accounts`](../fetchers/gcp/iam_service_accounts), [`gcp_kms_key_configuration`](../fetchers/gcp/kms_key_configuration), [`gcp_secret_manager_configuration`](../fetchers/gcp/secret_manager_configuration), [`oci_vault_keys`](../fetchers/oci/vault_keys)
+*17 fetchers:* [`aws_acm_certificate_status`](../fetchers/aws/acm_certificate_status), [`aws_kms_key_rotation`](../fetchers/aws/kms_key_rotation), [`aws_secrets_manager_rotation`](../fetchers/aws/secrets_manager_rotation), [`azure_ai_services_configuration`](../fetchers/azure/ai_services_configuration), [`azure_api_management_configuration`](../fetchers/azure/api_management_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration), [`azure_devops_service_connections`](../fetchers/azure/devops_service_connections), [`azure_entra_app_registrations`](../fetchers/azure/entra_app_registrations), [`azure_key_vault_key_rotation`](../fetchers/azure/key_vault_key_rotation), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`gcp_api_keys_inventory`](../fetchers/gcp/api_keys_inventory), [`gcp_iam_service_accounts`](../fetchers/gcp/iam_service_accounts), [`gcp_kms_key_configuration`](../fetchers/gcp/kms_key_configuration), [`gcp_secret_manager_configuration`](../fetchers/gcp/secret_manager_configuration), [`oci_vault_keys`](../fetchers/oci/vault_keys)
 
 #### `KSI-SVC-EIS` — Evaluating and Improving Security
 
@@ -244,7 +244,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2`, `ac-2.2`, `ac-4`, `ac-6.5`, `ia-3`, `ia-5.2`, `ra-5.5`
 
-*21 fetchers:* [`aws_eks_least_privilege`](../fetchers/aws/eks_least_privilege), [`aws_iam_roles`](../fetchers/aws/iam_roles), [`azure_ai_hub_configuration`](../fetchers/azure/ai_hub_configuration), [`azure_ai_services_configuration`](../fetchers/azure/ai_services_configuration), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_data_services_configuration`](../fetchers/azure/data_services_configuration), [`azure_entra_app_registrations`](../fetchers/azure/entra_app_registrations), [`azure_entra_service_principals`](../fetchers/azure/entra_service_principals), [`azure_managed_identity_configuration`](../fetchers/azure/managed_identity_configuration), [`azure_managed_redis_configuration`](../fetchers/azure/managed_redis_configuration), [`azure_redis_cache_configuration`](../fetchers/azure/redis_cache_configuration), [`azure_service_log_records`](../fetchers/azure/service_log_records), [`gcp_api_keys_inventory`](../fetchers/gcp/api_keys_inventory), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`gcp_iam_service_accounts`](../fetchers/gcp/iam_service_accounts), [`oci_iam_policies`](../fetchers/oci/iam_policies), [`oci_iam_users_credentials`](../fetchers/oci/iam_users_credentials), [`okta_non_user_accounts_authentication`](../fetchers/okta/non_user_accounts_authentication), [`wiz_tenant_security_settings`](../fetchers/wiz/tenant_security_settings)
+*22 fetchers:* [`aws_eks_least_privilege`](../fetchers/aws/eks_least_privilege), [`aws_iam_roles`](../fetchers/aws/iam_roles), [`azure_ai_hub_configuration`](../fetchers/azure/ai_hub_configuration), [`azure_ai_services_configuration`](../fetchers/azure/ai_services_configuration), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_data_services_configuration`](../fetchers/azure/data_services_configuration), [`azure_devops_service_connections`](../fetchers/azure/devops_service_connections), [`azure_entra_app_registrations`](../fetchers/azure/entra_app_registrations), [`azure_entra_service_principals`](../fetchers/azure/entra_service_principals), [`azure_managed_identity_configuration`](../fetchers/azure/managed_identity_configuration), [`azure_managed_redis_configuration`](../fetchers/azure/managed_redis_configuration), [`azure_redis_cache_configuration`](../fetchers/azure/redis_cache_configuration), [`azure_service_log_records`](../fetchers/azure/service_log_records), [`gcp_api_keys_inventory`](../fetchers/gcp/api_keys_inventory), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`gcp_iam_service_accounts`](../fetchers/gcp/iam_service_accounts), [`oci_iam_policies`](../fetchers/oci/iam_policies), [`oci_iam_users_credentials`](../fetchers/oci/iam_users_credentials), [`okta_non_user_accounts_authentication`](../fetchers/okta/non_user_accounts_authentication), [`wiz_tenant_security_settings`](../fetchers/wiz/tenant_security_settings)
 
 #### `KSI-IAM-SUS` — Responding to Suspicious Activity
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-287 of 299 fetchers carry a mapping.
+288 of 300 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -505,7 +505,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (89)
+### azure  (90)
 
 | Fetcher | Indicators |
 |---|---|
@@ -537,6 +537,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_devops_identities`](../fetchers/azure/devops_identities) | `KSI-IAM-AAM`, `KSI-IAM-JIT` |
 | [`azure_devops_permissions`](../fetchers/azure/devops_permissions) | `KSI-IAM-ELP` |
 | [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines) | `KSI-CMT-RMV`, `KSI-CMT-VTD`, `KSI-SVC-VRI` |
+| [`azure_devops_service_connections`](../fetchers/azure/devops_service_connections) | `KSI-IAM-SNU`, `KSI-SVC-ASM` |
 | [`azure_devops_work_items`](../fetchers/azure/devops_work_items) | `KSI-CMT-LMC`, `KSI-PIY-RES` |
 | [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings) | `KSI-CMT-LMC`, `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_disk_encryption_status`](../fetchers/azure/disk_encryption_status) | `KSI-SVC-SIN` |

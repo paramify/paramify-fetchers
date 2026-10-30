@@ -12,6 +12,34 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_devops_service_connections`** (`EVD-AZURE-DEVOPS-SERVICE-CONNECTIONS`):
+  how an Azure DevOps organization's pipelines hold their secrets, and which runs
+  used each service connection. Per connection, once however many projects share
+  it:
+  - how it authenticates (`auth_method`: workload identity federation, managed
+    identity, or a stored service principal secret or certificate, password,
+    token, key, publish profile or kubeconfig) and whether it holds a stored
+    credential (`null` when that can't be told);
+  - its service principal (app) and tenant ids, exactly as Azure DevOps gives
+    them, and for AzureRM its subscription or management group and creation mode;
+  - whether every YAML pipeline may use it (`null` when a project's pipeline
+    permissions couldn't be read);
+  - its execution history over the lookback, read newest first: plan type (Build
+    or Release), definition, run or release id, link, times and result, plus its
+    last use and last pipeline run whenever they were. A release logs a record
+    per stage; runs are counted once.
+
+  `service_principals` groups connections by tenant and app id, compared
+  case-insensitively, with their pipeline runs: the join key from an Azure change
+  made by that app to the run that made it. Variable groups record whether they
+  are Key Vault-linked, how many secret variables they hold, and each linked
+  secret's expiry; secure files are listed by name. Only the service principal
+  and tenant ids are kept from a connection's authorization parameters, and its
+  URL is cut to scheme and host; credentials, variable values and secure file
+  contents are never written. Read-only PAT scopes: Service Connections, Variable
+  Groups, Secure Files, Build (pipeline permissions), and Project and Team; or an
+  Entra identity with Reader on the service connections and the Library.
+
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
