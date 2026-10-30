@@ -38,10 +38,12 @@ config_schema:
       characters and ? one character. A matching web app, function app or
       deployment slot is listed under excluded with the pattern, gets none of the
       per-app reads, and is left out of every count and verdict; an excluded
-      app's slots are not read, so none is compared with production. Activity Log
-      deployment events on an excluded app or slot, or on a site this run didn't
-      list whose resource group or id a pattern matches, are left out too. A
-      pattern without one of these prefixes fails the run. Set it once under
+      app's slots are not read, so none is compared with production. Each
+      Activity Log deployment request is put on the site of the event naming its
+      requester, and left out too when that site is an excluded app or slot, or a
+      site this run didn't list whose resource group or id a pattern matches; a
+      swap between production and an excluded slot counts on the side whose event
+      names the requester. A pattern without one of these prefixes fails the run. Set it once under
       platforms.azure.config for every Azure fetcher that has this field;
       fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is
       in scope.
@@ -86,7 +88,7 @@ evidence_set:
     - web_apps.get_configuration() and get_configuration_slot() (per app with slots, and per slot) — the settings compared between each slot and production
     - activity_logs.list() (Microsoft.Web events over the last activity_log_days, 90 by default) — slot swaps, publishing-credential retrievals and package deployments, with who requested each
 
-    Output: azure_app_service_deployments_<subscription>.json — each web app's and slot's recorded deployments and deployment events with who and when, its deployment source, how each slot differs from production, and what the evidence cannot attribute; each deployment event carries its Activity Log correlation id to trace it back; all times are ISO 8601 UTC. Web apps, function apps and deployment slots the resource_exclusions patterns take out are listed under excluded instead, and the Activity Log events on them are not counted (results.activity_log.requests_on_excluded_sites counts their requests).
+    Output: azure_app_service_deployments_<subscription>.json — each web app's and slot's recorded deployments and deployment events with who and when, its deployment source, how each slot differs from production, and what the evidence cannot attribute; each deployment event carries its Activity Log correlation id to trace it back; all times are ISO 8601 UTC. Web apps, function apps and deployment slots the resource_exclusions patterns take out are listed under excluded instead, and Activity Log requests whose requester's event is on one of them are not counted (results.activity_log.requests_on_excluded_sites counts them).
 
     Summary fields:
 
@@ -101,8 +103,8 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no web app, function app, deployment slot or Activity Log event's site, such as a mistyped name
-    - boundary_excluded_web_apps — Number of web apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, none of its deployments, source, slots or settings are read, its Activity Log events are not counted, and no other count includes it
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no web app, function app, deployment slot or site an Activity Log request was made on, such as a mistyped name
+    - boundary_excluded_web_apps — Number of web apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, none of its deployments, source, slots or settings are read, Activity Log requests made on it or its slots are not counted, and no other count includes it
     - boundary_excluded_function_apps — Number of function apps and other sites that aren't web apps left out of scope the same way; excluded_function_apps leaves them out
     - boundary_excluded_deployment_slots — Number of deployment slots of in-scope web apps left out of scope because a pattern matched them (in practice an id: pattern naming the slot, since a slot shares its app's resource group and region); each is listed under excluded, gets no reads and is not compared with production. An excluded app's slots are never read, so they are not counted here
     - in_scope_web_apps — Number of web apps read and in scope, so it equals total_web_apps; 0 means none was read or the patterns took out every app, which a check can catch by requiring more than 0

@@ -425,11 +425,16 @@ def _deploy_client(reads):
     ))
 
 
-def run_deployments(monkeypatch, tmp_path, patterns):
-    events = [ns(operation_name=ns(value=op), status=ns(value="Succeeded"), caller="releaser@example.com",
-                 claims={"idtyp": "user"}, resource_id=f"{rg}/providers/Microsoft.Web/sites/{path}",
-                 correlation_id=f"corr-{i}", event_data_id=f"ev-{i}", event_timestamp=NOW)
-              for i, (op, rg, path) in enumerate(DEPLOY_EVENTS)]
+def _deploy_event(op, rg, path, correlation, status="Succeeded", caller="releaser@example.com", idtyp="user",
+                  when=NOW):
+    return ns(operation_name=ns(value=op), status=ns(value=status), caller=caller,
+              claims={"idtyp": idtyp} if idtyp else {}, resource_id=f"{rg}/providers/Microsoft.Web/sites/{path}",
+              correlation_id=correlation, event_data_id=f"ev-{correlation}-{path}-{status}", event_timestamp=when)
+
+
+def run_deployments(monkeypatch, tmp_path, patterns, events=None):
+    if events is None:
+        events = [_deploy_event(op, rg, path, f"corr-{i}") for i, (op, rg, path) in enumerate(DEPLOY_EVENTS)]
     reads: list = []
     failures: list = []
     m = deployments_fetcher
@@ -507,3 +512,30 @@ def test_deployments_bare_or_unknown_pattern_fails_the_run_as_bad_config(monkeyp
     code, evidence, _, failures = run_deployments(monkeypatch, tmp_path, patterns)
     assert code == 1 and failures == ["bad_config"]
     assert [f["operation"] for f in evidence["metadata"]["api_failures"]] == [f"config {ENV}"]
+
+
+QA_SWAP = (SWAP, IN_RG, "web-in/slots/qa")
+PROD_SWAP = ("Microsoft.Web/sites/slotsSwap/action", IN_RG, "web-in")
+PLATFORM = {"caller": "Microsoft.Web", "idtyp": None}
+
+
+@pytest.mark.parametrize("rows, on_production, excluded_swaps", [
+    # Requested on the excluded slot; production logs a row naming the user too, or only the platform's.
+    ([(QA_SWAP, {}), (PROD_SWAP, {})], 0, 1),
+    ([(QA_SWAP, {}), (PROD_SWAP, PLATFORM)], 0, 1),
+    # Requested on production; the excluded slot logs only the platform's row.
+    ([(PROD_SWAP, {}), (QA_SWAP, PLATFORM)], 1, 0),
+])
+def test_deployments_count_a_swap_with_an_excluded_slot_once_on_the_requesters_site(
+        monkeypatch, tmp_path, rows, on_production, excluded_swaps):
+    # One swap between in-scope web-in and its id:-excluded qa slot, logged on both under one correlation id.
+    events = [_deploy_event(*where, "swap-1", when=NOW + timedelta(minutes=i), **kwargs)
+              for i, (where, kwargs) in enumerate(rows)]
+    code, evidence, _, _ = run_deployments(monkeypatch, tmp_path, DEPLOY_SCOPE, events)
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0
+    assert results["web_apps"][0]["activity"]["slot_swaps"]["count"] == on_production
+    assert (summary["slot_swaps"], summary["apps_with_slot_swaps"]) == (on_production, on_production)
+    assert summary["deployment_activity_by_caller_type"] == ({"user": 1} if on_production else {})
+    assert summary["deployment_activity_on_unlisted_sites"] == 0
+    assert results["activity_log"]["requests_on_excluded_sites"]["slot_swaps"] == excluded_swaps

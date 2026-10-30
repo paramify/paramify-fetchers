@@ -288,7 +288,7 @@ def test_requests_on_unlisted_sites_are_counted_not_dropped(monkeypatch):
     apps, _ = deploys.collect_web_apps(SUB, object(), collector)
     events = DEFAULT_EVENTS + [event(SWAP, "func/slots/staging", correlation="f1"),
                                event(PUBLISH, "deleted-app", correlation="d1")]
-    unlisted = deploys.attach_activity(apps, [deploys.project_event(e) for e in events])
+    unlisted, _ = deploys.attach_activity(apps, [deploys.project_event(e) for e in events])
     assert unlisted == {"slot_swaps": 1, "publish_profile_downloads": 1, "publishing_credential_reads": 0,
                         "package_deployments": 0}
     summary = deploys.summarize(apps, 1, {**COMPLETE, "requests_on_unlisted_sites": unlisted})
@@ -311,7 +311,7 @@ def test_unread_activity_log_leaves_activity_null_and_evidence_unknown(monkeypat
     monkeypatch.setattr(deploys, "web_client", lambda *a: web_client(deployments={}))
     collector = deploys.Collector(logging.getLogger("test"))
     apps, _ = deploys.collect_web_apps(SUB, object(), collector)
-    assert deploys.attach_activity(apps, None) is None
+    assert deploys.attach_activity(apps, None) == (None, None)
     assert all(a["activity"] is None for a in apps)
     summary = deploys.summarize(apps, 1, {"days": 90, "complete": False, "cut_reason": "read_failed"})
     assert summary["apps_without_kudu_deployment_records"] == 2

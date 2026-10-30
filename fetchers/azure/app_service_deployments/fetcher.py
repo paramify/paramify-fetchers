@@ -381,31 +381,6 @@ def _requests(events: list[dict]) -> list[tuple]:
     return requests
 
 
-def split_events(events: list[dict], scope: ResourceExclusions, excluded: list[dict]) -> tuple[list, list]:
-    """(in-scope events, events on an excluded app or slot, a slot of an excluded app, or a site this run didn't list
-    whose id an rg: or id: pattern matches)."""
-    if not scope:
-        return events, []
-    out = {arm_id_key(e["id"]) for e in excluded}
-    verdicts: dict = {}
-    kept: list[dict] = []
-    dropped: list[dict] = []
-    for event in events:
-        site, slot, _ = site_of(event.get("resource_id"))
-        key = site if slot is None else f"{site}/slots/{slot}"
-        if site and key not in verdicts:
-            verdicts[key] = site in out or key in out or scope.match(key) is not None
-        (dropped if site and verdicts[key] else kept).append(event)
-    return kept, dropped
-
-
-def request_counts(events: list[dict] | None) -> dict | None:
-    if events is None:
-        return None
-    by_site = activity_records(events)
-    return {c: sum(len(records.get(c, [])) for records in by_site.values()) for c in ACTIVITY_CATEGORIES}
-
-
 def activity_records(events: list[dict]) -> dict:
     """{(site key, slot): {category: [records]}}, one record per request, on the site of the event naming the requester."""
     by_site: dict = defaultdict(lambda: {c: [] for c in ACTIVITY_CATEGORIES})
@@ -439,20 +414,26 @@ def activity_summary(records_by_category: dict) -> dict:
     return out
 
 
-def attach_activity(apps: list[dict], events: list[dict] | None) -> dict | None:
+def _request_counts(by_site: dict) -> dict:
+    return {c: sum(len(records.get(c, [])) for records in by_site.values()) for c in ACTIVITY_CATEGORIES}
+
+
+def attach_activity(apps: list[dict], events: list[dict] | None, out_of_scope=None) -> tuple[dict | None, dict | None]:
     """Fill each app's and slot's `activity` (None when the Activity Log could not be read).
 
-    Returns the requests on sites not listed (deleted apps or slots, function apps), by category.
+    Returns the requests on sites not listed (deleted apps or slots, function apps), by category, and apart from them
+    those whose requester's (site key, slot) `out_of_scope` names. Each request is first put on its requester's site.
     """
     if events is None:
-        return None
+        return None, None
     by_site = activity_records(events)
     for app in apps:
         key = arm_id_key(app["id"])
         app["activity"] = activity_summary(by_site.pop((key, None), {}))
         for slot in app.get("slots") or []:
             slot["activity"] = activity_summary(by_site.pop((key, str(slot["name"]).lower()), {}))
-    return {c: sum(len(records.get(c, [])) for records in by_site.values()) for c in ACTIVITY_CATEGORIES}
+    excluded = {where: by_site.pop(where) for where in list(by_site) if out_of_scope and out_of_scope(*where)}
+    return _request_counts(by_site), _request_counts(excluded)
 
 
 def slot_name(site: dict):
@@ -682,6 +663,17 @@ def collect_web_apps(subscription_id, cred, collector: Collector, scope: Resourc
     return sorted(apps, key=lambda a: a.get("id") or ""), len(others)
 
 
+def excluded_site(scope: ResourceExclusions, excluded: list[dict]):
+    """(site key, slot) -> whether it is an excluded app or slot, a slot of one, or a site an rg: or id: pattern matches."""
+    out = {arm_id_key(e["id"]) for e in excluded}
+
+    def test(site, slot) -> bool:
+        key = site if slot is None else f"{site}/slots/{slot}"
+        return bool(site) and (site in out or key in out or scope.match(key) is not None)
+
+    return test
+
+
 def boundary_summary(scope: ResourceExclusions, excluded: list[dict], apps: list[dict]) -> dict:
     """Scope fields named boundary_excluded_*, since excluded_function_apps counts in-scope sites this fetcher does
     not assess."""
@@ -783,11 +775,8 @@ def main() -> int:
             logger.warning("Microsoft.Web is not registered on subscription %s — no App Service in use", subscription_id)
         apps, excluded = collect_web_apps(subscription_id, cred, collector, scope, boundary)
         events, window = read_activity_log(subscription_id, cred, collector, window["days"], datetime.now(timezone.utc))
-        dropped = None
-        if events is not None:
-            events, dropped = split_events(events, scope, boundary)
-        window["requests_on_unlisted_sites"] = attach_activity(apps, events)
-        window["requests_on_excluded_sites"] = request_counts(dropped)
+        window["requests_on_unlisted_sites"], window["requests_on_excluded_sites"] = attach_activity(
+            apps, events, excluded_site(scope, boundary))
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
