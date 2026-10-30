@@ -49,6 +49,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_app_service_configuration")
 
@@ -956,9 +957,11 @@ def summarize(apps: list[dict], scan_enabled: bool = False) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_web_apps(subscription_id, cred, collector: Collector, scan_secrets: bool = False) -> list[dict]:
+def collect_web_apps(subscription_id, cred, collector: Collector, scan_secrets: bool = False,
+                     exclusions: ResourceExclusions | None = None, excluded: list | None = None) -> list[dict]:
     """One web_apps.list(), then Reader GETs per app (`config/web`, `config/authsettingsV2`, publishing
     policies, Key Vault references); with `scan_secrets`, the config/list POSTs for the literal-secret scan.
+    Apps the exclusions take out are appended to `excluded` and get none of the per-app reads.
     """
     client = web_client(subscription_id, cred, collector)
     if client is None:
@@ -973,6 +976,10 @@ def collect_web_apps(subscription_id, cred, collector: Collector, scan_secrets: 
         ]
 
     apps = collector.guard("web.web_apps.list", _list, default=[])
+    if exclusions:
+        apps, out = exclusions.split(apps, "web_app")
+        if excluded is not None:
+            excluded += out
     node_versions: dict = {}
 
     for app in apps:
@@ -1149,6 +1156,9 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     apps: list[dict] = []
+    excluded: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
     scan_secrets = scan_enabled()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
@@ -1163,7 +1173,7 @@ def main() -> int:
                 "in use; reporting status not_registered",
                 subscription_id,
             )
-        apps = collect_web_apps(subscription_id, cred, collector, scan_secrets)
+        apps = collect_web_apps(subscription_id, cred, collector, scan_secrets, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -1172,6 +1182,7 @@ def main() -> int:
                 "ambient Azure credential that can list subscriptions)"
             ),
         )
+    exclusions.warn_unmatched(logger)
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -1191,8 +1202,13 @@ def main() -> int:
             },
             "limitations": LIMITATIONS,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(apps, scan_secrets), "provider_registration_status": registration},
+        summary={
+            **summarize(apps, scan_secrets),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("web_app",), {"web_apps": len(apps)}),
+        },
     )
 
     filename = (

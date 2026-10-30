@@ -28,6 +28,7 @@ from azure_common import (  # noqa: E402
 )
 from azure_rest import parse_time, pinned_credential  # noqa: E402
 from entra_graph import aguard, with_graph_client  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_residual_resources")
@@ -201,6 +202,11 @@ def assignment_record(row: dict, role_names: dict, found) -> dict:
     }
 
 
+def in_scope_count(rows: list, exclusions: ResourceExclusions) -> int:
+    """Resource Graph rows no pattern matches by their own id, resource group or region."""
+    return sum(1 for r in rows if not exclusions.match(r.get("id"), r.get("location"), r.get("resourceGroup")))
+
+
 def summarize(resources: list, assignments: list, principal_check: str, checked: dict) -> dict:
     kinds = Counter(r["orphan_kind"] for r in resources)
     kinds.update(a["orphan_kind"] for a in assignments if a["orphan_kind"])
@@ -237,8 +243,9 @@ def federated_credential_count(arm, identity_id: str) -> int:
     return len(list_all(arm, f"{identity_id}/federatedIdentityCredentials", FIC_API_VERSION)["items"])
 
 
-def identity_records(subscription_id, cred, collector: Collector, identities: list, references: list, assignments: list):
-    """Identity records; federated credentials are read only for identities nothing else uses."""
+def identity_records(subscription_id, cred, collector: Collector, identities: list, references: list, assignments: list,
+                     exclusions: ResourceExclusions | None = None):
+    """Identity records; federated credentials are read only for in-scope identities nothing else uses."""
     attached = Counter(identity for _, identity in {(r.get("id"), r.get("identityId")) for r in references})
     roles = Counter((a.get("principalId") or "").lower() for a in assignments)
     arm = None
@@ -248,6 +255,10 @@ def identity_records(subscription_id, cred, collector: Collector, identities: li
         n_roles = roles[(row.get("principalId") or "").lower()] if row.get("principalId") else 0
         federated = None
         if n_attached == 0 and n_roles == 0:
+            if exclusions and exclusions.match(row.get("id"), row.get("location"), row.get("resourceGroup")):
+                # Out of scope: listed under excluded without reading its federated credentials.
+                records.append({**identity_record(row, n_attached, n_roles, None), "orphan_kind": "unused_identity"})
+                continue
             if arm is None:
                 # Resource Graph does not index federatedIdentityCredentials.
                 arm = arm_rest_client(cred)
@@ -298,7 +309,8 @@ async def existing_principals(collector: Collector, cred, ids: list, home_tenant
     return await with_graph_client(collector, cred, _work, default=None)
 
 
-def collect(subscription_id, cred, collector: Collector):
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None):
+    exclusions = exclusions if exclusions is not None else ResourceExclusions()
     client = collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
     if client is None:
         return [], [], {}, "failed", {}
@@ -334,9 +346,10 @@ def collect(subscription_id, cred, collector: Collector):
     rows = _run("role_assignments", ASSIGNMENTS_QUERY)
     identities = _run("user_assigned_identities", IDENTITIES_QUERY)
     references = _run("identity_references", IDENTITY_REFERENCES_QUERY)
-    checked = {"slots": len(slots), "stale_slot_days": days, "identities": len(identities or [])}
+    checked = {"slots": in_scope_count(slots, exclusions), "stale_slot_days": days,
+               "identities": in_scope_count(identities or [], exclusions)}
     if identities is not None and references is not None and rows is not None:
-        identity_rows = identity_records(subscription_id, cred, collector, identities, references, rows)
+        identity_rows = identity_records(subscription_id, cred, collector, identities, references, rows, exclusions)
         resources.extend(r for r in identity_rows if r["orphan_kind"])
 
     role_names = collector.guard(
@@ -372,10 +385,13 @@ def main() -> int:
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", lambda: pinned_credential(subscription_id))
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
 
     resources, assignments, sources, principal_check, checked = [], [], {}, "not_run", {}
     if subscription_id and cred is not None:
-        resources, assignments, sources, principal_check, checked = collect(subscription_id, cred, collector)
+        resources, assignments, sources, principal_check, checked = collect(
+            subscription_id, cred, collector, exclusions)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -385,6 +401,13 @@ def main() -> int:
             ),
         )
 
+    # Orphans and deleted principals were found against every resource and assignment, so in-scope verdicts hold.
+    resources, excluded = exclusions.split(resources, "orphaned_resource")
+    assignments, excluded_assignments = exclusions.split(
+        assignments, "role_assignment", name=lambda a: _guid(a["id"]) or None)
+    excluded += excluded_assignments
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -393,8 +416,13 @@ def main() -> int:
             "orphaned_resources": resources,
             "role_assignments": assignments,
             "sources": sources,
+            "excluded": excluded,
         },
-        summary=summarize(resources, assignments, principal_check, checked),
+        summary={
+            **summarize(resources, assignments, principal_check, checked),
+            **exclusions.summary(excluded, ("orphaned_resource", "role_assignment"), {
+                "orphaned_resources": len(resources), "role_assignments": len(assignments)}),
+        },
     )
 
     filename = f"azure_residual_resources_{sanitize_for_filename(subscription_id or 'unknown')}.json"
