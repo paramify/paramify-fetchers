@@ -40,6 +40,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from azure_rest import parse_time  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_storage_encryption_status")
 
@@ -589,6 +590,22 @@ def summarize_replication_keys_containers(accounts: list[dict]) -> dict:
     }
 
 
+def exclude_containers(exclusions: ResourceExclusions, accounts: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(accounts holding only their in-scope containers, excluded entries): an id: pattern can take a container out of
+    an in-scope account. An excluded account's containers are never listed."""
+    children = [(account, c) for account in accounts for c in account.get("containers") or []]
+    in_scope, out = exclusions.split(
+        children, "container", resource_id=lambda p: p[1].get("id") or p[0].get("id"),
+        location=lambda p: p[0].get("location"), resource_group=lambda p: p[0].get("resource_group"),
+        name=lambda p: p[1].get("name"))
+    copies = {
+        id(a): {**a, "containers": None if a.get("containers") is None else []} for a in accounts
+    }
+    for account, container in in_scope:
+        copies[id(account)]["containers"].append(container)
+    return list(copies.values()), out
+
+
 # --- collection (lazy azure imports) ---
 
 def _is_benign_unsupported(exc: BaseException) -> bool:
@@ -597,10 +614,12 @@ def _is_benign_unsupported(exc: BaseException) -> bool:
 
 
 def collect_storage_accounts(
-    subscription_id, cred, collector: Collector, now: datetime | None = None
+    subscription_id, cred, collector: Collector, now: datetime | None = None,
+    exclusions: ResourceExclusions | None = None, excluded: list | None = None,
 ) -> list[dict]:
     """One storage_accounts.list() plus a blob/file service GET and a container list per account,
-    and a get_properties(expand=geoReplicationStats) per geo-redundant account.
+    and a get_properties(expand=geoReplicationStats) per geo-redundant account. Accounts the
+    exclusions take out go to `excluded` with none of those reads.
 
     The list response already carries the encryption / network / key-policy fields and
     keyCreationTime, so key age needs no key read; listKeys is never called.
@@ -624,6 +643,12 @@ def collect_storage_accounts(
         return [(p, account_record(p, run_start, owner_keys, classification_keys)) for p in projected]
 
     listed = collector.guard("storage.storage_accounts.list", _list, default=[])
+    if exclusions:
+        kept, out = exclusions.split([account for _, account in listed], "storage_account")
+        in_scope = {id(account) for account in kept}
+        listed = [(projected, account) for projected, account in listed if id(account) in in_scope]
+        if excluded is not None:
+            excluded += sorted(out, key=lambda e: e["id"] or "")
 
     for projected, account in listed:
         group, name = account.get("resource_group"), account.get("name")
@@ -743,6 +768,8 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     accounts: list[dict] = []
+    excluded: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list call, so a zero-account result is legible: Azure
@@ -756,7 +783,7 @@ def main() -> int:
                 "in use; reporting status not_registered",
                 subscription_id,
             )
-        accounts = collect_storage_accounts(subscription_id, cred, collector)
+        accounts = collect_storage_accounts(subscription_id, cred, collector, exclusions=exclusions, excluded=excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -766,6 +793,11 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    accounts, out = exclude_containers(exclusions, accounts)
+    excluded += out
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -773,8 +805,16 @@ def main() -> int:
         results={
             "storage_accounts": accounts,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(accounts), "provider_registration_status": registration},
+        summary={
+            **summarize(accounts),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("storage_account", "container"), {
+                "storage_accounts": len(accounts),
+                "containers": sum(len(a.get("containers") or []) for a in accounts),
+            }),
+        },
     )
 
     filename = (

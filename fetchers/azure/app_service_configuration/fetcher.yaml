@@ -1,5 +1,5 @@
 name: azure_app_service_configuration
-version: 0.3.0
+version: 0.4.0
 description: >-
   Shows how each App Service web app is hardened: TLS and cipher suites, basic-auth publishing, identity, access restrictions, logging, Key Vault references, runtime support and, opt-in, literal secrets.
 category: azure
@@ -30,6 +30,21 @@ config_schema:
       gives a Windows Node app's version (WEBSITE_NODE_DEFAULT_VERSION) for runtime
       support, the one value written, and only when it is a version number. Off by
       default, so plain Reader is enough.
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2) or id:<resource id>
+      (also matches that resource's child resources). * matches any run of
+      characters and ? one character. A matching web app is listed under excluded
+      with the pattern, left out of every count and verdict, and none of its
+      settings are read. A pattern without one of these prefixes fails the run.
+      Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
+      ${env:VAR}. Empty: every resource is in scope.
 
 target_schema:
   subscription_id:
@@ -83,13 +98,19 @@ evidence_set:
     - provider.get_web_app_stacks() — App Service's runtime list with end-of-life dates
     - diagnostic_settings.list() (per app) — which log categories are exported
 
-    Output: azure_app_service_configuration_<subscription>.json — each web app's transport, publishing, identity, network, logging, Key Vault and runtime settings, with a verdict on whether its runtimes are still supported and, when the scan is on, the names of settings holding a literal secret.
+    Output: azure_app_service_configuration_<subscription>.json — each web app's transport, publishing, identity, network, logging, Key Vault and runtime settings, with a verdict on whether its runtimes are still supported and, when the scan is on, the names of settings holding a literal secret. Web apps the resource_exclusions patterns take out are listed under excluded instead.
 
     Summary fields:
 
     Which web apps were checked?
     - total_web_apps — Number of web apps checked (function apps are left out)
     - provider_registration_status — Whether the App Service provider (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no web app, such as a mistyped name
+    - excluded_web_apps — Number of web apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, none of its settings are read, and no other count includes it
+    - in_scope_web_apps — Number of web apps read and in scope; 0 means none was read or the patterns took out every app, which a check can catch by requiring more than 0
 
     Is traffic encrypted with modern TLS?
     - https_only_apps — Number of web apps that redirect HTTP to HTTPS

@@ -1,9 +1,26 @@
 name: azure_sql_managed_instance_configuration
-version: 0.2.0
+version: 0.3.0
 description: >-
   Shows how each SQL Managed Instance is reached, signed in to and audited, its subnet's NSG rules and routes,
   its maintenance window and its sensitivity-labeled database columns.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that resource's
+      child resources). * matches any run of characters and ? one character. A
+      matching managed instance is listed under excluded with the pattern, is not
+      read further, and is left out of every count and verdict. A pattern without
+      one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
+      ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -65,13 +82,19 @@ evidence_set:
     - managed_databases.list_by_instance() (per instance) — its databases
     - managed_database_sensitivity_labels.list_current_by_database() (per user database) — the columns classified with a sensitivity label or information type
 
-    Output: azure_sql_managed_instance_configuration_<subscription>.json — each SQL Managed Instance with its public data endpoint, connection type, minimum TLS version, private endpoints, Entra administrators, Entra-only setting, diagnostic settings, subnet NSG rules and routes (rules and routes Azure adds to the subnet for the instance marked service_aided), maintenance window, and per user database the count of classified columns by label and information type; an exported audit log shows a route out of the instance, not that auditing is switched on inside it, and a read that failed leaves the fields built from it null, never false.
+    Output: azure_sql_managed_instance_configuration_<subscription>.json — each SQL Managed Instance with its public data endpoint, connection type, minimum TLS version, private endpoints, Entra administrators, Entra-only setting, diagnostic settings, subnet NSG rules and routes (rules and routes Azure adds to the subnet for the instance marked service_aided), maintenance window, and per user database the count of classified columns by label and information type; an exported audit log shows a route out of the instance, not that auditing is switched on inside it, and a read that failed leaves the fields built from it null, never false. Instances the resource_exclusions patterns take out are listed under excluded instead, get none of the per-instance reads, and are left out of every count.
 
     Summary fields:
 
     What was checked?
-    - total_managed_instances — Number of SQL Managed Instances in the subscription
+    - total_managed_instances — Number of SQL Managed Instances in scope in the subscription
     - provider_registration_status — Whether Microsoft.Sql is registered on the subscription: registered, not_registered or unknown
+
+    Which instances are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every instance is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no managed instance, such as a mistyped name
+    - excluded_managed_instances — Number of managed instances left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, is not read further, and no other count includes them
+    - in_scope_managed_instances — Number of managed instances read and in scope; 0 means none was read or the patterns took out every instance, which a check can catch by requiring more than 0
 
     Is the instance closed to the public internet?
     - instances_public_data_endpoint_enabled — Number of instances with the public data endpoint enabled, the only way to reach an instance from outside its virtual network

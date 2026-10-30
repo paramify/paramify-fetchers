@@ -29,33 +29,41 @@ from jsonschema import Draft202012Validator
 
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import DEFAULT_EVIDENCE_FREQUENCY, EVIDENCE_FREQUENCIES
+from framework.runner import dependency_graph
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHERS_ROOT = REPO_ROOT / "fetchers"
+COMPARATORS_ROOT = REPO_ROOT / "comparators"
 SCHEMAS_ROOT = REPO_ROOT / "framework" / "schemas"
 
 
 def _fetcher_yamls() -> list[Path]:
     """Every real fetcher.yaml, mirroring discover_fetchers' walk.
 
-    category/<name>/fetcher.yaml, skipping any ``_``-prefixed dir (_shared,
-    _categories, _template) at either level.
+    category/<name>/fetcher.yaml under fetchers/ and comparators/, skipping any
+    ``_``-prefixed dir (_shared, _categories, _template) at either level.
     """
     out: list[Path] = []
-    for category_dir in sorted(FETCHERS_ROOT.iterdir()):
-        if not category_dir.is_dir() or category_dir.name.startswith("_"):
-            continue
-        for fetcher_dir in sorted(category_dir.iterdir()):
-            if not fetcher_dir.is_dir() or fetcher_dir.name.startswith("_"):
+    for tree in (FETCHERS_ROOT, COMPARATORS_ROOT):
+        for category_dir in sorted(tree.iterdir()):
+            if not category_dir.is_dir() or category_dir.name.startswith("_"):
                 continue
-            yaml_path = fetcher_dir / "fetcher.yaml"
-            if yaml_path.exists():
-                out.append(yaml_path)
+            for fetcher_dir in sorted(category_dir.iterdir()):
+                if not fetcher_dir.is_dir() or fetcher_dir.name.startswith("_"):
+                    continue
+                yaml_path = fetcher_dir / "fetcher.yaml"
+                if yaml_path.exists():
+                    out.append(yaml_path)
     return out
 
 
 FETCHER_YAMLS = _fetcher_yamls()
 CATEGORY_YAMLS = sorted((FETCHERS_ROOT / "_categories").glob("*.yaml"))
+
+
+def _short(yaml_path: Path) -> str:
+    """`<category>/<short_name>` of a fetcher.yaml in either tree."""
+    return f"{yaml_path.parent.parent.name}/{yaml_path.parent.name}"
 
 
 def _load_schema(name: str) -> dict:
@@ -100,6 +108,20 @@ def test_discovery_does_not_raise() -> None:
     discover_platforms(REPO_ROOT)  # must not raise on any category file
 
 
+def test_comparators_live_under_comparators_and_can_run() -> None:
+    """A layout rule for this repo: `depends_on` makes a comparator, filed under
+    comparators/; every fetcher under fetchers/ collects. Each comparator's inputs exist,
+    write JSON evidence and form no cycle."""
+    fetchers = discover_fetchers(REPO_ROOT)
+    misfiled = [
+        f"{f.path.relative_to(REPO_ROOT)}: depends_on {f.depends_on}"
+        for f in fetchers.values()
+        if f.is_comparator != (COMPARATORS_ROOT in f.path.parents)
+    ]
+    assert not misfiled, "comparators (depends_on) belong under comparators/, collectors under fetchers/:\n" + "\n".join(misfiled)
+    assert dependency_graph.problems(fetchers) == {}
+
+
 def test_fetcher_names_unique_and_complete() -> None:
     """Every fetcher.yaml on disk maps to exactly one discovered, uniquely named
     fetcher (discover_fetchers raises on a duplicate name before returning)."""
@@ -116,7 +138,9 @@ def test_fetcher_names_unique_and_complete() -> None:
 # and it is copied before anyone finds out.
 # --------------------------------------------------------------------------- #
 
-TEMPLATE_YAMLS = sorted(FETCHERS_ROOT.glob("_template*/fetcher.yaml"))
+TEMPLATE_YAMLS = sorted(FETCHERS_ROOT.glob("_template*/fetcher.yaml")) + [
+    COMPARATORS_ROOT / "_template" / "fetcher.yaml"
+]
 
 
 def test_templates_discovered() -> None:
@@ -180,7 +204,7 @@ def test_instructions_open_with_the_entry_path() -> None:
         text = (spec.get("evidence_set") or {}).get("instructions") or ""
         expected = _script_line(yaml_path, spec)
         if text and not (text.startswith(expected + ".") or text.split("\n", 1)[0] == expected):
-            bad.append(f"{yaml_path.parent.relative_to(FETCHERS_ROOT)}: want instructions to open with {expected!r}")
+            bad.append(f"{_short(yaml_path)}: want instructions to open with {expected!r}")
     assert not bad, "\n".join(bad)
 
 
@@ -190,7 +214,10 @@ def test_instructions_open_with_the_entry_path() -> None:
 # add a category (or category/short_name) once its fetchers are converted.
 # --------------------------------------------------------------------------- #
 
-TEXT_FORMAT_FETCHERS = ("azure/alert_rules", "azure/sql_managed_instance_configuration", "oci")
+TEXT_FORMAT_FETCHERS = (
+    "azure/alert_rules", "azure/entra_risky_users", "azure/sentinel_playbooks",
+    "azure/sql_managed_instance_configuration", "oci",
+)
 MAX_DESCRIPTION_WORDS = 30
 FIELD_LINE = re.compile(r"^- (\S+) — \S")
 BREAKDOWN_LINE = re.compile(r"^  - \S+ \(\S.*\)$")
@@ -198,7 +225,7 @@ COMMAND_LINE = re.compile(r"^- \S.* — \S")
 
 
 def _matches(yaml_path: Path, prefix: str) -> bool:
-    rel = yaml_path.parent.relative_to(FETCHERS_ROOT).as_posix()
+    rel = _short(yaml_path)
     return rel == prefix or rel.startswith(prefix + "/")
 
 
@@ -286,7 +313,7 @@ def test_text_format_fetchers_exist() -> None:
 def test_converted_fetcher_text_follows_the_format(yaml_path: Path) -> None:
     spec = yaml.safe_load(yaml_path.read_text())
     problems = _text_format_problems(yaml_path, spec)
-    assert not problems, f"{yaml_path.parent.relative_to(FETCHERS_ROOT)}:\n  " + "\n  ".join(problems)
+    assert not problems, f"{_short(yaml_path)}:\n  " + "\n  ".join(problems)
 
 
 _ALERT_RULES_YAML = FETCHERS_ROOT / "azure" / "alert_rules" / "fetcher.yaml"

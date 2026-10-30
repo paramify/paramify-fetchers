@@ -1,5 +1,5 @@
 name: azure_private_dns_zone_configuration
-version: 0.2.0
+version: 0.3.0
 description: >
   Inventories Azure private DNS zones (Microsoft.Network/privateDnsZones) in the subscription. For
   every zone: its virtual network links (auto-registration, resolution policy, link state, and
@@ -8,6 +8,30 @@ description: >
   behind by deleted endpoints are visible. Zone names that exist more than once are listed with the
   VNets each copy serves.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A private DNS zone is global, so only rg: and id: patterns take
+      one out. A matching zone is listed under excluded with the pattern and left
+      out of every count and verdict, its virtual network links and record sets
+      with it. Records are still matched against every private endpoint and
+      virtual network, and duplicate names against every zone, so an in-scope
+      zone's verdicts don't change: a name it shares with an excluded zone is
+      still a duplicate. Every zone, excluded ones too, is still read in full (its
+      links and record sets), so a failed read on an excluded zone still fails
+      the run. A pattern without one of these prefixes fails the run.
+      Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
+      ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -151,3 +175,13 @@ evidence_set:
     (registered / not_registered / unknown) is the Microsoft.Network resource provider's state, so
     total_zones 0 on an unregistered subscription reads as "service not in use" rather than "in use,
     none deployed".
+
+    Resources the resource_exclusions patterns take out are listed under excluded
+    instead, each with the pattern that matched; summary.duplicate_zone_names lists
+    only names an in-scope zone has, with every copy's zone id and VNets.
+
+    Which resources are left out of scope?
+      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no private DNS zone, such as a mistyped name or a location: pattern, which never matches a global zone
+      - excluded_private_dns_zones — Number of private DNS zones left out of scope because a pattern matched their resource group or id; each is listed under excluded with the pattern, and no other count includes them, their links or their records
+      - in_scope_private_dns_zones — Number of private DNS zones read and in scope; 0 means none was read or the patterns took out every one, which a check can catch by requiring more than 0

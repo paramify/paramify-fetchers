@@ -44,6 +44,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
     report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_key_vault_key_rotation")
 
@@ -86,6 +87,10 @@ APP_SERVICE_SOURCES = (APP_SERVICE_SOURCE_KEY_VAULT, APP_SERVICE_SOURCE_MANAGED,
 # keyVaultSecretStatus: Succeeded syncs; these are still pending or unknown; every other value is a failure.
 KEY_VAULT_SYNC_SUCCEEDED = "succeeded"
 KEY_VAULT_SYNC_UNDECIDED = {"unknown", "initialized", "waitingoncertificateorder"}
+
+# Each vault's child collections and the kind their excluded entries carry.
+VAULT_CHILD_KINDS = (("keys", "key"), ("secrets", "secret"), ("certificates", "certificate"))
+EXCLUSION_KINDS = ("key_vault", "key", "secret", "certificate", "app_service_certificate")
 
 
 # --- projection: the only code that touches an SDK model ---
@@ -964,6 +969,31 @@ def collect_app_service_certificates(
     )
 
 
+def _child_resource_id(vault: dict, child: dict) -> str | None:
+    """A child's ARM id, which sits under its vault's; a certificate or data-plane-only key has none, so its vault's."""
+    child_id = child.get("id")
+    return child_id if str(child_id or "").startswith("/") else vault.get("id")
+
+
+def exclude_vaults(exclusions: ResourceExclusions, vaults: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(in-scope vaults holding only their in-scope keys, secrets and certificates, excluded entries); a child takes
+    its vault's resource group and region, so it leaves with its vault."""
+    kept, excluded = exclusions.split(vaults, "key_vault")
+    copies = {id(vault): {**vault} for vault in kept}
+    for field, kind in VAULT_CHILD_KINDS:
+        children = [(vault, child) for vault in vaults for child in vault.get(field) or []]
+        in_scope, out = exclusions.split(
+            children, kind, resource_id=lambda p: _child_resource_id(*p), location=lambda p: p[0].get("location"),
+            resource_group=lambda p: p[0].get("resource_group"), name=lambda p: p[1].get("name"))
+        excluded += out
+        for copy in copies.values():
+            copy[field] = []
+        for vault, child in in_scope:
+            if id(vault) in copies:
+                copies[id(vault)][field].append(child)
+    return list(copies.values()), excluded
+
+
 def evidence_sections(
     vaults: list[dict], registration: str, app_service_certificates: list[dict], web_registration: str
 ) -> tuple[dict, dict]:
@@ -1031,7 +1061,22 @@ def main() -> int:
             ),
         )
 
+    # App Service certificates took their auto-renew from every vault, so an in-scope one keeps its answer.
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    vaults, excluded = exclude_vaults(exclusions, vaults)
+    app_service_certificates, excluded_certificates = exclusions.split(
+        app_service_certificates, "app_service_certificate")
+    excluded += excluded_certificates
+    exclusions.warn_unmatched(logger)
+
     results, summary = evidence_sections(vaults, registration, app_service_certificates, web_registration)
+    results["excluded"] = excluded
+    summary.update(exclusions.summary(excluded, EXCLUSION_KINDS, {
+        "key_vaults": len(vaults),
+        **{field: sum(len(v[field]) for v in vaults) for field, _ in VAULT_CHILD_KINDS},
+        "app_service_certificates": len(app_service_certificates),
+    }))
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
