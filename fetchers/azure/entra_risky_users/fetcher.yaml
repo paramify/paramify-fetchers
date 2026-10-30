@@ -54,12 +54,12 @@ evidence_set:
     Commands Executed:
     - Microsoft Graph GET /identityProtection/riskyUsers — every user Identity Protection has flagged, with risk level, state and last update
     - Microsoft Graph GET /identityProtection/riskyUsers/{id}/history (per user at open or high risk) — each change to the user's risk, what caused it and who initiated it
-    - Microsoft Graph GET /security/alerts_v2 filtered to serviceSource azureAdIdentityProtection — the Entra ID Protection alerts, matched to users by the object id or sign-in name in their user evidence
+    - Microsoft Graph GET /security/alerts_v2 filtered to serviceSource azureAdIdentityProtection — the Entra ID Protection alerts, matched to users by the object id or sign-in name in their user evidence and kept for a user only when raised since the user's current risk began
     - Microsoft Graph GET /directoryRoles — the activated directory roles
     - Microsoft Graph GET /directoryRoles/{id}/members and its microsoft.graph.servicePrincipal and microsoft.graph.group casts (per role) — who holds each role directly; the casts return the service principals the v1.0 list leaves out, and the role-assignable groups
     - Microsoft Graph GET /users/{id} (per privileged user with open risk) — whether the account is enabled
 
-    Output: azure_entra_risky_users_<tenant>.json — each risky user with risk level, state, detail and last update and the directory roles it holds; for users at open or high risk, their risk history, the last time their risk was closed and the Identity Protection alerts that name them; plus the groups that hold a privileged role.
+    Output: azure_entra_risky_users_<tenant>.json — each risky user with risk level, state, detail and last update and the directory roles it holds; for users at open or high risk, their risk history, the last time their risk was closed and the Identity Protection alerts raised on their current risk (null when the history couldn't be read); plus the groups that hold a privileged role.
 
     Summary fields:
 
@@ -87,9 +87,9 @@ evidence_set:
 
     Is each open or high risk followed up?
     - open_or_high_risk_users — Number of followed-up users: users with open risk, or whose risk level is high in any state; these are the users whose risk history and alerts are read
-    - risk_histories_read — Number of followed-up users whose risk history was read; a failed read leaves that user's history null and fails the run
+    - risk_histories_read — Number of followed-up users whose risk history was read; a failed read leaves that user's history and alerts null and fails the run
     - identity_protection_alerts — Number of Entra ID Protection alerts in the tenant (security alerts whose service source is azureAdIdentityProtection); null when the alerts couldn't be read
-    - alerts_for_open_or_high_risk_users — Number of Identity Protection alerts whose user evidence names a followed-up user, by object id or sign-in name, each alert counted once; null when the alerts couldn't be read
-    - open_high_risk_users_without_alert — Number of users with open risk and a high risk level whom no Identity Protection alert names; null when the alerts couldn't be read
-    - alerts_without_owner — Number of alerts counted in alerts_for_open_or_high_risk_users that nobody is assigned to (assigning the Defender XDR incident gives its alerts the same owner); null when the alerts couldn't be read
-    - alerts_without_incident — Number of alerts counted in alerts_for_open_or_high_risk_users with no Defender XDR incident id (the id a Sentinel incident records as its provider incident id); null when the alerts couldn't be read
+    - alerts_for_open_or_high_risk_users — Number of Identity Protection alerts on a followed-up user's current risk, each alert counted once, resolved ones included. An alert is on the current risk when its user evidence names the user, by object id or sign-in name, and it was created at or after the start of that risk: the first risk history entry after the last closed one, or the oldest entry when the risk was never closed; for a risk that is closed now, the start of the risk that closed; for a risk open again whose history ends closed, the time it closed. Null when the alerts, or a followed-up user's risk history, couldn't be read
+    - open_high_risk_users_without_alert — Number of users with open risk and a high risk level with no alert on their current risk, as counted in alerts_for_open_or_high_risk_users; an alert from an earlier risk doesn't count, a resolved one does; null when the alerts, or the risk history of one of these users, couldn't be read
+    - alerts_without_owner — Number of alerts counted in alerts_for_open_or_high_risk_users whose status isn't resolved and that nobody is assigned to (assigning the Defender XDR incident gives its alerts the same owner); resolved alerts aren't counted, as they need no owner; null when alerts_for_open_or_high_risk_users is null
+    - alerts_without_incident — Number of alerts counted in alerts_for_open_or_high_risk_users whose status isn't resolved and that have no Defender XDR incident id (the id a Sentinel incident records as its provider incident id); resolved alerts aren't counted; null when alerts_for_open_or_high_risk_users is null

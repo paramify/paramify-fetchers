@@ -483,13 +483,18 @@ schemas and the `paramify` CLI — not the internal code.
   risk.** Users at open risk or with a high risk level now carry their risk
   history (`risk_history`, oldest first, with what changed and who initiated it)
   and the last time their risk was closed (`last_closed_risk`), plus the Entra ID
-  Protection alerts whose user evidence names them (`alerts`: owner, status,
+  Protection alerts on their current risk (`alerts`: owner, status,
   classification and the Defender XDR incident id, which a Sentinel incident
-  records as its provider incident id). The summary adds
-  `open_or_high_risk_users`, `risk_histories_read`,
+  records as its provider incident id). An alert is on the current risk when its
+  user evidence names the user and it was created at or after the first history
+  entry after the last closed one (or the oldest entry, when the risk was never
+  closed), so an alert from an earlier risk doesn't count as follow-up; an
+  unread history leaves the user's alerts, and the counts they feed, null. The
+  summary adds `open_or_high_risk_users`, `risk_histories_read`,
   `identity_protection_alerts`, `alerts_for_open_or_high_risk_users`,
   `open_high_risk_users_without_alert`, `alerts_without_owner` and
-  `alerts_without_incident`, each described in the instructions. Needs
+  `alerts_without_incident`, the last two over unresolved alerts only, each
+  described in the instructions. Needs
   `SecurityAlert.Read.All` as well: without it the run fails as
   `not_authorized`, and the risky users and their history are still written.
   The 0.2.0 fields are unchanged.

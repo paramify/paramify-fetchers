@@ -2162,8 +2162,8 @@ def user_evidence(user_id=None, upn=None):
             "userAccount": {"azureAdUserId": user_id, "userPrincipalName": upn}}
 
 
-def idp_alert(alert_id, created, incident_id, assigned_to, *evidence):
-    return {"id": alert_id, "title": "Unfamiliar sign-in properties", "severity": "high", "status": "new",
+def idp_alert(alert_id, created, incident_id, assigned_to, *evidence, status="new"):
+    return {"id": alert_id, "title": "Unfamiliar sign-in properties", "severity": "high", "status": status,
             "classification": None, "determination": None, "assignedTo": assigned_to, "incidentId": incident_id,
             "serviceSource": "azureAdIdentityProtection", "createdDateTime": iso(created), "resolvedDateTime": None,
             "evidence": list(evidence)}
@@ -2402,6 +2402,7 @@ def test_entra_risky_users_history_and_alerts(azure, tmp_path):
     assert admin["last_closed_risk"]["initiated_by"] == "u-secops"
     assert admin["last_closed_risk"]["risk_detail"] == "adminDismissedAllRiskForUser"
     # Matched on object id or UPN, ignoring case; a-3 names someone else and a-4's account isn't user evidence.
+    # a-1 was raised the moment the current risk opened, which still counts.
     assert [a["id"] for a in admin["alerts"]] == ["a-1", "a-2"]
     assert admin["alerts"][0]["incident_id"] == "101" and admin["alerts"][0]["assigned_to"] == "secops@contoso.com"
     assert [a["id"] for a in reader["alerts"]] == ["a-5"] and reader["last_closed_risk"] is None
@@ -2431,6 +2432,44 @@ def test_entra_risky_users_high_risk_without_alert(azure, tmp_path):
     assert s["alerts_for_open_or_high_risk_users"] == 0 and s["alerts_without_owner"] == 0
 
 
+def test_entra_risky_users_alert_from_an_earlier_risk_is_not_follow_up(azure, tmp_path):
+    # Raised during the admin's risk that was remediated 40 days ago, not the one open since 10 days ago.
+    azure.arm[("/v1.0/security/alerts_v2", None)] = {"value": [
+        idp_alert("a-old", NOW - timedelta(days=42), "100", "secops@contoso.com", user_evidence(user_id="u-admin"))]}
+    code, ev = run("entra_risky_users", tmp_path)
+    admin = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "admin@contoso.com")
+    assert code == 0 and admin["alerts"] == []
+    s = ev["summary"]
+    assert s["identity_protection_alerts"] == 1 and s["alerts_for_open_or_high_risk_users"] == 0
+    assert s["open_high_risk_users_without_alert"] == 1
+
+
+def test_entra_risky_users_reopened_risk_counts_only_alerts_after_the_closure(azure, tmp_path):
+    # The reader is at risk again, but the history's last entry is the dismissal 20 days ago.
+    azure.arm[("/v1.0/identityProtection/riskyUsers/u-reader/history", None)] = {"value": [
+        history_item("atRisk", "low", NOW - timedelta(days=30), "none"),
+        history_item("dismissed", "none", NOW - timedelta(days=20), "adminDismissedAllRiskForUser", "u-secops")]}
+    page = azure.arm[("/v1.0/security/alerts_v2", None, "p2")]
+    azure.arm[("/v1.0/security/alerts_v2", None, "p2")] = {"value": [
+        *page["value"], idp_alert("a-6", NOW - timedelta(days=25), "106", None, user_evidence(user_id="u-reader"))]}
+    code, ev = run("entra_risky_users", tmp_path)
+    reader = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "reader@contoso.com")
+    assert code == 0 and [a["id"] for a in reader["alerts"]] == ["a-5"]
+
+
+def test_entra_risky_users_resolved_alerts_need_no_owner_or_incident(azure, tmp_path):
+    page = azure.arm[("/v1.0/security/alerts_v2", None, "p2")]
+    azure.arm[("/v1.0/security/alerts_v2", None, "p2")] = {"value": [*page["value"], idp_alert(
+        "a-6", NOW - timedelta(days=5), None, None, user_evidence(user_id="u-admin"), status="resolved")]}
+    code, ev = run("entra_risky_users", tmp_path)
+    admin = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "admin@contoso.com")
+    assert code == 0 and [a["id"] for a in admin["alerts"]] == ["a-1", "a-2", "a-6"]
+    s = ev["summary"]
+    # Counted as an alert for the risk, but not as one missing an owner or an incident.
+    assert s["alerts_for_open_or_high_risk_users"] == 4
+    assert s["alerts_without_owner"] == 2 and s["alerts_without_incident"] == 1
+
+
 def test_entra_risky_users_refused_alerts_fail_not_authorized(azure, tmp_path):
     azure.arm[("/v1.0/security/alerts_v2", None)] = Resp(
         403, {"error": {"code": "Forbidden", "message": "Missing role permissions on the request."}})
@@ -2450,7 +2489,13 @@ def test_entra_risky_users_unreadable_history_fails(azure, tmp_path):
     code, ev = run("entra_risky_users", tmp_path)
     reader = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "reader@contoso.com")
     assert code == 1 and reader["risk_history"] is None and reader["last_closed_risk"] is None
-    assert ev["summary"]["risk_histories_read"] == 1 and [a["id"] for a in reader["alerts"]] == ["a-5"]
+    # Without the history the start of the risk is unknown, so are its alerts and the counts they feed.
+    s = ev["summary"]
+    assert s["risk_histories_read"] == 1 and reader["alerts"] is None
+    assert s["alerts_for_open_or_high_risk_users"] is None and s["alerts_without_owner"] is None
+    assert s["alerts_without_incident"] is None
+    # The reader's risk is low, so the high-risk figure doesn't depend on it.
+    assert s["open_high_risk_users_without_alert"] == 0
 
 
 def test_entra_risky_users_refused_account_read_is_unknown(azure, tmp_path):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entra ID Protection risky users, joined to directory roles, risk history and the alerts naming them: which accounts are at risk and what was done about it."""
+"""Entra ID Protection risky users, joined to directory roles, risk history and the alerts raised on their current risk: which accounts are at risk and what was done about it."""
 
 import logging
 import sys
@@ -102,6 +102,21 @@ def last_closed_risk(history: Optional[List[Dict[str, Any]]]) -> Optional[Dict[s
     return closed[-1] if closed else None
 
 
+def current_risk_start(user: Dict[str, Any]) -> Optional[datetime]:
+    """When the user's latest risk began: the last history entry that follows a closed one, else the oldest entry."""
+    history = user["risk_history"]
+    if not history:
+        return None
+    if user["risk_state"] in OPEN_STATES and history[-1]["risk_state"] in CLOSED_STATES:
+        # Open again though the history ends closed: only what follows that closure is this risk.
+        return parse_time(history[-1]["risk_last_updated"])
+    start = history[0]
+    for before, item in zip(history, history[1:]):
+        if before["risk_state"] in CLOSED_STATES and item["risk_state"] not in CLOSED_STATES:
+            start = item
+    return parse_time(start["risk_last_updated"])
+
+
 def project_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": alert.get("id"),
@@ -131,11 +146,16 @@ def alerts_by_user(alerts: List[Dict[str, Any]]) -> Dict[str, Dict[str, Dict[str
     return named
 
 
-def user_alerts(named: Dict[str, Dict[str, Dict[str, Any]]], user: Dict[str, Any]) -> List[Dict[str, Any]]:
+def user_alerts(named: Dict[str, Dict[str, Dict[str, Any]]], user: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """The alerts naming the user that were raised since its current risk began; None when that start is unknown."""
+    since = current_risk_start(user)
+    if since is None:
+        return None
     found: Dict[str, Dict[str, Any]] = {}
     for key in (user["id"], user["user_principal_name"]):
         found.update(named.get(str(key or "").lower(), {}))
-    return sorted(found.values(), key=lambda a: a["created"] or "")
+    current = [a for a in found.values() if (created := parse_time(a["created"])) and created >= since]
+    return sorted(current, key=lambda a: a["created"] or "")
 
 
 def account_enabled(client, user_id: str) -> Optional[bool]:
@@ -183,9 +203,13 @@ def collect(client, collector) -> tuple:
     named = alerts_by_user(raw_alerts) if raw_alerts is not None else None
     for user in followed:
         user["alerts"] = user_alerts(named, user) if named is not None else None
+    # An unread history leaves that user's alerts unknown, and with them every count they feed.
+    unmatched = named is None or any(u["alerts"] is None for u in followed)
     alerts = list({a["id"]: a for u in followed for a in u["alerts"] or []}.values())
+    unresolved = [a for a in alerts if a["status"] != "resolved"]
 
     open_ = [u for u in users if u["risk_state"] in OPEN_STATES]
+    open_high = [u for u in open_ if u["risk_level"] == "high"]
     privileged_open = [u for u in open_ if u["privileged_roles"]]
     by_state: Dict[str, int] = {}
     for user in users:
@@ -196,7 +220,7 @@ def collect(client, collector) -> tuple:
         "risky_users_total": len(users),
         "by_risk_state": dict(sorted(by_state.items())),
         "open_risk_users": len(open_),
-        "open_high_risk_users": sum(1 for u in open_ if u["risk_level"] == "high"),
+        "open_high_risk_users": len(open_high),
         "privileged_open_risk_users": None if roles is None else len(privileged_open),
         "privileged_open_risk_users_enabled": None if roles is None else sum(
             1 for u in privileged_open if u.get("account_enabled") is not False
@@ -210,12 +234,13 @@ def collect(client, collector) -> tuple:
         "open_or_high_risk_users": len(followed),
         "risk_histories_read": sum(1 for u in followed if u["risk_history"] is not None),
         "identity_protection_alerts": len(raw_alerts) if raw_alerts is not None else None,
-        "open_high_risk_users_without_alert": None if named is None else sum(
-            1 for u in open_ if u["risk_level"] == "high" and not u["alerts"]
+        "open_high_risk_users_without_alert": None if named is None or any(u["alerts"] is None for u in open_high) else sum(
+            1 for u in open_high if not u["alerts"]
         ),
-        "alerts_for_open_or_high_risk_users": None if named is None else len(alerts),
-        "alerts_without_owner": None if named is None else sum(1 for a in alerts if not a["assigned_to"]),
-        "alerts_without_incident": None if named is None else sum(1 for a in alerts if not a["incident_id"]),
+        "alerts_for_open_or_high_risk_users": None if unmatched else len(alerts),
+        # A resolved alert needs no owner or incident, so only unresolved ones count.
+        "alerts_without_owner": None if unmatched else sum(1 for a in unresolved if not a["assigned_to"]),
+        "alerts_without_incident": None if unmatched else sum(1 for a in unresolved if not a["incident_id"]),
     }
     return {"identity_protection_available": True, "risky_users": users, "privileged_role_groups": held_by_groups}, summary
 
