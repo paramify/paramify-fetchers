@@ -2,7 +2,7 @@ validator: azure_vpn_gateway_sku_present
 cases:
   - name: sku_present
     expect: PASS
-    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"active_active":true,"gateway_type":"Vpn","sku_name":"VpnGw1AZ"}]},"summary":{"vpn_gateways":1}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"active_active":true,"gateway_type":"Vpn","sku_name":"VpnGw4AZ"}]},"summary":{"vpn_gateways":1}}}'
 
   - name: sku_present_non_az
     expect: PASS

@@ -17,9 +17,9 @@ cases:
             "partial_failure": false
           },
           "summary": {
-            "geo_redundant_accounts": 46,
+            "geo_redundant_accounts": 60,
             "minimum_tls_1_2_accounts": 3,
-            "total_storage_accounts": 46
+            "total_storage_accounts": 60
           }
         }
       }
@@ -32,7 +32,7 @@ cases:
     expect: FAIL
     note: >
       4 of 46 must not read as equal because 46 starts with 4.
-    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"geo_redundant_accounts": 4, "minimum_tls_1_2_accounts": 3, "total_storage_accounts": 46}}}'
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"geo_redundant_accounts": 4, "minimum_tls_1_2_accounts": 3, "total_storage_accounts": 400}}}'
 
   - name: no_accounts
     expect: FAIL

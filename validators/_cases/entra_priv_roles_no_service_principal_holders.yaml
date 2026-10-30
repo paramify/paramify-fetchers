@@ -131,13 +131,13 @@ cases:
             ]
           },
           "summary": {
-            "distinct_principals_with_a_directory_role": 4,
-            "distinct_privileged_principals": 4,
+            "distinct_principals_with_a_directory_role": 5,
+            "distinct_privileged_principals": 5,
             "global_administrator_count": 2,
             "global_administrator_role_activated": true,
             "groups_in_privileged_roles": 0,
             "privileged_assignment_percentage": 100,
-            "privileged_role_assignments": 4,
+            "privileged_role_assignments": 5,
             "privileged_role_names_assigned": [
               "Global Administrator",
               "Security Reader"
@@ -147,7 +147,7 @@ cases:
             "roles_with_no_members": 0,
             "service_principals_in_privileged_roles": 1,
             "total_directory_roles_activated": 2,
-            "total_role_assignments": 4,
+            "total_role_assignments": 5,
             "users_in_privileged_roles": 3
           }
         },

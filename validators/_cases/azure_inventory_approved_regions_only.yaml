@@ -18,7 +18,7 @@ cases:
           },
           "summary": {
             "resources_by_location": {
-              "centralus": 1,
+              "westus2": 1,
               "eastus": 5,
               "global": 3,
               "usgovvirginia": 1
@@ -30,13 +30,13 @@ cases:
         }
       }
 
-  - name: one_canadian_resource
+  - name: one_resource_outside_us
     expect: FAIL
-    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"resources_by_location": {"canadaeast": 1, "eastus": 7, "global": 2}, "tagged_resources": 10, "total_resources": 10, "untagged_resources": 0}}}'
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"resources_by_location": {"australiacentral": 1, "eastus": 7, "global": 2}, "tagged_resources": 10, "total_resources": 10, "untagged_resources": 0}}}'
 
   - name: last_key_out_of_region
     expect: FAIL
-    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"resources_by_location": {"eastus": 7, "global": 2, "westeurope": 1}, "tagged_resources": 10, "total_resources": 10, "untagged_resources": 0}}}'
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"resources_by_location": {"eastus": 7, "global": 2, "norwayeast": 1}, "tagged_resources": 10, "total_resources": 10, "untagged_resources": 0}}}'
 
   - name: location_unknown
     expect: FAIL

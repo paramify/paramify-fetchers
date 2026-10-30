@@ -12,7 +12,7 @@ cases:
     expect: FAIL
     note: >
       3 of 30 must not read as equal because 30 starts with 3.
-    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"minimum_tls_1_2_apps": 3, "total_web_apps": 30}}}'
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"minimum_tls_1_2_apps": 3, "total_web_apps": 300}}}'
 
   - name: no_web_apps
     expect: FAIL
