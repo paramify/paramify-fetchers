@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import urlparse
 
 import yaml
@@ -45,7 +45,10 @@ from framework.contract import (
     PlatformConfig,
     Secret,
     TargetField,
+    config_hint,
     effective_secrets,
+    platform_category,
+    platform_for,
 )
 from framework.custom_tags import category_display_names
 from framework.envelope import ENVELOPE_KEYS, is_enveloped, wrap_outputs
@@ -68,7 +71,7 @@ from framework.paramify_auth import (
     resolve_upload_token,
 )
 from framework.probe import probe_categories
-from framework.runner import manifest_loader
+from framework.runner import dependency_graph, manifest_loader
 from framework.secret_resolver import (
     is_env_ref_attempt,
     is_partial_env_ref,
@@ -175,6 +178,8 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
             "title": f.issue_report.title,
             "format": f.output_type,
         }
+    if f.is_comparator:
+        d["depends_on"] = list(f.depends_on)
     return d
 
 
@@ -205,7 +210,8 @@ def catalog(root: Path) -> dict:
     for name in sorted(by_category):
         spec = platforms.get(name)
         platform_block = None
-        if spec is not None:
+        # The block is what the category's fetchers take; a comparator takes none of it.
+        if spec is not None and any(platform_category(f) for f in by_category[name]):
             platform_block = {
                 "config": [_config_descriptor(c) for c in spec.config_schema.values()],
                 "secrets": [_secret_descriptor(s) for s in spec.secrets],
@@ -217,7 +223,7 @@ def catalog(root: Path) -> dict:
             "display_name": spec.display_name if spec else None,
             "platform": platform_block,
             "fetchers": [
-                _fetcher_descriptor(f, spec)
+                _fetcher_descriptor(f, platform_for(f, platforms))
                 for f in sorted(by_category[name], key=lambda x: x.name)
             ],
         })
@@ -480,7 +486,7 @@ def doctor(
         entries = (data.get("run") or {}).get("fetchers") or []
         used_cats = sorted({
             c for c in (
-                fetchers[e["use"]].category
+                platform_category(fetchers[e["use"]])
                 for e in entries
                 if e.get("use") in fetchers
             )
@@ -809,10 +815,25 @@ def set_output_dir(m: dict, output_dir: str) -> dict:
     return m
 
 
-def add_entry(m: dict, use: str) -> dict:
-    if _find_entry(m, use) is None:
-        _entries(m).append({"use": use})
-    return m
+def add_entry(m: dict, use: str, fetchers: Optional[Mapping[str, Any]] = None) -> Dict[str, Optional[str]]:
+    """Add `use` and, from `fetchers`, every input a comparator reads (and theirs) that the
+    manifest lacks. Done here, not at run time: an input can need targets and secrets a
+    run can't supply. Returns {each name added: the comparator it is an input of, or None}."""
+    fetchers = fetchers or {}
+    added: Dict[str, Optional[str]] = {}
+    todo: List[Tuple[str, Optional[str]]] = [(use, None)]
+    seen = set()
+    while todo:
+        name, reader = todo.pop(0)
+        if name in seen:
+            continue
+        seen.add(name)
+        if _find_entry(m, name) is None:
+            _entries(m).append({"use": name})
+            added[name] = reader
+        f = fetchers.get(name)
+        todo += [(dep, name) for dep in (f.depends_on if f else []) if dep in fetchers]
+    return added
 
 
 def remove_entry(m: dict, use: str) -> dict:
@@ -923,6 +944,8 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     if platforms is None:
         platforms = discover_platforms(root)
     parsed = manifest_loader.parse_manifest(manifest)
+    in_manifest = {e.use for e in parsed.entries}
+    problems = dependency_graph.problems(fetchers)
     secret_vars = secret_env_vars(fetchers.values(), platforms.values(), parsed.entries)
 
     for i, entry in enumerate(parsed.entries):
@@ -930,6 +953,15 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             errors.append(f"entry[{i}] uses unknown fetcher: {entry.use}")
             continue
         fetcher = fetchers[entry.use]
+
+        if entry.use in problems:
+            errors.append(f"{entry.use}: {problems[entry.use]}")
+        else:
+            # Same run only: an input the manifest doesn't run is reported missing.
+            errors.extend(
+                f"{entry.use}: reads {dep}, which is not in the manifest (fix: paramify manifest add {dep})"
+                for dep in fetcher.depends_on if dep not in in_manifest
+            )
 
         if fetcher.supports_targets and not entry.targets:
             # No targets[] is valid when every target field is optional — the runner
@@ -943,8 +975,8 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
         if not fetcher.supports_targets and entry.targets:
             errors.append(f"{entry.use}: does not support targets but manifest has targets[]")
 
-        spec = platforms.get(fetcher.category)
-        platform_cfg = parsed.platforms.get(fetcher.category)
+        spec = platform_for(fetcher, platforms)
+        platform_cfg = platform_for(fetcher, parsed.platforms)
         combined = {}
         if spec:
             combined.update(spec.config_schema)
@@ -955,10 +987,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             in_platform = platform_cfg and name in platform_cfg.config
             in_entry = name in entry.config
             if not (in_platform or in_entry):
-                errors.append(
-                    f"{entry.use}: required config '{name}' not set "
-                    f"(platforms.{fetcher.category}.config or fetcher config)"
-                )
+                errors.append(f"{entry.use}: required config '{name}' not set ({config_hint(fetcher, name)})")
 
         # The references the runner would refuse, so a hand edit fails here rather than at run time.
         merged = merged_config(fetcher, spec, platform_cfg, entry, secret_vars)
@@ -1044,6 +1073,8 @@ def _invocation_record(r) -> dict:
     }
     if r.exit_code != 0 and r.stderr:
         record["stderr_tail"] = r.stderr[-_STDERR_TAIL_CHARS:]
+    if r.inputs is not None:
+        record["inputs"] = r.inputs
     return record
 
 
@@ -1063,6 +1094,63 @@ def _last_line(text: Optional[str]) -> str:
         if line.strip():
             return line.strip()
     return ""
+
+
+def _input_record(r) -> dict:
+    """What a comparator is told about one invocation of its input; from the result, never the payload."""
+    failed = r.exit_code != 0
+    return {
+        "target": r.target,
+        "status": "failed" if failed else "success",
+        "exit_code": r.exit_code,
+        "error": (r.error or _last_line(r.stderr) or None) if failed else None,
+        "error_code": r.error_code if failed else None,
+        "collected_at": r.completed_at,
+        "outputs": [o for o in r.outputs if o.endswith(".json")],
+    }
+
+
+def _setup_failure_record(error: str) -> dict:
+    return {
+        "target": None, "status": "failed", "exit_code": None, "error": error,
+        "error_code": "runner_setup_failed", "collected_at": None, "outputs": [],
+    }
+
+
+def _inputs_index(fetcher, run_id: str, run_dir: Path, collected: dict, in_manifest: set) -> dict:
+    """The $COMPARATOR_INPUTS index: each input's invocations and the paths of their files."""
+    return {
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "inputs": {
+            dep: {
+                "in_manifest": dep in in_manifest,
+                "invocations": [
+                    {**{k: v for k, v in rec.items() if k != "outputs"},
+                     "files": [str(run_dir / name) for name in rec["outputs"]]}
+                    for rec in collected.get(dep, [])
+                ],
+            }
+            for dep in fetcher.depends_on
+        },
+    }
+
+
+def _metadata_inputs(fetcher, run_id: str, collected: dict) -> List[dict]:
+    """`metadata.inputs`: one row per input file, or one per input that has none."""
+    rows: List[dict] = []
+    for dep in fetcher.depends_on:
+        records = collected.get(dep)
+        if not records:
+            rows.append({"fetcher_name": dep, "target": None, "run_id": None,
+                         "collected_at": None, "status": "missing", "file": None})
+            continue
+        for rec in records:
+            for name in rec["outputs"] or [None]:
+                rows.append({"fetcher_name": dep, "target": rec["target"], "run_id": run_id,
+                             "collected_at": rec["collected_at"], "status": rec["status"],
+                             "file": name})
+    return rows
 
 
 def run(
@@ -1104,31 +1192,46 @@ def run(
     run_dir = parsed.output_dir.resolve() / f"run-{run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # Two phases: every fetcher in manifest order, then every comparator.
+    entries = dependency_graph.order(parsed.entries, fetchers)
+    in_manifest = {e.use for e in entries}
+    collected: Dict[str, List[dict]] = {}
+    problems = dependency_graph.problems(fetchers)
+
     emit({
         "event": "run_start",
         "run_id": run_id,
         "run_dir": str(run_dir),
-        "fetchers": [e.use for e in parsed.entries],
+        "fetchers": [e.use for e in entries],
     })
 
     all_results = []
     overall_ok = True
     started_at = _iso_now()
 
-    for entry in parsed.entries:
-        if entry.use not in fetchers:
-            emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": "not discovered"})
+    for entry in entries:
+        reason = "not discovered" if entry.use not in fetchers else problems.get(entry.use)
+        if reason:
+            emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": reason})
             overall_ok = False
             continue
         fetcher = fetchers[entry.use]
+        spec, platform_cfg = platform_for(fetcher, platforms), platform_for(fetcher, parsed.platforms)
         # An ambient run (supports_targets, no targets[]) is a single invocation.
         n_targets = len(entry.targets) if (fetcher.supports_targets and entry.targets) else 1
-        emit({
+        start_event = {
             "event": "fetcher_start",
             "fetcher": entry.use,
             "targets": n_targets,
             "fanout": fetcher.supports_targets,
-        })
+        }
+        if fetcher.is_comparator:
+            start_event["depends_on"] = list(fetcher.depends_on)
+        emit(start_event)
+
+        inputs_index = (
+            _inputs_index(fetcher, run_id, run_dir, collected, in_manifest) if fetcher.is_comparator else None
+        )
 
         def on_line(line: str, _use=entry.use) -> None:
             emit({"event": "log_line", "fetcher": _use, "line": line})
@@ -1145,13 +1248,7 @@ def run(
         # can't drift.
         assessment = None
         if fetcher.is_issue_report:
-            values = merged_config(
-                fetcher,
-                platforms.get(fetcher.category or ""),
-                parsed.platforms.get(fetcher.category or ""),
-                entry,
-                secret_vars,
-            ).values
+            values = merged_config(fetcher, spec, platform_cfg, entry, secret_vars).values
             assessment = {
                 ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
                 ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
@@ -1163,22 +1260,27 @@ def run(
                 fetcher,
                 entry,
                 run_dir,
-                platforms.get(fetcher.category or ""),
-                parsed.platforms.get(fetcher.category or ""),
+                spec,
+                platform_cfg,
                 on_line=on_line,
                 on_note=on_note,
+                inputs_index=inputs_index,
                 secret_vars=secret_vars,
             )
         except (RuntimeError, ValueError) as e:
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
             overall_ok = False
+            collected.setdefault(entry.use, []).append(_setup_failure_record(str(e)))
             if fetcher.is_issue_report:
                 # No invocation ran, so nothing else records it — and a cycle
                 # must not close on a run this entry was part of.
                 record_failed_entry(fetcher, run_id, run_dir, str(e), assessment)
             continue
 
+        collected.setdefault(entry.use, []).extend(_input_record(r) for r in results)
         for r in results:
+            if fetcher.is_comparator:
+                r.inputs = _metadata_inputs(fetcher, run_id, collected)
             # Exactly one of these applies: an issue report is never enveloped
             # (wrap_outputs returns early on kind), and only an issue report gets
             # a sidecar record.
@@ -2963,8 +3065,8 @@ def effective_config(
         if f is None:
             out[use] = []
             continue
-        spec = specs.get(f.category) if f.category else None
-        platform_cfg = parsed.platforms.get(f.category or "") or PlatformConfig()
+        spec = platform_for(f, specs)
+        platform_cfg = platform_for(f, parsed.platforms) or PlatformConfig()
         entry = entries.get(use) or ManifestEntry(use=use)
         platform_values, entry_values = platform_cfg.config, entry.config
         merged = merged_config(f, spec, platform_cfg, entry, secret_vars)

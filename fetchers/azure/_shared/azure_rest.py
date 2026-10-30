@@ -1,4 +1,4 @@
-"""ARM, Microsoft Graph and Log Analytics query REST client shared by the Sentinel and Log Analytics REST fetchers."""
+"""ARM, Microsoft Graph and Log Analytics query REST client shared by the Sentinel, Log Analytics and Entra REST fetchers."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from azure_common import (
     Collector,
@@ -36,6 +36,8 @@ QUERY_TIMEOUT = 600
 RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 MAX_RETRIES = 4
 MAX_RETRY_WAIT = 120
+# Each timed-out try costs HTTP_TIMEOUT, and most fetchers run inside the runner's 600 s default.
+MAX_TIMEOUT_RETRIES = 1
 # Sent as x-ms-app so LAQueryLogs can tell this collector's queries from people's.
 CLIENT_APP = "paramify-fetchers"
 WORKSPACES_ENV = "SENTINEL_WORKSPACES"
@@ -120,9 +122,10 @@ class AzureRestClient:
         return cached.token
 
     def _send(self, method: str, url: str, resource: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any):
-        """One request, retried on throttling, transient 5xx and dropped connections."""
+        """One request, retried on throttling, transient 5xx and dropped connections, and a GET on a timeout."""
         import requests  # lazy
 
+        timeouts = 0
         for attempt in range(MAX_RETRIES + 1):
             sent = {"Authorization": f"Bearer {self._token(resource)}", **(headers or {})}
             try:
@@ -130,6 +133,14 @@ class AzureRestClient:
             except requests.ConnectionError:
                 if attempt == MAX_RETRIES:
                     raise
+                time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
+                continue
+            except requests.Timeout:
+                # A read timeout may come after the server acted, so only an idempotent GET is resent.
+                if method != "get" or timeouts == MAX_TIMEOUT_RETRIES or attempt == MAX_RETRIES:
+                    raise
+                timeouts += 1
+                _LOGGER.warning("%s %s timed out; retrying", method.upper(), url.split("?")[0])
                 time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
                 continue
             if response.status_code not in RETRY_STATUSES or attempt == MAX_RETRIES:
@@ -157,21 +168,57 @@ class AzureRestClient:
             items.extend(body.get("value") or [])
         return items
 
+    def graph_get(self, path: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        return self._get(f"{self.graph}/v1.0{path}", params, self.graph)
+
+    def graph_pages(
+        self, path: str, version: str = "v1.0", params: Optional[Dict[str, str]] = None
+    ) -> Iterator[List[Dict[str, Any]]]:
+        """Each page of a Microsoft Graph collection in turn, following @odata.nextLink."""
+        body = self._get(f"{self.graph}/{version}{path}", params, self.graph)
+        yield list(body.get("value") or [])
+        while body.get("@odata.nextLink"):
+            body = self._get(body["@odata.nextLink"], resource=self.graph)
+            yield list(body.get("value") or [])
+
+    def graph_list(
+        self, path: str, version: str = "v1.0", params: Optional[Dict[str, str]] = None
+    ) -> List[Dict[str, Any]]:
+        return [item for page in self.graph_pages(path, version, params) for item in page]
+
     def graph_post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         response = self._send("post", f"{self.graph}/v1.0{path}", self.graph, json=body, timeout=HTTP_TIMEOUT)
         if response.status_code >= 400:
             raise ArmError(response.status_code, *_error_parts(response))
         return response.json()
 
+    def token_tenant(self) -> Optional[str]:
+        """The `tid` claim of the ARM token: which tenant this run actually authenticated into."""
+        import base64
+        import json
+
+        try:
+            claims = self._token(self.arm).split(".")[1]
+            return json.loads(base64.urlsafe_b64decode(claims + "=" * (-len(claims) % 4))).get("tid")
+        except (IndexError, ValueError):
+            return None
+
     def query(self, customer_id: str, kql: str, timespan: str) -> List[Dict[str, Any]]:
         """Rows of the primary table; a partial result raises rather than returning short."""
+        return self._logs_rows(f"{customer_id}/query", json={"query": kql, "timespan": timespan})
+
+    def search(self, customer_id: str, kql: str, timespan: str) -> List[Dict[str, Any]]:
+        """query() for Basic and Auxiliary tables, which /query refuses; /search takes the timespan in the URL."""
+        return self._logs_rows(f"{customer_id}/search", json={"query": kql}, params={"timespan": timespan})
+
+    def _logs_rows(self, path: str, **kwargs: Any) -> List[Dict[str, Any]]:
         response = self._send(
             "post",
-            f"{self.logs}/v1/workspaces/{customer_id}/query",
+            f"{self.logs}/v1/workspaces/{path}",
             self.logs,
             headers={"Prefer": f"wait={QUERY_TIMEOUT}", "x-ms-app": CLIENT_APP},
-            json={"query": kql, "timespan": timespan},
             timeout=QUERY_TIMEOUT + 30,
+            **kwargs,
         )
         if response.status_code >= 400:
             code, message = _error_parts(response)
@@ -418,3 +465,41 @@ def run_workspaces(
 
     return run_subscription(fetcher=fetcher, logger=logger, collect=per_workspace, session=session)
 
+
+def run_tenant(
+    *,
+    fetcher: str,
+    logger: logging.Logger,
+    collect: Callable[[AzureRestClient, Collector], tuple],
+    session: Any = None,
+) -> int:
+    """Tenant-scoped evidence (Entra): one file per tenant, named for AZURE_TENANT_ID or the token's tenant."""
+    output_dir = _start(logger)
+    collector = Collector(logger)
+    subscription_id = (os.environ.get("AZURE_SUBSCRIPTION_ID") or "").strip() or None
+    cred = collector.guard("azure.identity.DefaultAzureCredential", lambda: pinned_credential(subscription_id))
+
+    results: Dict[str, Any] = {}
+    summary: Dict[str, Any] = {}
+    tenant_id = (os.environ.get("AZURE_TENANT_ID") or "").strip() or None
+    tenant_source = "target" if tenant_id else "unresolved"
+    if cred is not None:
+        client = AzureRestClient(cred, session)
+        token_tenant = collector.guard("azure.identity token", client.token_tenant)
+        if token_tenant and tenant_id and token_tenant.lower() != tenant_id.lower():
+            collector.record(
+                "tenant check",
+                RuntimeError(f"credential authenticated into tenant {token_tenant}, not the target tenant {tenant_id}"),
+            )
+        elif collector.ok:
+            tenant_id, tenant_source = tenant_id or token_tenant, tenant_source if tenant_id else "token"
+            results, summary = collect(client, collector)
+    evidence = build_payload(
+        subscription_id=subscription_id,
+        subscription_source="target_correlation_only" if subscription_id else "not_applicable",
+        collector=collector,
+        results=results,
+        summary=summary,
+    )
+    evidence["metadata"].update({"tenant_id": tenant_id, "tenant_source": tenant_source})
+    return _finish(logger, collector, output_dir, f"{fetcher}_{sanitize_for_filename(tenant_id or 'unknown')}.json", evidence)
