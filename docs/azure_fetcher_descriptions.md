@@ -658,14 +658,14 @@ Access: Microsoft Graph IdentityRiskyUser.Read.All, SecurityAlert.Read.All and R
 Commands Executed:
 - Microsoft Graph `GET /identityProtection/riskyUsers` — risky users (a 403 saying the tenant isn't licensed means no P2)
 - Microsoft Graph `GET /identityProtection/riskyUsers/{id}/history` (per user at open or high risk) — each change to the user's risk, what caused it and who started it
-- Microsoft Graph `GET /security/alerts_v2` (Entra ID Protection alerts only) — the alerts naming each user at open or high risk, with owner, status and incident
+- Microsoft Graph `GET /security/alerts_v2` (Entra ID Protection alerts only) — the alerts raised on the current risk of each user at open or high risk, with owner, status and incident
 - Microsoft Graph `GET /directoryRoles` — activated directory roles
 - Microsoft Graph `GET /directoryRoles/{id}/members` — who holds each role
 - Microsoft Graph `GET /directoryRoles/{id}/members/microsoft.graph.servicePrincipal` — the service principals holding each role, which the members list leaves out
 - Microsoft Graph `GET /directoryRoles/{id}/members/microsoft.graph.group` (per role) — the role-assignable groups holding each role
 - Microsoft Graph `GET /users/{id}?$select=accountEnabled` (privileged users at open risk) — whether the account is enabled (a 403 means User.Read.All isn't granted, and the status reads unknown)
 
-Output: `azure_entra_risky_users_<tenant>.json` — whether Identity Protection is available, and each risky user with their risk level, state and any privileged roles, plus the risk history and alerts of users at open or high risk and the groups that hold a privileged role.
+Output: `azure_entra_risky_users_<tenant>.json` — whether Identity Protection is available, and each risky user with their risk level, state and any privileged roles, plus the risk history of users at open or high risk and the alerts raised on their current risk, and the groups that hold a privileged role.
 
 Summary fields:
 
@@ -693,12 +693,12 @@ Summary fields:
 
 **Did every serious risk raise an alert that someone owns?**
 - `open_or_high_risk_users` — Number of risky users at open or high risk: risk still open (at risk, or confirmed compromised), or a high risk level in any state. Their risk history and alerts are read
-- `risk_histories_read` — Number of users at open or high risk whose risk history was read; below `open_or_high_risk_users` only when a history read failed
+- `risk_histories_read` — Number of users at open or high risk whose risk history was read; below `open_or_high_risk_users` only when a history read failed, which also leaves that user's alerts null, and with them the alert counts below
 - `identity_protection_alerts` — Number of Entra ID Protection alerts Microsoft Defender XDR lists for the tenant, whichever user they name; null if the alerts couldn't be read
-- `alerts_for_open_or_high_risk_users` — Number of Entra ID Protection alerts whose user evidence names a user at open or high risk, matched on the user's object id or user principal name; null if the alerts couldn't be read
-- `open_high_risk_users_without_alert` — Number of users with open risk and a high risk level whom no Entra ID Protection alert names; an alert past Defender XDR's retention is no longer listed, so a long-open risk can count here; null if the alerts couldn't be read
-- `alerts_without_owner` — Number of alerts naming a user at open or high risk with nobody assigned; Defender XDR gives every alert in an incident the incident's owner when the incident is assigned, so this stands in for alerts whose incident has no owner; null if the alerts couldn't be read
-- `alerts_without_incident` — Number of alerts naming a user at open or high risk that belong to no Defender XDR incident; null if the alerts couldn't be read
+- `alerts_for_open_or_high_risk_users` — Number of Entra ID Protection alerts raised on the current risk of a user at open or high risk, resolved alerts included. An alert is on the current risk when its user evidence names the user (object id or user principal name) and it was created at or after the first risk-history entry after the risk was last closed, or the oldest entry if the risk was never closed; null if the alerts, or the risk history of a user at open or high risk, couldn't be read
+- `open_high_risk_users_without_alert` — Number of users with open risk and a high risk level whom no alert raised on their current risk names; an alert from an earlier, closed risk doesn't count, and a resolved alert does; an alert past Defender XDR's retention is no longer listed, so a long-open risk can count here; null if the alerts, or the risk history of a user with open high risk, couldn't be read
+- `alerts_without_owner` — Number of alerts counted in `alerts_for_open_or_high_risk_users` that aren't resolved and have nobody assigned; resolved alerts aren't counted, as they need no owner; Defender XDR gives every alert in an incident the incident's owner when the incident is assigned, so this stands in for alerts whose incident has no owner; null when `alerts_for_open_or_high_risk_users` is null
+- `alerts_without_incident` — Number of alerts counted in `alerts_for_open_or_high_risk_users` that aren't resolved and belong to no Defender XDR incident; resolved alerts aren't counted, as they need no incident; null when `alerts_for_open_or_high_risk_users` is null
 
 
 ### azure_entra_service_principals
