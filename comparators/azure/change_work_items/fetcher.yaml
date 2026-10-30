@@ -150,7 +150,7 @@ evidence_set:
     - percent_recorded — Percentage of changes needing a record that a work item records = changes_recorded / changes_needing_record × 100 (a whole number, 0–100); 0 when changes_needing_record is 0
 
     Are the records approved?
-    - changes_recorded_without_approval — Number of recorded changes whose record isn't approved (moved into an approval state or given an approval comment, as azure_devops_work_items reads it, and a record whose approval couldn't be read counts as not approved); a change several items could record counts as approved only if every one is approved
+    - changes_recorded_without_approval — Number of recorded changes whose record isn't approved (has no approval in effect as azure_devops_work_items reads it: moved into an approval state or given an approval comment, quoted text left out, and not withdrawn since; and a record whose approval couldn't be read counts as not approved); a change several items could record counts as approved only if every one is approved
     - changes_without_approved_record — Number of changes needing a record with no approved work item: changes_without_record plus changes_recorded_without_approval
     - changes_without_approved_record_by_origin — Number of changes without an approved record for each checked origin
     - changes_approved_after_change — Number of changes with an approved record where a record that isn't an emergency type (emergency_types) was approved after the change was made; counted, not treated as unapproved

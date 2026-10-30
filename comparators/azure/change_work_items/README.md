@@ -43,8 +43,9 @@ change. An item of one of `emergency_types`
 may be filed later, up to `emergency_hours_before` hours after the change.
 
 A matched or ambiguous change is approved when every work item that records it
-is approved, as `azure_devops_work_items` reads approval (an approval state or
-an approval comment); a record whose approval couldn't be read is not approved.
+is approved, as `azure_devops_work_items` reads approval: the approval in effect
+(an approval state or an approval comment, quoted text left out, not withdrawn
+since); a record whose approval couldn't be read is not approved.
 An approval may come after the change: such a change still counts as approved,
 and `changes_approved_after_change` counts it unless the late record is one of
 `emergency_types`, which are approved after the fact.
