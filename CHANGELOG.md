@@ -683,6 +683,30 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_sentinel_playbooks` 0.2.0: playbooks it can't read are unknown, not
+  failures or "does nothing".** A Logic App an automation rule runs that answers
+  401, 403, 404 or `SubscriptionNotFound`, usually one in another subscription,
+  is listed in `automation_rule_references_unresolved` with a note in
+  `results.notes`, and the run succeeds; any other error still fails it. A
+  playbook whose definition wasn't read now has null `capabilities`, `triggers`,
+  `connectors_used` and recipients instead of all false. The summary adds
+  `live_playbooks_without_definition`, and when it is above 0,
+  `live_account_containment_playbooks`, `live_notifying_playbooks` and
+  `notification_recipients` read null. **Re-check any validator that expects
+  `capabilities` to be an object or those counts to be numbers.** The
+  instructions now describe every summary field.
+- **`azure_entra_risky_users` 0.2.0: groups holding a privileged role are
+  counted.** A user who holds a privileged role only through a role-assignable
+  group wasn't visible: `privileged_open_risk_users` read 0. Each role's
+  `microsoft.graph.group` cast is now read, and the summary's
+  `privileged_role_groups` counts the groups holding a privileged role (listed
+  in `results.privileged_role_groups`). Their members aren't expanded, which
+  would need `GroupMember.Read.All`, so a validator on
+  `privileged_open_risk_users = 0` should also require `privileged_role_groups =
+  0`. Privileged roles are now judged by `entra_graph.is_privileged_role`, with
+  the same result. The instructions now describe every summary field, including
+  that `oldest_open_risk_days` counts from `riskLastUpdatedDateTime`, which
+  moves whenever the risk is updated.
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
