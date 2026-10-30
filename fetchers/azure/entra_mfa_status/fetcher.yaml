@@ -1,5 +1,5 @@
 name: azure_entra_mfa_status
-version: 0.2.0
+version: 0.3.0
 description: >
   For every user in the Microsoft Entra ID tenant, reports whether the account is
   enabled, when it last signed in, and whether it is MFA-capable — joining the
@@ -79,4 +79,8 @@ evidence_set:
     GET /reports/authenticationMethods/userRegistrationDetails; GET /directoryRoles,
     then GET /directoryRoles/{id}/members per privileged role and
     GET /groups/{id}/transitiveMembers per role-assignable group holding one;
-    GET /organization. Collections paged via @odata.nextLink.
+    GET /organization. Collections paged via @odata.nextLink. Coverage over all users
+    leaves out users with no registration-details row (the report omits disabled
+    accounts, so their MFA is unknown); coverage over enabled users counts them as
+    without MFA. A failed users read leaves every figure null, and a failed
+    registration-details read every figure that relies on it.

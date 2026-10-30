@@ -235,25 +235,56 @@ def join_users(
     return sorted(records, key=lambda r: (r.get("user_principal_name") or "", r.get("id") or ""))
 
 
-def summarize(users: list[dict], admin_roles_readable: bool = True) -> dict:
+# Figures that rely on the registration report, null when it couldn't be read in full.
+REGISTRATION_FIGURES = (
+    "mfa_capable_users",
+    "mfa_capable_enabled_users",
+    "mfa_coverage_percentage",
+    "mfa_coverage_percentage_all_users",
+    "enabled_users_without_mfa",
+    "mfa_registered_enabled_users",
+    "passwordless_capable_enabled_users",
+    "passwordless_coverage_percentage",
+    "sspr_registered_enabled_users",
+    "mfa_capable_enabled_member_users",
+    "member_mfa_coverage_percentage",
+    "mfa_capable_admin_users",
+    "admin_mfa_coverage_percentage",
+    "admin_users_without_mfa",
+    "admin_users_without_registration_details",
+    "users_with_registration_details",
+    "users_without_registration_details",
+)
+
+
+def summarize(
+    users: list[dict],
+    admin_roles_readable: bool = True,
+    users_read: bool = True,
+    registrations_read: bool = True,
+) -> dict:
     """MFA coverage over ENABLED users is the headline.
 
     A disabled account cannot sign in, so counting it as uncovered makes a well-run
     tenant with years of deprovisioned accounts look worse than a small neglected one.
-    Coverage over all users is reported too, so neither reading looks cherry-picked.
+    Coverage over all users is reported too, so neither reading looks cherry-picked. It
+    leaves out users with no registration-report row: the report omits disabled accounts,
+    so their MFA is unknown, not absent.
 
     The admin figures are None when directory-role membership could not be read in
     full: the registration report alone misses every admin without a report row, which
-    is exactly the admin most likely to have no MFA.
+    is exactly the admin most likely to have no MFA. Likewise every figure is None when
+    the users list wasn't read in full, and the report's figures when the report wasn't.
     """
     enabled = [u for u in users if u["account_enabled"]]
     enabled_members = [u for u in enabled if not u["is_guest"]]
+    reported = [u for u in users if u["has_registration_details"]]
     admins = [u for u in users if u["is_admin"]]
 
     def admin_figure(value):
         return value if admin_roles_readable else None
 
-    return {
+    summary = {
         "total_users": len(users),
         "enabled_users": len(enabled),
         "disabled_users": len(users) - len(enabled),
@@ -265,7 +296,7 @@ def summarize(users: list[dict], admin_roles_readable: bool = True) -> dict:
             sum(1 for u in enabled if u["is_mfa_capable"]), len(enabled)
         ),
         "mfa_coverage_percentage_all_users": coverage_percentage(
-            sum(1 for u in users if u["is_mfa_capable"]), len(users)
+            sum(1 for u in reported if u["is_mfa_capable"]), len(reported)
         ),
         "enabled_users_without_mfa": sum(1 for u in enabled if not u["is_mfa_capable"]),
         "mfa_registered_enabled_users": sum(1 for u in enabled if u["is_mfa_registered"]),
@@ -299,16 +330,24 @@ def summarize(users: list[dict], admin_roles_readable: bool = True) -> dict:
         "admin_users_without_registration_details": admin_figure(
             sum(1 for u in admins if not u["has_registration_details"])
         ),
-        # A user missing from the report counts as uncovered above; this says how much of
-        # the denominator that assumption is carrying.
+        # A user missing from the report counts as uncovered in the enabled and admin figures
+        # and as unknown in the all-users one; this says how many that is.
+        "users_with_registration_details": len(reported),
         "users_without_registration_details": sum(
             1 for u in users if not u["has_registration_details"]
         ),
         "users_never_signed_in": sum(1 for u in users if not u["last_sign_in"]),
     }
+    if not registrations_read:
+        summary.update(dict.fromkeys(REGISTRATION_FIGURES))
+    if not users_read:
+        summary.update(dict.fromkeys(k for k in summary if k != "admin_role_membership_readable"))
+    return summary
 
 
 # --- collection (lazy msgraph imports) ---
+
+NOTHING_READ = {"admin_roles_readable": False, "users_read": False, "registrations_read": False}
 
 async def _privileged_role_assignments(collector: Collector, client) -> list[dict] | None:
     """Each privileged directory role with the user ids holding it; None if incomplete.
@@ -370,7 +409,7 @@ async def _privileged_role_assignments(collector: Collector, client) -> list[dic
     return assignments
 
 
-async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, bool]:
+async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, dict[str, bool]]:
     """Resolve the tenant, read users, registration details and admin roles, join them."""
 
     async def _work(client):
@@ -384,12 +423,15 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, bool]:
                 select=list(USER_SELECT)
             )
         )
+        before = len(collector.failures)
         users = [
             project_user(u)
             for u in await paginate(
                 collector, "graph.users.get", client.users, request_configuration
             )
         ]
+        users_read = len(collector.failures) == before
+        before = len(collector.failures)
         registrations = [
             project_registration_details(d)
             for d in await paginate(
@@ -398,6 +440,7 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, bool]:
                 client.reports.authentication_methods.user_registration_details,
             )
         ]
+        registrations_read = len(collector.failures) == before
         assignments = await _privileged_role_assignments(collector, client)
         admin_roles = admin_roles_by_user(assignments) if assignments is not None else None
         logger.info(
@@ -406,12 +449,17 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, bool]:
             len(registrations),
             len(admin_roles) if admin_roles is not None else "unreadable",
         )
-        return join_users(users, registrations, admin_roles), tenant, admin_roles is not None
+        read = {
+            "admin_roles_readable": admin_roles is not None,
+            "users_read": users_read,
+            "registrations_read": registrations_read,
+        }
+        return join_users(users, registrations, admin_roles), tenant, read
 
     # `with_graph_client` records a construction/transport failure itself and returns the
     # default, so nothing here can raise.
     result = await with_graph_client(collector, cred, _work, default=None)
-    return result if result is not None else ([], {"tenant_source": "unresolved"}, False)
+    return result if result is not None else ([], {"tenant_source": "unresolved"}, NOTHING_READ)
 
 
 def main() -> int:
@@ -432,9 +480,9 @@ def main() -> int:
     if cred is None:
         users: list[dict] = []
         tenant = {"tenant_source": "unresolved"}
-        admin_roles_readable = False
+        read = NOTHING_READ
     else:
-        users, tenant, admin_roles_readable = asyncio.run(_collect(collector, cred))
+        users, tenant, read = asyncio.run(_collect(collector, cred))
 
     # No `provider_registration_status()` call, deliberately: Graph is not an ARM
     # resource provider, and an Entra tenant always exists.
@@ -446,7 +494,7 @@ def main() -> int:
         subscription_source=scoping["subscription_source"],
         collector=collector,
         results={"users": users},
-        summary=summarize(users, admin_roles_readable),
+        summary=summarize(users, **read),
     )
 
     filename = f"azure_entra_mfa_status_{tenant_filename_key(tenant)}.json"
