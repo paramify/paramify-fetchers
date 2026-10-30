@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 88 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 90 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -12,12 +12,13 @@ Use a dedicated read-only identity for evidence collection. `DefaultAzureCredent
 tries a service principal, workload identity, managed identity and then a cached
 `az login`, and uses the first that works. The full order and the variables the
 runner lets through are in [`_categories/azure.yaml`](../_categories/azure.yaml).
-When no service principal, workload or managed identity variable is set, 13 fetchers
+When no service principal, workload or managed identity variable is set, 14 fetchers
 try a cached `az login` first (the five `azure_sentinel_*`,
 `azure_log_analytics_query_audit`, `azure_log_analytics_deletion_rights`,
 `azure_log_storage_immutability`, `azure_app_service_backups`,
 `azure_change_provenance`, `azure_residual_resources`,
-`azure_entra_dormant_identities` and `azure_devops_audit_streams`), and so do
+`azure_entra_dormant_identities`, `azure_entra_emergency_accounts` and
+`azure_devops_audit_streams`), and so do
 `azure_entra_diagnostic_settings` and `azure_entra_risky_users` when `subscription_id`
 is set, so on a VM using its managed identity, set
 `AZURE_CLIENT_ID` for a user-assigned identity or don't leave an `az login` on the
@@ -88,17 +89,18 @@ instead of Reader.
 ### Microsoft Graph
 
 Application permissions on the identity, with admin consent. The Entra fetchers are
-tenant-scoped, except `azure_entra_dormant_identities`, which takes a subscription
-and reads the tenant it belongs to.
+tenant-scoped, except `azure_entra_dormant_identities` and
+`azure_entra_emergency_accounts`, which take a subscription and read the tenant it
+belongs to.
 
 | Permission | Needed by |
 |---|---|
 | `Application.Read.All` | `azure_entra_app_registrations`, `azure_entra_service_principals` |
-| `Policy.Read.All` | `azure_entra_conditional_access_policies`, `azure_entra_authentication_policy` |
+| `Policy.Read.All` | `azure_entra_conditional_access_policies`, `azure_entra_authentication_policy`, `azure_entra_emergency_accounts` |
 | `RoleManagement.Read.Directory` | `azure_entra_pim_assignments` (role definitions, eligible and active assignments, role management policies). The tenant needs Entra ID P2 or ID Governance; without it `pim_available` reads false and the run succeeds. `azure_entra_risky_users` (directory roles and the users, groups and apps that hold them; `Directory.Read.All` also covers it) |
 | `IdentityRiskyUser.Read.All` | `azure_entra_risky_users` (risky users). The tenant needs Entra ID P2; without it `identity_protection_available` reads false and the run succeeds |
-| `Directory.Read.All` | `azure_entra_authentication_policy` (group settings, subscribed SKUs), `azure_entra_mfa_status` (users, role members), `azure_entra_privileged_roles`, `azure_residual_resources` (principal lookup), `azure_entra_dormant_identities` (tenant check, users, role members, app registrations, principal lookup) |
-| `AuditLog.Read.All` | `azure_entra_mfa_status` (sign-in activity and the registration report), `azure_entra_dormant_identities` (users' and service principals' sign-in activity), `azure_entra_sign_ins` (sign-in logs; the tenant also needs Entra ID P1 or P2, and without it `sign_in_logs` reads `not_licensed` and the run succeeds) |
+| `Directory.Read.All` | `azure_entra_authentication_policy` (group settings, subscribed SKUs), `azure_entra_mfa_status` (users, role members), `azure_entra_privileged_roles`, `azure_residual_resources` (principal lookup), `azure_entra_dormant_identities` (tenant check, users, role members, app registrations, principal lookup), `azure_entra_emergency_accounts` (tenant check, users, excluded groups' and roles' members) |
+| `AuditLog.Read.All` | `azure_entra_mfa_status` (sign-in activity and the registration report), `azure_entra_dormant_identities` (users' and service principals' sign-in activity), `azure_entra_sign_ins` (sign-in logs; the tenant also needs Entra ID P1 or P2, and without it `sign_in_logs` reads `not_licensed` and the run succeeds), `azure_entra_emergency_accounts` (emergency accounts' sign-in activity and the registration report) |
 | `GroupMember.Read.All` | `azure_entra_groups` (groups, members and owners). `Directory.Read.All` covers it and the fetcher's optional permissions below, except `Member.Read.Hidden` |
 | `AccessReview.Read.All` | `azure_entra_access_reviews` (review series, runs and decisions). The tenant needs Entra ID P2 or ID Governance; without it `access_reviews_available` reads false and the run succeeds |
 | `Directory.Read.All` (optional) | `azure_log_analytics_deletion_rights`: principal names; without it the grants are listed by id |
@@ -107,7 +109,7 @@ and reads the tenant it belongs to.
 | `User.Read.All` (optional) | `azure_entra_groups`: members' and owners' sign-in names, account state and guest status; without it users come back as an id only, so `member_details_readable` and `owner_details_readable` read false, the guest, disabled-user and disabled-owner figures read null, and the run succeeds. `azure_entra_service_principals`: user owners' names and account state; without it they read null, and so does `service_principals_with_only_disabled_owners`. `azure_entra_risky_users`: whether each privileged user with open risk is enabled; without it `account_enabled` reads null, the user counts as enabled, and the run succeeds |
 | `Policy.Read.ConditionalAccess` or `Policy.Read.All` (optional) | `azure_entra_sign_ins`: the Conditional Access policies applied to each listed sign-in; without it they read null and the run succeeds |
 | `Member.Read.Hidden` (optional) | `azure_entra_groups`: members of hidden-membership groups; without it they read unknown and are counted in `hidden_membership_groups_unread`. `Directory.Read.All` doesn't cover it |
-| `Organization.Read.All` (optional) | Every `azure_entra_*` fetcher but `azure_entra_dormant_identities`: tenant name and domain; without it the tenant id comes from `AZURE_TENANT_ID`, and the run fails only if that is unset too |
+| `Organization.Read.All` (optional) | Every `azure_entra_*` fetcher but `azure_entra_dormant_identities` and `azure_entra_emergency_accounts`: tenant name and domain; without it the tenant id comes from `AZURE_TENANT_ID`, and the run fails only if that is unset too |
 
 For the Entra fetchers, narrower permissions can stand in for `Directory.Read.All`;
 each call's Microsoft Graph reference page lists them.
@@ -209,6 +211,7 @@ Identity and access:
 | `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted and tenant-wide admin roles flagged |
 | `azure_entra_pim_assignments` | PIM for directory roles: who is eligible for each role, active assignments marked permanent, time-bound or activated, and each privileged role's activation rules (MFA or authentication context, justification, approval and approvers, maximum hours), with roles that allow permanent assignments flagged |
 | `azure_entra_dormant_identities` | Users and service principals holding a directory role or an Azure role in the subscription, with their last sign-in: dormant, never-used, guest and deleted identities flagged |
+| `azure_entra_emergency_accounts` | Users that Conditional Access MFA policies exclude and whether another policy still covers them, and each emergency account's exclusions, last sign-in, registered methods and the Sentinel or Azure Monitor alert rules that name it |
 | `azure_entra_groups` | Groups with their members and owners: kind, whether they can hold directory roles, and dynamic (paused flagged), assigned or synced membership, with groups that have no owner, only disabled owners, guests or disabled users flagged |
 | `azure_entra_sign_ins` | Interactive sign-ins over a lookback: MFA required and passed, methods used (phishing-resistant counted), legacy clients, Conditional Access applied, and risky sign-ins (risk levels need Entra ID P2) |
 | `azure_entra_risky_users` | Users Entra ID Protection flags as risky, the privileged directory roles each holds directly, and privileged users with open risk who can still sign in; groups holding a privileged role are counted, not expanded |
