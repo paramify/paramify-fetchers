@@ -1,0 +1,30 @@
+key: azure_rbac_custom_roles_no_privilege_escalation
+name: Azure RBAC No Custom Role Can Escalate Privileges
+type: AUTOMATED
+role: configuration
+statement: >-
+  The subscription's role definitions were listed without an API failure (built-in roles were
+  returned, so an empty custom-role list is real), and no custom Azure RBAC role can raise its own or
+  anyone's privileges: none grants writing role assignments, rewriting role definitions or writing
+  deny assignments, with wildcards matched as Azure matches them and notActions honored. A
+  subscription with no custom roles passes. Substantiates that privileges are strictly defined and can't be widened by their holders
+  (KSI-CNA-DFP, KSI-IAM-ELP). An approved exception (a deployment role that must assign roles) still
+  fails here and must be justified outside this evidence. Does NOT prove who holds these roles
+  (azure_rbac_role_assignments), anything about built-in roles such as Owner or User Access
+  Administrator, or other powerful actions (resource locks, data-plane access); custom roles
+  defined only at a management group may not be listed.
+
+# Built-in roles always exist, so builtin_role_definitions of 0 means the list failed: the regex
+# needs 1 or more there, and a failed read never matches.
+regex: '"partial_failure":\s*false[\s\S]*?"builtin_role_definitions":\s*(?<builtin_role_definitions>[1-9]\d*)[\s\S]*?"custom_roles_with_privilege_escalation":\s*(?<custom_roles_with_privilege_escalation>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # custom_roles_with_privilege_escalation
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-RBAC-CUSTOM-ROLES
