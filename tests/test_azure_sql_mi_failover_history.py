@@ -121,15 +121,6 @@ def test_forced_failover_allows_data_loss():
     assert record["allows_data_loss"] is True
 
 
-@pytest.mark.parametrize("raw, days", [(None, 90), ("30", 30), ("0", 1), ("365", 90), ("soon", 90)])
-def test_failover_history_days_stay_within_the_activity_log(monkeypatch, raw, days):
-    if raw is None:
-        monkeypatch.delenv(backups.FAILOVER_DAYS_ENV, raising=False)
-    else:
-        monkeypatch.setenv(backups.FAILOVER_DAYS_ENV, raw)
-    assert backups.failover_history_days() == days
-
-
 def _monitor(monkeypatch, events):
     queries = []
 

@@ -21,7 +21,10 @@ config_schema:
     env: AZURE_SQL_MI_FAILOVER_HISTORY_DAYS
     description: >
       How many days back failovers are read from the Activity Log, ending at the
-      run; 1 to 90, the days the Activity Log keeps.
+      run; 1 to 90, the days the Activity Log keeps. A value above 90 is capped
+      with a warning; one that isn't a whole number from 1 up fails the run as
+      bad_config, and 90 is read. The value asked for is kept in the evidence as
+      results.failover_history_window.days_requested.
   resource_exclusions:
     type: string
     required: false
@@ -111,7 +114,8 @@ evidence_set:
     failover group gains `failovers_in_window`, `succeeded_failovers_in_window`
     and `latest_succeeded_failover_time`. A failover Azure starts itself under an
     Automatic policy may leave no Activity Log entry. `results.failover_history_window`
-    gives the window read and whether it was read in full; when the read failed
+    gives the window read (`days`, and `days_requested` as configured) and
+    whether it was read in full; when the read failed
     or stopped at 200,000 events, `results.failovers` and every failover count
     are null, never 0, and the run fails (partial_failure). Summary: `failover_history_days`, `failover_history_read`,
     `total_failovers`, `failover_group_failovers`,

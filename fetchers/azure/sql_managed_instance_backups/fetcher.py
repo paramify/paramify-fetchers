@@ -31,6 +31,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from azure_rest import bounded_int_config  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 from sql_managed_instance import (  # noqa: E402
@@ -456,18 +457,6 @@ def summarize_failovers(failovers: list[dict] | None, window: dict, now: datetim
 
 # --- collection (lazy azure imports) ---
 
-def failover_history_days() -> int:
-    raw = os.environ.get(FAILOVER_DAYS_ENV) or str(ACTIVITY_LOG_MAX_DAYS)
-    try:
-        days = int(raw)
-    except ValueError:
-        logger.warning("%s=%r is not a whole number; using %d", FAILOVER_DAYS_ENV, raw, ACTIVITY_LOG_MAX_DAYS)
-        return ACTIVITY_LOG_MAX_DAYS
-    if not 1 <= days <= ACTIVITY_LOG_MAX_DAYS:
-        logger.warning("%s=%d is outside 1-%d; clamped", FAILOVER_DAYS_ENV, days, ACTIVITY_LOG_MAX_DAYS)
-    return min(max(days, 1), ACTIVITY_LOG_MAX_DAYS)
-
-
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -614,7 +603,8 @@ def main() -> int:
     registration = REGISTRATION_UNKNOWN
     now = utc_now()
     events: list[dict] | None = None
-    window: dict = {"days": failover_history_days(), "complete": False, "cut_reason": "not_read"}
+    days, days_requested = bounded_int_config(collector, FAILOVER_DAYS_ENV, ACTIVITY_LOG_MAX_DAYS, ACTIVITY_LOG_MAX_DAYS)
+    window: dict = {"days": days, "complete": False, "cut_reason": "not_read"}
     if subscription_id and cred is not None:
         registration = provider_registration_status(
             collector, subscription_id, cred, "Microsoft.Sql"
@@ -626,7 +616,7 @@ def main() -> int:
                 subscription_id,
             )
         instances, groups, unlisted = collect(subscription_id, cred, collector, exclusions, excluded)
-        events, window = read_failover_history(subscription_id, cred, collector, window["days"], now)
+        events, window = read_failover_history(subscription_id, cred, collector, days, now)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -636,6 +626,7 @@ def main() -> int:
             ),
         )
 
+    window["days_requested"] = days_requested
     exclusions.record_invalid(collector)
     failovers, out = attach_failovers(
         None if events is None else failover_records(events), instances, groups, excluded, exclusions)

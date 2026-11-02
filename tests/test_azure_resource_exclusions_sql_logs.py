@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace as ns
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
 sys.path.insert(0, str(REPO_ROOT / "fetchers" / "_lib"))
@@ -300,6 +302,26 @@ def test_sql_backups_failover_on_an_unlisted_group_leaves_only_by_pattern(monkey
     assert evidence["results"]["failovers"] == []
     assert [(e["kind"], e["name"], e["reason"]) for e in evidence["results"]["excluded"] if e["kind"] == "failover"] == [
         ("failover", "fog-gone", "resource_matched")]
+
+
+@pytest.mark.parametrize("raw, days, requested, code", [
+    (None, 90, 90, 0), ("30", 30, 30, 0), ("365", 90, 365, 0), ("9O", 90, "9O", 1), ("0", 90, 0, 1),
+])
+def test_sql_backups_record_a_bad_failover_window_as_bad_config_and_keep_the_value_asked_for(
+        monkeypatch, tmp_path, raw, days, requested, code):
+    if raw is None:
+        monkeypatch.delenv(backups.FAILOVER_DAYS_ENV, raising=False)
+    else:
+        monkeypatch.setenv(backups.FAILOVER_DAYS_ENV, raw)
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    returned, evidence = run_sql(monkeypatch, tmp_path, backups, None)
+    window = evidence["results"]["failover_history_window"]
+    assert (returned, window["days"], window["days_requested"], evidence["summary"]["failover_history_days"]) == (
+        code, days, requested, days)
+    assert window["complete"] is True
+    if code:
+        status = json.loads((tmp_path / "status.json").read_text())
+        assert status["code"] == "bad_config" and backups.FAILOVER_DAYS_ENV in status["error"]
 
 
 def test_sql_backups_unread_activity_log_leaves_failover_counts_null(monkeypatch, tmp_path):
