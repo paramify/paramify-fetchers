@@ -2,6 +2,7 @@ name: azure_waf_ddos_activity
 version: 0.1.0
 description: >-
   Shows whether DoS protection is watched: what each WAF blocked or only logged, whether WAF and DDoS attack alerts reach someone, and DDoS mitigations, which read unknown without DDoS Protection.
+category: azure
 
 config_schema:
   lookback_days:
