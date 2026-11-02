@@ -516,7 +516,8 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`azure_sentinel_playbooks` 0.3.0: run history and last run result.** Each
   playbook now carries its runs over a lookback (`run_lookback_days`, default
-  90, the default Logic Apps run-history retention; `SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS`):
+  90, the default Logic Apps run-history retention; `SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS`;
+  a larger value is clamped to 90 with a warning):
   how many ran, a count per status, how many failed (failed, timed out, aborted
   or faulted), the newest run's status and time, the last success and the last
   failure, and its ten newest runs with status, start and end time, trigger and

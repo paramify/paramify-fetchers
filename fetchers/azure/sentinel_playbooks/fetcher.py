@@ -37,6 +37,8 @@ ACCOUNT_CONTAINMENT_MARKERS = ('"accountenabled": false', "revokesigninsessions"
 UNREADABLE_STATUSES = frozenset({401, 403, 404})
 LOOKBACK_ENV = "SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS"
 DEFAULT_LOOKBACK_DAYS = 90
+# Logic Apps keep 90 days of run history unless a workflow's retention is changed.
+MAX_LOOKBACK_DAYS = 90
 RECENT_RUNS = 10
 FAILED_STATUSES = frozenset({"Failed", "TimedOut", "Aborted", "Faulted"})
 NO_RUN_HISTORY = dict.fromkeys(
@@ -265,8 +267,15 @@ def automation_references(client, subscription_id: str, collector, ids: Dict[str
     return refs
 
 
-def collect(client, subscription_id: str, collector) -> tuple:
+def lookback_days() -> int:
     days = int_config(LOOKBACK_ENV, DEFAULT_LOOKBACK_DAYS)
+    if days > MAX_LOOKBACK_DAYS:
+        logger.warning("%s=%d is outside 1-%d; using %d", LOOKBACK_ENV, days, MAX_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS)
+    return min(days, MAX_LOOKBACK_DAYS)
+
+
+def collect(client, subscription_id: str, collector) -> tuple:
+    days = lookback_days()
     since = datetime.now(timezone.utc) - timedelta(days=days)
     ids: Dict[str, str] = {}
     refs = automation_references(client, subscription_id, collector, ids)

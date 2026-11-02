@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import logging
 import os
 import sys
 from collections import namedtuple
@@ -2405,6 +2406,25 @@ def test_sentinel_playbooks_runs_are_filtered_on_the_lookback(azure, tmp_path, m
     assert any(f and f.startswith(f"StartTime ge {since}") and f.endswith("Z") for f in filters)
     assert code == 0 and ev["summary"]["run_lookback_days"] == 3
     assert pb["runs_in_lookback"] == 1 and pb["last_success_time"] is None and pb["failed_runs"] == 1
+
+
+@pytest.mark.parametrize("raw, days, warned", [("30", 30, False), ("90", 90, False), ("365", 90, True), ("0", 90, False)])
+def test_sentinel_playbooks_lookback_is_capped_at_the_run_history_retention(monkeypatch, caplog, raw, days, warned):
+    monkeypatch.setenv("SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS", raw)
+    with caplog.at_level(logging.WARNING):
+        assert MODS["sentinel_playbooks"].lookback_days() == days
+    assert ("outside 1-90" in caplog.text) is warned
+
+
+def test_sentinel_playbooks_capped_lookback_is_what_the_evidence_reports(azure, tmp_path, monkeypatch):
+    monkeypatch.setenv("SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS", "365")
+    filters = []
+    get = azure.get
+    azure.get = lambda url, params=None, **kw: (filters.append((params or {}).get("$filter")), get(url, params, **kw))[1]
+    code, ev = run("sentinel_playbooks", tmp_path)
+    since = (NOW - timedelta(days=90)).strftime("%Y-%m-%dT")
+    assert code == 0 and ev["summary"]["run_lookback_days"] == 90
+    assert any(f and f.startswith(f"StartTime ge {since}") for f in filters)
 
 
 def test_sentinel_playbooks_live_playbook_without_runs(azure, tmp_path):

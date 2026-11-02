@@ -44,8 +44,9 @@ config_schema:
     default: 90
     env: SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS
     description: >
-      Each playbook's runs that started within this many days are read. Logic
-      Apps keep 90 days of run history by default.
+      Each playbook's runs that started within this many days are read, from 1
+      to 90. Logic Apps keep 90 days of run history by default, so a larger
+      value is clamped to 90 with a warning.
 
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
@@ -92,7 +93,7 @@ evidence_set:
     - notification_recipients — List of the static email addresses live playbooks send to; addresses built from the incident when the playbook runs aren't included; null when live_playbooks_without_definition is above 0
 
     Do live playbooks run, and do their runs succeed?
-    - run_lookback_days — Days of run history read for each playbook (SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS, default 90)
+    - run_lookback_days — Days of run history read for each playbook (SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS, default 90, at most 90)
     - playbooks_run_history_unread — List of the resource ids of playbooks whose runs couldn't be read (401, 403 or 404, each also given a note; any other error fails the run); their run fields read null
     - live_playbooks_run_history_unread — Number of live playbooks whose runs couldn't be read, so how their runs ended is unknown
     - live_playbooks_last_run_succeeded — Number of live playbooks whose newest run in the lookback succeeded; null when live_playbooks_run_history_unread is above 0
