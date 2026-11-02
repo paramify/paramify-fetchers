@@ -538,7 +538,7 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_backup_recovery_status` 0.3.0: restore jobs.** Each vault now lists
   its restore jobs (`restore_jobs`) over `restore_window_days` (365 by default
   and at most, `AZURE_BACKUP_RESTORE_WINDOW_DAYS`; a value that isn't a whole
-  number from 1 up fails the run as `bad_config`, and the value asked for is
+  number from 1 up fails the run as `bad_config`, and the number asked for is
   kept as `restore_job_window_days_requested`), read with `backup_jobs.list` filtered to
   operation Restore in slices of 30 days, test restores included. Each job has
   its status, start and end, duration, protected item, and from

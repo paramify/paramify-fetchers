@@ -22,8 +22,9 @@ config_schema:
     description: >
       How many days back restore jobs are read, ending at the run, from 1 to 365. A
       value above 365 is capped with a warning; one that isn't a whole number from 1
-      up fails the run as bad_config, and 365 is read. The value asked for is kept in
-      the evidence as restore_job_window_days_requested. A vault keeps job history for
+      up fails the run as bad_config, and 365 is read. The number asked for is kept in
+      the evidence as restore_job_window_days_requested (null when the value isn't a
+      whole number). A vault keeps job history for
       a limited time, so older restores may be gone whatever the window.
   resource_exclusions:
     type: string
@@ -98,7 +99,7 @@ evidence_set:
     Each restore job keeps Azure's own free text: job_properties (the job's property bag, such as a restore destination path; URL query strings are dropped) and each error's error_string.
 
     Were restores run, and how did they go?
-    - restore_job_window_days — Number of days back restore jobs were read, ending at the run (365 unless AZURE_BACKUP_RESTORE_WINDOW_DAYS sets it, and at most 365; results.restore_job_window_days_requested keeps the value asked for); a vault keeps job history for a limited time, so the oldest days may hold nothing
+    - restore_job_window_days — Number of days back restore jobs were read, ending at the run (365 unless AZURE_BACKUP_RESTORE_WINDOW_DAYS sets it, and at most 365; results.restore_job_window_days_requested keeps the number asked for, null if it wasn't one); a vault keeps job history for a limited time, so the oldest days may hold nothing
     - restore_jobs_read — True if every in-scope vault's restore jobs were read; when false, every restore field below is null
     - total_restore_jobs — Number of restore jobs in the window across in-scope vaults, whatever their result; null if a vault's jobs weren't read
     - succeeded_restore_jobs — Number of those whose status is Completed (CompletedWithWarnings, a partial restore, isn't counted); null if a vault's jobs weren't read

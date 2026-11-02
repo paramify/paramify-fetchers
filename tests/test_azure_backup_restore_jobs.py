@@ -289,7 +289,7 @@ def test_main_reports_restore_jobs_with_their_details(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("window, used, requested, code, slices", [
-    ("9O", 365, "9O", 1, 13), ("0", 365, 0, 1, 13), ("3650", 365, 3650, 0, 13), ("60", 60, 60, 0, 2),
+    ("9O", 365, None, 1, 13), ("0", 365, 0, 1, 13), ("3650", 365, 3650, 0, 13), ("60", 60, 60, 0, 2),
 ])
 def test_main_records_a_bad_window_as_bad_config_and_keeps_the_value_asked_for(
         monkeypatch, tmp_path, window, used, requested, code, slices):
