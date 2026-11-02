@@ -14,6 +14,11 @@ from urllib.parse import urlparse
 
 from framework.paramify.resources import ArtifactRequest, Channel, EvidenceSet, Stack
 
+_EVIDENCE_POST_KEYS = frozenset({
+    "referenceId", "name", "description", "instructions", "remarks", "frequency", "startDate",
+    "whenToApproveArtifactRequest", "whenToCreateAndUpdateProcessArtifactRequest",
+})
+
 
 class FakeResponse:
     def __init__(self, status_code: int, payload: Any = None, text: Optional[str] = None) -> None:
@@ -53,6 +58,7 @@ class FakeParamify:
         self._fail_once: Dict[str, int] = {}
         self._batches_enabled = True
         self._n: Dict[str, int] = {}
+        self.duplicate_evidence_body = "Evidence already exists"
 
     # ----- state helpers -------------------------------------------------
     def _next(self, kind: str) -> int:
@@ -116,14 +122,20 @@ class FakeParamify:
                 ref = params.get("referenceId")
                 rows = [e for e in self._evidence if ref in (None, e["referenceId"])]
                 return FakeResponse(200, {"evidences": rows})
-            if any(e["referenceId"] == body["referenceId"] for e in self._evidence):
-                return FakeResponse(409, text="Evidence already exists")
-            chans = [c["stackId"] if isinstance(c, dict) else c for c in body.get("channels") or []]
+            extra = sorted(set(body) - _EVIDENCE_POST_KEYS)
+            if extra:
+                return FakeResponse(400, text=f"Unrecognized keys: {', '.join(extra)}")
+            if not body.get("name"):
+                return FakeResponse(400, text="name is required")
+            if any(e["referenceId"] == body.get("referenceId") for e in self._evidence):
+                # The spec gives no body text for this refusal; the wording is assumed.
+                return FakeResponse(409, text=self.duplicate_evidence_body)
             row = self._make_evidence(
-                body["referenceId"], chans,
-                body.get("whenToApproveArtifactRequest", "SUBMISSION_WITH_PASSING_VALIDATORS"),
-                body.get("name"),
+                body.get("referenceId") or f"EVD-{self._next('ev') + 1000}", (),
+                body.get("whenToApproveArtifactRequest", "SUBMISSION"), body["name"],
             )
+            row["whenToCreateAndUpdateProcessArtifactRequest"] = body.get(
+                "whenToCreateAndUpdateProcessArtifactRequest", "MANUAL")
             return FakeResponse(201, row)
         if method == "GET" and path == "/artifact-requests":
             rows = [r for r in self._requests if r["evidenceId"] == params.get("evidenceId")]

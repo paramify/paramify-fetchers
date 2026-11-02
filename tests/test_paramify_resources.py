@@ -130,3 +130,32 @@ def test_reader_memoizes_identical_calls(fake, res):
     reader.evidence_by_reference(["EVD-A"])
     assert len([c for c in fake.calls if c[1] == "/evidence"]) == 1
     assert not hasattr(reader, "create_batch")
+
+
+def test_post_evidence_rejects_channels_and_automated(fake, res):
+    for extra in ({"channels": []}, {"automated": True}):
+        with pytest.raises(ApiError) as e:
+            res.create_evidence({"referenceId": "EVD-X", "name": "X", **extra})
+        assert e.value.status == 400
+
+
+def test_post_evidence_requires_name(res):
+    with pytest.raises(ApiError) as e:
+        res.create_evidence({"referenceId": "EVD-X"})
+    assert e.value.status == 400
+
+
+def test_created_evidence_defaults_to_submission_and_has_no_channels(res):
+    made = res.create_evidence({"referenceId": "EVD-X", "name": "X"})
+    assert made.approval == "SUBMISSION"
+    assert made.channels == ()
+    assert FakeParamify().add_evidence("EVD-Y").approval == "SUBMISSION"
+
+
+def test_unrecognized_duplicate_reply_is_not_swallowed(fake, res):
+    fake.add_evidence("EVD-A")
+    fake.duplicate_evidence_body = "nope"
+    with pytest.raises(ApiError) as e:
+        res.create_evidence({"referenceId": "EVD-A", "name": "A"})
+    assert e.value.status == 409
+    assert not [c for c in fake.calls if c[0] == "GET" and c[1] == "/evidence"]
