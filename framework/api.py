@@ -33,6 +33,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import urlparse
 
 import yaml
+from dotenv import load_dotenv
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
@@ -69,6 +70,7 @@ from framework.paramify_auth import (
     READ_TOKEN_ENV,
     UPLOAD_TOKEN_ENV,
     describe_base_url,
+    missing_token_error,
     resolve_base_url,
     resolve_upload_token,
 )
@@ -80,15 +82,10 @@ from framework.secret_resolver import (
     is_partial_env_ref,
     view_runtime_value,
 )
+from framework.sync import upload as _sync_upload
+from framework.sync.model import Plan
 
-
-def _missing_token_error() -> str:
-    """One wording for the missing-token error, since three call sites raise it."""
-    return (
-        f"{UPLOAD_TOKEN_ENV} is not set (or {READ_TOKEN_ENV} as a fallback). "
-        f"Set it in the environment by any means — export, .env, secret manager, "
-        f"CI secret — or run `paramify doctor <manifest>` to check before a run."
-    )
+_missing_token_error = missing_token_error
 
 _STDERR_TAIL_CHARS = 4000
 
@@ -1376,19 +1373,6 @@ def _upload_config(root: Path, config_path: Optional[Path]) -> Optional[Path]:
     return Path(config_path) if config_path else default_upload_config(root)
 
 
-def _load_paramify_uploader(root: Path):
-    """Load the source-tree uploader without requiring uploaders/ to be packaged."""
-    path = Path(root) / "uploaders" / "paramify_evidence" / "uploader.py"
-    if not path.exists():
-        raise RuntimeError(f"Paramify evidence uploader not found at {path}")
-    spec = importlib.util.spec_from_file_location("paramify_evidence_uploader", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load Paramify evidence uploader from {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def _load_paramify_validator_syncer(root: Path):
     """Load the source-tree validator syncer without requiring uploaders/ to be packaged."""
     path = Path(root) / "uploaders" / "paramify_validators" / "syncer.py"
@@ -1490,10 +1474,9 @@ def upload_preflight(
     dry_run: bool = False,
 ) -> dict:
     """Inspect upload readiness without making Paramify API calls."""
-    uploader = _load_paramify_uploader(root)
-    uploader.load_dotenv()
+    load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
+    config = _sync_upload.load_config(config_path)
     paramify_cfg = config.get("paramify") or {}
     base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
 
@@ -1503,7 +1486,7 @@ def upload_preflight(
     if not run_path.is_dir():
         errors.append(f"No run directory to upload: {run_path}")
     else:
-        file_count = sum(1 for _ in uploader.iter_evidence_files(run_path))
+        file_count = sum(1 for p in run_path.glob("*.json") if is_evidence_file(p))
         if file_count == 0:
             errors.append(f"No evidence files found in {run_path}")
 
@@ -1531,6 +1514,29 @@ def upload_preflight(
     }
 
 
+def plan_upload(
+    run_dir,
+    root: Path,
+    config_path: Optional[Path] = None,
+    *,
+    online: bool,
+    stack: Optional[str] = None,
+    only_file: Optional[str] = None,
+    custom_tags: bool = True,
+    with_validators: bool = False,
+) -> Plan:
+    """The upload plan for one run directory; nothing is written.
+
+    Online it reads the workspace and needs a token; `online=False` needs
+    neither, and shows routing values as unknown. Raises ValueError for setup
+    errors. `framework.sync.render.render_plan` turns the plan into text.
+    """
+    return _sync_upload.plan_upload(
+        run_dir, root, _upload_config(root, config_path), online=online, stack=stack,
+        only_file=only_file, custom_tags=custom_tags, with_validators=with_validators,
+    )
+
+
 def upload_run(
     run_dir,
     root: Path,
@@ -1539,22 +1545,24 @@ def upload_run(
     dry_run: bool = False,
     on_event: Optional[Callable[[dict], None]] = None,
     custom_tags: bool = True,
+    stack: Optional[str] = None,
+    only_file: Optional[str] = None,
+    with_validators: bool = False,
 ) -> dict:
-    """Upload one run directory to Paramify.
+    """Upload one run directory to Paramify, one batch per manifest entry.
 
-    Fires upload_start / upload_file / upload_complete so front-ends can render
-    progress. Raises ValueError for setup errors; returns the uploader summary
-    for completed batches, even when some files failed.
+    Plans, then applies under a lock on the run. Fires upload_start /
+    upload_file / upload_complete (plus the engine's action_* and
+    delivery_file events) so front-ends can render progress. A dry run plans
+    offline: no token and no API call. Raises ValueError for setup errors;
+    otherwise returns the summary (`uploaded`, `skipped_duplicate`,
+    `skipped_failed`, `errors`, `ok`, `plan`, `entries`, ...), even when some
+    entries failed. `with_validators` syncs validators for the run's sets
+    before delivery.
     """
-    uploader = _load_paramify_uploader(root)
-    config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    return uploader.upload_run(
-        Path(run_dir),
-        config=config,
-        dry_run=dry_run,
-        on_event=on_event,
-        custom_tags=custom_tags,
+    return _sync_upload.run_upload(
+        run_dir, root, _upload_config(root, config_path), dry_run=dry_run, on_event=on_event,
+        custom_tags=custom_tags, stack=stack, only_file=only_file, with_validators=with_validators,
     )
 
 
