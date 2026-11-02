@@ -539,7 +539,7 @@ schemas and the `paramify` CLI — not the internal code.
   Activity Log (resource provider Microsoft.Sql) over `failover_history_days`
   (90 by default and at most, `AZURE_SQL_MI_FAILOVER_HISTORY_DAYS`; a value
   that isn't a whole number from 1 up fails the run as `bad_config`, and the
-  value asked for is kept as `failover_history_window.days_requested`) and lists
+  number asked for is kept as `failover_history_window.days_requested`) and lists
   each failover request in `results.failovers`: a failover group's planned
   failover, its forced failover allowing data loss, or a failover between one
   managed instance's replicas, with start and end, duration, final status,

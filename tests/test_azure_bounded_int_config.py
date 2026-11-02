@@ -1,5 +1,5 @@
-"""Shared bounded_int_config: a bad value fails the run as bad_config, one past the maximum is capped, and the value
-as configured is kept."""
+"""Shared bounded_int_config: a bad value fails the run as bad_config, one past the maximum is capped, and the number
+asked for is kept."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def test_a_good_value_is_used_and_one_past_the_maximum_is_capped(monkeypatch, ra
     assert collector.ok
 
 
-@pytest.mark.parametrize("raw, requested", [("9O", "9O"), ("0", 0), ("-5", -5), ("30d", "30d")])
+@pytest.mark.parametrize("raw, requested", [("9O", None), ("0", 0), ("-5", -5), ("30d", None), ("1.5", None)])
 def test_a_bad_value_fails_as_bad_config_and_keeps_what_was_asked(monkeypatch, raw, requested):
     monkeypatch.setenv(ENV, raw)
     collector = _collector()

@@ -305,7 +305,7 @@ def test_sql_backups_failover_on_an_unlisted_group_leaves_only_by_pattern(monkey
 
 
 @pytest.mark.parametrize("raw, days, requested, code", [
-    (None, 90, 90, 0), ("30", 30, 30, 0), ("365", 90, 365, 0), ("9O", 90, "9O", 1), ("0", 90, 0, 1),
+    (None, 90, 90, 0), ("30", 30, 30, 0), ("365", 90, 365, 0), ("9O", 90, None, 1), ("0", 90, 0, 1),
 ])
 def test_sql_backups_record_a_bad_failover_window_as_bad_config_and_keep_the_value_asked_for(
         monkeypatch, tmp_path, raw, days, requested, code):
