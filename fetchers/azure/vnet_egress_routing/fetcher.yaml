@@ -1,5 +1,5 @@
 name: azure_vnet_egress_routing
-version: 0.1.0
+version: 0.2.0
 description: >
   Where each subnet's Internet-bound traffic goes: through a firewall or network
   virtual appliance, into a black hole, to a VPN/ExpressRoute gateway, out a NAT
@@ -49,6 +49,31 @@ config_schema:
     description: >
       How many other subscriptions to search for the Virtual WAN hub of a spoke whose
       hub is not in this subscription. Only used when such a spoke exists.
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching virtual network, subnet, route table, network
+      interface, Azure Firewall or Virtual WAN hub is listed under excluded with
+      the pattern and left out of every count and verdict; a subnet leaves with its
+      virtual network, and a network interface with its subnet. Egress paths and
+      appliance owners are still worked out against every record, so an in-scope
+      subnet routed through an excluded firewall, route table or hub keeps its
+      egress path. A firewall's routed_workload_subnets, a route table's
+      associated and a virtual network's subnet_count count only in-scope
+      subnets; a route table's subnet_ids still lists every subnet it is attached
+      to. Peerings are still read for every virtual network, excluded ones too,
+      so a failed read on one still fails the run. A pattern without one of these
+      prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
+      resource is in scope.
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
@@ -149,3 +174,25 @@ evidence_set:
     Standard public load balancer with outbound rules (or of a basic public load
     balancer) leaves through that load balancer, yet it and its subnet still read
     "default_outbound" (or "none"). Maps to KSI-CNA-RNT / KSI-CNA-ULN / KSI-CNA-DFP.
+
+    Resources the resource_exclusions patterns take out are listed under excluded
+    instead, each with the pattern that matched; a network interface taken out with
+    its subnet names that subnet in matched_id. An in-scope firewall that routes only
+    excluded subnets counts in azure_firewalls_with_no_routed_subnet, and an in-scope
+    route table attached only to excluded subnets counts in unassociated_route_tables.
+
+    Which resources are left out of scope?
+      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no virtual network, subnet, route table, network interface, Azure Firewall or Virtual WAN hub, such as a mistyped name
+      - excluded_virtual_networks — Number of virtual networks left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+      - excluded_subnets — Number of subnets left out of scope the same way, which takes every subnet of an excluded virtual network
+      - excluded_route_tables — Number of route tables left out of scope the same way
+      - excluded_network_interfaces — Number of network interfaces left out of scope the same way, or because a pattern matched one of their subnets
+      - excluded_azure_firewalls — Number of Azure Firewalls left out of scope the same way
+      - excluded_virtual_hubs — Number of Virtual WAN hubs left out of scope the same way
+      - in_scope_virtual_networks — Number of virtual networks read and in scope; 0 means none was read or the patterns took out every one, which a check can catch by requiring more than 0
+      - in_scope_subnets — Number of subnets read and in scope, platform subnets included
+      - in_scope_route_tables — Number of route tables read and in scope
+      - in_scope_network_interfaces — Number of network interfaces read and in scope
+      - in_scope_azure_firewalls — Number of Azure Firewalls read and in scope
+      - in_scope_virtual_hubs — Number of Virtual WAN hubs read and in scope, from this subscription or found for one of its spokes

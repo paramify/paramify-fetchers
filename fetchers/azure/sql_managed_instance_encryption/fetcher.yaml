@@ -1,11 +1,29 @@
 name: azure_sql_managed_instance_encryption
-version: 0.1.0
+version: 0.2.0
 description: >
   For each Azure SQL Managed Instance in the subscription, reports how its data is
   encrypted at rest: the instance's TDE encryption protector (a service-managed key
   or a customer-managed Key Vault key, its key URI and whether auto-rotation is on),
   and Transparent Data Encryption state for every database on the instance.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that resource's
+      child resources). * matches any run of characters and ? one character. A
+      matching managed instance is listed under excluded with the pattern and left
+      out of every count and verdict; neither it nor its databases are read further
+      (an id: pattern naming one database matches nothing). A pattern without one of these prefixes fails the
+      run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
+      ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -65,3 +83,10 @@ evidence_set:
     and true only when every user database answered Enabled. Instance and
     summary counts split user databases into TDE enabled, disabled and unknown;
     the summary's `total_user_databases` is null when any database list failed.
+    Resources the resource_exclusions patterns take out are listed under `excluded`
+    instead, each with the pattern that matched, and every count covers only the
+    instances in scope. The summary echoes `resource_exclusion_patterns`, lists
+    `resource_exclusion_patterns_unmatched` (patterns that matched no instance, such
+    as a mistyped name), and counts `excluded_managed_instances` and
+    `in_scope_managed_instances` (0 when none was read or the patterns took out
+    every instance, which a check can catch by requiring more than 0).

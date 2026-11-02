@@ -106,5 +106,6 @@ paramify evidence evidence/run-<timestamp>/rippling_all_employees.json
 |---|---|
 | `Secret reference ${env:…} could not be resolved` | Export that variable in the shell that runs `paramify`. |
 | `NOTE target selects AWS_PROFILE; ignored ambient credentials …` | Expected: a target's `profile:` overrides static AWS keys. Remove it to use them. |
+| `a comparator ignores platforms.<category>.config` | A [comparator](comparators.md#how-the-runner-runs-one) gets none of its category's config, secrets or passthrough env. Set its own config on its entry with `paramify manifest set-config`. |
 
 **More detail:** [shared platform config](run_manifest_guide.md#4-set-shared-config-once)

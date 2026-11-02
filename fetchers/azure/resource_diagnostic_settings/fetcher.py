@@ -26,6 +26,7 @@ from azure_common import (  # noqa: E402
     provider_registration_status,
     report_failure,
     resolve_subscription,
+    resource_group_from_id,
     sanitize_for_filename,
     sorted_counts,
     write_evidence,
@@ -48,6 +49,7 @@ from diagnostics import (  # noqa: E402
     project_diagnostic_setting,
     resource_uri,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_resource_diagnostic_settings")
@@ -249,6 +251,11 @@ def summarize(records: list[dict], enumerated: int, total_reported, pages: int) 
         "uncovered_by_type": {t: uncovered_by_type[t] for t in sorted(uncovered_by_type)},
         "all_log_emitting_resources_covered": status[STATUS_ERROR] == 0 and len(covered) == len(emitting),
     }
+
+
+def scoped_location(record: dict):
+    """A subscription-level resource has no resource group and stays in scope unless an id: pattern names it."""
+    return record["location"] if resource_group_from_id(record["id"]) else None
 
 
 def classify_error(exc: BaseException):
@@ -611,6 +618,9 @@ def main() -> int:
     hours = basic_lookback_hours()
     approved = approved_workspaces()
     workspaces: dict = {}
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    excluded: list[dict] = []
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Insights")
         if registration == NOT_REGISTERED:
@@ -619,7 +629,9 @@ def main() -> int:
                 subscription_id,
             )
         inventory = enumerate_resources(subscription_id, cred, collector)
-        resources = with_storage_children([inventory_record(r) for r in inventory["rows"]])
+        # Excluded resources (a storage account's services with it) are never read, and only in-scope ones pick destinations.
+        resources, excluded = exclusions.split(
+            with_storage_children([inventory_record(r) for r in inventory["rows"]]), "resource", location=scoped_location)
         monitor = collector.guard(
             "monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred)
         )
@@ -639,6 +651,7 @@ def main() -> int:
             ),
         )
 
+    exclusions.warn_unmatched(logger)
     records = sorted((with_ingestion(r, workspaces, approved) for r in records), key=lambda r: (r["id"] or "").lower())
     destinations = destination_records(workspaces, records, approved)
     evidence = build_payload(
@@ -654,11 +667,13 @@ def main() -> int:
             "ingestion_query": INGESTION_QUERY,
             "basic_table_query": BASIC_TABLE_QUERY,
             "approved_log_workspaces": approved or None,
+            "excluded": excluded,
         },
         summary={
             **summarize(records, len(inventory["rows"]), inventory["total_records"], inventory["pages"]),
             "provider_registration_status": registration,
             **summarize_ingestion(records, destinations, days, hours, approved),
+            **exclusions.summary(excluded, ("resource",), {"resources": len(records)}),
         },
     )
 

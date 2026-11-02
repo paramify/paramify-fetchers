@@ -48,6 +48,8 @@ STATUS_CODES = frozenset(
         "bad_config",
         "partial_failure",
         "internal_error",
+        # A comparator's input failed or is missing; that input's evidence holds the cause.
+        "input_failed",
     }
 )
 

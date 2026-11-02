@@ -80,7 +80,8 @@ The runner owns the `metadata` envelope, and the fetcher owns `payload`. The `ev
 > `metadata`+`payload` envelope. But fetchers still write raw evidence dicts and
 > read the environment directly. They do not get a typed secrets object yet.
 > These are known interim shortcuts, not the target design. Comparators
-> (`depends_on`) are not built yet. Structured exit-code categories are not built
+> (`depends_on`) are built, with one demo so far ([`comparators.md`](comparators.md)).
+> Structured exit-code categories are not built
 > either: exit codes are still binary `0`/`1`, plus `124` when the runner kills a
 > fetcher on timeout. Issue-report collection is complete: the contract, the
 > runner, the uploader and the template. Wiz ships the first three vendor fetchers
@@ -106,7 +107,10 @@ fetchers/
     <short_name>/               # one directory per fetcher
       fetcher.yaml
       fetcher.py | fetcher.sh
-comparators/                    # cross-source comparators (template only so far)
+comparators/
+  _lib/comparator_inputs.py     # the shared reader for a comparator's inputs
+  _template/                    # copy this to start a comparator
+  <category>/<short_name>/      # a comparator: fetcher.yaml with depends_on + fetcher.py
 uploaders/
   paramify_evidence/            # push evidence to Paramify (built)
   paramify_issues/              # send raw scan reports into assessment pipelines (built)
