@@ -2044,8 +2044,8 @@ Summary fields:
 - `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no Recovery Services vault, protected item or protected resource, such as a mistyped name
 - `excluded_recovery_services_vaults` — Number of Recovery Services vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, no other count includes them, and their backup policies, protected items and restore jobs are never read
 - `excluded_protected_items` — Number of protected items in in-scope vaults left out of scope because an id: pattern matched the item, or a pattern matched its protected resource by resource group or id; each is listed under excluded. An excluded vault's items are never read, so they are not counted here
-- `in_scope_recovery_services_vaults` — Number of Recovery Services vaults read and in scope; 0 means none was read or the patterns took out every vault, which a check can catch by requiring more than 0
-- `in_scope_protected_items` — Number of protected items read and in scope
+- `in_scope_recovery_services_vaults` — Number of Recovery Services vaults read and in scope; 0 means the subscription has none or the patterns took out every vault, which a check can catch by requiring more than 0; null if the vault list couldn't be read
+- `in_scope_protected_items` — Number of protected items read and in scope; null if the vault list couldn't be read
 - `excluded_restore_jobs` — Number of restore jobs in in-scope vaults left out of scope because they restored an excluded protected item, matched by the item's friendly name in the same vault (a job names its item no other way); a job stays in scope when an in-scope item in that vault has the same friendly name, or when its item is no longer listed (protection stopped and its data deleted). Each is listed under excluded and its details are never read
 - `in_scope_restore_jobs` — Number of restore jobs read and in scope; null if the vault list or a vault's restore jobs couldn't be read
 
