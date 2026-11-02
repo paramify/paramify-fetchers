@@ -2,6 +2,7 @@ name: azure_network_traffic_activity
 version: 0.1.0
 description: >-
   Shows the network traffic actually seen over a window: flows to unexpected ports or new destinations, denied-flow spikes, Front Door requests, and requests reaching origins outside Front Door.
+category: azure
 
 config_schema:
   lookback_days:

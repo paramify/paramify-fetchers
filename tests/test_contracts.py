@@ -93,6 +93,15 @@ def test_fetcher_yaml_matches_schema(yaml_path: Path) -> None:
     assert not errors, f"{yaml_path.name} violates fetcher_schema.json:\n{_format_errors(errors)}"
 
 
+@pytest.mark.parametrize("yaml_path", FETCHER_YAMLS, ids=_rel_ids(FETCHER_YAMLS))
+def test_fetcher_yaml_declares_its_directory_category(yaml_path: Path) -> None:
+    """Without its category a fetcher gets none of the category's secrets or passthrough env under `paramify run`."""
+    declared = (yaml.safe_load(yaml_path.read_text()) or {}).get("category")
+    assert declared == yaml_path.parent.parent.name, (
+        f"{_short(yaml_path)} declares category {declared!r}, not {yaml_path.parent.parent.name!r}"
+    )
+
+
 @pytest.mark.parametrize("yaml_path", CATEGORY_YAMLS, ids=_rel_ids(CATEGORY_YAMLS))
 def test_category_yaml_matches_schema(yaml_path: Path) -> None:
     validator = Draft202012Validator(_load_schema("category_schema.json"))
