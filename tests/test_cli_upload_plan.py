@@ -89,6 +89,13 @@ def test_apply_prints_plan_then_events_then_outcomes(fake, tmp_path):  # noqa: F
     assert submits(fake) == ["/batches/bt-1/submit"]
 
 
+def test_apply_plans_exactly_once_and_prints_that_plan(fake, tmp_path):  # noqa: F811
+    res = cli("upload", str(two_files(tmp_path)))
+    assert res.exit_code == 0, res.output
+    assert len([c for c in calls(fake) if c.startswith("GET /evidence")]) == 1
+    assert res.output.count("1 deliver · 0 noop · 0 refuse") == 1
+
+
 def test_apply_exits_1_when_an_entry_is_refused(fake, tmp_path):  # noqa: F811
     st1, st2 = fake.add_stack("Prod"), fake.add_stack("Gov")
     fake.add_evidence("EVD-X", channels=[st1.id, st2.id])
@@ -139,6 +146,21 @@ def test_validators_sync_once_and_before_delivery(fake, tmp_path, monkeypatch): 
     res = cli("upload", str(two_files(tmp_path)), "--with-validators")
     assert res.exit_code == 0, res.output
     assert seen == [["EVD-X"]]
+
+
+def test_validators_summary_and_progress_survive(fake, tmp_path, monkeypatch):  # noqa: F811
+    def sync(root, **kw):
+        kw["on_event"]({"event": "sync_start", "validators": 2, "base_url": "https://x", "dry_run": False})
+        kw["on_event"]({"event": "sync_validator", "key": "v1", "outcome": "created"})
+        return {"ok": True, "created": 2}
+
+    monkeypatch.setattr(api, "sync_validators", sync)
+    run = str(two_files(tmp_path))
+    human = cli("upload", run, "--with-validators")
+    assert human.exit_code == 0, human.output
+    assert "Sync 2 validator(s) → https://x" in human.output and "[OK] v1  created" in human.output
+    fake2 = cli("upload", run, "--with-validators", "--json")
+    assert json.loads(fake2.output)["validators"] == {"ok": True, "created": 2}
 
 
 def test_a_rejected_token_is_named_in_human_and_json_output(no_env, tmp_path, monkeypatch):  # noqa: F811
@@ -215,12 +237,20 @@ def test_set_stack_without_a_token_stores_as_given_with_a_note(no_env, tmp_path)
     assert "not checked" in res.output
 
 
-def test_set_stack_fetcher_matching_none_or_several_names_the_entries(fake, tmp_path):  # noqa: F811
+def test_set_stack_targets_each_of_two_entries_with_the_same_fetcher(fake, tmp_path):  # noqa: F811
+    fake.add_stack("Prod"), fake.add_stack("Gov")
+    use = a_fetcher()
+    path = manifest_file(tmp_path, use, use)
+    assert cli("manifest", "set-stack", str(path), "Prod", "--fetcher", use).exit_code == 0
+    assert cli("manifest", "set-stack", str(path), "Gov", "--fetcher", f"{use}#1").exit_code == 0
+    first, second = read(path)["run"]["fetchers"]
+    assert first["paramify"]["stack_name"] == "Prod" and second["paramify"]["stack_name"] == "Gov"
+
+
+def test_set_stack_fetcher_matching_none_names_the_entries(fake, tmp_path):  # noqa: F811
     fake.add_stack("Prod")
     use = a_fetcher()
     path = manifest_file(tmp_path, use, use)
-    several = cli("manifest", "set-stack", str(path), "Prod", "--fetcher", use)
-    assert several.exit_code == 1 and f"{use}#1" in several.output
     none = cli("manifest", "set-stack", str(path), "Prod", "--fetcher", "nope")
     assert none.exit_code == 1 and "matches no entry" in none.output
     assert cli("manifest", "set-stack", str(path), "Prod", "--fetcher", f"{use}#1").exit_code == 0

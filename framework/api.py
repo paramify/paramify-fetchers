@@ -1638,18 +1638,19 @@ def set_stack(m: dict, stack: str, stack_name: Optional[str] = None, use: Option
     """Record the Paramify stack uploads go to: manifest-wide, or for one fetcher entry.
 
     Writes `run.paramify.stack` (and `stack_name` when given). With `use`, writes
-    that entry's `paramify` block instead. `use` is an entry key (`aws_iam_mfa`,
-    `aws_iam_mfa#1`) or a fetcher name; a name shared by several entries, or one
-    that matches none, raises ValueError naming the entry keys.
+    that entry's `paramify` block instead. `use` is an entry key (`aws_iam_mfa` is
+    the first entry for that fetcher, `aws_iam_mfa#1` the second) or a fetcher
+    name; one that matches none, or several, raises ValueError naming the entry keys.
     """
     if use is None:
         block = _run(m).setdefault("paramify", {})
     else:
         pairs = _keyed_entries(m)
-        hits = [(k, e) for k, e in pairs if e.get("use") == use] or [(k, e) for k, e in pairs if k == use]
+        hits = [(k, e) for k, e in pairs if k == use] or [(k, e) for k, e in pairs if e.get("use") == use]
         if len(hits) != 1:
             names = ", ".join(k for k, _ in hits) if hits else ", ".join(k for k, _ in pairs) or "none"
-            what = "matches several entries; name one by its entry key" if hits else "matches no entry"
+            what = (f"matches several entries; use {hits[0][0]} for the first, {hits[0][0]}#1 for the second"
+                    if hits else "matches no entry")
             raise ValueError(f"{use!r} {what} (entries: {names})")
         block = hits[0][1].setdefault("paramify", {})
     block["stack"] = stack

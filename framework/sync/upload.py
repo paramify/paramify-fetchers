@@ -365,6 +365,7 @@ def run_upload(
             root, online=False, custom_tags=custom_tags, with_validators=with_validators, on_event=emit)
         emit({"event": "upload_start", **base})
         report.bind(engine.plan(providers, setup.ctx, None), delivery)
+        emit({"event": "plan", "plan": report.plan.to_json()})
         report.planned()
         summary = {**base, **report.summary(None), "tags": report.tags(policy, None),
                    "results": report.results, "log_path": None}
@@ -407,6 +408,7 @@ def _apply_locked(
             run_state=state, on_event=emit, on_delivery_event=report.on_delivery,
         )
         report.bind(engine.plan(providers, setup.ctx, Reader(resources)), delivery)
+        emit({"event": "plan", "plan": report.plan.to_json()})
         outcomes = engine.apply(report.plan, providers, resources, on_event=report.on_engine)
     except BaseException as exc:
         error = str(exc) or type(exc).__name__
@@ -416,6 +418,9 @@ def _apply_locked(
                    "results": report.results, "outcomes": [asdict(o) for o in outcomes or []]}
         if error is not None:
             summary["ok"] = False
+        validators = next((o for o in outcomes or [] if o.action_id == "validators/registry"), None)
+        if validators is not None:
+            summary["validators"] = validators.result  # the validator sync's own summary
         summary["log_path"] = _write_log(setup.run_dir, summary, error)
     return summary
 

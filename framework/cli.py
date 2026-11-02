@@ -490,9 +490,9 @@ def _upload_stage(
     shape, and the exit codes identical between them, which is what a caller
     scripting either one depends on.
 
-    With `plan_fn` the stage plans first: `plan_only` prints the plan and stops
-    (read-only, online); otherwise the plan is printed before the upload applies
-    and the outcomes after it.
+    With `plan_only` the stage prints the plan (`plan_fn`, read-only, online) and
+    stops. Otherwise the upload prints the plan it makes, as a `plan` event, before
+    it applies, and the outcomes after it.
     """
     root = api.find_repo_root()
     if run_dir:
@@ -567,23 +567,34 @@ def _upload_stage(
             _err(f"{prefix}: {text}")
         raise typer.Exit(1)
 
-    if plan_fn is not None and (plan_only or not json_out):
+    if plan_fn is not None and plan_only:
         try:
             plan = plan_fn(
-                resolved_run_dir, root, config_path,
-                online=plan_only or not dry_run,
+                resolved_run_dir, root, config_path, online=True,
                 **{k: v for k, v in (upload_kwargs or {}).items() if k in _PLAN_KWARGS},
             )
         except Exception as e:  # noqa: BLE001
-            _fail_stage("Plan failed" if plan_only else "Upload failed", e)
-        if plan_only and json_out:
+            _fail_stage("Plan failed", e)
+        if json_out:
             typer.echo(json.dumps({"ok": True, "plan": plan.to_json()}, indent=2, default=str))
-            raise typer.Exit(0)
-        for line in render_plan(plan):
-            typer.echo(line)
-        if plan_only:
-            raise typer.Exit(0)
-        typer.echo("")
+        else:
+            for line in render_plan(plan):
+                typer.echo(line)
+        raise typer.Exit(0)
+
+    printer = _human_upload_printer(noun, log_name)
+    validator_printer = _human_validator_printer()
+
+    def on_human_event(ev: dict) -> None:
+        # The engine's plan, printed once as it is made; validator-sync progress as before.
+        if ev.get("event") == "plan":
+            for line in render_plan(Plan.from_json(ev["plan"])):
+                typer.echo(line)
+            typer.echo("")
+        elif str(ev.get("event", "")).startswith("sync_"):
+            validator_printer(ev)
+        else:
+            printer(ev)
 
     try:
         summary = upload_fn(
@@ -591,7 +602,7 @@ def _upload_stage(
             root,
             config_path,
             dry_run=dry_run,
-            on_event=None if json_out else _human_upload_printer(noun, log_name),
+            on_event=None if json_out else on_human_event,
             **(upload_kwargs or {}),
         )
     except Exception as e:  # noqa: BLE001
