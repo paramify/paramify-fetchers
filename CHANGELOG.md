@@ -19,7 +19,11 @@ schemas and the `paramify` CLI — not the internal code.
     type, allowed inbound internet flows on ports outside
     `NETWORK_TRAFFIC_EXPECTED_INBOUND_PORTS`, ports and outbound destinations new
     against the prior window, and days whose denied flows spike past
-    `NETWORK_TRAFFIC_DENIED_SPIKE_FACTOR` times the prior daily average.
+    `NETWORK_TRAFFIC_DENIED_SPIKE_FACTOR` times the prior daily average. Each table
+    is judged against its own prior window, so one without flows there (a VNet
+    flow log just turned on) adds no new port, destination or spike and is
+    counted apart. The traffic figures read null unless every table was read or
+    doesn't exist yet.
   - Front Door access logs: requests, status classes, top hosts, origins and client
     IPs per profile.
   - Front Door's App Service origins: requests from public addresses outside the

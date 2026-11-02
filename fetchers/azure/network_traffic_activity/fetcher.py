@@ -177,6 +177,7 @@ WS_QUERIED = "queried"
 WS_NOT_AUTHORIZED = "not_authorized"
 WS_NOT_FOUND = "not_found"
 WS_ERROR = "error"
+NOT_PRESENT = "not_present"
 ANALYTICS = "analytics"
 CURRENT = "current"
 PRIOR = "prior"
@@ -360,49 +361,68 @@ def _num(value) -> int:
 
 # --- traffic analytics ---
 
+def has_baseline(read: dict) -> bool:
+    """A table's own prior window holds flows."""
+    return any(r.get("Period") == PRIOR and _num(r.get("Flows")) and _day(r.get("Day"))
+               for r in read.get("flow_daily") or [])
+
+
+def _new(prior: int, current_with_baseline: int):
+    """Traffic seen only in tables without their own baseline is neither new nor old."""
+    if prior:
+        return False
+    return True if current_with_baseline else None
+
+
 def traffic_record(flow_reads: list[dict], days: int, ports_expected: list[int], spike_factor: int, sample: int) -> dict:
     """flow_reads: one entry per workspace table read, each holding its query rows."""
-    daily = [r for read in flow_reads for r in read.get("flow_daily") or []]
+    reads = [(read, has_baseline(read)) for read in flow_reads]
     totals: dict = defaultdict(Counter)
     flow_types: dict = defaultdict(Counter)
     denied_per_day: Counter = Counter()
+    compared_denied_per_day: Counter = Counter()
     prior_days = set()
-    for r in daily:
-        period = r.get("Period")
-        flows, allowed, denied = _num(r.get("Flows")), _num(r.get("Allowed")), _num(r.get("Denied"))
-        totals[period].update({"flows": flows, "allowed": allowed, "denied": denied})
-        if period == CURRENT:
-            ftype = r.get("FlowType") or "Unknown"
-            flow_types[ftype].update({"flows": flows, "allowed": allowed, "denied": denied})
-            day = _day(r.get("Day"))
-            if day:
-                denied_per_day[day] += denied
-            if r.get("Direction") == "I" and ftype in INTERNET_FLOW_TYPES:
-                totals["internet_inbound"]["allowed"] += allowed
-            if ftype == MALICIOUS:
-                totals["malicious"]["allowed"] += allowed
-        elif period == PRIOR and flows:
-            day = _day(r.get("Day"))
-            if day:
-                prior_days.add(day)
-    baseline = bool(prior_days)
+    for read, based in reads:
+        for r in read.get("flow_daily") or []:
+            period = r.get("Period")
+            flows, allowed, denied = _num(r.get("Flows")), _num(r.get("Allowed")), _num(r.get("Denied"))
+            totals[period].update({"flows": flows, "allowed": allowed, "denied": denied})
+            if period == CURRENT:
+                ftype = r.get("FlowType") or "Unknown"
+                flow_types[ftype].update({"flows": flows, "allowed": allowed, "denied": denied})
+                day = _day(r.get("Day"))
+                if day:
+                    denied_per_day[day] += denied
+                    if based:
+                        compared_denied_per_day[day] += denied
+                if r.get("Direction") == "I" and ftype in INTERNET_FLOW_TYPES:
+                    totals["internet_inbound"]["allowed"] += allowed
+                if ftype == MALICIOUS:
+                    totals["malicious"]["allowed"] += allowed
+            elif period == PRIOR and flows:
+                day = _day(r.get("Day"))
+                if day:
+                    prior_days.add(day)
+    baseline = any(based for _, based in reads)
     # Averaged over the prior days that hold records, so a log turned on mid-window doesn't dilute the baseline.
     baseline_daily_denied = round(totals[PRIOR]["denied"] / min(len(prior_days), days), 1) if baseline else None
     threshold = spike_factor * max(baseline_daily_denied or 0, DENIED_SPIKE_FLOOR) if baseline else None
-    spikes = sorted(d for d, n in denied_per_day.items() if threshold is not None and n > threshold)
+    spikes = sorted(d for d, n in compared_denied_per_day.items() if threshold is not None and n > threshold)
 
     ports: dict = defaultdict(Counter)
-    for r in (r for read in flow_reads for r in read.get("flow_ports") or []):
-        key = (r.get("Direction"), r.get("Protocol"), r.get("DestPort"), bool(r.get("Internet")))
-        ports[key].update({"current": _num(r.get("CurrentAllowed")), "prior": _num(r.get("PriorAllowed")),
-                           "sources": _num(r.get("Sources"))})
+    for read, based in reads:
+        for r in read.get("flow_ports") or []:
+            key = (r.get("Direction"), r.get("Protocol"), r.get("DestPort"), bool(r.get("Internet")))
+            current = _num(r.get("CurrentAllowed"))
+            ports[key].update({"current": current, "current_with_baseline": current if based else 0,
+                               "prior": _num(r.get("PriorAllowed")), "sources": _num(r.get("Sources"))})
     port_records = sorted(
         ({"direction": d, "protocol": p, "port": port, "from_internet": internet, "allowed_flows": c["current"],
-          "distinct_sources": c["sources"], "new": baseline and c["prior"] == 0}
+          "distinct_sources": c["sources"], "new": _new(c["prior"], c["current_with_baseline"])}
          for (d, p, port, internet), c in ports.items() if c["current"] > 0),
         key=lambda x: (-x["allowed_flows"], x["direction"] or "", x["port"] if x["port"] is not None else -1),
     )
-    new_ports = [p for p in port_records if p["new"]]
+    new_ports = [p for p in port_records if p["new"] is True]
     unexpected = sorted({
         p["port"] for p in port_records
         if p["direction"] == "I" and p["from_internet"] and p["port"] is not None and p["port"] not in ports_expected
@@ -411,15 +431,18 @@ def traffic_record(flow_reads: list[dict], days: int, ports_expected: list[int],
     destinations: Counter = Counter()
     new_destinations: Counter = Counter()
     new_top = []
-    for r in (r for read in flow_reads for r in read.get("flow_destinations") or []):
-        ftype = r.get("FlowType") or "Unknown"
-        destinations[ftype] += _num(r.get("Destinations"))
-        new_destinations[ftype] += _num(r.get("NewDestinations"))
-        for d in dynamic_list(r.get("NewTop")):
-            ip = ip_text(d.get("destination")) if isinstance(d, dict) else None
-            if ip:
-                new_top.append({"destination": ip, "flow_type": ftype, "allowed_flows": _num(d.get("flows")),
-                                "first_seen": d.get("first_seen")})
+    for read, based in reads:
+        for r in read.get("flow_destinations") or []:
+            ftype = r.get("FlowType") or "Unknown"
+            destinations[ftype] += _num(r.get("Destinations"))
+            if not based:
+                continue
+            new_destinations[ftype] += _num(r.get("NewDestinations"))
+            for d in dynamic_list(r.get("NewTop")):
+                ip = ip_text(d.get("destination")) if isinstance(d, dict) else None
+                if ip:
+                    new_top.append({"destination": ip, "flow_type": ftype, "allowed_flows": _num(d.get("flows")),
+                                    "first_seen": d.get("first_seen")})
     new_top.sort(key=lambda d: (-d["allowed_flows"], d["destination"]))
 
     top = sorted(
@@ -432,6 +455,8 @@ def traffic_record(flow_reads: list[dict], days: int, ports_expected: list[int],
     )[:sample]
     return {
         "baseline_available": baseline,
+        "tables_with_baseline": sum(1 for _, based in reads if based),
+        "tables_without_baseline": sum(1 for _, based in reads if not based),
         "prior_window_days_with_records": len(prior_days),
         "flows": totals[CURRENT]["flows"],
         "allowed_flows": totals[CURRENT]["allowed"],
@@ -441,6 +466,7 @@ def traffic_record(flow_reads: list[dict], days: int, ports_expected: list[int],
         "internet_inbound_allowed_flows": totals["internet_inbound"]["allowed"],
         "malicious_allowed_flows": totals["malicious"]["allowed"],
         "denied_flows_per_day": dict(sorted(denied_per_day.items())),
+        "denied_flows_per_day_in_tables_with_baseline": dict(sorted(compared_denied_per_day.items())),
         "baseline_daily_denied_flows": baseline_daily_denied,
         "denied_spike_threshold": threshold,
         "denied_spike_days": spikes if baseline else None,
@@ -614,9 +640,9 @@ def summarize(flow_logs: list[dict], traffic: dict, flow_tables: list[dict], pro
     status = Counter(w["status"] for w in workspaces)
     exporting_profiles = [p for p in profiles if p["access_log_exported"]]
     exporting_apps = [a for a in apps if a["http_logs_exported"]]
-    flows_read = any(t["status"] == WS_QUERIED for t in flow_tables)
-    flows_known = bool(flow_tables) and all(t["status"] == WS_QUERIED for t in flow_tables)
-    t = traffic if flows_read else {}
+    # A table that doesn't exist yet holds no flows; any other unread table leaves the traffic figures unknown.
+    flows_known = bool(flow_tables) and all(t["status"] in (WS_QUERIED, NOT_PRESENT) for t in flow_tables)
+    t = traffic if flows_known else {}
     return {
         "lookback_days": days,
         "expected_inbound_ports": ports_expected,
@@ -628,9 +654,10 @@ def summarize(flow_logs: list[dict], traffic: dict, flow_tables: list[dict], pro
         "traffic_tables": len(flow_tables),
         "traffic_tables_read": sum(1 for x in flow_tables if x["status"] == WS_QUERIED),
         "traffic_tables_skipped_basic_plan": sum(1 for x in flow_tables if x["status"] == "skipped_basic_plan"),
-        "traffic_tables_not_present": sum(1 for x in flow_tables if x["status"] == "not_present"),
+        "traffic_tables_not_present": sum(1 for x in flow_tables if x["status"] == NOT_PRESENT),
+        "traffic_tables_without_baseline": sum(1 for x in flow_tables if x.get("baseline_available") is False),
         "traffic_read_in_full": flows_known,
-        "traffic_baseline_available": t.get("baseline_available") if flows_read else None,
+        "traffic_baseline_available": t.get("baseline_available"),
         "flows": t.get("flows"),
         "allowed_flows": t.get("allowed_flows"),
         "denied_flows": t.get("denied_flows"),
@@ -739,7 +766,7 @@ def flow_table_status(ws: dict, table: str) -> str:
         return ws["status"]
     meta = next((t for t in ws["tables"] if t["name"] == table), None)
     if meta is None or not meta["exists"]:
-        return "not_present"
+        return NOT_PRESENT
     if table in ws.get("skipped_tables", ()):
         return "skipped_basic_plan"
     return WS_QUERIED if table in ws.get("read_tables", ()) else WS_ERROR
@@ -880,10 +907,12 @@ def collect(client, subscription_id: str, collector) -> tuple:
         ws = workspaces[wkey]
         status = flow_table_status(ws, table)
         meta: dict = next((t for t in ws["tables"] if t["name"] == table), {})
+        read = {key: ws.get(f"{table}:{key}") or [] for key in FLOW_QUERIES} if status == WS_QUERIED else None
         flow_table_records.append({"workspace_id": ws["workspace_id"], "table": table, "status": status,
-                                   "plan": meta.get("plan"), "retention_in_days": meta.get("retention_in_days")})
-        if status == WS_QUERIED:
-            flow_reads.append({key: ws.get(f"{table}:{key}") or [] for key in FLOW_QUERIES})
+                                   "plan": meta.get("plan"), "retention_in_days": meta.get("retention_in_days"),
+                                   "baseline_available": has_baseline(read) if read is not None else None})
+        if read is not None:
+            flow_reads.append(read)
     traffic = traffic_record(flow_reads, days, ports_expected, spike_factor, sample)
 
     profile_records = sorted(

@@ -227,6 +227,50 @@ def test_new_destinations_parse_json_text_and_drop_non_addresses():
     assert [d["destination"] for d in t["new_outbound_destinations_top"]] == ["198.51.100.7", "203.0.113.9"]
 
 
+def test_a_table_without_its_own_baseline_adds_nothing_new():
+    based = {"flow_daily": [day_row("2026-01-01", "prior", flows=100, allowed=50, denied=50),
+                            day_row("2026-01-09", "current", flows=100, allowed=50, denied=50)],
+             "flow_ports": [{"Direction": "I", "Protocol": "T", "DestPort": 22, "Internet": True, "CurrentAllowed": 3,
+                             "PriorAllowed": 0, "Sources": 1}],
+             "flow_destinations": [{"FlowType": "ExternalPublic", "Destinations": 2, "NewDestinations": 1,
+                                    "NewTop": [{"destination": "203.0.113.9", "flows": 4}]}]}
+    fresh = {"flow_daily": [day_row("2026-01-09", "current", flows=5000, denied=5000)],
+             "flow_ports": [{"Direction": "I", "Protocol": "T", "DestPort": 8443, "Internet": True, "CurrentAllowed": 9,
+                             "PriorAllowed": 0, "Sources": 4},
+                            {"Direction": "I", "Protocol": "T", "DestPort": 22, "Internet": True, "CurrentAllowed": 1,
+                             "PriorAllowed": 0, "Sources": 1}],
+             "flow_destinations": [{"FlowType": "ExternalPublic", "Destinations": 30, "NewDestinations": 30,
+                                    "NewTop": [{"destination": "198.51.100.7", "flows": 99}]}]}
+    t = nta.traffic_record([based, fresh], days=7, ports_expected=[443], spike_factor=3, sample=5)
+    assert (t["baseline_available"], t["tables_with_baseline"], t["tables_without_baseline"]) == (True, 1, 1)
+    assert nta.has_baseline(based) and not nta.has_baseline(fresh)
+    assert [p["port"] for p in t["new_ports"]] == [22]
+    assert {p["port"]: p["new"] for p in t["top_allowed_ports"]} == {22: True, 8443: None}
+    assert t["unexpected_inbound_ports"] == [22, 8443]
+    assert (t["outbound_destinations"], t["new_outbound_destinations"]) == (32, 1)
+    assert [d["destination"] for d in t["new_outbound_destinations_top"]] == ["203.0.113.9"]
+    assert t["denied_flows_per_day"] == {"2026-01-09": 5050}
+    assert t["denied_flows_per_day_in_tables_with_baseline"] == {"2026-01-09": 50}
+    assert t["denied_spike_days"] == []
+
+
+def test_traffic_figures_need_every_table_read():
+    read = {"flow_daily": [day_row("2026-01-01", "prior", flows=10, allowed=10),
+                           day_row("2026-01-09", "current", flows=50, allowed=50)]}
+    traffic = nta.traffic_record([read], days=7, ports_expected=[443], spike_factor=3, sample=5)
+    queried = {"status": nta.WS_QUERIED, "baseline_available": True}
+    partial = nta.summarize([], traffic, [queried, {"status": nta.WS_ERROR, "baseline_available": None}],
+                            [], [], [], 7, [443])
+    assert partial["traffic_read_in_full"] is False
+    assert all(partial[k] is None for k in ("flows", "malicious_allowed_flows", "unexpected_inbound_ports_count",
+                                            "traffic_baseline_available", "new_ports_count", "denied_spike_days_count"))
+    full = nta.summarize([], traffic, [queried, {"status": nta.NOT_PRESENT, "baseline_available": None}],
+                         [], [], [], 7, [443])
+    assert full["traffic_read_in_full"] is True
+    assert (full["flows"], full["malicious_allowed_flows"], full["unexpected_inbound_ports_count"]) == (50, 0, 0)
+    assert full["traffic_baseline_available"] is True and full["traffic_tables_without_baseline"] == 0
+
+
 def test_top_flows_keep_addresses_only():
     rows = [{"Direction": "I", "FlowType": "ExternalPublic", "Src": "203.0.113.5", "Dest": "", "DestPort": 443,
              "Protocol": "T", "Flows": 10, "Allowed": 10, "Denied": 0, "LastSeen": "2026-01-09T00:00:00Z"},
@@ -501,6 +545,8 @@ def test_collect_wires_flows_front_door_and_origins(monkeypatch):
     assert summary["flow_logs"] == 3 and summary["flow_logs_with_traffic_analytics"] == 2
     assert [(t["table"], t["status"]) for t in results["traffic_tables"]] == [
         (nta.NSG_TABLE, nta.WS_QUERIED), (nta.VNET_TABLE, "not_present")]
+    assert [t["baseline_available"] for t in results["traffic_tables"]] == [False, None]
+    assert summary["traffic_read_in_full"] is True and summary["traffic_tables_without_baseline"] == 1
     assert summary["front_door_profiles"] == 1 and summary["origin_apps"] == 1
     assert results["front_door_backend_prefixes"] == 2
     assert results["origin_apps"][0]["front_door_connection"] == "private_link" and summary["origin_apps_private_link"] == 1

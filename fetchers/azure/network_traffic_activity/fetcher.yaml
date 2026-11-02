@@ -117,23 +117,24 @@ evidence_set:
     - traffic_tables_read — Number of Traffic Analytics tables read
     - traffic_tables_skipped_basic_plan — Number of Traffic Analytics tables skipped because they are on the Basic or Auxiliary plan, which bills per GB scanned, and query_basic_tables is off
     - traffic_tables_not_present — Number of Traffic Analytics tables that don't exist in their workspace yet, because Traffic Analytics has written nothing there
-    - traffic_read_in_full — True if every Traffic Analytics table was read; false if any wasn't, or there is no table to read
+    - traffic_tables_without_baseline — Number of Traffic Analytics tables read whose own prior window has no flows, such as a VNet flow log turned on during the window; their traffic counts toward no new port, new destination or denied-flow spike
+    - traffic_read_in_full — True if every Traffic Analytics table was read or doesn't exist yet; false if any other table wasn't read, or there is no table to read. Every traffic figure below reads null unless this is true; results.traffic keeps the figures from the tables that were read
 
     What traffic did the flow logs see?
-    - flows — Number of flows in the window, with each public address in a Traffic Analytics record counted on its own; null when no Traffic Analytics table was read
-    - allowed_flows — Number of allowed flows in the window; null when no Traffic Analytics table was read
-    - denied_flows — Number of denied flows in the window; null when no Traffic Analytics table was read
-    - internet_inbound_allowed_flows — Number of allowed inbound flows from the internet in the window (Traffic Analytics flow types ExternalPublic and MaliciousFlow); null when no Traffic Analytics table was read
-    - malicious_allowed_flows — Number of allowed flows in the window to or from an address Microsoft's threat intelligence reports as malicious (flow type MaliciousFlow); null when no Traffic Analytics table was read
+    - flows — Number of flows in the window, with each public address in a Traffic Analytics record counted on its own; null unless traffic_read_in_full
+    - allowed_flows — Number of allowed flows in the window; null unless traffic_read_in_full
+    - denied_flows — Number of denied flows in the window; null unless traffic_read_in_full
+    - internet_inbound_allowed_flows — Number of allowed inbound flows from the internet in the window (Traffic Analytics flow types ExternalPublic and MaliciousFlow); null unless traffic_read_in_full
+    - malicious_allowed_flows — Number of allowed flows in the window to or from an address Microsoft's threat intelligence reports as malicious (flow type MaliciousFlow); null unless traffic_read_in_full
 
     Is there traffic that shouldn't be there?
-    - unexpected_inbound_ports — List of destination ports outside expected_inbound_ports that allowed inbound internet flows reached in the window; null when no Traffic Analytics table was read
-    - unexpected_inbound_ports_count — Number of destination ports outside expected_inbound_ports that allowed inbound internet flows reached in the window; null when no Traffic Analytics table was read
-    - traffic_baseline_available — True if the prior window has any flows; false if it has none; null when no Traffic Analytics table was read. Without a baseline, new_ports_count, new_outbound_destinations and denied_spike_days read null
-    - new_ports_count — Number of direction, protocol and destination port combinations with allowed flows in the window and none in the prior window; null without a baseline
-    - outbound_destinations — Number of destination addresses that allowed outbound flows reached in the window, counted once per flow type and Traffic Analytics table; null when no Traffic Analytics table was read
-    - new_outbound_destinations — Number of destination addresses that allowed outbound flows reached in the window but not in the prior window, counted once per flow type and Traffic Analytics table; null without a baseline
-    - denied_spike_days — List of days in the window whose denied flows exceed the spike threshold: denied_spike_factor times the larger of the prior window's daily average of denied flows and 100 flows (300 at the default factor), averaged over the prior-window days that hold records; null without a baseline
+    - unexpected_inbound_ports — List of destination ports outside expected_inbound_ports that allowed inbound internet flows reached in the window; null unless traffic_read_in_full
+    - unexpected_inbound_ports_count — Number of destination ports outside expected_inbound_ports that allowed inbound internet flows reached in the window; null unless traffic_read_in_full
+    - traffic_baseline_available — True if any Traffic Analytics table read has flows in its own prior window; false if none has; null unless traffic_read_in_full. Without a baseline, new_ports_count, new_outbound_destinations and denied_spike_days read null
+    - new_ports_count — Number of direction, protocol and destination port combinations with allowed flows in the window in a table that has its own baseline, and none in the prior window; a combination seen only in tables without a baseline isn't counted; null without a baseline
+    - outbound_destinations — Number of destination addresses that allowed outbound flows reached in the window, counted once per flow type and Traffic Analytics table; null unless traffic_read_in_full
+    - new_outbound_destinations — Number of destination addresses that allowed outbound flows reached in the window but not in the prior window, counted once per flow type and Traffic Analytics table, from the tables that have their own baseline only; null without a baseline
+    - denied_spike_days — List of days in the window whose denied flows, in the tables that have their own baseline, exceed the spike threshold: denied_spike_factor times the larger of the prior window's daily average of denied flows and 100 flows (300 at the default factor), averaged over the prior-window days that hold records; null without a baseline
     - denied_spike_days_count — Number of days in the window whose denied flows exceed the spike threshold; null without a baseline
 
     Do Front Door's access logs show its requests?
