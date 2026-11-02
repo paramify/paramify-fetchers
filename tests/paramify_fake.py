@@ -20,6 +20,13 @@ _EVIDENCE_POST_KEYS = frozenset({
 })
 
 
+def _matches(wanted: Any, value: str) -> bool:
+    """A query filter: absent matches all; a list (a repeated parameter) matches any of its values."""
+    if wanted is None:
+        return True
+    return value in wanted if isinstance(wanted, (list, tuple)) else value == wanted
+
+
 class FakeResponse:
     def __init__(self, status_code: int, payload: Any = None, text: Optional[str] = None) -> None:
         self.status_code = status_code
@@ -167,7 +174,7 @@ class FakeParamify:
             rows = [a for a in self._artifacts
                     if a["_evidenceId"] == m.group(1)
                     and params.get("batchId") in (None, a["batchId"])
-                    and params.get("originalFileName") in (None, a["originalFileName"])]
+                    and _matches(params.get("originalFileName"), a["originalFileName"])]
             return FakeResponse(200, {"artifacts": [{k: v for k, v in a.items() if k != "_evidenceId"} for a in rows]})
         m = re.fullmatch(r"/custom-tags/([^/]+)/([^/]+)", path)
         if method == "POST" and m:

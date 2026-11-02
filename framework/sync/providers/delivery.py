@@ -4,9 +4,10 @@ For each entry, in this order (the first refusal ends the entry):
 
 1. channel: by the evidence set's channels and the entry's stack;
 2. artifact request on that channel: the current one, else the latest past one;
-3. batch: this entry's batch for this run is looked for among ALL batches of
-   the evidence set, so a second upload of a run skips or resumes it, even
-   after the cycle rolled over, and never makes another;
+3. batch: this entry's batch for this run is found anywhere on the evidence
+   set, through one artifacts query by file name, so a second upload of a run
+   skips or resumes it, even after the cycle rolled over, and never makes
+   another;
 4. WAF: a file the production WAF would block is dropped at plan time.
 
 The rules live in `delivery_routing` as pure functions; `diff` composes them.
@@ -18,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+from framework.paramify.client import ApiError, ErrorKind
 from framework.paramify.resources import (
     Artifact,
     ArtifactRequest,
@@ -32,6 +34,7 @@ from framework.sync.providers.delivery_routing import (
     DONE,
     Refusal,
     attribute,
+    own_batch_ids,
     resolve_channel,
     resolve_request,
     stack_drift,
@@ -207,15 +210,41 @@ class DeliveryProvider:
         channel = resolve_channel(e, ev, obs.stacks)
         if isinstance(channel, Refusal):
             return obs
+        target: Optional[ArtifactRequest] = None
         if channel is not None:
             obs.requests = reader.artifact_requests(ev.id)
             obs.current_ids = {r.id for r in reader.artifact_requests(ev.id, current=True)}
-            if isinstance(resolve_request(e, channel, obs.requests, obs.current_ids, self._today()), Refusal):
+            request = resolve_request(e, channel, obs.requests, obs.current_ids, self._today())
+            if isinstance(request, Refusal):
                 return obs
-        # Every batch of the set, on any request: this run's batch may sit on an
-        # earlier request if the cycle rolled over since the last upload.
-        obs.batches = reader.batches(evidence_id=ev.id)
-        obs.artifacts = {b.id: reader.artifacts(ev.id, batch_id=b.id) for b in obs.batches}
+            target = request
+        # This run's batch, wherever it is (the cycle may have rolled over since
+        # the last upload): one query by this entry's file names, then only the
+        # batches those artifacts name. Reads stay flat as the set's history grows.
+        names = [f.original_file_name for f in e.files if f.skip_reason is None]
+        found = reader.artifacts(ev.id, original_file_names=names)
+        candidates = own_batch_ids(found, e)
+        if e.recorded_batch_id and e.recorded_batch_id not in candidates:
+            candidates.append(e.recorded_batch_id)  # may still have no artifacts
+        for bid in candidates:
+            try:
+                b = reader.batch(bid)
+            except ApiError as exc:
+                if exc.kind is not ErrorKind.MISSING:
+                    raise
+                continue  # a stale id, e.g. from a run uploaded to another workspace
+            if b.evidence_id == ev.id:
+                obs.batches.append(b)
+                obs.artifacts[b.id] = [a for a in found if a.batch_id == b.id]
+        # Other runs' open batches, for the warning: only on the chosen target.
+        if target is not None:
+            open_here = reader.batches(artifact_request_id=target.id, status="OPEN")
+        else:
+            open_here = [b for b in reader.batches(evidence_id=ev.id, status="OPEN") if b.artifact_request_id is None]
+        for b in open_here:
+            if b.id not in obs.artifacts:
+                obs.batches.append(b)
+            obs.artifacts[b.id] = reader.artifacts(ev.id, batch_id=b.id)
         return obs
 
     # -- diff ------------------------------------------------------------- #

@@ -169,9 +169,20 @@ class Resources:
     def batch(self, batch_id: str) -> Batch:
         return _batch(self._client.get(f"/batches/{batch_id}"))
 
-    def artifacts(self, evidence_id: str, *, batch_id: Optional[str] = None) -> List[Artifact]:
-        params = {"batchId": batch_id} if batch_id else None
-        body = self._client.get(f"/evidence/{evidence_id}/artifacts", params) or {}
+    def artifacts(
+        self,
+        evidence_id: str,
+        *,
+        batch_id: Optional[str] = None,
+        original_file_names: Optional[Sequence[str]] = None,
+    ) -> List[Artifact]:
+        """Artifacts of an evidence set; `original_file_names` is one query (a repeated parameter)."""
+        params: Dict[str, Any] = {}
+        if batch_id:
+            params["batchId"] = batch_id
+        if original_file_names:
+            params["originalFileName"] = list(original_file_names)
+        body = self._client.get(f"/evidence/{evidence_id}/artifacts", params or None) or {}
         return [_artifact(a) for a in body.get("artifacts") or []]
 
     def create_evidence(self, body: Dict[str, Any]) -> EvidenceSet:
@@ -253,5 +264,14 @@ class Reader:
     def batch(self, batch_id: str) -> Batch:
         return self._cached("batch", batch_id)  # type: ignore[no-any-return]
 
-    def artifacts(self, evidence_id: str, *, batch_id: Optional[str] = None) -> List[Artifact]:
-        return list(self._cached("artifacts", evidence_id, batch_id=batch_id))
+    def artifacts(
+        self,
+        evidence_id: str,
+        *,
+        batch_id: Optional[str] = None,
+        original_file_names: Optional[Sequence[str]] = None,
+    ) -> List[Artifact]:
+        return list(self._cached(
+            "artifacts", evidence_id, batch_id=batch_id,
+            original_file_names=list(original_file_names) if original_file_names else None,
+        ))

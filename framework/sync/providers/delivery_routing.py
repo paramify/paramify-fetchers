@@ -65,7 +65,7 @@ def resolve_channel(entry: EntryDesired, evidence: Optional[EvidenceSet], stacks
         return None
     if len(channels) == 1:
         only = channels[0]
-        if not entry.stack:
+        if not entry.stack or entry.stack == only.stack_id:
             return only
         found = _find_stack(entry.stack, stacks)
         if isinstance(found, Refusal):
@@ -149,6 +149,17 @@ def _of_entry(tokens: List[str], entry: EntryDesired) -> bool:
     if _token(tokens, "entry") is not None:
         return f"entry={entry.entry_key}" in tokens
     return entry.entry_key == entry.use and f"fetcher={entry.use}" in tokens
+
+
+def own_batch_ids(artifacts: List[Artifact], entry: EntryDesired) -> List[str]:
+    """Ids of the batches holding an artifact of this entry from this run, in first-seen order."""
+    ids: List[str] = []
+    for a in artifacts:
+        tokens = note_tokens(a.note)
+        if (a.batch_id and a.batch_id not in ids and entry.run_id
+                and _token(tokens, "run_id") == entry.run_id and _of_entry(tokens, entry)):
+            ids.append(a.batch_id)
+    return ids
 
 
 def attribute(batches: List[Batch], artifacts: Dict[str, List[Artifact]], entry: EntryDesired) -> Attribution:

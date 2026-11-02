@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import requests
 
 from framework.paramify.client import ApiError, Client
 from framework.paramify.resources import Reader, Resources
@@ -72,6 +73,19 @@ def test_batch_upload_submit_round_trip(fake, res):
     assert art.batch_id == batch.id
     assert res.batch(batch.id).artifact_count == 1
     assert res.submit_batch(batch.id).status == "APPROVED"
+
+
+def test_artifacts_filter_by_original_file_names(fake, res):
+    ev, req = _request_for(fake)
+    batch = res.create_batch(artifact_request_id=req.id)
+    for name in ("a.json", "b.json", "c.json"):
+        res.upload_to_batch(batch.id, name, b"{}", {})
+    got = res.artifacts(ev.id, original_file_names=["a.json", "c.json"])
+    assert [a.original_file_name for a in got] == ["a.json", "c.json"]
+    assert fake.calls[-1] == ("GET", f"/evidence/{ev.id}/artifacts", {"originalFileName": ["a.json", "c.json"]})
+    # The 0.14.0 parameter is an array in form style: one repeated key per name.
+    url = requests.Request("GET", "https://x.test/a", params={"originalFileName": ["a.json", "c.json"]}).prepare().url
+    assert url == "https://x.test/a?originalFileName=a.json&originalFileName=c.json"
 
 
 def test_manual_approval_submits_to_submitted_and_closed_batch_refuses(fake, res):

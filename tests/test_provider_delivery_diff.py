@@ -139,6 +139,14 @@ def test_channels_one_matching_stack(tmp_path):
         assert a.summary == "deliver 2 files to AR-41 (stack Prod, channel CHN-1): new batch"
 
 
+def test_channels_one_on_configured_stack_id_missing_from_stack_list(tmp_path):
+    gone = Channel("ch-9", "CHN-9", "st-gone")
+    e = entry(tmp_path, stack="st-gone", no_request="evidence")
+    assert resolve_channel(e, evidence(gone), [PROD]) == gone
+    a = plan_one(e, observed(evidence(gone), stacks=[PROD], requests=[], current=[]))
+    assert a.verb == "deliver" and a.changes["channel"] == "CHN-9"
+
+
 def test_channels_one_other_stack_refuses(tmp_path):
     a = plan_one(entry(tmp_path, stack="GovCloud"), observed(evidence(CH_P), stacks=[PROD, GOV]))
     assert a.verb == "refuse"
@@ -594,7 +602,68 @@ def test_observe_rollover_finds_this_runs_batch_on_the_old_request(tmp_path):
     res.submit_batch(made.id)
     [a] = plan_run(fake, tmp_path)
     assert a.verb == "noop" and a.payload["batch_id"] == made.id
-    assert ("GET", "/batches", {"evidenceId": ev.id, "page": 1, "pageSize": 100}) in fake.calls
+    assert ("GET", f"/evidence/{ev.id}/artifacts", {"originalFileName": ["a.json"]}) in fake.calls
+    assert ("GET", f"/batches/{made.id}", {}) in fake.calls
+
+
+def test_read_count_is_bounded_by_open_batches_on_the_target(tmp_path):
+    fake = FakeParamify()
+    st = fake.add_stack("Prod")
+    ev = fake.add_evidence("EVD-X", channels=[st.id], approval="MANUAL")
+    ch = ev.channels[0].id
+    old = fake.add_request(ev.id, ch, date(2026, 9, 1), date(2026, 9, 20))
+    now = fake.add_request(ev.id, ch, date(2026, 10, 21), date(2026, 11, 15))
+    build(tmp_path, {"a.json": env(fetcher="x"), "b.json": env(fetcher="x")},
+          [inv("x", ["a.json", "b.json"])], {"x": {"use": "x"}})
+    res = Resources(Client("t", "https://api.example.test", session=fake.session))
+
+    def history(n, ar=None, submit=True):
+        b = res.create_batch(artifact_request_id=ar) if ar else res.create_batch(evidence_id=ev.id)
+        res.upload_to_batch(b.id, "a.json", b"{}", {"note": f"fetcher=x; run_id=R{n}; entry=x"})
+        if submit:
+            res.submit_batch(b.id)
+        return b
+
+    for n in range(45):
+        history(n, old.id)
+    open_on_target = [history(n, now.id, submit=False) for n in range(45, 48)]
+    history(48, now.id)
+    history(49, submit=False)  # open, but evidence level: not the chosen target
+    mine = res.create_batch(artifact_request_id=now.id)
+    res.upload_to_batch(mine.id, "a.json", b"{}", {"note": "fetcher=x; run_id=RID; entry=x"})
+    fake.calls.clear()
+
+    [a] = plan_run(fake, tmp_path)
+    assert a.verb == "deliver" and a.payload["resume_batch_id"] == mine.id
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["b.json"]
+    assert len(a.warnings) == 3 and all("is still open" in w or "has been open" in w for w in a.warnings)
+    artifact_reads = [c for c in fake.calls if c[1] == f"/evidence/{ev.id}/artifacts"]
+    open_count = len(open_on_target) + 1  # the other runs' open batches and this run's
+    assert len(artifact_reads) == 1 + open_count
+    assert artifact_reads[0][2] == {"originalFileName": ["a.json", "b.json"]}
+    listings = [c[2] for c in fake.calls if c[1] == "/batches"]
+    assert listings and all(p.get("status") == "OPEN" for p in listings)
+    assert [c[1] for c in fake.calls if c[1].startswith("/batches/")] == [f"/batches/{mine.id}"]
+
+
+def test_observe_recorded_empty_batch_is_resumed(tmp_path):
+    fake = FakeParamify()
+    ev = fake.add_evidence("EVD-X")
+    build(tmp_path, {"a.json": env(fetcher="x")}, [inv("x", ["a.json"])], {"x": {"use": "x"}})
+    res = Resources(Client("t", "https://api.example.test", session=fake.session))
+    empty = res.create_batch(evidence_id=ev.id)
+    RunState(tmp_path).record_batch("x", empty.id)
+    [a] = plan_run(fake, tmp_path)
+    assert a.verb == "deliver" and a.payload["resume_batch_id"] == empty.id
+
+
+def test_observe_stale_recorded_batch_is_ignored(tmp_path):
+    fake = FakeParamify()
+    fake.add_evidence("EVD-X")
+    build(tmp_path, {"a.json": env(fetcher="x")}, [inv("x", ["a.json"])], {"x": {"use": "x"}})
+    RunState(tmp_path).record_batch("x", "bt-from-another-workspace")
+    [a] = plan_run(fake, tmp_path)
+    assert a.verb == "deliver" and a.payload["resume_batch_id"] is None
 
 
 @pytest.mark.parametrize("bad", ["../", "/etc/passwd", "/bin/sh", "/bin/bash", "<script"])
