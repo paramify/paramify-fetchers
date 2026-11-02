@@ -12,6 +12,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
+  matches each Azure change made outside a pipeline in `azure_change_provenance`
+  (by default, direct edits and ARM deployments a person ran) to the
+  `azure_devops_work_items` records that name its caller and cover the time it
+  was made. Each change is `matched`, `ambiguous`, `unmatched`, `excluded` (a
+  caller in `CHANGE_RECORD_EXCLUDED_CALLERS`), `application` (reported apart,
+  needing no record), or `no_caller`. A callerless row takes its caller from the
+  nearest named change to the same resource within 10 minutes, as
+  `azure_change_provenance` takes its origin, or else from its deployment. The
+  checked origins, record types, which people on an item count (by default its
+  assignee, creator or closer), and the hours before creation and after
+  finishing that an item covers are settings; an emergency type (default
+  `Hotfix`) may be filed up to 72 hours after the change, and an item still
+  open covers changes only up to `CHANGE_RECORD_OPEN_ITEM_DAYS` (30) days after
+  it was created or last changed. The summary counts
+  each status, overall and by origin, the changes without a record, recorded
+  without approval and without an approved record, the approved changes whose
+  non-emergency record was approved after the change, the changes read and the
+  shortest change window read (`change_lookback_days`), so a narrow window
+  can't pass as no changes, and `work_items_cover_changes`, false when the work
+  items window starts too late for the earliest change.
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
@@ -97,6 +118,18 @@ schemas and the `paramify` CLI — not the internal code.
     (null when the list that shows them failed); `excluded_function_apps` and
     `excluded_deployment_slots` keep their meaning and now count only in-scope
     items this fetcher doesn't assess.
+  - `azure_app_service_deployments` 0.2.0: web apps, function apps and
+    deployment slots (a slot follows its app), taken out before the per-app
+    reads, so an excluded app's slots are neither read nor compared with
+    production. Each Activity Log deployment request is put on the site of the
+    event naming its requester first; one on an excluded app or slot, or on a
+    site the run didn't list whose resource group or id a pattern matches,
+    leaves every count, and `results.activity_log.requests_on_excluded_sites`
+    counts it. A swap between in-scope production and an excluded slot counts
+    once, on the side whose event names the requester. As in `azure_app_service_backups`, the counts are
+    `boundary_excluded_web_apps`, `boundary_excluded_function_apps` and
+    `boundary_excluded_deployment_slots`; `excluded_function_apps` keeps its
+    meaning and now counts only in-scope sites that aren't web apps.
   - `azure_network_security_groups` 0.4.0: network security groups, virtual
     networks (with their subnets) and network interfaces; a NIC also leaves with
     the virtual network its subnets sit in, or with a subnet an `id:` pattern
@@ -544,6 +577,38 @@ schemas and the `paramify` CLI — not the internal code.
   one, and assignments are not affected. One change to the 0.3.0 fields: when the
   assignment list fails, every assignment summary count reads null instead of 0
   (the run still fails); otherwise they are unchanged.
+- **`azure_entra_conditional_access_policies` judges authentication strengths by
+  their allowed sign-in methods** (0.1.0 → 0.2.0). Only a strength's name was kept,
+  and any strength counted as MFA, so phishing-resistant enforcement couldn't be
+  shown and a custom strength that allows a password alone read as MFA. The fetcher
+  now reads `/policies/authenticationStrengthPolicies` (only when a policy uses a
+  strength) as raw JSON, because the SDK reads a two-method combination such as
+  `password,sms` as null. Each policy carries its strength's id and allowed
+  combinations and `requires_phishing_resistant_mfa` (true only when every allowed
+  combination is FIDO2 or a passkey, Windows Hello for Business or multi-factor
+  certificate authentication, and no other grant control can be met instead; null
+  when the strength couldn't be read). `requires_mfa` now counts a strength only
+  when it satisfies MFA. New summary fields: `authentication_strengths_readable`,
+  `enforced_policies_requiring_phishing_resistant_mfa`,
+  `enforced_phishing_resistant_mfa_for_all_users_and_apps` and
+  `phishing_resistant_mfa_role_template_ids`. The evidence set adds KSI-IAM-APM, and
+  its description and instructions use the plain-text layout.
+
+- **`azure_entra_conditional_access_policies` reads unread policies as unknown, not
+  absent.** When the policies can't be read, every summary figure except
+  `authentication_strengths_readable` is null; `total_policies` read 0 and
+  `mfa_required_for_admin_portals` read false before. A failed strength read leaves
+  `authentication_strengths` null rather than an empty list.
+
+- **`azure_entra_conditional_access_policies` shows MFA coverage split across
+  policies.** A tenant can require MFA for all users with one policy for browsers
+  and another for mobile and desktop apps; no single policy then covers every
+  client. The new summary list `mfa_client_app_types_for_all_users_and_apps` holds
+  the client app types those policies cover together, counting only policies where
+  MFA has no alternative grant control and no risk, platform, location or app
+  exclusion narrows them. Each policy also carries
+  `requires_mfa_without_alternative`.
+
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
   history (`risk_history`, oldest first, with what changed and who initiated it)
@@ -881,7 +946,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
-
+- **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
+  unknown in the all-users coverage.** The authentication-methods registration
+  report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`
+  counted every one as without MFA. It is now taken over the users with a row,
+  and the new `users_with_registration_details` gives its denominator. The
+  figures over enabled users and admins are unchanged: there a user with no row
+  still counts as without MFA. A failed read no longer reads as 0: when the users
+  list can't be read in full every figure is null, and when the registration
+  report can't be, every figure that relies on it.
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
