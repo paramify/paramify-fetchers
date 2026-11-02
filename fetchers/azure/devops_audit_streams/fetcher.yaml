@@ -49,7 +49,9 @@ secrets:
     required: false
     description: >
       Read-only personal access token with the Read Audit Log scope
-      (vso.auditlog), from a user with the View audit log and Manage audit
+      (vso.auditlog, which Microsoft's REST reference gives for listing streams;
+      vso.auditstreams_manage is only for changing them), from a user with the
+      View audit log and Manage audit
       streams permissions; listing streams needs Manage audit streams, as no
       read-only permission exists, and without it the stream fields are null
       and the run is not_authorized. A scoped
