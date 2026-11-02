@@ -218,6 +218,20 @@ def test_a_restore_job_stays_in_scope_while_an_in_scope_item_shares_its_name():
         ("protected_item", "web01-rg-dev"), ("protected_item", "db01-rg-dev"), ("restore_job", "db01")]
 
 
+def test_a_restore_job_takes_its_own_items_pattern_whatever_order_split_lists_entries_in():
+    class Reversed(backup.ResourceExclusions):
+        def split(self, items, kind, **keys):
+            kept, excluded = super().split(items, kind, **keys)
+            return kept, excluded[::-1]
+
+    jobs = [backup.project_job(_job("j-web", entity="web01")), backup.project_job(_job("j-db", entity="db01"))]
+    vault = {**_vault(jobs), "location": "regionwest",
+             "backup_protected_items": [_item("web01", "rg-dev"), _item("db01", "rg-test")]}
+    _, excluded = backup.exclude_protected_items(Reversed(["rg:rg-dev", "rg:rg-test"]), [vault])
+    assert sorted((e["name"], e["pattern"]) for e in excluded if e["kind"] == "restore_job") == [
+        ("db01", "rg:rg-test"), ("web01", "rg:rg-dev")]
+
+
 def test_unread_details_on_a_succeeded_restore_leave_the_max_age_null():
     jobs = [backup.restore_job_record(backup.project_job(_job("j1")), {"Recovery Point Time in UTC": "20/09/2026 04:00:00"}),
             backup.restore_job_record(backup.project_job(_job("j2")), None)]

@@ -689,21 +689,23 @@ def exclude_protected_items(exclusions: ResourceExclusions, vaults: list[dict]) 
     friendly name in the same vault, because a job names its item only that way; a name an in-scope item of the vault
     shares keeps the job in scope."""
     all_items = [(vault, item) for vault in vaults for item in vault["backup_protected_items"]]
-    items, by_vault = exclusions.split(
-        all_items, "protected_item", resource_id=lambda p: p[1].get("id") or p[0].get("id"),
-        location=lambda p: p[0].get("location"), resource_group=lambda p: p[0].get("resource_group"),
-        name=lambda p: p[1].get("name"))
+    by_item = {"resource_id": lambda p: p[1].get("id") or p[0].get("id"), "location": lambda p: p[0].get("location"),
+               "resource_group": lambda p: p[0].get("resource_group")}
+    by_resource = {"resource_id": lambda p: p[1].get("source_resource_id"), "location": lambda p: None,
+                   "resource_group": lambda p: None}
+    items, by_vault = exclusions.split(all_items, "protected_item", name=lambda p: p[1].get("name"), **by_item)
     first = list(items)
-    items, by_source = exclusions.split(
-        items, "protected_item", resource_id=lambda p: p[1].get("source_resource_id"), location=lambda p: None,
-        resource_group=lambda p: None, name=lambda p: p[1].get("name"))
-    # Each split's entries come in the order of the items it took out.
+    items, by_source = exclusions.split(items, "protected_item", name=lambda p: p[1].get("name"), **by_resource)
     first_ids, kept_ids = {id(i) for _, i in first}, {id(i) for _, i in items}
-    removed = [p for p in all_items if id(p[1]) not in first_ids] + [p for p in first if id(p[1]) not in kept_ids]
+    removed = ([(p, by_item) for p in all_items if id(p[1]) not in first_ids]
+               + [(p, by_resource) for p in first if id(p[1]) not in kept_ids])
     patterns: dict = {}
-    for (vault, item), entry in zip(removed, by_vault + by_source):
+    for pair, keys in removed:
+        vault, item = pair
         if _job_key(item.get("friendly_name")):
-            patterns.setdefault((id(vault), _job_key(item.get("friendly_name"))), entry["pattern"])
+            # The same keys the split matched on, so the pattern doesn't depend on the order of its entries.
+            pattern = exclusions.match(*(keys[k](pair) for k in ("resource_id", "location", "resource_group")))
+            patterns.setdefault((id(vault), _job_key(item.get("friendly_name"))), pattern)
     in_scope: dict = {id(vault): [] for vault in vaults}
     for vault, item in items:
         in_scope[id(vault)].append(item)
