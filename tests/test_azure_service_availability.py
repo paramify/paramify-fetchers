@@ -141,6 +141,65 @@ def test_degraded_and_unknown_periods_are_windows_but_not_outages():
     assert h["availability_percentage"] == 100.0
 
 
+def test_unknown_hours_are_not_counted_as_available():
+    history = [status("Available", timedelta(days=40), "a"),
+               status("Unknown", timedelta(days=20), "quiet"),
+               status("Available", timedelta(days=10), "b"),
+               status("Unavailable", timedelta(days=5), "down", reasonType="Unplanned"),
+               status("Available", timedelta(days=5) - timedelta(hours=24), "up")]
+    h = sa.health_record(history, NOW, WINDOW_START)
+    assert (h["observed_hours"], h["unknown_hours_in_window"], h["known_hours"]) == (720.0, 240.0, 480.0)
+    assert h["availability_percentage"] == 95.0
+    assert (h["longest_unknown_hours"], h["longest_outage_hours"]) == (240.0, 24.0)
+
+
+@pytest.mark.parametrize("history, rto, expected", [
+    # An ongoing outage longer than the objective misses it.
+    ([status("Available", timedelta(days=40), "a"), status("Unavailable", timedelta(hours=30), "down")], 24.0, False),
+    # A finished outage longer than the objective misses it, whatever else happened.
+    ([status("Available", timedelta(days=40), "a"), status("Unavailable", timedelta(days=3), "down"),
+      status("Available", timedelta(days=3) - timedelta(hours=25), "up"), status("Unknown", timedelta(days=1), "q")],
+     24.0, False),
+    # An Unknown period longer than the objective could hide a miss.
+    ([status("Available", timedelta(days=40), "a"), status("Unknown", timedelta(days=20), "q"),
+      status("Available", timedelta(days=6), "b")], 24.0, None),
+    # Degraded still serves, so a long Degraded period is not a miss.
+    ([status("Available", timedelta(days=40), "a"), status("Degraded", timedelta(days=3), "slow"),
+      status("Available", timedelta(days=1), "b")], 24.0, True),
+    # Nothing known in the lookback: unknown.
+    ([status("Unknown", timedelta(minutes=1), "q")], 24.0, None),
+])
+def test_recovery_time_objective_cases(history, rto, expected):
+    assert sa.meets_objective(sa.health_record(history, NOW, WINDOW_START), rto) is expected
+
+
+def test_front_door_periods_are_origin_probe_failures_not_outages():
+    history = [status("Available", timedelta(days=40), "a"),
+               status("Unavailable", timedelta(days=3), "down", title="Unavailable Backends", reasonType="Unplanned"),
+               status("Degraded", timedelta(days=2), "slow", reasonType="Unplanned"),
+               status("Available", timedelta(days=1), "b"),
+               status("Unavailable", timedelta(hours=2), "again", reasonType="Unplanned")]
+    h = sa.health_record(history, NOW, WINDOW_START, origin_driven=True)
+    assert h["signal"] == sa.ORIGIN_PROBES
+    assert all(h[k] is None for k in ("outages", "longest_outage_hours", "availability_percentage", "ongoing_outage"))
+    assert (h["origin_probe_failure_windows"], h["origin_probe_failure_hours_in_window"]) == (3, 50.0)
+    assert (h["longest_origin_probe_failure_hours"], h["failing_origin_probes_now"]) == (24.0, True)
+    assert not any(w["counts_as_outage"] for w in h["windows"])
+    record = sa.resource_record({"id": FD}, h, None, 1.0)
+    assert (record["available_now"], record["meets_recovery_time_objective"]) == (None, None)
+
+
+def test_only_the_newest_windows_are_listed_but_every_one_is_counted():
+    history = [status("Available", timedelta(days=40), "a")]
+    for i in range(120):
+        down = timedelta(days=25) - timedelta(hours=4 * i)
+        history += [status("Unavailable", down, f"d{i}", reasonType="Unplanned"),
+                    status("Available", down - timedelta(hours=1), f"u{i}")]
+    h = sa.health_record(history, NOW, WINDOW_START)
+    assert (h["outages"], h["windows_total"], h["windows_listed"], len(h["windows"])) == (120, 120, 100, 100)
+    assert h["windows"][-1]["start"] == ts(timedelta(days=25) - timedelta(hours=4 * 119))
+
+
 def test_a_degraded_resource_still_counts_as_available_now():
     h = sa.health_record([status("Degraded", timedelta(hours=1))], NOW, WINDOW_START)
     assert sa.available_now(h) is True
@@ -178,7 +237,9 @@ def test_meets_objective(rto, expected):
 
 @pytest.mark.parametrize("props, expected", [
     ({"context": "Platform Initiated"}, "platform"),
-    ({"reasonType": "Planned"}, "platform"),
+    ({"healthEventCause": "PlatformInitiated"}, "platform"),
+    ({"reasonType": "Unplanned", "context": "Not Applicable"}, "unknown"),
+    ({"reasonType": "Planned"}, "unknown"),
     ({"context": "Customer Initiated"}, "customer"),
     ({"reasonType": "UserInitiated"}, "customer"),
     ({}, "unknown"),
@@ -238,6 +299,12 @@ def test_old_results_leave_the_last_hour_unknown():
     assert (check["hours_with_data"], check["healthy_last_hour"], check["last_hour"]) == (1, None, None)
 
 
+def test_a_stopped_app_gets_no_health_check_verdict():
+    end = NOW.replace(minute=0)
+    check = sa.health_check_record(sa.READ, "/health", sa.READ, sa.project_points(metric([point(1, 0)])), end, stopped=True)
+    assert (check["app_stopped"], check["hours_unhealthy"], check["healthy_last_hour"]) == (True, 1, None)
+
+
 def test_a_failed_metric_read_is_unknown_not_zero():
     check = sa.health_check_record(sa.READ, "/health", sa.ERROR, [], NOW)
     assert all(check[k] is None for k in ("hours_with_data", "hours_unhealthy", "healthy_percentage", "healthy_last_hour"))
@@ -249,9 +316,11 @@ class FakeArm:
     """ARM answers for one subscription: a web app, a function app, an out-of-scope web app, a Front Door and a CDN
     profile, and a managed instance."""
 
-    def __init__(self, health=None, failing=(), registration="Registered"):
+    def __init__(self, health=None, failing=(), registration="Registered", web_state="Running", web_metric=None):
         self.calls: list[str] = []
         self.health = health or {}
+        self.web_state = web_state
+        self.web_metric = web_metric
         self.failing = dict(failing)
         self.registration = registration
 
@@ -275,7 +344,7 @@ class FakeArm:
         if path.endswith("/providers/Microsoft.Web/sites"):
             return [
                 {"id": WEB, "name": "web1", "kind": "app,linux", "location": "East US 2",
-                 "properties": {"state": "Running", "sku": "PremiumV3"}},
+                 "properties": {"state": self.web_state, "sku": "PremiumV3"}},
                 {"id": FUNC, "name": "func1", "kind": "functionapp", "location": "Central US", "properties": {}},
                 {"id": WEB_OUT, "name": "web2", "kind": "app", "location": "East US 2", "properties": {}},
             ]
@@ -289,7 +358,7 @@ class FakeArm:
             return self.health.get(resource, [status("Available", timedelta(days=60))])
         if path.endswith("/providers/Microsoft.Insights/metrics"):
             assert params["metricnames"] == "HealthCheckStatus" and params["interval"] == "PT1H"
-            return metric([point(2, 100), point(1, 100)])
+            return self.web_metric or metric([point(2, 100), point(1, 100)])
         raise AssertionError(f"unexpected list {path}")
 
 
@@ -325,13 +394,61 @@ def test_collect_reads_every_in_scope_resource_and_only_front_door_profiles():
         "apps_health_check_healthy_last_hour", "service_impacting_events")} == {
         "resources": 5, "app_services": 3, "web_apps": 2, "function_apps": 1, "front_door_profiles": 1,
         "sql_managed_instances": 1, "resource_health_read": 5, "resource_health_unknown": 0,
-        "resources_available_now": 5, "outages_in_window": 1, "longest_outage_hours": 2.0,
+        "resources_available_now": 4, "outages_in_window": 1, "longest_outage_hours": 2.0,
         "apps_with_health_check": 1, "apps_without_health_check": 2, "all_apps_have_health_check": False,
         "apps_health_check_healthy_last_hour": 1, "service_impacting_events": 1}
     assert summary["regions"] == ["centralus", "eastus2", "global"]
     east = next(r for r in results["regions"] if r["region"] == "eastus2")
     assert (east["resources"], east["outages_in_window"], east["apps_with_health_check"]) == (3, 1, 1)
     assert summary["resources_recovery_time_objective_unknown"] is None
+
+
+def test_front_door_failures_are_counted_apart_from_outages():
+    failing = [status("Available", timedelta(days=40), "a"),
+               status("Unavailable", timedelta(hours=5), "down", title="Unavailable Backends", reasonType="Unplanned")]
+    results, summary, collector = run(FakeArm(health={FD: failing}))
+    assert collector.ok
+    assert {k: summary[k] for k in ("resources_unavailable_now", "outages_in_window", "ongoing_outages",
+                                    "front_door_profiles_failing_origin_probes_now",
+                                    "front_door_origin_probe_failure_windows",
+                                    "front_door_longest_origin_probe_failure_hours")} == {
+        "resources_unavailable_now": 0, "outages_in_window": 0, "ongoing_outages": 0,
+        "front_door_profiles_failing_origin_probes_now": 1, "front_door_origin_probe_failure_windows": 1,
+        "front_door_longest_origin_probe_failure_hours": 5.0}
+    glob = next(r for r in results["regions"] if r["region"] == "global")
+    assert (glob["availability_unknown_now"], glob["front_door_profiles_failing_origin_probes_now"]) == (0, 1)
+
+
+def test_an_ongoing_outage_past_the_objective_fails_every_resource_check(monkeypatch):
+    monkeypatch.setenv(sa.RTO_ENV, "24")
+    down = [status("Available", timedelta(days=40), "a"), status("Unavailable", timedelta(hours=30), "down")]
+    _, summary, _ = run(FakeArm(health={WEB: down}))
+    assert (summary["resources_missing_recovery_time_objective"], summary["all_resources_meet_recovery_time_objective"],
+            summary["longest_outage_hours"], summary["ongoing_outages"]) == (1, False, 30.0, 1)
+
+
+def test_a_long_unknown_period_leaves_the_objective_unknown(monkeypatch):
+    monkeypatch.setenv(sa.RTO_ENV, "24")
+    quiet = [status("Available", timedelta(days=40), "a"), status("Unknown", timedelta(days=20), "q"),
+             status("Available", timedelta(days=6), "b")]
+    _, summary, _ = run(FakeArm(health={WEB: quiet}))
+    assert (summary["resources_recovery_time_objective_unknown"], summary["all_resources_meet_recovery_time_objective"],
+            summary["longest_unknown_hours"]) == (1, None, 336.0)
+
+
+def test_a_stopped_app_is_not_counted_as_failing_its_health_check():
+    results, summary, _ = run(FakeArm(web_state="Stopped", web_metric=metric([point(2, 0), point(1, 0)])))
+    web = next(r for r in results["resources"] if r["id"] == WEB)["health_check"]
+    assert (web["app_stopped"], web["hours_unhealthy"]) == (True, 2)
+    assert {k: summary[k] for k in ("apps_stopped", "apps_health_check_unhealthy_last_hour", "apps_with_unhealthy_hours",
+                                    "apps_health_check_without_recent_data")} == {
+        "apps_stopped": 1, "apps_health_check_unhealthy_last_hour": 0, "apps_with_unhealthy_hours": 0,
+        "apps_health_check_without_recent_data": 0}
+
+
+def test_a_running_app_whose_health_check_fails_is_unhealthy():
+    _, summary, _ = run(FakeArm(web_metric=metric([point(2, 0), point(1, 15.5, 0)])))
+    assert (summary["apps_health_check_unhealthy_last_hour"], summary["apps_with_unhealthy_hours"]) == (1, 1)
 
 
 def test_excluded_resources_get_no_calls_and_are_counted_out(monkeypatch):
@@ -415,7 +532,7 @@ def test_the_recovery_time_objective_is_checked_per_resource(monkeypatch):
                                     "resources_missing_recovery_time_objective",
                                     "resources_recovery_time_objective_unknown",
                                     "all_resources_meet_recovery_time_objective")} == {
-        "recovery_time_objective_hours": 1.5, "resources_meeting_recovery_time_objective": 4,
+        "recovery_time_objective_hours": 1.5, "resources_meeting_recovery_time_objective": 3,
         "resources_missing_recovery_time_objective": 1, "resources_recovery_time_objective_unknown": 0,
         "all_resources_meet_recovery_time_objective": False}
 

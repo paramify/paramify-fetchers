@@ -13,17 +13,21 @@ schemas and the `paramify` CLI — not the internal code.
 ### Added
 
 - **`azure_service_availability`** (`EVD-AZURE-SERVICE-AVAILABILITY`) — when each
-  App Service app (web and function apps), Front Door Standard/Premium profile and
-  SQL Managed Instance was unavailable, from its Resource Health history over a
-  lookback of up to 30 days: every Unavailable, Degraded and Unknown period with
-  start, end, length, cause and the Azure incident Resource Health links to it,
-  availability percentage, and a rollup per region. Periods the customer started
-  (stop, restart, scale) are listed but are not outages. With
+  App Service app (web and function apps) and SQL Managed Instance was
+  unavailable, from its Resource Health history over a lookback of up to 30 days:
+  every Unavailable, Degraded and Unknown period with start, end, length, cause
+  and the Azure incident Resource Health links to it, availability over the hours
+  Resource Health knew about, and a rollup per region. Periods the customer
+  started (stop, restart, scale) are listed but are not outages. With
   `recovery_time_objective_hours` set, each resource's longest outage is checked
-  against it. For apps, the health check path and hourly `HealthCheckStatus`
-  results. A failed or refused read leaves availability unknown, never available,
-  and fails the run. Takes `resource_exclusions`. Front Door origin health per
-  region stays in `azure_front_door_origins`, and Service Health events in
+  against it; an Unknown period longer than the objective leaves it unknown.
+  Front Door Standard/Premium profiles are read too, but Resource Health judges a
+  profile by whether its origins answer health probes, so their periods are
+  reported as origin probe failures and never as outages. For apps, the health
+  check path and hourly `HealthCheckStatus` results; stopped apps get no verdict.
+  A failed or refused read leaves availability unknown, never available, and fails
+  the run. Takes `resource_exclusions`. Front Door origin health per region stays
+  in `azure_front_door_origins`, and Service Health events in
   `azure_service_health_advisories`.
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
