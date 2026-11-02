@@ -27,7 +27,9 @@ config_schema:
       character. A matching AI services account or AI Search service is listed under excluded
       with the pattern and left out of every count and verdict; an account's
       deployments, content filter policies, projects, connections and diagnostic
-      settings are not read, so one the identity can't read doesn't fail the run. A pattern
+      settings are not read, so one the identity can't read doesn't fail the run. Accounts and
+      search services are the only kinds: an id: pattern naming a project under an account
+      matches nothing and is listed among the unmatched patterns. A pattern
       without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in scope.
 

@@ -27,12 +27,11 @@ config_schema:
       resource's child resources). * matches any run of characters and ? one
       character. A matching hub, project or other workspace is listed under excluded with the
       pattern and left out of every count and verdict; its datastores, endpoints,
-      computes, connections and diagnostic settings are not read. A project also
-      leaves with an excluded hub when it sits in the hub's resource group or under
-      its id; any other project stays in scope, still inherits the excluded hub's
-      network access, managed-network isolation and encryption, and still has its
-      repeats of that hub's connections left out of the distinct counts (the hub's
-      connection names are read for that). A pattern
+      computes, connections and diagnostic settings are not read. Every project of an
+      excluded hub leaves with it, in any resource group, with reason hub_excluded and the
+      hub in matched_id. An id: pattern reaches only a hub, project or other workspace; one
+      naming a datastore, endpoint, compute or connection matches nothing and is listed
+      among the unmatched patterns. A pattern
       without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in scope.
 

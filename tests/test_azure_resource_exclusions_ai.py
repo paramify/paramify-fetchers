@@ -40,13 +40,13 @@ def _set_patterns(monkeypatch, patterns):
         monkeypatch.setenv(ENV, patterns)
 
 
-def _common(monkeypatch, m, tmp_path):
+def _common(monkeypatch, m, tmp_path, diag_reads):
     monkeypatch.setattr(m, "load_dotenv", lambda: None)
     monkeypatch.setattr(m, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
     monkeypatch.setattr(m, "credential", lambda: object())
     monkeypatch.setattr(m, "provider_registration_status", lambda *a: "registered")
     monkeypatch.setattr(m, "monitor_client", lambda sub, cred: "monitor")
-    monkeypatch.setattr(m, "list_diagnostic_settings", lambda monitor, rid: [])
+    monkeypatch.setattr(m, "list_diagnostic_settings", lambda monitor, rid: diag_reads.append(rid) or [])
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
 
 
@@ -65,7 +65,7 @@ def _hub_id(rg, name):
 
 
 def run_hub(monkeypatch, tmp_path, patterns, workspaces=None, connections=None):
-    """Returns (exit code, evidence, paths read)."""
+    """Returns (exit code, evidence, paths read, diagnostic-settings reads)."""
     workspaces = workspaces if workspaces is not None else [
         _ws("rg-in", "hub-in", "Hub"),
         _ws("rg-out", "hub-out", "Hub", pna="Disabled"),
@@ -76,6 +76,7 @@ def run_hub(monkeypatch, tmp_path, patterns, workspaces=None, connections=None):
     ]
     connections = connections or {}
     paths: list = []
+    diag: list = []
 
     def list_all(client, path, version):
         paths.append(path)
@@ -84,12 +85,12 @@ def run_hub(monkeypatch, tmp_path, patterns, workspaces=None, connections=None):
         return {"items": connections.get(path, []), "pages": 1}
 
     m = hub_fetcher
-    _common(monkeypatch, m, tmp_path)
+    _common(monkeypatch, m, tmp_path, diag)
     monkeypatch.setattr(m, "arm_rest_client", lambda cred: "rest")
     monkeypatch.setattr(m, "list_all", list_all)
     _set_patterns(monkeypatch, patterns)
     code = m.main()
-    return code, json.loads((tmp_path / "azure_ai_hub_configuration_s1.json").read_text()), paths
+    return code, json.loads((tmp_path / "azure_ai_hub_configuration_s1.json").read_text()), paths, diag
 
 
 def _kind_names(evidence):
@@ -97,7 +98,7 @@ def _kind_names(evidence):
 
 
 def test_hub_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
-    code, evidence, _ = run_hub(monkeypatch, tmp_path, None)
+    code, evidence, *_ = run_hub(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
     assert summary["total_workspaces"] == 6 and summary["hubs"] == 2 and summary["projects"] == 3
@@ -109,7 +110,7 @@ def test_hub_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_
 
 
 def test_hub_excludes_by_group_and_region_and_skips_their_reads(monkeypatch, tmp_path):
-    code, evidence, paths = run_hub(monkeypatch, tmp_path, "rg:rg-out, location:regioneast, rg:typo")
+    code, evidence, paths, diag = run_hub(monkeypatch, tmp_path, "rg:rg-out, location:regioneast, rg:typo")
     summary = evidence["summary"]
     assert code == 0
     assert sorted(w["name"] for w in evidence["results"]["workspaces"]) == ["classic", "hub-in", "proj-in"]
@@ -121,47 +122,48 @@ def test_hub_excludes_by_group_and_region_and_skips_their_reads(monkeypatch, tmp
     assert (summary["in_scope_hubs"], summary["in_scope_projects"], summary["in_scope_other_workspaces"]) == (1, 1, 1)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
     assert not [p for p in paths if "hub-out" in p or "proj-out" in p or "proj-east" in p]
+    assert sorted(r.rsplit("/", 1)[1] for r in diag) == ["classic", "hub-in", "proj-in"]
 
 
 def test_hub_excludes_other_workspaces_by_id(monkeypatch, tmp_path):
-    _, evidence, _ = run_hub(monkeypatch, tmp_path, f"id:{_hub_id('rg-in', 'classic')}")
+    _, evidence, *_ = run_hub(monkeypatch, tmp_path, f"id:{_hub_id('rg-in', 'classic')}")
     assert [(e["kind"], e["name"]) for e in evidence["results"]["excluded"]] == [("other_workspace", "classic")]
     assert (evidence["summary"]["excluded_other_workspaces"], evidence["summary"]["in_scope_other_workspaces"]) == (1, 0)
 
 
-def test_hub_project_in_the_hubs_group_leaves_with_an_excluded_hub(monkeypatch, tmp_path):
-    hub_id = _hub_id("rg-in", "hub-in")
-    _, evidence, _ = run_hub(monkeypatch, tmp_path, f"id:{hub_id}")
-    entries = {e["name"]: e for e in evidence["results"]["excluded"]}
-    assert sorted(entries) == ["hub-in", "proj-east", "proj-in"]
-    assert entries["proj-in"]["reason"] == "hub_excluded" and entries["proj-in"]["hub_id"] == hub_id
-    assert entries["proj-in"]["pattern"] == entries["hub-in"]["pattern"]
-    assert sorted(w["name"] for w in evidence["results"]["workspaces"]) == ["classic", "hub-out", "proj-out"]
-
-
-def test_hub_project_elsewhere_keeps_its_verdicts_and_repeats_when_the_hub_is_excluded(monkeypatch, tmp_path):
+def test_hub_every_project_leaves_with_an_excluded_hub_wherever_it_sits(monkeypatch, tmp_path):
     hub_id = _hub_id("rg-hub", "hub-x")
-    workspaces = [_ws("rg-hub", "hub-x", "Hub", pna="Disabled"), _ws("rg-in", "proj-x", "Project", hub=hub_id)]
-    conn = lambda ws: {"id": f"{ws}/connections/aoai", "name": "aoai",  # noqa: E731
-                       "properties": {"authType": "ApiKey", "category": "AzureOpenAI"}}
-    connections = {f"{hub_id}/connections": [conn(hub_id)],
-                   f"{_hub_id('rg-in', 'proj-x')}/connections": [conn(_hub_id("rg-in", "proj-x"))]}
-    _, plain, _ = run_hub(monkeypatch, tmp_path, None, workspaces, connections)
-    code, evidence, paths = run_hub(monkeypatch, tmp_path, "rg:rg-hub", workspaces, connections)
-    assert code == 0
-    [project] = evidence["results"]["workspaces"]
-    [plain_project] = [w for w in plain["results"]["workspaces"] if w["name"] == "proj-x"]
-    assert project == plain_project
-    assert project["network_exposure"] == "private" and "network_access" in project["inherited_from_hub"]
-    assert project["connections"][0]["repeats_hub_connection"] is True
-    assert evidence["summary"]["distinct_connections"] == 0
-    assert [e["name"] for e in evidence["results"]["excluded"]] == ["hub-x"]
-    # Only the hub's connection names are read, nothing else of it.
-    assert [p for p in paths if "hub-x" in p] == [f"{hub_id}/connections"]
+    workspaces = [_ws("rg-hub", "hub-x", "Hub", pna="Disabled"), _ws("rg-in", "proj-x", "Project", hub=hub_id),
+                  _ws("rg-hub", "proj-y", "Project", hub=hub_id), _ws("rg-in", "proj-z", "Project")]
+    code, evidence, paths, diag = run_hub(monkeypatch, tmp_path, f"id:{hub_id}", workspaces)
+    entries = {e["name"]: e for e in evidence["results"]["excluded"]}
+    assert code == 0 and sorted(entries) == ["hub-x", "proj-x", "proj-y"]
+    for name in ("proj-x", "proj-y"):
+        assert entries[name]["reason"] == "hub_excluded" and entries[name]["matched_id"] == hub_id
+        assert entries[name]["pattern"] == entries["hub-x"]["pattern"] and "hub_id" not in entries[name]
+    assert [w["name"] for w in evidence["results"]["workspaces"]] == ["proj-z"]
+    assert (evidence["summary"]["excluded_hubs"], evidence["summary"]["excluded_projects"]) == (1, 2)
+    assert not [p for p in paths if "hub-x" in p or "proj-x" in p or "proj-y" in p]
+    assert [r.rsplit("/", 1)[1] for r in diag] == ["proj-z"]
+
+
+def test_hub_distinct_connections_count_only_in_scope_workspaces(monkeypatch, tmp_path):
+    hub_id = _hub_id("rg-hub", "hub-x")
+    kept_id = _hub_id("rg-in", "hub-y")
+    workspaces = [_ws("rg-hub", "hub-x", "Hub"), _ws("rg-in", "proj-x", "Project", hub=hub_id),
+                  _ws("rg-in", "hub-y", "Hub")]
+    conn = {"name": "aoai", "properties": {"authType": "ApiKey", "category": "AzureOpenAI"}}
+    kept = {"name": "search", "properties": {"authType": "ApiKey", "category": "CognitiveSearch"}}
+    connections = {f"{hub_id}/connections": [conn], f"{_hub_id('rg-in', 'proj-x')}/connections": [conn],
+                   f"{kept_id}/connections": [kept]}
+    _, evidence, paths, _ = run_hub(monkeypatch, tmp_path, "rg:rg-hub", workspaces, connections)
+    assert [w["name"] for w in evidence["results"]["workspaces"]] == ["hub-y"]
+    assert evidence["summary"]["distinct_connections"] == 1
+    assert [p for p in paths if "connections" in p] == [f"{kept_id}/connections"]
 
 
 def test_hub_bare_pattern_fails_the_run(monkeypatch, tmp_path):
-    code, evidence, _ = run_hub(monkeypatch, tmp_path, "rg-out")
+    code, evidence, *_ = run_hub(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["summary"]["total_workspaces"] == 6
 
@@ -192,6 +194,8 @@ def run_services(monkeypatch, tmp_path, patterns):
                 _account("rg-in", "acct-east", location="regioneast"), _account("rg-in", "speech", kind="SpeechServices")]
     search = [_search("rg-in", "srch-in"), _search("rg-out", "srch-out"), _search("rg-in", "srch-east", "regioneast")]
     calls: list = []
+    paths: list = []
+    diag: list = []
     client = NS(accounts=NS(list=lambda: accounts), deployments=_Calls(calls, "deployments"),
                 rai_policies=_Calls(calls, "rai_policies"), projects=_Calls(calls, "projects"))
     module = types.ModuleType("azure.mgmt.cognitiveservices")
@@ -199,19 +203,20 @@ def run_services(monkeypatch, tmp_path, patterns):
     monkeypatch.setitem(sys.modules, "azure.mgmt.cognitiveservices", module)
 
     def list_all(rest, path, version):
+        paths.append(path)
         return {"items": search if path.endswith("searchServices") else [], "pages": 1}
 
     m = services_fetcher
-    _common(monkeypatch, m, tmp_path)
+    _common(monkeypatch, m, tmp_path, diag)
     monkeypatch.setattr(m, "arm_rest_client", lambda cred: "rest")
     monkeypatch.setattr(m, "list_all", list_all)
     _set_patterns(monkeypatch, patterns)
     code = m.main()
-    return code, json.loads((tmp_path / "azure_ai_services_configuration_s1.json").read_text()), calls
+    return code, json.loads((tmp_path / "azure_ai_services_configuration_s1.json").read_text()), calls, paths, diag
 
 
 def test_services_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
-    code, evidence, _ = run_services(monkeypatch, tmp_path, None)
+    code, evidence, *_ = run_services(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
     assert (summary["total_accounts"], summary["total_search_services"]) == (4, 3)
@@ -222,7 +227,7 @@ def test_services_without_patterns_adds_only_empty_exclusion_fields(monkeypatch,
 
 
 def test_services_exclude_by_group_and_region_and_skip_account_reads(monkeypatch, tmp_path):
-    code, evidence, calls = run_services(monkeypatch, tmp_path, "rg:rg-out, location:regioneast, rg:typo")
+    code, evidence, calls, paths, diag = run_services(monkeypatch, tmp_path, "rg:rg-out, location:regioneast, rg:typo")
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0
     assert sorted(a["name"] for a in results["accounts"]) == ["acct-in", "speech"]
@@ -235,16 +240,27 @@ def test_services_exclude_by_group_and_region_and_skip_account_reads(monkeypatch
             summary["excluded_search_services"]) == (1, 1, 2)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
     assert {account for _, account in calls} == {"acct-in"}
+    assert not [p for p in paths if "acct-out" in p or "acct-east" in p or "srch-out" in p or "srch-east" in p]
+    assert not [r for r in diag if any(x in r for x in ("acct-out", "acct-east", "srch-out", "srch-east"))]
+    assert any(r.endswith("acct-in") for r in diag) and any(r.endswith("srch-in") for r in diag)
 
 
 def test_services_id_pattern_takes_out_one_account(monkeypatch, tmp_path):
     target = _account("rg-in", "acct-in").id
-    _, evidence, _ = run_services(monkeypatch, tmp_path, f"id:{target}")
+    _, evidence, *_ = run_services(monkeypatch, tmp_path, f"id:{target}")
     assert [e["name"] for e in evidence["results"]["excluded"]] == ["acct-in"]
     assert evidence["summary"]["in_scope_accounts"] == 3
 
 
+def test_services_id_naming_a_project_matches_nothing(monkeypatch, tmp_path):
+    project = f"{_account('rg-in', 'acct-in').id}/projects/p1"
+    code, evidence, *_ = run_services(monkeypatch, tmp_path, f"id:{project}")
+    assert code == 0 and evidence["results"]["excluded"] == []
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] == [f"id:{project}"]
+    assert evidence["summary"]["in_scope_accounts"] == 4
+
+
 def test_services_bare_pattern_fails_the_run(monkeypatch, tmp_path):
-    code, evidence, _ = run_services(monkeypatch, tmp_path, "rg-out")
+    code, evidence, *_ = run_services(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["summary"]["total_accounts"] == 4

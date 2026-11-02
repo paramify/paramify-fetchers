@@ -147,6 +147,14 @@ schemas and the `paramify` CLI — not the internal code.
     route needs it. Metric and smart detector rules carry the location `global`
     and action groups and processing rules none, so `location:` reaches only log
     search rules.
+  - `azure_ai_hub_configuration` 0.2.0: hubs, projects and other Machine
+    Learning workspaces; an excluded workspace's connections, datastores,
+    endpoints, computes and diagnostic settings are not read, and every project
+    of an excluded hub leaves with it (named in `matched_id`).
+  - `azure_ai_services_configuration` 0.2.0: AI services accounts and AI Search
+    services; an excluded account's deployments, content filter policies,
+    projects, connections and diagnostic settings are not read. An `id:` naming
+    a project under an account matches nothing.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or
@@ -535,14 +543,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
-- **`azure_ai_hub_configuration` 0.2.0 and `azure_ai_services_configuration` 0.2.0:
-  resource exclusions.** `resource_exclusions` now takes hubs, projects and other
-  workspaces (hub configuration) and AI services accounts and AI Search services
-  (services configuration) out of scope, by resource group, region or id; an
-  excluded one is listed under `excluded` and gets none of its per-resource reads.
-  A project leaves with an excluded hub in its resource group or under its id; any
-  other project keeps inheriting the excluded hub's settings, and its repeats of
-  that hub's connections stay out of the distinct counts.
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
   history (`risk_history`, oldest first, with what changed and who initiated it)

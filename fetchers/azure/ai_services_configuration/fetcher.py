@@ -487,8 +487,7 @@ def collect_account(client, rest, monitor, account: dict, collector: Collector) 
 
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
             excluded: list | None = None) -> tuple:
-    """Accounts and search services the exclusions take out go to `excluded`; an excluded account's deployments,
-    policies, projects and connections are not read."""
+    """Accounts and search services the exclusions take out go to `excluded` and get no reads."""
     exclusions = exclusions or ResourceExclusions()
     def _client():
         from azure.mgmt.cognitiveservices import (
@@ -522,7 +521,6 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
     search, out_search = exclusions.split(search, "search_service")
     if excluded is not None:
         excluded += sorted(out_accounts + out_search, key=lambda e: (e["kind"], e["id"] or ""))
-    exclusions.warn_unmatched(logger)
     monitor = (
         collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))
         if accounts or search
@@ -582,6 +580,7 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
+    exclusions.warn_unmatched(logger)
 
     evidence = build_payload(
         subscription_id=subscription_id,

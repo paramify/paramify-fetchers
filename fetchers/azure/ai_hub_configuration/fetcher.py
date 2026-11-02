@@ -282,30 +282,27 @@ def workspace_kind(workspace: dict) -> str:
 
 
 def split_workspaces(listed: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
-    """(in-scope workspaces, excluded entries). A project also leaves with an excluded hub it sits under or beside."""
+    """(in-scope workspaces, excluded entries); every project of an excluded hub leaves with it."""
     kept, out = [], []
-    for kind in ("hub", "project", "other_workspace"):
+    for kind in KINDS:
         k, o = exclusions.split([w for w in listed if workspace_kind(w) == kind], kind)
         kept += k
         out += o
     hubs = {(e["id"] or "").lower(): e for e in out if e["kind"] == "hub"}
     in_scope = []
     for w in kept:
-        hub_id = (w["hub_resource_id"] or "").lower()
-        parent = hubs.get(hub_id) if workspace_kind(w) == "project" else None
-        same_group = parent is not None and (w["resource_group"] or "").lower() == (parent["resource_group"] or "").lower()
-        if parent is not None and (same_group or (w["id"] or "").lower().startswith(hub_id + "/")):
-            out.append(excluded_item("project", w["name"], parent["pattern"], "hub_excluded", id=w["id"],
-                                     resource_group=w["resource_group"], location=w["location"], hub_id=w["hub_resource_id"]))
-        else:
+        parent = hubs.get((w["hub_resource_id"] or "").lower()) if workspace_kind(w) == "project" else None
+        if parent is None:
             in_scope.append(w)
+        else:
+            out.append(excluded_item("project", w["name"], parent["pattern"], "hub_excluded", id=w["id"],
+                                     resource_group=w["resource_group"], location=w["location"], matched_id=parent["id"]))
     return in_scope, out
 
 
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
             excluded: list | None = None) -> list[dict]:
-    """Workspaces the exclusions take out go to `excluded` and get no child reads; an in-scope project still
-    inherits from an excluded hub's listed settings."""
+    """Workspaces the exclusions take out go to `excluded` and get no reads."""
     exclusions = exclusions or ResourceExclusions()
     client = collector.guard("arm_rest.arm_rest_client (init)", lambda: arm_rest_client(cred))
     if client is None:
@@ -321,7 +318,6 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
     workspaces, out = split_workspaces(listed, exclusions)
     if excluded is not None:
         excluded += sorted(out, key=lambda e: e["id"] or "")
-    exclusions.warn_unmatched(logger)
     monitor = (
         collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))
         if workspaces
@@ -366,28 +362,16 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
                 "exported_log_category_groups": exported["exported_log_category_groups"],
             }
         )
-    out_ids = {(e["id"] or "").lower() for e in out}
-    out_hub_ids = {h.lower(): h for w in workspaces if (h := w["hub_resource_id"]) and h.lower() in out_ids}
-    # An excluded hub's connection names are read only to tell which of an in-scope project's are repeats.
-    hub_names = {}
-    for key, hub_id in sorted(out_hub_ids.items()):
-        rows = collector.guard(
-            f"machinelearningservices.connections.list({basename(hub_id)})",
-            lambda hub_id=hub_id: list_all(client, f"{hub_id}/connections", WORKSPACES_API)["items"],
-        )
-        if rows is not None:
-            hub_names[key] = {r.get("name") for r in rows}
-    mark_hub_repeats(records, hub_names)
-    apply_hub_inheritance(records, listed)
+    mark_hub_repeats(records)
+    apply_hub_inheritance(records)
     resolve_serverless_public(records)
     return sorted(records, key=lambda r: r["id"] or "")
 
 
-def apply_hub_inheritance(workspaces: list[dict], listed: list[dict] | None = None) -> None:
+def apply_hub_inheritance(workspaces: list[dict]) -> None:
     """A project inherits network access, managed-network isolation and encryption from its hub
-    when it leaves them unset. A project whose hub is not in this subscription keeps Azure's defaults.
-    `listed` is every workspace read, so an excluded hub still gives its settings."""
-    hubs = {(w["id"] or "").lower(): w for w in listed or workspaces if compact(w["kind"]) == "hub"}
+    when it leaves them unset. A project whose hub is not in this subscription keeps Azure's defaults."""
+    hubs = {(w["id"] or "").lower(): w for w in workspaces if compact(w["kind"]) == "hub"}
     for w in workspaces:
         unset = w.pop("_unset", {})
         hub = hubs.get((w["hub_resource_id"] or "").lower())
@@ -422,12 +406,11 @@ def resolve_serverless_public(workspaces: list[dict]) -> None:
                 e["public"] = w["network_exposure"] != "private"
 
 
-def mark_hub_repeats(workspaces: list[dict], extra_hub_names: dict | None = None) -> None:
+def mark_hub_repeats(workspaces: list[dict]) -> None:
     """Flag each project connection that repeats one of its own hub's, so it is not counted twice."""
     hub_names = {
         (w["id"] or "").lower(): {c["name"] for c in w["connections"] or []} for w in workspaces
     }
-    hub_names.update(extra_hub_names or {})
     for w in workspaces:
         own_hub = hub_names.get((w["hub_resource_id"] or "").lower())
         for c in w["connections"] or []:
@@ -473,6 +456,7 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
+    exclusions.warn_unmatched(logger)
 
     evidence = build_payload(
         subscription_id=subscription_id,
