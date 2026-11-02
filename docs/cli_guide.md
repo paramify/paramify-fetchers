@@ -57,6 +57,7 @@ paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
 paramify evidence <file>       # read one evidence file, or an issue-report sidecar
 paramify upload   [run-dir]    # push a run's evidence to Paramify (default: latest run)
+paramify stacks                # list the workspace's stacks (name, id)
 paramify issues   <sub>        # send a run's issue reports into assessment pipelines; list/close their jobs
 paramify programs <sub>        # list workspace programs; turn them into targets
 paramify assessments <sub>     # list workspace assessments; point issue reports at one
@@ -209,18 +210,46 @@ paramify upload                     # upload the latest run (get-or-create evide
 ```
 
 `paramify upload` takes an optional run directory. The default is the latest
-run under `--output-dir`. It supports `--dry-run`, `--config` and `--json`. You
-can also call the same uploader directly as
-`python -m uploaders.paramify_evidence <run-dir>`.
+run under `--output-dir`. It sends one batch for each fetcher entry in the run.
+The batch goes through the channel of the evidence set when the set has one. It
+needs Paramify API 0.14.0 or later.
 
-The uploader is idempotent within a run. It talks to Paramify REST v0 over HTTPS
-only, and it reads `PARAMIFY_UPLOAD_API_TOKEN` (and the optional
-`PARAMIFY_API_BASE_URL`).
+| Flag | Effect |
+|---|---|
+| `--dry-run` | Lists what would upload. Makes no API calls and needs no token. Routing shows as unknown. |
+| `--plan` | Reads the workspace (no changes) and prints the full plan. Applies nothing. |
+| `--stack STACK` | Sends every entry to this stack (an id or a name). It replaces the stack the run recorded. |
+| `--with-validators` | Syncs validators for the run's evidence sets before the batches go out. |
+| `--no-tags` | Skips the default custom tags for this upload. |
+| `--config`, `-f`, `-o` | Choose the uploader config, the manifest, and the output directory. |
+| `--json` | Prints the summary: the legacy counts, plus `plan`, `entries`, `outcomes` and, with `--with-validators`, `validators`. |
+
+Set the stack in the manifest under `run.paramify` (`stack`, `stack_name`,
+`approval`, `no_request`). An entry can set the same keys in its own `paramify`
+block. List the stacks in the workspace with `paramify stacks`. Write one into a
+manifest with `paramify manifest set-stack MANIFEST STACK [--fetcher NAME]`.
+With a token, the command looks up the stack and stores its id and name. Check
+the stack ids against the workspace with `paramify validate --online`.
+
+Uploading the same run again changes nothing. The upload finds the batch it made
+for that run. A new run makes a new batch. If a temporary failure holds a batch
+open, run the same upload again to resume it. A new evidence set gets the
+approval mode `SUBMISSION_WITH_PASSING_VALIDATORS` unless `approval` says
+otherwise. The upload never changes an existing set. The routing rules and each
+refusal are in [`uploader_guide.md`](uploader_guide.md#how-a-run-is-delivered).
+
+The upload talks to Paramify REST v0 over HTTPS only, and it reads
+`PARAMIFY_UPLOAD_API_TOKEN` (and the optional `PARAMIFY_API_BASE_URL`).
 [`uploaders/paramify_evidence/README.md`](../uploaders/paramify_evidence/README.md)
 shows how to create a Paramify API key with the necessary permissions.
 
+`uploaders/paramify_evidence/uploader.py` still works for old schedules, but it
+is deprecated. It hands the run to the same upload and prints a notice. Use
+`paramify upload`.
+
 The runner does not chain the two stages. That is the customer's job, and
-`run_and_upload.sh` at the repo root is a sample script for it.
+`deploy/run-and-upload.sh <manifest> [stack]` is a sample script for it. It
+uploads the run it just collected.
 
 ## Scan results, not evidence
 
