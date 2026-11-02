@@ -473,7 +473,9 @@ class ConfirmModal(ButtonRowNav, ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-card", classes="confirm"):
-            yield Label(self._message, id="modal-title")
+            # Plain text: a message carries file names and API bodies, and a "[" in
+            # one must show as itself, not be read as Rich markup.
+            yield Label(Text(self._message), id="modal-title")
             with Horizontal(id="modal-buttons"):
                 yield Button("Yes", variant="error", id="yes")
                 yield Button("No", variant="primary", id="no")

@@ -212,6 +212,49 @@ def test_a_planning_error_is_shown_and_never_uploads(tmp_path, monkeypatch, no_t
     assert "stack 'nope' not found" in text
 
 
+def _rendered_confirm(app) -> str:
+    """The confirm's text as drawn: markup in the message would be eaten here."""
+    assert isinstance(app.screen, ConfirmModal)
+    label = app.screen.query_one("#modal-title")
+    return "\n".join(strip.text for strip in label.render_lines(label.region.reset_offset))
+
+
+def test_confirm_shows_brackets_in_file_names_and_messages(tmp_path, monkeypatch, no_token, run_tui):
+    _upload_ready(tmp_path, monkeypatch, token=True)
+
+    def fake_plan(run_dir, root, config_path=None, *, online, **kw):
+        return Plan([Action(id="delivery/x", provider="delivery", key="x", verb="deliver",
+                            summary="deliver 1 file to [bold]EVD-X[/bold]",
+                            payload={"dropped": [{"original_file_name": "report[x].json",
+                                                  "reason": "blocked [red]by[/red] the WAF"}]})])
+
+    monkeypatch.setattr(api, "plan_upload", fake_plan)
+    text = _open_confirm(tmp_path, run_tui, _rendered_confirm, monkeypatch)
+    assert "report[x].json" in text, text
+    assert "[bold]EVD-X[/bold]" in text and "blocked [red]by[/red] the WAF" in text
+
+
+def test_log_shows_brackets_in_file_names_and_reasons(tmp_path, run_tui):
+    path, _ = _manifest(tmp_path)
+
+    async def body(app, pilot):
+        await pilot.press("5")
+        await pilot.pause()
+        page = app.screen.query_one(UploadPage)
+        page._begin_log(Text("uploading"))
+        page._handle_upload_event({"event": "upload_file", "action_id": "delivery/x", "file": "report[x].json",
+                                   "outcome": "error", "reason": "HTTP 400: [bold]bad[/bold]"})
+        log = page.query_one("#upload-log")
+        for _ in range(40):
+            await pilot.pause(0.05)
+            if log.lines:
+                break
+        text = "\n".join(strip.text for strip in log.lines)
+        assert "report[x].json" in text and "HTTP 400: [bold]bad[/bold]" in text
+
+    run_tui(body, path)
+
+
 def test_log_panel_renders_delivery_file_progress(tmp_path, run_tui):
     path, _ = _manifest(tmp_path)
 
