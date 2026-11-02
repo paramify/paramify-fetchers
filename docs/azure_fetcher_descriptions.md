@@ -4965,7 +4965,7 @@ Summary fields:
 
 
 ### azure_sql_managed_instance_backups
-Short Description: Shows whether each SQL Managed Instance database keeps at least 7 days of point-in-time restore and long-term backups, and whether backups and the instance survive a zone or region loss.
+Short Description: Shows whether each SQL Managed Instance database keeps 7 days of point-in-time restore and long-term backups, survives a zone or region loss, and which failovers ran.
 
 Script: fetchers/azure/sql_managed_instance_backups/fetcher.py (shared helper: fetchers/azure/_shared/sql_managed_instance.py)
 
@@ -4979,8 +4979,9 @@ Commands Executed:
 - `managed_databases.list_by_instance()` (per in-scope instance) — the databases and their earliest restore points
 - `managed_backup_short_term_retention_policies.get()` (per user database) — point-in-time restore retention in days
 - `managed_instance_long_term_retention_policies.get()` (per user database) — weekly, monthly and yearly long-term retention
+- `activity_logs.list()` for resource provider Microsoft.Sql — every failover of a failover group or instance in the Activity Log's last 90 days
 
-Output: `azure_sql_managed_instance_backups_<subscription>.json` — each SQL Managed Instance with its state, backup storage redundancy, zone redundancy and failover groups, and each database's earliest restore point and short- and long-term retention; system databases are kept but not counted.
+Output: `azure_sql_managed_instance_backups_<subscription>.json` — each SQL Managed Instance with its state, backup storage redundancy, zone redundancy and failover groups, each database's earliest restore point and short- and long-term retention, and each failover in the window with its result, duration and the region that took over; system databases are kept but not counted.
 
 Summary fields:
 
@@ -4997,6 +4998,8 @@ Summary fields:
 - `excluded_instance_failover_groups` — Number of instance failover groups left out of scope because every instance the group pairs in this subscription is out of scope; each is listed under excluded with the pattern
 - `in_scope_managed_instances` — Number of SQL Managed Instances read and in scope; 0 means none was read or the patterns took out every instance, which a check can catch by requiring more than 0
 - `in_scope_instance_failover_groups` — Number of instance failover groups read and in scope
+- `excluded_failovers` — Number of failovers left out of scope because the failover group or instance they moved is out of scope, or, when that group or instance is no longer listed, because a pattern matched the failover's resource id; each is listed under excluded with the pattern
+- `in_scope_failovers` — Number of failovers read and in scope; null if the Activity Log couldn't be read in full
 
 **Does every user database keep at least 7 days of point-in-time restore?**
 - `databases_retention_at_least_7_days` — Number of user databases whose short-term (point-in-time restore) retention is 7 days or more
@@ -5021,6 +5024,20 @@ Summary fields:
 - `instances_failover_group_unknown` — Number of instances whose failover group membership is unknown: the failover group list for their resource group and region couldn't be read, and no other region's list showed them in a group
 - `total_instance_failover_groups` — Number of in-scope instance failover groups found in the resource groups and regions holding an instance, each counted once although Azure lists a group from every region it spans; null if a failover group list couldn't be read for a resource group and region holding an in-scope instance (a failed list where every instance is excluded is only logged as a warning)
 - `failover_groups_manual_policy` — Number of instance failover groups whose failover policy is Manual, so a person has to start a failover (Automatic fails over on its own); null if a failover group list couldn't be read for a resource group and region holding an in-scope instance
+
+**Have failovers been run, and how long did they take?**
+- `failover_history_days` — Days back that failovers are read from the Activity Log, ending at the run (90, the most the Activity Log keeps, unless AZURE_SQL_MI_FAILOVER_HISTORY_DAYS sets fewer)
+- `failover_history_read` — True if the Activity Log was read in full over the window; false if the read failed or stopped at 200,000 events, and then every failover field below is null
+- `total_failovers` — Number of failovers in the window, each one request (its Activity Log events share a correlation id), whatever its result; null if the Activity Log couldn't be read in full
+- `failover_group_failovers` — Number of failovers of an instance failover group, planned or forced; null if the Activity Log couldn't be read in full
+- `forced_failovers_allowing_data_loss` — Number of failover group failovers forced with possible data loss (forceFailoverAllowDataLoss); null if the Activity Log couldn't be read in full
+- `managed_instance_failovers` — Number of failovers between one managed instance's own replicas, started by someone rather than by a failover group; null if the Activity Log couldn't be read in full
+- `succeeded_failovers` — Number of failovers whose final status is Succeeded; null if the Activity Log couldn't be read in full
+- `failed_failovers` — Number of failovers whose final status is Failed; null if the Activity Log couldn't be read in full
+- `failover_groups_with_succeeded_failover` — Number of instance failover groups with at least one Succeeded failover in the window; null if the Activity Log couldn't be read in full
+- `latest_succeeded_failover_time` — Time of the end, in UTC, of the newest Succeeded failover; null if there was none or the Activity Log couldn't be read in full
+- `days_since_latest_succeeded_failover` — Days from the end of the newest Succeeded failover to the run; null if there was none or the Activity Log couldn't be read in full
+- `longest_succeeded_failover_minutes` — Longest time a Succeeded failover took, from its first Activity Log event to its final status, in minutes, to compare with the recovery time objective; null if there was none or the Activity Log couldn't be read in full
 
 
 ### azure_sql_managed_instance_configuration
