@@ -257,3 +257,13 @@ def test_template_record_carries_the_source_record_verbatim(monkeypatch):
     rec = mod.record(raw)
     assert rec["source"] == expected
     assert inventory.payload_problems({"data": [rec], "records_included": True}) == []
+
+
+def test_authoring_guidance_names_the_required_source_record():
+    """The fetcher schema's `kind` text and the create-fetcher skill both state the rule."""
+    kind = json.loads((SCHEMAS / "fetcher_schema.json").read_text())["properties"]["kind"]["description"]
+    assert "`source`" in kind and "verbatim" in kind
+    skill = (REPO_ROOT / ".claude" / "skills" / "create-fetcher" / "SKILL.md").read_text()
+    start = skill.index("→ INVENTORY")
+    inventory_step = skill[start:skill.index("COMPARATOR", start)]
+    assert "`source`" in inventory_step and "verbatim" in inventory_step
