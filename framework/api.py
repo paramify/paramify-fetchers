@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 import yaml
@@ -1564,6 +1564,100 @@ def upload_run(
         run_dir, root, _upload_config(root, config_path), dry_run=dry_run, on_event=on_event,
         custom_tags=custom_tags, stack=stack, only_file=only_file, with_validators=with_validators,
     )
+
+
+def list_stacks(root: Optional[Path] = None, config_path: Optional[Path] = None) -> List[dict]:
+    """The workspace's stacks as `[{"id", "name"}]`, sorted by name. Needs a token.
+
+    Raises ValueError when there is no token or the base URL is invalid; an
+    API error is raised as it is.
+    """
+    root = Path(root) if root is not None else find_repo_root()
+    load_dotenv()
+    config = _sync_upload.load_config(_upload_config(root, config_path))
+    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
+    url_error = base_url_error(base_url)
+    if url_error:
+        raise ValueError(url_error)
+    token, _ = resolve_upload_token()
+    if not token:
+        raise ValueError(_missing_token_error())
+    stacks = _sync_upload.Resources(_sync_upload.Client(token, base_url)).stacks()
+    return sorted(({"id": s.id, "name": s.name} for s in stacks), key=lambda s: (s["name"], s["id"]))
+
+
+def _run_block(m: dict) -> dict:
+    run = m.get("run")
+    return run if isinstance(run, dict) else {}
+
+
+def _keyed_entries(m: dict) -> List[Tuple[str, dict]]:
+    """Each fetcher entry with its entry key (`x`, `x#1`), as the runner names them."""
+    run = _run_block(m)
+    entries = [e for e in run.get("fetchers") or [] if isinstance(e, dict) and isinstance(e.get("use"), str)]
+    return list(zip(manifest_loader.entry_keys([ManifestEntry(use=e["use"]) for e in entries]), entries))
+
+
+def resolve_stack(stacks: Sequence[Mapping[str, Any]], value: str) -> Dict[str, str]:
+    """The workspace stack a user's `value` names: an exact id first, then an exact (case-sensitive) name.
+
+    Raises ValueError when nothing matches, or when a name is shared by several
+    stacks (the message lists their ids).
+    """
+    for s in stacks:
+        if s["id"] == value:
+            return {"id": s["id"], "name": s["name"]}
+    named = [s for s in stacks if s["name"] == value]
+    if len(named) == 1:
+        return {"id": named[0]["id"], "name": named[0]["name"]}
+    if named:
+        ids = ", ".join(s["id"] for s in named)
+        raise ValueError(f"{len(named)} stacks are named {value!r}; use one of these ids: {ids}")
+    known = ", ".join(s["name"] for s in stacks) or "none"
+    raise ValueError(f"no stack {value!r} in this workspace (stacks: {known})")
+
+
+def stack_errors(manifest: dict, stacks: Sequence[Mapping[str, Any]]) -> List[str]:
+    """One error for each `stack` in the manifest (the default and each entry's) that no workspace stack matches."""
+    run = _run_block(manifest)
+    places = [("run.paramify.stack", (run.get("paramify") or {}).get("stack"))]
+    places += [(f"fetchers[{k}].paramify.stack", (e.get("paramify") or {}).get("stack"))
+               for k, e in _keyed_entries(manifest)]
+    errors = []
+    for where, value in places:
+        if not value:
+            continue
+        try:
+            resolve_stack(stacks, str(value))
+        except ValueError as exc:
+            errors.append(f"{where}: {exc}")
+    return errors
+
+
+def set_stack(m: dict, stack: str, stack_name: Optional[str] = None, use: Optional[str] = None) -> dict:
+    """Record the Paramify stack uploads go to: manifest-wide, or for one fetcher entry.
+
+    Writes `run.paramify.stack` (and `stack_name` when given). With `use`, writes
+    that entry's `paramify` block instead. `use` is an entry key (`aws_iam_mfa`,
+    `aws_iam_mfa#1`) or a fetcher name; a name shared by several entries, or one
+    that matches none, raises ValueError naming the entry keys.
+    """
+    if use is None:
+        block = _run(m).setdefault("paramify", {})
+    else:
+        pairs = _keyed_entries(m)
+        hits = [(k, e) for k, e in pairs if e.get("use") == use] or [(k, e) for k, e in pairs if k == use]
+        if len(hits) != 1:
+            names = ", ".join(k for k, _ in hits) if hits else ", ".join(k for k, _ in pairs) or "none"
+            what = "matches several entries; name one by its entry key" if hits else "matches no entry"
+            raise ValueError(f"{use!r} {what} (entries: {names})")
+        block = hits[0][1].setdefault("paramify", {})
+    block["stack"] = stack
+    if stack_name:
+        block["stack_name"] = stack_name
+    else:
+        block.pop("stack_name", None)
+    return m
 
 
 # --------------------------------------------------------------------------- #

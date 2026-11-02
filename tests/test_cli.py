@@ -56,7 +56,7 @@ def _subcommands(group: str) -> set:
 EXPECTED_TOP = {
     "list", "catalog", "describe", "ksi", "doctor", "manifests", "runs",
     "evidence", "validate", "run", "upload", "manifest", "scripts", "programs",
-    "assessments", "capabilities", "artifacts", "issues", "tui",
+    "assessments", "capabilities", "artifacts", "issues", "tui", "stacks",
 }
 EXPECTED_PROGRAMS = {"list", "target"}
 EXPECTED_ASSESSMENTS = {"list", "select"}
@@ -66,7 +66,7 @@ EXPECTED_ISSUES = {"upload"}
 EXPECTED_MANIFEST = {
     "init", "new", "add", "remove", "set-config", "set-secret",
     "add-target", "remove-target", "set-platform-config",
-    "set-passthrough", "set-output-dir", "show",
+    "set-passthrough", "set-output-dir", "set-stack", "show",
 }
 EXPECTED_SCRIPTS = {"sync"}
 

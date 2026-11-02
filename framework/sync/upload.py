@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -412,7 +413,7 @@ def _apply_locked(
         raise
     finally:
         summary = {**base, **report.summary(outcomes or []), "tags": report.tags(policy, outcomes),
-                   "results": report.results}
+                   "results": report.results, "outcomes": [asdict(o) for o in outcomes or []]}
         if error is not None:
             summary["ok"] = False
         summary["log_path"] = _write_log(setup.run_dir, summary, error)

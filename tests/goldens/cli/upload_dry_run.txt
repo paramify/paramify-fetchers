@@ -2,6 +2,12 @@ $ paramify upload --dry-run evidence/run-<run-id>
 exit 0
 --- stdout
 Uploading to production: https://app.paramify.com/api/v0
+evidence_sets
+  noop EVD-DEMO-HELLO: evidence set EVD-DEMO-HELLO: state unknown (offline)
+delivery
+  deliver demo_hello: deliver 1 file to EVD-DEMO-HELLO (routing unknown offline)
+1 deliver · 0 noop · 0 refuse
+
 Upload 1 file(s) from <repo>/evidence/run-<run-id> → https://app.paramify.com/api/v0 (dry-run)
 
         [DRY] demo_hello.json  set=EVD-DEMO-HELLO  tags=Automated by Paramify Fetchers,Demo

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
+import requests
 
 from framework import api
 from framework.paramify import client as client_mod
@@ -80,13 +81,10 @@ def submits(fake) -> List[str]:
 # ---- dry run ------------------------------------------------------------------
 
 def test_dry_run_makes_no_http_calls(no_env, root, tmp_path, monkeypatch):
-    class Refuse:
-        headers: Dict[str, str] = {}
+    def refuse(self, *a, **k):
+        raise AssertionError("a dry run made an HTTP request")
 
-        def request(self, *a, **k):
-            raise AssertionError("a dry run made an HTTP request")
-
-    monkeypatch.setattr(client_mod.requests, "Session", Refuse)
+    monkeypatch.setattr(requests.sessions.Session, "request", refuse)
     run = tmp_path / "run-1"
     run.mkdir()
     build(run, {"a.json": env(fetcher="x"), "b.json": env(fetcher="x"),
@@ -205,10 +203,12 @@ def test_validators_are_a_noop_in_a_dry_run(no_env, root, tmp_path, monkeypatch)
     assert v["verb"] == "noop" and v["summary"] == "sync validators for 1 evidence set"
 
 
-def test_failed_validator_sync_makes_the_upload_not_ok(fake, root, tmp_path, monkeypatch):
+def test_failed_validator_sync_stops_before_any_batch_is_submitted(fake, root, tmp_path, monkeypatch):
     monkeypatch.setattr(api, "sync_validators", lambda *a, **k: {"ok": False, "errors": 1})
     out = api.upload_run(two_files(tmp_path), root, with_validators=True)
-    assert out["entries"]["x"]["state"] == "delivered" and out["ok"] is False
+    assert out["ok"] is False and out["uploaded"] == 0
+    assert out["entries"]["x"]["state"] == "skipped"
+    assert submits(fake) == [] and not fake._batches
 
 
 def test_upload_log_records_batch_and_stack(fake, root, tmp_path):

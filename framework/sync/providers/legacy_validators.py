@@ -54,6 +54,7 @@ class LegacyValidatorsProvider:
             verb="update" if self._online else "noop",
             summary=f"sync validators for {_sets(len(desired))}",
             payload={"reference_ids": list(desired)},
+            on_failure="stop",  # a set without its validators must not be delivered
         )]
 
     def apply(self, action: Action, resources: Any, resolve: Callable[[Any], Any]) -> Outcome:
