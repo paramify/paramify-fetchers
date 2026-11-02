@@ -277,7 +277,8 @@ def test_main_reports_null_not_zero_when_the_vault_list_is_not_read(monkeypatch,
     summary = evidence["summary"]
     assert code == 1 and evidence["results"]["recovery_services_vaults"] == []
     assert (summary["restore_job_window_days"], summary["restore_jobs_read"], summary["in_scope_restore_jobs"],
-            summary["retention_threshold_days"]) == (90, False, None, 30)
+            summary["in_scope_recovery_services_vaults"], summary["in_scope_protected_items"],
+            summary["retention_threshold_days"]) == (90, False, None, None, None, 30)
     restore_counts = set(backup.summarize_restores([], 90, NOW)) - {"restore_job_window_days", "restore_jobs_read"}
     vault_counts = set(backup.summarize([])) - {"retention_threshold_days"}
     assert {k: summary[k] for k in restore_counts | vault_counts} == dict.fromkeys(restore_counts | vault_counts)
@@ -290,7 +291,8 @@ def test_main_reports_zero_when_the_vault_list_is_read_and_empty(monkeypatch, tm
     summary = evidence["summary"]
     assert code == 0
     assert (summary["restore_jobs_read"], summary["total_restore_jobs"], summary["total_recovery_services_vaults"],
-            summary["total_protected_items"], summary["in_scope_restore_jobs"]) == (True, 0, 0, 0, 0)
+            summary["total_protected_items"], summary["in_scope_restore_jobs"],
+            summary["in_scope_recovery_services_vaults"], summary["in_scope_protected_items"]) == (True, 0, 0, 0, 0, 0, 0)
 
 
 def test_real_sdk_models_project():

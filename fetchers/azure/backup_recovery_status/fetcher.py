@@ -947,8 +947,8 @@ def main() -> int:
             **summarize_restores(vaults, restore_window_days, now, listed),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("recovery_services_vault", "protected_item", "restore_job"), {
-                "recovery_services_vaults": len(vaults),
-                "protected_items": sum(v["total_protected_items"] for v in vaults),
+                "recovery_services_vaults": len(vaults) if listed else None,
+                "protected_items": sum(v["total_protected_items"] for v in vaults) if listed else None,
                 "restore_jobs": sum(v["total_restore_jobs"] for v in vaults) if restores_read else None,
             }),
         },
