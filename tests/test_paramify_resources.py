@@ -1,0 +1,132 @@
+"""Round-trips of the typed resources against the in-process fake API."""
+from __future__ import annotations
+
+import importlib.util
+import sys
+from datetime import date
+from pathlib import Path
+
+import pytest
+
+from framework.paramify.client import ApiError, Client
+from framework.paramify.resources import Reader, Resources
+
+_spec = importlib.util.spec_from_file_location("paramify_fake", Path(__file__).with_name("paramify_fake.py"))
+assert _spec and _spec.loader
+_mod = importlib.util.module_from_spec(_spec)
+sys.modules["paramify_fake"] = _mod
+_spec.loader.exec_module(_mod)
+FakeParamify = _mod.FakeParamify
+
+
+@pytest.fixture
+def fake():
+    return FakeParamify()
+
+
+@pytest.fixture
+def res(fake):
+    return Resources(Client("t", "https://api.example.test", session=fake.session))
+
+
+def _request_for(fake, ref="EVD-A", approval="SUBMISSION"):
+    stack = fake.add_stack("prod")
+    ev = fake.add_evidence(ref, channels=[stack.id], approval=approval)
+    req = fake.add_request(ev.id, ev.channels[0].id, date(2026, 10, 1), date(2026, 12, 1))
+    return ev, req
+
+
+def test_stacks_and_evidence_by_reference(fake, res):
+    stack = fake.add_stack("prod")
+    fake.add_evidence("EVD-A", channels=[stack.id])
+    assert [s.name for s in res.stacks()] == ["prod"]
+    got = res.evidence_by_reference(["EVD-A", "EVD-MISSING"])
+    assert list(got) == ["EVD-A"]
+    assert got["EVD-A"].channels[0].stack_id == stack.id
+
+
+def test_create_evidence_then_read_by_reference(res):
+    made = res.create_evidence({"referenceId": "EVD-N", "name": "N"})
+    assert res.evidence_by_reference(["EVD-N"])["EVD-N"] == made
+
+
+def test_create_evidence_on_existing_reference_returns_existing(fake, res):
+    existing = fake.add_evidence("EVD-A")
+    assert res.create_evidence({"referenceId": "EVD-A", "name": "x"}).id == existing.id
+
+
+def test_artifact_requests_current_filter(fake, res):
+    ev, req = _request_for(fake)
+    assert [r.id for r in res.artifact_requests(ev.id, current=True)] == [req.id]
+    fake.set_today(date(2027, 1, 1))
+    assert res.artifact_requests(ev.id, current=True) == []
+    assert res.artifact_requests(ev.id)[0].due_date == date(2026, 12, 1)
+
+
+def test_batch_upload_submit_round_trip(fake, res):
+    ev, req = _request_for(fake)
+    batch = res.create_batch(artifact_request_id=req.id)
+    assert [b.id for b in res.batches(artifact_request_id=req.id)] == [batch.id]
+    art = res.upload_to_batch(batch.id, "a.json", b"{}", {"title": "a"})
+    assert [a.original_file_name for a in res.artifacts(ev.id, batch_id=batch.id)] == ["a.json"]
+    assert art.batch_id == batch.id
+    assert res.batch(batch.id).artifact_count == 1
+    assert res.submit_batch(batch.id).status == "APPROVED"
+
+
+def test_manual_approval_submits_to_submitted_and_closed_batch_refuses(fake, res):
+    ev, _ = _request_for(fake, approval="MANUAL")
+    batch = res.create_batch(evidence_id=ev.id)
+    res.upload_to_batch(batch.id, "a.json", b"{}", {})
+    assert res.submit_batch(batch.id).status == "SUBMITTED"
+    with pytest.raises(ApiError) as e:
+        res.upload_to_batch(batch.id, "b.json", b"{}", {})
+    assert e.value.status == 409
+
+
+def test_submit_empty_batch_is_a_conflict(fake, res):
+    ev, _ = _request_for(fake)
+    batch = res.create_batch(evidence_id=ev.id)
+    with pytest.raises(ApiError) as e:
+        res.submit_batch(batch.id)
+    assert e.value.status == 409
+
+
+def test_paging_walks_every_page(fake, res):
+    ev, _ = _request_for(fake)
+    for _ in range(150):
+        res.create_batch(evidence_id=ev.id)
+    assert len(res.batches(evidence_id=ev.id)) == 150
+
+
+def test_fail_upload_once_then_succeeds(fake, res):
+    ev, _ = _request_for(fake)
+    batch = res.create_batch(evidence_id=ev.id)
+    fake.fail_upload_once("a.json", 400)
+    with pytest.raises(ApiError):
+        res.upload_to_batch(batch.id, "a.json", b"{}", {})
+    assert res.upload_to_batch(batch.id, "a.json", b"{}", {}).original_file_name == "a.json"
+
+
+def test_without_batches_is_missing(fake, res):
+    fake.without_batches()
+    with pytest.raises(ApiError) as e:
+        res.batches()
+    assert e.value.status == 404
+
+
+def test_add_tags_posts_names(fake, res):
+    res.add_tags("evidence", "ev-1", ["x", "y"])
+    assert fake.tags[("evidence", "ev-1")] == ["x", "y"]
+
+
+def test_reader_memoizes_identical_calls(fake, res):
+    fake.add_stack("prod")
+    reader = Reader(res)
+    reader.stacks()
+    reader.stacks()
+    assert [c for c in fake.calls if c[1] == "/stacks"] == [("GET", "/stacks", {})]
+    reader.evidence_by_reference(["EVD-A"])
+    reader.evidence_by_reference(["EVD-A"])
+    assert len([c for c in fake.calls if c[1] == "/evidence"]) == 1
+    assert not hasattr(reader, "create_batch")

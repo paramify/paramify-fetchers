@@ -1,0 +1,224 @@
+"""An in-process fake of the Paramify 0.14.0 API for the sync engine's tests.
+
+`FakeParamify.session` stands in for a `requests.Session`: pass it to
+`Client(..., session=fake.session)`. State helpers build the workspace.
+"""
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
+
+from framework.paramify.resources import ArtifactRequest, Channel, EvidenceSet, Stack
+
+
+class FakeResponse:
+    def __init__(self, status_code: int, payload: Any = None, text: Optional[str] = None) -> None:
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text if text is not None else ("" if payload is None else json.dumps(payload))
+        self.headers: Dict[str, str] = {}
+
+    def json(self) -> Any:
+        return json.loads(self.text)
+
+
+@dataclass
+class _Session:
+    fake: "FakeParamify"
+    headers: Dict[str, str] = field(default_factory=dict)
+
+    def request(self, method: str, url: str, params: Any = None, json: Any = None,
+                files: Any = None, timeout: Any = None) -> FakeResponse:
+        path = urlparse(url).path
+        self.fake.calls.append((method, path, dict(params or {})))
+        return self.fake._route(method, path, dict(params or {}), json, files)
+
+
+class FakeParamify:
+    def __init__(self) -> None:
+        self.session = _Session(self)
+        self.calls: List[Tuple[str, str, Dict[str, Any]]] = []
+        self.today = date(2026, 11, 1)
+        self.tags: Dict[Tuple[str, str], List[str]] = {}
+        self._stacks: List[Dict[str, Any]] = []
+        self._evidence: List[Dict[str, Any]] = []
+        self._requests: List[Dict[str, Any]] = []
+        self._batches: List[Dict[str, Any]] = []
+        self._artifacts: List[Dict[str, Any]] = []
+        self._fail_all: Dict[str, Tuple[int, str]] = {}
+        self._fail_once: Dict[str, int] = {}
+        self._batches_enabled = True
+        self._n: Dict[str, int] = {}
+
+    # ----- state helpers -------------------------------------------------
+    def _next(self, kind: str) -> int:
+        self._n[kind] = self._n.get(kind, 0) + 1
+        return self._n[kind]
+
+    def add_stack(self, name: str) -> Stack:
+        row = {"id": f"st-{self._next('st')}", "name": name}
+        self._stacks.append(row)
+        return Stack(**row)
+
+    def _make_evidence(self, ref: str, channels: Any, approval: str, name: Optional[str] = None) -> Dict[str, Any]:
+        row = {
+            "id": f"ev-{self._next('ev')}", "referenceId": ref, "name": name or ref,
+            "whenToApproveArtifactRequest": approval,
+            "channels": [
+                {"id": f"ch-{self._next('ch')}", "referenceId": f"CH-{self._n['ch']}",
+                 "owner": None, "stackId": s}
+                for s in channels
+            ],
+        }
+        self._evidence.append(row)
+        return row
+
+    def add_evidence(self, ref: str, *, channels: Any = (), approval: str = "SUBMISSION") -> EvidenceSet:
+        row = self._make_evidence(ref, channels, approval)
+        return EvidenceSet(
+            id=row["id"], reference_id=ref, name=row["name"], approval=approval,
+            channels=tuple(Channel(c["id"], c["referenceId"], c["stackId"]) for c in row["channels"]),
+        )
+
+    def add_request(self, evidence_id: str, channel_id: str, requested: date, due: date) -> ArtifactRequest:
+        row = {
+            "id": f"ar-{self._next('ar')}", "referenceId": f"AR-{self._n['ar']}",
+            "requestedDate": requested.isoformat(), "dueDate": due.isoformat(),
+            "channelId": channel_id, "evidenceId": evidence_id, "batchCount": 0,
+        }
+        self._requests.append(row)
+        return ArtifactRequest(row["id"], row["referenceId"], channel_id, evidence_id, requested, due)
+
+    def set_today(self, d: date) -> None:
+        self.today = d
+
+    def fail_upload(self, filename: str, status: int, body: str = "") -> None:
+        self._fail_all[filename] = (status, body)
+
+    def fail_upload_once(self, filename: str, status: int) -> None:
+        self._fail_once[filename] = status
+
+    def without_batches(self) -> None:
+        self._batches_enabled = False
+
+    # ----- routing -------------------------------------------------------
+    def _route(self, method: str, path: str, params: Dict[str, Any], body: Any, files: Any) -> FakeResponse:
+        if path.startswith("/batches") and not self._batches_enabled:
+            return FakeResponse(404, text="Not Found")
+        if method == "GET" and path == "/stacks":
+            return FakeResponse(200, self._stacks)
+        if path == "/evidence":
+            if method == "GET":
+                ref = params.get("referenceId")
+                rows = [e for e in self._evidence if ref in (None, e["referenceId"])]
+                return FakeResponse(200, {"evidences": rows})
+            if any(e["referenceId"] == body["referenceId"] for e in self._evidence):
+                return FakeResponse(409, text="Evidence already exists")
+            chans = [c["stackId"] if isinstance(c, dict) else c for c in body.get("channels") or []]
+            row = self._make_evidence(
+                body["referenceId"], chans,
+                body.get("whenToApproveArtifactRequest", "SUBMISSION_WITH_PASSING_VALIDATORS"),
+                body.get("name"),
+            )
+            return FakeResponse(201, row)
+        if method == "GET" and path == "/artifact-requests":
+            rows = [r for r in self._requests if r["evidenceId"] == params.get("evidenceId")]
+            if str(params.get("current")).lower() == "true":
+                rows = [r for r in rows
+                        if date.fromisoformat(r["requestedDate"]) <= self.today <= date.fromisoformat(r["dueDate"])]
+            return self._page(rows, "artifactRequests", params)
+        if path == "/batches":
+            if method == "GET":
+                rows = [b for b in self._batches
+                        if all(params.get(q) in (None, b[k]) for q, k in
+                               (("evidenceId", "evidenceId"), ("artifactRequestId", "artifactRequestId"),
+                                ("status", "status")))]
+                return self._page(rows, "batches", params)
+            return self._create_batch(body)
+        m = re.fullmatch(r"/batches/([^/]+)(?:/(submit|artifacts/upload))?", path)
+        if m:
+            batch = next((b for b in self._batches if b["id"] == m.group(1)), None)
+            if batch is None:
+                return FakeResponse(404, text="Not Found")
+            if m.group(2) is None and method == "GET":
+                return FakeResponse(200, batch)
+            if m.group(2) == "submit":
+                return self._submit(batch)
+            if m.group(2):
+                return self._upload(batch, files)
+        m = re.fullmatch(r"/evidence/([^/]+)/artifacts", path)
+        if method == "GET" and m:
+            rows = [a for a in self._artifacts
+                    if a["_evidenceId"] == m.group(1)
+                    and params.get("batchId") in (None, a["batchId"])
+                    and params.get("originalFileName") in (None, a["originalFileName"])]
+            return FakeResponse(200, {"artifacts": [{k: v for k, v in a.items() if k != "_evidenceId"} for a in rows]})
+        m = re.fullmatch(r"/custom-tags/([^/]+)/([^/]+)", path)
+        if method == "POST" and m:
+            have = self.tags.setdefault((m.group(1), m.group(2)), [])
+            have.extend(n for n in body["names"] if n not in have)
+            return FakeResponse(200, {"customTags": have})
+        return FakeResponse(404, text="Not Found")
+
+    def _page(self, rows: List[Dict[str, Any]], key: str, params: Dict[str, Any]) -> FakeResponse:
+        size = int(params.get("pageSize", 100))
+        page = int(params.get("page", 1))
+        total_pages = max(1, -(-len(rows) // size))
+        return FakeResponse(200, {
+            key: rows[(page - 1) * size: page * size],
+            "pagination": {"page": page, "pageSize": size, "totalCount": len(rows), "totalPages": total_pages},
+        })
+
+    def _create_batch(self, body: Dict[str, Any]) -> FakeResponse:
+        request_id = None
+        if body["type"] == "ARTIFACT_REQUEST":
+            request = next((r for r in self._requests if r["id"] == body["artifactRequestId"]), None)
+            if request is None:
+                return FakeResponse(404, text="Not Found")
+            request_id, evidence_id = request["id"], request["evidenceId"]
+            request["batchCount"] += 1
+        else:
+            evidence_id = body["evidenceId"]
+        evidence = next((e for e in self._evidence if e["id"] == evidence_id), None)
+        if evidence is None:
+            return FakeResponse(404, text="Not Found")
+        row = {
+            "id": f"bt-{self._next('bt')}", "referenceId": f"BCH-{self._n['bt']}", "status": "OPEN",
+            "evidenceId": evidence_id, "artifactRequestId": request_id, "artifactCount": 0,
+            "whenToApprove": evidence["whenToApproveArtifactRequest"], "whenToCreateAndUpdateProcess": "NEVER",
+        }
+        self._batches.append(row)
+        return FakeResponse(201, row)
+
+    def _upload(self, batch: Dict[str, Any], files: Any) -> FakeResponse:
+        filename = files["file"][0]
+        if batch["status"] not in ("OPEN", "REJECTED"):
+            return FakeResponse(409, text="Batch is not open")
+        if filename in self._fail_once:
+            return FakeResponse(self._fail_once.pop(filename), text="injected failure")
+        if filename in self._fail_all:
+            status, text = self._fail_all[filename]
+            return FakeResponse(status, text=text)
+        meta = json.loads(files["artifact"][1])
+        row = {
+            "id": f"af-{self._next('af')}", "title": meta.get("title") or filename,
+            "originalFileName": filename, "pathname": f"/artifacts/{filename}", "note": meta.get("note"),
+            "isUrl": False, "fileType": "json", "createdAt": f"{self.today.isoformat()}T00:00:00Z",
+            "createdBy": {}, "effectiveDate": meta.get("effectiveDate") or self.today.isoformat(),
+            "batchId": batch["id"], "validators": [], "_evidenceId": batch["evidenceId"],
+        }
+        self._artifacts.append(row)
+        batch["artifactCount"] += 1
+        return FakeResponse(201, {k: v for k, v in row.items() if k != "_evidenceId"})
+
+    def _submit(self, batch: Dict[str, Any]) -> FakeResponse:
+        if batch["status"] not in ("OPEN", "REJECTED"):
+            return FakeResponse(409, text="Batch is not open")
+        if batch["artifactCount"] == 0:
+            return FakeResponse(409, text="Batch has no artifacts")
+        batch["status"] = "SUBMITTED" if batch["whenToApprove"] == "MANUAL" else "APPROVED"
+        return FakeResponse(200, batch)
