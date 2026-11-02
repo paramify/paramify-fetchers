@@ -171,6 +171,11 @@ A new evidence set gets the approval mode
 validators pass. Set `approval` to change it. The upload never changes an
 existing set: it only adds tags to it.
 
+When you set `approval` and an existing set uses a different mode, the plan
+shows a note. When the upload must create a set, all the entries that send to
+it must have the same `approval`. If they do not, the upload refuses that set.
+Entries that send to an existing set can have different values.
+
 ### Held and dropped files
 
 | Problem | Result |

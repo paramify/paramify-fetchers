@@ -53,6 +53,8 @@ def test_desired_two_entries_same_use(tmp_path):
     a, b = desired_from_run(tmp_path, {})
     assert (a.entry_key, a.reference_id, a.stack, a.approval) == ("x", "EVD-A", "S1", "MANUAL")
     assert (b.entry_key, b.stack_name, b.no_request) == ("x#1", "Main", "evidence")
+    assert a.approval_explicit is True
+    assert b.approval_explicit is False and b.approval == "SUBMISSION_WITH_PASSING_VALIDATORS"
 
 
 def test_desired_from_legacy_run(tmp_path):

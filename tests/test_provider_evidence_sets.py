@@ -30,12 +30,13 @@ DEFAULT = "SUBMISSION_WITH_PASSING_VALIDATORS"
 TODAY = date(2026, 11, 1)
 
 
-def entry(key="e", ref="EVD-A", approval=DEFAULT, category="aws", **es):
+def entry(key="e", ref="EVD-A", approval=None, category="aws", **es):
+    """`approval` None is the default, not set in the manifest; a value is set explicitly."""
     evidence_set = {"reference_id": ref, "name": "Set A", **es}
     return EntryDesired(
         entry_key=key, use=key, run_id="R", reference_id=ref, evidence_set=evidence_set,
-        category=category, approval=approval, stack=None, stack_name=None,
-        no_request="refuse", files=(), recorded_batch_id=None,
+        category=category, approval=approval or DEFAULT, stack=None, stack_name=None,
+        no_request="refuse", files=(), recorded_batch_id=None, approval_explicit=approval is not None,
     )
 
 
@@ -81,7 +82,7 @@ def test_empty_description_and_default_frequency_omitted():
 
 def test_existing_set_noop_with_drift_and_tags():
     seen = observed_set(name="Other", approval="MANUAL")
-    noop, tag = plan_for(provider(), [entry()], {"EVD-A": seen})
+    noop, tag = plan_for(provider(), [entry(approval=DEFAULT)], {"EVD-A": seen})
     assert noop.verb == "noop"
     assert noop.warnings == [
         f"approval is MANUAL here; new sets get {DEFAULT}",
@@ -89,6 +90,19 @@ def test_existing_set_noop_with_drift_and_tags():
     ]
     assert noop.payload["id"] == "ev-9"
     assert tag.verb == "tag"
+
+
+def test_existing_set_default_approval_is_no_drift():  # Ruling 20
+    seen = observed_set(approval="MANUAL")
+    [noop, _] = plan_for(provider(), [entry()], {"EVD-A": seen})
+    assert noop.warnings == []
+
+
+def test_existing_set_with_entries_that_disagree_is_not_refused():  # Ruling 20
+    seen = observed_set(approval="MANUAL")
+    noop, tag = plan_for(provider(), [entry("a", approval="SUBMISSION"), entry("b")], {"EVD-A": seen})
+    assert noop.verb == "noop" and tag.verb == "tag"
+    assert noop.warnings == ["approval is MANUAL here; new sets get SUBMISSION"]
 
 
 def test_existing_set_without_drift_has_no_warnings():

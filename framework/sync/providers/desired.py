@@ -55,6 +55,7 @@ class EntryDesired:
     files: tuple[DeliveryFile, ...]
     recorded_batch_id: Optional[str]
     collected_on: Optional[date] = None  # the day the run started (UTC), from _run_metadata.json
+    approval_explicit: bool = False  # `approval` came from the manifest, not the default
 
 
 def is_enveloped(obj: Any) -> bool:
@@ -234,5 +235,6 @@ def desired_from_run(
             files=tuple(files),
             recorded_batch_id=state.batch_for(key),
             collected_on=_started_on(run_meta),
+            approval_explicit=bool(cfg.get("approval")),
         ))
     return result

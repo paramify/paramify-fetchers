@@ -31,6 +31,7 @@ class SetDesired:
     category: Optional[str]
     entry_keys: List[str] = field(default_factory=list)
     approvals: Dict[str, str] = field(default_factory=dict)  # entry key -> approval
+    explicit: Dict[str, str] = field(default_factory=dict)  # entry key -> approval set in the manifest
 
     @property
     def conflict(self) -> bool:
@@ -59,6 +60,8 @@ def group_by_reference(entries: List[EntryDesired]) -> List[SetDesired]:
             rec.category = e.category
         rec.entry_keys.append(e.entry_key)
         rec.approvals[e.entry_key] = e.approval
+        if e.approval_explicit:
+            rec.explicit[e.entry_key] = e.approval
     return list(sets.values())
 
 
@@ -107,7 +110,7 @@ class EvidenceSetsProvider:
                     summary=f"evidence set {d.reference_id}: state unknown (offline)",
                 ))
                 continue
-            if d.conflict:
+            if d.conflict and seen is None:  # only a set this run creates needs one approval
                 pairs = ", ".join(f"{k}={v}" for k, v in d.approvals.items())
                 actions.append(Action(
                     id=action_id, provider=self.name, key=d.reference_id, verb="refuse",
@@ -137,10 +140,10 @@ class EvidenceSetsProvider:
                 ))
             else:
                 warnings: List[str] = []
-                if seen.approval != d.approval:
-                    warnings.append(
-                        f"approval is {seen.approval} here; new sets get {d.approval}"
-                    )
+                # Only an approval the manifest sets is drift; the default would note every older set.
+                for wanted in dict.fromkeys(d.explicit.values()):
+                    if seen.approval != wanted:
+                        warnings.append(f"approval is {seen.approval} here; new sets get {wanted}")
                 if seen.name != d.name:
                     warnings.append(f"name in Paramify is '{seen.name}'; the fetcher calls it '{d.name}'")
                 actions.append(Action(
