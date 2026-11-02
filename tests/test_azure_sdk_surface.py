@@ -238,7 +238,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "MonitorManagementClient",
         "activity_logs",
         ["list"],
-        "azure/app_service_deployments — without it no slot swap or publish-profile download is seen",
+        "azure/app_service_deployments — without it no slot swap or publish-profile download is seen; "
+        "azure/sql_managed_instance_backups — failover history",
     ),
     (
         "azure.mgmt.monitor",
@@ -2921,7 +2922,8 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "EventData",
         ["claims", "caller", "correlation_id", "event_data_id", "resource_id", "operation_name", "status",
          "event_timestamp"],
-        "azure/app_service_deployments — a renamed caller reads as an unattributed swap or download",
+        "azure/app_service_deployments — a renamed caller reads as an unattributed swap or download; "
+        "azure/sql_managed_instance_backups — failover history",
     ),
     (
         "azure.mgmt.monitor.models",

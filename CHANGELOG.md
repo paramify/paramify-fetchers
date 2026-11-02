@@ -514,6 +514,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_sql_managed_instance_backups` 0.3.0: failover history.** Reads the
+  Activity Log (resource provider Microsoft.Sql) over `failover_history_days`
+  (90 by default and at most, `AZURE_SQL_MI_FAILOVER_HISTORY_DAYS`) and lists
+  each failover request in `results.failovers`: a failover group's planned
+  failover, its forced failover allowing data loss, or a failover between one
+  managed instance's replicas, with start and end, duration, final status,
+  caller, the region that took over, and the failover group's policy. Each
+  failover group gains its failover count and newest succeeded failover. The
+  summary adds total, group, forced, instance, succeeded and failed failovers,
+  groups with a succeeded failover, the newest succeeded failover and days since
+  it, and the longest succeeded failover in minutes; each is null, not 0, when
+  the Activity Log wasn't read in full. A failover follows its failover group or
+  instance out of scope under `resource_exclusions`. Also maps to KSI-RPL-RRO
+  and KSI-RPL-TRC. The 0.2.0 fields are unchanged.
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
   history (`risk_history`, oldest first, with what changed and who initiated it)
