@@ -28,6 +28,9 @@ schemas and the `paramify` CLI — not the internal code.
     IPs per profile.
   - Front Door's App Service origins: requests from public addresses outside the
     `AzureFrontDoor.Backend` ranges, which reached the origin without Front Door.
+    Those ranges are shared by every Front Door, so a request through another
+    tenant's profile counts as through Front Door; `azure_front_door_origins`
+    checks that each origin requires its own profile's `X-Azure-FDID`.
   - Tables on the Basic or Auxiliary plan are queried only when
     `NETWORK_TRAFFIC_QUERY_BASIC_TABLES` is on. A workspace that refuses the read
     reads unknown and doesn't fail the run.

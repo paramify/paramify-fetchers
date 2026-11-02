@@ -150,7 +150,7 @@ FD_QUERIES = {
     "fd_clients": "| summarize Requests = count() by ResourceId, ClientIp | order by ResourceId asc, Requests desc " + _RANKED,
 }
 
-# CIp is the address that connected to the app: Front Door's back end over the internet, a private address over Private Link.
+# CIp is the address that connected: any tenant's Front Door back end (the log has no X-Azure-FDID), or a private address over Private Link.
 _HTTP = (
     f"{HTTP_TABLE} | where TimeGenerated > ago({{days}}d) | where tolower(_ResourceId) in ({{app_ids}}) "
     "| extend ResourceId = tolower(_ResourceId), "
