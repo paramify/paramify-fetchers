@@ -842,15 +842,27 @@ def remove_entry(m: dict, use: str) -> dict:
     return m
 
 
-def set_fetcher_config(m: dict, use: str, key: str, value: Any) -> dict:
-    _ensure_entry(m, use).setdefault("config", {})[key] = value
+def _entry_for(m: dict, use: str, entry_key: Optional[str]) -> dict:
+    """The entry to write: the one named by `entry_key` (`x`, `x#1`) when given, else the
+    first entry using `use` (created when missing)."""
+    if entry_key is None:
+        return _ensure_entry(m, use)
+    hit = next((e for k, e in _keyed_entries(m) if k == entry_key), None)
+    if hit is None:
+        raise ValueError(f"no entry {entry_key!r} in the manifest")
+    return hit
+
+
+def set_fetcher_config(m: dict, use: str, key: str, value: Any, entry_key: Optional[str] = None) -> dict:
+    _entry_for(m, use, entry_key).setdefault("config", {})[key] = value
     return m
 
 
-def set_secret(m: dict, use: str, name: str, env_var: str) -> dict:
+def set_secret(m: dict, use: str, name: str, env_var: str, entry_key: Optional[str] = None) -> dict:
     """Set a (non-per-target) secret reference for a fetcher entry. Stores a
-    ${env:VAR} reference — never the secret value."""
-    _ensure_entry(m, use).setdefault("secrets", {})[name] = f"${{env:{env_var}}}"
+    ${env:VAR} reference — never the secret value. `entry_key` (`x#1`) picks one of
+    several entries that use the same fetcher."""
+    _entry_for(m, use, entry_key).setdefault("secrets", {})[name] = f"${{env:{env_var}}}"
     return m
 
 

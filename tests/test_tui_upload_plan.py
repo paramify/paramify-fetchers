@@ -235,3 +235,59 @@ def test_log_panel_renders_delivery_file_progress(tmp_path, run_tui):
         assert "b.json dropped" in text and "WAF" in text
 
     run_tui(body, path)
+
+
+def _two_entry_manifest(tmp_path: Path):
+    catalog = api.catalog(REPO_ROOT)
+    fetcher = next(f for c in catalog["categories"] for f in c["fetchers"] if f.get("config"))
+    name, cfg_key = fetcher["name"], fetcher["config"][0]["name"]
+    m = api.init_manifest()
+    api.set_output_dir(m, str(tmp_path / "evidence"))
+    api.add_entry(m, name)
+    m["run"]["fetchers"].append({"use": name, "config": {cfg_key: "second-original"}})
+    path = tmp_path / "two.yaml"
+    path.write_text(yaml.safe_dump(m))
+    return path, name, cfg_key
+
+
+def test_entry_editor_edits_the_selected_duplicate_entry(tmp_path, run_tui):
+    path, name, cfg_key = _two_entry_manifest(tmp_path)
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, FormModal)
+        for r in app.screen.query("FieldRow"):
+            if r.group == "config" and r.spec["key"] == cfg_key:
+                r.query_one(Input).value = "second-edited"
+            if r.group == "paramify" and r.spec["key"] == "approval":
+                r.query_one(Select).value = "MANUAL"
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await _settle(app, pilot)
+
+    run_tui(body, path)
+    first, second = _run_block(path)["fetchers"]
+    assert "paramify" not in first and (first.get("config") or {}).get(cfg_key) != "second-edited"
+    assert second["paramify"] == {"approval": "MANUAL"}
+    assert second["config"][cfg_key] == "second-edited"
+
+
+def test_entry_editor_opens_on_unknown_hand_edited_values(tmp_path, run_tui):
+    path, name = _manifest(tmp_path)
+    m = yaml.safe_load(path.read_text())
+    m["run"]["fetchers"][0]["paramify"] = {"approval": "BOGUS", "no_request": "nope"}
+    path.write_text(yaml.safe_dump(m))
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, FormModal)
+
+    run_tui(body, path)

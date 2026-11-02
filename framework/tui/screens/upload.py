@@ -487,13 +487,14 @@ class UploadPage(ButtonRowNav, Vertical):
         self.app.call_from_thread(self._confirm_upload, run_dir, "\n".join(lines), question, error)
 
     def _confirm_upload(self, run_dir: str, body: str, question: str, error: bool) -> None:
-        self._busy_planning = False
-
         def go(ok: bool) -> None:
             if ok and not error:
                 self._start_upload(run_dir)
 
-        self.app.push_screen(ConfirmModal(body if error else f"{body}\n\n{question}"), go)
+        try:
+            self.app.push_screen(ConfirmModal(body if error else f"{body}\n\n{question}"), go)
+        finally:
+            self._busy_planning = False
 
     def _start_upload(self, run_dir: str) -> None:
         self._uploading = True

@@ -19,8 +19,10 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Input, Static
 
 from framework import api
+from framework.contract import ManifestEntry
 from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
 from framework.paramify_auth import resolve_upload_token
+from framework.runner.manifest_loader import entry_keys
 from framework.tui import kinds, palette, render
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
@@ -91,7 +93,9 @@ class ManifestPage(ButtonRowNav, Vertical):
         yield Static(id="manifest-issues")
 
     def on_mount(self) -> None:
-        self._selected: Optional[str] = None
+        self._selected: Optional[str] = None  # the fetcher (use) of the selected row
+        self._selected_key: Optional[str] = None  # its entry key: x, x#1
+        self._key_use: Dict[str, str] = {}
         self._errors: List[str] = []
         # {use: merged config view}, rebuilt with the table (api.effective_config)
         self._config_view: Dict[str, List[dict]] = {}
@@ -173,8 +177,13 @@ class ManifestPage(ButtonRowNav, Vertical):
 
         dt.clear()
         row_keys: List[str] = []
-        for e in entries:
+        # One row per entry, keyed by entry key (`x`, `x#1`): two entries of one
+        # fetcher used to share a key, which the table refuses.
+        keys = entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries])
+        self._key_use = {}
+        for e, ekey in zip(entries, keys):
             use = e.get("use", "?")
+            self._key_use[ekey] = use
             d = descriptors.get(use)
             fanout = bool(d and d.get("supports_targets"))
             sset, stot = self._secret_counts(d, e)
@@ -190,9 +199,9 @@ class ManifestPage(ButtonRowNav, Vertical):
                 str(ntargets) if fanout else "—",
                 status,
                 render.destination_cell(d, self._config_view.get(use)) if d else "—",
-                key=use,
+                key=ekey,
             )
-            row_keys.append(use)
+            row_keys.append(ekey)
 
         self._set_empty(
             None
@@ -202,14 +211,18 @@ class ManifestPage(ButtonRowNav, Vertical):
 
         # preserve selection across rebuilds
         if row_keys:
-            target = self._selected if self._selected in row_keys else row_keys[0]
-            self._selected = target
+            if self._selected_key in row_keys:
+                target = self._selected_key
+            else:
+                target = next((k for k in row_keys if self._key_use[k] == self._selected), row_keys[0])
+            self._selected_key = target
+            self._selected = self._key_use[target]
             try:
                 dt.move_cursor(row=dt.get_row_index(target))
             except Exception:
                 pass
         else:
-            self._selected = None
+            self._selected = self._selected_key = None
 
         self._refresh_detail()
         self._set_issues(self._errors)
@@ -314,7 +327,9 @@ class ManifestPage(ButtonRowNav, Vertical):
     # -- events ----------------------------------------------------------- #
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        self._selected = event.row_key.value
+        key = event.row_key.value
+        self._selected_key = key
+        self._selected = self._key_use.get(key, key)
         self._refresh_detail()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -492,7 +507,9 @@ class ManifestPage(ButtonRowNav, Vertical):
         if d is None:
             self.notify("Unknown fetcher — cannot edit.", severity="warning")
             return
-        entry = self._entry(use)
+        # Every write below targets this exact entry, not the first with this fetcher.
+        ekey = self._selected_key if self._key_use.get(self._selected_key or "") == use else use
+        entry = next((e for k, e in self._keyed() if k == ekey), None) or self._entry(use)
         cfg = entry.get("config") or {}
         secs = entry.get("secrets") or {}
         config_specs = [self._config_spec(c, cfg.get(c["name"])) for c in d.get("config", [])]
@@ -510,9 +527,9 @@ class ManifestPage(ButtonRowNav, Vertical):
         paramify_specs = [
             {"key": "stack", "label": "stack", "kind": "text", "value": pf.get("stack"),
              "placeholder": "inherit", "required": False, "help": "stack id or name; blank inherits"},
-            {"key": "approval", "label": "approval", "kind": "select", "value": pf.get("approval"),
+            {"key": "approval", "label": "approval", "kind": "select", "value": pf.get("approval") if pf.get("approval") in APPROVALS else None,
              "options": [(v, v) for v in APPROVALS], "required": False, "help": "blank inherits"},
-            {"key": "no_request", "label": "no_request", "kind": "select", "value": pf.get("no_request"),
+            {"key": "no_request", "label": "no_request", "kind": "select", "value": pf.get("no_request") if pf.get("no_request") in NO_REQUESTS else None,
              "options": [(v, v) for v in NO_REQUESTS], "required": False, "help": "blank inherits"},
         ]
         groups = {"config": config_specs, "secrets": secret_specs, "paramify": paramify_specs}
@@ -521,10 +538,10 @@ class ManifestPage(ButtonRowNav, Vertical):
             if result is None:
                 return
             for k, v in (result.get("config") or {}).items():
-                api.set_fetcher_config(m, use, k, v)
+                api.set_fetcher_config(m, use, k, v, entry_key=ekey)
             for name, env in (result.get("secrets") or {}).items():
-                api.set_secret(m, use, name, env)
-            self._set_entry_paramify(use, result.get("paramify") or {})
+                api.set_secret(m, use, name, env, entry_key=ekey)
+            self._set_entry_paramify(entry, result.get("paramify") or {})
             self._autosave()
             self.rebuild()
             self.notify(f"Updated {use}.")
@@ -546,9 +563,12 @@ class ManifestPage(ButtonRowNav, Vertical):
             done,
         )
 
-    def _set_entry_paramify(self, use: str, values: dict) -> None:
+    def _keyed(self) -> List[tuple]:
+        entries = self._entries()
+        return list(zip(entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries]), entries))
+
+    def _set_entry_paramify(self, entry: dict, values: dict) -> None:
         """Write the entry's `paramify` block from the form; a blank field removes its key."""
-        entry = self._entry(use)
         block = dict(entry.get("paramify") or {})
         for key in ("stack", "approval", "no_request"):
             if values.get(key):
