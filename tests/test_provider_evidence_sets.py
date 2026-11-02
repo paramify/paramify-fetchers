@@ -92,13 +92,13 @@ def test_existing_set_noop_with_drift_and_tags():
     assert tag.verb == "tag"
 
 
-def test_existing_set_default_approval_is_no_drift():  # Ruling 20
+def test_existing_set_default_approval_is_no_drift():
     seen = observed_set(approval="MANUAL")
     [noop, _] = plan_for(provider(), [entry()], {"EVD-A": seen})
     assert noop.warnings == []
 
 
-def test_existing_set_with_entries_that_disagree_is_not_refused():  # Ruling 20
+def test_existing_set_with_entries_that_disagree_is_not_refused():
     seen = observed_set(approval="MANUAL")
     noop, tag = plan_for(provider(), [entry("a", approval="SUBMISSION"), entry("b")], {"EVD-A": seen})
     assert noop.verb == "noop" and tag.verb == "tag"

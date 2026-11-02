@@ -317,7 +317,7 @@ def test_skips_and_drops_are_counted_and_reported_per_file(fake, root, tmp_path)
           [inv("x", ["a.json", "b.json", "c.json"])])
     events: List[Dict[str, Any]] = []
     out = api.upload_run(run, root, on_event=events.append)
-    # A drop is not an error (Ruling 19): `dropped` counts it, and ok == (errors == 0).
+    # A drop is not an error: `dropped` counts it, and ok == (errors == 0).
     assert (out["uploaded"], out["skipped_failed"], out["errors"], out["dropped"]) == (1, 1, 0, 1)
     assert out["entries"]["x"]["state"] == "delivered_with_drops" and out["ok"] is True
     assert sorted(file_events(events)) == [("a.json", "uploaded"), ("b.json", "dropped"),
@@ -491,7 +491,7 @@ def test_a_decision_skip_still_leaves_ok_true(fake, root, tmp_path):
     assert (out["skipped_failed"], out["errors"], out["ok"]) == (1, 0, True)
 
 
-# ---- refused writes fail one action, not the run (Ruling 21) ----------------------
+# ---- refused writes fail one action, not the run --------------------------------
 
 def _two_sets(tmp_path: Path) -> Path:
     run = tmp_path / "run-1"
@@ -594,7 +594,7 @@ def test_a_run_older_than_31_days_reads_artifacts_without_a_date_filter(fake, ro
     assert "createdAt" not in read
 
 
-# ---- dropped files are counted apart from errors (Ruling 19) --------------------
+# ---- dropped files are counted apart from errors ---------------------------------
 
 def test_a_file_dropped_at_apply_is_dropped_not_an_error(fake, root, tmp_path):
     fake.fail_upload("a.json", 413, "too large")
