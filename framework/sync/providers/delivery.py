@@ -4,13 +4,12 @@ For each entry, in this order (the first refusal ends the entry):
 
 1. channel: by the evidence set's channels and the entry's stack;
 2. artifact request on that channel: the current one, else the latest past one;
-3. batch: this entry's batch for this run is found on the server, from the
-   `run_id=` and `entry=` (or `fetcher=`) tokens in its artifacts' notes, so a
-   second upload of a run resumes or skips it and never makes another;
+3. batch: this entry's batch for this run is looked for among ALL batches of
+   the evidence set, so a second upload of a run skips or resumes it, even
+   after the cycle rolled over, and never makes another;
 4. WAF: a file the production WAF would block is dropped at plan time.
 
-The rules are the pure functions `resolve_channel`, `resolve_request` and
-`attribute`; `DeliveryProvider.diff` composes them.
+The rules live in `delivery_routing` as pure functions; `diff` composes them.
 """
 from __future__ import annotations
 
@@ -29,6 +28,15 @@ from framework.paramify.resources import (
 )
 from framework.sync.model import UNKNOWN, Action, Ref, SyncContext
 from framework.sync.providers import waf
+from framework.sync.providers.delivery_routing import (
+    DONE,
+    Refusal,
+    attribute,
+    resolve_channel,
+    resolve_request,
+    stack_drift,
+    stack_name,
+)
 from framework.sync.providers.desired import (
     DeliveryFile,
     EntryDesired,
@@ -38,21 +46,8 @@ from framework.sync.providers.desired import (
 )
 from framework.sync.state import RunState
 
-DONE = ("SUBMITTED", "APPROVED")
 EVIDENCE_LEVEL_WARNING = "evidence-level batch: does not count toward the solution capability"
 ALL_DROPPED = "every file was dropped"
-
-
-@dataclass(frozen=True)
-class Refusal:
-    message: str
-    fix: str
-
-
-@dataclass(frozen=True)
-class Attribution:
-    mine: Optional[Batch]
-    earlier_open: List[Tuple[Batch, str]]  # (batch, its run id)
 
 
 @dataclass
@@ -65,147 +60,6 @@ class EntryObserved:
     current_ids: Set[str] = field(default_factory=set)
     batches: List[Batch] = field(default_factory=list)
     artifacts: Dict[str, List[Artifact]] = field(default_factory=dict)  # batch id -> artifacts
-
-
-# ---- routing rules --------------------------------------------------------- #
-
-def _stack_list(stacks: List[Stack]) -> str:
-    return ", ".join(f"{s.name} ({s.id})" for s in stacks) or "none"
-
-
-def _stack_name(stack_id: str, stacks: List[Stack]) -> Optional[str]:
-    return next((s.name for s in stacks if s.id == stack_id), None)
-
-
-def _find_stack(wanted: str, stacks: List[Stack]) -> Stack | Refusal | None:
-    """The stack with this id, else the one stack with this name. None: no such stack."""
-    by_id = next((s for s in stacks if s.id == wanted), None)
-    if by_id is not None:
-        return by_id
-    by_name = [s for s in stacks if s.name == wanted]
-    if len(by_name) > 1:
-        ids = ", ".join(s.id for s in by_name)
-        return Refusal(f"stack name {wanted} matches more than one stack", f"use the stack id: {ids}")
-    return by_name[0] if by_name else None
-
-
-def resolve_channel(entry: EntryDesired, evidence: Optional[EvidenceSet], stacks: List[Stack]) -> Channel | Refusal | None:
-    """The channel to deliver on; None means the evidence set itself (it has no channels)."""
-    channels = list(evidence.channels) if evidence is not None else []
-    ref = entry.reference_id
-    if not channels:
-        return None
-    if len(channels) == 1:
-        only = channels[0]
-        if not entry.stack:
-            return only
-        found = _find_stack(entry.stack, stacks)
-        if isinstance(found, Refusal):
-            return found
-        if found is not None and found.id == only.stack_id:
-            return only
-        on = _stack_name(only.stack_id, stacks) or only.stack_id
-        says = found.name if found is not None else entry.stack
-        return Refusal(
-            f"{ref}'s only channel is on stack {on}; the manifest says {says}",
-            f"set this entry's stack to {on}, or create a channel for stack {says} on {ref} in the app",
-        )
-    if entry.stack:
-        found = _find_stack(entry.stack, stacks)
-        if isinstance(found, Refusal):
-            return found
-        if found is None:
-            return Refusal(
-                f"stack {entry.stack} is not in this workspace",
-                f"use one of the workspace's stacks: {_stack_list(stacks)}",
-            )
-        stack = found
-    elif len(stacks) == 1:
-        stack = stacks[0]
-    else:
-        return Refusal(
-            f"{ref} has {len(channels)} channels and no stack is configured",
-            "set a stack (paramify manifest set-stack, or paramify upload --stack); "
-            f"stacks: {_stack_list(stacks)}",
-        )
-    on_stack = [c for c in channels if c.stack_id == stack.id]
-    if not on_stack:
-        return Refusal(
-            f"{ref} has no channel on stack {stack.name}",
-            f"create a channel for stack {stack.name} on {ref} in the app",
-        )
-    if len(on_stack) > 1:
-        names = ", ".join(c.reference_id for c in on_stack)
-        return Refusal(
-            f"{ref} has {len(on_stack)} channels on stack {stack.name}: {names}",
-            f"keep one channel for stack {stack.name} on {ref} in the app",
-        )
-    return on_stack[0]
-
-
-def resolve_request(
-    entry: EntryDesired,
-    channel: Channel,
-    requests: List[ArtifactRequest],
-    current_ids: Set[str],
-    today: date,
-) -> ArtifactRequest | Refusal | None:
-    """The current request on the channel, else the latest past one. None: deliver at evidence level."""
-    on_channel = [r for r in requests if r.channel_id == channel.id]
-    current = [r for r in on_channel if r.id in current_ids]
-    if current:
-        return max(current, key=lambda r: (r.requested_date, r.due_date))
-    past = [r for r in on_channel if r.requested_date <= today]
-    if past:
-        return max(past, key=lambda r: r.due_date)
-    if entry.no_request == "evidence":
-        return None
-    return Refusal(
-        f"no current or past artifact request on channel {channel.reference_id} of {entry.reference_id}",
-        f"create an artifact request on {channel.reference_id} in the app, or set no_request: evidence on "
-        "this entry to deliver at the evidence level (it does not count toward the solution capability)",
-    )
-
-
-def note_tokens(note: str) -> List[str]:
-    return note.split("; ")
-
-
-def _token(tokens: List[str], key: str) -> Optional[str]:
-    prefix = f"{key}="
-    return next((t[len(prefix):] for t in tokens if t.startswith(prefix)), None)
-
-
-def _of_entry(tokens: List[str], entry: EntryDesired) -> bool:
-    """The note names this entry: `entry=<key>`, or for older notes `fetcher=<use>` when key == use."""
-    if _token(tokens, "entry") is not None:
-        return f"entry={entry.entry_key}" in tokens
-    return entry.entry_key == entry.use and f"fetcher={entry.use}" in tokens
-
-
-def attribute(batches: List[Batch], artifacts: Dict[str, List[Artifact]], entry: EntryDesired) -> Attribution:
-    """Which batch is this entry's for this run, and which of its batches from earlier runs are still open."""
-    mine: List[Batch] = []
-    earlier: List[Tuple[Batch, str]] = []
-    for b in batches:
-        arts = artifacts.get(b.id) or []
-        if not arts:
-            if entry.recorded_batch_id and b.id == entry.recorded_batch_id:
-                mine.append(b)
-            continue
-        runs: List[str] = []
-        for a in arts:
-            tokens = note_tokens(a.note)
-            run_id = _token(tokens, "run_id")
-            if run_id is not None and _of_entry(tokens, entry) and run_id not in runs:
-                runs.append(run_id)
-        if entry.run_id and entry.run_id in runs:
-            mine.append(b)
-        elif runs and b.status == "OPEN":
-            earlier.append((b, runs[0]))
-    # A finished batch wins over an open one, so a stray duplicate never gets resumed.
-    mine.sort(key=lambda b: 0 if b.status in DONE else 1)
-    return Attribution(mine[0] if mine else None, earlier)
 
 
 @dataclass(frozen=True)
@@ -232,6 +86,22 @@ def _route(entry: EntryDesired, obs: EntryObserved, today: date) -> _Route | Ref
     return _Route(channel, request, late)
 
 
+def _batch_target(
+    mine: Batch, channel: Optional[Channel], obs: EntryObserved
+) -> Tuple[Optional[ArtifactRequest], Optional[str], Optional[str]]:
+    """(request, request id, warning) for this run's batch where it already is."""
+    ar_id = mine.artifact_request_id
+    if ar_id is None:
+        return None, None, EVIDENCE_LEVEL_WARNING
+    known = next((r for r in obs.requests
+                  if r.id == ar_id and (channel is None or r.channel_id == channel.id)), None)
+    if ar_id in obs.current_ids:
+        return known, ar_id, None
+    if known is None:
+        return None, ar_id, f"resuming {mine.reference_id} on an earlier artifact request"
+    return known, ar_id, f"late submission to {known.reference_id} (due {known.due_date.isoformat()})"
+
+
 def _open_warning(b: Batch, run_id: str, arts: List[Artifact], today: date) -> str:
     dates = []
     for a in arts:
@@ -242,15 +112,6 @@ def _open_warning(b: Batch, run_id: str, arts: List[Artifact], today: date) -> s
     if not dates:
         return f"{b.reference_id} from run {run_id} is still open (age unknown)"
     return f"{b.reference_id} from run {run_id} has been open {_count((today - min(dates)).days, 'day')}"
-
-
-def _stack_drift(entry: EntryDesired, stacks: List[Stack]) -> Optional[str]:
-    if not entry.stack or entry.stack_name is None:
-        return None
-    s = next((s for s in stacks if s.id == entry.stack), None)
-    if s is None or s.name == entry.stack_name:
-        return None
-    return f"stack {s.id} is now named {s.name} (manifest label: {entry.stack_name})"
 
 
 def _count(n: int, noun: str) -> str:
@@ -346,18 +207,14 @@ class DeliveryProvider:
         channel = resolve_channel(e, ev, obs.stacks)
         if isinstance(channel, Refusal):
             return obs
-        target: Optional[ArtifactRequest] = None
         if channel is not None:
             obs.requests = reader.artifact_requests(ev.id)
             obs.current_ids = {r.id for r in reader.artifact_requests(ev.id, current=True)}
-            request = resolve_request(e, channel, obs.requests, obs.current_ids, self._today())
-            if isinstance(request, Refusal):
+            if isinstance(resolve_request(e, channel, obs.requests, obs.current_ids, self._today()), Refusal):
                 return obs
-            target = request
-        if target is not None:
-            obs.batches = reader.batches(artifact_request_id=target.id)
-        else:
-            obs.batches = [b for b in reader.batches(evidence_id=ev.id) if b.artifact_request_id is None]
+        # Every batch of the set, on any request: this run's batch may sit on an
+        # earlier request if the cycle rolled over since the last upload.
+        obs.batches = reader.batches(evidence_id=ev.id)
         obs.artifacts = {b.id: reader.artifacts(ev.id, batch_id=b.id) for b in obs.batches}
         return obs
 
@@ -391,41 +248,56 @@ class DeliveryProvider:
                 changes={"stack": UNKNOWN, "channel": UNKNOWN, "target": UNKNOWN},
             )
 
-        warnings = [w for w in (_stack_drift(e, obs.stacks),) if w]
+        warnings = [w for w in (stack_drift(e, obs.stacks),) if w]
         route = _route(e, obs, today)
         if isinstance(route, Refusal):
             return action("refuse", route.message, fix=route.fix, warnings=warnings)
-        channel, request = route.channel, route.request
-        if route.warning:
-            warnings.append(route.warning)
+        channel = route.channel
+        found = attribute(obs.batches, obs.artifacts, e)
+        mine = found.mine
+        route_ar = route.request.id if route.request else None
+        request, ar_id, target_warning = route.request, route_ar, route.warning
+        if mine is not None and mine.artifact_request_id != route_ar:
+            # This run's batch is on another target: it stays there.
+            request, ar_id, target_warning = _batch_target(mine, channel, obs)
+            if mine.status in DONE:
+                target_warning = None
+        if target_warning:
+            warnings.append(target_warning)
+        warnings += [
+            _open_warning(b, rid, obs.artifacts.get(b.id) or [], today)
+            for b, rid in found.earlier_open
+            if b.artifact_request_id == route_ar
+        ]
+
         if obs.evidence is None:
             payload["evidence_id"] = Ref(f"evidence_sets/{e.reference_id}", "id")
             where = f"{e.reference_id} (new evidence set, evidence level)"
         else:
             payload["evidence_id"] = obs.evidence.id
             where = f"{e.reference_id} (evidence level)"
-        stack_name = _stack_name(channel.stack_id, obs.stacks) if channel else None
-        if request is not None and channel is not None:
-            stack = f"stack {stack_name}, " if stack_name else ""
-            where = f"{request.reference_id} ({stack}channel {channel.reference_id})"
+        named = stack_name(channel.stack_id, obs.stacks) if channel else None
+        if ar_id is not None:
+            route_text = f"{f'stack {named}, ' if named else ''}channel {channel.reference_id}" if channel else e.reference_id
+            where = f"{request.reference_id if request else 'an earlier artifact request'} ({route_text})"
         payload.update(
-            target="ARTIFACT_REQUEST" if request else "EVIDENCE",
-            artifact_request_id=request.id if request else None,
-            planned_current=bool(request and request.id in obs.current_ids),
+            target="ARTIFACT_REQUEST" if ar_id else "EVIDENCE",
+            artifact_request_id=ar_id,
+            planned_current=bool(ar_id and ar_id in obs.current_ids),
         )
         changes: Dict[str, Any] = {
-            "stack": {"id": channel.stack_id, "name": stack_name} if channel else None,
+            "stack": {"id": channel.stack_id, "name": named} if channel else None,
             "channel": channel.reference_id if channel else None,
             "target": payload["target"],
-            "artifact_request": None if request is None else {
-                "reference_id": request.reference_id, "requested_date": request.requested_date.isoformat(),
-                "due_date": request.due_date.isoformat(), "current": payload["planned_current"],
+            "artifact_request": None if ar_id is None else {
+                "id": ar_id,
+                "reference_id": request.reference_id if request else None,
+                "requested_date": request.requested_date.isoformat() if request else None,
+                "due_date": request.due_date.isoformat() if request else None,
+                "current": payload["planned_current"],
             },
         }
 
-        found = attribute(obs.batches, obs.artifacts, e)
-        warnings += [_open_warning(b, rid, obs.artifacts.get(b.id) or [], today) for b, rid in found.earlier_open]
-        mine = found.mine
         if mine is not None:
             changes["batch"] = {"id": mine.id, "reference_id": mine.reference_id, "status": mine.status}
         if mine is not None and mine.status in DONE:

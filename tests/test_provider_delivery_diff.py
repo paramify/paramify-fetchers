@@ -25,9 +25,8 @@ from framework.paramify.resources import (
 )
 from framework.sync.model import UNKNOWN, Plan, Ref, SyncContext
 from framework.sync.providers import waf
-from framework.sync.providers.delivery import (
-    DeliveryProvider,
-    EntryObserved,
+from framework.sync.providers.delivery import DeliveryProvider, EntryObserved
+from framework.sync.providers.delivery_routing import (
     Refusal,
     attribute,
     resolve_channel,
@@ -517,7 +516,7 @@ def test_observe_new_set_reads_no_batches(tmp_path):
     assert [c[1] for c in fake.calls] == ["/evidence"]
 
 
-def test_observe_evidence_level_lists_only_unrequested_batches(tmp_path):
+def test_observe_evidence_level_ignores_other_runs_batches_on_requests(tmp_path):
     fake = FakeParamify()
     st = fake.add_stack("Prod")
     ev = fake.add_evidence("EVD-X", channels=[st.id])
@@ -527,9 +526,75 @@ def test_observe_evidence_level_lists_only_unrequested_batches(tmp_path):
           {"x": {"use": "x", "no_request": "evidence"}})
     res = Resources(Client("t", "https://api.example.test", session=fake.session))
     on_request = res.create_batch(artifact_request_id=ar.id)
-    res.upload_to_batch(on_request.id, "a.json", b"{}", {"note": "fetcher=x; run_id=RID; entry=x"})
+    res.upload_to_batch(on_request.id, "a.json", b"{}", {"note": "fetcher=x; run_id=R0; entry=x"})
     [a] = plan_run(fake, tmp_path)
     assert a.verb == "deliver" and a.payload["target"] == "EVIDENCE" and a.payload["resume_batch_id"] is None
+    assert a.warnings == ["evidence-level batch: does not count toward the solution capability"]
+
+
+# ---- cycle rollover between two uploads of one run (all batches of the set) --
+
+def _old_request_batch(status, run_id="R1", ar="ar-40"):
+    b = batch(status=status, ar=ar)
+    arts = {b.id: [artifact("a.json", note_text=note(run_id=run_id, entry="aws_x"))]}
+    return [b], arts
+
+
+def test_rollover_this_runs_batch_approved_on_old_request_is_noop(tmp_path):
+    batches, arts = _old_request_batch("APPROVED")
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), requests=[AR_PAST, AR_NOW], batches=batches,
+                                           artifacts=arts))
+    assert a.verb == "noop" and a.summary == "already delivered in BCH-12"
+    assert a.payload["batch_id"] == "bt-12" and a.payload["artifact_request_id"] == "ar-40"
+
+
+def test_rollover_this_runs_batch_open_on_old_request_resumes_there(tmp_path):
+    batches, arts = _old_request_batch("OPEN")
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), requests=[AR_PAST, AR_NOW], batches=batches,
+                                           artifacts=arts))
+    assert a.verb == "deliver" and a.payload["resume_batch_id"] == "bt-12"
+    assert a.payload["target"] == "ARTIFACT_REQUEST" and a.payload["artifact_request_id"] == "ar-40"
+    assert a.payload["planned_current"] is False
+    assert a.warnings == ["late submission to AR-40 (due 2026-10-28)"]
+    assert a.summary == "deliver 1 file to AR-40 (channel CHN-1): resume BCH-12 (1 missing)"
+
+
+def test_rollover_resume_on_unobserved_request_says_earlier(tmp_path):
+    batches, arts = _old_request_batch("REJECTED", ar="ar-gone")
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), requests=[AR_NOW], batches=batches, artifacts=arts))
+    assert a.verb == "deliver" and a.payload["artifact_request_id"] == "ar-gone"
+    assert a.warnings == ["resuming BCH-12 on an earlier artifact request"]
+
+
+def test_rollover_resume_on_evidence_level_batch(tmp_path):
+    batches, arts = _old_request_batch("OPEN", ar=None)
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), batches=batches, artifacts=arts))
+    assert a.verb == "deliver" and a.payload["resume_batch_id"] == "bt-12"
+    assert a.payload["target"] == "EVIDENCE" and a.payload["artifact_request_id"] is None
+
+
+def test_rollover_other_runs_open_batch_on_old_request_not_mentioned(tmp_path):
+    batches, arts = _old_request_batch("OPEN", run_id="R0")
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), requests=[AR_PAST, AR_NOW], batches=batches,
+                                           artifacts=arts))
+    assert a.verb == "deliver" and a.payload["resume_batch_id"] is None
+    assert a.payload["artifact_request_id"] == "ar-41" and a.warnings == []
+
+
+def test_observe_rollover_finds_this_runs_batch_on_the_old_request(tmp_path):
+    fake = FakeParamify()
+    st = fake.add_stack("Prod")
+    ev = fake.add_evidence("EVD-X", channels=[st.id], approval="MANUAL")
+    old = fake.add_request(ev.id, ev.channels[0].id, date(2026, 10, 1), date(2026, 10, 20))
+    fake.add_request(ev.id, ev.channels[0].id, date(2026, 10, 21), date(2026, 11, 15))
+    build(tmp_path, {"a.json": env(fetcher="x")}, [inv("x", ["a.json"])], {"x": {"use": "x"}})
+    res = Resources(Client("t", "https://api.example.test", session=fake.session))
+    made = res.create_batch(artifact_request_id=old.id)
+    res.upload_to_batch(made.id, "a.json", b"{}", {"note": "fetcher=x; run_id=RID; entry=x"})
+    res.submit_batch(made.id)
+    [a] = plan_run(fake, tmp_path)
+    assert a.verb == "noop" and a.payload["batch_id"] == made.id
+    assert ("GET", "/batches", {"evidenceId": ev.id, "page": 1, "pageSize": 100}) in fake.calls
 
 
 @pytest.mark.parametrize("bad", ["../", "/etc/passwd", "/bin/sh", "/bin/bash", "<script"])
