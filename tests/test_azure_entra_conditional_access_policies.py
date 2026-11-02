@@ -173,7 +173,7 @@ def test_denied_strength_read_is_not_authorized_and_nulls_the_figures(monkeypatc
 def test_denied_policy_read_is_not_authorized_and_unknown_not_zero(monkeypatch):
     policies, strengths, s, collector = _run(monkeypatch, _graph([], policies_status=403))
 
-    assert policies == [] and collector.failures
+    assert policies == [] and collector.failures and strengths is None
     assert collector.failures[0]["message"].endswith("(status 403)")
     assert classify_failure_code(collector.failures) == "not_authorized"
     # Every policy figure, not only the phishing-resistant ones, reads unknown.
@@ -259,6 +259,18 @@ def test_mfa_client_types_skip_device_filters_flows_and_other_risks(monkeypatch)
     assert conditions["p-no-flow"]["authentication_flow_transfer_methods"] == []
     assert conditions["p-no-flow"]["device_filter"] is None
     assert json.loads(json.dumps(by_id["p-device"])) == by_id["p-device"]
+
+
+def test_no_graph_client_leaves_the_strengths_unknown(monkeypatch):
+    async def no_client(collector, cred, work, default=None):
+        collector.record("graph.client", RuntimeError("no Graph client"))
+        return default
+
+    monkeypatch.setattr(ca, "with_graph_client", no_client)
+    collector = Collector(logging.getLogger("test"))
+    policies, _tenant, strengths, readable, policies_readable = asyncio.run(ca._collect(collector, object()))
+    assert policies == [] and strengths is None and policies_readable is False
+    assert ca.summarize(policies, readable, policies_readable)["total_policies"] is None
 
 
 def test_strengths_are_not_read_when_no_policy_uses_one(monkeypatch):

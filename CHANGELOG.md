@@ -534,7 +534,8 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_entra_conditional_access_policies` reads unread policies as unknown, not
   absent.** When the policies can't be read, every summary figure except
   `authentication_strengths_readable` is null; `total_policies` read 0 and
-  `mfa_required_for_admin_portals` read false before. A failed strength read leaves
+  `mfa_required_for_admin_portals` read false before. A failed strength read, or
+  policies that couldn't be read (the Graph client included), leave
   `authentication_strengths` null rather than an empty list.
 
 - **`azure_entra_conditional_access_policies` shows MFA coverage split across

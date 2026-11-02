@@ -491,6 +491,9 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[d
             # None, not [], when the read failed: unread is not "no strengths".
             strengths = None if raw is None else sorted(
                 (strength_record(s) for s in raw), key=lambda s: (s["display_name"] or "", s["id"] or ""))
+        elif not policies_readable:
+            # The policies not read may use strengths.
+            strengths = None
         by_id = {str(s["id"]).lower(): s for s in strengths or []} if readable else None
         policies = [policy_record(p, by_id) for p in projected]
         logger.info("Collected %d Conditional Access policy/policies", len(policies))
@@ -504,7 +507,7 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[d
         )
 
     result = await with_graph_client(collector, cred, _work, default=None)
-    return result if result is not None else ([], {"tenant_source": "unresolved"}, [], True, False)
+    return result if result is not None else ([], {"tenant_source": "unresolved"}, None, True, False)
 
 
 def main() -> int:
@@ -525,7 +528,7 @@ def main() -> int:
     if cred is None:
         policies: list[dict] = []
         tenant = {"tenant_source": "unresolved"}
-        strengths: list[dict] | None = []
+        strengths: list[dict] | None = None
         strengths_readable, policies_readable = True, False
     else:
         policies, tenant, strengths, strengths_readable, policies_readable = asyncio.run(_collect(collector, cred))
