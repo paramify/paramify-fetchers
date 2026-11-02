@@ -7,7 +7,6 @@ one run from running at once.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
@@ -69,6 +68,11 @@ class RunState:
 
     @contextmanager
     def lock(self) -> Iterator[None]:
+        # Imported here, so the facade still imports on native Windows (no fcntl).
+        try:
+            import fcntl
+        except ImportError:
+            raise RuntimeError("run locking needs a POSIX system (use WSL)") from None
         fd = os.open(self.run_dir / UPLOAD_LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o644)
         try:
             try:

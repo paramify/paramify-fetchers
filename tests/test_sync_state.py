@@ -94,3 +94,21 @@ def test_lock_is_exclusive_across_processes(tmp_path: Path) -> None:
 def test_bookkeeping_files_are_not_evidence(tmp_path: Path) -> None:
     assert not is_evidence_file(tmp_path / UPLOAD_STATE_FILE)
     assert not is_evidence_file(tmp_path / UPLOAD_LOCK_FILE)
+
+
+def test_framework_api_imports_without_fcntl_and_lock_says_why(tmp_path):
+    """Native Windows has no fcntl: importing the facade still works; only locking a run refuses."""
+    code = (
+        "import sys; sys.modules['fcntl'] = None\n"  # `import fcntl` now raises ImportError
+        "import framework.api\n"
+        "from framework.sync.state import RunState\n"
+        "try:\n"
+        f"    with RunState({str(tmp_path)!r}).lock():\n"
+        "        pass\n"
+        "except RuntimeError as exc:\n"
+        "    print(exc)\n"
+    )
+    root = Path(__file__).resolve().parent.parent
+    p = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == "run locking needs a POSIX system (use WSL)"
