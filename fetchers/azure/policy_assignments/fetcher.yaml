@@ -94,10 +94,10 @@ evidence_set:
     definition parameters. Policy exemptions: one raw ARM GET of
     /subscriptions/<id>/providers/Microsoft.Authorization/policyExemptions at the preview
     api-version 2024-12-01-preview (no filter, so inherited, resource-group, resource and
-    expired exemptions are all returned), following nextLink; ARM refusing that
-    api-version (InvalidApiVersionParameter, NoRegisteredProviderFound or
-    InvalidResourceType) reports the exemptions as unknown (null counts) without failing
-    the run, and any other error fails it.
+    expired exemptions are all returned), following nextLink. Any failed read fails the
+    run with every exemption count null; ARM refusing that api-version
+    (InvalidApiVersionParameter, NoRegisteredProviderFound or InvalidResourceType) is
+    told apart as exemptions_read_status api_version_unavailable, other errors as failed.
     Exemption categories are matched without regard to case and written as Waiver or
     Mitigated. lifts_enforcement is null, with lifts_enforcement_unknown_reason saying why,
     when the exempted assignment isn't listed (assignment_not_listed: usually an
@@ -108,5 +108,6 @@ evidence_set:
     one in an older version the assignment still uses; flagged per member as
     in_initiative false), or an exempted member's effect couldn't be resolved
     (effect_unresolved). The summary counts exemptions on unlisted assignments and the
-    distinct unlisted assignments they name.
+    distinct unlisted assignments they name. When the assignments weren't read, those
+    counts, assignments_with_exemptions and active_exemptions_lifting_enforcement are null.
     Reader, plus management-group read for MG-scoped custom definitions.

@@ -439,6 +439,13 @@ def test_unlisted_assignment_count_is_null_when_assignments_were_unread():
             summary["unlisted_assignments_with_exemptions"]) == (None, None, None)
 
 
+def test_lifting_count_is_null_when_assignments_were_unread():
+    records = [exemption(wire_exemption(f"e{i}", expires="2026-06-11T00:00:00Z"), unread=True) for i in range(2)]
+    summary = fx.summarize_exemptions(records, fx.EXEMPTIONS_READ)
+    assert (summary["active_exemptions"], summary["exemptions_lifting_enforcement_unknown"]) == (2, 2)
+    assert summary["active_exemptions_lifting_enforcement"] is None
+
+
 def test_assignment_exemption_count_is_null_when_unread():
     target = initiative_assignment(["deny"])
     other = initiative_assignment(["deny"], name="a2")
@@ -536,16 +543,17 @@ def test_list_reads_every_exemption(monkeypatch):
     (400, "(NoRegisteredProviderFound) No registered resource provider found for this api version."),
     (404, "(InvalidResourceType) The resource type could not be found for api version."),
 ])
-def test_refused_api_version_is_unknown_not_a_failure(monkeypatch, status_code, message):
+def test_refused_api_version_is_unavailable_and_a_recorded_failure(monkeypatch, status_code, message):
     (projected, status), collector = _collect(monkeypatch, _HttpError(status_code, message))
-    assert (projected, status, collector.ok) == (None, "api_version_unavailable", True)
+    assert (projected, status, collector.ok) == (None, "api_version_unavailable", False)
+    assert classify_failure_code(collector.failures) == "partial_failure"
 
 
 def test_refusal_code_is_read_from_the_arm_error_body(monkeypatch):
     exc = _HttpError(400, "Operation returned an invalid status 'Bad Request'")
     exc.error = type("Err", (), {"code": "InvalidApiVersionParameter"})()
     (projected, status), collector = _collect(monkeypatch, exc)
-    assert (projected, status, collector.ok) == (None, "api_version_unavailable", True)
+    assert (projected, status, collector.ok) == (None, "api_version_unavailable", False)
 
 
 @pytest.mark.parametrize("status_code, message", [
@@ -583,3 +591,25 @@ def test_failed_assignment_list_leaves_the_summary_null_and_fails_the_run(monkey
     summary = evidence["summary"]
     assert all(summary[key] is None for key in fx.summarize([]))
     assert (evidence["metadata"]["partial_failure"], evidence["results"]["policy_assignments"]) == (True, [])
+
+
+def test_refused_api_version_fails_the_run_and_keeps_the_reason(monkeypatch, tmp_path):
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    monkeypatch.delenv("AZURE_RESOURCE_EXCLUSIONS", raising=False)
+    monkeypatch.setattr(fx, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(fx, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
+    monkeypatch.setattr(fx, "credential", lambda: object())
+    monkeypatch.setattr(fx, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(fx, "collect_policy_assignments", lambda *a: [])
+    monkeypatch.setattr(fx, "arm_rest_client", lambda cred: object())
+
+    def refused(*a):
+        raise _HttpError(400, "(InvalidApiVersionParameter) The api-version is invalid.")
+
+    monkeypatch.setattr(fx, "list_all", refused)
+    assert fx.main() == 1
+    evidence = json.loads((tmp_path / "azure_policy_assignments_s1.json").read_text())
+    assert evidence["summary"]["exemptions_read_status"] == "api_version_unavailable"
+    assert evidence["summary"]["active_exemptions_lifting_enforcement"] is None
+    assert evidence["metadata"]["partial_failure"] is True

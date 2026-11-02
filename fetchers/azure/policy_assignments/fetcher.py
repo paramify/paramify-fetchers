@@ -871,8 +871,9 @@ def summarize_exemptions(exemptions: list[dict] | None, status: str) -> dict:
         "inherited_exemptions": count(lambda e: e["inherited_from_management_group"]),
         "exemptions_by_scope_kind": by_scope,
         "defender_benchmark_exemptions": count(lambda e: e["on_defender_benchmark_assignment"]),
-        "active_exemptions_lifting_enforcement": count(
-            lambda e: e["expired"] is False and e["lifts_enforcement"] is True
+        "active_exemptions_lifting_enforcement": (
+            None if not known or unknown_assignments
+            else count(lambda e: e["expired"] is False and e["lifts_enforcement"] is True)
         ),
         "exemptions_lifting_enforcement_unknown": count(lambda e: e["lifts_enforcement"] is None),
         "exemptions_naming_members_not_in_initiative": count(lambda e: e["names_members_not_in_initiative"]),
@@ -1067,9 +1068,9 @@ def api_version_refused(exc) -> bool:
 def collect_policy_exemptions(subscription_id, cred, collector: Collector) -> tuple[list[dict] | None, str]:
     """Every exemption in effect on the subscription: its own, inherited, and those on anything inside it.
 
-    The unfiltered list at subscription scope returns all three, expired ones included. ARM refusing the
-    pinned preview api-version (InvalidApiVersionParameter, NoRegisteredProviderFound, InvalidResourceType)
-    is logged and reported as unknown, not as a failed run; any other error, 400s included, is a failure.
+    The unfiltered list at subscription scope returns all three, expired ones included. Any error fails
+    the run; ARM refusing the pinned preview api-version (InvalidApiVersionParameter,
+    NoRegisteredProviderFound, InvalidResourceType) is told apart as api_version_unavailable.
     """
     def _list():
         client = arm_rest_client(cred)
@@ -1079,14 +1080,8 @@ def collect_policy_exemptions(subscription_id, cred, collector: Collector) -> tu
     try:
         return _list(), EXEMPTIONS_READ
     except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
-        if api_version_refused(exc):
-            logger.warning(
-                "policyExemptions list refused api-version %s (%s %s) — reporting exemptions as unknown: %s",
-                EXEMPTIONS_API_VERSION, _status_code(exc), _arm_error_code(exc), " ".join(str(exc).split())[:200],
-            )
-            return None, EXEMPTIONS_API_UNAVAILABLE
         collector.record("policy.policy_exemptions.list", exc)
-        return None, EXEMPTIONS_FAILED
+        return None, EXEMPTIONS_API_UNAVAILABLE if api_version_refused(exc) else EXEMPTIONS_FAILED
 
 
 def exemption_results(

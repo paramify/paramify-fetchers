@@ -534,11 +534,12 @@ schemas and the `paramify` CLI — not the internal code.
   `exemption_count`. The summary adds exemption counts by category, expiry, scope
   and enforcement, and `exemptions_read_status`. Exemptions exist only in preview
   api-versions, which the stable SDK leaves out, so they are read by a raw ARM GET
-  pinned to 2024-12-01-preview. ARM refusing that version
-  (InvalidApiVersionParameter, NoRegisteredProviderFound or InvalidResourceType)
-  leaves every exemption count null (`api_version_unavailable`) without failing
-  the run; any other failed read, other 400s included, fails it with the counts
-  null. Adopts `resource_exclusions` for exemptions only: rg: and id: patterns
+  pinned to 2024-12-01-preview. A failed read fails the run with every exemption
+  count null; `exemptions_read_status` says `api_version_unavailable` when ARM
+  refused that version (InvalidApiVersionParameter, NoRegisteredProviderFound or
+  InvalidResourceType) and `failed` otherwise. When the assignment list fails,
+  `active_exemptions_lifting_enforcement` and the counts that join exemptions to
+  assignments read null, not 0. Adopts `resource_exclusions` for exemptions only: rg: and id: patterns
   match an exemption through the scope it was made at, location: never matches
   one, and assignments are not affected. One change to the 0.3.0 fields: when the
   assignment list fails, every assignment summary count reads null instead of 0
