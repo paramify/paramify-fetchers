@@ -570,6 +570,13 @@ def test_collect_treats_unregistered_providers_as_empty():
     assert summary["waf_resources"] == 0 and summary["public_ips"] == 0 and results["workspaces"] == []
 
 
+def test_collect_refuses_a_subscription_id_that_is_not_a_guid():
+    client = FakeClient(tables={wda.DIAG_TABLE: "Analytics"}, lists=_lists())
+    c = collector()
+    assert wda.collect(client, "x' or 1 == 1 //", c) == ({}, {})
+    assert not c.ok and client.queries == []
+
+
 def test_filled_queries_have_no_stray_placeholders():
     for key, kql in wda.filled_queries({"days": 30, "subscription_id": SUB_ID, "sample": 10}).items():
         assert not re.search(r"\{[a-z_]+\}", kql), key

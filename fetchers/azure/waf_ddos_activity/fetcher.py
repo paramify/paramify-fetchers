@@ -66,6 +66,8 @@ DDOS_TABLES = re.compile(r"\b(DDoSProtectionNotifications|DDoSMitigationReports|
 # Rule and policy names reach the evidence verbatim; anything else could carry a probe's text into the upload.
 PLAIN_NAME = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 QUERY_CODE = re.compile(r"^\((\d{3})\)\s*(\S*)")
+# The subscription id goes into KQL text unescaped.
+GUID = re.compile(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
 # Redirect sends the request elsewhere, so it never reaches the origin.
 BLOCK_ACTIONS = ("block", "blocked", "jschallengeblock", "redirect")
@@ -729,6 +731,9 @@ def collect_alert_rules(client, subscription_id: str, collector) -> list[dict] |
 
 
 def collect(client, subscription_id: str, collector) -> tuple:
+    if not GUID.fullmatch(subscription_id or ""):
+        collector.record("subscription_id", ValueError("the subscription id is not a GUID"))
+        return {}, {}
     days = lookback_days()
     sample = int_config(SAMPLE_ENV, DEFAULT_SAMPLE_SIZE)
     basic = flag(BASIC_ENV)
