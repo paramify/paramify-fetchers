@@ -22,8 +22,8 @@ schemas and the `paramify` CLI — not the internal code.
   `unhealthy_past_sla_by_severity`, `unhealthy_past_sla_count` and
   `unhealthy_days_open_unknown_count`. The two past-SLA counts are null, never 0,
   when the assessment list or the Resource Graph severity read failed, a severity's
-  SLA days are invalid, a needed date is missing, or an Unhealthy finding of that
-  severity took its severity from the catalogue.
+  SLA days are invalid or a needed date is missing. When any Unhealthy finding took
+  its severity from the catalogue, every severity's count and the total are null.
 - **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
   matches each Azure change made outside a pipeline in `azure_change_provenance`
   (by default, direct edits and ARM deployments a person ran) to the

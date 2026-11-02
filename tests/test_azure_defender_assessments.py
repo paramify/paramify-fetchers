@@ -320,11 +320,16 @@ def test_a_missing_date_nulls_that_severity_and_the_total_only():
     assert s["unhealthy_days_open_unknown_count"] == 1
 
 
-def test_a_catalogue_severity_nulls_that_severity_and_the_total_only():
-    s = _summary([aged("Low", 60, source="catalogue"), aged("Low", 5, status="Healthy", source="catalogue"),
-                  aged("High", 40)])
-    assert s["unhealthy_past_sla_by_severity"] == {"High": 1, "Medium": 0, "Low": None}
+def test_an_unhealthy_catalogue_severity_nulls_every_severity_and_the_total():
+    s = _summary([aged("Low", 60, source="catalogue"), aged("High", 40)])
+    assert s["unhealthy_past_sla_by_severity"] == {"High": None, "Medium": None, "Low": None}
     assert s["unhealthy_past_sla_count"] is None
+
+
+def test_a_healthy_catalogue_severity_leaves_the_counts_known():
+    s = _summary([aged("Low", 5, status="Healthy", source="catalogue"), aged("High", 40)])
+    assert s["unhealthy_past_sla_by_severity"] == {"High": 1, "Medium": 0, "Low": 0}
+    assert s["unhealthy_past_sla_count"] == 1
 
 
 def test_an_unhealthy_finding_with_no_severity_nulls_the_total_only():
@@ -428,7 +433,7 @@ def test_main_a_bad_sla_value_fails_as_bad_config_with_null_counts(monkeypatch, 
     assert (record["sla_days"], record["past_sla"]) == (None, None) and record["days_open"] > 400
 
 
-def test_main_an_assessment_missing_from_resource_graph_nulls_its_catalogue_severity(
+def test_main_an_assessment_missing_from_resource_graph_nulls_every_severity(
         monkeypatch, fake_models, tmp_path):
     missing = assessment(AUTH)  # catalogue rates it Low: 60 days is inside Low's 180, maybe not its own SLA
     missing.status.status_change_date = datetime.now(timezone.utc) - timedelta(days=60)
@@ -438,7 +443,7 @@ def test_main_an_assessment_missing_from_resource_graph_nulls_its_catalogue_seve
     code, evidence, _ = _run_main(monkeypatch, tmp_path, [{"id": listed.id, "severity": "Medium"}])
     s = evidence["summary"]
     assert code == 0 and s["unhealthy_severity_from_catalogue_count"] == 1
-    assert s["unhealthy_past_sla_by_severity"] == {"High": 0, "Medium": 0, "Low": None}
+    assert s["unhealthy_past_sla_by_severity"] == {"High": None, "Medium": None, "Low": None}
     assert s["unhealthy_past_sla_count"] is None
 
 
