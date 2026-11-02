@@ -117,6 +117,32 @@ def test_a_platform_failure_after_a_customer_restart_is_still_an_outage():
     assert (h["outages"], h["longest_outage_hours"], sa.meets_objective(h, 4.0)) == (1, 8.0, False)
 
 
+def test_a_customer_restart_with_an_outage_on_both_sides_stays_part_of_it():
+    history = [status("Available", timedelta(days=40), "a"),
+               status("Unavailable", timedelta(hours=7), "down", context="Platform Initiated"),
+               status("Unavailable", timedelta(hours=4), "restart", context="Customer Initiated"),
+               status("Unavailable", timedelta(hours=3), "still down", context="Platform Initiated"),
+               status("Available", timedelta(0), "up")]
+    h = sa.health_record(history, NOW, WINDOW_START)
+    assert [(w["initiated_by"], w["duration_hours"], w["counts_as_outage"]) for w in h["windows"]] == [
+        ("platform", 7.0, True)]
+    assert (h["outages"], h["longest_outage_hours"], h["customer_initiated_unavailable_windows"]) == (1, 7.0, 0)
+    assert h["longest_outage_with_adjacent_unknown_hours"] == 7.0 and sa.meets_objective(h, 4.0) is False
+
+
+def test_a_restart_between_unattributed_outage_parts_keeps_one_unattributed_outage():
+    history = [status("Available", timedelta(days=40), "a"),
+               status("Unavailable", timedelta(hours=9), "down", reasonType="Unplanned"),
+               status("Unavailable", timedelta(hours=6), "restart", context="Customer Initiated"),
+               status("Unavailable", timedelta(hours=5), "still down", reasonType="Unplanned"),
+               status("Available", timedelta(hours=4), "up"),
+               status("Unavailable", timedelta(hours=3), "restart again", context="Customer Initiated"),
+               status("Available", timedelta(0), "up again")]
+    h = sa.health_record(history, NOW, WINDOW_START)
+    assert [(w["initiated_by"], w["duration_hours"]) for w in h["windows"]] == [("unknown", 5.0), ("customer", 3.0)]
+    assert (h["outages"], h["customer_initiated_unavailable_windows"], sa.meets_objective(h, 4.0)) == (1, 1, False)
+
+
 def test_a_platform_cause_named_partway_through_an_outage_keeps_it_one_outage():
     history = [status("Available", timedelta(days=40), "a"),
                status("Unavailable", timedelta(hours=8), "down", reasonType="Unplanned"),

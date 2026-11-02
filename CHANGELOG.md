@@ -20,8 +20,9 @@ schemas and the `paramify` CLI — not the internal code.
   Resource Health knew about (with counts of resources it leaves out or only
   partly covers), and a rollup per region. A resource with no known hours has
   no outage figures. Periods the customer started (stop, restart, scale) are
-  listed but are not outages; one inside an outage, such as a restart, is its
-  own period, and the time around it stays an outage. With
+  listed but are not outages; one with an outage directly on both sides, such as
+  a restart during an outage, is part of that outage, and one at an outage's
+  start or end is its own period. With
   `recovery_time_objective_hours` set, each resource's longest outage is checked
   against it; an Unknown period longer than the objective, or an outage that runs
   past it with the Unknown time touching it, leaves the verdict unknown. An

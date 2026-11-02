@@ -69,8 +69,8 @@ LIMITATIONS = [
     "Available.",
     "Periods the customer started (a stop, restart or scale: Resource Health names the customer or user as the "
     "cause) are listed but are not outages, count as available time, and do not count against the recovery time "
-    "objective. One that starts or ends inside an outage is its own period, and the outage counts up to it and from "
-    "it.",
+    "objective. One with an outage directly before and after it, such as a restart during an outage, is part of that "
+    "outage; one at an outage's start or end is its own period, and the outage counts up to it or from it.",
     "Recovery time is the length of a continuous Unavailable period; a Degraded resource still serves requests.",
     "Unknown periods (Resource Health had no information) are not counted as available: availability is measured "
     "over known hours, a resource with no known hours has no outage figures, and an Unknown period longer than the "
@@ -262,6 +262,23 @@ def merge_key(state, props: dict) -> tuple:
     return state, state == UNAVAILABLE and initiated_by(props) == CUSTOMER
 
 
+OUTAGE_KEY, CUSTOMER_KEY = (UNAVAILABLE, False), (UNAVAILABLE, True)
+
+
+def bridge_restarts(segments: list[dict]) -> list[dict]:
+    """A customer Unavailable period with an outage directly before and after it is part of that outage."""
+    out: list[dict] = []
+    for segment in segments:
+        if segment["key"] == OUTAGE_KEY and len(out) > 1 and out[-1]["key"] == CUSTOMER_KEY \
+                and out[-2]["key"] == OUTAGE_KEY:
+            restart = out.pop()
+            out[-1]["end"] = segment["end"]
+            out[-1]["statuses"] += restart["statuses"] + segment["statuses"]
+        else:
+            out.append(segment)
+    return out
+
+
 def timeline(statuses: list[dict]):
     """(segments oldest first, impacting events, statuses without a time). A transition lasts until the next one, the
     newest until now (end None); adjacent transitions with the same merge_key merge into one segment."""
@@ -290,13 +307,14 @@ def timeline(statuses: list[dict]):
             segments[-1]["statuses"].append(props)
         else:
             segments.append({"state": state, "key": key, "start": at, "end": end, "statuses": [props]})
-    return segments, sorted(events, key=lambda e: e[0]), untimed
+    return bridge_restarts(segments), sorted(events, key=lambda e: e[0]), untimed
 
 
 def window_record(segment: dict, events: list, now: datetime, window_start: datetime) -> dict:
     start, end = segment["start"], segment["end"]
     statuses = segment["statuses"]
-    attributed = [initiated_by(p) for p in statuses]
+    # A customer restart bridged into an outage leaves the outage's cause as it was.
+    attributed = [a for a in map(initiated_by, statuses) if not (segment["key"] == OUTAGE_KEY and a == CUSTOMER)]
     first = statuses[0]
     return {
         "state": segment["state"],
