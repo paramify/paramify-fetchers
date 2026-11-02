@@ -20,10 +20,11 @@ schemas and the `paramify` CLI — not the internal code.
   Resource Health knew about (with counts of resources it leaves out or only
   partly covers), and a rollup per region. A resource with no known hours has
   no outage figures. Periods the customer started (stop, restart, scale) are
-  listed but are not outages. With `recovery_time_objective_hours` set, each
-  resource's longest outage is checked against it; an Unknown period longer than
-  the objective, or an outage that runs past it with the Unknown time touching
-  it, leaves the verdict unknown.
+  listed but are not outages; one inside an outage, such as a restart, is its
+  own period, and the time around it stays an outage. With
+  `recovery_time_objective_hours` set, each resource's longest outage is checked
+  against it; an Unknown period longer than the objective, or an outage that runs
+  past it with the Unknown time touching it, leaves the verdict unknown.
   Front Door Standard/Premium profiles are read too, but Resource Health judges a
   profile by whether its origins answer health probes, so their periods are
   reported as origin probe failures and never as outages. For apps, the health

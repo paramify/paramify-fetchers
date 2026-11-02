@@ -94,6 +94,37 @@ def test_adjacent_statuses_in_the_same_state_merge_and_duplicates_count_once():
     assert (h["outages"], h["longest_outage_hours"]) == (1, 2.0)
 
 
+def test_a_customer_restart_during_an_outage_does_not_hide_it():
+    history = [status("Available", timedelta(days=40), "a"),
+               status("Unavailable", timedelta(hours=10), "down", reasonType="Unplanned", context="Unknown"),
+               status("Unavailable", timedelta(hours=4), "restart", context="Customer Initiated"),
+               status("Available", timedelta(0), "up")]
+    h = sa.health_record(history, NOW, WINDOW_START)
+    assert [(w["initiated_by"], w["duration_hours"], w["counts_as_outage"]) for w in h["windows"]] == [
+        ("unknown", 6.0, True), ("customer", 4.0, False)]
+    assert (h["outages"], h["longest_outage_hours"], h["customer_initiated_unavailable_windows"]) == (1, 6.0, 1)
+    assert h["availability_percentage"] < 100.0 and sa.meets_objective(h, 4.0) is False
+
+
+def test_a_platform_failure_after_a_customer_restart_is_still_an_outage():
+    history = [status("Available", timedelta(days=40), "a"),
+               status("Unavailable", timedelta(hours=10), "restart", context="Customer Initiated"),
+               status("Unavailable", timedelta(hours=8), "down", reasonType="Unplanned", context="Unknown"),
+               status("Available", timedelta(0), "up")]
+    h = sa.health_record(history, NOW, WINDOW_START)
+    assert [(w["initiated_by"], w["duration_hours"]) for w in h["windows"]] == [("customer", 2.0), ("unknown", 8.0)]
+    assert (h["outages"], h["longest_outage_hours"], sa.meets_objective(h, 4.0)) == (1, 8.0, False)
+
+
+def test_a_platform_cause_named_partway_through_an_outage_keeps_it_one_outage():
+    history = [status("Available", timedelta(days=40), "a"),
+               status("Unavailable", timedelta(hours=8), "down", reasonType="Unplanned"),
+               status("Unavailable", timedelta(hours=5), "named", context="Platform Initiated"),
+               status("Available", timedelta(0), "up")]
+    h = sa.health_record(history, NOW, WINDOW_START)
+    assert (h["outages"], h["longest_outage_hours"], h["windows"][0]["initiated_by"]) == (1, 8.0, "platform")
+
+
 def test_a_period_the_customer_started_is_listed_but_is_not_an_outage():
     history = [
         status("Available", timedelta(days=60), "a"),

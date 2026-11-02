@@ -68,7 +68,8 @@ LIMITATIONS = [
     "Available.",
     "Periods the customer started (a stop, restart or scale: Resource Health names the customer or user as the "
     "cause) are listed but are not outages, count as available time, and do not count against the recovery time "
-    "objective.",
+    "objective. One that starts or ends inside an outage is its own period, and the outage counts up to it and from "
+    "it.",
     "Recovery time is the length of a continuous Unavailable period; a Degraded resource still serves requests.",
     "Unknown periods (Resource Health had no information) are not counted as available: availability is measured "
     "over known hours, a resource with no known hours has no outage figures, and an Unknown period longer than the "
@@ -254,9 +255,14 @@ def health_event(at, props: dict) -> dict:
     }
 
 
+def merge_key(state, props: dict) -> tuple:
+    """Unavailable splits where the customer becomes or stops being the cause; platform and unattributed stay one outage."""
+    return state, state == UNAVAILABLE and initiated_by(props) == CUSTOMER
+
+
 def timeline(statuses: list[dict]):
     """(segments oldest first, impacting events, statuses without a time). A transition lasts until the next one, the
-    newest until now (end None); adjacent transitions to the same state merge into one segment."""
+    newest until now (end None); adjacent transitions with the same merge_key merge into one segment."""
     transitions: list[tuple] = []
     events: list[tuple] = []
     untimed, seen = 0, set()
@@ -276,11 +282,12 @@ def timeline(statuses: list[dict]):
     segments: list[dict] = []
     for i, (at, state, props) in enumerate(transitions):
         end = transitions[i + 1][0] if i + 1 < len(transitions) else None
-        if segments and segments[-1]["state"] == state:
+        key = merge_key(state, props)
+        if segments and segments[-1]["key"] == key:
             segments[-1]["end"] = end
             segments[-1]["statuses"].append(props)
         else:
-            segments.append({"state": state, "start": at, "end": end, "statuses": [props]})
+            segments.append({"state": state, "key": key, "start": at, "end": end, "statuses": [props]})
     return segments, sorted(events, key=lambda e: e[0]), untimed
 
 
