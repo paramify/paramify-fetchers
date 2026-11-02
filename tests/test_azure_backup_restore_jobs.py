@@ -52,13 +52,16 @@ def test_duration_seconds_reads_iso_and_timedelta(value, seconds):
 
 
 @pytest.mark.parametrize("text, expected", [
-    # Day first, as Azure Backup writes it: 05/09 is 5 September.
+    # Day first in 24-hour form, as SQL-in-VM restores write it: 05/09 is 5 September.
     ("05/09/2026 15:08:12", datetime(2026, 9, 5, 15, 8, 12, tzinfo=timezone.utc)),
     ("24/09/2026 15:08", datetime(2026, 9, 24, 15, 8, tzinfo=timezone.utc)),
+    # Month first with AM/PM, as Azure Files restores write it (az CLI's test_afs_cross_region_restore recording).
+    ("9/25/2026 6:36:19 AM", datetime(2026, 9, 25, 6, 36, 19, tzinfo=timezone.utc)),
+    ("09/24/2026 3:08:12 PM", datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
     ("2026-09-24T15:08:12Z", datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
-    ("09/24/2026 3:08:12 PM", None), ("soon", None), (None, None),
+    ("24/09/2026 3:08:12 PM", None), ("soon", None), (None, None),
 ])
-def test_recovery_point_time_is_day_first_or_iso(text, expected):
+def test_recovery_point_time_is_day_first_24_hour_month_first_12_hour_or_iso(text, expected):
     assert backup.parse_recovery_point_time(text) == expected
 
 
@@ -182,6 +185,26 @@ def test_an_unread_vault_makes_every_restore_count_null_not_zero():
     assert all(v is None for k, v in summary.items() if k not in ("restore_job_window_days", "restore_jobs_read"))
 
 
+def _item(name, rg):
+    return {"id": f"{VAULT}/backupFabrics/Azure/protectionContainers/c/protectedItems/{name}-{rg}",
+            "name": f"{name}-{rg}", "friendly_name": name,
+            "source_resource_id": f"/subscriptions/s1/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/{name}"}
+
+
+def test_a_restore_job_stays_in_scope_while_an_in_scope_item_shares_its_name():
+    jobs = [backup.project_job(_job("j-dev", entity="web01")),
+            backup.project_job(_job("j-prod", status="Failed", entity="web01")),
+            backup.project_job(_job("j-db", entity="db01"))]
+    vault = {**_vault(jobs), "location": "regionwest",
+             "backup_protected_items": [_item("web01", "rg-dev"), _item("web01", "rg-prod"), _item("db01", "rg-dev")]}
+    vaults, excluded = backup.exclude_protected_items(backup.ResourceExclusions(["rg:rg-dev"]), [vault])
+    assert [i["name"] for i in vaults[0]["backup_protected_items"]] == ["web01-rg-prod"]
+    # A web01 job can't say which web01 it restored, and one of them is in scope, so both stay.
+    assert [j["name"] for j in vaults[0]["restore_jobs"]] == ["j-dev", "j-prod"]
+    assert [(e["kind"], e["name"]) for e in excluded] == [
+        ("protected_item", "web01-rg-dev"), ("protected_item", "db01-rg-dev"), ("restore_job", "db01")]
+
+
 def test_unread_details_on_a_succeeded_restore_leave_the_max_age_null():
     jobs = [backup.restore_job_record(backup.project_job(_job("j1")), {"Recovery Point Time in UTC": "20/09/2026 04:00:00"}),
             backup.restore_job_record(backup.project_job(_job("j2")), None)]
@@ -192,12 +215,12 @@ def test_unread_details_on_a_succeeded_restore_leave_the_max_age_null():
 
 # --- end to end ---
 
-def _run(monkeypatch, tmp_path, list_jobs, get_details):
+def _run(monkeypatch, tmp_path, list_jobs, get_details, recovery_client=None):
     vault = ns(id=VAULT, name="rsv-a", location="regionwest", properties=ns())
     client = ns(backup_policies=ns(list=lambda **_: []), backup_protected_items=ns(list=lambda **_: []),
                 backup_jobs=ns(list=list_jobs), job_details=ns(get=get_details))
-    monkeypatch.setitem(sys.modules, "azure.mgmt.recoveryservices",
-                        ns(RecoveryServicesClient=lambda **_: ns(vaults=ns(list_by_subscription_id=lambda: [vault]))))
+    recovery_client = recovery_client or (lambda **_: ns(vaults=ns(list_by_subscription_id=lambda: [vault])))
+    monkeypatch.setitem(sys.modules, "azure.mgmt.recoveryservices", ns(RecoveryServicesClient=recovery_client))
     monkeypatch.setitem(sys.modules, "azure.mgmt.recoveryservicesbackup",
                         ns(RecoveryServicesBackupClient=lambda **_: client))
     monkeypatch.setattr(backup, "load_dotenv", lambda: None)
@@ -239,6 +262,35 @@ def test_main_fails_and_reports_null_when_the_job_list_is_refused(monkeypatch, t
             summary["in_scope_restore_jobs"]) == (False, None, None, None)
     assert [f["operation"] for f in evidence["metadata"]["api_failures"]] == [
         "recoveryservicesbackup.backup_jobs.list (rsv-a)"]
+
+
+def _refuse_vaults(*_, **__):
+    raise RuntimeError("(AuthorizationFailed) does not have authorization to perform vaults/read")
+
+
+@pytest.mark.parametrize("recovery_client", [
+    _refuse_vaults, lambda **_: ns(vaults=ns(list_by_subscription_id=_refuse_vaults)),
+], ids=["client_init_fails", "vault_list_refused"])
+def test_main_reports_null_not_zero_when_the_vault_list_is_not_read(monkeypatch, tmp_path, recovery_client):
+    no_vault = lambda **_: pytest.fail("no vault was listed")  # noqa: E731
+    code, evidence = _run(monkeypatch, tmp_path, no_vault, no_vault, recovery_client)
+    summary = evidence["summary"]
+    assert code == 1 and evidence["results"]["recovery_services_vaults"] == []
+    assert (summary["restore_job_window_days"], summary["restore_jobs_read"], summary["in_scope_restore_jobs"],
+            summary["retention_threshold_days"]) == (90, False, None, 30)
+    restore_counts = set(backup.summarize_restores([], 90, NOW)) - {"restore_job_window_days", "restore_jobs_read"}
+    vault_counts = set(backup.summarize([])) - {"retention_threshold_days"}
+    assert {k: summary[k] for k in restore_counts | vault_counts} == dict.fromkeys(restore_counts | vault_counts)
+
+
+def test_main_reports_zero_when_the_vault_list_is_read_and_empty(monkeypatch, tmp_path):
+    no_vault = lambda **_: pytest.fail("no vault was listed")  # noqa: E731
+    code, evidence = _run(monkeypatch, tmp_path, no_vault, no_vault,
+                          lambda **_: ns(vaults=ns(list_by_subscription_id=lambda: [])))
+    summary = evidence["summary"]
+    assert code == 0
+    assert (summary["restore_jobs_read"], summary["total_restore_jobs"], summary["total_recovery_services_vaults"],
+            summary["total_protected_items"], summary["in_scope_restore_jobs"]) == (True, 0, 0, 0, 0)
 
 
 def test_real_sdk_models_project():

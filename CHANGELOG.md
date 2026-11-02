@@ -524,10 +524,14 @@ schemas and the `paramify` CLI — not the internal code.
   point's time). The summary adds total, succeeded and failed restores, counts
   by status, vaults with a succeeded restore, the newest succeeded restore and
   days since it, the longest succeeded restore in minutes and the largest
-  recovery point age, each null when a vault's jobs weren't read. A restore job
-  of an excluded protected item, matched by friendly name, is listed under
-  `excluded` and gets no details read. Also maps to KSI-RPL-ARP, KSI-RPL-RRO
-  and KSI-RPL-TRC. The 0.2.0 fields are unchanged.
+  recovery point age, each null when the vault list or a vault's jobs weren't
+  read. A restore job of an excluded protected item, matched by friendly name,
+  is listed under `excluded` and gets no details read, unless an in-scope item
+  in the same vault shares that name. Also maps to KSI-RPL-RRO and
+  KSI-RPL-TRC. **Fixed:** when the vault list couldn't be read (client set-up
+  or the list call failed, or no subscription or credential), the 0.2.0
+  summary counts (`total_recovery_services_vaults`, `total_protected_items`,
+  `retention_threshold_percentage` and the rest) read null instead of 0.
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
   history (`risk_history`, oldest first, with what changed and who initiated it)

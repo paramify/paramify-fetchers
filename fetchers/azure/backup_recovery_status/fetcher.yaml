@@ -42,7 +42,9 @@ config_schema:
       whose protected items all leave stays in scope and counts as protecting
       nothing. A restore job of an excluded protected item (matched by the item's
       friendly name in the same vault) is listed under excluded too, and its
-      details are not read. A pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      details are not read, unless an in-scope item in that vault has the same
+      friendly name; a job whose item is no longer listed (protection stopped and
+      its data deleted) stays in scope. A pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}.
       Empty: every resource is in scope.
 
@@ -77,7 +79,6 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-RPL-ABO
-  - KSI-RPL-ARP   # restores run against the recovery plan's objectives
   - KSI-RPL-RRO   # restore duration and recovery point age, to compare with the RTO and RPO
   - KSI-RPL-TRC   # restore jobs, test restores included
 
@@ -88,6 +89,10 @@ evidence_set:
     Script: azure/backup_recovery_status/fetcher.py. Azure SDK calls (azure-mgmt-recoveryservices RecoveryServicesClient): vaults.list_by_subscription_id(); then per in-scope vault (azure-mgmt-recoveryservicesbackup RecoveryServicesBackupClient): backup_policies.list(), backup_protected_items.list(), backup_jobs.list() filtered to operation Restore over restore_window_days in slices of 30 days, and job_details.get() per in-scope restore job for its recovery point time and restore target. Retention threshold 30 days. Reader (or Backup Reader on the vaults) is enough.
 
     Vaults, protected items and restore jobs the resource_exclusions patterns take out are listed under excluded instead.
+
+    When the vault list couldn't be read (no subscription or credential, or the list call failed), every vault, protected item, policy and restore count in the summary is null, not 0; a subscription where Microsoft.RecoveryServices isn't registered lists no vaults and reads 0.
+
+    Each restore job keeps Azure's own free text: job_properties (the job's property bag, such as a restore destination path; URL query strings are dropped) and each error's error_string.
 
     Were restores run, and how did they go?
     - restore_job_window_days — Number of days back restore jobs were read, ending at the run (365 unless AZURE_BACKUP_RESTORE_WINDOW_DAYS sets it); a vault keeps job history for a limited time, so the oldest days may hold nothing
@@ -107,8 +112,8 @@ evidence_set:
 
     How long did restores take, and how old was the data they restored?
     - longest_succeeded_restore_minutes — Duration of the longest succeeded restore, in minutes, to compare with the recovery time objective; null if there was none or a vault's jobs weren't read
-    - max_recovery_point_age_hours — Largest recovery point age among succeeded restores: the hours between the recovery point a restore used and the restore's start, to compare with the recovery point objective; null if none had a readable recovery point time, a succeeded restore's details couldn't be read, or a vault's jobs weren't read
-    - succeeded_restores_without_recovery_point_time — Number of succeeded restores whose details name no recovery point time Azure Backup's day/month/year format can be read from, or whose details couldn't be read; they are left out of max_recovery_point_age_hours; null if a vault's jobs weren't read
+    - max_recovery_point_age_hours — Largest recovery point age among succeeded restores: how old the restored data was when the restore started, in hours between the recovery point a restore used and its start. The point is the one the person restoring chose, so a deliberate restore of an older point raises it; it isn't the recovery point objective a restore could achieve. Null if none had a readable recovery point time, a succeeded restore's details couldn't be read, or a vault's jobs weren't read
+    - succeeded_restores_without_recovery_point_time — Number of succeeded restores left out of max_recovery_point_age_hours: their details name no recovery point time in a form the fetcher reads (ISO 8601, day/month/year in 24-hour form as SQL restores write it, or month/day/year with AM/PM as Azure Files restores write it), the time is after the restore's start, or the details couldn't be read; null if a vault's jobs weren't read
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
@@ -117,5 +122,5 @@ evidence_set:
     - excluded_protected_items — Number of protected items in in-scope vaults left out of scope because a pattern matched the item's id, or the protected resource by resource group or id (the entry's id is then that resource's); each is listed under excluded. An excluded vault's items are never read, so they are not counted here
     - in_scope_recovery_services_vaults — Number of Recovery Services vaults read and in scope; 0 means none was read or the patterns took out every vault, which a check can catch by requiring more than 0
     - in_scope_protected_items — Number of protected items read and in scope
-    - excluded_restore_jobs — Number of restore jobs in in-scope vaults left out of scope because they restored an excluded protected item, matched by the item's friendly name in the same vault (a job names its item no other way); each is listed under excluded and gets no details read
+    - excluded_restore_jobs — Number of restore jobs in in-scope vaults left out of scope because they restored an excluded protected item, matched by the item's friendly name in the same vault (a job names its item no other way); a job stays in scope when an in-scope item in that vault has the same friendly name, or when its item is no longer listed. Each is listed under excluded and gets no details read
     - in_scope_restore_jobs — Number of restore jobs read and in scope; null if a vault's jobs weren't read

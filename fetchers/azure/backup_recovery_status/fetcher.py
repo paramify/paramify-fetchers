@@ -67,8 +67,8 @@ FAILED_JOB_STATUS = "failed"
 RECOVERY_POINT_TIME_KEYS = ("recoverypointtime", "recoverypointtimeinutc")
 RESTORE_TYPE_KEYS = ("jobtype", "restoretype")
 RESTORE_TARGET_KEYS = ("restoredestination",)
-# Azure Backup writes the recovery point time as day/month/year in UTC.
-RECOVERY_POINT_TIME_FORMATS = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M")
+# The recovery point time in UTC: day first in 24-hour form (SQL in a VM), month first with AM/PM (Azure Files).
+RECOVERY_POINT_TIME_FORMATS = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%m/%d/%Y %I:%M:%S %p")
 _ISO_DURATION = re.compile(r"^P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$")
 _URL_QUERY = re.compile(r"(https?://[^\s?\"'<>]+)\?[^\s\"'<>]*", re.IGNORECASE)
 
@@ -504,12 +504,16 @@ def vault_record(vault: dict) -> dict:
     }
 
 
-def summarize(vaults: list[dict]) -> dict:
+def summarize(vaults: list[dict], listed: bool = True) -> dict:
     """The headline is retention adequacy across PROTECTED ITEMS, not policies.
 
     A vault can define a dozen policies and protect nothing. The threshold is emitted
-    next to the percentage so the number is never bare.
+    next to the percentage so the number is never bare. When the vault list wasn't
+    read (`listed` false), every count is null rather than 0.
     """
+    if not listed:
+        return {k: (MINIMUM_RETENTION_DAYS if k == "retention_threshold_days" else None)
+                for k in summarize([])}
     policies = [p for v in vaults for p in v["backup_policies"]]
     items = [i for v in vaults for i in v["backup_protected_items"]]
     adequate_items = sum(1 for i in items if i["meets_retention_threshold"])
@@ -570,7 +574,7 @@ def _bag_value(bag: dict, keys: tuple) -> str | None:
 
 
 def parse_recovery_point_time(text: str | None) -> datetime | None:
-    """The property bag's recovery point time: ISO-8601, or day/month/year in UTC as Azure Backup writes it."""
+    """The property bag's recovery point time in UTC: ISO-8601, or one of RECOVERY_POINT_TIME_FORMATS."""
     if not text:
         return None
     parsed = parse_time(text)
@@ -634,9 +638,10 @@ def vault_restore_fields(jobs: list[dict] | None) -> dict:
     }
 
 
-def summarize_restores(vaults: list[dict], window_days: int, now: datetime) -> dict:
-    """Restore counts across vaults; all but the window and `restore_jobs_read` are null if any vault's jobs are unread."""
-    read = all(v.get("restore_jobs_read") for v in vaults)
+def summarize_restores(vaults: list[dict], window_days: int, now: datetime, listed: bool = True) -> dict:
+    """Restore counts across vaults; all but the window and `restore_jobs_read` are null if the vault list or any
+    vault's jobs are unread."""
+    read = listed and all(v.get("restore_jobs_read") for v in vaults)
     jobs = [j for v in vaults for j in v.get("restore_jobs") or []]
     succeeded = [j for j in jobs if j.get("succeeded")]
     latest = max((j["end_time"] for j in succeeded if j.get("end_time")), default=None)
@@ -676,7 +681,8 @@ def exclude_protected_items(exclusions: ResourceExclusions, vaults: list[dict]) 
     """(in-scope vaults holding only their in-scope protected items, excluded entries). An item leaves when a pattern
     matches its id or the resource it protects, whose id its entry then carries; a vault whose items all leave stays
     in scope. An excluded vault's items are never listed. A restore job leaves with the item it restored, matched by
-    friendly name in the same vault, because a job names its item only that way."""
+    friendly name in the same vault, because a job names its item only that way; a name an in-scope item of the vault
+    shares keeps the job in scope."""
     all_items = [(vault, item) for vault in vaults for item in vault["backup_protected_items"]]
     items, by_vault = exclusions.split(
         all_items, "protected_item", resource_id=lambda p: p[1].get("id") or p[0].get("id"),
@@ -696,6 +702,7 @@ def exclude_protected_items(exclusions: ResourceExclusions, vaults: list[dict]) 
     in_scope: dict = {id(vault): [] for vault in vaults}
     for vault, item in items:
         in_scope[id(vault)].append(item)
+        patterns.pop((id(vault), _job_key(item.get("friendly_name"))), None)
     by_job: list[dict] = []
     copies = []
     for v in vaults:
@@ -798,9 +805,9 @@ def read_restore_job_details(subscription_id, cred, collector: Collector, vaults
 
 def collect_vaults(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
                    excluded: list | None = None, restore_window_days: int = DEFAULT_RESTORE_WINDOW_DAYS,
-                   now: datetime | None = None) -> list[dict]:
+                   now: datetime | None = None) -> list[dict] | None:
     """vaults.list_by_subscription_id(), then policies, protected items and restore jobs per vault; vaults the
-    exclusions take out go to `excluded` unread."""
+    exclusions take out go to `excluded` unread. None when the vault list couldn't be read."""
     now = now or utc_now()
     from azure.mgmt.recoveryservices import RecoveryServicesClient
 
@@ -809,15 +816,15 @@ def collect_vaults(subscription_id, cred, collector: Collector, exclusions: Reso
 
     client = collector.guard("recoveryservices.RecoveryServicesClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself.
         return [project_vault(v) for v in client.vaults.list_by_subscription_id()]
 
-    vaults = collector.guard(
-        "recoveryservices.vaults.list_by_subscription_id", _list, default=[]
-    )
+    vaults = collector.guard("recoveryservices.vaults.list_by_subscription_id", _list)
+    if vaults is None:
+        return None
     if exclusions:
         vaults, out = exclusions.split(vaults, "recovery_services_vault")
         if excluded is not None:
@@ -890,6 +897,8 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     vaults: list[dict] = []
+    # False until the vault list is read, so a missing subscription or credential, or a refused list, reads null.
+    listed = False
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
     restore_window_days = int_config(RESTORE_WINDOW_ENV, DEFAULT_RESTORE_WINDOW_DAYS)
@@ -906,7 +915,8 @@ def main() -> int:
                 "no Recovery Services vaults in use; reporting status not_registered",
                 subscription_id,
             )
-        vaults = collect_vaults(subscription_id, cred, collector, exclusions, excluded, restore_window_days, now)
+        collected = collect_vaults(subscription_id, cred, collector, exclusions, excluded, restore_window_days, now)
+        listed, vaults = collected is not None, collected or []
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -921,7 +931,7 @@ def main() -> int:
     excluded += out
     exclusions.warn_unmatched(logger)
     vaults = read_restore_job_details(subscription_id, cred, collector, vaults)
-    restores_read = all(v["restore_jobs_read"] for v in vaults)
+    restores_read = listed and all(v["restore_jobs_read"] for v in vaults)
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -933,8 +943,8 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(vaults),
-            **summarize_restores(vaults, restore_window_days, now),
+            **summarize(vaults, listed),
+            **summarize_restores(vaults, restore_window_days, now, listed),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("recovery_services_vault", "protected_item", "restore_job"), {
                 "recovery_services_vaults": len(vaults),
