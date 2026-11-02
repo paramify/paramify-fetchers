@@ -19,7 +19,8 @@ config_schema:
       value asked for is kept in the evidence as lookback_days_requested. Older
       events that Resource Graph still holds are read by their tracking id and
       added; one the event API can't find is counted in
-      events_in_resource_graph_not_found.
+      events_in_resource_graph_not_found. A value that is not a whole number
+      above 0 fails the run as bad_config.
   resource_exclusions:
     type: string
     required: false

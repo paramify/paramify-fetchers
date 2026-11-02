@@ -514,6 +514,16 @@ def test_lookback_days_comes_from_the_environment_and_stops_at_what_the_list_ser
         used, requested, used)
 
 
+@pytest.mark.parametrize("raw, requested", [("18O", None), ("0", 0), ("-2", -2), ("1.5", None)])
+def test_an_invalid_lookback_fails_the_run_as_bad_config(monkeypatch, fixed_now, graph, raw, requested):
+    monkeypatch.setenv(sh.LOOKBACK_ENV, raw)
+    monkeypatch.setattr(sh, "provider_registration_status", lambda *a: azure_common.REGISTERED)
+    c = collector()
+    results, _ = sh.collect_subscription(_Health([]), "s1", c)
+    assert (results["lookback_days"], results["lookback_days_requested"]) == (180, requested)
+    assert azure_common.classify_failure_code(c.failures) == "bad_config"
+
+
 def test_lookback_defaults_to_the_longest_window_the_list_serves(monkeypatch, fixed_now, graph):
     monkeypatch.delenv(sh.LOOKBACK_ENV, raising=False)
     monkeypatch.setattr(sh, "provider_registration_status", lambda *a: azure_common.REGISTERED)

@@ -3,6 +3,7 @@
 
 import html
 import logging
+import os
 import re
 import sys
 from collections import Counter
@@ -20,7 +21,7 @@ from azure_common import (  # noqa: E402
     resource_group_from_id,
     sorted_counts,
 )
-from azure_rest import int_config, parse_time, run_subscription  # noqa: E402
+from azure_rest import parse_time, run_subscription  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import query_all, resource_graph_client  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
@@ -425,15 +426,27 @@ def collect(client, subscription_id: str, now: datetime, lookback_days: int, col
     return events, True, billing, older_read, not_found if older_read else None
 
 
+def lookback_setting(collector: Collector) -> tuple:
+    """(days asked for, days used): an invalid value fails the run as bad_config; past the cap it is cut to the cap."""
+    raw = (os.environ.get(LOOKBACK_ENV) or "").strip()
+    try:
+        requested = int(raw) if raw else DEFAULT_LOOKBACK_DAYS
+    except ValueError:
+        requested = None
+    if requested is None or requested <= 0:
+        collector.record(f"config {LOOKBACK_ENV}", ValueError(f"invalid lookback {raw!r}: expected whole days > 0"))
+        return requested, DEFAULT_LOOKBACK_DAYS
+    if requested > MAX_LOOKBACK_DAYS:
+        logger.warning("%s=%d is past the %d days the event list serves; using %d",
+                       LOOKBACK_ENV, requested, MAX_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS)
+    return requested, min(requested, MAX_LOOKBACK_DAYS)
+
+
 def collect_subscription(client, subscription_id: str, collector: Collector) -> tuple:
     """(results, summary) for run_subscription."""
     scope = ResourceExclusions.from_env()
     scope.record_invalid(collector)
-    requested = int_config(LOOKBACK_ENV, DEFAULT_LOOKBACK_DAYS)
-    lookback_days = min(requested, MAX_LOOKBACK_DAYS)
-    if requested > MAX_LOOKBACK_DAYS:
-        logger.warning("%s=%d is past the %d days the event list serves; using %d",
-                       LOOKBACK_ENV, requested, MAX_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS)
+    requested, lookback_days = lookback_setting(collector)
     now = datetime.now(timezone.utc)
     registration = provider_registration_status(collector, subscription_id, client.cred, NAMESPACE)
     events, events_read, billing, older_read, not_found = collect(client, subscription_id, now, lookback_days,

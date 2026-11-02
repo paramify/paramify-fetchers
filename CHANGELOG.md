@@ -19,7 +19,8 @@ schemas and the `paramify` CLI — not the internal code.
   start and end, published and last update times, recommended actions and the
   resources it names. The event list covers a lookback window
   (`AZURE_SERVICE_HEALTH_LOOKBACK_DAYS`, 180 by default and at most 180, because
-  a 270-day window answers 502), and any older event Resource Graph still holds
+  a 270-day window answers 502; one that is not a whole number above 0 fails the
+  run as `bad_config`), and any older event Resource Graph still holds
   is added, read by its tracking id from 30 days before its last update; one
   the event API can't find is counted in `events_in_resource_graph_not_found`.
   When Resource Graph's events or one of those older events can't be read,
@@ -896,6 +897,9 @@ schemas and the `paramify` CLI — not the internal code.
 ### Fixed
 
 
+- **Azure: an invalid lookback or recovery time objective fails as `bad_config`.**
+  The messages matched no `bad_config` marker, so `azure_change_provenance` and
+  `azure_front_door_origins` reported an invalid lookback as `partial_failure`.
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
