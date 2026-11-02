@@ -256,7 +256,12 @@ class _Health:
         self.get_params[path.split("/")[-1]] = params
         self._answer("GET", path)
         assert api_version == sh.API and set(params or {}) == {"queryStartTime"}
-        return self.by_id[path.split("/")[-1]]
+        found = self.by_id[path.split("/")[-1]]
+        month, day, year = map(int, params["queryStartTime"].split("/"))
+        last = azure_rest.parse_time(found["properties"]["lastUpdateTime"])
+        if last < datetime(year, month, day, tzinfo=timezone.utc):
+            raise azure_rest.ArmError(404, "NotFound", "no event updated since queryStartTime")
+        return found
 
     def post(self, path, api_version):
         self._answer("POST", path)
@@ -323,7 +328,8 @@ def test_collect_joins_the_window_resource_graph_and_each_events_own_reads(graph
     c = collector()
     events, read, billing, graph_read, not_found = sh.collect(client, "s1", NOW, 180, c)
     assert (read, billing, graph_read, not_found, c.ok) == (True, 2, True, 0, True)
-    assert client.get_params == {"OLD-1": {"queryStartTime": "1/9/2026"}, "OLD-BILL": {"queryStartTime": "1/9/2026"}}
+    assert client.get_params == {"OLD-1": {"queryStartTime": "12/11/2025"},
+                                 "OLD-BILL": {"queryStartTime": "12/11/2025"}}
     assert sorted(client.calls) == sorted([
         ("GET", "/"), ("GET", "/OLD-1"), ("GET", "/OLD-BILL"), ("POST", "/SA-1/fetchEventDetails"),
         ("POST", "/SA-1/listSecurityAdvisoryImpactedResources")])
@@ -391,9 +397,9 @@ def test_an_older_event_the_api_cannot_find_is_counted_and_one_that_fails_is_rec
     assert sh.summarize(events, read, billing, 180, graph_read, missed)["events_in_resource_graph_not_found"] == not_found
 
 
-@pytest.mark.parametrize("last, start", [(None, "5/4/2026"), ("0001-01-01T00:00:00", "5/4/2026"),
-                                         ("2025-12-31T23:00:00Z", "12/30/2025")])
-def test_an_older_event_is_read_from_the_day_before_its_last_update_or_the_window(graph, last, start):
+@pytest.mark.parametrize("last, start", [(None, "4/5/2026"), ("0001-01-01T00:00:00", "4/5/2026"),
+                                         ("2025-12-31T23:00:00Z", "12/1/2025")])
+def test_an_older_event_is_read_from_30_days_before_its_last_update_or_the_window(graph, last, start):
     graph.events = [graph_event("OLD-1", last)]
     client = _Health([], by_id={"OLD-1": raw_event("OLD-1")})
     events, *_ = sh.collect(client, "s1", NOW, 180, collector())
@@ -501,3 +507,16 @@ def test_post_list_posts_once_then_follows_next_link_by_get(monkeypatch):
     with pytest.raises(azure_rest.ArmError) as err:
         client.post("/subscriptions/s1/denied", "2025-05-01")
     assert err.value.status == 403
+
+
+@pytest.mark.parametrize("graph_last, found", [
+    ("2025-12-20T00:00:00Z", True),   # Resource Graph behind the event: the start is well before its update
+    ("2026-01-20T00:00:00Z", True),   # Resource Graph 18 days ahead: still inside the 30-day margin
+    ("2026-02-20T00:00:00Z", False),  # more than 30 days ahead: not found, and counted
+])
+def test_the_by_id_start_tolerates_resource_graph_and_the_event_disagreeing(graph, graph_last, found):
+    graph.events = [graph_event("OLD-1", graph_last)]
+    client = _Health([], by_id={"OLD-1": raw_event("OLD-1", lastUpdateTime="2026-01-02T00:00:00Z")})
+    c = collector()
+    events, _, _, _, not_found = sh.collect(client, "s1", NOW, 180, c)
+    assert ([e["tracking_id"] for e in events], not_found, c.ok) == (["OLD-1"] if found else [], 0 if found else 1, True)

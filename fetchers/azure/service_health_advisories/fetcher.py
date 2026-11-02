@@ -34,6 +34,9 @@ LOOKBACK_ENV = "AZURE_SERVICE_HEALTH_LOOKBACK_DAYS"
 # Measured: 180 days answers, 270 days gets 502 BadGateway at once, every time.
 MAX_LOOKBACK_DAYS = 180
 DEFAULT_LOOKBACK_DAYS = MAX_LOOKBACK_DAYS
+# Measured: Resource Graph's last update can differ from the event's by over two weeks; a by-id GET from years back
+# still answers, so a wide margin costs nothing.
+BY_ID_MARGIN_DAYS = 30
 WORKERS = 4
 # Summaries and updates are HTML written by Microsoft; a long incident runs to many kilobytes.
 MAX_TEXT = 1000
@@ -375,7 +378,7 @@ def read_by_id(client, base: str, tracking_id: str, since: datetime, collector: 
     """(status, raw event) for an event Resource Graph holds but the windowed list left out."""
     try:
         # The GET filters on lastUpdateTime like the list (3 days by default), so start before the event's last update.
-        params = {"queryStartTime": query_start(since - timedelta(days=1))}
+        params = {"queryStartTime": query_start(since - timedelta(days=BY_ID_MARGIN_DAYS))}
         return READ, {"name": tracking_id, **client.get(f"{base}/{tracking_id}", API, params)}
     except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
         status = read_status(exc)

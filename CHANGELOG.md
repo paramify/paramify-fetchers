@@ -20,7 +20,7 @@ schemas and the `paramify` CLI — not the internal code.
   resources it names. The event list covers a lookback window
   (`AZURE_SERVICE_HEALTH_LOOKBACK_DAYS`, 180 by default and at most 180, because
   a 270-day window answers 502), and any older event Resource Graph still holds
-  is added, read by its tracking id from the day before its last update; one
+  is added, read by its tracking id from 30 days before its last update; one
   the event API can't find is counted in `events_in_resource_graph_not_found`.
   The resources each event names come from
   Resource Graph, because the REST impactedResources list came back empty for
