@@ -1,16 +1,20 @@
 key: azure_rbac_custom_roles_no_privilege_escalation
-name: Azure RBAC No Custom Role Can Escalate Privileges
+name: Azure RBAC No Custom Role Grants Direct Privilege Escalation Actions
 type: AUTOMATED
 role: configuration
 statement: >-
   The subscription's role definitions were listed without an API failure (built-in roles were
-  returned, so an empty custom-role list is real), and no custom Azure RBAC role can raise its own or
-  anyone's privileges: none grants writing role assignments, rewriting role definitions or writing
-  deny assignments, with wildcards matched as Azure matches them and notActions honored. A
-  subscription with no custom roles passes. Substantiates that privileges are strictly defined and can't be widened by their holders
-  (KSI-CNA-DFP, KSI-IAM-ELP). An approved exception (a deployment role that must assign roles) still
-  fails here and must be justified outside this evidence. Does NOT prove who holds these roles
-  (azure_rbac_role_assignments), anything about built-in roles such as Owner or User Access
+  returned, so an empty custom-role list is real), and no custom Azure RBAC role grants the direct
+  escalation actions: Microsoft.Authorization/roleAssignments/write, roleDefinitions/write or
+  denyAssignments/write, with wildcards matched as Azure matches them and notActions honored. A
+  subscription with no custom roles passes. Substantiates that custom role privileges are strictly
+  defined (KSI-CNA-DFP, KSI-IAM-ELP). An approved exception (a deployment role that must assign
+  roles) still fails here and must be justified outside this evidence. Does NOT prove that no
+  custom role can widen privileges another way: PIM requests
+  (Microsoft.Authorization/roleAssignmentScheduleRequests/write and
+  roleEligibilityScheduleRequests/write) are not checked, nor are indirect paths such as a policy
+  assignment whose deployIfNotExists managed identity holds roles. Nor does it prove who holds these
+  roles (azure_rbac_role_assignments), anything about built-in roles such as Owner or User Access
   Administrator, or other powerful actions (resource locks, data-plane access); custom roles
   defined only at a management group may not be listed.
 
