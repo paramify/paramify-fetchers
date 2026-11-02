@@ -297,6 +297,7 @@ class ManifestEntry:
     config: Dict[str, Any] = field(default_factory=dict)
     secrets: Dict[str, str] = field(default_factory=dict)
     targets: List[TargetInstance] = field(default_factory=list)
+    paramify: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -304,6 +305,7 @@ class Manifest:
     output_dir: Path
     entries: List[ManifestEntry]
     platforms: Dict[str, PlatformConfig] = field(default_factory=dict)
+    paramify: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -327,3 +329,6 @@ class InvocationResult:
     error_code: Optional[str] = None
     # A comparator's inputs, as the runner records them in `metadata.inputs`.
     inputs: Optional[List[Dict[str, Any]]] = None
+    # The manifest entry this invocation belongs to (see manifest_loader.entry_keys);
+    # every target of a fan-out shares it.
+    entry_key: Optional[str] = None

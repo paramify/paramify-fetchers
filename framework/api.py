@@ -21,6 +21,7 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
 import tempfile
@@ -1076,6 +1077,7 @@ def _invocation_record(r) -> dict:
         record["stderr_tail"] = r.stderr[-_STDERR_TAIL_CHARS:]
     if r.inputs is not None:
         record["inputs"] = r.inputs
+    record["entry_key"] = r.entry_key
     return record
 
 
@@ -1189,9 +1191,12 @@ def run(
         if on_event is not None:
             on_event(event)
 
-    run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    # The suffix keeps two runs started in the same second apart.
+    run_id = f"{datetime.now(timezone.utc):%Y-%m-%dT%H-%M-%SZ}-{secrets.token_hex(2)}"
     run_dir = parsed.output_dir.resolve() / f"run-{run_id}"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(parents=True, exist_ok=False)
+    # Keys come from manifest order; dependency_graph.order only reorders the same objects.
+    keys = {id(e): k for e, k in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries))}
 
     # Two phases: every fetcher in manifest order, then every comparator.
     entries = dependency_graph.order(parsed.entries, fetchers)
@@ -1267,6 +1272,7 @@ def run(
                 on_note=on_note,
                 inputs_index=inputs_index,
                 secret_vars=secret_vars,
+                entry_key=keys[id(entry)],
             )
         except (RuntimeError, ValueError) as e:
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
@@ -1317,6 +1323,10 @@ def run(
         "started_at": started_at,
         "completed_at": completed_at,
         "invocations": [_invocation_record(r) for r in all_results],
+        "paramify": {
+            keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(parsed, e)}
+            for e in entries
+        },
     }
     metadata_path = run_dir / "_run_metadata.json"
     metadata_path.write_text(json.dumps(metadata, indent=2, default=str))
