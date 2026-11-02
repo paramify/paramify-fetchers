@@ -37,6 +37,7 @@ from azure_common import (  # noqa: E402
     write_evidence,        # writes the evidence dict to disk as JSON
     report_failure,        # logs the reason AND writes $FETCHER_STATUS_FILE
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_defender_assessments")
@@ -357,6 +358,8 @@ def main() -> int:
     # managed identity, `az login` cache, etc., in order). collector.guard means
     # a bad/missing credential is recorded as a failure, not a crash.
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
 
     assessments: list[dict] = []
     registration_status = UNKNOWN
@@ -382,6 +385,12 @@ def main() -> int:
             ),
         )
 
+    # An assessment follows the resource it is about; it carries no region, so location: patterns never match one.
+    assessments, excluded = exclusions.split(
+        assessments, "assessment", resource_id=lambda a: a["resource_id"],
+        name=lambda a: a["display_name"] or a["name"])
+    exclusions.warn_unmatched(logger)
+
     # Step 4: assemble the raw evidence dict. build_payload wraps our
     # results/summary with the standard metadata block (subscription id, when
     # this ran, whether anything failed) — the runner then wraps THIS whole
@@ -394,8 +403,12 @@ def main() -> int:
             "assessments": assessments,
             # Also in results so a validator can assert the service is in use at all.
             "provider_registration_status": registration_status,
+            "excluded": excluded,
         },
-        summary=summarize(assessments, registration_status),
+        summary={
+            **summarize(assessments, registration_status),
+            **exclusions.summary(excluded, ("assessment",), {"assessments": len(assessments)}),
+        },
     )
 
     # Step 5: write the evidence file. The subscription id is baked into the
