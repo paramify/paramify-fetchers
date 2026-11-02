@@ -61,7 +61,7 @@ GRAPH = "resource_graph"
 EVENTS_QUERY = (
     "ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events' "
     "| extend lastUpdateTime = coalesce(todatetime(tolong(properties.LastUpdateTime)), "
-    "todatetime(properties.LastUpdateTime)) | project id, lastUpdateTime | order by id asc"
+    "todatetime(tostring(properties.LastUpdateTime))) | project id, lastUpdateTime | order by id asc"
 )
 # Measured: the REST impactedResources list came back empty for events Resource Graph lists resources for.
 IMPACTED_QUERY = (
