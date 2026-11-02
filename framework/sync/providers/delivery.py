@@ -401,13 +401,18 @@ class DeliveryProvider:
         # Step 1. A resumed batch stays on its own request by design, so only a
         # new batch on a request planned as current is re-checked.
         if p.get("planned_current") and not p.get("resume_batch_id"):
-            current = {r.id for r in resources.artifact_requests(p["evidence_id"], current=True)}
-            if p["artifact_request_id"] not in current:
-                again = self._replan(p, resources)
-                note = f"re-planned, the artifact request rolled over: {again.summary}"
+            try:
+                current = {r.id for r in resources.artifact_requests(p["evidence_id"], current=True)}
+                again = None if p["artifact_request_id"] in current else self._replan(p, resources)
+            except ApiError as exc:
+                if exc.kind is not ErrorKind.TEMPORARY:
+                    raise
+                return self._held(action.id, _Delivered(), f"the artifact request check failed temporarily ({exc.message})")
+            if again is not None:
+                note = "; ".join([f"re-planned, the artifact request rolled over: {again.summary}", *again.warnings])
                 if again.verb == "refuse":
                     return Outcome(action.id, "refused", _Delivered().result("refused"),
-                                   f"{again.summary}: {again.fix}")
+                                   "; ".join([f"{again.summary}: {again.fix}", *again.warnings]))
                 if again.verb == "noop":
                     return self._noop(action.id, again.payload, note)
                 p = resolve(again.payload)
@@ -426,10 +431,14 @@ class DeliveryProvider:
         done = _Delivered(p.get("batch_id"), p.get("batch_reference"), p.get("status"))
         return Outcome(action_id, "noop", done.result("noop"), message)
 
-    def _emit(self, action_id: str, name: str, outcome: str, n: Optional[int], of: int, size: int) -> None:
+    def _emit(self, action_id: str, name: str, outcome: str, n: Optional[int], of: int, size: int,
+              reason: Optional[str] = None) -> None:
         if self._on_event is not None:
-            self._on_event({"event": "delivery_file", "action_id": action_id, "file": name,
-                            "outcome": outcome, "n": n, "of": of, "bytes": size})
+            event = {"event": "delivery_file", "action_id": action_id, "file": name,
+                     "outcome": outcome, "n": n, "of": of, "bytes": size}
+            if reason:
+                event["reason"] = reason
+            self._on_event(event)
 
     def _deliver(self, action_id: str, p: Dict[str, Any], resources: Any, note: str) -> Outcome:
         run = _Delivered(dropped=[{"name": d["original_file_name"], "reason": d["reason"]}
@@ -449,6 +458,8 @@ class DeliveryProvider:
                     self._run_state.record_batch(p["entry_key"], made.id)
                 present = set()
         except ApiError as exc:
+            if exc.kind is ErrorKind.TEMPORARY:  # an outage, not a configuration gap
+                return self._held(action_id, run, exc.message)
             return self._failed(action_id, exc, run, resources, ev_id, target)
 
         # Step 3: upload what the batch does not have yet.
@@ -466,22 +477,24 @@ class DeliveryProvider:
                 content = self._content(Path(f["path"]))
             except OSError as exc:
                 run.dropped.append({"name": name, "reason": f"cannot read {name}: {exc.strerror or exc}"})
-                self._emit(action_id, name, "dropped", n, len(to_send), 0)
+                self._emit(action_id, name, "dropped", n, len(to_send), 0, run.dropped[-1]["reason"])
                 continue
+            reason: Optional[str] = None
             try:
                 resources.upload_to_batch(run.batch_id, name, content, {"title": f["title"], "note": f["note"]})
                 run.uploaded.append(name)
                 outcome = "uploaded"
             except ApiError as exc:
                 if exc.kind is ErrorKind.PERMANENT:
-                    run.dropped.append({"name": name, "reason": WAF_BLOCKED if exc.status == 403 else exc.message})
+                    reason = WAF_BLOCKED if exc.status == 403 else exc.message
+                    run.dropped.append({"name": name, "reason": reason})
                     outcome = "dropped"
                 elif exc.kind is ErrorKind.TEMPORARY:
                     run.held.append(name)
-                    outcome = "held"
+                    outcome, reason = "held", exc.message
                 else:
                     return self._failed(action_id, exc, run, resources, ev_id, f"batch {run.name}")
-            self._emit(action_id, name, outcome, n, len(to_send), len(content))
+            self._emit(action_id, name, outcome, n, len(to_send), len(content), reason)
 
         # Step 4: submit only when nothing is held and the batch is not empty.
         if run.held:
@@ -499,9 +512,11 @@ class DeliveryProvider:
             if run.status not in DONE:  # the submit may still have taken effect
                 return self._held(action_id, run, f"the submit failed temporarily ({exc.message})")
         # Step 5: read the batch back.
-        self._read_back(run, resources, ev_id)
         parts = [note] if note else []
-        if run.status == "SUBMITTED":
+        if not self._read_back(run, resources, ev_id):
+            run.status = None  # the submit took effect; what it led to is unknown
+            parts.append("submitted; status could not be read back")
+        elif run.status == "SUBMITTED":
             parts.append(f"{run.name} SUBMITTED: held because validators failed: {', '.join(run.validators_failed)}"
                          if run.validators_failed else
                          f"{run.name} SUBMITTED: waiting for review (approval {run.approval or 'unknown'})")
@@ -513,8 +528,10 @@ class DeliveryProvider:
                        "; ".join(parts))
 
     def _held(self, action_id: str, run: _Delivered, why: str) -> Outcome:
-        return Outcome(action_id, "failed", run.result("held"),
-                       f"held: {why}; {run.name} stays OPEN for the next upload to resume")
+        """A temporary failure: the next upload of this run resumes (or creates) the batch."""
+        then = (f"{run.name} stays OPEN for the next upload to resume" if run.batch_id
+                else "no batch was recorded; the next upload tries again")
+        return Outcome(action_id, "failed", run.result("held"), f"held: {why}; {then}")
 
     def _failed(self, action_id: str, exc: ApiError, run: _Delivered, resources: Any, ev_id: str,
                 what: str) -> Outcome:
@@ -530,15 +547,25 @@ class DeliveryProvider:
             message = exc.message
         return Outcome(action_id, "failed", run.result("failed"), message)
 
-    def _read_back(self, run: _Delivered, resources: Any, ev_id: str) -> None:
-        """Status and reference from the API; failing validators of a batch held for them."""
+    def _read_back(self, run: _Delivered, resources: Any, ev_id: str) -> bool:
+        """Status and reference from the API; failing validators of a batch held for them.
+
+        False when the batch could not be read (a fatal error still raises).
+        """
         try:
             b = resources.batch(run.batch_id)
-            run.batch_reference, run.status, run.approval = b.reference_id, b.status, b.when_to_approve
-            if b.status == "SUBMITTED" and b.when_to_approve == "SUBMISSION_WITH_PASSING_VALIDATORS":
-                arts = resources.artifacts(ev_id, batch_id=b.id)
-                run.validators_failed = list(dict.fromkeys(
-                    name for a in arts for name, result in a.validators if result in _FAILING))
         except ApiError as exc:
             if exc.fatal:
                 raise
+            return False
+        run.batch_reference, run.status, run.approval = b.reference_id, b.status, b.when_to_approve
+        if b.status == "SUBMITTED" and b.when_to_approve == "SUBMISSION_WITH_PASSING_VALIDATORS":
+            try:
+                arts = resources.artifacts(ev_id, batch_id=b.id)
+            except ApiError as exc:
+                if exc.fatal:
+                    raise
+                return True  # the status is known; which validators failed is not
+            run.validators_failed = list(dict.fromkeys(
+                name for a in arts for name, result in a.validators if result in _FAILING))
+        return True

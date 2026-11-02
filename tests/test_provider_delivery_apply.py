@@ -466,3 +466,91 @@ def test_unexpected_verb_fails():
     p = DeliveryProvider()
     out = p.apply(Action("delivery/x", "delivery", "x", "create", "s"), None, lambda v: v)
     assert out.status == "failed"
+
+
+# ---- temporary failures before a batch exists, read-back, re-plan warnings ---
+
+def _temporary(path: str) -> ApiError:
+    return ApiError(f"GET {path} failed after retrying (HTTP 503)", status=503,
+                    kind=ErrorKind.TEMPORARY, method="GET", path=path)
+
+
+def test_temporary_failure_creating_the_batch_holds_with_no_batch(tmp_path, monkeypatch):
+    fake = FakeParamify()
+    h = Harness(fake, two_files(tmp_path))
+    plan = h.plan()
+
+    def boom(**_kw):
+        raise _temporary("/batches")
+
+    monkeypatch.setattr(h.res, "create_batch", boom)
+    d = h.apply(plan)["delivery/x"]
+    assert d.status == "failed"
+    assert d.result["state"] == "held" and d.result["batch_id"] is None
+    assert d.result["uploaded"] == [] and h.uploads() == []
+    assert "no batch was recorded" in d.message and "HTTP 503" in d.message
+    assert RunState(tmp_path).batch_for("x") is None
+
+
+def test_temporary_failure_reading_a_resumed_batch_holds_it(tmp_path, monkeypatch):
+    fake = FakeParamify()
+    ev, ar = with_request(fake)
+    h = Harness(fake, two_files(tmp_path))
+    made = h.res.create_batch(artifact_request_id=ar.id)
+    h.res.upload_to_batch(made.id, "a.json", b"{}", {"note": "fetcher=x; run_id=RID; entry=x"})
+    plan = h.plan()
+
+    def boom(*_a, **_kw):
+        raise _temporary(f"/evidence/{ev.id}/artifacts")
+
+    monkeypatch.setattr(h.res, "artifacts", boom)
+    d = h.apply(plan)["delivery/x"]
+    assert d.status == "failed" and d.result["state"] == "held"
+    assert d.result["batch_id"] == made.id and h.submits() == []
+    assert "stays OPEN" in d.message
+
+
+def test_temporary_failure_in_the_rollover_check_holds_with_no_batch(tmp_path, monkeypatch):
+    fake = FakeParamify()
+    with_request(fake, requested=date(2026, 10, 1), due=date(2026, 11, 5))
+    h = Harness(fake, two_files(tmp_path))
+    plan = h.plan()
+
+    def boom(*_a, **_kw):
+        raise _temporary("/artifact-requests")
+
+    monkeypatch.setattr(h.res, "artifact_requests", boom)
+    fake.calls.clear()
+    d = h.apply(plan)["delivery/x"]
+    assert d.status == "failed"
+    assert d.result["state"] == "held" and d.result["batch_id"] is None
+    assert ("POST", "/batches", {}) not in fake.calls
+
+
+def test_failed_read_back_after_submit_reports_no_status(tmp_path, monkeypatch):
+    fake = FakeParamify()
+    h = Harness(fake, two_files(tmp_path))
+    plan = h.plan()
+
+    def boom(batch_id):
+        raise _temporary(f"/batches/{batch_id}")
+
+    monkeypatch.setattr(h.res, "batch", boom)
+    d = h.apply(plan)["delivery/x"]
+    assert d.status == "applied"
+    assert d.result["state"] == "delivered" and d.result["status"] is None
+    assert d.result["uploaded"] == ["a.json", "b.json"]
+    assert d.message == "submitted; status could not be read back"
+    assert h.submits() == ["/batches/bt-1/submit"]
+
+
+def test_rollover_replan_warnings_reach_the_outcome_message(tmp_path):
+    fake = FakeParamify()
+    ev, old = with_request(fake, requested=date(2026, 10, 1), due=date(2026, 11, 5))
+    h = Harness(fake, two_files(tmp_path))
+    plan = h.plan()
+    fake.set_today(date(2026, 11, 10))
+    d = h.apply(plan)["delivery/x"]
+    assert d.status == "applied"
+    assert "re-planned" in d.message
+    assert f"late submission to {old.reference_id} (due 2026-11-05)" in d.message
