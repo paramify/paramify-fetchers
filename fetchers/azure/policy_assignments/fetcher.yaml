@@ -94,8 +94,10 @@ evidence_set:
     definition parameters. Policy exemptions: one raw ARM GET of
     /subscriptions/<id>/providers/Microsoft.Authorization/policyExemptions at the preview
     api-version 2024-12-01-preview (no filter, so inherited, resource-group, resource and
-    expired exemptions are all returned), following nextLink; a 400 or 404 on that
-    api-version reports the exemptions as unknown (null counts) without failing the run.
+    expired exemptions are all returned), following nextLink; ARM refusing that
+    api-version (InvalidApiVersionParameter, NoRegisteredProviderFound or
+    InvalidResourceType) reports the exemptions as unknown (null counts) without failing
+    the run, and any other error fails it.
     Exemption categories are matched without regard to case and written as Waiver or
     Mitigated. lifts_enforcement is null, with lifts_enforcement_unknown_reason saying why,
     when the exempted assignment isn't listed (assignment_not_listed: usually an

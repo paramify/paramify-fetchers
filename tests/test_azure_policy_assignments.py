@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -212,6 +213,12 @@ def test_unreadable_do_not_enforce_initiative_counts_no_members():
 def test_summary_with_no_assignments_reports_zero_unresolved_members():
     summary = fx.summarize([])
     assert (summary["unresolved_member_policies"], summary["unresolved_member_policies_not_enforced"]) == (0, 0)
+
+
+def test_unlisted_assignments_summarize_as_null_not_zero():
+    summary = fx.summarize(None)
+    assert summary.keys() == fx.summarize([]).keys()
+    assert all(v is None for v in summary.values())
 
 
 # --- policy exemptions ---
@@ -524,13 +531,55 @@ def test_list_reads_every_exemption(monkeypatch):
     assert (status, [p["name"] for p in projected], collector.ok) == ("read", ["e1", "e2"], True)
 
 
-@pytest.mark.parametrize("status_code", [400, 404])
-def test_refused_api_version_is_unknown_not_a_failure(monkeypatch, status_code):
-    (projected, status), collector = _collect(monkeypatch, _HttpError(status_code, "(InvalidResourceType) no"))
+@pytest.mark.parametrize("status_code, message", [
+    (400, "(InvalidApiVersionParameter) The api-version is invalid."),
+    (400, "(NoRegisteredProviderFound) No registered resource provider found for this api version."),
+    (404, "(InvalidResourceType) The resource type could not be found for api version."),
+])
+def test_refused_api_version_is_unknown_not_a_failure(monkeypatch, status_code, message):
+    (projected, status), collector = _collect(monkeypatch, _HttpError(status_code, message))
     assert (projected, status, collector.ok) == (None, "api_version_unavailable", True)
+
+
+def test_refusal_code_is_read_from_the_arm_error_body(monkeypatch):
+    exc = _HttpError(400, "Operation returned an invalid status 'Bad Request'")
+    exc.error = type("Err", (), {"code": "InvalidApiVersionParameter"})()
+    (projected, status), collector = _collect(monkeypatch, exc)
+    assert (projected, status, collector.ok) == (None, "api_version_unavailable", True)
+
+
+@pytest.mark.parametrize("status_code, message", [
+    (400, "(BadRequest) The request is malformed."),
+    (400, "Operation returned an invalid status 'Bad Request'"),
+    (404, "(SubscriptionNotFound) The subscription could not be found."),
+])
+def test_other_400_or_404_is_a_recorded_failure(monkeypatch, status_code, message):
+    (projected, status), collector = _collect(monkeypatch, _HttpError(status_code, message))
+    assert (projected, status, collector.ok) == (None, "failed", False)
 
 
 def test_denied_list_is_a_recorded_failure(monkeypatch):
     (projected, status), collector = _collect(monkeypatch, _HttpError(403, "(AuthorizationFailed) denied"))
     assert (projected, status) == (None, "failed")
     assert classify_failure_code(collector.failures) == "not_authorized"
+
+
+def test_failed_assignment_list_leaves_the_summary_null_and_fails_the_run(monkeypatch, tmp_path):
+    def failed_list(subscription_id, cred, collector):
+        collector.record("policy.policy_assignments.list", RuntimeError("list failed"))
+        return None
+
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    monkeypatch.delenv("AZURE_RESOURCE_EXCLUSIONS", raising=False)
+    monkeypatch.setattr(fx, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(fx, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
+    monkeypatch.setattr(fx, "credential", lambda: object())
+    monkeypatch.setattr(fx, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(fx, "collect_policy_assignments", failed_list)
+    monkeypatch.setattr(fx, "collect_policy_exemptions", lambda *a: ([], fx.EXEMPTIONS_READ))
+    assert fx.main() == 1
+    evidence = json.loads((tmp_path / "azure_policy_assignments_s1.json").read_text())
+    summary = evidence["summary"]
+    assert all(summary[key] is None for key in fx.summarize([]))
+    assert (evidence["metadata"]["partial_failure"], evidence["results"]["policy_assignments"]) == (True, [])

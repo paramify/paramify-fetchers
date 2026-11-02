@@ -136,8 +136,10 @@ SOURCE_DEFINITION_DEFAULT = "definition_default"
 # Anything else ("[if(...)]", a concat) is reported as unresolved with its raw text.
 PARAMETER_REFERENCE = re.compile(r"^\[\s*parameters\(\s*'([^']+)'\s*\)\s*\]$", re.IGNORECASE)
 
-# Exemptions have no GA api-version; a 400 or 404 on this one reads as unknown, not as none.
+# Exemptions have no GA api-version; ARM refusing this one reads as unknown, not as none.
 EXEMPTIONS_API_VERSION = "2024-12-01-preview"
+API_VERSION_REFUSAL_CODES = {"invalidapiversionparameter", "noregisteredproviderfound", "invalidresourcetype"}
+ARM_CODE_PREFIX = re.compile(r"^\s*\((\w+)\)")
 EXEMPTION_SEGMENT = "/providers/microsoft.authorization/policyexemptions/"
 CANONICAL_CATEGORIES = {"waiver": "Waiver", "mitigated": "Mitigated"}
 
@@ -559,8 +561,10 @@ def assignment_record(assignment: dict) -> dict:
     }
 
 
-def summarize(assignments: list[dict]) -> dict:
-    """Enforcement coverage plus what kind of governance is actually assigned."""
+def summarize(assignments: list[dict] | None) -> dict:
+    """Enforcement coverage plus what kind of governance is actually assigned; all null when unlisted."""
+    if assignments is None:
+        return dict.fromkeys(summarize([]), None)
     total = len(assignments)
     enforced = sum(1 for a in assignments if a["enforced"])
     return {
@@ -1048,11 +1052,24 @@ def _status_code(exc) -> int | None:
     return getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
 
 
+def _arm_error_code(exc) -> str:
+    code = getattr(getattr(exc, "error", None), "code", None)
+    if not code:
+        match = ARM_CODE_PREFIX.match(str(exc))
+        code = match.group(1) if match else ""
+    return str(code)
+
+
+def api_version_refused(exc) -> bool:
+    return _status_code(exc) in (400, 404) and _arm_error_code(exc).lower() in API_VERSION_REFUSAL_CODES
+
+
 def collect_policy_exemptions(subscription_id, cred, collector: Collector) -> tuple[list[dict] | None, str]:
     """Every exemption in effect on the subscription: its own, inherited, and those on anything inside it.
 
-    The unfiltered list at subscription scope returns all three, expired ones included. A 400 or 404 means
-    the pinned preview api-version is no longer served: logged and reported as unknown, not as a failed run.
+    The unfiltered list at subscription scope returns all three, expired ones included. ARM refusing the
+    pinned preview api-version (InvalidApiVersionParameter, NoRegisteredProviderFound, InvalidResourceType)
+    is logged and reported as unknown, not as a failed run; any other error, 400s included, is a failure.
     """
     def _list():
         client = arm_rest_client(cred)
@@ -1062,10 +1079,10 @@ def collect_policy_exemptions(subscription_id, cred, collector: Collector) -> tu
     try:
         return _list(), EXEMPTIONS_READ
     except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
-        if _status_code(exc) in (400, 404):
+        if api_version_refused(exc):
             logger.warning(
-                "policyExemptions list refused api-version %s (%s) — reporting exemptions as unknown: %s",
-                EXEMPTIONS_API_VERSION, _status_code(exc), " ".join(str(exc).split())[:200],
+                "policyExemptions list refused api-version %s (%s %s) — reporting exemptions as unknown: %s",
+                EXEMPTIONS_API_VERSION, _status_code(exc), _arm_error_code(exc), " ".join(str(exc).split())[:200],
             )
             return None, EXEMPTIONS_API_UNAVAILABLE
         collector.record("policy.policy_exemptions.list", exc)
@@ -1157,7 +1174,7 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(assignments),
+            **summarize(listed),
             **summarize_exemptions(exemptions, exemptions_status),
             "provider_registration_status": registration,
             **boundary,

@@ -534,12 +534,15 @@ schemas and the `paramify` CLI — not the internal code.
   `exemption_count`. The summary adds exemption counts by category, expiry, scope
   and enforcement, and `exemptions_read_status`. Exemptions exist only in preview
   api-versions, which the stable SDK leaves out, so they are read by a raw ARM GET
-  pinned to 2024-12-01-preview; a 400 or 404 on that version leaves every
-  exemption count null (`api_version_unavailable`) without failing the run, and
-  any other failed read fails it with the counts null. Adopts
-  `resource_exclusions` for exemptions only: rg: and id: patterns match an
-  exemption through the scope it was made at, location: never matches one, and
-  assignments are not affected. The 0.3.0 fields are unchanged.
+  pinned to 2024-12-01-preview. ARM refusing that version
+  (InvalidApiVersionParameter, NoRegisteredProviderFound or InvalidResourceType)
+  leaves every exemption count null (`api_version_unavailable`) without failing
+  the run; any other failed read, other 400s included, fails it with the counts
+  null. Adopts `resource_exclusions` for exemptions only: rg: and id: patterns
+  match an exemption through the scope it was made at, location: never matches
+  one, and assignments are not affected. One change to the 0.3.0 fields: when the
+  assignment list fails, every assignment summary count reads null instead of 0
+  (the run still fails); otherwise they are unchanged.
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
   history (`risk_history`, oldest first, with what changed and who initiated it)
