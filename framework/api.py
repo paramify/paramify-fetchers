@@ -71,6 +71,7 @@ from framework.paramify_auth import (
     resolve_upload_token,
 )
 from framework.probe import probe_categories
+from framework.run_files import is_evidence_file
 from framework.runner import dependency_graph, manifest_loader
 from framework.secret_resolver import (
     is_env_ref_attempt,
@@ -1401,7 +1402,7 @@ def reference_ids_from_run(run_dir) -> set:
     if not run_path.is_dir():
         return refs
     for p in sorted(run_path.glob("*.json")):
-        if p.name in ("_run_metadata.json", "upload_log.json"):
+        if not is_evidence_file(p):
             continue
         try:
             env = json.loads(p.read_text())
@@ -1992,7 +1993,7 @@ def _run_summary(run_dir: Path) -> dict:
         # upload_log.json is the evidence uploader's own record, not evidence:
         # counted, a scan-only run someone once ran `paramify upload` on looked
         # like an evidence run and was picked as one.
-        if p.name in ("_run_metadata.json", "upload_log.json") or p.name in seen:
+        if not is_evidence_file(p) or p.name in seen:
             continue
         files.append({"name": p.name, "path": str(p), "fetcher": None, "target": None,
                       "exit_code": None, "kind": "evidence"})

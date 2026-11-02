@@ -52,6 +52,7 @@ from framework.paramify_auth import (  # noqa: E402
     resolve_upload_token,
 )
 from framework.paramify_responses import already_present  # noqa: E402
+from framework.run_files import is_evidence_file  # noqa: E402
 
 logger = logging.getLogger("paramify_evidence_uploader")
 
@@ -197,9 +198,8 @@ def find_latest_run(output_dir: Path) -> Optional[Path]:
 
 def iter_evidence_files(run_dir: Path):
     for p in sorted(run_dir.glob("*.json")):
-        if p.name in ("_run_metadata.json", "upload_log.json"):
-            continue
-        yield p
+        if is_evidence_file(p):
+            yield p
 
 
 def override_for(metadata: Dict, overrides: Dict) -> Dict:
