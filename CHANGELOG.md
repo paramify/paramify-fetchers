@@ -12,6 +12,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_service_health_advisories`** (`EVD-AZURE-SERVICE-HEALTH`) — the
+  Microsoft Service Health events reported to the subscription over a lookback
+  window (`AZURE_SERVICE_HEALTH_LOOKBACK_DAYS`, 90 by default): service issues,
+  planned maintenance, health advisories (retirements included) and security
+  advisories, each with its status, level, impacted services and regions, impact
+  start and end, published and last update times, recommended actions and the
+  resources it names. Open follows Microsoft's own active rule. A sensitive
+  security advisory's summary and updates come from `fetchEventDetails`, and its
+  resources from `listSecurityAdvisoryImpactedResources`; Reader has neither
+  action, so without them those read unknown and the run does not fail. Takes
+  `resource_exclusions`, applied to the resources an event names. Billing
+  communications are left out. `_shared/azure_rest.py` gains `post` and
+  `post_list` for ARM read actions sent as POST.
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
