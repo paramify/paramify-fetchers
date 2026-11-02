@@ -118,13 +118,19 @@ def apply(
     providers: Sequence[Provider],
     resources: Any,
     on_event: Optional[Event] = None,
+    outcomes: Optional[List[Outcome]] = None,
 ) -> List[Outcome]:
-    """Apply the plan. Returns one Outcome per action, in plan order."""
+    """Apply the plan. Returns one Outcome per action, in plan order.
+
+    Each outcome is appended to `outcomes` (when given) as soon as it is made,
+    so a caller still has the finished ones if apply is interrupted.
+    """
     emit: Event = on_event or (lambda _event: None)
     by_name = {p.name: p for p in providers}
     by_id: Dict[str, Outcome] = {}
     resolve = _resolver(by_id)
-    outcomes: List[Outcome] = []
+    if outcomes is None:
+        outcomes = []
     stopped: Optional[str] = None
 
     for action in plan.actions:

@@ -58,6 +58,7 @@ _FILE_OUTCOME = {"uploaded": "uploaded", "already_present": "skipped_duplicate",
                  "dropped": "dropped", "held": "error", "error": "error"}
 # A planned-only entry state, for a dry run.
 _PLANNED_STATE = {"deliver": "planned", "noop": "noop", "refuse": "refused"}
+INTERRUPTED = "not applied: upload interrupted"
 
 
 def _utc_now() -> str:
@@ -445,6 +446,7 @@ def _apply_locked(
     deprecations: Sequence[str] = (),
 ) -> Dict[str, Any]:
     outcomes: Optional[List[Outcome]] = None
+    done: List[Outcome] = []  # filled as apply goes, so an interruption keeps what finished
     error: Optional[str] = None
     try:
         emit({"event": "upload_start", **base})
@@ -456,9 +458,13 @@ def _apply_locked(
         )
         report.bind(engine.plan(providers, setup.ctx, Reader(resources)), delivery)
         emit({"event": "plan", "plan": report.plan.to_json()})
-        outcomes = engine.apply(report.plan, providers, resources, on_event=report.on_engine)
+        outcomes = engine.apply(report.plan, providers, resources, on_event=report.on_engine, outcomes=done)
     except BaseException as exc:
         error = str(exc) or type(exc).__name__
+        # Every action without an outcome was not applied; none of them is "planned" any more.
+        finished = {o.action_id for o in done}
+        outcomes = done + [Outcome(a.id, "skipped", message=INTERRUPTED)
+                           for a in report.plan.actions if a.id not in finished]
         raise
     finally:
         summary = {**base, **report.summary(outcomes or []), "tags": report.tags(policy, outcomes),

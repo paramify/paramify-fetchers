@@ -675,3 +675,29 @@ def test_a_file_unreadable_at_apply_is_an_error_not_a_drop(fake, root, tmp_path,
     assert (out["uploaded"], out["errors"], out["dropped"], out["ok"]) == (1, 1, 0, False)
     [b] = [r for r in out["results"] if r["file"] == "b.json"]
     assert b["outcome"] == "error" and b["reason"].startswith("cannot read b.json")
+
+
+# ---- an interrupted apply -----------------------------------------------------------
+
+def test_an_interrupted_apply_records_unapplied_entries_as_skipped(fake, root, tmp_path, monkeypatch):
+    real = upload_mod.DeliveryProvider._deliver
+
+    def deliver(self, action_id, p, resources, note):
+        if action_id == "delivery/y":
+            raise KeyboardInterrupt
+        return real(self, action_id, p, resources, note)
+
+    monkeypatch.setattr(upload_mod.DeliveryProvider, "_deliver", deliver)
+    run = _two_sets(tmp_path)
+    with pytest.raises(KeyboardInterrupt):
+        api.upload_run(run, root)
+    log = json.loads((run / "upload_log.json").read_text())
+    assert log["ok"] is False and log["error"] == "KeyboardInterrupt"
+    assert log["entries"]["x"]["state"] == "delivered"
+    assert log["entries"]["y"]["state"] == "skipped"
+    assert log["entries"]["y"]["message"] == "not applied: upload interrupted"
+    assert "planned" not in {e["state"] for e in log["entries"].values()}
+    by_id = {o["action_id"]: o for o in log["outcomes"]}
+    assert by_id["delivery/y"] == {"action_id": "delivery/y", "status": "skipped", "result": {},
+                                   "message": "not applied: upload interrupted"}
+    assert log["errors"] >= 1
