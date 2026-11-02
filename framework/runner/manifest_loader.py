@@ -77,8 +77,18 @@ def entry_keys(entries: Sequence[ManifestEntry]) -> List[str]:
 
 def resolved_paramify(manifest: Manifest, entry: ManifestEntry) -> Dict[str, Any]:
     """The `paramify` settings that apply to one entry: its own values win over the
-    manifest's. A key set in neither is absent."""
-    return {**manifest.paramify, **entry.paramify}
+    manifest's. A key set in neither is absent.
+
+    `stack` and `stack_name` are a pair: the label comes only from the level that
+    set the stack, so an entry's own stack never takes the run-level label (that
+    would warn of a rename that never happened).
+    """
+    merged = {**manifest.paramify, **entry.paramify}
+    source = entry.paramify if "stack" in entry.paramify else manifest.paramify
+    merged.pop("stack_name", None)
+    if "stack" in source and "stack_name" in source:
+        merged["stack_name"] = source["stack_name"]
+    return merged
 
 
 def load_manifest(path: Path, repo_root: Path) -> Manifest:

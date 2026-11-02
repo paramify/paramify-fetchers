@@ -57,6 +57,19 @@ def test_resolved_paramify_entry_wins():
     assert resolved_paramify(m, m.entries[0]) == {"stack": "Gov", "approval": "MANUAL"}
 
 
+def test_an_entry_stack_does_not_inherit_the_run_level_label():
+    m = parse_manifest({"run": {"paramify": {"stack": "st-1", "stack_name": "Prod"},
+                                "fetchers": [{"use": "x", "paramify": {"stack": "st-2"}},
+                                             {"use": "y"},
+                                             {"use": "z", "paramify": {"stack": "st-3", "stack_name": "Gov"}},
+                                             {"use": "w", "paramify": {"stack_name": "Stray"}}]}})
+    x, y, z, w = (resolved_paramify(m, e) for e in m.entries)
+    assert x == {"stack": "st-2"}
+    assert y == {"stack": "st-1", "stack_name": "Prod"}
+    assert z == {"stack": "st-3", "stack_name": "Gov"}
+    assert w == {"stack": "st-1", "stack_name": "Prod"}  # a label without its stack is ignored
+
+
 def test_resolved_paramify_absent_keys_stay_absent():
     m = parse_manifest({"run": {"fetchers": [{"use": "x"}]}})
     assert m.paramify == {} and m.entries[0].paramify == {}
