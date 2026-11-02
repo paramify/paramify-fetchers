@@ -2326,8 +2326,8 @@ Summary fields:
 - `unresolved_member_policies_not_enforced` — Number of policies whose effect couldn't be resolved inside assignments with enforcement mode DoNotEnforce, where an enforcing effect may be held back unseen
 
 **Were the exemptions read?**
-- `exemptions_read_status` — Whether the exemptions were read: read, failed (the list call failed, and the run fails), api_version_unavailable (Azure refused the preview version with a 400 or 404; the run doesn't fail) or not_read (no subscription or credential); every exemption count below is null unless it is read
-- `exemptions_api_version` — The configured preview version of the exemptions API the fetcher reads (2024-12-01-preview)
+- `exemptions_read_status` — Whether the exemptions were read: read, failed (the list call failed, and the run fails), api_version_unavailable (Azure refused the pinned preview version with InvalidApiVersionParameter, NoRegisteredProviderFound or InvalidResourceType; the run doesn't fail, and any other error counts as failed) or not_read (no subscription or credential); every exemption count below is null unless it is read
+- `exemptions_api_version` — What the fetcher pins the exemptions API to: the preview version 2024-12-01-preview, set in its code
 - `total_policy_exemptions` — Number of in-scope exemptions in effect on the subscription, its own, inherited from a management group, or on a resource group or resource inside it, expired ones included
 
 **What do the exemptions waive?**
