@@ -499,6 +499,79 @@ def test_failed_preview_rule_listing_is_logged_not_failed(monkeypatch):
     assert s["alert_rules_readable"] is True and results["emergency_accounts"][0]["monitored"] is True
 
 
+X509_MULTI = {"id": "X509Certificate", "state": "enabled",
+              "includeTargets": [{"targetType": "group", "id": "all_users"}], "excludeTargets": [],
+              "authenticationModeConfiguration": {"x509CertificateAuthenticationDefaultMode": "x509CertificateMultiFactor"}}
+
+
+def _with_certificate(graph, method=None, cert_ids=("X509:<SKI>00aa11bb22cc",), groups=None):
+    """BG2 signs in with a certificate bound by its certificate user ids; BG1 keeps its FIDO2 key."""
+    graph[emergency.X509_CONFIG_PATH] = method or X509_MULTI
+    graph[f"/users/{BG2}"] = {**USERS[BG2], "authorizationInfo": {"certificateUserIds": list(cert_ids)}}
+    if groups is not None:
+        graph[f"/users/{BG2}/transitiveMemberOf/microsoft.graph.group"] = [{"id": g} for g in groups]
+    return graph
+
+
+def _methods(monkeypatch, graph, arm, errors=None):
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm, errors=errors), f"breakglass1@contoso.test, {BG2}")
+    return {a["id"]: a for a in results["emergency_accounts"]}, s, results, collector
+
+
+def test_multi_factor_certificate_counts_as_phishing_resistant(monkeypatch):
+    graph, arm = _tenant()
+    by_id, s, results, collector = _methods(monkeypatch, _with_certificate(graph), arm)
+
+    assert collector.failures == []
+    bg1, bg2 = by_id[BG1], by_id[BG2]
+    assert bg2["phishing_resistant_method_registered"] is False
+    assert bg2["certificate_user_ids_count"] == 1 and bg2["multi_factor_certificate_method_applies"] is True
+    assert bg2["phishing_resistant_certificate"] is True and bg2["phishing_resistant_method"] is True
+    assert bg1["phishing_resistant_certificate"] is False and bg1["phishing_resistant_method"] is True
+    assert s["multi_factor_certificate_sign_in_enabled"] is True
+    assert s["emergency_accounts_with_phishing_resistant_method"] == 2
+    assert results["x509_certificate_method"]["include_targets"] == ["all_users"]
+
+
+def test_single_factor_certificate_or_no_binding_is_not_phishing_resistant(monkeypatch):
+    single = {**X509_MULTI, "authenticationModeConfiguration": {
+        "x509CertificateAuthenticationDefaultMode": "x509CertificateSingleFactor"}}
+    for graph, applies in ((_with_certificate(_tenant()[0], method=single), False),
+                           (_with_certificate(_tenant()[0], cert_ids=()), True),
+                           (_with_certificate(_tenant()[0], method={**X509_MULTI, "state": "disabled"}), False)):
+        by_id, s, _results, collector = _methods(monkeypatch, graph, _tenant()[1])
+        assert collector.failures == []
+        assert by_id[BG2]["multi_factor_certificate_method_applies"] is applies
+        assert by_id[BG2]["phishing_resistant_certificate"] is False
+        assert s["emergency_accounts_with_phishing_resistant_method"] == 1
+
+
+def test_certificate_method_scoped_to_groups(monkeypatch):
+    scoped = {**X509_MULTI, "includeTargets": [{"targetType": "group", "id": "g-cba"}],
+              "excludeTargets": [{"targetType": "group", "id": "g-no-cba"}]}
+    for groups, expected in ((["g-cba"], True), (["g-other"], False), (["g-cba", "g-no-cba"], False)):
+        graph, arm = _tenant()
+        by_id, s, _results, _collector = _methods(monkeypatch, _with_certificate(graph, method=scoped, groups=groups), arm)
+        assert by_id[BG2]["phishing_resistant_certificate"] is expected, groups
+
+    graph, arm = _tenant()
+    errors = {"transitiveMemberOf": DENIED}
+    by_id, s, _results, collector = _methods(monkeypatch, _with_certificate(graph, method=scoped, groups=[]), arm, errors)
+    assert by_id[BG2]["phishing_resistant_certificate"] is None and by_id[BG2]["phishing_resistant_method"] is None
+    assert s["emergency_accounts_with_phishing_resistant_method"] is None and collector.failures
+
+
+def test_unread_certificate_method_leaves_only_accounts_without_a_key_unknown(monkeypatch):
+    graph, arm = _tenant()
+    by_id, s, _results, collector = _methods(monkeypatch, _with_certificate(graph), arm, {"x509Certificate": DENIED})
+
+    assert classify_failure_code(collector.failures) == "not_authorized"
+    assert s["multi_factor_certificate_sign_in_enabled"] is None
+    assert by_id[BG1]["phishing_resistant_method"] is True
+    assert by_id[BG2]["phishing_resistant_certificate"] is None and by_id[BG2]["phishing_resistant_method"] is None
+    assert s["emergency_accounts_with_phishing_resistant_method"] is None
+
+
 def test_deleted_excluded_group_is_empty_not_a_failure(monkeypatch):
     graph, arm = _tenant()
     del graph["/groups/g-bg/transitiveMembers/microsoft.graph.user"]

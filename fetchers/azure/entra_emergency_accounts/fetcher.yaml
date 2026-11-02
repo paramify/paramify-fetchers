@@ -46,10 +46,11 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
 # Microsoft Graph permissions (application permission, admin consent):
-#   Policy.Read.All     — Conditional Access policies.
-#   Directory.Read.All  — /organization, users, group members, directory roles and their
-#                         members. Organization.Read.All, User.Read.All, GroupMember.Read.All
-#                         and RoleManagement.Read.Directory together cover the same reads.
+#   Policy.Read.All     — Conditional Access policies and the X.509 certificate method.
+#   Directory.Read.All  — /organization, users (certificate user ids included), group
+#                         members, users' groups, directory roles and their members.
+#                         Organization.Read.All, User.Read.All, GroupMember.Read.All and
+#                         RoleManagement.Read.Directory together cover the same reads.
 #   AuditLog.Read.All   — users' signInActivity and userRegistrationDetails; both also
 #                         need Entra ID P1 or P2.
 # Azure: Reader on the subscription (Microsoft Sentinel Reader on the workspaces is the
@@ -78,11 +79,14 @@ evidence_set:
     - Microsoft Graph GET /users/{id or user principal name} (per named emergency account) — the account, or that the directory has no such user
     - Microsoft Graph GET /users/{id} with signInActivity (per emergency account) — when it last signed in
     - Microsoft Graph GET /reports/authenticationMethods/userRegistrationDetails/{id} (per emergency account) — the sign-in methods it has registered
+    - Microsoft Graph GET /policies/authenticationMethodsPolicy/authenticationMethodConfigurations/x509Certificate — whether certificate-based authentication is enabled, multi-factor by default, and which groups it includes and excludes
+    - Microsoft Graph GET /users/{id} with authorizationInfo (per emergency account) — the certificate user ids that bind a certificate to the account
+    - Microsoft Graph GET /users/{id}/transitiveMemberOf/microsoft.graph.group (per emergency account with certificate user ids, only when the X.509 method is multi-factor and includes or excludes groups) — whether the method applies to the account
     - GET Microsoft.OperationalInsights/workspaces and Microsoft.SecurityInsights/onboardingStates — the subscription's Microsoft Sentinel workspaces
     - GET Microsoft.SecurityInsights/alertRules (per Sentinel workspace, at the stable and preview API versions) — analytics rules and their queries; a failed preview read is logged, and near-real-time rules may then be missed
     - GET Microsoft.Insights/scheduledQueryRules — Azure Monitor log search alert rules and their queries
 
-    Output: azure_entra_emergency_accounts_<subscription>.json — each emergency account (or candidate) with its MFA policy exclusions, whether another MFA policy still covers it, last sign-in, registered methods and the enabled alert rules whose query names it, each other user excluded from an MFA policy, each enforced MFA policy with its includes, excludes and conditions, and any named account the directory doesn't have.
+    Output: azure_entra_emergency_accounts_<subscription>.json — each emergency account (or candidate) with its MFA policy exclusions, whether another MFA policy still covers it, last sign-in, registered methods, whether a multi-factor certificate lets it sign in, and the enabled alert rules whose query names it, the tenant's X.509 certificate method, each other user excluded from an MFA policy, each enforced MFA policy with its includes, excludes and conditions, and any named account the directory doesn't have.
 
     Summary fields:
 
@@ -97,6 +101,7 @@ evidence_set:
     - alert_rules_readable — True if every Sentinel workspace's analytics rules and the subscription's log search alert rules were read; false if not, and the monitoring figures read null
     - user_sign_in_activity — Whether the emergency accounts' sign-in activity was read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused, failed, or the accounts themselves weren't read)
     - registration_details — Whether the emergency accounts' registered methods were read: read, not_licensed or not_read, as for user_sign_in_activity
+    - multi_factor_certificate_sign_in_enabled — True if the X.509 certificate method is enabled and multi-factor by default; false if it's disabled, absent or single-factor by default (authentication binding rules that make some certificates multi-factor aren't evaluated); null if it wasn't read
     - enforced_mfa_policies — Number of enabled (not report-only) Conditional Access policies that require MFA or an authentication strength, even when another control can be met instead (their exclusions all count); null if the policies weren't read
     - enforced_mfa_policies_for_all_users — Number of enforced MFA policies that include all users; null if the policies weren't read
     - mfa_policies_counting_for_coverage — Number of enforced MFA policies that count for coverage: MFA is mandatory (the MFA control or an authentication strength that satisfies MFA, and, when any one control is enough, no compliant device, terms of use or other control that isn't MFA as an alternative), they target all cloud apps (app exclusions aren't judged), apply to browsers or to mobile and desktop apps (the two modern client app types), and have no other condition that limits when they apply (sign-in, user, insider or service principal risk, platforms, locations, a device filter or authentication flows); null if the policies weren't read
@@ -109,7 +114,7 @@ evidence_set:
     - emergency_accounts_not_found — Number of named accounts the directory has no user for; null if a named account couldn't be read or, with none named, if the exclusions weren't read
     - emergency_accounts_enabled — Number of emergency accounts whose account is enabled; null if a named account couldn't be read or, with none named, if the exclusions weren't read
     - emergency_accounts_excluded_from_every_all_users_mfa_policy — Number of emergency accounts excluded from every enforced MFA policy that includes all users (0 when no enforced MFA policy includes all users); null if the exclusions weren't read
-    - emergency_accounts_with_phishing_resistant_method — Number of emergency accounts with a FIDO2 security key, passkey, Windows Hello for Business or macOS platform credential registered; null if the registration report or the accounts weren't read
+    - emergency_accounts_with_phishing_resistant_method — Number of emergency accounts with a phishing-resistant method: a FIDO2 security key, device-bound passkey, Windows Hello for Business or macOS platform credential registered, or a multi-factor certificate. A certificate counts when the X.509 method is enabled, multi-factor by default and applies to the account (all users or one of its groups, and none of its excluded groups), and the account has certificate user ids; a certificate matched by user principal name alone, with no certificate user id, doesn't count. Null if the accounts weren't read, or an account without a registered method has a read behind it that failed (the registration report, the X.509 method, its certificate user ids or its groups)
     - emergency_accounts_monitored — Number of emergency accounts named, by whole sign-in name or object id, in the query of at least one enabled Sentinel analytics rule or log search alert rule; a rule that finds the accounts through a watchlist, a group or a display name doesn't count, and whether the rule notifies anyone isn't checked; null if the rules or the accounts weren't read
 
     Is anyone left without MFA who shouldn't be?

@@ -29,7 +29,10 @@ schemas and the `paramify` CLI — not the internal code.
   `ENTRA_EMERGENCY_ACCOUNTS` it records its exclusions and coverage, its last successful sign-in, its registered methods
   (phishing-resistant flagged) and the enabled Microsoft Sentinel analytics rules
   and Azure Monitor log search alert rules in the subscription whose query names
-  it by whole sign-in name or object id. Every other excluded user is listed too.
+  it by whole sign-in name or object id. A multi-factor certificate counts as
+  phishing-resistant, as in `azure_entra_authentication_policy`, when the X.509
+  method is enabled, multi-factor by default and applies to the account, and the
+  account has certificate user ids. Every other excluded user is listed too.
   With no accounts named, the users excluded from every enforced MFA policy for
   all users are reported as candidates and none counts as approved. A summary
   field whose read failed is null, not 0. Microsoft Graph Policy.Read.All,

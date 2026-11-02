@@ -46,6 +46,11 @@ PHISHING_RESISTANT_METHODS = frozenset({
     "fido2securitykey", "windowshelloforbusiness", "passkeydevicebound", "passkeydeviceboundauthenticator",
     "passkeydeviceboundwindowshello", "macossecureenclavekey",
 })
+# The X.509 method counts as phishing-resistant only when multi-factor by default, as in
+# azure_entra_authentication_policy; binding rules that raise single-factor certificates aren't evaluated.
+X509_CONFIG_PATH = "/policies/authenticationMethodsPolicy/authenticationMethodConfigurations/x509Certificate"
+X509_MULTI_FACTOR = "x509certificatemultifactor"
+ALL_USERS_TARGET = "all_users"
 _GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 CONFIGURED = "configured"
@@ -80,6 +85,14 @@ def _signed_in_at(value) -> Optional[str]:
 
 def _lower(values) -> List[str]:
     return sorted({str(v).lower() for v in values or [] if v})
+
+
+def _all_of(*values: Optional[bool]) -> Optional[bool]:
+    return False if any(v is False for v in values) else None if any(v is None for v in values) else True
+
+
+def _any_of(*values: Optional[bool]) -> Optional[bool]:
+    return True if any(v is True for v in values) else None if any(v is None for v in values) else False
 
 
 # --- Conditional Access ---
@@ -262,6 +275,49 @@ def naming_rules(user: dict, rules: List[dict]) -> List[dict]:
     ]
 
 
+# --- certificates ---
+
+def x509_method(config: Optional[dict]) -> dict:
+    """The tenant's X.509 certificate method: enabled, multi-factor by default, and the groups it includes and excludes."""
+    config = config or {}
+    mode = (config.get("authenticationModeConfiguration") or {}).get("x509CertificateAuthenticationDefaultMode")
+    return {
+        "state": config.get("state"),
+        "default_authentication_mode": mode,
+        "include_targets": _lower(t.get("id") for t in config.get("includeTargets") or []),
+        "exclude_targets": _lower(t.get("id") for t in config.get("excludeTargets") or []),
+        "multi_factor_sign_in_enabled": config.get("state") == STATE_ENABLED and str(mode or "").lower() == X509_MULTI_FACTOR,
+    }
+
+
+def needs_groups(method: dict) -> bool:
+    return ALL_USERS_TARGET not in method["include_targets"] or bool(method["exclude_targets"])
+
+
+def certificate_fields(method: Optional[dict], cert_ids: Optional[list], groups: Optional[set],
+                       registered: Optional[bool]) -> dict:
+    """A multi-factor certificate the X.509 method lets the account use; None where that rests on a failed read.
+
+    The account must carry certificate user ids: a certificate matched by user principal name alone isn't credited.
+    """
+    enabled = method["multi_factor_sign_in_enabled"] if method is not None else None
+    in_scope: Optional[bool] = None
+    if method is not None:
+        if not needs_groups(method):
+            in_scope = True
+        elif groups is not None:
+            in_scope = ((ALL_USERS_TARGET in method["include_targets"] or bool(groups & set(method["include_targets"])))
+                        and not groups & set(method["exclude_targets"]))
+    applies = _all_of(enabled, in_scope)
+    certificate = _all_of(applies, bool(cert_ids) if cert_ids is not None else None)
+    return {
+        "certificate_user_ids_count": len(cert_ids) if cert_ids is not None else None,
+        "multi_factor_certificate_method_applies": applies,
+        "phishing_resistant_certificate": certificate,
+        "phishing_resistant_method": _any_of(registered, certificate),
+    }
+
+
 # --- records ---
 
 def _registration(details: Optional[dict]) -> dict:
@@ -293,8 +349,11 @@ def _exclusion_fields(exclusions: Optional[List[dict]], all_users_policies: set,
 
 def account_record(named_as: Optional[str], user: dict, exclusion_fields: dict, activity_ok: bool,
                    registration: Optional[dict], registration_ok: bool, rules: List[dict], rules_ok: bool,
-                   now: datetime) -> dict:
+                   now: datetime, certificate: Optional[tuple] = None) -> dict:
+    """`certificate` is (X.509 method or None if unread, certificate user ids or None, groups or None)."""
     activity = user.get("signInActivity") or {}
+    methods = _registration(registration) if registration_ok else _registration(None)
+    method, cert_ids, groups = certificate or (None, None, None)
     last = _signed_in_at(activity.get("lastSuccessfulSignInDateTime"))
     parsed = parse_time(last)
     watching = naming_rules(user, rules) if rules_ok else None
@@ -310,7 +369,8 @@ def account_record(named_as: Optional[str], user: dict, exclusion_fields: dict, 
         "last_successful_sign_in": last if activity_ok else None,
         "last_sign_in_attempt": _signed_in_at(activity.get("lastSignInDateTime")) if activity_ok else None,
         "days_since_last_successful_sign_in": (now - parsed).days if activity_ok and parsed else None,
-        **(_registration(registration) if registration_ok else _registration(None)),
+        **methods,
+        **certificate_fields(method, cert_ids, groups, methods["phishing_resistant_method_registered"]),
         **exclusion_fields,
         "alert_rules_naming_account": watching,
         "monitored": bool(watching) if watching is not None else None,
@@ -331,11 +391,11 @@ def excluded_user_record(user: dict, exclusion_fields: dict) -> dict:
 
 def summarize(accounts: List[dict], not_found: List[str], others: List[dict], policies: Optional[List[dict]],
               rules: Optional[List[dict]], workspaces: Optional[int], status: Dict[str, str], source: str,
-              named: int, legacy_blocked: Optional[bool] = None) -> dict:
+              named: int, legacy_blocked: Optional[bool] = None, x509: Optional[dict] = None) -> dict:
     accounts_ok = status["accounts"] == READ
     exclusions_ok = status["policies"] == READ and status["exclusions"] == READ and accounts_ok
     rules_ok = status["alert_rules"] == READ
-    registration_ok = status["registration_details"] == READ
+    methods_known = accounts_ok and all(a["phishing_resistant_method"] is not None for a in accounts)
     approved = source == CONFIGURED
     population = [r for r in [*accounts, *others] if r["account_enabled"] and r["excluded_from_an_mfa_policy"]]
     coverage_known = exclusions_ok and all(r["excluded_from_mfa"] is not None for r in population)
@@ -356,6 +416,7 @@ def summarize(accounts: List[dict], not_found: List[str], others: List[dict], po
         "alert_rules_readable": rules_ok,
         "user_sign_in_activity": status["user_sign_in_activity"],
         "registration_details": status["registration_details"],
+        "multi_factor_certificate_sign_in_enabled": x509["multi_factor_sign_in_enabled"] if x509 is not None else None,
         "enforced_mfa_policies": len(policies) if policies is not None else None,
         "enforced_mfa_policies_for_all_users": (
             sum(1 for p in policies if p["includes_all_users"]) if policies is not None else None),
@@ -370,7 +431,7 @@ def summarize(accounts: List[dict], not_found: List[str], others: List[dict], po
         "emergency_accounts_excluded_from_every_all_users_mfa_policy": count(
             sum(1 for a in accounts if a["excluded_from_every_all_users_mfa_policy"]), exclusions_ok),
         "emergency_accounts_with_phishing_resistant_method": count(
-            sum(1 for a in accounts if a["phishing_resistant_method_registered"]), registration_ok and accounts_ok),
+            sum(1 for a in accounts if a["phishing_resistant_method"]), methods_known),
         "emergency_accounts_monitored": count(sum(1 for a in accounts if a["monitored"]), rules_ok and accounts_ok),
         "users_excluded_from_an_mfa_policy": count(len(population), exclusions_ok),
         "users_excluded_from_mfa": count(len(out_accounts) + len(out_others), coverage_known),
@@ -383,8 +444,8 @@ def summarize(accounts: List[dict], not_found: List[str], others: List[dict], po
 
 # --- collection ---
 
-def _get_user(client, path: str) -> Optional[dict]:
-    """A user, or None when the directory has no such user."""
+def _get_or_none(client, path: str) -> Optional[dict]:
+    """The object, or None when the directory has none."""
     try:
         return client.graph_get(path)
     except ArmError as exc:
@@ -430,7 +491,7 @@ class Directory:
     def user(self, uid: str):
         """The user, None if the directory has none, or False if the read failed."""
         found = self.collector.guard(f"graph.users({uid}).get",
-                                     lambda: _get_user(self.client, _user_path(uid, USER_SELECT)), default=False)
+                                     lambda: _get_or_none(self.client, _user_path(uid, USER_SELECT)), default=False)
         if found:
             self._keep([found])
         return found
@@ -544,15 +605,31 @@ def _alert_rules(client, collector, subscription_id: str) -> tuple:
     return ordered, len(workspaces), len(collector.failures) == before
 
 
+def _certificate(client, collector, uid: str, method: Optional[dict]) -> tuple:
+    """(X.509 method, the account's certificate user ids, its group ids); None for a read that failed.
+
+    Groups are read only when they decide whether the method applies.
+    """
+    found = collector.guard(f"graph.users({uid}).get(authorizationInfo)", lambda: _get_or_none(
+        client, _user_path(uid, "id,authorizationInfo")))
+    cert_ids = None if found is None else list((found.get("authorizationInfo") or {}).get("certificateUserIds") or [])
+    groups: Optional[set] = None
+    if method is not None and method["multi_factor_sign_in_enabled"] and cert_ids and needs_groups(method):
+        listed = collector.guard(f"graph.users({uid}).transitiveMemberOf.get", lambda: client.graph_list(
+            f"/users/{uid}/transitiveMemberOf/microsoft.graph.group?$select=id"))
+        groups = None if listed is None else {str(g.get("id") or "").lower() for g in listed}
+    return method, cert_ids, groups
+
+
 def _account_detail(client, collector, user: dict) -> tuple:
     """(user with sign-in activity, activity status, registration details, registration status)."""
     uid = str(user.get("id") or "")
     before = len(collector.failures)
     full = collector.guard(f"graph.users({uid}).get(signInActivity)",
-                           lambda: _get_user(client, _user_path(uid, f"{USER_SELECT},signInActivity")))
+                           lambda: _get_or_none(client, _user_path(uid, f"{USER_SELECT},signInActivity")))
     activity = read_status(collector, before)
     before = len(collector.failures)
-    details = collector.guard(f"graph.userRegistrationDetails({uid}).get", lambda: _get_user(
+    details = collector.guard(f"graph.userRegistrationDetails({uid}).get", lambda: _get_or_none(
         client, f"/reports/authenticationMethods/userRegistrationDetails/{uid}"))
     return {**user, **(full or {})}, activity, details, read_status(collector, before)
 
@@ -595,6 +672,10 @@ def collect(client, subscription_id: str, collector) -> tuple:
     legacy_blocked = any(blocks_legacy_for_all_users(r) for r in raw_policies or [])
     all_users_policies = {p["id"] for p in policies if p["includes_all_users"]}
 
+    x509_raw = collector.guard("graph.authenticationMethodConfigurations(x509Certificate).get",
+                               lambda: _get_or_none(client, X509_CONFIG_PATH), default=False)
+    x509 = None if x509_raw is False else x509_method(x509_raw)
+
     directory = Directory(client, collector)
     direct, groups, roles, guests, resolved = _resolve_exclusions(directory, policies)
     status["exclusions"] = READ if resolved and status["policies"] == READ else NOT_READ
@@ -617,7 +698,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
     not_found: List[str] = []
     ok = True
     for ref in named:
-        user = collector.guard(f"graph.users({ref}).get", lambda ref=ref: _get_user(client, _user_path(ref, USER_SELECT)),
+        user = collector.guard(f"graph.users({ref}).get", lambda ref=ref: _get_or_none(client, _user_path(ref, USER_SELECT)),
                                default=False)
         if user is False:
             ok = False
@@ -641,8 +722,9 @@ def collect(client, subscription_id: str, collector) -> tuple:
         full, act, details, reg = _account_detail(client, collector, user)
         activity.append(act)
         registration.append(reg)
+        certificate = _certificate(client, collector, str(user.get("id") or ""), x509)
         accounts.append(account_record(ref, full, exclusion_fields(user), act == READ, details, reg == READ,
-                                       rules, rules_ok, now))
+                                       rules, rules_ok, now, certificate))
     if status["accounts"] == READ:
         status["user_sign_in_activity"] = _worst(activity)
         status["registration_details"] = _worst(registration)
@@ -657,13 +739,13 @@ def collect(client, subscription_id: str, collector) -> tuple:
     logger.info("Collected %d emergency account(s) (%s), %d other excluded user(s), %d MFA policy/policies, %d alert rule(s)",
                 len(accounts), source, len(others), len(policies), len(rules))
     read_policies = policies if status["policies"] == READ else None
-    return (_results(tenant_id, source, accounts, not_found, others, read_policies, now),
+    return (_results(tenant_id, source, accounts, not_found, others, read_policies, now, x509),
             summarize(accounts, not_found, others, read_policies, rules, workspaces, status, source, len(named),
-                      legacy_blocked))
+                      legacy_blocked, x509))
 
 
 def _results(tenant_id, source: str, accounts: List[dict], not_found: List[str], others: List[dict],
-             policies: Optional[List[dict]], now: datetime) -> dict:
+             policies: Optional[List[dict]], now: datetime, x509: Optional[dict] = None) -> dict:
     return {
         "tenant_id": tenant_id,
         "emergency_accounts_source": source,
@@ -671,6 +753,7 @@ def _results(tenant_id, source: str, accounts: List[dict], not_found: List[str],
         "emergency_accounts_not_found": not_found,
         "other_users_excluded_from_mfa": others,
         "mfa_policies": policies,
+        "x509_certificate_method": x509,
         "evaluated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
