@@ -226,9 +226,8 @@ def read_status(exc: BaseException) -> str:
     status = getattr(exc, "status", None)
     if status == 404:
         return NOT_FOUND
-    if status in (401, 403):
-        return NOT_AUTHORIZED
-    return ERROR
+    # 401 is a refused token, not a missing optional action, so it fails the run.
+    return NOT_AUTHORIZED if status == 403 else ERROR
 
 
 def with_reads(event: dict, details_status: str, resources_status: str, resources) -> dict:

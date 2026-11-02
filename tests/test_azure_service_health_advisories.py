@@ -147,7 +147,7 @@ def test_impacted_resource_projection_derives_name_and_group_from_the_id():
 
 
 @pytest.mark.parametrize("status, expected", [
-    (404, sh.NOT_FOUND), (403, sh.NOT_AUTHORIZED), (401, sh.NOT_AUTHORIZED), (400, sh.ERROR), (500, sh.ERROR),
+    (404, sh.NOT_FOUND), (403, sh.NOT_AUTHORIZED), (401, sh.ERROR), (400, sh.ERROR), (500, sh.ERROR),
 ])
 def test_read_status_comes_from_the_http_status(status, expected):
     assert sh.read_status(azure_rest.ArmError(status, "Code", "message")) == expected
@@ -354,6 +354,14 @@ def test_refused_advisory_details_and_resources_are_unknown_not_a_failure(graph)
     assert (c.ok, sa["details_status"], sa["impacted_resources_status"], sa["impacted_resources"]) == (
         True, sh.NOT_AUTHORIZED, sh.NOT_AUTHORIZED, None)
     assert sh.summarize(events, read, 0, 180)["impacted_resources"] is None
+
+
+def test_a_refused_token_on_an_optional_read_fails_the_run(graph):
+    client = _Health([raw_event("SA-1", event_type="SecurityAdvisory", isEventSensitive=True)],
+                     refuse={"/fetchEventDetails": azure_rest.ArmError(401, "InvalidAuthenticationToken", "no")})
+    c = collector()
+    [ev], *_ = sh.collect(client, "s1", NOW, 180, c)
+    assert (c.ok, ev["details_status"]) == (False, sh.ERROR)
 
 
 @pytest.mark.parametrize("status, outcome, ok", [(404, sh.NOT_FOUND, True), (500, sh.ERROR, False)])
