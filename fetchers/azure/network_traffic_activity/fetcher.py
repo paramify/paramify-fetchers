@@ -172,6 +172,8 @@ HTTP_QUERIES = {
 # Host and origin names reach the evidence verbatim; a probe's text there can make the upload refuse the file.
 HOST_NAME = re.compile(r"^[A-Za-z0-9.-]+(:[0-9]+)?$")
 QUERY_CODE = re.compile(r"^\((\d{3})\)\s*(\S*)")
+# The subscription id goes into KQL text unescaped.
+GUID = re.compile(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
 WS_QUERIED = "queried"
 WS_NOT_AUTHORIZED = "not_authorized"
@@ -838,6 +840,9 @@ def collect_sites(client, subscription_id: str, origins: list[dict], collector) 
 
 
 def collect(client, subscription_id: str, collector) -> tuple:
+    if not GUID.fullmatch(subscription_id or ""):
+        collector.record("subscription_id", ValueError("the subscription id is not a GUID"))
+        return {}, {}
     days = lookback_days()
     sample = int_config(SAMPLE_ENV, DEFAULT_SAMPLE_SIZE)
     spike_factor = int_config(SPIKE_ENV, DEFAULT_SPIKE_FACTOR)

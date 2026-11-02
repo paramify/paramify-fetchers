@@ -606,6 +606,13 @@ def test_collect_treats_unregistered_providers_as_empty():
     assert results["workspaces"] == []
 
 
+def test_collect_refuses_a_subscription_id_that_is_not_a_guid():
+    client = FakeClient(lists=_lists())
+    collector = Collector(logger())
+    assert nta.collect(client, "x' or 1 == 1 //", collector) == ({}, {})
+    assert not collector.ok and client.queries == []
+
+
 def test_filled_queries_have_no_stray_placeholders():
     fmt = {"days": 7, "span": 14, "subscription_id": SUB_ID, "sample": 10}
     for key, kql in nta.filled_queries(fmt).items():
