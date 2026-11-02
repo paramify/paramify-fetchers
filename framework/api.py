@@ -1548,6 +1548,10 @@ def upload_run(
     stack: Optional[str] = None,
     only_file: Optional[str] = None,
     with_validators: bool = False,
+    upload_cfg: Optional[dict] = None,
+    token: Optional[str] = None,
+    base_url: Optional[str] = None,
+    deprecations: Sequence[str] = (),
 ) -> dict:
     """Upload one run directory to Paramify, one batch per manifest entry.
 
@@ -1558,11 +1562,14 @@ def upload_run(
     otherwise returns the summary (`uploaded`, `skipped_duplicate`,
     `skipped_failed`, `errors`, `ok`, `plan`, `entries`, ...), even when some
     entries failed. `with_validators` syncs validators for the run's sets
-    before delivery.
+    before delivery. `upload_cfg` (a config dict used instead of the file),
+    `token` and `base_url` (both ahead of the environment) are for callers that
+    already hold them; `deprecations` are notes for `upload_log.json`.
     """
     return _sync_upload.run_upload(
         run_dir, root, _upload_config(root, config_path), dry_run=dry_run, on_event=on_event,
         custom_tags=custom_tags, stack=stack, only_file=only_file, with_validators=with_validators,
+        upload_cfg=upload_cfg, token=token, base_url=base_url, deprecations=deprecations,
     )
 
 

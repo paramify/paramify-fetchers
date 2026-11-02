@@ -1,0 +1,97 @@
+"""deploy/run-and-upload.sh uploads the run it just made, through `paramify upload`.
+
+A stub `paramify` first on PATH records its argv; `run --json` prints a summary
+naming a run directory. No fetcher runs.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPT = REPO_ROOT / "deploy" / "run-and-upload.sh"
+
+STUB = """#!/bin/sh
+printf '%s\\n' "$*" >> "$STUB_LOG"
+case "$1" in
+  run) printf '%s\\n' "$STUB_RUN_SUMMARY"; exit "${STUB_RUN_RC:-0}" ;;
+  upload) exit "${STUB_UPLOAD_RC:-0}" ;;
+esac
+"""
+
+
+@pytest.fixture
+def harness(tmp_path):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    stub = bindir / "paramify"
+    stub.write_text(STUB)
+    stub.chmod(0o755)
+    log = tmp_path / "calls.log"
+    run_dir = tmp_path / "evidence" / "run-20260101-000000-ab12"
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
+        "STUB_LOG": str(log),
+        "STUB_RUN_SUMMARY": json.dumps({"run_dir": str(run_dir), "ok": True}),
+    }
+
+    # The script cds to its own repo root: give it a throwaway one, so the test
+    # never reads or writes the working tree.
+    fake_root = tmp_path / "root"
+    (fake_root / "deploy").mkdir(parents=True)
+    shutil.copy(SCRIPT, fake_root / "deploy" / "run-and-upload.sh")
+    manifest = fake_root / "manifests" / "m.yaml"
+    manifest.parent.mkdir()
+    manifest.write_text("run: {}\n")
+
+    def go(*args, **extra):
+        args = tuple(str(manifest) if a == "MANIFEST" else a for a in args)
+        p = subprocess.run(["bash", str(fake_root / "deploy" / "run-and-upload.sh"), *args],
+                           env={**env, **extra}, capture_output=True, text=True)
+        calls = log.read_text().splitlines() if log.exists() else []
+        return p, calls, str(run_dir)
+
+    return go
+
+
+def test_upload_receives_the_run_dir_from_run_json(harness):
+    p, calls, run_dir = harness("MANIFEST")
+    assert p.returncode == 0, p.stderr
+    assert calls[0].startswith("run ") and "--json" in calls[0]
+    assert calls[1] == f"upload {run_dir}"
+
+
+def test_second_argument_becomes_the_stack(harness):
+    p, calls, run_dir = harness("MANIFEST", "Production")
+    assert p.returncode == 0, p.stderr
+    assert calls[1] == f"upload {run_dir} --stack Production"
+
+
+def test_collect_failure_still_uploads_and_exits_with_the_collect_code(harness):
+    p, calls, run_dir = harness("MANIFEST", STUB_RUN_RC="1")
+    assert p.returncode == 1
+    assert calls[1] == f"upload {run_dir}"
+    assert "collect exited 1" in p.stderr
+
+
+def test_upload_failure_is_the_exit_code(harness):
+    p, _calls, _ = harness("MANIFEST", STUB_UPLOAD_RC="1")
+    assert p.returncode == 1
+
+
+def test_no_manifest_is_a_usage_error(harness):
+    p, calls, _ = harness()
+    assert p.returncode == 2 and calls == []
+    assert "usage" in p.stderr
+
+
+def test_a_run_without_a_summary_does_not_upload(harness):
+    p, calls, _ = harness("MANIFEST", STUB_RUN_SUMMARY="not json")
+    assert p.returncode != 0
+    assert not any(c.startswith("upload") for c in calls)

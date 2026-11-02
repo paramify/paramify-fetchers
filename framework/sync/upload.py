@@ -79,14 +79,18 @@ class _Setup:
     """The checks every upload makes before it plans, and what they resolved."""
 
     def __init__(self, run_dir: Any, config_path: Optional[Path], stack: Optional[str],
-                 only_file: Optional[str]) -> None:
+                 only_file: Optional[str], *, upload_cfg: Optional[Dict[str, Any]] = None,
+                 token: Optional[str] = None, base_url: Optional[str] = None) -> None:
         load_dotenv()
         self.run_dir = Path(run_dir)
         if not self.run_dir.is_dir():
             raise ValueError(f"No run directory to upload: {self.run_dir}")
         self.config_path = config_path
-        self.config = load_config(config_path)
-        self.base_url, _ = resolve_base_url((self.config.get("paramify") or {}).get("base_url"))
+        # An in-memory config replaces the file: nothing is read or written.
+        self.config = upload_cfg if upload_cfg is not None else load_config(config_path)
+        self.token = token
+        # Config wins, then an explicit argument, then the environment.
+        self.base_url, _ = resolve_base_url((self.config.get("paramify") or {}).get("base_url") or base_url)
         url_error = base_url_error(self.base_url)
         if url_error:
             raise ValueError(url_error)
@@ -97,7 +101,7 @@ class _Setup:
         self.ctx = SyncContext(self.run_dir, self.config, stack_override=stack, only_file=only_file)
 
     def client(self) -> Client:
-        token, _ = resolve_upload_token()
+        token = self.token or resolve_upload_token()[0]
         if not token:
             raise ValueError(missing_token_error())
         return Client(token, self.base_url)
@@ -346,15 +350,25 @@ def run_upload(
     stack: Optional[str] = None,
     only_file: Optional[str] = None,
     with_validators: bool = False,
+    upload_cfg: Optional[Dict[str, Any]] = None,
+    token: Optional[str] = None,
+    base_url: Optional[str] = None,
+    deprecations: Sequence[str] = (),
 ) -> Dict[str, Any]:
     """Plan and apply the upload of one run; see the module docstring.
+
+    `upload_cfg`, `token` and `base_url` are for callers that already hold them
+    (the legacy uploader script): a config dict is used instead of reading
+    `config_path`, and the token and base URL win over the environment.
+    `deprecations` are notes written to `upload_log.json`.
 
     Raises ValueError for setup errors (no run dir, no evidence, bad base URL
     or config, no token, another upload of this run in progress). An API
     error that stops planning (an old API, a 401) is raised as it is.
     """
     emit: Event = on_event or (lambda _ev: None)
-    setup = _Setup(run_dir, config_path, stack, only_file)
+    setup = _Setup(run_dir, config_path, stack, only_file,
+                   upload_cfg=upload_cfg, token=token, base_url=base_url)
     policy = resolve_tag_policy(setup.config, override_off=None if custom_tags else NO_TAGS)
     report = _Report(emit, dry_run, Tagger(None, "", policy=policy, display_names=category_display_names(root)))
     base = {"run_dir": str(setup.run_dir), "base_url": setup.base_url, "dry_run": dry_run,
@@ -377,7 +391,8 @@ def run_upload(
     try:
         with state.lock():
             summary = _apply_locked(setup, root, client, state, report, policy, base,
-                                    custom_tags=custom_tags, with_validators=with_validators, emit=emit)
+                                    custom_tags=custom_tags, with_validators=with_validators, emit=emit,
+                                    deprecations=deprecations)
     except RunLocked as exc:
         raise ValueError(str(exc)) from None
     emit({"event": "upload_complete", **summary})
@@ -396,6 +411,7 @@ def _apply_locked(
     custom_tags: bool,
     with_validators: bool,
     emit: Event,
+    deprecations: Sequence[str] = (),
 ) -> Dict[str, Any]:
     outcomes: Optional[List[Outcome]] = None
     error: Optional[str] = None
@@ -421,6 +437,8 @@ def _apply_locked(
         validators = next((o for o in outcomes or [] if o.action_id == "validators/registry"), None)
         if validators is not None:
             summary["validators"] = validators.result  # the validator sync's own summary
+        if deprecations:
+            summary["deprecations"] = list(deprecations)
         summary["log_path"] = _write_log(setup.run_dir, summary, error)
     return summary
 
@@ -439,6 +457,8 @@ def _write_log(run_dir: Path, summary: Dict[str, Any], error: Optional[str]) -> 
         "results": summary["results"],
         "entries": summary["entries"],
     }
+    if summary.get("deprecations"):
+        log["deprecations"] = summary["deprecations"]
     if error is not None:
         log["error"] = error
     path = run_dir / UPLOAD_LOG

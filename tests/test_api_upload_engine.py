@@ -377,3 +377,60 @@ def test_render_outcomes_one_line_per_entry():
         "failed z: provider bug",
         "failed validators/registry: validator sync had errors",
     ]
+
+
+# ---- explicit config, token, base URL and deprecations (legacy wrapper) --------
+
+def test_upload_cfg_replaces_reading_the_config_file(no_env, root, tmp_path):
+    """An in-memory config wins over the file; the file is not read at all."""
+    cfg_file = tmp_path / "bad.yaml"
+    cfg_file.write_text("this: [is: not valid")
+    out = api.upload_run(two_files(tmp_path), root, cfg_file, dry_run=True,
+                         upload_cfg={"paramify": {"base_url": "https://cfg.example.test"}})
+    assert out["base_url"] == "https://cfg.example.test"
+    assert not list(tmp_path.glob("*.json")) and out["ok"] is True
+
+
+def test_base_url_argument_beats_the_environment(no_env, root, tmp_path):
+    out = api.upload_run(two_files(tmp_path), root, dry_run=True, base_url="https://arg.example.test")
+    assert out["base_url"] == "https://arg.example.test"
+
+
+def test_token_and_base_url_arguments_reach_the_client(fake, root, tmp_path, monkeypatch):
+    seen = {}
+
+    def spy(token, base_url, **kw):
+        seen.update(token=token, base_url=base_url)
+        return Client(token, base_url, session=fake.session, sleep=lambda _s: None, retry_budget_s=3)
+
+    monkeypatch.setattr(upload_mod, "Client", spy)
+    api.upload_run(two_files(tmp_path), root, token="explicit-tok", base_url="https://arg.example.test")
+    assert seen == {"token": "explicit-tok", "base_url": "https://arg.example.test"}
+
+
+def test_token_argument_stands_in_for_a_missing_environment_token(no_env, root, tmp_path, monkeypatch):
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def spy(token, base_url, **kw):
+        seen["token"] = token
+        raise Stop
+
+    monkeypatch.setattr(upload_mod, "Client", spy)
+    with pytest.raises(Stop):
+        api.upload_run(two_files(tmp_path), root, token="only-arg")
+    assert seen["token"] == "only-arg"
+
+
+def test_deprecations_land_in_the_log(fake, root, tmp_path):
+    run = two_files(tmp_path)
+    api.upload_run(run, root, deprecations=["use 'paramify upload'"])
+    assert json.loads((run / "upload_log.json").read_text())["deprecations"] == ["use 'paramify upload'"]
+
+
+def test_no_deprecations_key_by_default(fake, root, tmp_path):
+    run = two_files(tmp_path)
+    api.upload_run(run, root)
+    assert "deprecations" not in json.loads((run / "upload_log.json").read_text())

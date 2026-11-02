@@ -4,11 +4,17 @@
 # These are two SEPARATE framework stages; this script just chains them — the
 # kind of glue that lives in your cron/CI, not in the framework itself.
 #
-#   ./deploy/run-and-upload.sh <manifest>     # e.g. manifests/minimal.yaml
+#   ./deploy/run-and-upload.sh <manifest> [stack]    # e.g. manifests/minimal.yaml
+#
+# [stack] is optional: a stack name or id, passed to `paramify upload --stack`
+# (it overrides the manifest's run.paramify.stack for this upload).
 #
 # <manifest> is a path (relative to the repo root, or absolute) — the same value
 # you'd pass to `paramify run`. There is one source of manifests (./manifests/,
 # what the TUI builds); name them however makes sense for your schedule.
+#
+# The upload step sends the run the collect step just made (its directory comes
+# from `paramify run --json`), not whichever run is newest on disk.
 #
 # Secrets must already be in the environment (the manifest references them as
 # ${env:VAR}); PARAMIFY_UPLOAD_API_TOKEN is required for the upload step.
@@ -16,8 +22,9 @@ set -uo pipefail
 cd "$(dirname "$0")/.."   # repo root (/app in the image)
 
 manifest="${1:-}"
+stack="${2:-}"
 if [ -z "$manifest" ]; then
-    echo "usage: ./deploy/run-and-upload.sh <manifest>   (e.g. manifests/minimal.yaml)" >&2
+    echo "usage: ./deploy/run-and-upload.sh <manifest> [stack]   (e.g. manifests/minimal.yaml)" >&2
     exit 2
 fi
 if [ ! -f "$manifest" ]; then
@@ -26,14 +33,24 @@ if [ ! -f "$manifest" ]; then
 fi
 
 echo "==> collect: $manifest"
-paramify run "$manifest"
+summary=$(paramify run "$manifest" --json)
 collect_rc=$?
 if [ "$collect_rc" -ne 0 ]; then
     echo "WARN: collect exited $collect_rc (a fetcher reported failures); uploading whatever was produced" >&2
 fi
+py=$(command -v python3 || command -v python)   # the image has `python`; a laptop may only have `python3`
+run_dir=$(printf '%s' "$summary" | "$py" -c 'import json,sys; print(json.load(sys.stdin)["run_dir"])' 2>/dev/null)
+if [ -z "$run_dir" ]; then
+    echo "collect produced no run directory; nothing to upload" >&2
+    printf '%s\n' "$summary" >&2
+    exit "$([ "$collect_rc" -ne 0 ] && echo "$collect_rc" || echo 1)"
+fi
+echo "    run: $run_dir"
 
-echo "==> upload latest run -> ${PARAMIFY_API_BASE_URL:-<default>}"
-python uploaders/paramify_evidence/uploader.py
+echo "==> upload $run_dir -> ${PARAMIFY_API_BASE_URL:-<default>}"
+upload_args=("$run_dir")
+if [ -n "$stack" ]; then upload_args+=(--stack "$stack"); fi
+paramify upload "${upload_args[@]}"
 upload_rc=$?
 
 # Surface the worst non-zero so cron/monitoring can alert.
