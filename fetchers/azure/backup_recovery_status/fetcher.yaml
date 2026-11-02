@@ -95,7 +95,12 @@ evidence_set:
     - total_restore_jobs — Number of restore jobs in the window across in-scope vaults, whatever their result; null if a vault's jobs weren't read
     - succeeded_restore_jobs — Number of those whose status is Completed (CompletedWithWarnings, a partial restore, isn't counted); null if a vault's jobs weren't read
     - failed_restore_jobs — Number of those whose status is Failed; null if a vault's jobs weren't read
-    - restore_jobs_by_status — Count of restore jobs by status (Completed, CompletedWithWarnings, Failed, InProgress, Cancelled); null if a vault's jobs weren't read
+    - restore_jobs_by_status — Number of restore jobs for each status, as Azure Backup names it; null if a vault's jobs weren't read:
+      - Completed (the restore finished)
+      - CompletedWithWarnings (the restore finished but left some data out)
+      - Failed (the restore stopped with an error)
+      - InProgress (still running when the fetcher ran)
+      - Cancelled (stopped by someone before it finished)
     - vaults_with_succeeded_restore — Number of in-scope vaults with at least one succeeded restore in the window; null if a vault's jobs weren't read
     - latest_succeeded_restore_time — End time of the newest succeeded restore, in UTC; null if there was none or a vault's jobs weren't read
     - days_since_latest_succeeded_restore — Days from that restore's end to the run; null if there was none or a vault's jobs weren't read
