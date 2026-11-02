@@ -277,6 +277,7 @@ Backup and recovery:
 | `azure_backup_recovery_status` | Recovery Services vaults: backup policies and retention, protected items and their last backup |
 | `azure_app_service_backups` | Whether each web app is actually backed up: newest restore point, gaps, custom backup schedule and history |
 | `azure_sql_managed_instance_backups` | SQL Managed Instance backup storage redundancy, zone redundancy, retention and failover groups |
+| `azure_service_availability` | When each App Service app and SQL Managed Instance was unavailable over the last 30 days, for how long and why, against the recovery time objective; Front Door origin probe failures and each app's health-check results |
 
 Logging and monitoring:
 
