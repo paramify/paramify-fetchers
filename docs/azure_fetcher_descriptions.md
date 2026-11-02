@@ -2026,12 +2026,12 @@ Output: `azure_backup_recovery_status_<subscription>.json` — each Recovery Ser
 Summary fields:
 
 **What was checked?**
-- `total_recovery_services_vaults` — Number of Recovery Services vaults in scope (not taken out by a resource_exclusions pattern)
-- `vaults_with_protected_items` — Number of vaults that back up at least one item
-- `vaults_without_protected_items` — Number of in-scope vaults that back up nothing, including a vault whose protected items were all taken out of scope
-- `total_backup_policies` — Number of backup policies across all vaults
-- `total_protected_items` — Number of protected items (VMs, file shares, databases and other workloads registered for backup) across all vaults
-- `protected_items_by_workload_type` — Number of protected items for each workload type, keyed by Azure's name for the type; common keys:
+- `total_recovery_services_vaults` — Number of Recovery Services vaults in scope (not taken out by a resource_exclusions pattern); null if the vault list couldn't be read
+- `vaults_with_protected_items` — Number of vaults that back up at least one item; null if the vault list couldn't be read
+- `vaults_without_protected_items` — Number of in-scope vaults that back up nothing, including a vault whose protected items were all taken out of scope; null if the vault list couldn't be read
+- `total_backup_policies` — Number of backup policies across all vaults; null if the vault list couldn't be read
+- `total_protected_items` — Number of protected items (VMs, file shares, databases and other workloads registered for backup) across all vaults; null if the vault list couldn't be read
+- `protected_items_by_workload_type` — Number of protected items for each workload type, keyed by Azure's name for the type; null if the vault list couldn't be read; common keys:
   - VM (Azure virtual machine)
   - AzureFileShare (Azure Files share)
   - SQLDataBase (SQL Server database in a VM)
@@ -2046,29 +2046,29 @@ Summary fields:
 - `excluded_protected_items` — Number of protected items in in-scope vaults left out of scope because an id: pattern matched the item, or a pattern matched its protected resource by resource group or id; each is listed under excluded. An excluded vault's items are never read, so they are not counted here
 - `in_scope_recovery_services_vaults` — Number of Recovery Services vaults read and in scope; 0 means none was read or the patterns took out every vault, which a check can catch by requiring more than 0
 - `in_scope_protected_items` — Number of protected items read and in scope
-- `excluded_restore_jobs` — Number of restore jobs in in-scope vaults left out of scope because they restored an excluded protected item, matched by the item's friendly name in the same vault (a job names its item no other way); each is listed under excluded and its details are never read
-- `in_scope_restore_jobs` — Number of restore jobs read and in scope; null if a vault's restore jobs couldn't be read
+- `excluded_restore_jobs` — Number of restore jobs in in-scope vaults left out of scope because they restored an excluded protected item, matched by the item's friendly name in the same vault (a job names its item no other way); a job stays in scope when an in-scope item in that vault has the same friendly name, or when its item is no longer listed (protection stopped and its data deleted). Each is listed under excluded and its details are never read
+- `in_scope_restore_jobs` — Number of restore jobs read and in scope; null if the vault list or a vault's restore jobs couldn't be read
 
 **Are backups kept long enough?**
 - `retention_threshold_days` — Days of retention a backup policy must reach to meet the threshold (30)
-- `policies_meeting_retention_threshold` — Number of backup policies that meet the retention threshold: the policy's longest retention, taken across its daily, weekly, monthly, yearly and flat retention and any per-database sub-policies and converted to days (a week as 7, a month as 30, a year as 365), is at least `retention_threshold_days`
-- `policies_without_readable_retention` — Number of backup policies with no retention the fetcher could convert to days
-- `protected_items_meeting_retention_threshold` — Number of protected items whose backup policy in the same vault meets the retention threshold; an item with no policy, or whose policy isn't found, doesn't count
-- `retention_threshold_percentage` — Percentage of protected items whose policy meets the retention threshold = `protected_items_meeting_retention_threshold` / `total_protected_items` × 100 (a whole number, 0–100); 0 when `total_protected_items` is 0
+- `policies_meeting_retention_threshold` — Number of backup policies that meet the retention threshold: the policy's longest retention, taken across its daily, weekly, monthly, yearly and flat retention and any per-database sub-policies and converted to days (a week as 7, a month as 30, a year as 365), is at least `retention_threshold_days`; null if the vault list couldn't be read
+- `policies_without_readable_retention` — Number of backup policies with no retention the fetcher could convert to days; null if the vault list couldn't be read
+- `protected_items_meeting_retention_threshold` — Number of protected items whose backup policy in the same vault meets the retention threshold; an item with no policy, or whose policy isn't found, doesn't count; null if the vault list couldn't be read
+- `retention_threshold_percentage` — Percentage of protected items whose policy meets the retention threshold = `protected_items_meeting_retention_threshold` / `total_protected_items` × 100 (a whole number, 0–100); 0 when `total_protected_items` is 0; null if the vault list couldn't be read
 
 **Are the backups themselves protected?**
-- `soft_delete_enabled_vaults` — Number of vaults with soft delete Enabled or AlwaysON (on and can't be turned off), so deleted backups are kept for a recovery period
-- `immutability_enabled_vaults` — Number of vaults with immutability Unlocked or Locked, so recovery points can't be deleted before they expire; only Locked can't be turned off
-- `cross_region_restore_vaults` — Number of vaults with cross-region restore Enabled, so backups can be restored in the paired region
+- `soft_delete_enabled_vaults` — Number of vaults with soft delete Enabled or AlwaysON (on and can't be turned off), so deleted backups are kept for a recovery period; null if the vault list couldn't be read
+- `immutability_enabled_vaults` — Number of vaults with immutability Unlocked or Locked, so recovery points can't be deleted before they expire; only Locked can't be turned off; null if the vault list couldn't be read
+- `cross_region_restore_vaults` — Number of vaults with cross-region restore Enabled, so backups can be restored in the paired region; null if the vault list couldn't be read
 
 **Are protected items actually being backed up?**
-- `protected_items_with_policy` — Number of protected items that have a backup policy assigned
-- `protected_items_in_protected_state` — Number of protected items whose protection state is Protected (not stopped, paused, pending or in error)
-- `protected_items_with_healthy_last_backup` — Number of protected items whose last backup status is Completed, Success, Succeeded or Healthy
+- `protected_items_with_policy` — Number of protected items that have a backup policy assigned; null if the vault list couldn't be read
+- `protected_items_in_protected_state` — Number of protected items whose protection state is Protected (not stopped, paused, pending or in error); null if the vault list couldn't be read
+- `protected_items_with_healthy_last_backup` — Number of protected items whose last backup status is Completed, Success, Succeeded or Healthy; null if the vault list couldn't be read
 
 **Have restores been run, and did they work?**
 - `restore_job_window_days` — Days back that restore jobs are read, ending at the run (365 unless AZURE_BACKUP_RESTORE_WINDOW_DAYS sets it); a vault keeps job history for a limited time, so the oldest days may hold nothing
-- `restore_jobs_read` — True if every in-scope vault's restore jobs were read; false if any vault's read failed, and then every restore field below is null
+- `restore_jobs_read` — True if every in-scope vault's restore jobs were read; false if the vault list or any vault's restore jobs couldn't be read, and then every restore field below is null
 - `total_restore_jobs` — Number of restore jobs in the window across in-scope vaults, test restores included, whatever their result; null if a vault's restore jobs couldn't be read
 - `succeeded_restore_jobs` — Number of restore jobs in the window whose status is Completed (a CompletedWithWarnings restore, which left some data out, doesn't count); null if a vault's restore jobs couldn't be read
 - `failed_restore_jobs` — Number of restore jobs in the window whose status is Failed; null if a vault's restore jobs couldn't be read
@@ -2084,8 +2084,8 @@ Summary fields:
 
 **How long did restores take, and how old was the data they restored?**
 - `longest_succeeded_restore_minutes` — Longest time a Completed restore in the window took, in minutes, to compare with the recovery time objective; null if there was none or a vault's restore jobs couldn't be read
-- `max_recovery_point_age_hours` — Hours of data the worst Completed restore would have lost: the largest gap between the recovery point a restore used and the restore's start, to compare with the recovery point objective; null if no Completed restore named a readable recovery point time, a Completed restore's details couldn't be read, or a vault's restore jobs couldn't be read
-- `succeeded_restores_without_recovery_point_time` — Number of Completed restores left out of `max_recovery_point_age_hours` because their details named no recovery point time the fetcher could read (it reads Azure Backup's day/month/year form) or couldn't be read; null if a vault's restore jobs couldn't be read
+- `max_recovery_point_age_hours` — Hours between the recovery point a restore used and the restore's start, the largest among Completed restores: how old the restored data was when the restore started. The person restoring chooses the point, so a deliberate restore of an older point raises it; it isn't the recovery point objective a restore could achieve; null if no Completed restore named a readable recovery point time, a Completed restore's details couldn't be read, or a vault's restore jobs couldn't be read
+- `succeeded_restores_without_recovery_point_time` — Number of Completed restores left out of `max_recovery_point_age_hours`: their details named no recovery point time the fetcher could read (it reads day/month/year in 24-hour form, as SQL restores write it, and month/day/year with AM/PM, as Azure Files restores write it), the time named was after the restore's start, or the details couldn't be read; null if a vault's restore jobs couldn't be read
 
 
 ### azure_defender_assessments
@@ -4965,7 +4965,7 @@ Summary fields:
 
 
 ### azure_sql_managed_instance_backups
-Short Description: Shows whether each SQL Managed Instance database keeps 7 days of point-in-time restore and long-term backups, survives a zone or region loss, and which failovers ran.
+Short Description: Shows whether each SQL Managed Instance database keeps at least 7 days of point-in-time restore and long-term backups, survives a zone or region loss, and which failovers ran.
 
 Script: fetchers/azure/sql_managed_instance_backups/fetcher.py (shared helper: fetchers/azure/_shared/sql_managed_instance.py)
 
