@@ -10,12 +10,14 @@ config_schema:
   lookback_days:
     type: integer
     required: false
-    default: 90
+    default: 180
     env: AZURE_SERVICE_HEALTH_LOOKBACK_DAYS
     description: >
       How many days back to list events, counted against each event's last
-      update. The portal's health history shows 90 days; the API serves up to
-      about a year.
+      update. At most 180: the event list answers 502 Bad Gateway for a
+      270-day window, so a larger value is cut to 180 with a warning, and the
+      value asked for is kept in the evidence as lookback_days_requested. Older
+      events that Resource Graph still holds are added whatever the window.
   resource_exclusions:
     type: string
     required: false
@@ -83,17 +85,20 @@ evidence_set:
     - subscriptions.list() — picks a subscription when none is set
     - providers.get() for Microsoft.ResourceHealth — tells an unregistered provider from a quiet subscription
     - GET Microsoft.ResourceHealth/events — the Service Health events last updated within the lookback window
+    - ServiceHealthResources where type is microsoft.resourcehealth/events — events Resource Graph still holds, to catch older ones the window misses
+    - GET Microsoft.ResourceHealth/events/{trackingId} (per event Resource Graph holds that the window missed) — its full record
     - POST Microsoft.ResourceHealth/events/{trackingId}/fetchEventDetails (per sensitive event) — the summary and updates the list leaves out
-    - GET Microsoft.ResourceHealth/events/{trackingId}/impactedResources (per event except security advisories) — the resources the event names
+    - ServiceHealthResources where type is microsoft.resourcehealth/events/impactedresources — the resources each event names
     - POST Microsoft.ResourceHealth/events/{trackingId}/listSecurityAdvisoryImpactedResources (per security advisory) — the resources the advisory names
 
-    Output: azure_service_health_advisories_<subscription>.json — each event with its type, status, level, title, summary, impacted services and regions, impact start and end, published and last update times, latest update, recommended actions and the in-scope resources it names, plus limitations; resources the resource_exclusions patterns take out, and events whose every named resource they take out, are listed under excluded instead.
+    Output: azure_service_health_advisories_<subscription>.json — each event with its type, status, level, title, summary, impacted services with their regions and the regions still active, impact start and end, published and last update times, latest update, recommended actions and the in-scope resources it names, plus limitations; resources the resource_exclusions patterns take out, and events whose every named resource they take out, are listed under excluded instead.
 
     Summary fields:
 
     What did Microsoft report to the subscription?
-    - lookback_days — Number of days back the event list reaches, counted against each event's last update (default 90)
-    - events — Number of Service Health events in scope last updated within the window, billing communications left out; null, like every count below except the scope lists, when the event list could not be read
+    - lookback_days — Number of days back the event list reaches, counted against each event's last update (180 by default, and at most 180)
+    - events — Number of Service Health events in scope: those last updated within the window plus older ones Resource Graph still holds, billing communications left out; null, like every count below except the scope lists, when the event list could not be read
+    - events_from_resource_graph — Number of events in scope that the windowed list left out and Resource Graph still holds, such as a retirement announced long ago; null when Resource Graph's events could not be read
     - events_by_type — Number of events of each type; a type with none is left out:
       - ServiceIssue (an outage or degradation of an Azure service)
       - PlannedMaintenance (scheduled maintenance that may affect availability)
@@ -116,15 +121,15 @@ evidence_set:
     - open_retirement_advisories — Number of open health advisories that announce a retirement
     - upcoming_planned_maintenance — Number of planned maintenance events whose maintenance has not ended
     - open_events_action_recommended — Number of open events that ask for action: Microsoft tagged them Action Recommended or listed recommended actions
-    - open_high_severity_events — Number of open events at level Critical or Error
+    - open_high_severity_advisories — Number of open health or security advisories at level Critical or Error
 
     Which resources do the events name?
     - impacted_resources — Number of distinct in-scope resources named by any event; null while any event's resource list is unread
     - impacted_resources_by_type — Number of distinct in-scope resources named by any event, for each resource type; null while any event's resource list is unread
     - events_with_impacted_resources — Number of events that name at least one in-scope resource; null while any event's resource list is unread
     - open_events_with_impacted_resources — Number of open events that name at least one in-scope resource; null while any event's resource list is unread
-    - events_impacted_resources_unread — Number of events whose resource list was refused or failed; above 0, the resource counts are null
-    - events_impacted_resources_not_authorized — Number of events whose resource list was refused (403); a security advisory's list needs the optional action
+    - events_impacted_resources_unread — Number of events whose resource list was refused or failed (Resource Graph's list, or a security advisory's own); above 0, the resource counts are null
+    - events_impacted_resources_not_authorized — Number of security advisories whose resource list was refused (403) because the optional action is not granted
 
     Can the security advisories be read in full?
     - sensitive_events — Number of events Microsoft marks sensitive, whose summary and updates the event list leaves out

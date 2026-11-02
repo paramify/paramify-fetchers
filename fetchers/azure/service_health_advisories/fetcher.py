@@ -22,6 +22,7 @@ from azure_common import (  # noqa: E402
 )
 from azure_rest import int_config, parse_time, run_subscription  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_graph import query_all, resource_graph_client  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 
 NAME = "azure_service_health_advisories"
@@ -30,7 +31,9 @@ logger = logging.getLogger(NAME)
 API = "2025-05-01"
 NAMESPACE = "Microsoft.ResourceHealth"
 LOOKBACK_ENV = "AZURE_SERVICE_HEALTH_LOOKBACK_DAYS"
-DEFAULT_LOOKBACK_DAYS = 90
+# Measured: 180 days answers, 270 days gets 502 BadGateway at once, every time.
+MAX_LOOKBACK_DAYS = 180
+DEFAULT_LOOKBACK_DAYS = MAX_LOOKBACK_DAYS
 WORKERS = 4
 # Summaries and updates are HTML written by Microsoft; a long incident runs to many kilobytes.
 MAX_TEXT = 1000
@@ -44,12 +47,22 @@ RETIREMENT = "Retirement"
 ACTIVE = "active"
 ACTION_RECOMMENDED_TAG = "action recommended"
 HIGH_SEVERITY_LEVELS = ("critical", "error")
+ADVISORIES = (HEALTH_ADVISORY, SECURITY_ADVISORY)
 
 READ = "read"
 NOT_FOUND = "not_found"
 NOT_AUTHORIZED = "not_authorized"
 ERROR = "error"
 NOT_NEEDED = "not_needed"
+
+LISTED = "event_list"
+GRAPH = "resource_graph"
+EVENTS_QUERY = "ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events' | project id | order by id asc"
+# Measured: the REST impactedResources list came back empty for events Resource Graph lists resources for.
+IMPACTED_QUERY = (
+    "ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events/impactedresources' "
+    "| project id, properties | order by id asc"
+)
 
 EVENT_KIND = "event"
 RESOURCE_KIND = "impacted_resource"
@@ -59,7 +72,8 @@ ADVISORY_RESOURCES_ACTION = "Microsoft.ResourceHealth/events/listSecurityAdvisor
 LIMITATIONS = [
     "Shows what Microsoft reported to the subscription, not whether anyone reviewed it: review disposition and "
     "change tracking are kept outside Azure.",
-    "Lists events last updated within the lookback window; Microsoft serves up to about a year through this API.",
+    "Lists events last updated within the lookback window (at most 180 days: the event list answers 502 Bad Gateway "
+    "for a longer one), plus any older event Resource Graph still holds, such as a retirement announced long ago.",
     f"Security advisory summaries and updates need {DETAILS_ACTION}, and their impacted resources need "
     f"{ADVISORY_RESOURCES_ACTION}; Reader has neither, so without them those fields read unknown.",
     "Billing communications are left out: they concern charges, not service health.",
@@ -72,9 +86,9 @@ EVENT_COUNTS = (
     "events", "events_by_type", "events_by_status", "events_by_level", "retirement_advisories",
     "billing_events_skipped", "open_events", "open_events_by_type", "open_service_issues",
     "open_security_advisories", "open_health_advisories", "open_retirement_advisories",
-    "upcoming_planned_maintenance", "open_events_action_recommended", "open_high_severity_events",
+    "upcoming_planned_maintenance", "open_events_action_recommended", "open_high_severity_advisories",
     "sensitive_events", "sensitive_event_details_read", "sensitive_event_details_not_authorized",
-    "events_impacted_resources_unread", "events_impacted_resources_not_authorized",
+    "events_impacted_resources_unread", "events_impacted_resources_not_authorized", "events_from_resource_graph",
 )
 # Null, not a partial count, while any event's impacted resources are unread.
 RESOURCE_COUNTS = (
@@ -105,12 +119,28 @@ def _lower(value) -> str:
     return str(value or "").lower()
 
 
+def stamp(value):
+    """The time as given, or None when absent or unparsable; Microsoft writes 0001-01-01 for a time not set."""
+    parsed = parse_time(value)
+    return value if parsed and parsed.year > 1900 else None
+
+
 def is_open(event_type, status, mitigation, now: datetime) -> bool:
     """Microsoft's own 'active' rule: a service issue by its status, other events until their impact ends."""
-    end = parse_time(mitigation)
+    end = parse_time(stamp(mitigation))
     if event_type == SERVICE_ISSUE or end is None:
         return _lower(status) == ACTIVE
     return end > now
+
+
+def _service(impact: dict) -> dict:
+    regions = impact.get("impactedRegions") or []
+    return {
+        "service": impact.get("impactedService"),
+        "regions": sorted({r.get("impactedRegion") for r in regions if r.get("impactedRegion")}, key=_lower),
+        "active_regions": sorted({r.get("impactedRegion") for r in regions
+                                  if r.get("impactedRegion") and _lower(r.get("status")) == ACTIVE}, key=_lower),
+    }
 
 
 def _updates(props: dict) -> list[dict]:
@@ -148,23 +178,13 @@ def event_record(raw: dict, now: datetime) -> dict:
         "title": p.get("title"),
         "summary": plain(p.get("summary")),
         "impact_type": p.get("impactType"),
-        "impact_start_time": p.get("impactStartTime"),
-        "impact_mitigation_time": p.get("impactMitigationTime"),
-        "last_update_time": p.get("lastUpdateTime"),
+        "impact_start_time": stamp(p.get("impactStartTime")),
+        "impact_mitigation_time": stamp(p.get("impactMitigationTime")),
+        "last_update_time": stamp(p.get("lastUpdateTime")),
         "published_at": dated[0].get("updateDateTime") if dated else None,
         "update_count": len(updates),
         "latest_update": {"at": latest.get("updateDateTime"), "summary": plain(latest.get("summary"))} if latest else None,
-        "impacted_services": [
-            {
-                "service": impact.get("impactedService"),
-                "regions": sorted(
-                    ({"region": r.get("impactedRegion"), "status": r.get("status"),
-                      "last_update_time": r.get("lastUpdateTime")} for r in impact.get("impactedRegions") or []),
-                    key=lambda r: _lower(r["region"]),
-                ),
-            }
-            for impact in p.get("impact") or []
-        ],
+        "impacted_services": sorted((_service(i) for i in p.get("impact") or []), key=lambda s: _lower(s["service"])),
         "recommended_action_message": plain(recommended.get("message")),
         "recommended_actions": actions,
         "event_tags": tags,
@@ -229,7 +249,8 @@ def apply_scope(scope: ResourceExclusions, events: list[dict]) -> tuple[list[dic
     return kept, excluded
 
 
-def summarize(events: list[dict], events_read: bool, billing_skipped: int, lookback_days: int) -> dict:
+def summarize(events: list[dict], events_read: bool, billing_skipped, lookback_days: int,
+              graph_read: bool = True) -> dict:
     open_events = [e for e in events if e["open"]]
     unread = [e for e in events if e["impacted_resources"] is None]
     resources: dict[str, dict] = {}
@@ -245,6 +266,7 @@ def summarize(events: list[dict], events_read: bool, billing_skipped: int, lookb
     summary = {
         "lookback_days": lookback_days,
         "events": len(events),
+        "events_from_resource_graph": sum(1 for e in events if e.get("listed_by") == GRAPH) if graph_read else None,
         "events_by_type": sorted_counts(Counter(e["event_type"] or "unknown" for e in events)),
         "events_by_status": sorted_counts(Counter(e["status"] or "unknown" for e in events)),
         "events_by_level": sorted_counts(Counter(e["event_level"] or "unknown" for e in events)),
@@ -258,7 +280,9 @@ def summarize(events: list[dict], events_read: bool, billing_skipped: int, lookb
         "open_retirement_advisories": open_of(HEALTH_ADVISORY, RETIREMENT),
         "upcoming_planned_maintenance": open_of(PLANNED_MAINTENANCE),
         "open_events_action_recommended": sum(1 for e in open_events if e["action_recommended"]),
-        "open_high_severity_events": sum(1 for e in open_events if _lower(e["event_level"]) in HIGH_SEVERITY_LEVELS),
+        "open_high_severity_advisories": sum(
+            1 for e in open_events
+            if e["event_type"] in ADVISORIES and _lower(e["event_level"]) in HIGH_SEVERITY_LEVELS),
         "sensitive_events": len(sensitive),
         "sensitive_event_details_read": sum(1 for e in sensitive if e["details_status"] == READ),
         "sensitive_event_details_not_authorized": sum(1 for e in sensitive if e["details_status"] == NOT_AUTHORIZED),
@@ -276,6 +300,24 @@ def summarize(events: list[dict], events_read: bool, billing_skipped: int, lookb
 
 # --- collection ---
 
+def graph_rows(cred, subscription_id: str, query: str) -> list[dict]:
+    return query_all(resource_graph_client(cred), subscription_id, query)["rows"]
+
+
+def tracking_id_of(resource_id) -> str:
+    """The tracking id inside an event or impacted-resource id, as written."""
+    text = str(resource_id or "")
+    at = text.lower().find("/events/")
+    return text[at + len("/events/"):].split("/")[0] if at >= 0 else ""
+
+
+def impacted_by_event(rows: list[dict]) -> dict:
+    out: dict[str, list] = {}
+    for row in rows:
+        out.setdefault(_lower(tracking_id_of(row.get("id"))), []).append(impacted_record(row))
+    return out
+
+
 def read_details(client, base: str, event: dict, raw: dict, collector: Collector) -> tuple:
     """(status, raw event): a sensitive event's summary and updates come only from fetchEventDetails."""
     if not event["is_sensitive"]:
@@ -291,67 +333,94 @@ def read_details(client, base: str, event: dict, raw: dict, collector: Collector
         return status, raw
 
 
-def read_impacted(client, base: str, event: dict, collector: Collector) -> tuple:
-    """(status, resources); a security advisory's resources come only from its own POST action."""
-    advisory = event["event_type"] == SECURITY_ADVISORY
-    operation = "listSecurityAdvisoryImpactedResources" if advisory else "impactedResources"
-    path = f"{base}/{event['tracking_id']}/{operation}"
+def read_impacted(client, base: str, event: dict, graph_impacted, collector: Collector) -> tuple:
+    """(status, resources): Resource Graph for most events, a security advisory's own POST action for those."""
+    if event["event_type"] != SECURITY_ADVISORY:
+        if graph_impacted is None:
+            return ERROR, None
+        return READ, graph_impacted.get(_lower(event["tracking_id"]), [])
     try:
-        raw = client.post_list(path, API) if advisory else client.list(path, API)
+        raw = client.post_list(f"{base}/{event['tracking_id']}/listSecurityAdvisoryImpactedResources", API)
     except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
         status = read_status(exc)
         if status == ERROR:
-            collector.record(f"resourceHealth.events.{operation} ({event['tracking_id']})", exc)
+            collector.record(f"resourceHealth.events.listSecurityAdvisoryImpactedResources ({event['tracking_id']})",
+                             exc)
         else:
             logger.warning("impacted resources %s: %s (%s)", event["tracking_id"], status, exc)
         return status, None
     return READ, [impacted_record(r) for r in raw]
 
 
-def read_event(client, base: str, raw: dict, now: datetime, collector: Collector) -> dict:
+def read_event(client, base: str, raw: dict, listed_by: str, now: datetime, graph_impacted,
+               collector: Collector) -> dict:
     event = event_record(raw, now)
     details_status, source = read_details(client, base, event, raw, collector)
     if details_status == READ:
         event = event_record({**raw, **source, "name": event["tracking_id"]}, now)
-    resources_status, resources = read_impacted(client, base, event, collector)
-    return with_reads(event, details_status, resources_status, resources)
+    resources_status, resources = read_impacted(client, base, event, graph_impacted, collector)
+    return {**with_reads(event, details_status, resources_status, resources), "listed_by": listed_by}
+
+
+def read_by_id(client, base: str, tracking_id: str, collector: Collector):
+    """An event Resource Graph holds but the windowed list left out; None when it is gone or the read failed."""
+    try:
+        return {"name": tracking_id, **client.get(f"{base}/{tracking_id}", API)}
+    except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
+        if read_status(exc) == NOT_FOUND:
+            logger.warning("event %s is in Resource Graph but not found", tracking_id)
+        else:
+            collector.record(f"resourceHealth.events.get ({tracking_id})", exc)
+        return None
 
 
 def collect(client, subscription_id: str, now: datetime, lookback_days: int, collector: Collector) -> tuple:
-    """(events, whether the event list was read, billing events skipped)."""
+    """(events, whether the event list was read, billing events skipped, whether Resource Graph's events were read)."""
     base = f"/subscriptions/{subscription_id}/providers/{NAMESPACE}/events"
     start = query_start(now - timedelta(days=lookback_days))
     raw = collector.guard("resourceHealth.events.list", lambda: client.list(base, API, {"queryStartTime": start}))
     if raw is None:
-        return [], False, None
-    billing = [r for r in raw if (r.get("properties") or {}).get("eventType") == BILLING]
-    wanted = [r for r in raw if (r.get("properties") or {}).get("eventType") != BILLING]
+        return [], False, None, False
+    graph_ids = collector.guard(
+        "resourcegraph.resources (Service Health events)",
+        lambda: [tracking_id_of(r.get("id")) for r in graph_rows(client.cred, subscription_id, EVENTS_QUERY)])
+    graph_impacted = collector.guard(
+        "resourcegraph.resources (Service Health impacted resources)",
+        lambda: impacted_by_event(graph_rows(client.cred, subscription_id, IMPACTED_QUERY)))
+    listed = {_lower(r.get("name")) for r in raw}
+    missing = sorted({t for t in graph_ids or [] if t and _lower(t) not in listed}, key=_lower)
+    older = [found for t in missing if (found := read_by_id(client, base, t, collector)) is not None]
+    sources = [(r, LISTED) for r in raw] + [(r, GRAPH) for r in older]
+    billing = sum(1 for r, _ in sources if (r.get("properties") or {}).get("eventType") == BILLING)
+    wanted = [(r, by) for r, by in sources if (r.get("properties") or {}).get("eventType") != BILLING]
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        events = list(pool.map(lambda r: read_event(client, base, r, now, collector), wanted))
-    # One refused list is a warning; every non-advisory list refused means Reader itself is missing.
-    plain_events = [e for e in events if e["event_type"] != SECURITY_ADVISORY]
-    if plain_events and all(e["impacted_resources_status"] == NOT_AUTHORIZED for e in plain_events):
-        collector.record("resourceHealth.events.impactedResources",
-                         PermissionError("every event's impacted resource list was refused (403)"))
-    return events, True, len(billing)
+        events = list(pool.map(
+            lambda item: read_event(client, base, item[0], item[1], now, graph_impacted, collector), wanted))
+    return events, True, billing, graph_ids is not None
 
 
 def collect_subscription(client, subscription_id: str, collector: Collector) -> tuple:
     """(results, summary) for run_subscription."""
     scope = ResourceExclusions.from_env()
     scope.record_invalid(collector)
-    lookback_days = int_config(LOOKBACK_ENV, DEFAULT_LOOKBACK_DAYS)
+    requested = int_config(LOOKBACK_ENV, DEFAULT_LOOKBACK_DAYS)
+    lookback_days = min(requested, MAX_LOOKBACK_DAYS)
+    if requested > MAX_LOOKBACK_DAYS:
+        logger.warning("%s=%d is past the %d days the event list serves; using %d",
+                       LOOKBACK_ENV, requested, MAX_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS)
     now = datetime.now(timezone.utc)
     registration = provider_registration_status(collector, subscription_id, client.cred, NAMESPACE)
-    events, events_read, billing = collect(client, subscription_id, now, lookback_days, collector)
+    events, events_read, billing, graph_read = collect(client, subscription_id, now, lookback_days, collector)
     events, excluded = apply_scope(scope, events)
     scope.warn_unmatched(logger)
     events.sort(key=lambda e: (e["tracking_id"] or ""))
     if events_read:
-        logger.info("%d Service Health events in the last %d days", len(events), lookback_days)
+        logger.info("%d Service Health events in the last %d days or still in Resource Graph", len(events),
+                    lookback_days)
     results = {
         "evaluated_at": now.isoformat(),
         "lookback_days": lookback_days,
+        "lookback_days_requested": requested,
         "query_start": query_start(now - timedelta(days=lookback_days)),
         "events": events,
         "excluded": excluded,
@@ -364,7 +433,7 @@ def collect_subscription(client, subscription_id: str, collector: Collector) -> 
     elif any(e["impacted_resources"] is None for e in events):
         boundary["excluded_impacted_resources"] = None
     summary = {
-        **summarize(events, events_read, billing, lookback_days),
+        **summarize(events, events_read, billing, lookback_days, graph_read),
         "provider_registration_status": registration,
         **boundary,
     }

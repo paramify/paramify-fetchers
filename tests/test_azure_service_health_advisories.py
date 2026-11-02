@@ -100,23 +100,32 @@ def test_event_projection_reads_the_fields_an_assessor_needs():
         "latest_update": {"at": "2026-10-05T00:00:00Z", "summary": "Second"},
         "recommended_action_message": "Migrate", "recommended_actions": ["Move to v2"], "action_recommended": True,
         "is_sensitive": False, "open": True}
-    assert record["impacted_services"] == [{"service": "App Service", "regions": [
-        {"region": "East US 2", "status": "Active", "last_update_time": "2026-10-20T00:00:00Z"}]}]
+    assert record["impacted_services"] == [{"service": "App Service", "regions": ["East US 2"],
+                                            "active_regions": ["East US 2"]}]
 
 
 def test_an_update_sent_to_several_regions_counts_once():
     raw = raw_event(updates=[update("2026-10-02T00:00:00Z")])
     region = raw["properties"]["impact"][0]["impactedRegions"][0]
-    raw["properties"]["impact"][0]["impactedRegions"].append({**region, "impactedRegion": "West US"})
+    raw["properties"]["impact"][0]["impactedRegions"].append({**region, "impactedRegion": "West US", "status": "Resolved"})
     record = sh.event_record(raw, NOW)
     assert record["update_count"] == 1
-    assert [r["region"] for r in record["impacted_services"][0]["regions"]] == ["East US 2", "West US"]
+    assert record["impacted_services"] == [{"service": "App Service", "regions": ["East US 2", "West US"],
+                                            "active_regions": ["East US 2"]}]
 
 
 def test_no_updates_or_actions_leave_published_and_action_empty():
     record = sh.event_record(raw_event(), NOW)
     assert (record["published_at"], record["latest_update"], record["action_recommended"]) == (None, None, False)
     assert sh.event_record(raw_event(eventTags=["action recommended"]), NOW)["action_recommended"] is True
+
+
+def test_microsofts_unset_time_reads_as_none():
+    record = sh.event_record(raw_event(event_type="ServiceIssue", mitigation="0001-01-01T00:00:00",
+                                       impactStartTime="0001-01-01T00:00:00"), NOW)
+    assert (record["impact_mitigation_time"], record["impact_start_time"], record["open"]) == (None, None, True)
+    assert sh.event_record(raw_event(status="Resolved", mitigation="0001-01-01T00:00:00"), NOW)["open"] is False
+    assert sh.stamp("2026-10-01T00:00:00Z") == "2026-10-01T00:00:00Z"
 
 
 def test_impacted_resource_projection_derives_name_and_group_from_the_id():
@@ -176,7 +185,7 @@ def test_summary_counts_open_events_by_kind_and_the_resources_they_name():
     ]
     summary = sh.summarize(events, True, 2, 90)
     assert summary == {
-        "lookback_days": 90, "events": 5,
+        "lookback_days": 90, "events": 5, "events_from_resource_graph": 0,
         "events_by_type": {"HealthAdvisory": 1, "PlannedMaintenance": 1, "RCA": 1, "SecurityAdvisory": 1,
                            "ServiceIssue": 1},
         "events_by_status": {"Active": 4, "Resolved": 1},
@@ -185,7 +194,7 @@ def test_summary_counts_open_events_by_kind_and_the_resources_they_name():
         "open_events": 3, "open_events_by_type": {"HealthAdvisory": 1, "SecurityAdvisory": 1, "ServiceIssue": 1},
         "open_service_issues": 1, "open_security_advisories": 1, "open_health_advisories": 1,
         "open_retirement_advisories": 1, "upcoming_planned_maintenance": 0, "open_events_action_recommended": 1,
-        "open_high_severity_events": 2,
+        "open_high_severity_advisories": 1,
         "sensitive_events": 1, "sensitive_event_details_read": 0, "sensitive_event_details_not_authorized": 1,
         "events_impacted_resources_unread": 0, "events_impacted_resources_not_authorized": 0,
         "impacted_resources": 2, "impacted_resources_by_type": {"microsoft.web/sites": 2},
@@ -215,9 +224,10 @@ def test_every_count_is_unknown_when_the_event_list_was_not_read():
 class _Health:
     """One subscription's Service Health API; `refuse` maps a path suffix to the error it answers."""
 
-    def __init__(self, events, resources=None, details=None, refuse=None, cred=None):
-        self.events, self.resources, self.details = events, resources or {}, details or {}
-        self.refuse, self.calls, self.cred = refuse or {}, [], cred
+    def __init__(self, events, by_id=None, resources=None, details=None, refuse=None, window="5/5/2026"):
+        self.events, self.by_id, self.resources = events, by_id or {}, resources or {}
+        self.details, self.refuse, self.window = details or {}, refuse or {}, window
+        self.calls, self.cred = [], None
 
     def _answer(self, method, path):
         self.calls.append((method, path.split("/events", 1)[1] or "/"))
@@ -227,10 +237,13 @@ class _Health:
 
     def list(self, path, api_version, params=None):
         self._answer("GET", path)
-        if path.endswith("/events"):
-            assert params == {"queryStartTime": "8/3/2026"} and api_version == sh.API
-            return self.events
-        return self.resources.get(path.split("/")[-2], [])
+        assert path.endswith("/events") and api_version == sh.API
+        assert params == {"queryStartTime": self.window}
+        return self.events
+
+    def get(self, path, api_version):
+        self._answer("GET", path)
+        return self.by_id[path.split("/")[-1]]
 
     def post(self, path, api_version):
         self._answer("POST", path)
@@ -241,74 +254,131 @@ class _Health:
         return self.resources.get(path.split("/")[-2], [])
 
 
+def graph_event(tid):
+    return {"id": f"{SUB}/providers/Microsoft.ResourceHealth/events/{tid}"}
+
+
+def graph_resource(tid, rid=APP, **kwargs):
+    return {"id": f"{SUB}/providers/Microsoft.ResourceHealth/events/{tid}/impactedResources/b64==", **raw_resource(rid, **kwargs)}
+
+
+@pytest.fixture
+def graph(monkeypatch):
+    """Resource Graph's Service Health table; set `events` / `impacted` to rows, or to an exception to raise."""
+    table = SimpleNamespace(events=[], impacted=[], queries=[])
+
+    def rows(cred, subscription_id, query):
+        table.queries.append((subscription_id, query))
+        answer = table.events if query == sh.EVENTS_QUERY else table.impacted
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(sh, "graph_rows", rows)
+    return table
+
+
 def collector():
     return azure_common.Collector(sh.logger)
 
 
-def test_collect_reads_each_event_its_details_and_resources_and_skips_billing():
+@pytest.mark.parametrize("resource_id, expected", [
+    (f"{SUB}/providers/Microsoft.ResourceHealth/events/AB_C-12", "AB_C-12"),
+    (f"{SUB}/providers/microsoft.resourcehealth/Events/AB_C-12/impactedResources/x", "AB_C-12"),
+    ("/no/events/here", "here"),
+    ("", ""),
+    (None, ""),
+])
+def test_tracking_id_comes_from_the_event_segment(resource_id, expected):
+    assert sh.tracking_id_of(resource_id) == expected
+
+
+def test_collect_joins_the_window_resource_graph_and_each_events_own_reads(graph):
+    graph.events = [graph_event("HA-1"), graph_event("OLD-1"), graph_event("OLD-BILL")]
+    graph.impacted = [graph_resource("ha-1"), graph_resource("OLD-1", DB, rtype="Microsoft.Sql/servers")]
     sensitive = raw_event("SA-1", event_type="SecurityAdvisory", isEventSensitive=True, summary=None)
     details = raw_event("SA-1", event_type="SecurityAdvisory", isEventSensitive=True, summary="<p>Rotate keys</p>",
                         updates=[update("2026-10-03T00:00:00Z", "Patched")])
+    old = raw_event("OLD-1", lastUpdateTime="2026-01-01T00:00:00Z")
     client = _Health(
         [raw_event("HA-1"), sensitive, raw_event("BILL-1", event_type="Billing")],
-        resources={"HA-1": [raw_resource()], "SA-1": [raw_resource(DB, rtype="Microsoft.Sql/servers")]},
+        by_id={"OLD-1": {k: v for k, v in old.items() if k != "name"},
+               "OLD-BILL": raw_event("OLD-BILL", event_type="Billing")},
+        resources={"SA-1": [raw_resource(DB, rtype="Microsoft.Sql/servers")]},
         details={"SA-1": {"properties": details["properties"]}},
     )
     c = collector()
-    events, read, billing = sh.collect(client, "s1", NOW, 90, c)
-    assert (read, billing, c.ok) == (True, 1, True)
+    events, read, billing, graph_read = sh.collect(client, "s1", NOW, 180, c)
+    assert (read, billing, graph_read, c.ok) == (True, 2, True, True)
     assert sorted(client.calls) == sorted([
-        ("GET", "/"), ("GET", "/HA-1/impactedResources"), ("POST", "/SA-1/fetchEventDetails"),
+        ("GET", "/"), ("GET", "/OLD-1"), ("GET", "/OLD-BILL"), ("POST", "/SA-1/fetchEventDetails"),
         ("POST", "/SA-1/listSecurityAdvisoryImpactedResources")])
+    assert {q for _, q in graph.queries} == {sh.EVENTS_QUERY, sh.IMPACTED_QUERY}
     by_id = {e["tracking_id"]: e for e in events}
+    assert {t: (e["listed_by"], [r["resource_name"] for r in e["impacted_resources"]]) for t, e in by_id.items()} == {
+        "HA-1": ("event_list", ["app1"]), "SA-1": ("event_list", ["sql1"]), "OLD-1": ("resource_graph", ["sql1"])}
     assert (by_id["SA-1"]["summary"], by_id["SA-1"]["published_at"], by_id["SA-1"]["details_status"]) == (
         "Rotate keys", "2026-10-03T00:00:00Z", sh.READ)
-    assert [r["resource_name"] for r in by_id["SA-1"]["impacted_resources"]] == ["sql1"]
-    assert (by_id["HA-1"]["details_status"], by_id["HA-1"]["impacted_resources_status"]) == (sh.NOT_NEEDED, sh.READ)
+    assert sh.summarize(events, read, billing, 180, graph_read)["events_from_resource_graph"] == 1
 
 
-def test_refused_advisory_details_and_resources_are_unknown_not_a_failure():
+def test_refused_advisory_details_and_resources_are_unknown_not_a_failure(graph):
     client = _Health(
         [raw_event("HA-1"), raw_event("SA-1", event_type="SecurityAdvisory", isEventSensitive=True)],
         refuse={"/fetchEventDetails": azure_rest.ArmError(403, "AuthorizationFailed", "no"),
                 "/listSecurityAdvisoryImpactedResources": azure_rest.ArmError(403, "AuthorizationFailed", "no")},
     )
     c = collector()
-    events, read, _ = sh.collect(client, "s1", NOW, 90, c)
+    events, read, _, _ = sh.collect(client, "s1", NOW, 180, c)
     sa = next(e for e in events if e["tracking_id"] == "SA-1")
     assert (c.ok, sa["details_status"], sa["impacted_resources_status"], sa["impacted_resources"]) == (
         True, sh.NOT_AUTHORIZED, sh.NOT_AUTHORIZED, None)
-    assert sh.summarize(events, read, 0, 90)["impacted_resources"] is None
+    assert sh.summarize(events, read, 0, 180)["impacted_resources"] is None
 
 
-def test_a_missing_resource_list_reads_as_none_listed():
-    client = _Health([raw_event("HA-1")], refuse={"/impactedResources": azure_rest.ArmError(404, "NotFound", "x")})
+@pytest.mark.parametrize("status, outcome, ok", [(404, sh.NOT_FOUND, True), (500, sh.ERROR, False)])
+def test_an_advisory_resource_list_that_is_missing_reads_none_and_one_that_fails_is_recorded(graph, status, outcome, ok):
+    client = _Health([raw_event("SA-1", event_type="SecurityAdvisory")],
+                     refuse={"/listSecurityAdvisoryImpactedResources": azure_rest.ArmError(status, "Code", "x")})
     c = collector()
-    [ev], _, _ = sh.collect(client, "s1", NOW, 90, c)
-    assert (c.ok, ev["impacted_resources_status"], ev["impacted_resources"]) == (True, sh.NOT_FOUND, [])
+    [ev], _, _, _ = sh.collect(client, "s1", NOW, 180, c)
+    assert (c.ok, ev["impacted_resources_status"], ev["impacted_resources"]) == (
+        ok, outcome, [] if outcome == sh.NOT_FOUND else None)
 
 
-def test_a_failed_resource_list_fails_the_run():
-    client = _Health([raw_event("HA-1")], refuse={"/impactedResources": azure_rest.ArmError(500, "Internal", "x")})
+def test_a_failed_resource_graph_read_leaves_impacted_resources_unknown(graph):
+    graph.impacted = azure_rest.ArmError(500, "Internal", "x")
+    client = _Health([raw_event("HA-1"), raw_event("SI-1", event_type="ServiceIssue")])
     c = collector()
-    [ev], _, _ = sh.collect(client, "s1", NOW, 90, c)
-    assert (c.ok, ev["impacted_resources_status"], c.failures[0]["operation"]) == (
-        False, sh.ERROR, "resourceHealth.events.impactedResources (HA-1)")
+    events, read, billing, graph_read = sh.collect(client, "s1", NOW, 180, c)
+    assert [f["operation"] for f in c.failures] == ["resourcegraph.resources (Service Health impacted resources)"]
+    assert {e["impacted_resources_status"] for e in events} == {sh.ERROR}
+    summary = sh.summarize(events, read, billing, 180, graph_read)
+    assert {k: summary[k] for k in sh.RESOURCE_COUNTS} == dict.fromkeys(sh.RESOURCE_COUNTS, None)
+    assert (summary["events_impacted_resources_unread"], summary["events"]) == (2, 2)
 
 
-def test_every_plain_resource_list_refused_means_reader_is_missing():
-    client = _Health([raw_event("HA-1"), raw_event("SI-1", event_type="ServiceIssue")],
-                     refuse={"/impactedResources": azure_rest.ArmError(403, "AuthorizationFailed", "no")})
+def test_a_failed_resource_graph_event_read_leaves_older_events_unknown(graph):
+    graph.events = azure_rest.ArmError(403, "AuthorizationFailed", "no")
     c = collector()
-    sh.collect(client, "s1", NOW, 90, c)
-    assert [f["type"] for f in c.failures] == ["PermissionError"]
+    events, read, billing, graph_read = sh.collect(_Health([raw_event("HA-1")]), "s1", NOW, 180, c)
+    assert (len(events), graph_read, c.ok) == (1, False, False)
+    assert sh.summarize(events, read, billing, 180, graph_read)["events_from_resource_graph"] is None
 
 
-def test_a_failed_event_list_is_recorded_and_leaves_every_count_unknown():
+@pytest.mark.parametrize("status, ok", [(404, True), (500, False)])
+def test_an_older_event_that_is_gone_is_skipped_and_one_that_fails_is_recorded(graph, status, ok):
+    graph.events = [graph_event("OLD-1")]
+    c = collector()
+    events, *_ = sh.collect(_Health([], refuse={"/OLD-1": azure_rest.ArmError(status, "Code", "x")}), "s1", NOW, 180, c)
+    assert (events, c.ok) == ([], ok)
+
+
+def test_a_failed_event_list_is_recorded_and_leaves_every_count_unknown(graph):
     client = _Health([], refuse={"/events": azure_rest.ArmError(403, "AuthorizationFailed", "no")})
     c = collector()
-    assert sh.collect(client, "s1", NOW, 90, c) == ([], False, None)
-    assert not c.ok
+    assert sh.collect(client, "s1", NOW, 180, c) == ([], False, None, False)
+    assert not c.ok and graph.queries == []
 
 
 @pytest.fixture
@@ -316,43 +386,48 @@ def fixed_now(monkeypatch):
     monkeypatch.setattr(sh, "datetime", SimpleNamespace(now=lambda tz=None: NOW))
 
 
-def test_collect_subscription_writes_scope_fields_and_registration(monkeypatch, fixed_now):
+def test_collect_subscription_writes_scope_fields_and_registration(monkeypatch, fixed_now, graph):
     monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:rg-data")
     monkeypatch.setattr(sh, "provider_registration_status", lambda *a: azure_common.REGISTERED)
-    client = _Health([raw_event("HA-1"), raw_event("HA-2")],
-                     resources={"HA-1": [raw_resource()], "HA-2": [raw_resource(DB)]})
-    results, summary = sh.collect_subscription(client, "s1", collector())
+    graph.impacted = [graph_resource("HA-1"), graph_resource("HA-2", DB)]
+    results, summary = sh.collect_subscription(_Health([raw_event("HA-1"), raw_event("HA-2")]), "s1", collector())
     assert [e["tracking_id"] for e in results["events"]] == ["HA-1"]
     assert (results["query_start"], results["provider_registration_status"], len(results["limitations"])) == (
-        "8/3/2026", azure_common.REGISTERED, 5)
-    assert {k: summary[k] for k in ("events", "impacted_resources", "excluded_events", "excluded_impacted_resources",
-                                    "resource_exclusion_patterns", "resource_exclusion_patterns_unmatched")} == {
-        "events": 1, "impacted_resources": 1, "excluded_events": 1, "excluded_impacted_resources": 1,
-        "resource_exclusion_patterns": ["rg:rg-data"], "resource_exclusion_patterns_unmatched": []}
+        "5/5/2026", azure_common.REGISTERED, 5)
+    assert {k: summary[k] for k in ("events", "events_from_resource_graph", "impacted_resources", "excluded_events",
+                                    "excluded_impacted_resources", "resource_exclusion_patterns",
+                                    "resource_exclusion_patterns_unmatched")} == {
+        "events": 1, "events_from_resource_graph": 0, "impacted_resources": 1, "excluded_events": 1,
+        "excluded_impacted_resources": 1, "resource_exclusion_patterns": ["rg:rg-data"],
+        "resource_exclusion_patterns_unmatched": []}
 
 
-def test_collect_subscription_leaves_exclusion_counts_unknown_when_nothing_was_read(monkeypatch, fixed_now):
+def test_collect_subscription_leaves_exclusion_counts_unknown_when_nothing_was_read(monkeypatch, fixed_now, graph):
     monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "bad-pattern")
     monkeypatch.setattr(sh, "provider_registration_status", lambda *a: azure_common.REGISTRATION_UNKNOWN)
     c = collector()
     _, summary = sh.collect_subscription(
         _Health([], refuse={"/events": azure_rest.ArmError(500, "Internal", "x")}), "s1", c)
-    assert (summary["excluded_events"], summary["excluded_impacted_resources"], summary["events"]) == (None, None, None)
+    assert (summary["excluded_events"], summary["excluded_impacted_resources"], summary["events"],
+            summary["events_from_resource_graph"]) == (None, None, None, None)
     assert {f["operation"] for f in c.failures} == {"config AZURE_RESOURCE_EXCLUSIONS", "resourceHealth.events.list"}
 
 
-def test_lookback_days_comes_from_the_environment(monkeypatch, fixed_now):
-    monkeypatch.setenv(sh.LOOKBACK_ENV, "365")
+@pytest.mark.parametrize("requested, used, start", [(30, 30, "10/2/2026"), (365, 180, "5/5/2026")])
+def test_lookback_days_comes_from_the_environment_and_stops_at_what_the_list_serves(
+        monkeypatch, fixed_now, graph, requested, used, start):
+    monkeypatch.setenv(sh.LOOKBACK_ENV, str(requested))
     monkeypatch.setattr(sh, "provider_registration_status", lambda *a: azure_common.REGISTERED)
-    seen = {}
+    results, summary = sh.collect_subscription(_Health([], window=start), "s1", collector())
+    assert (results["lookback_days"], results["lookback_days_requested"], summary["lookback_days"]) == (
+        used, requested, used)
 
-    class _Window(_Health):
-        def list(self, path, api_version, params=None):
-            seen.update(params or {})
-            return []
 
-    results, summary = sh.collect_subscription(_Window([]), "s1", collector())
-    assert (seen, results["lookback_days"], summary["lookback_days"]) == ({"queryStartTime": "11/1/2025"}, 365, 365)
+def test_lookback_defaults_to_the_longest_window_the_list_serves(monkeypatch, fixed_now, graph):
+    monkeypatch.delenv(sh.LOOKBACK_ENV, raising=False)
+    monkeypatch.setattr(sh, "provider_registration_status", lambda *a: azure_common.REGISTERED)
+    results, _ = sh.collect_subscription(_Health([]), "s1", collector())
+    assert (results["lookback_days"], results["lookback_days_requested"]) == (180, 180)
 
 
 # --- shared client: POST list actions ---
