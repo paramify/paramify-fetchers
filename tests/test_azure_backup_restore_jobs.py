@@ -252,7 +252,7 @@ def test_a_restore_whose_workload_form_is_unknown_keeps_its_text_and_is_counted_
 
 # --- end to end ---
 
-def _run(monkeypatch, tmp_path, list_jobs, get_details, recovery_client=None):
+def _run(monkeypatch, tmp_path, list_jobs, get_details, recovery_client=None, window="90"):
     vault = ns(id=VAULT, name="rsv-a", location="regionwest", properties=ns())
     client = ns(backup_policies=ns(list=lambda **_: []), backup_protected_items=ns(list=lambda **_: []),
                 backup_jobs=ns(list=list_jobs), job_details=ns(get=get_details))
@@ -266,7 +266,8 @@ def _run(monkeypatch, tmp_path, list_jobs, get_details, recovery_client=None):
     monkeypatch.setattr(backup, "provider_registration_status", lambda *a: "registered")
     monkeypatch.setattr(backup, "utc_now", lambda: NOW)
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
-    monkeypatch.setenv(backup.RESTORE_WINDOW_ENV, "90")
+    monkeypatch.setenv(backup.RESTORE_WINDOW_ENV, window)
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
     monkeypatch.delenv("AZURE_RESOURCE_EXCLUSIONS", raising=False)
     code = backup.main()
     return code, json.loads((tmp_path / "azure_backup_recovery_status_s1.json").read_text())
@@ -285,6 +286,23 @@ def test_main_reports_restore_jobs_with_their_details(monkeypatch, tmp_path):
     assert [(j["name"], j["recovery_point_age_hours"]) for j in vault["restore_jobs"]] == [("j1", 6.0)]
     assert (evidence["summary"]["restore_job_window_days"], evidence["summary"]["total_restore_jobs"],
             evidence["summary"]["in_scope_restore_jobs"], evidence["summary"]["excluded_restore_jobs"]) == (90, 1, 1, 0)
+
+
+@pytest.mark.parametrize("window, used, requested, code, slices", [
+    ("9O", 365, "9O", 1, 13), ("0", 365, 0, 1, 13), ("3650", 365, 3650, 0, 13), ("60", 60, 60, 0, 2),
+])
+def test_main_records_a_bad_window_as_bad_config_and_keeps_the_value_asked_for(
+        monkeypatch, tmp_path, window, used, requested, code, slices):
+    filters = []
+    returned, evidence = _run(monkeypatch, tmp_path, lambda **kw: filters.append(kw["filter"]) or [],
+                              lambda **_: pytest.fail("no job to read"), window=window)
+    assert (returned, len(filters)) == (code, slices)
+    assert (evidence["summary"]["restore_job_window_days"],
+            evidence["results"]["restore_job_window_days_requested"]) == (used, requested)
+    if code:
+        status = json.loads((tmp_path / "status.json").read_text())
+        assert status["code"] == "bad_config" and backup.RESTORE_WINDOW_ENV in status["error"]
+        assert [f["operation"] for f in evidence["metadata"]["api_failures"]] == [f"config {backup.RESTORE_WINDOW_ENV}"]
 
 
 def test_main_fails_and_reports_null_when_the_job_list_is_refused(monkeypatch, tmp_path):

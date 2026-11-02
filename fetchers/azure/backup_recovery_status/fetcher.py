@@ -45,7 +45,7 @@ from azure_common import (  # noqa: E402
     sorted_counts,
     write_evidence,
 )
-from azure_rest import int_config, parse_time  # noqa: E402
+from azure_rest import bounded_int_config, parse_time  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 
@@ -57,6 +57,8 @@ MINIMUM_RETENTION_DAYS = 30
 
 RESTORE_WINDOW_ENV = "AZURE_BACKUP_RESTORE_WINDOW_DAYS"
 DEFAULT_RESTORE_WINDOW_DAYS = 365
+# A cap, so a mistyped window can't page years of 30-day slices per vault for history Azure has likely dropped.
+MAX_RESTORE_WINDOW_DAYS = 365
 # Azure PowerShell refuses job queries spanning more than 30 days, so the window is read in slices.
 JOB_QUERY_SLICE_DAYS = 30
 # The $filter date format az backup job list sends.
@@ -908,7 +910,8 @@ def main() -> int:
     listed = False
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
-    restore_window_days = int_config(RESTORE_WINDOW_ENV, DEFAULT_RESTORE_WINDOW_DAYS)
+    restore_window_days, restore_window_requested = bounded_int_config(
+        collector, RESTORE_WINDOW_ENV, DEFAULT_RESTORE_WINDOW_DAYS, MAX_RESTORE_WINDOW_DAYS)
     now = utc_now()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
@@ -947,6 +950,7 @@ def main() -> int:
         results={
             "recovery_services_vaults": vaults,
             "provider_registration_status": registration,
+            "restore_job_window_days_requested": restore_window_requested,
             "excluded": excluded,
         },
         summary={

@@ -377,8 +377,8 @@ def test_backup_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, t
     collector = Collector(logging.getLogger("test_exclusions_data"))
     vaults = backup.read_restore_job_details(
         "s1", object(), collector, backup.collect_vaults("s1", object(), collector, restore_window_days=30, now=NOW))
-    assert evidence["results"] == _json({"recovery_services_vaults": vaults,
-                                         "provider_registration_status": "registered", "excluded": []})
+    assert evidence["results"] == _json({"recovery_services_vaults": vaults, "provider_registration_status": "registered",
+                                         "restore_job_window_days_requested": 30, "excluded": []})
     assert evidence["summary"] == _json({**backup.summarize(vaults), **backup.summarize_restores(vaults, 30, NOW),
                                          "provider_registration_status": "registered",
                                          **_no_exclusions(recovery_services_vault=4, protected_item=5, restore_job=5)})
