@@ -69,8 +69,7 @@ FAILED_JOB_STATUS = "failed"
 RECOVERY_POINT_TIME_KEYS = ("recoverypointtime", "recoverypointtimeinutc")
 RESTORE_TYPE_KEYS = ("jobtype", "restoretype")
 RESTORE_TARGET_KEYS = ("restoredestination",)
-# The recovery point time in UTC by the job's workload: day first in 24-hour form (SQL in a VM), month first with
-# AM/PM (Azure Files). Other workloads read only ISO 8601 until a real sample shows their form.
+# By job workload: SQL in a VM writes day first in 24-hour form, Azure Files month first with AM/PM; others ISO only.
 RECOVERY_POINT_TIME_FORMATS = {
     "sqldatabase": ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"),
     "azurefileshare": ("%m/%d/%Y %I:%M:%S %p",),
