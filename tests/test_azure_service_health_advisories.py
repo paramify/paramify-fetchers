@@ -128,6 +128,17 @@ def test_microsofts_unset_time_reads_as_none():
     assert sh.stamp("2026-10-01T00:00:00Z") == "2026-10-01T00:00:00Z"
 
 
+def test_an_update_with_microsofts_unset_time_is_not_published_or_latest():
+    record = sh.event_record(raw_event(updates=[update("0001-01-01T00:00:00", "Unset"),
+                                                update("2026-10-04T00:00:00Z", "Real")]), NOW)
+    assert (record["published_at"], record["latest_update"], record["update_count"]) == (
+        "2026-10-04T00:00:00Z", {"at": "2026-10-04T00:00:00Z", "summary": "Real"}, 2)
+    assert sh.event_record(raw_event(updates=[update("0001-01-01T00:00:00")]), NOW)["published_at"] is None
+    resource = sh.impacted_record(raw_resource(maintenanceStartTime="0001-01-01T00:00:00",
+                                               maintenanceEndTime="2026-11-05T02:00:00Z"))
+    assert (resource["maintenance_start_time"], resource["maintenance_end_time"]) == (None, "2026-11-05T02:00:00Z")
+
+
 def test_impacted_resource_projection_derives_name_and_group_from_the_id():
     record = sh.impacted_record(raw_resource())
     assert record == {"resource_id": APP, "resource_type": "microsoft.web/sites", "resource_name": "app1",
@@ -185,7 +196,7 @@ def test_summary_counts_open_events_by_kind_and_the_resources_they_name():
     ]
     summary = sh.summarize(events, True, 2, 90)
     assert summary == {
-        "lookback_days": 90, "events": 5, "events_from_resource_graph": 0,
+        "lookback_days": 90, "events": 5, "events_from_resource_graph": 0, "events_in_resource_graph_not_found": 0,
         "events_by_type": {"HealthAdvisory": 1, "PlannedMaintenance": 1, "RCA": 1, "SecurityAdvisory": 1,
                            "ServiceIssue": 1},
         "events_by_status": {"Active": 4, "Resolved": 1},
@@ -227,7 +238,7 @@ class _Health:
     def __init__(self, events, by_id=None, resources=None, details=None, refuse=None, window="5/5/2026"):
         self.events, self.by_id, self.resources = events, by_id or {}, resources or {}
         self.details, self.refuse, self.window = details or {}, refuse or {}, window
-        self.calls, self.cred = [], None
+        self.calls, self.cred, self.get_params = [], None, {}
 
     def _answer(self, method, path):
         self.calls.append((method, path.split("/events", 1)[1] or "/"))
@@ -241,8 +252,10 @@ class _Health:
         assert params == {"queryStartTime": self.window}
         return self.events
 
-    def get(self, path, api_version):
+    def get(self, path, api_version, params=None):
+        self.get_params[path.split("/")[-1]] = params
         self._answer("GET", path)
+        assert api_version == sh.API and set(params or {}) == {"queryStartTime"}
         return self.by_id[path.split("/")[-1]]
 
     def post(self, path, api_version):
@@ -254,8 +267,8 @@ class _Health:
         return self.resources.get(path.split("/")[-2], [])
 
 
-def graph_event(tid):
-    return {"id": f"{SUB}/providers/Microsoft.ResourceHealth/events/{tid}"}
+def graph_event(tid, last="2026-01-10T08:00:00Z"):
+    return {"id": f"{SUB}/providers/Microsoft.ResourceHealth/events/{tid}", "lastUpdateTime": last}
 
 
 def graph_resource(tid, rid=APP, **kwargs):
@@ -308,8 +321,9 @@ def test_collect_joins_the_window_resource_graph_and_each_events_own_reads(graph
         details={"SA-1": {"properties": details["properties"]}},
     )
     c = collector()
-    events, read, billing, graph_read = sh.collect(client, "s1", NOW, 180, c)
-    assert (read, billing, graph_read, c.ok) == (True, 2, True, True)
+    events, read, billing, graph_read, not_found = sh.collect(client, "s1", NOW, 180, c)
+    assert (read, billing, graph_read, not_found, c.ok) == (True, 2, True, 0, True)
+    assert client.get_params == {"OLD-1": {"queryStartTime": "1/9/2026"}, "OLD-BILL": {"queryStartTime": "1/9/2026"}}
     assert sorted(client.calls) == sorted([
         ("GET", "/"), ("GET", "/OLD-1"), ("GET", "/OLD-BILL"), ("POST", "/SA-1/fetchEventDetails"),
         ("POST", "/SA-1/listSecurityAdvisoryImpactedResources")])
@@ -329,7 +343,7 @@ def test_refused_advisory_details_and_resources_are_unknown_not_a_failure(graph)
                 "/listSecurityAdvisoryImpactedResources": azure_rest.ArmError(403, "AuthorizationFailed", "no")},
     )
     c = collector()
-    events, read, _, _ = sh.collect(client, "s1", NOW, 180, c)
+    events, read, *_ = sh.collect(client, "s1", NOW, 180, c)
     sa = next(e for e in events if e["tracking_id"] == "SA-1")
     assert (c.ok, sa["details_status"], sa["impacted_resources_status"], sa["impacted_resources"]) == (
         True, sh.NOT_AUTHORIZED, sh.NOT_AUTHORIZED, None)
@@ -341,7 +355,7 @@ def test_an_advisory_resource_list_that_is_missing_reads_none_and_one_that_fails
     client = _Health([raw_event("SA-1", event_type="SecurityAdvisory")],
                      refuse={"/listSecurityAdvisoryImpactedResources": azure_rest.ArmError(status, "Code", "x")})
     c = collector()
-    [ev], _, _, _ = sh.collect(client, "s1", NOW, 180, c)
+    [ev], *_ = sh.collect(client, "s1", NOW, 180, c)
     assert (c.ok, ev["impacted_resources_status"], ev["impacted_resources"]) == (
         ok, outcome, [] if outcome == sh.NOT_FOUND else None)
 
@@ -350,7 +364,7 @@ def test_a_failed_resource_graph_read_leaves_impacted_resources_unknown(graph):
     graph.impacted = azure_rest.ArmError(500, "Internal", "x")
     client = _Health([raw_event("HA-1"), raw_event("SI-1", event_type="ServiceIssue")])
     c = collector()
-    events, read, billing, graph_read = sh.collect(client, "s1", NOW, 180, c)
+    events, read, billing, graph_read, _ = sh.collect(client, "s1", NOW, 180, c)
     assert [f["operation"] for f in c.failures] == ["resourcegraph.resources (Service Health impacted resources)"]
     assert {e["impacted_resources_status"] for e in events} == {sh.ERROR}
     summary = sh.summarize(events, read, billing, 180, graph_read)
@@ -361,23 +375,35 @@ def test_a_failed_resource_graph_read_leaves_impacted_resources_unknown(graph):
 def test_a_failed_resource_graph_event_read_leaves_older_events_unknown(graph):
     graph.events = azure_rest.ArmError(403, "AuthorizationFailed", "no")
     c = collector()
-    events, read, billing, graph_read = sh.collect(_Health([raw_event("HA-1")]), "s1", NOW, 180, c)
-    assert (len(events), graph_read, c.ok) == (1, False, False)
-    assert sh.summarize(events, read, billing, 180, graph_read)["events_from_resource_graph"] is None
+    events, read, billing, graph_read, not_found = sh.collect(_Health([raw_event("HA-1")]), "s1", NOW, 180, c)
+    assert (len(events), graph_read, not_found, c.ok) == (1, False, None, False)
+    summary = sh.summarize(events, read, billing, 180, graph_read, not_found)
+    assert (summary["events_from_resource_graph"], summary["events_in_resource_graph_not_found"]) == (None, None)
 
 
-@pytest.mark.parametrize("status, ok", [(404, True), (500, False)])
-def test_an_older_event_that_is_gone_is_skipped_and_one_that_fails_is_recorded(graph, status, ok):
+@pytest.mark.parametrize("status, not_found, ok", [(404, 1, True), (500, 0, False)])
+def test_an_older_event_the_api_cannot_find_is_counted_and_one_that_fails_is_recorded(graph, status, not_found, ok):
     graph.events = [graph_event("OLD-1")]
     c = collector()
-    events, *_ = sh.collect(_Health([], refuse={"/OLD-1": azure_rest.ArmError(status, "Code", "x")}), "s1", NOW, 180, c)
-    assert (events, c.ok) == ([], ok)
+    client = _Health([], refuse={"/OLD-1": azure_rest.ArmError(status, "Code", "x")})
+    events, read, billing, graph_read, missed = sh.collect(client, "s1", NOW, 180, c)
+    assert (events, missed, c.ok) == ([], not_found, ok)
+    assert sh.summarize(events, read, billing, 180, graph_read, missed)["events_in_resource_graph_not_found"] == not_found
+
+
+@pytest.mark.parametrize("last, start", [(None, "5/4/2026"), ("0001-01-01T00:00:00", "5/4/2026"),
+                                         ("2025-12-31T23:00:00Z", "12/30/2025")])
+def test_an_older_event_is_read_from_the_day_before_its_last_update_or_the_window(graph, last, start):
+    graph.events = [graph_event("OLD-1", last)]
+    client = _Health([], by_id={"OLD-1": raw_event("OLD-1")})
+    events, *_ = sh.collect(client, "s1", NOW, 180, collector())
+    assert ([e["listed_by"] for e in events], client.get_params) == (["resource_graph"], {"OLD-1": {"queryStartTime": start}})
 
 
 def test_a_failed_event_list_is_recorded_and_leaves_every_count_unknown(graph):
     client = _Health([], refuse={"/events": azure_rest.ArmError(403, "AuthorizationFailed", "no")})
     c = collector()
-    assert sh.collect(client, "s1", NOW, 180, c) == ([], False, None, False)
+    assert sh.collect(client, "s1", NOW, 180, c) == ([], False, None, False, None)
     assert not c.ok and graph.queries == []
 
 
@@ -400,6 +426,15 @@ def test_collect_subscription_writes_scope_fields_and_registration(monkeypatch, 
         "events": 1, "events_from_resource_graph": 0, "impacted_resources": 1, "excluded_events": 1,
         "excluded_impacted_resources": 1, "resource_exclusion_patterns": ["rg:rg-data"],
         "resource_exclusion_patterns_unmatched": []}
+
+
+def test_an_excluded_resource_named_by_two_events_counts_once(monkeypatch, fixed_now, graph):
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:rg-data")
+    monkeypatch.setattr(sh, "provider_registration_status", lambda *a: azure_common.REGISTERED)
+    graph.impacted = [graph_resource("HA-1", DB), graph_resource("HA-1"), graph_resource("HA-2", DB.upper())]
+    results, summary = sh.collect_subscription(_Health([raw_event("HA-1"), raw_event("HA-2")]), "s1", collector())
+    assert len([x for x in results["excluded"] if x["kind"] == sh.RESOURCE_KIND]) == 2
+    assert (summary["excluded_impacted_resources"], summary["excluded_events"]) == (1, 1)
 
 
 def test_collect_subscription_leaves_exclusion_counts_unknown_when_nothing_was_read(monkeypatch, fixed_now, graph):

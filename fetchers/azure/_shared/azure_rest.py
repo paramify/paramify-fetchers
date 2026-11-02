@@ -156,8 +156,8 @@ class AzureRestClient:
             raise ArmError(response.status_code, *_error_parts(response))
         return response.json()
 
-    def get(self, path: str, api_version: str) -> Dict[str, Any]:
-        return self._get(f"{self.arm}{path}", {"api-version": api_version})
+    def get(self, path: str, api_version: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        return self._get(f"{self.arm}{path}", {"api-version": api_version, **(params or {})})
 
     def list(self, path: str, api_version: str, params: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
         """Every page: ARM documents no page size for these lists, so stopping early truncates silently."""

@@ -74,6 +74,7 @@ otherwise.
 | Reader on other subscriptions (optional) | `azure_alert_rules` and `azure_activity_log_alerts` (action groups), `azure_app_gateway_waf` (WAF policies), `azure_vnet_egress_routing` (Virtual WAN hubs), `azure_sentinel_playbooks` (Logic Apps an automation rule runs) | That reference reads unresolved; the run succeeds |
 | Reader or Microsoft Sentinel Reader on the workspaces Entra logs are sent to (optional) | `azure_entra_diagnostic_settings` | That category's `to_sentinel_workspace` reads null, with a note; the run succeeds |
 | Reader on the management group (optional) | `azure_policy_assignments` | Management-group custom definitions read `unavailable`; the run succeeds |
+| A custom role with `Microsoft.ResourceHealth/events/fetchEventDetails/action` and `Microsoft.ResourceHealth/events/listSecurityAdvisoryImpactedResources/action` (optional) | `azure_service_health_advisories` | A sensitive event's summary and updates, and the resources a security advisory names, read `not_authorized`; the run succeeds |
 
 Reader also covers the Sentinel fetchers' ARM reads. Microsoft Sentinel Reader on the
 workspace is the narrower alternative. The Defender fetchers accept Security Reader
@@ -293,6 +294,7 @@ Logging and monitoring:
 | `azure_alert_rules` | Metric, log search and smart detector alert rules, resolved to the receivers they notify and checked against suppression rules |
 | `azure_activity_log_alerts` | Activity log alert rules and which security-relevant control-plane operations they cover |
 | `azure_monitor_fired_alerts` | Alerts fired in the last 30 days, who acknowledged and closed each and when, and how often each alert rule fired |
+| `azure_service_health_advisories` | Microsoft Service Health events over the last 180 days plus older ones Resource Graph still holds: service issues, planned maintenance, health advisories (retirements included) and security advisories, with status, level, recommended actions and the resources each names |
 
 Microsoft Sentinel:
 
