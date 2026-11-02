@@ -14,7 +14,8 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
   Unhealthy assessment reports `days_open` (from `status_change_date`, null when
-  missing), its `sla_days` and `past_sla`. SLA days per severity come from
+  missing; it starts again at 0 when a finding turns Healthy and then Unhealthy
+  again), its `sla_days` and `past_sla`. SLA days per severity come from
   `sla_days_high` / `sla_days_medium` / `sla_days_low` (`AZURE_DEFENDER_SLA_DAYS_*`,
   default 30 / 90 / 180; an invalid value fails the run as `bad_config` and has no
   default fallback). The summary adds `sla_days_by_severity`,

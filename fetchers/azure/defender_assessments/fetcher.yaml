@@ -130,9 +130,11 @@ evidence_set:
     patterns took out; no other count includes them) and in_scope_assessments (how
     many stayed, the same as total_assessments).
     Each Unhealthy record carries days_open (whole days from status_change_date to
-    the run, null when that date is missing), sla_days (its severity's limit, null
-    when the severity is unknown) and past_sla (days_open above sla_days, null when
-    either is null); other records carry null for all three. The summary gives
+    the run, null when that date is missing; status_change_date is when the status
+    last changed, so a finding that turns Healthy and then Unhealthy again starts
+    again at 0), sla_days (its severity's limit, null when the severity is unknown)
+    and past_sla (days_open above sla_days, null when either is null); other records
+    carry null for all three. The summary gives
     sla_days_by_severity, unhealthy_past_sla_by_severity and unhealthy_past_sla_count
     (a severity's count is null when the assessment list or the Resource Graph
     severity read failed, that severity's SLA days are invalid, or one of its
