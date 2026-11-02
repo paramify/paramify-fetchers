@@ -117,7 +117,9 @@ evidence_set:
     `total_failovers`, `failover_group_failovers`,
     `forced_failovers_allowing_data_loss`, `managed_instance_failovers`,
     `succeeded_failovers`, `failed_failovers`,
-    `failover_groups_with_succeeded_failover`, `latest_succeeded_failover_time`,
+    `failover_groups_with_succeeded_failover` (distinct `failover_group_id`s, or
+    resource group and name for a group no longer listed, since two groups in
+    different resource groups can share a name), `latest_succeeded_failover_time`,
     `days_since_latest_succeeded_failover` and
     `longest_succeeded_failover_minutes` (compare with the recovery time
     objective).

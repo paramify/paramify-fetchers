@@ -84,13 +84,26 @@ def _group(rg, policy="Manual"):
 def test_failovers_join_their_group_by_resource_group_and_name():
     dev, prod = _group("rg-dev"), _group("rg-prod", policy="Automatic")
     # Sent to the region taking over, so the event names the group's other regional view.
-    records = backups.failover_records([_event(prod["regional_views"][1]["id"], "Succeeded", 0)])
+    records = backups.failover_records([_event(prod["regional_views"][1]["id"], "Succeeded", 0, "c1"),
+                                        _event(dev["id"], "Succeeded", 30, "c2")])
     kept, dropped = backups.attach_failovers(records, [], [dev, prod], [], None)
     assert dropped == []
     assert [(f["failover_group_id"], f["failover_policy"], f["target_found"]) for f in kept] == [
-        (prod["id"], "Automatic", True)]
+        (dev["id"], "Manual", True), (prod["id"], "Automatic", True)]
     assert [(g["failovers_in_window"], g["succeeded_failovers_in_window"])
-            for g in (backups.group_failover_fields(g, kept) for g in (dev, prod))] == [(0, 0), (1, 1)]
+            for g in (backups.group_failover_fields(g, kept) for g in (dev, prod))] == [(1, 1), (1, 1)]
+    # Two groups share the name fog-a; the summary counts each.
+    assert backups.summarize_failovers(kept, {"days": 90}, NOW)["failover_groups_with_succeeded_failover"] == 2
+
+
+def test_unlisted_groups_count_apart_by_resource_group_and_name():
+    events = [_event(f"/subscriptions/s1/resourceGroups/{rg}/providers/Microsoft.Sql/locations/{region}/"
+                     f"instanceFailoverGroups/fog-a", "Succeeded", minute, correlation)
+              for rg, region, minute, correlation in (("rg-x", "regionwest", 0, "c1"), ("rg-x", "regioneast", 30, "c2"),
+                                                     ("rg-y", "regionwest", 60, "c3"))]
+    kept, _ = backups.attach_failovers(backups.failover_records(events), [], [], [], None)
+    assert [f["failover_group_id"] for f in kept] == [None] * 3
+    assert backups.summarize_failovers(kept, {"days": 90}, NOW)["failover_groups_with_succeeded_failover"] == 2
 
 
 def test_a_failover_from_an_unlisted_resource_group_joins_by_name_only_when_one_group_has_it():

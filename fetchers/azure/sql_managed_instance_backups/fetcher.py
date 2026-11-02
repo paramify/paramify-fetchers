@@ -419,6 +419,13 @@ def group_failover_fields(group: dict, failovers: list[dict] | None) -> dict:
     }
 
 
+def _failover_group_key(failover: dict):
+    """The group a failover moved: its listed id, else the resource group and name, since a name is unique per DNS zone."""
+    if failover.get("failover_group_id"):
+        return lower(failover["failover_group_id"])
+    return lower(resource_group_from_id(failover.get("resource_id"))), lower(failover.get("failover_group"))
+
+
 def summarize_failovers(failovers: list[dict] | None, window: dict, now: datetime) -> dict:
     """Failover counts over the window; all but the window fields are null when the history wasn't read in full."""
     read = failovers is not None
@@ -434,7 +441,7 @@ def summarize_failovers(failovers: list[dict] | None, window: dict, now: datetim
         "succeeded_failovers": len(succeeded),
         "failed_failovers": sum(1 for f in failovers if lower(f["status"]) == "failed"),
         "failover_groups_with_succeeded_failover": len(
-            {lower(f["failover_group"]) for f in succeeded if f["kind"] == "failover_group"}),
+            {_failover_group_key(f) for f in succeeded if f["kind"] == "failover_group"}),
         "latest_succeeded_failover_time": latest,
         "days_since_latest_succeeded_failover": round(
             (now - datetime.fromisoformat(latest.replace("Z", "+00:00"))).total_seconds() / 86400, 1) if latest else None,

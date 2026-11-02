@@ -545,7 +545,8 @@ schemas and the `paramify` CLI — not the internal code.
   (`failover_group_id`, matched by resource group and name) with its policy.
   Each failover group gains its failover count and newest succeeded failover. The
   summary adds total, group, forced, instance, succeeded and failed failovers,
-  groups with a succeeded failover, the newest succeeded failover and days since
+  groups with a succeeded failover (by group id, so groups sharing a name in
+  different resource groups count apart), the newest succeeded failover and days since
   it, and the longest succeeded failover in minutes; each is null, not 0, when
   the Activity Log wasn't read in full. A failover follows its failover group or
   instance out of scope under `resource_exclusions`. Also maps to KSI-RPL-RRO
