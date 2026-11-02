@@ -20,6 +20,7 @@ from textual.widgets import Button, Input, Static
 
 from framework import api
 from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
+from framework.paramify_auth import resolve_upload_token
 from framework.tui import kinds, palette, render
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
@@ -32,6 +33,9 @@ from framework.tui.modals import (
     PreviewModal,
     TargetsModal,
 )
+
+APPROVALS = ("MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION")
+NO_REQUESTS = ("refuse", "evidence")
 
 
 def _cell(value) -> str:
@@ -74,6 +78,8 @@ class ManifestPage(ButtonRowNav, Vertical):
             # select_on_focus off: Textual selects the whole value on focus, so
             # the first keystroke replaced the existing path wholesale.
             yield Input(placeholder="./evidence", id="manifest-output-dir", select_on_focus=False)
+            yield Static("stack:", classes="inline-label")
+            yield Button("—", id="manifest-stack")
             yield Button("Add fetcher", variant="primary", id="btn-add")
             yield Button("Save", id="btn-save")
         with Horizontal(id="manifest-body"):
@@ -140,6 +146,8 @@ class ManifestPage(ButtonRowNav, Vertical):
         odi = self.query_one("#manifest-output-dir", Input)
         if odi.value != out:
             odi.value = out
+
+        self.query_one("#manifest-stack", Button).label = self._stack_label()
 
         descriptors = self._descriptors()
         entries = self._entries()
@@ -334,6 +342,77 @@ class ManifestPage(ButtonRowNav, Vertical):
         self.notify("Output dir updated.")
         self.rebuild()
 
+    def _stack_label(self) -> str:
+        block = self._run().get("paramify") or {}
+        return str(block.get("stack_name") or block.get("stack") or "—")
+
+    @on(Button.Pressed, "#manifest-stack")
+    def _on_stack(self) -> None:
+        self.action_pick_stack()
+
+    def action_pick_stack(self) -> None:
+        """Choose the Paramify stack uploads go to.
+
+        With a token the choice is a list read from the workspace (id and name
+        stored). Without one there is nothing to list, so the value is typed and
+        stored as the stack alone.
+        """
+        m = self._manifest
+        if m is None:
+            return
+        token, _ = resolve_upload_token()
+        if token:
+            self._pick_stack_online(m)
+        else:
+            self._type_stack(m)
+
+    @work(thread=True, exclusive=True, group="stacks")
+    def _pick_stack_online(self, m: dict) -> None:
+        try:
+            stacks = api.list_stacks(self.app.root_path)
+        except Exception as exc:
+            self.app.call_from_thread(self.notify, f"Could not list stacks: {exc}", severity="error")
+            return
+        self.app.call_from_thread(self._show_stack_picker, m, stacks)
+
+    def _show_stack_picker(self, m: dict, stacks: List[dict]) -> None:
+        names = {s["id"]: s["name"] for s in stacks}
+
+        def done(choice: Optional[str]) -> None:
+            if choice is None:
+                return
+            api.set_stack(m, choice, names.get(choice))
+            self._autosave()
+            self.notify("Stack updated.")
+            self.rebuild()
+
+        self.app.push_screen(
+            PickerModal("Paramify stack", [(s["id"], f"{s['name']}  ({s['id']})") for s in stacks]),
+            done,
+        )
+
+    def _type_stack(self, m: dict) -> None:
+        current = (self._run().get("paramify") or {}).get("stack") or ""
+        spec = {"key": "stack", "label": "stack", "kind": "text", "value": current,
+                "placeholder": "stack id or name", "required": False,
+                "help": "no API token: the value is stored as typed"}
+
+        def done(result: Optional[dict]) -> None:
+            if result is None:
+                return
+            value = (result.get("stack") or {}).get("stack")
+            if value and value != current:
+                api.set_stack(m, value)
+                self._autosave()
+                self.notify("Stack updated.")
+                self.rebuild()
+
+        self.app.push_screen(
+            FormModal("Paramify stack", {"stack": [spec]},
+                      subtitle="Set a token to pick from the workspace's stacks."),
+            done,
+        )
+
     @on(Button.Pressed, "#btn-add")
     def _on_btn_add(self) -> None:
         self.action_add_fetcher()
@@ -427,11 +506,16 @@ class ManifestPage(ButtonRowNav, Vertical):
             }
             for s in d.get("secrets", []) if not s.get("per_target")
         ]
-        if not config_specs and not secret_specs:
-            hint = " — press 't' to edit its targets" if d.get("supports_targets") else ""
-            self.notify(f"{use} has no entry-level config or secrets to edit{hint}.")
-            return
-        groups = {"config": config_specs, "secrets": secret_specs}
+        pf = entry.get("paramify") or {}
+        paramify_specs = [
+            {"key": "stack", "label": "stack", "kind": "text", "value": pf.get("stack"),
+             "placeholder": "inherit", "required": False, "help": "stack id or name; blank inherits"},
+            {"key": "approval", "label": "approval", "kind": "select", "value": pf.get("approval"),
+             "options": [(v, v) for v in APPROVALS], "required": False, "help": "blank inherits"},
+            {"key": "no_request", "label": "no_request", "kind": "select", "value": pf.get("no_request"),
+             "options": [(v, v) for v in NO_REQUESTS], "required": False, "help": "blank inherits"},
+        ]
+        groups = {"config": config_specs, "secrets": secret_specs, "paramify": paramify_specs}
 
         def done(result: Optional[dict]) -> None:
             if result is None:
@@ -440,6 +524,7 @@ class ManifestPage(ButtonRowNav, Vertical):
                 api.set_fetcher_config(m, use, k, v)
             for name, env in (result.get("secrets") or {}).items():
                 api.set_secret(m, use, name, env)
+            self._set_entry_paramify(use, result.get("paramify") or {})
             self._autosave()
             self.rebuild()
             self.notify(f"Updated {use}.")
@@ -460,6 +545,22 @@ class ManifestPage(ButtonRowNav, Vertical):
             FormModal(f"Edit {use} — entry config and secrets", groups, subtitle=subtitle),
             done,
         )
+
+    def _set_entry_paramify(self, use: str, values: dict) -> None:
+        """Write the entry's `paramify` block from the form; a blank field removes its key."""
+        entry = self._entry(use)
+        block = dict(entry.get("paramify") or {})
+        for key in ("stack", "approval", "no_request"):
+            if values.get(key):
+                block[key] = values[key]
+            else:
+                block.pop(key, None)
+        if block.get("stack") != (entry.get("paramify") or {}).get("stack"):
+            block.pop("stack_name", None)  # a name belongs to the id it was stored with
+        if block:
+            entry["paramify"] = block
+        else:
+            entry.pop("paramify", None)
 
     def action_edit_targets(self) -> None:
         """Open the fanout targets of the selected fetcher as an editable table.

@@ -5,7 +5,8 @@ A field spec is a plain dict:
     {
         "key":         str,          # the config/secret/target key
         "label":       str,          # display label (defaults to key)
-        "kind":        "text" | "int" | "bool" | "secret",
+        "kind":        "text" | "int" | "bool" | "secret" | "select",
+        "options":     [(label, value), ...]   # select only; blank is always allowed
         "value":       initial value (str/int/bool/None),
         "placeholder": str,          # e.g. a default or the suggested env var
         "required":    bool,
@@ -22,9 +23,12 @@ from typing import Any, Optional
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Input, Label, Switch
+from textual.widgets import Input, Label, Select, Switch
 
 from framework.secret_resolver import env_var_name
+
+# Select.BLANK was renamed Select.NULL; 8.0 only knows the old name.
+_NULL = getattr(Select, "NULL", getattr(Select, "BLANK", None))
 
 
 def env_name_from_ref(ref: Optional[str]) -> str:
@@ -68,6 +72,15 @@ class FieldRow(Vertical):
 
         if kind == "bool":
             yield Switch(value=bool(spec.get("value")), id="field-input")
+        elif kind == "select":
+            # Blank is a choice: it means "unset", and the caller drops the key.
+            yield Select(
+                [(label, val) for label, val in spec.get("options", [])],
+                value=spec.get("value") or _NULL,
+                prompt=spec.get("placeholder") or "inherit",
+                allow_blank=True,
+                id="field-input",
+            )
         else:
             value = spec.get("value")
             yield Input(
@@ -81,6 +94,9 @@ class FieldRow(Vertical):
         kind = self.spec.get("kind", "text")
         if kind == "bool":
             return self.query_one(Switch).value
+        if kind == "select":
+            value = self.query_one(Select).value
+            return None if value is _NULL or value == _NULL else value
         raw = self.query_one(Input).value.strip()
         if raw == "":
             return None
