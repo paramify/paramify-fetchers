@@ -63,7 +63,20 @@ def make(script, **kw):
     ("GET", "/evidence/x", 404, "", False, ErrorKind.MISSING),
     ("GET", "/evidence", 429, "", False, ErrorKind.TEMPORARY),
     ("GET", "/batches", 503, "", False, ErrorKind.TEMPORARY),
-    ("POST", "/evidence", 400, "", False, ErrorKind.FATAL),
+    # A refused write fails only its own action; a refused read still stops planning.
+    ("POST", "/evidence", 400, "", False, ErrorKind.REJECTED),
+    ("POST", "/batches", 422, "", False, ErrorKind.REJECTED),
+    ("PATCH", "/evidence/e", 405, "", False, ErrorKind.REJECTED),
+    ("POST", "/batches/b/submit", 415, "", False, ErrorKind.REJECTED),
+    ("POST", "/evidence", 403, "", False, ErrorKind.FATAL),
+    ("POST", "/evidence", 401, "", False, ErrorKind.FATAL),
+    ("GET", "/evidence", 400, "", False, ErrorKind.FATAL),
+    # Tags never break an upload: every refusal but a 401 is a warning.
+    ("POST", "/custom-tags/evidence/e", 422, "", False, ErrorKind.WARNING),
+    ("POST", "/custom-tags/evidence/e", 400, "", False, ErrorKind.WARNING),
+    ("POST", "/custom-tags/evidence/e", 404, "", False, ErrorKind.WARNING),
+    ("POST", "/custom-tags/evidence/e", 409, "", False, ErrorKind.WARNING),
+    ("POST", "/custom-tags/evidence/e", 401, "", False, ErrorKind.FATAL),
 ])
 def test_classify(method, path, status, body, upload, kind):
     assert classify(method, path, status, body, upload) is kind

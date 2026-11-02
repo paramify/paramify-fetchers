@@ -172,9 +172,12 @@ class EvidenceSetsProvider:
             try:
                 resources.add_tags(ENTITY_EVIDENCE, action.payload["evidence_id"], list(action.payload["tags"]))
             except ApiError as exc:
-                if exc.kind is not ErrorKind.WARNING:
+                if exc.fatal:  # a 401: nothing else in this run can succeed either
                     raise
-                self._tags_unavailable = True
-                return Outcome(action.id, "applied", message=TAGS_UNAVAILABLE)
+                if exc.kind is ErrorKind.WARNING and exc.status == 403:
+                    self._tags_unavailable = True
+                    return Outcome(action.id, "applied", message=TAGS_UNAVAILABLE)
+                # Tagging never breaks an upload: the set is delivered untagged.
+                return Outcome(action.id, "failed", message=f"tags not added: {exc.message}")
             return Outcome(action.id, "applied")
         return Outcome(action.id, "failed", message=f"unexpected verb {action.verb}")

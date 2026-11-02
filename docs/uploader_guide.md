@@ -173,6 +173,8 @@ existing set: it only adds tags to it.
 |---|---|
 | A temporary failure (429, 5xx, network) | The batch stays `OPEN` and the entry is `held`. Run the same upload again. It sends only the missing files, then submits. |
 | A permanent failure on one file (the production WAF, 413, another 4xx) | The upload drops that file, submits the rest, and names the dropped file. The entry is `delivered_with_drops`. |
+| The API refuses a write (400, 405, 415, 422) for one evidence set or batch | That set or entry fails, with the message from the API. The other entries still upload. Only a 401 or 403 stops the whole upload. |
+| The API refuses a tag | The upload sends the evidence without the tag and shows a warning. |
 
 A file that cannot be read, is not an envelope, or has no complete evidence set
 is an error. The upload names it and still sends the other files of the entry.

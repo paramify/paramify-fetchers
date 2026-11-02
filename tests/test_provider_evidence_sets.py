@@ -199,3 +199,25 @@ def test_other_tag_errors_fail_the_action(res, monkeypatch):
     monkeypatch.setattr(res, "add_tags", boom)
     _, outs = run(provider(), res, [entry()])
     assert outs[1].status == "failed"
+
+
+@pytest.mark.parametrize("kind,status", [
+    (ErrorKind.TEMPORARY, 500), (ErrorKind.WARNING, 422), (ErrorKind.REJECTED, 400), (ErrorKind.MISSING, 404),
+])
+def test_tag_errors_other_than_401_never_stop_the_run(res, monkeypatch, kind, status):
+    def boom(entity, entity_id, tags):
+        raise ApiError("bad", status=status, kind=kind, method="POST", path=f"/custom-tags/{entity}/{entity_id}")
+
+    monkeypatch.setattr(res, "add_tags", boom)
+    _, outs = run(provider(), res, [entry("a", "EVD-A"), entry("b", "EVD-B")])
+    assert [o.status for o in outs] == ["applied", "failed", "applied", "failed"]
+    assert outs[1].message.startswith("tags not added")
+
+
+def test_tag_401_stops_the_run(res, monkeypatch):
+    def boom(entity, entity_id, tags):
+        raise ApiError("no", status=401, kind=ErrorKind.FATAL, method="POST", path="/custom-tags/evidence/e")
+
+    monkeypatch.setattr(res, "add_tags", boom)
+    _, outs = run(provider(), res, [entry("a", "EVD-A"), entry("b", "EVD-B")])
+    assert [o.status for o in outs] == ["applied", "failed", "skipped", "skipped"]

@@ -23,6 +23,7 @@ class ErrorKind(str, Enum):
     MISSING = "missing"
     CONFLICT = "conflict"
     WARNING = "warning"
+    REJECTED = "rejected"  # a write the API refused: that action fails, the run goes on
 
 
 class ApiError(Exception):
@@ -49,12 +50,17 @@ class ApiError(Exception):
 
 
 def classify(method: str, path: str, status: int, body: str, is_upload: bool) -> ErrorKind:
-    """Map a failed response to an ErrorKind."""
+    """Map a failed response to an ErrorKind.
+
+    Only a 401, a 403 outside tags and uploads, and a refused read stop the
+    run. A refused write (400, 405, 415, 422, ...) fails its own action. A
+    tag write never breaks an upload, so its refusals are warnings.
+    """
     if status == 401:
         return ErrorKind.FATAL
+    if path.startswith("/custom-tags") and 400 <= status < 500 and status != 429:
+        return ErrorKind.WARNING
     if status == 403:
-        if path.startswith("/custom-tags"):
-            return ErrorKind.WARNING
         if is_upload and "requestId" not in body:
             # The production WAF rejects the file itself; it carries no requestId.
             return ErrorKind.PERMANENT
@@ -67,6 +73,8 @@ def classify(method: str, path: str, status: int, body: str, is_upload: bool) ->
         return ErrorKind.TEMPORARY
     if is_upload and 400 <= status < 500:
         return ErrorKind.PERMANENT
+    if method != "GET" and 400 <= status < 500:
+        return ErrorKind.REJECTED
     return ErrorKind.FATAL
 
 

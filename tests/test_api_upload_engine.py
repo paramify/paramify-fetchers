@@ -485,3 +485,33 @@ def test_a_decision_skip_still_leaves_ok_true(fake, root, tmp_path):
           [inv("x", ["a.json", "z.json"])])
     out = api.upload_run(run, root)
     assert (out["skipped_failed"], out["errors"], out["ok"]) == (1, 0, True)
+
+
+# ---- refused writes fail one action, not the run (Ruling 21) ----------------------
+
+def _two_sets(tmp_path: Path) -> Path:
+    run = tmp_path / "run-1"
+    run.mkdir()
+    return build(run, {"a.json": env(fetcher="x", ref="EVD-X"), "b.json": env(fetcher="y", ref="EVD-Y")},
+                 [inv("x", ["a.json"]), inv("y", ["b.json"], fetcher="y")],
+                 {"x": {"use": "x"}, "y": {"use": "y"}})
+
+
+def test_a_400_on_evidence_create_fails_only_that_set(fake, root, tmp_path):
+    fake.fail_route("POST", "/evidence", 400, "bad frequency", when={"referenceId": "EVD-X"})
+    out = api.upload_run(_two_sets(tmp_path), root)
+    by_id = {o["action_id"]: o for o in out["outcomes"]}
+    assert by_id["evidence_sets/EVD-X"]["status"] == "failed"
+    assert "HTTP 400" in by_id["evidence_sets/EVD-X"]["message"]
+    assert by_id["delivery/x"]["status"] == "skipped"
+    assert out["entries"]["x"]["state"] == "skipped"
+    assert out["entries"]["y"]["state"] == "delivered"
+    assert out["ok"] is False and out["uploaded"] == 1
+    assert len(submits(fake)) == 1
+
+
+def test_a_422_on_tags_is_a_warning_and_delivery_goes_on(fake, root, tmp_path):
+    fake.fail_route("POST", "/custom-tags/.*", 422, "bad tag name")
+    out = api.upload_run(two_files(tmp_path), root)
+    assert out["entries"]["x"]["state"] == "delivered" and out["ok"] is True
+    assert out["uploaded"] == 2 and out["tags"]["failed"] == 1

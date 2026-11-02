@@ -63,6 +63,7 @@ class FakeParamify:
         self._artifacts: List[Dict[str, Any]] = []
         self._fail_all: Dict[str, Tuple[int, str]] = {}
         self._fail_once: Dict[str, int] = {}
+        self._fail_routes: List[Tuple[str, str, int, str, Dict[str, Any]]] = []
         self._batches_enabled = True
         self._n: Dict[str, int] = {}
         self.duplicate_evidence_body = "Evidence already exists"
@@ -118,8 +119,32 @@ class FakeParamify:
     def without_batches(self) -> None:
         self._batches_enabled = False
 
+    def fail_route(self, method: str, path_regex: str, status: int, text: str = "",
+                   when: Optional[Dict[str, Any]] = None) -> None:
+        """Answer `status` to every `method` call on a path matching `path_regex`.
+
+        `when` limits it to JSON bodies that hold these key/value pairs.
+        """
+        self._fail_routes.append((method, path_regex, status, text, dict(when or {})))
+
+    def add_legacy_artifact(self, evidence_id: str, filename: str, note: str) -> Dict[str, Any]:
+        """An artifact the pre-batch uploader made (POST /evidence/{id}/artifacts/upload): no batch."""
+        row = {
+            "id": f"af-{self._next('af')}", "title": filename, "originalFileName": filename,
+            "pathname": f"/artifacts/{filename}", "note": note, "isUrl": False, "fileType": "json",
+            "createdAt": f"{self.today.isoformat()}T00:00:00Z", "createdBy": {},
+            "effectiveDate": self.today.isoformat(), "batchId": None, "validators": [],
+            "_evidenceId": evidence_id,
+        }
+        self._artifacts.append(row)
+        return row
+
     # ----- routing -------------------------------------------------------
     def _route(self, method: str, path: str, params: Dict[str, Any], body: Any, files: Any) -> FakeResponse:
+        for f_method, f_path, f_status, f_text, f_when in self._fail_routes:
+            if (f_method == method and re.fullmatch(f_path, path)
+                    and all((body or {}).get(k) == v for k, v in f_when.items())):
+                return FakeResponse(f_status, text=f_text)
         if path.startswith("/batches") and not self._batches_enabled:
             return FakeResponse(404, text="Not Found")
         if method == "GET" and path == "/stacks":
