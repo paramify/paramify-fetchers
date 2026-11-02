@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+UPLOAD_STATE_FILE = "_upload_state.json"
+UPLOAD_LOCK_FILE = "_upload.lock"
+
 RESERVED_RUN_FILES: frozenset[str] = frozenset(
-    {"_run_metadata.json", "upload_log.json", "_upload_state.json", "_upload.lock"}
+    {"_run_metadata.json", "upload_log.json", UPLOAD_STATE_FILE, UPLOAD_LOCK_FILE}
 )
 
 
