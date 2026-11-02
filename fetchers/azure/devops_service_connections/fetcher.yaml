@@ -66,7 +66,6 @@ secrets:
 
 ksis:
   - KSI-SVC-ASM      # pipeline secrets: federated or stored, Key Vault-backed variable groups and their expiry
-  - KSI-IAM-SNU      # non-user authentication from pipelines to Azure, and where it is used
 
 evidence_set:
   reference_id: EVD-AZURE-DEVOPS-SERVICE-CONNECTIONS
