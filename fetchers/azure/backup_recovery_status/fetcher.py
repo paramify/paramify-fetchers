@@ -67,8 +67,12 @@ FAILED_JOB_STATUS = "failed"
 RECOVERY_POINT_TIME_KEYS = ("recoverypointtime", "recoverypointtimeinutc")
 RESTORE_TYPE_KEYS = ("jobtype", "restoretype")
 RESTORE_TARGET_KEYS = ("restoredestination",)
-# The recovery point time in UTC: day first in 24-hour form (SQL in a VM), month first with AM/PM (Azure Files).
-RECOVERY_POINT_TIME_FORMATS = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%m/%d/%Y %I:%M:%S %p")
+# The recovery point time in UTC by the job's workload: day first in 24-hour form (SQL in a VM), month first with
+# AM/PM (Azure Files). Other workloads read only ISO 8601 until a real sample shows their form.
+RECOVERY_POINT_TIME_FORMATS = {
+    "sqldatabase": ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"),
+    "azurefileshare": ("%m/%d/%Y %I:%M:%S %p",),
+}
 _ISO_DURATION = re.compile(r"^P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$")
 _URL_QUERY = re.compile(r"(https?://[^\s?\"'<>]+)\?[^\s\"'<>]*", re.IGNORECASE)
 
@@ -573,14 +577,15 @@ def _bag_value(bag: dict, keys: tuple) -> str | None:
     return None
 
 
-def parse_recovery_point_time(text: str | None) -> datetime | None:
-    """The property bag's recovery point time in UTC: ISO-8601, or one of RECOVERY_POINT_TIME_FORMATS."""
+def parse_recovery_point_time(text: str | None, workload_type: str | None) -> datetime | None:
+    """The property bag's recovery point time in UTC: ISO-8601, or the form RECOVERY_POINT_TIME_FORMATS gives the
+    job's workload; None for any other text."""
     if not text:
         return None
     parsed = parse_time(text)
     if parsed is not None:
         return parsed
-    for fmt in RECOVERY_POINT_TIME_FORMATS:
+    for fmt in RECOVERY_POINT_TIME_FORMATS.get(str(workload_type or "").strip().lower(), ()):
         try:
             return datetime.strptime(text.strip(), fmt).replace(tzinfo=timezone.utc)
         except ValueError:
@@ -600,7 +605,7 @@ def restore_job_record(job: dict, bag: dict | None) -> dict:
     """One restore job joined to its details (`bag` None: the read failed); a recovery point after the start is null."""
     start = parse_time(job.get("start_time"))
     point_text = _bag_value(bag, RECOVERY_POINT_TIME_KEYS) if bag is not None else None
-    point = parse_recovery_point_time(point_text)
+    point = parse_recovery_point_time(point_text, job.get("workload_type"))
     if point is not None and start is not None and point > start:
         point = None
     status = str(job.get("status") or "").strip().lower()

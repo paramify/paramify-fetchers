@@ -542,7 +542,10 @@ schemas and the `paramify` CLI — not the internal code.
   its status, start and end, duration, protected item, and from
   `job_details.get` its restore type, restore target and the recovery point it
   used, with `recovery_point_age_hours` (the restore's start minus the recovery
-  point's time). The summary adds total, succeeded and failed restores, counts
+  point's time). The recovery point time's form is chosen by the job's
+  workload: ISO 8601 for any, day first in 24-hour form for SQL in a VM, month
+  first with AM/PM for Azure Files; other workloads' times stay null, with the
+  text kept, until a real sample confirms their form. The summary adds total, succeeded and failed restores, counts
   by status, vaults with a succeeded restore, the newest succeeded restore and
   days since it, the longest succeeded restore in minutes and the largest
   recovery point age, each null when the vault list or a vault's jobs weren't

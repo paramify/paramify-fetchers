@@ -30,11 +30,11 @@ def _collector():
 
 
 def _job(name, status="Completed", start="2026-09-20T10:00:00Z", end="2026-09-20T10:45:00Z", duration="PT45M",
-         operation="Restore", entity="share-a"):
+         operation="Restore", entity="db-a", workload="SQLDataBase"):
     return ns(id=f"{VAULT}/backupJobs/{name}", name=name,
               properties=ns(operation=operation, status=status, start_time=start, end_time=end, duration=duration,
-                            entity_friendly_name=entity, job_type="AzureStorageJob",
-                            backup_management_type="AzureStorage"))
+                            entity_friendly_name=entity, job_type="AzureWorkloadJob", workload_type=workload,
+                            backup_management_type="AzureWorkload"))
 
 
 def _details(bag):
@@ -51,18 +51,31 @@ def test_duration_seconds_reads_iso_and_timedelta(value, seconds):
     assert backup.duration_seconds(value) == seconds
 
 
-@pytest.mark.parametrize("text, expected", [
+@pytest.mark.parametrize("text, workload, expected", [
     # Day first in 24-hour form, as SQL-in-VM restores write it: 05/09 is 5 September.
-    ("05/09/2026 15:08:12", datetime(2026, 9, 5, 15, 8, 12, tzinfo=timezone.utc)),
-    ("24/09/2026 15:08", datetime(2026, 9, 24, 15, 8, tzinfo=timezone.utc)),
+    ("05/09/2026 15:08:12", "SQLDataBase", datetime(2026, 9, 5, 15, 8, 12, tzinfo=timezone.utc)),
+    ("24/09/2026 15:08", "SQLDataBase", datetime(2026, 9, 24, 15, 8, tzinfo=timezone.utc)),
+    ("09/24/2026 3:08:12 PM", "SQLDataBase", None),
     # Month first with AM/PM, as Azure Files restores write it (az CLI's test_afs_cross_region_restore recording).
-    ("9/25/2026 6:36:19 AM", datetime(2026, 9, 25, 6, 36, 19, tzinfo=timezone.utc)),
-    ("09/24/2026 3:08:12 PM", datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
-    ("2026-09-24T15:08:12Z", datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
-    ("24/09/2026 3:08:12 PM", None), ("soon", None), (None, None),
+    ("9/25/2026 6:36:19 AM", "AzureFileShare", datetime(2026, 9, 25, 6, 36, 19, tzinfo=timezone.utc)),
+    ("09/24/2026 3:08:12 PM", "AzureFileShare", datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
+    ("24/09/2026 15:08:12", "AzureFileShare", None),
+    # ISO 8601 reads for any workload.
+    ("2026-09-24T15:08:12Z", "VM", datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
+    ("2026-09-24T15:08:12Z", None, datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
+    ("24/09/2026 3:08:12 PM", "SQLDataBase", None), ("soon", "SQLDataBase", None), (None, "SQLDataBase", None),
 ])
-def test_recovery_point_time_is_day_first_24_hour_month_first_12_hour_or_iso(text, expected):
-    assert backup.parse_recovery_point_time(text) == expected
+def test_recovery_point_time_reads_the_form_its_workload_writes_or_iso(text, workload, expected):
+    assert backup.parse_recovery_point_time(text, workload) == expected
+
+
+@pytest.mark.parametrize("workload, expected", [
+    ("SQLDataBase", datetime(2026, 5, 3, 14, 0, tzinfo=timezone.utc)), ("AzureFileShare", None), ("VM", None),
+    ("SAPHanaDatabase", None), (None, None),
+])
+def test_an_ambiguous_time_reads_only_for_a_workload_whose_form_is_known(workload, expected):
+    # 03/05 is 3 May day first and 5 March month first; no real sample shows which a VM or SAP HANA restore writes.
+    assert backup.parse_recovery_point_time("03/05/2026 14:00:00", workload) == expected
 
 
 def test_property_bag_drops_url_query_strings():
@@ -211,6 +224,16 @@ def test_unread_details_on_a_succeeded_restore_leave_the_max_age_null():
     summary = backup.summarize_restores([{**_vault(None), **backup.vault_restore_fields(jobs)}], 365, NOW)
     assert summary["max_recovery_point_age_hours"] is None
     assert summary["succeeded_restores_without_recovery_point_time"] == 1
+
+
+def test_a_restore_whose_workload_form_is_unknown_keeps_its_text_and_is_counted_without_a_time():
+    vm = backup.restore_job_record(backup.project_job(_job("j-vm", workload="VM", entity="vm-a")),
+                                   {"Recovery Point Time in UTC": "03/05/2026 14:00:00"})
+    assert (vm["recovery_point_time_text"], vm["recovery_point_time"], vm["recovery_point_age_hours"]) == (
+        "03/05/2026 14:00:00", None, None)
+    sql = backup.restore_job_record(backup.project_job(_job("j-sql")), {"Recovery Point Time in UTC": "20/09/2026 04:00:00"})
+    summary = backup.summarize_restores([{**_vault(None), **backup.vault_restore_fields([vm, sql])}], 365, NOW)
+    assert (summary["max_recovery_point_age_hours"], summary["succeeded_restores_without_recovery_point_time"]) == (6.0, 1)
 
 
 # --- end to end ---
