@@ -127,6 +127,16 @@ class ManifestPage(ButtonRowNav, Vertical):
     def _entry(self, use: str) -> dict:
         return next((e for e in self._entries() if e.get("use") == use), {})
 
+    def _selected_entry_key(self) -> Optional[str]:
+        """The selected row's entry key (`x`, `x#1`), so a write reaches that entry, not the first."""
+        use = self._selected
+        if use is None:
+            return None
+        return self._selected_key if self._key_use.get(self._selected_key or "") == use else use
+
+    def _keyed_entry(self, key: Optional[str]) -> dict:
+        return next((e for k, e in self._keyed() if k == key), {})
+
     def _descriptors(self) -> Dict[str, dict]:
         cat = getattr(self.app, "catalog_data", None)
         out: Dict[str, dict] = {}
@@ -508,7 +518,7 @@ class ManifestPage(ButtonRowNav, Vertical):
             self.notify("Unknown fetcher — cannot edit.", severity="warning")
             return
         # Every write below targets this exact entry, not the first with this fetcher.
-        ekey = self._selected_key if self._key_use.get(self._selected_key or "") == use else use
+        ekey = self._selected_entry_key()
         entry = next((e for k, e in self._keyed() if k == ekey), None) or self._entry(use)
         cfg = entry.get("config") or {}
         secs = entry.get("secrets") or {}
@@ -596,13 +606,14 @@ class ManifestPage(ButtonRowNav, Vertical):
         if not d or not d.get("supports_targets"):
             self.notify("This fetcher does not support targets.", severity="warning")
             return
+        key = self._selected_entry_key()  # the selected entry, not the first with this fetcher
 
         fields = [t["name"] for t in d.get("target_schema", [])]
         per_target_secrets = [s for s in d.get("secrets", []) if s.get("per_target")]
 
         def rows() -> List[List[str]]:
             out = []
-            for t in (self._entry(use).get("targets") or []):
+            for t in (self._keyed_entry(key).get("targets") or []):
                 row = [_cell(t.get(f)) for f in fields]
                 if per_target_secrets:
                     wired = len(t.get("secrets") or {})
@@ -617,16 +628,16 @@ class ManifestPage(ButtonRowNav, Vertical):
                 columns,
                 rows,
                 on_add=self.action_add_target,
-                on_edit=lambda i: self._edit_target(use, i),
-                on_remove=lambda i: self._remove_target_at(use, i),
+                on_edit=lambda i: self._edit_target(use, i, key),
+                on_remove=lambda i: self._remove_target_at(use, i, key),
                 subtitle="the fetcher runs once per target",
             )
         )
 
-    def _edit_target(self, use: str, index: int) -> None:
+    def _edit_target(self, use: str, index: int, key: Optional[str] = None) -> None:
         m = self._manifest
         d = self._descriptors().get(use) or {}
-        targets = self._entry(use).get("targets") or []
+        targets = self._keyed_entry(key or use).get("targets") or []
         if m is None or not 0 <= index < len(targets):
             return
         current = targets[index]
@@ -650,6 +661,7 @@ class ManifestPage(ButtonRowNav, Vertical):
                 m, use, index,
                 result.get("values") or {},
                 secret_env=(result.get("secrets") or None),
+                entry_key=key,
             )
             self._autosave()
             self.rebuild()
@@ -664,15 +676,15 @@ class ManifestPage(ButtonRowNav, Vertical):
             done,
         )
 
-    def _remove_target_at(self, use: str, index: int) -> None:
+    def _remove_target_at(self, use: str, index: int, key: Optional[str] = None) -> None:
         m = self._manifest
         if m is None:
             return
-        summary = _target_summary((self._entry(use).get("targets") or [])[index])
+        summary = _target_summary((self._keyed_entry(key or use).get("targets") or [])[index])
 
         def done(ok: bool) -> None:
             if ok:
-                api.remove_target(m, use, index)
+                api.remove_target(m, use, index, entry_key=key)
                 self._autosave()
                 self.rebuild()
                 self.notify(f"Removed target {index} from {use}.")
@@ -701,7 +713,8 @@ class ManifestPage(ButtonRowNav, Vertical):
             if result is None:
                 return
             values = result.get("values") or {}
-            api.add_target(m, use, values, secret_env=(result.get("secrets") or None))
+            api.add_target(m, use, values, secret_env=(result.get("secrets") or None),
+                           entry_key=self._selected_entry_key())
             self._autosave()
             self.rebuild()
             # api.validate() does not check required target fields, so warn here:
@@ -839,10 +852,12 @@ class ManifestPage(ButtonRowNav, Vertical):
         use, m = self._selected, self._manifest
         if not use or m is None:
             return
+        # Only the selected entry; another entry of the same fetcher stays.
+        key = self._selected_entry_key()
 
         def done(ok: bool) -> None:
             if ok:
-                api.remove_entry(m, use)
+                api.remove_entry(m, use, entry_key=key)
                 self._selected = None
                 self._autosave()
                 self.rebuild()

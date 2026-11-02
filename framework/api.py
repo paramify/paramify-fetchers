@@ -836,10 +836,22 @@ def add_entry(m: dict, use: str, fetchers: Optional[Mapping[str, Any]] = None) -
     return added
 
 
-def remove_entry(m: dict, use: str) -> dict:
+def remove_entry(m: dict, use: str, entry_key: Optional[str] = None) -> dict:
+    """Remove every entry that uses `use`, or, given `entry_key` (`x#1`), only that entry."""
     run = _run(m)
-    run["fetchers"] = [e for e in _entries(m) if e.get("use") != use]
+    if entry_key is None:
+        run["fetchers"] = [e for e in _entries(m) if e.get("use") != use]
+        return m
+    hit = next((e for k, e in _keyed_entries(m) if k == entry_key), None)
+    run["fetchers"] = [e for e in _entries(m) if e is not hit]
     return m
+
+
+def _existing_entry(m: dict, use: str, entry_key: Optional[str]) -> Optional[dict]:
+    """The entry named by `entry_key`, else the first using `use`; None when absent."""
+    if entry_key is None:
+        return _find_entry(m, use)
+    return next((e for k, e in _keyed_entries(m) if k == entry_key), None)
 
 
 def _entry_for(m: dict, use: str, entry_key: Optional[str]) -> dict:
@@ -867,11 +879,13 @@ def set_secret(m: dict, use: str, name: str, env_var: str, entry_key: Optional[s
 
 
 def add_target(
-    m: dict, use: str, values: Dict[str, Any], secret_env: Optional[Dict[str, str]] = None
+    m: dict, use: str, values: Dict[str, Any], secret_env: Optional[Dict[str, str]] = None,
+    entry_key: Optional[str] = None,
 ) -> dict:
     """Append a fanout target. secret_env maps per_target secret name -> ENV_VAR;
-    each is stored as a ${env:VAR} reference."""
-    entry = _ensure_entry(m, use)
+    each is stored as a ${env:VAR} reference. `entry_key` (`x#1`) picks one of
+    several entries that use the same fetcher."""
+    entry = _entry_for(m, use, entry_key)
     target = dict(values)
     if secret_env:
         target["secrets"] = {n: f"${{env:{v}}}" for n, v in secret_env.items()}
@@ -882,15 +896,17 @@ def add_target(
 def set_target(
     m: dict, use: str, index: int, values: Dict[str, Any],
     secret_env: Optional[Dict[str, str]] = None,
+    entry_key: Optional[str] = None,
 ) -> dict:
     """Replace the fanout target at `index`. Raises IndexError if it is not there.
 
     A replace rather than a merge: the editor hands back every field it showed,
     and a field the user cleared has to actually clear. Per-target secrets are
     preserved when `secret_env` is None, because the editor can show a target's
-    values without touching credentials it never displayed.
+    values without touching credentials it never displayed. `entry_key` (`x#1`)
+    picks one of several entries that use the same fetcher.
     """
-    entry = _find_entry(m, use)
+    entry = _existing_entry(m, use, entry_key)
     targets = (entry or {}).get("targets") or []
     if not 0 <= index < len(targets):
         raise IndexError(f"{use} has no target at index {index}")
@@ -904,10 +920,11 @@ def set_target(
     return m
 
 
-def remove_target(m: dict, use: str, index: int) -> dict:
+def remove_target(m: dict, use: str, index: int, entry_key: Optional[str] = None) -> dict:
     """Remove the fanout target at `index` from a fetcher entry. No-op if the
-    entry or index does not exist."""
-    entry = _find_entry(m, use)
+    entry or index does not exist. `entry_key` (`x#1`) picks one of several
+    entries that use the same fetcher."""
+    entry = _existing_entry(m, use, entry_key)
     if entry is not None:
         targets = entry.get("targets") or []
         if 0 <= index < len(targets):
