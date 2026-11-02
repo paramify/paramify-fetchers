@@ -160,8 +160,9 @@ def mfa_policy(policy: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     users = conditions.get("users") or {}
     included = users.get("includeUsers") or []
     excluded = users.get("excludeUsers") or []
-    all_apps = ALL in _lower((conditions.get("applications") or {}).get("includeApplications"))
-    narrowing = narrowing_conditions(conditions)
+    apps = conditions.get("applications") or {}
+    all_apps = ALL in _lower(apps.get("includeApplications"))
+    narrowing = narrowing_conditions(conditions) + (["excluded_applications"] if apps.get("excludeApplications") else [])
     modern = sorted(MODERN_CLIENT_TYPES[t] for t in client_types(conditions) if t in MODERN_CLIENT_TYPES)
     mandatory = mfa_mandatory(grant)
     return {

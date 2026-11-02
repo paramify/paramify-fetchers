@@ -20,9 +20,10 @@ schemas and the `paramify` CLI — not the internal code.
   directory role or as a guest. A user an exclusion names counts as left without
   MFA unless browsers and mobile and desktop apps are each covered by a policy that
   makes MFA mandatory (no compliant device, terms of use or password-only strength
-  as an alternative), targets all cloud apps, has no other narrowing condition
-  (risk, platforms, locations, device filter), includes them and doesn't exclude
-  them; one policy can cover both client types, or two policies one each. Each
+  as an alternative), targets all cloud apps with none excluded, has no other
+  narrowing condition (risk, platforms, locations, device filter), includes them
+  and doesn't exclude them; one policy can cover both client types, or two
+  policies one each. Each
   policy records its client app types, and
   `legacy_authentication_blocked_for_all_users` says whether an enforced policy
   blocks legacy clients for all users. For each account named in

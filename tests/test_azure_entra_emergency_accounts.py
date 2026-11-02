@@ -287,6 +287,23 @@ def test_policies_for_some_apps_or_with_conditions_do_not_cover(monkeypatch):
     assert s["users_excluded_from_mfa"] == 3
 
 
+def test_a_policy_that_excludes_an_app_does_not_cover(monkeypatch):
+    graph, arm = _tenant()
+    most = _policy("p-most-apps", "MFA for all apps but one")
+    most["conditions"]["applications"]["excludeApplications"] = ["00000002-0000-0ff1-ce00-000000000000"]
+    graph["/identity/conditionalAccess/policies"].append(most)
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm), BG1)
+
+    assert collector.failures == []
+    p = next(p for p in results["mfa_policies"] if p["id"] == "p-most-apps")
+    assert p["targets_all_applications"] is True and p["narrowing_conditions"] == ["excluded_applications"]
+    assert p["counts_for_coverage"] is False
+    # As in the conditional access fetcher: an app the policy leaves out has no MFA from it.
+    svc = next(u for u in results["other_users_excluded_from_mfa"] if u["id"] == SVC)
+    assert svc["covered_by_an_mfa_policy"] is False and svc["excluded_from_mfa"] is True
+    assert s["users_excluded_from_mfa"] == 3
+
+
 def test_only_a_named_transfer_method_is_an_authentication_flow_condition():
     flows = [{"transferMethods": "none"}, {"transferMethods": "deviceCodeFlow,authenticationTransfer"}, None]
     found = [emergency.narrowing_conditions({"authenticationFlows": f}) for f in flows]
