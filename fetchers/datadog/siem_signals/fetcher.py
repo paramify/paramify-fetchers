@@ -14,18 +14,33 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import requests
-
 from dotenv import load_dotenv
 
 # The shared failure-reporting helper lives in fetchers/_lib/ — the same import
 # mechanism as a category `_shared` module, one directory up.
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+# Paging shared by the Datadog fetchers lives in the category's _shared/.
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 
+from datadog_paging import (  # noqa: E402
+    PagingError,
+    failure_result,
+    paginate_cursor,
+    with_paging_status,
+)
+from datadog_siem_state import NOT_ACTIVE_MESSAGE, read_siem_state  # noqa: E402
 from fetcher_status import report_failure  # noqa: E402
 
 logger = logging.getLogger("datadog_siem_signals")
+
+
+# A 403 or 404 on the FIRST page may mean Cloud SIEM is not active, but a
+# missing permission answers the same way. Only then is the content pack states
+# signal read (see _shared/datadog_siem_state.py). It alone decides
+# "not_available"; otherwise the status is a failure. On a later page, the same
+# status is a partial failure, and a 401 is always a failure.
+SIEM_GATE_STATUSES = (403, 404)
 
 
 def current_timestamp() -> str:
@@ -57,49 +72,59 @@ def fetch_all_signals(
     from_ts: str,
     to_ts: str,
 ) -> List[Dict[str, Any]]:
-    all_signals: List[Dict[str, Any]] = []
-    cursor: Optional[str] = None
-    endpoint = f"{base_url}/api/v2/security_monitoring/signals/search"
+    """Every signal in the window. POST /api/v2/security_monitoring/signals/search
+    pages with `page.limit` and `page.cursor`, the next cursor in
+    `meta.page.after`. Raises PagingError if the first page fails; a later
+    failure comes back on the returned list's `.error`."""
+    return paginate_cursor(
+        f"{base_url}/api/v2/security_monitoring/signals/search",
+        headers,
+        operation="Datadog search security signals",
+        body={"filter": {"from": from_ts, "to": to_ts}},
+        page_size=100,
+    )
 
-    while True:
-        body: Dict[str, Any] = {
-            "filter": {"from": from_ts, "to": to_ts},
-            "page": {"limit": 100},
-        }
-        if cursor:
-            body["page"]["cursor"] = cursor
 
-        try:
-            response = requests.post(endpoint, headers=headers, json=body, timeout=30)
-            response.raise_for_status()
-            payload = response.json()
-            data = payload.get("data", [])
-            all_signals.extend(data)
+def _dict(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
-            cursor = payload.get("meta", {}).get("page", {}).get("after")
-            if not cursor or not data:
-                break
-        except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code in (403, 404):
-                raise
-            logger.warning("Pagination interrupted: %s", e)
-            break
-        except requests.exceptions.RequestException as e:
-            logger.warning("Pagination interrupted: %s", e)
-            break
 
-    return all_signals
+def _first(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
 
 
 def extract_signal_fields(signal: Dict[str, Any]) -> Dict[str, Any]:
-    attrs = signal.get("attributes", {})
+    """Read one signal from POST /api/v2/security_monitoring/signals/search.
+
+    A search result keeps the signal's own attributes one level down, in
+    ``attributes.attributes``; ``attributes.custom`` holds the same data for a
+    single-signal read. In both, the signal's ``status`` is its severity (info,
+    low, medium, high, critical), ``workflow.rule`` names the rule that raised
+    it, and ``workflow.triage.state`` is where review stands (open,
+    under_review, archived). Each value is looked up in that order, then at the
+    top of ``attributes``.
+    """
+    outer = _dict(signal.get("attributes"))
+    inner = _dict(outer.get("attributes"))
+    custom = _dict(outer.get("custom")) or _dict(inner.get("custom"))
+    layers = [inner, custom, outer]
+
+    workflows = [_dict(layer.get("workflow")) for layer in layers]
+    rules = [_dict(w.get("rule")) for w in workflows] + [_dict(outer.get("rule"))]
+    triages = [_dict(w.get("triage")) for w in workflows]
+
     return {
         "id": signal.get("id"),
-        "status": attrs.get("status"),
-        "severity": attrs.get("severity"),
-        "timestamp": attrs.get("timestamp"),
-        "rule_name": attrs.get("rule", {}).get("name"),
-        "rule_id": attrs.get("rule", {}).get("id"),
+        # Triage state: open, under_review or archived.
+        "status": _first(*(t.get("state") for t in triages)),
+        # The signal's status attribute is its severity.
+        "severity": _first(*(layer.get("status") for layer in layers), outer.get("severity")),
+        "timestamp": _first(outer.get("timestamp"), inner.get("timestamp")),
+        "rule_name": _first(*(r.get("name") for r in rules)),
+        "rule_id": _first(*(r.get("id") for r in rules)),
     }
 
 
@@ -133,7 +158,7 @@ def get_siem_signals() -> Dict[str, Any]:
             for name, count in rule_hits.most_common(10)
         ]
 
-        return {
+        return with_paging_status({
             "status": "success",
             "api_endpoint": endpoint,
             "record_count": len(extracted),
@@ -147,17 +172,23 @@ def get_siem_signals() -> Dict[str, Any]:
                 "date_range": {"from": from_ts, "to": to_ts},
             },
             "retrieved_at": current_timestamp(),
-        }
+        }, signals)
 
-    except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code in (403, 404):
-            return {
-                "status": "not_available",
-                "message": "Security Monitoring (SIEM) is not enabled for this organization",
-                "api_endpoint": endpoint,
-                "retrieved_at": current_timestamp(),
-            }
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+    except PagingError as e:
+        if e.status_code in SIEM_GATE_STATUSES:
+            siem_state = read_siem_state(base_url, headers)
+            if siem_state["enabled"] is False:
+                return {
+                    "status": "not_available",
+                    "message": NOT_ACTIVE_MESSAGE,
+                    "api_endpoint": endpoint,
+                    "data": {"siem_state": siem_state},
+                    "retrieved_at": current_timestamp(),
+                }
+            result = failure_result(e, endpoint, current_timestamp())
+            result["siem_state"] = siem_state
+            return result
+        return failure_result(e, endpoint, current_timestamp())
     except RuntimeError as e:
         return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
     except Exception as e:
@@ -185,7 +216,7 @@ def main() -> int:
     # Last line on stderr wins: the runner reads its tail into the envelope's metadata.error.
     if result.get("status") not in {"success", "partial_or_empty", "not_available"}:
         reason = result.get("message", "unknown error")
-        report_failure(reason)
+        report_failure(reason, result.get("error_code"))
         return 1
     return 0
 

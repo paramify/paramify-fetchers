@@ -95,13 +95,45 @@ def fetch_timeline_cells(
         return []
 
 
+def _related_id(relationships: Dict[str, Any], *keys: str) -> Optional[str]:
+    for key in keys:
+        rel = relationships.get(key)
+        data = rel.get("data") if isinstance(rel, dict) else None
+        if isinstance(data, dict) and data.get("id"):
+            return data["id"]
+    return None
+
+
+def cell_content_text(content: Any) -> Optional[str]:
+    """The text of a timeline cell.
+
+    A markdown cell holds it as ``{"content": "<markdown>"}``, the shape the
+    incidents API documents for timeline cells. A bare string is also accepted.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        text = content.get("content")
+        if isinstance(text, str):
+            return text
+    return None
+
+
 def extract_cell_fields(cell: Dict[str, Any]) -> Dict[str, Any]:
-    attrs = cell.get("attributes", {})
+    attrs = cell.get("attributes") or {}
+    relationships = cell.get("relationships") or {}
+    content = attrs.get("content")
     return {
+        "id": cell.get("id"),
         "cell_type": attrs.get("cell_type"),
         "created": attrs.get("created"),
         "modified": attrs.get("modified"),
-        "created_by_id": cell.get("relationships", {}).get("created_by", {}).get("data", {}).get("id"),
+        "created_by_id": _related_id(relationships, "created_by", "created_by_user"),
+        "important": attrs.get("important"),
+        # What the entry says, for the after-action review. A non-markdown cell
+        # keeps its content object as the API returned it.
+        "content": cell_content_text(content),
+        "content_raw": content if isinstance(content, dict) and cell_content_text(content) is None else None,
     }
 
 

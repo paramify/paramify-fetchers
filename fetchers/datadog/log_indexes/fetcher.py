@@ -8,6 +8,7 @@ Purpose: Retrieve log index retention configs to prove what data is retained and
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,7 +57,6 @@ def extract_index_fields(index: Dict[str, Any]) -> Dict[str, Any]:
     flex_retention = index.get("num_flex_logs_retention_days") or index.get("numFlexLogsRetentionDays")
     daily_limit = index.get("daily_limit") or index.get("dailyLimit")
     is_rate_limited = index.get("is_rate_limited") if "is_rate_limited" in index else index.get("isRateLimited")
-    daily_limit_gb = round(daily_limit / 1_000_000_000, 2) if daily_limit else None
     return {
         "name": index.get("name"),
         "numRetentionDays": retention,
@@ -64,6 +64,46 @@ def extract_index_fields(index: Dict[str, Any]) -> Dict[str, Any]:
         "filter_query": index.get("filter", {}).get("query"),
         "dailyLimit": daily_limit,
         "isRateLimited": is_rate_limited,
+        "tags": index.get("tags") or [],
+    }
+
+
+AUDIT_INDEXES_ENV = "DATADOG_AUDIT_INDEXES"
+
+
+def parse_audit_index_names(raw: Optional[str]) -> List[str]:
+    """Index names from the audit_indexes config: comma- or space-separated."""
+    names: List[str] = []
+    for part in re.split(r"[\s,]+", raw or ""):
+        if part and part not in names:
+            names.append(part)
+    return names
+
+
+def summarize_audit_indexes(extracted: List[Dict[str, Any]], audit_names: List[str]) -> Dict[str, Any]:
+    """Which indexes hold audit logs, and their retention.
+
+    Datadog has no field that marks an index as holding audit logs, so the
+    fetcher does not guess one from the filter query. With no audit_indexes
+    configured, every index counts as an audit index, so a short retention is
+    never left out. With names configured, only those indexes count, and a
+    configured name with no matching index is listed in
+    audit_indexes_not_found. Sets ``is_audit_index`` on each record.
+    """
+    configured = bool(audit_names)
+    wanted = set(audit_names)
+    for idx in extracted:
+        idx["is_audit_index"] = (idx.get("name") in wanted) if configured else True
+
+    audit = [idx for idx in extracted if idx["is_audit_index"]]
+    retentions = [idx["numRetentionDays"] for idx in audit if idx.get("numRetentionDays") is not None]
+    present = {idx.get("name") for idx in extracted}
+    return {
+        "audit_index_selection": "configured" if configured else "all_indexes",
+        "audit_indexes": [idx.get("name") for idx in audit],
+        "audit_indexes_not_found": [n for n in audit_names if n not in present],
+        "min_retention_days_audit_indexes": min(retentions) if retentions else None,
+        "audit_indexes_below_90_days": sum(1 for v in retentions if v < 90),
     }
 
 
@@ -91,19 +131,9 @@ def get_log_indexes() -> Dict[str, Any]:
         max_retention = max(retention_values) if retention_values else 0
         indexes_below_90 = sum(1 for v in retention_values if v < 90)
 
-        audit_keywords = {"cloudtrail", "okta", "kubernetes.audit"}
-
-        def is_audit_index(idx: Dict[str, Any]) -> bool:
-            query = (idx.get("filter_query") or "").lower()
-            return any(kw in query for kw in audit_keywords)
-
-        audit_retentions = [
-            idx["numRetentionDays"]
-            for idx in extracted
-            if is_audit_index(idx) and idx.get("numRetentionDays") is not None
-        ]
-        min_retention_audit = min(audit_retentions) if audit_retentions else None
-        audit_below_90 = sum(1 for v in audit_retentions if v < 90)
+        audit = summarize_audit_indexes(extracted, parse_audit_index_names(os.environ.get(AUDIT_INDEXES_ENV)))
+        min_retention_audit = audit["min_retention_days_audit_indexes"]
+        audit_below_90 = audit["audit_indexes_below_90_days"]
 
         indexes_summary = [
             {
@@ -111,6 +141,7 @@ def get_log_indexes() -> Dict[str, Any]:
                 "retention_days": idx["numRetentionDays"],
                 "filter": idx["filter_query"],
                 "daily_limit_gb": round(idx["dailyLimit"] / 1_000_000_000, 2) if idx.get("dailyLimit") else None,
+                "is_audit_index": idx["is_audit_index"],
             }
             for idx in extracted
         ]
@@ -127,6 +158,9 @@ def get_log_indexes() -> Dict[str, Any]:
                 "indexes_below_90_days": indexes_below_90,
                 "min_retention_days_audit_indexes": min_retention_audit,
                 "audit_indexes_below_90_days": audit_below_90,
+                "audit_index_selection": audit["audit_index_selection"],
+                "audit_indexes": audit["audit_indexes"],
+                "audit_indexes_not_found": audit["audit_indexes_not_found"],
                 "indexes_summary": indexes_summary,
             },
             "retrieved_at": current_timestamp(),

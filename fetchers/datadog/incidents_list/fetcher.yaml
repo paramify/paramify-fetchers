@@ -1,5 +1,5 @@
 name: datadog_incidents_list
-version: 0.1.0
+version: 0.1.1
 description: Retrieves incident records from Datadog for after-action review and pattern analysis within a configurable lookback window.
 category: datadog
 
@@ -28,4 +28,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-INCIDENTS-LIST
   name: Datadog Incidents List
-  instructions: 'Script: datadog/incidents_list/fetcher.py. Calls GET /api/v2/incidents with offset pagination and date filters. Lookback window controlled by DATADOG_INCIDENTS_LOOKBACK_DAYS (default 90). Writes JSON incident list.'
+  instructions: 'Script: datadog/incidents_list/fetcher.py. Calls GET /api/v2/incidents with offset pagination and date filters. Lookback window controlled by DATADOG_INCIDENTS_LOOKBACK_DAYS (default 90). Extracts title, severity, state, detected and resolved times (resolution_hours from the two), customer impact, and the commander from relationships.commander_user. Writes JSON incident list.'
