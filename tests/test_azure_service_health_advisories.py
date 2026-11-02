@@ -477,8 +477,19 @@ def test_collect_subscription_leaves_exclusion_counts_unknown_when_nothing_was_r
     _, summary = sh.collect_subscription(
         _Health([], refuse={"/events": azure_rest.ArmError(500, "Internal", "x")}), "s1", c)
     assert (summary["excluded_events"], summary["excluded_impacted_resources"], summary["events"],
-            summary["events_from_resource_graph"]) == (None, None, None, None)
+            summary["events_from_resource_graph"], summary["resource_exclusion_patterns_unmatched"]) == (
+        None, None, None, None, None)
     assert {f["operation"] for f in c.failures} == {"config AZURE_RESOURCE_EXCLUSIONS", "resourceHealth.events.list"}
+
+
+def test_unread_resource_lists_leave_the_unmatched_patterns_unknown(monkeypatch, fixed_now, graph, caplog):
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:rg-data")
+    monkeypatch.setattr(sh, "provider_registration_status", lambda *a: azure_common.REGISTERED)
+    graph.impacted = azure_rest.ArmError(500, "Internal", "x")
+    _, summary = sh.collect_subscription(_Health([raw_event("HA-1")]), "s1", collector())
+    assert (summary["resource_exclusion_patterns"], summary["resource_exclusion_patterns_unmatched"],
+            summary["excluded_impacted_resources"], summary["excluded_events"]) == (["rg:rg-data"], None, None, 0)
+    assert "matched nothing" not in caplog.text
 
 
 def test_an_unread_older_event_leaves_the_event_and_exclusion_counts_unknown(monkeypatch, fixed_now, graph):

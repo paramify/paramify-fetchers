@@ -141,6 +141,6 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource an event names, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource an event names, such as a mistyped name; null while any event's resource list is unread, or when the events could not all be read, since a pattern may match a resource that wasn't read
     - excluded_impacted_resources — Number of distinct resources named by events that a pattern took out by resource group, region or id; each is listed under excluded with the pattern, once for each event that names it, and no other count includes them; null while any event's resource list is unread, or when the events could not all be read
     - excluded_events — Number of events left out because a pattern took out every resource they name; each is listed under excluded; null when the events could not all be read
