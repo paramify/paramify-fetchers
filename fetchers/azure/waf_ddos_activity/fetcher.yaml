@@ -74,7 +74,7 @@ evidence_set:
 
     Commands Executed:
     - GET Microsoft.Cdn/profiles, then GET securityPolicies (per Front Door Standard or Premium profile) — which WAF policies each profile attaches
-    - GET Microsoft.Network/applicationGateways — gateways on a WAF tier with a WAF policy or the legacy in-gateway WAF configuration
+    - GET Microsoft.Network/applicationGateways — gateways on a WAF tier with a WAF policy on the gateway, a listener or a path rule, or the legacy in-gateway WAF configuration
     - GET FrontDoorWebApplicationFirewallPolicies and GET ApplicationGatewayWebApplicationFirewallPolicies — each WAF policy's mode (Prevention or Detection) and state
     - GET Microsoft.Network/publicIPAddresses — every public IP, whether it is attached, and its own DDoS protection mode
     - GET diagnosticSettings (per WAF resource and per attached public IP) — which workspaces receive the WAF log and the DDoS log categories, and whether a gateway writes resource-specific tables
@@ -91,11 +91,11 @@ evidence_set:
 
     What was checked?
     - lookback_days — Days of WAF and DDoS records and attack metrics read
-    - waf_resources — Number of WAF resources: Front Door profiles that attach a WAF policy (or whose security policies couldn't be read) and WAF-tier App Gateways with a WAF policy or the legacy WAF configuration
+    - waf_resources — Number of WAF resources: Front Door profiles that attach a WAF policy (or whose security policies couldn't be read) and WAF-tier App Gateways with a WAF policy on the gateway, a listener or a path rule, or the legacy WAF configuration. Which WAF applies to each listener is shown by azure_app_gateway_waf
     - front_door_waf_resources — Number of WAF resources that are Front Door profiles
     - app_gateway_waf_resources — Number of WAF resources that are App Gateways
     - front_door_profiles_without_waf — Number of Front Door Standard and Premium profiles that attach no WAF policy
-    - waf_resources_in_detection_mode — Number of WAF resources with a policy in Detection mode, which logs matching requests without blocking them
+    - waf_resources_in_detection_mode — Number of WAF resources with a policy in Detection mode, which logs matching requests without blocking them, including a policy that a gateway's listener or path rule attaches in place of the gateway's
     - waf_resources_mode_unknown — Number of WAF resources with no policy in Detection mode where a policy's mode couldn't be read (the profile's security policies or the policy itself couldn't be read)
 
     Do the WAFs send their logs?

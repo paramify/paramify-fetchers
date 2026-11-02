@@ -335,19 +335,37 @@ def front_door_waf_resource(profile: dict, security_policies) -> dict:
         if dig(sp, "properties", "parameters", "wafPolicy", "id")
     }, key=str.lower)
     return {"id": profile.get("id"), "name": profile.get("name"), "type": FRONT_DOOR, "sku": dig(profile, "sku", "name"),
-            "waf_policy_ids": policies, "category": FD_WAF_CATEGORY}
+            "waf_policy_ids": policies, "category": FD_WAF_CATEGORY,
+            "waf_policy_scopes": None if policies is None else {id_key(p): ["security_policy"] for p in policies}}
+
+
+def gateway_policies(props: dict) -> dict:
+    """{policy id key: (id, scopes)} for the gateway's WAF policy and any a listener or path rule attaches in its place."""
+    found: dict = {}
+    refs = [("gateway", props.get("firewallPolicy"))]
+    refs += [("listener", dig(li, "properties", "firewallPolicy")) for li in props.get("httpListeners") or []]
+    refs += [("path_rule", dig(rule, "properties", "firewallPolicy"))
+             for path_map in props.get("urlPathMaps") or [] for rule in dig(path_map, "properties", "pathRules") or []]
+    for scope, ref in refs:
+        pid = ref.get("id") if isinstance(ref, dict) else None
+        if pid:
+            found.setdefault(id_key(pid), (pid, set()))[1].add(scope)
+    return {k: (pid, sorted(scopes)) for k, (pid, scopes) in sorted(found.items())}
 
 
 def gateway_waf_resource(gateway: dict) -> dict | None:
-    """A WAF-tier gateway with a WAF policy or the legacy in-gateway WAF configuration; None for any other gateway."""
+    """A WAF-tier gateway with a WAF policy anywhere on it or the legacy in-gateway WAF configuration; None for any other."""
     props = gateway.get("properties") or {}
     tier = (dig(props, "sku", "tier") or "").lower()
+    policies = gateway_policies(props)
     policy = dig(props, "firewallPolicy", "id")
     legacy = props.get("webApplicationFirewallConfiguration") or {}
-    if not tier.startswith("waf") or not (policy or legacy.get("enabled") is True):
+    if not tier.startswith("waf") or not (policies or legacy.get("enabled") is True):
         return None
     return {"id": gateway.get("id"), "name": gateway.get("name"), "type": APP_GATEWAY, "sku": dig(props, "sku", "name"),
-            "waf_policy_ids": [policy] if policy else [], "legacy_waf_mode": legacy.get("firewallMode") if not policy else None,
+            "waf_policy_ids": [pid for pid, _ in policies.values()],
+            "waf_policy_scopes": {k: scopes for k, (_, scopes) in policies.items()},
+            "legacy_waf_mode": legacy.get("firewallMode") if not policy else None,
             "category": AGW_WAF_CATEGORY}
 
 
@@ -413,8 +431,11 @@ def waf_activity(resource: dict, settings, workspaces: dict, policies: dict, ale
             modes[name].add(r["Mode"])
     attached = [policies.get(id_key(p)) or {"id": p, "name": basename(p), "mode": None, "enabled": None}
                 for p in resource["waf_policy_ids"] or []]
+    scopes = resource.get("waf_policy_scopes") or {}
+    attached = [{**p, "attached_to": scopes.get(id_key(p["id"]))} for p in attached]
     if resource.get("legacy_waf_mode"):
-        attached.append({"id": None, "name": "gateway WAF configuration", "mode": resource["legacy_waf_mode"], "enabled": True})
+        attached.append({"id": None, "name": "gateway WAF configuration", "mode": resource["legacy_waf_mode"], "enabled": True,
+                         "attached_to": ["gateway"]})
     total: Counter = Counter()
     for c in per_policy.values():
         total.update(c)
@@ -429,7 +450,8 @@ def waf_activity(resource: dict, settings, workspaces: dict, policies: dict, ale
         "name": resource["name"],
         "type": resource["type"],
         "sku": resource["sku"],
-        "waf_policies": [{"name": p["name"], "mode": p["mode"], "enabled": p["enabled"]} for p in attached],
+        "waf_policies": [{"name": p["name"], "mode": p["mode"], "enabled": p["enabled"], "attached_to": p["attached_to"]}
+                         for p in attached],
         "waf_policies_read": resource["waf_policy_ids"] is not None,
         "detection_mode": detection_mode(resource, attached),
         "diagnostic_settings_read": settings is not None,

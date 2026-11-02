@@ -84,6 +84,29 @@ def test_gateway_waf_resource(props, expected):
     assert (record if record is None else (record["waf_policy_ids"], record["legacy_waf_mode"])) == expected
 
 
+LISTENER_POLICY = f"{AGW_POLICY}-site"
+PATH_POLICY = f"{AGW_POLICY}-path"
+
+
+def test_a_gateway_with_only_listener_and_path_policies_is_a_waf():
+    props = {"sku": {"tier": "WAF_v2", "name": "WAF_v2"},
+             "httpListeners": [{"properties": {"firewallPolicy": {"id": LISTENER_POLICY}}}, {"properties": {}}],
+             "urlPathMaps": [{"properties": {"pathRules": [{"properties": {"firewallPolicy": {"id": PATH_POLICY}}},
+                                                           {"properties": {"firewallPolicy": {"id": LISTENER_POLICY.upper()}}}]}}]}
+    gateway = wda.gateway_waf_resource({"id": AGW, "name": "agw1", "properties": props})
+    assert gateway is not None and gateway["waf_policy_ids"] == [PATH_POLICY, LISTENER_POLICY]
+    assert gateway["waf_policy_scopes"] == {PATH_POLICY.lower(): ["path_rule"], LISTENER_POLICY.lower(): ["listener", "path_rule"]}
+    policies = {LISTENER_POLICY.lower(): {"id": LISTENER_POLICY, "name": "agwpolicy-site", "mode": "Detection", "enabled": True},
+                PATH_POLICY.lower(): {"id": PATH_POLICY, "name": "agwpolicy-path", "mode": "Prevention", "enabled": True}}
+    rec = wda.waf_activity(gateway, [], {}, policies, [], sample=5)
+    assert rec["detection_mode"] is True
+    assert [(p["name"], p["attached_to"]) for p in rec["waf_policies"]] == [
+        ("agwpolicy-path", ["path_rule"]), ("agwpolicy-site", ["listener", "path_rule"])]
+    with_gateway = wda.gateway_waf_resource({"id": AGW, "name": "agw1", "properties": {
+        **props, "firewallPolicy": {"id": AGW_POLICY}, "webApplicationFirewallConfiguration": {"enabled": True}}})
+    assert with_gateway["waf_policy_scopes"][AGW_POLICY.lower()] == ["gateway"] and with_gateway["legacy_waf_mode"] is None
+
+
 def test_front_door_waf_resource_reads_attached_policies():
     sps = [{"properties": {"parameters": {"wafPolicy": {"id": FD_POLICY}}}}, {"properties": {"parameters": {}}}]
     assert wda.front_door_waf_resource({"id": PROFILE, "name": "fd1"}, sps)["waf_policy_ids"] == [FD_POLICY]
@@ -177,7 +200,8 @@ def test_waf_activity_from_the_fuller_copy():
     assert rec["waf_log_workspaces"] == [LAW, LAW2]
     assert (rec["waf_events"], rec["requests_matched"], rec["requests_blocked"], rec["requests_logged_only"]) == (10, 6, 0, 6)
     assert rec["detection_mode"] is True
-    assert rec["waf_policies"] == [{"name": "wafpolicy1", "mode": "Detection", "enabled": True}]
+    assert rec["waf_policies"] == [{"name": "wafpolicy1", "mode": "Detection", "enabled": True,
+                                    "attached_to": ["security_policy"]}]
     assert rec["activity_by_policy"][0]["logged_modes"] == ["detection"]
     assert rec["top_rules"] == [{"rule": "Microsoft_DefaultRuleSet-2.1-SQLI-942100", "events": 8, "blocked_events": 0}]
     assert rec["waf_logs_arriving"] is True
@@ -290,7 +314,7 @@ def test_gateway_with_dedicated_tables_reads_agw_firewall_logs():
     rec = wda.waf_activity(gateway, [setting(group="allLogs", dedicated=True)], workspaces, {}, [], sample=5)
     assert (rec["waf_events"], rec["requests_blocked"]) == (10, 4)
     assert rec["activity_by_policy"][0]["policy"] == "agwpolicy"
-    assert rec["waf_policies"] == [{"name": "agwpolicy", "mode": None, "enabled": None}]
+    assert rec["waf_policies"] == [{"name": "agwpolicy", "mode": None, "enabled": None, "attached_to": ["gateway"]}]
 
 
 # --- DDoS ---
@@ -501,7 +525,8 @@ def test_collect_wires_waf_ddos_and_alerts(monkeypatch):
     assert (summary["public_ips"], summary["internet_facing_public_ips"]) == (2, 1)
     assert summary["public_ips_with_attack_alert"] == 1 and summary["ddos_attack_alert_rules"] == 1
     assert summary["public_ips_attacked"] is None and summary["ddos_mitigations_started"] is None
-    assert results["waf_resources"][0]["waf_policies"] == [{"name": "wafpolicy1", "mode": "Prevention", "enabled": True}]
+    assert results["waf_resources"][0]["waf_policies"] == [{"name": "wafpolicy1", "mode": "Prevention", "enabled": True,
+                                                            "attached_to": ["security_policy"]}]
     assert all("_scopes" not in r for r in results["alert_rules"])
     kql = [q[1] for q in client.queries]
     assert sum("FrontDoorWebApplicationFirewallLog" in k for k in kql) == len(wda.WAF_QUERIES)

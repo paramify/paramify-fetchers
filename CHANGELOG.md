@@ -14,9 +14,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`azure_waf_ddos_activity`** (`EVD-AZURE-WAF-DDOS-ACTIVITY`): whether DoS protection is
   watched, not only switched on, over a window (default 30 days).
-  - WAF: each Front Door profile with a WAF policy and each WAF-tier App Gateway, with
-    its WAF log export and, from Log Analytics, requests blocked, logged only and
-    allowed per policy, the most-matched rules and the last event. A request that
+  - WAF: each Front Door profile with a WAF policy and each WAF-tier App Gateway
+    with a policy on the gateway, a listener or a path rule, or the legacy WAF
+    configuration, with its WAF log export and, from Log Analytics, requests
+    blocked, logged only and allowed per policy, the most-matched rules and the
+    last event. A request that
     matched several rules counts once. Detection-mode policies are flagged, and a
     request one would have blocked in Prevention mode counts as would-block: a
     Front Door blocking action, or an App Gateway's `Detected` (rule 949110).
