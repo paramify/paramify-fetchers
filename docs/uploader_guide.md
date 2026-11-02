@@ -102,6 +102,10 @@ Paramify submits and approves as one unit. All the targets of one entry go in th
 same batch. Two entries that use the same fetcher get two batches. The solution
 capability reads the most recent approved batch whose validators pass.
 
+**An upload of the same run again sends nothing twice.** This is also true for a
+run that an earlier uploader sent before batches existed. Its files are already
+on the set, so the upload does not send them again.
+
 **Channels decide the route.** For each entry the upload counts the channels on
 the evidence set:
 

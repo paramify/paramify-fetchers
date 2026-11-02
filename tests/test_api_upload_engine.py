@@ -515,3 +515,42 @@ def test_a_422_on_tags_is_a_warning_and_delivery_goes_on(fake, root, tmp_path):
     out = api.upload_run(two_files(tmp_path), root)
     assert out["entries"]["x"]["state"] == "delivered" and out["ok"] is True
     assert out["uploaded"] == 2 and out["tags"]["failed"] == 1
+
+
+# ---- runs the pre-batch uploader delivered -------------------------------------
+
+LEGACY_NOTE = "fetcher=x; version=0.1.0; run_id=RID; status=success"
+
+
+def test_a_run_delivered_before_batches_is_a_noop(fake, root, tmp_path):
+    ev = fake.add_evidence("EVD-X")
+    fake.add_legacy_artifact(ev.id, "a.json", LEGACY_NOTE)
+    fake.add_legacy_artifact(ev.id, "b.json", LEGACY_NOTE)
+    events: List[Dict[str, Any]] = []
+    out = api.upload_run(two_files(tmp_path), root, on_event=events.append)
+    assert out["entries"]["x"]["state"] == "noop" and out["ok"] is True
+    assert "already delivered before batches" in out["entries"]["x"]["message"]
+    assert (out["uploaded"], out["skipped_duplicate"], out["errors"]) == (0, 2, 0)
+    assert file_events(events) == [("a.json", "skipped_duplicate"), ("b.json", "skipped_duplicate")]
+    assert not fake._batches
+
+
+def test_files_delivered_before_batches_are_left_out_of_the_batch(fake, root, tmp_path):
+    ev = fake.add_evidence("EVD-X")
+    fake.add_legacy_artifact(ev.id, "a.json", LEGACY_NOTE)
+    fake.add_legacy_artifact(ev.id, "b.json", LEGACY_NOTE.replace("RID", "OTHER"))  # another run
+    events: List[Dict[str, Any]] = []
+    out = api.upload_run(two_files(tmp_path), root, on_event=events.append)
+    entry = out["entries"]["x"]
+    assert entry["state"] == "delivered" and entry["already_present"] == ["a.json"]
+    assert entry["uploaded"] == ["b.json"]
+    assert sorted(file_events(events)) == [("a.json", "skipped_duplicate"), ("b.json", "uploaded")]
+    [batch] = fake._batches
+    assert batch["artifactCount"] == 1
+
+
+def test_a_legacy_artifact_of_another_entry_is_not_this_entrys(fake, root, tmp_path):
+    ev = fake.add_evidence("EVD-X")
+    fake.add_legacy_artifact(ev.id, "a.json", LEGACY_NOTE.replace("fetcher=x", "fetcher=z"))
+    out = api.upload_run(two_files(tmp_path), root)
+    assert out["entries"]["x"]["uploaded"] == ["a.json", "b.json"]

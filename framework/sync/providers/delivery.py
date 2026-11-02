@@ -7,7 +7,9 @@ For each entry, in this order (the first refusal ends the entry):
 3. batch: this entry's batch for this run is found anywhere on the evidence
    set, through one artifacts query by file name, so a second upload of a run
    skips or resumes it, even after the cycle rolled over, and never makes
-   another;
+   another. A file of this run that the pre-batch uploader already sent (an
+   artifact with no batch) is left out; when every file was, the entry is a
+   no-op;
 4. WAF: a file the production WAF would block is dropped at plan time.
 
 The rules live in `delivery_routing` as pure functions; `diff` composes them.
@@ -42,6 +44,7 @@ from framework.sync.providers.delivery_routing import (
     DONE,
     Refusal,
     attribute,
+    delivered_before_batches,
     own_batch_ids,
     resolve_channel,
     resolve_request,
@@ -59,6 +62,7 @@ from framework.sync.state import RunState
 
 EVIDENCE_LEVEL_WARNING = "evidence-level batch: does not count toward the solution capability"
 ALL_DROPPED = "every file was dropped"
+BEFORE_BATCHES = "already delivered before batches"
 WAF_BLOCKED = "blocked by the production WAF"
 _FAILING = ("FAIL", "ERROR")
 
@@ -73,6 +77,8 @@ class EntryObserved:
     current_ids: Set[str] = field(default_factory=set)
     batches: List[Batch] = field(default_factory=list)
     artifacts: Dict[str, List[Artifact]] = field(default_factory=dict)  # batch id -> artifacts
+    # This run's files the pre-batch uploader already sent (their artifacts have no batch).
+    before_batches: List[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -254,6 +260,14 @@ class DeliveryProvider:
             obs.stacks = reader.stacks()
         if ev is None:
             return obs  # created in this run: no batches yet
+        # This run's batch, wherever it is (the cycle may have rolled over since
+        # the last upload): one query by this entry's file names, then only the
+        # batches those artifacts name. Reads stay flat as the set's history grows.
+        # It runs before routing: a run sent before batches existed needs no route.
+        names = [f.original_file_name for f in e.files if f.skip_reason is None]
+        # No names would make the filter vanish and read the whole set's artifacts.
+        found = reader.artifacts(ev.id, original_file_names=names) if names else []
+        obs.before_batches = delivered_before_batches(found, e)
         channel = resolve_channel(e, ev, obs.stacks)
         if isinstance(channel, Refusal):
             return obs
@@ -265,12 +279,6 @@ class DeliveryProvider:
             if isinstance(request, Refusal):
                 return obs
             target = request
-        # This run's batch, wherever it is (the cycle may have rolled over since
-        # the last upload): one query by this entry's file names, then only the
-        # batches those artifacts name. Reads stay flat as the set's history grows.
-        names = [f.original_file_name for f in e.files if f.skip_reason is None]
-        # No names would make the filter vanish and read the whole set's artifacts.
-        found = reader.artifacts(ev.id, original_file_names=names) if names else []
         candidates = own_batch_ids(found, e)
         if e.recorded_batch_id and e.recorded_batch_id not in candidates:
             candidates.append(e.recorded_batch_id)  # may still have no artifacts
@@ -326,6 +334,13 @@ class DeliveryProvider:
             )
 
         warnings = [w for w in (stack_drift(e, obs.stacks),) if w]
+        earlier = [f.original_file_name for f in files if f.original_file_name in obs.before_batches]
+        if earlier:
+            payload["before_batches"] = earlier
+            if len(earlier) == len(files):
+                return action("noop", f"{BEFORE_BATCHES} ({_count(len(files), 'file')})", warnings=warnings)
+            files = [f for f in files if f.original_file_name not in earlier]
+            payload["files"] = [_file_json(f) for f in files]
         route = _route(e, obs, today)
         if isinstance(route, Refusal):
             return action("refuse", route.message, fix=route.fix, warnings=warnings)
@@ -429,7 +444,8 @@ class DeliveryProvider:
         return self._plan_entry(entry, self._observe_entry(entry, ev, reader), self._today())
 
     def _noop(self, action_id: str, p: Dict[str, Any], message: str) -> Outcome:
-        done = _Delivered(p.get("batch_id"), p.get("batch_reference"), p.get("status"))
+        done = _Delivered(p.get("batch_id"), p.get("batch_reference"), p.get("status"),
+                          already_present=list(p.get("before_batches") or []))
         return Outcome(action_id, "noop", done.result("noop"), message)
 
     def _emit(self, action_id: str, name: str, outcome: str, n: Optional[int], of: int, size: int,
@@ -470,7 +486,8 @@ class DeliveryProvider:
         files = p.get("files") or []
         entry = self.entries.get(p["entry_key"])
         wanted = [f.original_file_name for f in self._split(entry)[0]] if entry is not None \
-            else [f["original_file_name"] for f in files]
+            else [*(p.get("before_batches") or []), *(f["original_file_name"] for f in files)]
+        present |= set(p.get("before_batches") or [])  # sent before batches existed
         run.already_present = [n for n in wanted if n in present]
         to_send = [f for f in files if f["original_file_name"] not in present]
         for name in run.already_present:
