@@ -168,9 +168,43 @@ def test_unknown_hours_are_not_counted_as_available():
       status("Available", timedelta(days=1), "b")], 24.0, True),
     # Nothing known in the lookback: unknown.
     ([status("Unknown", timedelta(minutes=1), "q")], 24.0, None),
+    # Unknown right after an outage may be the same outage: 20 h + 18 h could be a 38 h miss.
+    ([status("Available", timedelta(days=40), "a"), status("Unavailable", timedelta(hours=60), "down"),
+      status("Unknown", timedelta(hours=40), "q"), status("Available", timedelta(hours=22), "b")], 24.0, None),
+    # Unknown right before an outage may hide its start.
+    ([status("Available", timedelta(days=40), "a"), status("Unknown", timedelta(hours=60), "q"),
+      status("Unavailable", timedelta(hours=42), "down"), status("Available", timedelta(hours=22), "b")], 24.0, None),
+    # Available between them: the outage is known to be 20 h.
+    ([status("Available", timedelta(days=40), "a"), status("Unavailable", timedelta(hours=60), "down"),
+      status("Available", timedelta(hours=40), "b"), status("Unknown", timedelta(hours=39), "q"),
+      status("Available", timedelta(hours=21), "c")], 24.0, True),
 ])
 def test_recovery_time_objective_cases(history, rto, expected):
     assert sa.meets_objective(sa.health_record(history, NOW, WINDOW_START), rto) is expected
+
+
+def test_an_outage_and_the_unknown_time_touching_it_are_measured_together():
+    history = [status("Available", timedelta(days=40), "a"), status("Unknown", timedelta(hours=70), "q1"),
+               status("Unavailable", timedelta(hours=60), "down"), status("Unknown", timedelta(hours=40), "q2"),
+               status("Degraded", timedelta(hours=22), "slow"), status("Unknown", timedelta(hours=20), "q3"),
+               status("Available", timedelta(hours=1), "b")]
+    h = sa.health_record(history, NOW, WINDOW_START)
+    assert (h["longest_outage_hours"], h["longest_outage_with_adjacent_unknown_hours"]) == (20.0, 48.0)
+
+
+def test_a_resource_with_no_known_hours_has_no_outage_figures():
+    for history in ([status("Unknown", timedelta(0), "current")], [status("Unknown", timedelta(days=40), "q")]):
+        h = sa.health_record(history, NOW, WINDOW_START)
+        assert h["known_hours"] == 0
+        assert all(h[k] is None for k in ("outages", "longest_outage_hours", "ongoing_outage",
+                                          "unavailable_hours_in_window", "availability_percentage",
+                                          "longest_outage_with_adjacent_unknown_hours"))
+        assert h["windows_total"] == 1 and h["customer_initiated_unavailable_windows"] == 0
+
+
+def test_history_that_starts_inside_the_lookback_is_flagged():
+    assert sa.health_record([status("Available", timedelta(days=5))], NOW, WINDOW_START)["history_starts_in_lookback"]
+    assert not sa.health_record([status("Available", timedelta(days=60))], NOW, WINDOW_START)["history_starts_in_lookback"]
 
 
 def test_front_door_periods_are_origin_probe_failures_not_outages():
@@ -440,9 +474,29 @@ def test_the_summary_counts_resources_whose_availability_leaves_out_unknown_time
     quiet = [status("Available", timedelta(days=40), "a"), status("Unknown", timedelta(days=20), "q"),
              status("Available", timedelta(days=6), "b")]
     unknown_now = [status("Unknown", timedelta(0), "current")]
-    _, summary, _ = run(FakeArm(health={WEB: quiet, FUNC: unknown_now}))
-    assert (summary["lowest_availability_percentage"], summary["resources_without_availability"],
-            summary["resources_with_unknown_hours"], summary["resources_availability_unknown_now"]) == (100.0, 1, 1, 1)
+    unknown_all_along = [status("Unknown", timedelta(days=40), "q")]
+    created_lately = [status("Available", timedelta(days=5), "a")]
+    _, summary, _ = run(FakeArm(health={WEB: quiet, FUNC: unknown_now, MI: unknown_all_along, WEB_OUT: created_lately}))
+    assert {k: summary[k] for k in ("lowest_availability_percentage", "resources_without_availability",
+                                    "resources_with_unknown_hours", "resources_with_partial_history",
+                                    "resources_availability_unknown_now", "outages_in_window",
+                                    "resources_with_outage_in_window", "longest_outage_hours")} == {
+        "lowest_availability_percentage": 100.0, "resources_without_availability": 2,
+        "resources_with_unknown_hours": 1, "resources_with_partial_history": 2,
+        "resources_availability_unknown_now": 2, "outages_in_window": 0, "resources_with_outage_in_window": 0,
+        "longest_outage_hours": 0.0}
+
+
+def test_outage_counts_are_null_when_no_resource_has_known_hours(monkeypatch):
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:rg-out")
+    unknown = [status("Unknown", timedelta(0), "current")]
+    results, summary, collector = run(FakeArm(health={WEB: unknown, FUNC: unknown, MI: unknown}))
+    assert collector.ok
+    assert all(summary[k] is None for k in ("outages_in_window", "resources_with_outage_in_window", "ongoing_outages",
+                                            "longest_outage_hours", "lowest_availability_percentage"))
+    assert summary["resources_without_availability"] == 3
+    east = next(r for r in results["regions"] if r["region"] == "eastus2")
+    assert (east["outages_in_window"], east["longest_outage_hours"]) == (None, None)
 
 
 def test_a_stopped_app_is_not_counted_as_failing_its_health_check():
@@ -475,20 +529,67 @@ def test_excluded_resources_get_no_calls_and_are_counted_out(monkeypatch):
     assert summary["resource_exclusion_patterns_unmatched"] == ["location:nowhere"]
 
 
+def test_an_excluded_cdn_profile_is_not_counted(monkeypatch):
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "id:" + CDN)
+    client = FakeArm()
+    results, summary, collector = run(client)
+    assert collector.ok
+    assert results["cdn_profiles_not_front_door"] == 0
+    assert [(e["kind"], e["id"]) for e in results["excluded"]] == [("cdn_profile", CDN)]
+    assert (summary["resource_exclusion_patterns_unmatched"], summary["front_door_profiles"]) == ([], 1)
+
+
 def test_an_invalid_exclusion_pattern_fails_the_run(monkeypatch):
     monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg-out")
     _, _, collector = run(FakeArm())
     assert not collector.ok
 
 
-def test_a_failed_list_leaves_its_counts_null():
+MEASURED_FIELDS = (
+    "resources_available_now", "resources_unavailable_now", "resources_degraded_now",
+    "resources_availability_unknown_now", "resources_with_outage_in_window", "outages_in_window", "ongoing_outages",
+    "customer_initiated_unavailable_windows", "longest_outage_hours", "longest_degraded_hours", "longest_unknown_hours",
+    "lowest_availability_percentage", "resources_without_availability", "resources_with_unknown_hours",
+    "resources_with_partial_history", "resources_meeting_recovery_time_objective",
+    "resources_missing_recovery_time_objective", "resources_recovery_time_objective_unknown",
+    "all_resources_meet_recovery_time_objective")
+APP_FIELDS = (
+    "apps_stopped", "apps_with_health_check", "apps_without_health_check", "apps_health_check_unknown",
+    "all_apps_have_health_check", "apps_health_check_healthy_last_hour", "apps_health_check_unhealthy_last_hour",
+    "apps_health_check_without_recent_data", "apps_with_unhealthy_hours", "health_check_metric_unread")
+FRONT_DOOR_FIELDS = ("front_door_profiles_failing_origin_probes_now", "front_door_origin_probe_failure_windows",
+                     "front_door_longest_origin_probe_failure_hours")
+WHOLE_RUN_FIELDS = ("resources", "resource_health_unknown", "windows_not_listed", "service_impacting_events")
+
+
+def test_a_failed_app_list_leaves_every_count_over_apps_null(monkeypatch):
+    monkeypatch.setenv(sa.RTO_ENV, "24")
     client = FakeArm(failing={"/providers/Microsoft.Web/sites": azure_rest.ArmError(500, "InternalServerError", "boom")})
     results, summary, collector = run(client)
     assert not collector.ok
-    assert {k: summary[k] for k in ("resources", "app_services", "web_apps", "excluded_apps", "in_scope_apps",
-                                    "all_apps_have_health_check")} == dict.fromkeys(
-        ("resources", "app_services", "web_apps", "excluded_apps", "in_scope_apps", "all_apps_have_health_check"))
+    nulls = ("app_services", "web_apps", "excluded_apps", "in_scope_apps") + MEASURED_FIELDS + APP_FIELDS + WHOLE_RUN_FIELDS
+    assert {k: summary[k] for k in nulls} == dict.fromkeys(nulls)
     assert (summary["front_door_profiles"], summary["sql_managed_instances"]) == (1, 1)
+    assert (summary["front_door_profiles_failing_origin_probes_now"], summary["front_door_origin_probe_failure_windows"]) == (0, 0)
+    for region in results["regions"]:
+        assert (region["outages_in_window"], region["available_now"], region["apps_with_health_check"]) == (None, None, None)
+
+
+def test_a_failed_profile_list_leaves_the_front_door_counts_null():
+    client = FakeArm(failing={"/providers/Microsoft.Cdn/profiles": azure_rest.ArmError(500, "InternalServerError", "boom")})
+    results, summary, collector = run(client)
+    assert not collector.ok
+    assert {k: summary[k] for k in FRONT_DOOR_FIELDS + WHOLE_RUN_FIELDS} == dict.fromkeys(FRONT_DOOR_FIELDS + WHOLE_RUN_FIELDS)
+    assert (summary["outages_in_window"], summary["apps_with_health_check"], results["cdn_profiles_not_front_door"]) == (0, 1, None)
+    assert all(r["front_door_profiles_failing_origin_probes_now"] is None for r in results["regions"])
+
+
+def test_without_an_objective_no_recovery_count_passes():
+    _, summary, _ = run(FakeArm())
+    assert all(summary[k] is None for k in ("resources_meeting_recovery_time_objective",
+                                            "resources_missing_recovery_time_objective",
+                                            "resources_recovery_time_objective_unknown",
+                                            "all_resources_meet_recovery_time_objective"))
 
 
 def test_a_refused_health_read_is_unknown_and_fails_the_run():
@@ -551,6 +652,13 @@ def test_an_invalid_recovery_time_objective_fails_the_run(monkeypatch, raw):
     monkeypatch.setenv(sa.RTO_ENV, raw)
     _, summary, collector = run(FakeArm())
     assert not collector.ok and summary["recovery_time_objective_hours"] is None
+
+
+@pytest.mark.parametrize("raw", ["soon", "0", "-2", "1.5"])
+def test_an_invalid_lookback_fails_the_run(monkeypatch, raw):
+    monkeypatch.setenv(sa.LOOKBACK_ENV, raw)
+    _, summary, collector = run(FakeArm())
+    assert not collector.ok and summary["lookback_days"] == 30
 
 
 def test_the_lookback_is_capped_at_what_resource_health_keeps(monkeypatch):

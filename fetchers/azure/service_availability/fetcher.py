@@ -14,7 +14,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from app_service import is_web_app  # noqa: E402
 from azure_common import arm_id_key, resource_group_from_id, sorted_counts  # noqa: E402
-from azure_rest import int_config, parse_time, run_subscription  # noqa: E402
+from azure_rest import parse_time, run_subscription  # noqa: E402
 from frontdoor import FRONT_DOOR_SKUS  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
@@ -43,6 +43,7 @@ WORKERS = 4
 APP, FRONT_DOOR, SQL_MI = "app_service", "front_door", "sql_managed_instance"
 RESOURCE_TYPES = (APP, FRONT_DOOR, SQL_MI)
 EXCLUDED_KIND = {APP: "app", FRONT_DOOR: "front_door_profile", SQL_MI: "sql_managed_instance"}
+CDN_PROFILE_KIND = "cdn_profile"
 WEB_APP, FUNCTION_APP = "web_app", "function_app"
 AVAILABLE, UNAVAILABLE, DEGRADED, UNKNOWN = "Available", "Unavailable", "Degraded", "Unknown"
 STATES = {s.lower(): s for s in (AVAILABLE, UNAVAILABLE, DEGRADED, UNKNOWN)}
@@ -59,15 +60,20 @@ ORIGIN_PROBES, RESOURCE_SIGNAL = "origin_health_probes", "resource"
 FAILING = (UNAVAILABLE, DEGRADED)
 
 LIMITATIONS = [
-    f"Resource Health keeps {MAX_LOOKBACK_DAYS} days of history, so the lookback is capped there; history_from shows "
-    "how far back each resource's history reaches.",
+    f"Resource Health keeps about {MAX_LOOKBACK_DAYS} days of history, so the lookback is capped there; history_from "
+    "shows how far back each resource's history reaches, and a period that began before the oldest status Resource "
+    "Health keeps is measured from that status.",
     "Availability is what Resource Health reports from Microsoft's own checks for the resource type, not an "
-    "end-to-end probe of the application.",
+    "end-to-end probe of the application. A stopped app counts as Resource Health reports it, which can be "
+    "Available.",
     "Periods the customer started (a stop, restart or scale: Resource Health names the customer or user as the "
-    "cause) are listed but are not outages and do not count against the recovery time objective.",
+    "cause) are listed but are not outages, count as available time, and do not count against the recovery time "
+    "objective.",
     "Recovery time is the length of a continuous Unavailable period; a Degraded resource still serves requests.",
     "Unknown periods (Resource Health had no information) are not counted as available: availability is measured "
-    "over known hours, and an Unknown period longer than the recovery time objective leaves the objective unknown.",
+    "over known hours, a resource with no known hours has no outage figures, and an Unknown period longer than the "
+    "recovery time objective, or one that with the outages next to it runs longer than the objective, leaves the "
+    "objective unknown.",
     "Deployment slots are not read: production apps only.",
     "Resource Health judges a Front Door profile by whether its origins answer health probes, not by whether Front "
     "Door serves requests, so one failing origin makes the profile Unavailable or Degraded while the others serve. "
@@ -123,8 +129,28 @@ def smallest(values):
     return min(values) if values else None
 
 
+def total(values):
+    values = [v for v in values if v is not None]
+    return sum(values) if values else None
+
+
+def gate(ok: bool, value):
+    """The value when its list was read, else None: a count over a failed list is unknown, not 0."""
+    return value if ok else None
+
+
 def read_settings(collector) -> dict:
-    days = int_config(LOOKBACK_ENV, DEFAULT_LOOKBACK_DAYS)
+    raw_days = (os.environ.get(LOOKBACK_ENV) or "").strip()
+    days = DEFAULT_LOOKBACK_DAYS
+    if raw_days:
+        try:
+            days = int(raw_days)
+        except ValueError:
+            days = 0
+        if days <= 0:
+            collector.record(f"config {LOOKBACK_ENV}",
+                             ValueError(f"invalid lookback {raw_days!r}: expected whole days > 0"))
+            days = DEFAULT_LOOKBACK_DAYS
     if days > MAX_LOOKBACK_DAYS:
         logger.warning("%s=%d is past the %d days Resource Health keeps; using %d",
                        LOOKBACK_ENV, days, MAX_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS)
@@ -289,9 +315,11 @@ def unread_health(status: str, error=None, signal: str = RESOURCE_SIGNAL) -> dic
     return {
         "status": status, "error": error, "signal": signal, "statuses_read": None, "statuses_without_time": None,
         "current_state": None, "current_since": None, "current_title": None, "current_summary": None,
-        "last_checked": None, "history_from": None, "observed_hours": None, "known_hours": None,
+        "last_checked": None, "history_from": None, "history_starts_in_lookback": None, "observed_hours": None,
+        "known_hours": None,
         "availability_percentage": None, "unavailable_hours_in_window": None, "degraded_hours_in_window": None,
         "unknown_hours_in_window": None, "outages": None, "ongoing_outage": None, "longest_outage_hours": None,
+        "longest_outage_with_adjacent_unknown_hours": None,
         "customer_initiated_unavailable_windows": None, "degraded_windows": None, "unknown_windows": None,
         "longest_degraded_hours": None, "longest_unknown_hours": None,
         "origin_probe_failure_windows": None, "origin_probe_failure_hours_in_window": None,
@@ -309,7 +337,9 @@ def health_record(statuses: list[dict], now: datetime, window_start: datetime, o
         return {**unread_health(NO_DATA, signal=signal), "statuses_read": len(statuses),
                 "statuses_without_time": untimed}
     relevant = [s for s in segments if (s["end"] or now) > window_start]
-    windows = [window_record(s, events, now, window_start) for s in relevant if s["state"] != AVAILABLE]
+    # Oldest first, None for Available, so outages can be matched with the Unknown periods right next to them.
+    chain = [None if s["state"] == AVAILABLE else window_record(s, events, now, window_start) for s in relevant]
+    windows = [w for w in chain if w]
     for w in windows:
         w["counts_as_outage"] = not origin_driven and w["state"] == UNAVAILABLE and w["initiated_by"] != CUSTOMER
     outages = [w for w in windows if w["counts_as_outage"]]
@@ -336,6 +366,7 @@ def health_record(statuses: list[dict], now: datetime, window_start: datetime, o
         "current_summary": latest.get("summary"),
         "last_checked": iso(parse_time(latest.get("reportedTime"))),
         "history_from": iso(history_from),
+        "history_starts_in_lookback": history_from > window_start,
         "observed_hours": observed,
         "known_hours": round(max(observed - unknown, 0), 2),
         "degraded_hours_in_window": in_window((DEGRADED,)),
@@ -363,18 +394,37 @@ def health_record(statuses: list[dict], now: datetime, window_start: datetime, o
             "failing_origin_probes_now": None if current["state"] == UNKNOWN else current["state"] in FAILING,
         })
         return record
-    down = round(sum(w["hours_in_window"] for w in outages), 2)
+    record["customer_initiated_unavailable_windows"] = sum(
+        1 for w in windows if w["state"] == UNAVAILABLE and w["initiated_by"] == CUSTOMER)
     known = record["known_hours"]
+    if not known:
+        # Resource Health knew nothing in the lookback, so "no outage" can't be told apart from "no information".
+        return record
+    down = round(sum(w["hours_in_window"] for w in outages), 2)
     record.update({
-        "availability_percentage": round(100 * (known - down) / known, 3) if known else None,
+        "availability_percentage": round(100 * (known - down) / known, 3),
         "unavailable_hours_in_window": down,
         "outages": len(outages),
         "ongoing_outage": any(w["ongoing"] for w in outages),
         "longest_outage_hours": biggest(w["duration_hours"] for w in outages) or 0.0,
-        "customer_initiated_unavailable_windows": sum(
-            1 for w in windows if w["state"] == UNAVAILABLE and w["initiated_by"] == CUSTOMER),
+        "longest_outage_with_adjacent_unknown_hours": longest_with_adjacent_unknown(chain),
     })
     return record
+
+
+def longest_with_adjacent_unknown(chain: list) -> float:
+    """Hours of the longest run of outages and the Unknown periods touching them, with no Available, Degraded or
+    customer-started time between: the outage may have lasted that long."""
+    best, run, has_outage = 0.0, 0.0, False
+    for w in chain + [None]:
+        if w and (w["counts_as_outage"] or w["state"] == UNKNOWN):
+            run += w["duration_hours"]
+            has_outage = has_outage or w["counts_as_outage"]
+            continue
+        if has_outage:
+            best = max(best, run)
+        run, has_outage = 0.0, False
+    return round(best, 2)
 
 
 def available_now(health: dict):
@@ -391,8 +441,8 @@ def meets_objective(health: dict, rto):
         return None
     if health["longest_outage_hours"] > rto:
         return False
-    # An Unknown period longer than the objective could hide an outage that misses it.
-    if not health["known_hours"] or health["longest_unknown_hours"] > rto:
+    # Unknown time longer than the objective, alone or next to an outage, could hide an outage that misses it.
+    if health["longest_unknown_hours"] > rto or health["longest_outage_with_adjacent_unknown_hours"] > rto:
         return None
     return True
 
@@ -494,37 +544,49 @@ def running_checks(records: list[dict]) -> list[dict]:
     return [r["health_check"] for r in records if r["health_check"] and not r["health_check"]["app_stopped"]]
 
 
-def region_records(records: list[dict]) -> list[dict]:
+def list_flags(listed: dict) -> tuple[bool, bool, bool]:
+    """(apps and SQL Managed Instances listed, apps listed, Front Door profiles listed)."""
+    return (listed[APP] is not None and listed[SQL_MI] is not None, listed[APP] is not None,
+            listed[FRONT_DOOR] is not None)
+
+
+def region_records(records: list[dict], listed: dict) -> list[dict]:
+    """Per-region rollup; a count over a type whose list failed is None, as in the summary."""
+    measured_ok, apps_ok, doors_ok = list_flags(listed)
     regions: dict = {}
     for r in records:
         regions.setdefault(r["region"], []).append(r)
     out = []
     for name, members in sorted(regions.items()):
         own = measured(members)
-        checks = [m["health_check"] for m in members if m["health_check"]]
+        checks = running_checks(members)
         out.append({
             "region": name,
             "resources": len(members),
             "by_type": sorted_counts(Counter(m["resource_type"] for m in members)),
-            "available_now": sum(1 for m in own if m["available_now"] is True),
-            "unavailable_now": sum(1 for m in own if m["available_now"] is False),
-            "availability_unknown_now": sum(1 for m in own if m["available_now"] is None),
-            "outages_in_window": sum(m["outages_in_window"] or 0 for m in own),
-            "longest_outage_hours": biggest(m["longest_outage_hours"] for m in own),
-            "front_door_profiles_failing_origin_probes_now": sum(
-                1 for m in members if m["resource_health"]["failing_origin_probes_now"] is True),
-            "apps_with_health_check": sum(1 for c in checks if c["health_check_enabled"] is True),
-            "apps_health_check_healthy_last_hour": sum(1 for c in checks if c["healthy_last_hour"] is True),
-            "apps_health_check_unhealthy_last_hour": sum(1 for c in checks if c["healthy_last_hour"] is False),
+            "available_now": gate(measured_ok, sum(1 for m in own if m["available_now"] is True)),
+            "unavailable_now": gate(measured_ok, sum(1 for m in own if m["available_now"] is False)),
+            "availability_unknown_now": gate(measured_ok, sum(1 for m in own if m["available_now"] is None)),
+            "outages_in_window": gate(measured_ok, total(m["outages_in_window"] for m in own)),
+            "longest_outage_hours": gate(measured_ok, biggest(m["longest_outage_hours"] for m in own)),
+            "front_door_profiles_failing_origin_probes_now": gate(doors_ok, sum(
+                1 for m in members if m["resource_health"]["failing_origin_probes_now"] is True)),
+            "apps_with_health_check": gate(apps_ok, sum(
+                1 for m in members if (m["health_check"] or {}).get("health_check_enabled") is True)),
+            "apps_health_check_healthy_last_hour": gate(apps_ok, sum(1 for c in checks if c["healthy_last_hour"] is True)),
+            "apps_health_check_unhealthy_last_hour": gate(apps_ok, sum(
+                1 for c in checks if c["healthy_last_hour"] is False)),
         })
     return out
 
 
 def summarize(records: list[dict], listed: dict, settings: dict, registration: str) -> dict:
+    """A count over a type whose list failed is None, never 0; outage counts skip resources with no known hours."""
     health = [r["resource_health"] for r in records]
     read = [h for h in health if h["status"] == READ]
     own = measured(records)
     own_read = [r["resource_health"] for r in own if r["resource_health"]["status"] == READ]
+    known = [h for h in own_read if h["outages"] is not None]
     doors = [r["resource_health"] for r in records
              if r["resource_type"] == FRONT_DOOR and r["resource_health"]["status"] == READ]
     apps = [r for r in records if r["resource_type"] == APP]
@@ -532,12 +594,16 @@ def summarize(records: list[dict], listed: dict, settings: dict, registration: s
     running = running_checks(apps)
     rto = settings["recovery_time_objective_hours"]
     lists_ok = all(listed[t] is not None for t in RESOURCE_TYPES)
-    measured_lists_ok = listed[APP] is not None and listed[SQL_MI] is not None
+    m, a, f = list_flags(listed)
+    judged = m and rto is not None
 
     def typed(resource_type, app_type=None):
         if listed[resource_type] is None:
             return None
         return sum(1 for r in records if r["resource_type"] == resource_type and app_type in (None, r["app_type"]))
+
+    def per_known(predicate):
+        return None if not known else sum(1 for h in known if predicate(h))
 
     return {
         "lookback_days": settings["lookback_days"],
@@ -550,47 +616,51 @@ def summarize(records: list[dict], listed: dict, settings: dict, registration: s
         "front_door_profiles": typed(FRONT_DOOR),
         "sql_managed_instances": typed(SQL_MI),
         "resource_health_read": len(read),
-        "resource_health_unknown": len(health) - len(read),
+        "resource_health_unknown": gate(lists_ok, len(health) - len(read)),
         "resource_health_by_status": sorted_counts(Counter(h["status"] for h in health)),
-        "windows_not_listed": sum(h["windows_total"] - h["windows_listed"] for h in read),
-        "resources_available_now": sum(1 for r in own if r["available_now"] is True),
-        "resources_unavailable_now": sum(1 for r in own if r["available_now"] is False),
-        "resources_degraded_now": sum(1 for r in own if r["resource_health"]["current_state"] == DEGRADED),
-        "resources_availability_unknown_now": sum(1 for r in own if r["available_now"] is None),
-        "resources_with_outage_in_window": sum(1 for h in own_read if h["outages"]),
-        "outages_in_window": sum(h["outages"] for h in own_read),
-        "ongoing_outages": sum(1 for h in own_read if h["ongoing_outage"]),
-        "customer_initiated_unavailable_windows": sum(h["customer_initiated_unavailable_windows"] for h in own_read),
-        "longest_outage_hours": biggest(h["longest_outage_hours"] for h in own_read),
-        "longest_degraded_hours": biggest(h["longest_degraded_hours"] for h in own_read),
-        "longest_unknown_hours": biggest(h["longest_unknown_hours"] for h in own_read),
-        "lowest_availability_percentage": smallest(h["availability_percentage"] for h in own_read),
-        "resources_without_availability": sum(1 for h in own_read if h["availability_percentage"] is None),
-        "resources_with_unknown_hours": sum(1 for h in own_read if h["unknown_hours_in_window"]),
-        "service_impacting_events": len(distinct_events(e for h in read for e in h["service_impacting_events"])),
-        "resources_meeting_recovery_time_objective": sum(
-            1 for r in own if r["meets_recovery_time_objective"] is True),
-        "resources_missing_recovery_time_objective": sum(
-            1 for r in own if r["meets_recovery_time_objective"] is False),
-        "resources_recovery_time_objective_unknown": None if rto is None else sum(
-            1 for r in own if r["meets_recovery_time_objective"] is None),
-        "all_resources_meet_recovery_time_objective": None if rto is None or not measured_lists_ok else all_true(
-            [r["meets_recovery_time_objective"] for r in own]),
-        "front_door_profiles_failing_origin_probes_now": sum(1 for h in doors if h["failing_origin_probes_now"]),
-        "front_door_origin_probe_failure_windows": sum(h["origin_probe_failure_windows"] for h in doors),
-        "front_door_longest_origin_probe_failure_hours": biggest(h["longest_origin_probe_failure_hours"] for h in doors),
-        "apps_stopped": sum(1 for r in apps if lower(r["state"]) == "stopped"),
-        "apps_with_health_check": sum(1 for c in checks if c["health_check_enabled"] is True),
-        "apps_without_health_check": sum(1 for c in checks if c["health_check_enabled"] is False),
-        "apps_health_check_unknown": sum(1 for c in checks if c["health_check_enabled"] is None),
-        "all_apps_have_health_check": None if listed[APP] is None else all_true(
-            [c["health_check_enabled"] for c in checks]),
-        "apps_health_check_healthy_last_hour": sum(1 for c in running if c["healthy_last_hour"] is True),
-        "apps_health_check_unhealthy_last_hour": sum(1 for c in running if c["healthy_last_hour"] is False),
-        "apps_health_check_without_recent_data": sum(
-            1 for c in running if c["health_check_enabled"] is not False and c["healthy_last_hour"] is None),
-        "apps_with_unhealthy_hours": sum(1 for c in running if c["hours_unhealthy"]),
-        "health_check_metric_unread": sum(1 for c in checks if c["metric_status"] == ERROR),
+        "windows_not_listed": gate(lists_ok, sum(h["windows_total"] - h["windows_listed"] for h in read)),
+        "resources_available_now": gate(m, sum(1 for r in own if r["available_now"] is True)),
+        "resources_unavailable_now": gate(m, sum(1 for r in own if r["available_now"] is False)),
+        "resources_degraded_now": gate(m, sum(1 for r in own if r["resource_health"]["current_state"] == DEGRADED)),
+        "resources_availability_unknown_now": gate(m, sum(1 for r in own if r["available_now"] is None)),
+        "resources_with_outage_in_window": gate(m, per_known(lambda h: h["outages"])),
+        "outages_in_window": gate(m, total(h["outages"] for h in known)),
+        "ongoing_outages": gate(m, per_known(lambda h: h["ongoing_outage"])),
+        "customer_initiated_unavailable_windows": gate(m, total(
+            h["customer_initiated_unavailable_windows"] for h in own_read)),
+        "longest_outage_hours": gate(m, biggest(h["longest_outage_hours"] for h in known)),
+        "longest_degraded_hours": gate(m, biggest(h["longest_degraded_hours"] for h in own_read)),
+        "longest_unknown_hours": gate(m, biggest(h["longest_unknown_hours"] for h in own_read)),
+        "lowest_availability_percentage": gate(m, smallest(h["availability_percentage"] for h in known)),
+        "resources_without_availability": gate(m, sum(1 for h in own_read if h["availability_percentage"] is None)),
+        "resources_with_unknown_hours": gate(m, sum(
+            1 for h in own_read if h["known_hours"] and h["unknown_hours_in_window"])),
+        "resources_with_partial_history": gate(m, sum(1 for h in own_read if h["history_starts_in_lookback"])),
+        "service_impacting_events": gate(lists_ok, len(distinct_events(
+            e for h in read for e in h["service_impacting_events"]))),
+        "resources_meeting_recovery_time_objective": gate(judged, sum(
+            1 for r in own if r["meets_recovery_time_objective"] is True)),
+        "resources_missing_recovery_time_objective": gate(judged, sum(
+            1 for r in own if r["meets_recovery_time_objective"] is False)),
+        "resources_recovery_time_objective_unknown": gate(judged, sum(
+            1 for r in own if r["meets_recovery_time_objective"] is None)),
+        "all_resources_meet_recovery_time_objective": gate(judged, all_true(
+            [r["meets_recovery_time_objective"] for r in own])),
+        "front_door_profiles_failing_origin_probes_now": gate(f, sum(1 for h in doors if h["failing_origin_probes_now"])),
+        "front_door_origin_probe_failure_windows": gate(f, total(h["origin_probe_failure_windows"] for h in doors)),
+        "front_door_longest_origin_probe_failure_hours": gate(f, biggest(
+            h["longest_origin_probe_failure_hours"] for h in doors)),
+        "apps_stopped": gate(a, sum(1 for r in apps if lower(r["state"]) == "stopped")),
+        "apps_with_health_check": gate(a, sum(1 for c in checks if c["health_check_enabled"] is True)),
+        "apps_without_health_check": gate(a, sum(1 for c in checks if c["health_check_enabled"] is False)),
+        "apps_health_check_unknown": gate(a, sum(1 for c in checks if c["health_check_enabled"] is None)),
+        "all_apps_have_health_check": gate(a, all_true([c["health_check_enabled"] for c in checks])),
+        "apps_health_check_healthy_last_hour": gate(a, sum(1 for c in running if c["healthy_last_hour"] is True)),
+        "apps_health_check_unhealthy_last_hour": gate(a, sum(1 for c in running if c["healthy_last_hour"] is False)),
+        "apps_health_check_without_recent_data": gate(a, sum(
+            1 for c in running if c["health_check_enabled"] is not False and c["healthy_last_hour"] is None)),
+        "apps_with_unhealthy_hours": gate(a, sum(1 for c in running if c["hours_unhealthy"])),
+        "health_check_metric_unread": gate(a, sum(1 for c in checks if c["metric_status"] == ERROR)),
         "regions": sorted({r["region"] for r in records}),
     }
 
@@ -610,7 +680,7 @@ def boundary_summary(scope: ResourceExclusions, excluded: list[dict], records: l
 
 # --- collection ---
 
-def list_resources(client, subscription_id: str, collector) -> tuple[dict, int | None]:
+def list_resources(client, subscription_id: str, collector) -> tuple[dict, list[dict] | None]:
     """Projected resources per type (None when the list failed), and CDN profiles that are not Front Door."""
     base = f"/subscriptions/{subscription_id}/providers"
     sites = collector.guard("web.sites.list", lambda: client.list(f"{base}/Microsoft.Web/sites", WEB_API))
@@ -628,7 +698,10 @@ def list_resources(client, subscription_id: str, collector) -> tuple[dict, int |
         FRONT_DOOR: projected(None if profiles is None else [p for p in profiles if is_front_door(p)], FRONT_DOOR),
         SQL_MI: projected(instances, SQL_MI),
     }
-    return listed, None if profiles is None else sum(1 for p in profiles if not is_front_door(p))
+    other = None if profiles is None else [
+        {"id": p.get("id"), "name": p.get("name"), "location": p.get("location"),
+         "resource_group": resource_group_from_id(p.get("id"))} for p in profiles if not is_front_door(p)]
+    return listed, other
 
 
 def health_registration(client, subscription_id: str) -> str:
@@ -714,6 +787,9 @@ def collect(client, subscription_id: str, collector) -> tuple:
         kept, out = scope.split(listed[resource_type] or [], EXCLUDED_KIND[resource_type])
         in_scope += kept
         excluded += out
+    # Not read, but counted, so the exclusions apply to them too.
+    other_cdn_in_scope, other_cdn_out = scope.split(other_cdn_profiles or [], CDN_PROFILE_KIND)
+    excluded += other_cdn_out
     scope.warn_unmatched(logger)
 
     registration = health_registration(client, subscription_id)
@@ -734,8 +810,8 @@ def collect(client, subscription_id: str, collector) -> tuple:
         "settings": {**settings, "window_start": iso(window_start), "window_end": iso(now)},
         "resource_health_registration": registration,
         "resources": records,
-        "regions": region_records(records),
-        "cdn_profiles_not_front_door": other_cdn_profiles,
+        "regions": region_records(records, listed),
+        "cdn_profiles_not_front_door": None if other_cdn_profiles is None else len(other_cdn_in_scope),
         "excluded": sorted(excluded, key=lambda e: arm_id_key(e.get("id"))),
         "limitations": LIMITATIONS,
         "related_evidence": RELATED_EVIDENCE,

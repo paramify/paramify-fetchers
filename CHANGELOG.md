@@ -18,16 +18,19 @@ schemas and the `paramify` CLI — not the internal code.
   every Unavailable, Degraded and Unknown period with start, end, length, cause
   and the Azure incident Resource Health links to it, availability over the hours
   Resource Health knew about (with counts of resources it leaves out or only
-  partly covers), and a rollup per region. Periods the customer
-  started (stop, restart, scale) are listed but are not outages. With
-  `recovery_time_objective_hours` set, each resource's longest outage is checked
-  against it; an Unknown period longer than the objective leaves it unknown.
+  partly covers), and a rollup per region. A resource with no known hours has
+  no outage figures. Periods the customer started (stop, restart, scale) are
+  listed but are not outages. With `recovery_time_objective_hours` set, each
+  resource's longest outage is checked against it; an Unknown period longer than
+  the objective, or an outage that runs past it with the Unknown time touching
+  it, leaves the verdict unknown.
   Front Door Standard/Premium profiles are read too, but Resource Health judges a
   profile by whether its origins answer health probes, so their periods are
   reported as origin probe failures and never as outages. For apps, the health
   check path and hourly `HealthCheckStatus` results; stopped apps get no verdict.
   A failed or refused read leaves availability unknown, never available, and fails
-  the run. Takes `resource_exclusions`. Front Door origin health per region stays
+  the run; a failed list leaves every count over that resource type null. Takes
+  `resource_exclusions`. Front Door origin health per region stays
   in `azure_front_door_origins`, and Service Health events in
   `azure_service_health_advisories`.
 - **Resource exclusions for Azure fetchers.** A shared helper,
