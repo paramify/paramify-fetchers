@@ -34,6 +34,7 @@ from azure_common import (  # noqa: E402
 )
 from diagnostics import audit_logging_summary  # noqa: E402
 from foundry_connections import compact, connection_fields  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_ai_services_configuration")
 
@@ -54,6 +55,7 @@ HARM_CATEGORIES = ("hate", "sexual", "violence", "selfharm")
 SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2}
 DEFAULT_HARM_THRESHOLD = "medium"
 FIRST_PARTY_PUBLISHERS = {"openai", "microsoft"}
+KINDS = ("account", "search_service")
 
 
 def network_exposure(public_network_access, default_action) -> str:
@@ -483,7 +485,11 @@ def collect_account(client, rest, monitor, account: dict, collector: Collector) 
     }
 
 
-def collect(subscription_id, cred, collector: Collector) -> tuple:
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None) -> tuple:
+    """Accounts and search services the exclusions take out go to `excluded`; an excluded account's deployments,
+    policies, projects and connections are not read."""
+    exclusions = exclusions or ResourceExclusions()
     def _client():
         from azure.mgmt.cognitiveservices import (
             CognitiveServicesManagementClient,  # lazy
@@ -512,6 +518,11 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
         ],
         default=[],
     )
+    accounts, out_accounts = exclusions.split(accounts, "account")
+    search, out_search = exclusions.split(search, "search_service")
+    if excluded is not None:
+        excluded += sorted(out_accounts + out_search, key=lambda e: (e["kind"], e["id"] or ""))
+    exclusions.warn_unmatched(logger)
     monitor = (
         collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))
         if accounts or search
@@ -550,6 +561,8 @@ def main() -> int:
 
     accounts: list = []
     search_services: list = []
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.CognitiveServices")
@@ -558,7 +571,7 @@ def main() -> int:
                 "Microsoft.CognitiveServices is not registered on subscription %s — reporting status not_registered",
                 subscription_id,
             )
-        accounts, search_services = collect(subscription_id, cred, collector)
+        accounts, search_services = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -568,6 +581,8 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -576,8 +591,13 @@ def main() -> int:
             "accounts": accounts,
             "search_services": search_services,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(accounts, search_services), "provider_registration_status": registration},
+        summary={
+            **summarize(accounts, search_services),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, KINDS, {"accounts": len(accounts), "search_services": len(search_services)}),
+        },
     )
     filename = f"azure_ai_services_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

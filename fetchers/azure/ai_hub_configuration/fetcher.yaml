@@ -1,5 +1,5 @@
 name: azure_ai_hub_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   Inventories Azure AI hubs, AI projects and the other Azure Machine Learning workspaces
   (Microsoft.MachineLearningServices/workspaces) in the subscription. For every workspace: how
@@ -12,6 +12,29 @@ description: >
   exposure, whether diagnostic logs are exported, and every connection to another service with
   whether the connection holds a stored secret.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching hub, project or other workspace is listed under excluded with the
+      pattern and left out of every count and verdict; its datastores, endpoints,
+      computes, connections and diagnostic settings are not read. A project also
+      leaves with an excluded hub when it sits in the hub's resource group or under
+      its id; any other project stays in scope, still inherits the excluded hub's
+      network access, managed-network isolation and encryption, and still has its
+      repeats of that hub's connections left out of the distinct counts (the hub's
+      connection names are read for that). A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -104,3 +127,8 @@ evidence_set:
     nothing about endpoint or compute exposure: there is nothing deployed yet. Lists that could not be read are null and set metadata.partial_failure.
     provider_registration_status (registered / not_registered / unknown) is the
     Microsoft.MachineLearningServices resource provider's state.
+    Workspaces the resource_exclusions patterns take out are listed under excluded instead of workspaces.
+    resource_exclusion_patterns lists the configured patterns, empty when none are set; resource_exclusion_patterns_unmatched the ones that matched no
+    workspace, such as a mistyped name; excluded_hubs, excluded_projects and excluded_other_workspaces count the workspaces left out of scope because a
+    pattern matched their resource group, region or id, or their hub was excluded; in_scope_hubs, in_scope_projects and in_scope_other_workspaces count
+    those read and in scope, and 0 for all three means none was read or the patterns took out every workspace, which a check can catch by requiring more than 0.

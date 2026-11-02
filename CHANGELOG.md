@@ -535,6 +535,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_ai_hub_configuration` 0.2.0 and `azure_ai_services_configuration` 0.2.0:
+  resource exclusions.** `resource_exclusions` now takes hubs, projects and other
+  workspaces (hub configuration) and AI services accounts and AI Search services
+  (services configuration) out of scope, by resource group, region or id; an
+  excluded one is listed under `excluded` and gets none of its per-resource reads.
+  A project leaves with an excluded hub in its resource group or under its id; any
+  other project keeps inheriting the excluded hub's settings, and its repeats of
+  that hub's connections stay out of the distinct counts.
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
   history (`risk_history`, oldest first, with what changed and who initiated it)
