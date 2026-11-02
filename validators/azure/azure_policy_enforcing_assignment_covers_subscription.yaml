@@ -13,8 +13,9 @@ statement: >
 
 # One assignment record, in the fetcher's sorted key order: actually_enforces (first key)
 # < excluded_scope_count < scope_kind (last key). The tempered token stops at the next
-# record, so an enforcing record cannot splice onto another record's scope.
-regex: '"actually_enforces":\s*true,(?:(?!"actually_enforces")[\s\S])*?"excluded_scope_count":\s*0,(?:(?!"actually_enforces")[\s\S])*?"scope_kind":\s*"(?:subscription|management_group)"'
+# record and at policy_exemptions, so an enforcing record cannot splice onto another
+# record's scope or an exemption's.
+regex: '"actually_enforces":\s*true,(?:(?!"actually_enforces"|"policy_exemptions")[\s\S])*?"excluded_scope_count":\s*0,(?:(?!"actually_enforces"|"policy_exemptions")[\s\S])*?"scope_kind":\s*"(?:subscription|management_group)"'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

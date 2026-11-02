@@ -2297,7 +2297,7 @@ Summary fields:
 
 
 ### azure_policy_assignments
-Short Description: Lists every Azure Policy assignment in effect on the subscription and shows which ones actually enforce their policies and which only audit.
+Short Description: Lists every Azure Policy assignment and exemption in effect on the subscription, showing which assignments actually enforce their policies, which only audit, and what each exemption waives and until when.
 
 Script: fetchers/azure/policy_assignments/fetcher.py
 
@@ -2309,13 +2309,20 @@ Commands Executed:
 - `policy_assignments.list()` — every assignment on the subscription and those inherited from management groups
 - `policy_definitions` / `policy_set_definitions` `get_built_in()`, `get()` or `get_at_management_group()` (per distinct definition) — display name, built-in or custom, and the policy effect
 - `policy_definitions.list_built_in()` (once, when an initiative is assigned) — the effect of each built-in member policy
+- `GET Microsoft.Authorization/policyExemptions` (a preview version, the only kind Azure offers) — every exemption on the subscription, inherited from management groups, or on its resource groups and resources, Defender for Cloud recommendation exemptions included
 
-Output: `azure_policy_assignments_<subscription>.json` — each policy assignment with its scope, exclusions, parameters, enforcement mode and policy definition, the effect of each policy it applies, and whether it actually enforces.
+Output: `azure_policy_assignments_<subscription>.json` — each policy assignment with its scope, exclusions, parameters, enforcement mode and policy definition, the effect of each policy it applies, whether it actually enforces, and each policy exemption with what it exempts, its category, reason and expiry; exemptions the resource_exclusions patterns take out are listed under excluded instead.
 
 Summary fields:
 
+**Which exemptions are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every exemption is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no exemption, such as a mistyped name or any location: pattern, since exemptions carry no region
+- `excluded_policy_exemptions` — Number of exemptions left out of scope because a pattern matched the resource group or id of the scope they were made at (a resource group, or a resource and its group); exemptions made at the subscription or a management group stay, and each excluded one is listed under excluded with the pattern; null when the exemptions couldn't be read. Policy assignments are never left out
+- `in_scope_policy_exemptions` — Number of exemptions read and in scope; null when the exemptions couldn't be read
+
 **What policy assignments exist?**
-- `total_policy_assignments` — Number of policy assignments in effect on the subscription, its own and inherited
+- `total_policy_assignments` — Number of policy assignments in effect on the subscription, its own and inherited; null when the assignment list fails, and then every assignment and effect field in this summary is null too and the run fails
 - `initiative_assignments` — Number of assignments of an initiative (a policy set bundling many policies)
 - `single_definition_assignments` — Number of assignments of a single policy definition
 - `built_in_definition_assignments` — Number of assignments whose definition or initiative is built in by Microsoft
@@ -2354,6 +2361,39 @@ Summary fields:
 - `member_policy_effect_counts` — Number of policies with each effect across every assignment, counting each policy of an initiative (an initiative assigned twice counts twice), plus unresolved for policies whose effect couldn't be resolved
 - `unresolved_member_policies` — Number of policies across every assignment whose effect couldn't be resolved, counting the unresolved policies inside partly resolved initiatives, which are classed by their resolved policies alone
 - `unresolved_member_policies_not_enforced` — Number of policies whose effect couldn't be resolved inside assignments with enforcement mode DoNotEnforce, where an enforcing effect may be held back unseen
+
+**Were the exemptions read?**
+- `exemptions_read_status` — Whether the exemptions were read: read, failed (the list call failed, and the run fails), api_version_unavailable (Azure refused the pinned preview version with InvalidApiVersionParameter, NoRegisteredProviderFound or InvalidResourceType; the run doesn't fail, and any other error counts as failed) or not_read (no subscription or credential); every exemption count below is null unless it is read
+- `exemptions_api_version` — What the fetcher pins the exemptions API to: the preview version 2024-12-01-preview, set in its code
+- `total_policy_exemptions` — Number of in-scope exemptions in effect on the subscription, its own, inherited from a management group, or on a resource group or resource inside it, expired ones included
+
+**What do the exemptions waive?**
+- `waiver_exemptions` — Number of in-scope exemptions in category Waiver (the resource is accepted as non-compliant), matched without regard to case
+- `mitigated_exemptions` — Number of in-scope exemptions in category Mitigated (the policy's intent is met another way), matched without regard to case
+- `whole_assignment_exemptions` — Number of in-scope exemptions that exempt every policy of an assignment rather than named members of an initiative
+- `defender_benchmark_exemptions` — Number of in-scope exemptions on Defender for Cloud's own assignment (SecurityCenterBuiltIn), which is how Defender recommendation exemptions are stored
+- `active_exemptions_lifting_enforcement` — Number of unexpired in-scope exemptions that lift enforcement: they exempt a policy with an enforcing effect (deny, modify, deployIfNotExists and the others listed above) on an assignment with enforcement mode Default
+- `exemptions_lifting_enforcement_unknown` — Number of in-scope exemptions where that can't be told; each one's lifts_enforcement_unknown_reason says why: the exempted assignment isn't listed, the assignments or the initiative's members couldn't be read, an exempted policy isn't in the initiative's current definition, or an exempted policy's effect couldn't be resolved
+- `exemptions_naming_members_not_in_initiative` — Number of in-scope exemptions naming at least one initiative member that the initiative's current definition doesn't have: a policy since removed from the initiative, or one in an older version the assignment still uses
+- `assignments_with_exemptions` — Number of listed assignments with at least one in-scope exemption; null when an exemption's assignment can't be checked because the assignment list failed
+- `exemptions_of_unlisted_assignments` — Number of in-scope exemptions whose assignment isn't among the assignments listed for the subscription, usually an assignment since deleted, whose exemptions Azure leaves in place; null when the assignment list failed
+- `unlisted_assignments_with_exemptions` — Number of distinct assignments that in-scope exemptions point at but that aren't among the listed assignments; null when the assignment list failed
+
+**Where were the exemptions made?**
+- `exemptions_by_scope_kind` — Number of in-scope exemptions made at each kind of scope:
+  - management_group (a management group above the subscription)
+  - subscription (the subscription itself)
+  - resource_group (one resource group)
+  - resource (one resource)
+  - unknown (a scope the fetcher can't classify)
+- `inherited_exemptions` — Number of in-scope exemptions made at a management group above the subscription
+
+**Do the exemptions expire?**
+- `active_exemptions` — Number of in-scope exemptions that are unexpired, including those with no expiry date
+- `expired_exemptions` — Number of in-scope exemptions whose expiry date has passed; Azure keeps them but no longer applies them
+- `exemptions_without_expiry` — Number of in-scope exemptions with no expiry date, which apply until someone deletes them
+- `exemptions_expiring_within_30_days` — Number of unexpired in-scope exemptions that expire in under 30 days
+- `exemptions_with_unreadable_expiry` — Number of in-scope exemptions whose expiry date couldn't be parsed, so whether they expired is unknown
 
 
 ### azure_policy_compliance
