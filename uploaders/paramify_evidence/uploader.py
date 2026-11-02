@@ -53,11 +53,18 @@ from framework.paramify_auth import (  # noqa: E402
 )
 from framework.paramify_responses import already_present  # noqa: E402
 from framework.run_files import is_evidence_file  # noqa: E402
+from framework.sync.providers.desired import (  # noqa: E402,F401
+    artifact_content,
+    artifact_note,
+    artifact_title,
+    is_enveloped,
+    override_for,
+    resolve_evidence_set,
+)
 
 logger = logging.getLogger("paramify_evidence_uploader")
 
 _REQUEST_TIMEOUT = 30
-_ENVELOPE_KEYS = {"schema_version", "metadata", "payload"}
 
 
 def _utc_now() -> str:
@@ -183,10 +190,6 @@ class ParamifyClient:
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
-def is_enveloped(obj) -> bool:
-    return isinstance(obj, dict) and _ENVELOPE_KEYS <= set(obj.keys())
-
-
 def find_latest_run(output_dir: Path) -> Optional[Path]:
     """The newest run that holds evidence — not simply the newest run, which is
     often a pipeline manifest's (issue reports only) sharing the same output dir."""
@@ -200,24 +203,6 @@ def iter_evidence_files(run_dir: Path):
     for p in sorted(run_dir.glob("*.json")):
         if is_evidence_file(p):
             yield p
-
-
-def override_for(metadata: Dict, overrides: Dict) -> Dict:
-    """The customer override block for the fetcher that produced this evidence."""
-    return overrides.get(metadata.get("fetcher_name"), {}) or {}
-
-
-def resolve_evidence_set(metadata: Dict, overrides: Dict) -> Optional[Dict]:
-    """Merge the envelope's evidence_set with any per-fetcher customer override."""
-    es = metadata.get("evidence_set")
-    if not es:
-        return None
-    ov = override_for(metadata, overrides)
-    resolved = dict(es)
-    for key in ("reference_id", "name", "instructions", "description", "frequency"):
-        if key in ov:
-            resolved[key] = ov[key]
-    return resolved
 
 
 def _channel_labels(channels: List[Dict]) -> str:
@@ -250,46 +235,15 @@ def resolve_channel(
     )
 
 
-# Target fields preferred as the single identifying suffix in an artifact title.
-# program_name leads: where a target carries both a readable label and an opaque
-# id (Paramify programs), the reviewer picking among artifacts needs the label.
-# Fetchers whose id IS readable (gitlab's group/project) declare no program_name,
-# so they fall through to project_id exactly as before.
-_TITLE_KEYS = ("program_name", "project_id", "name", "id", "region", "cluster", "host", "bucket", "account_id")
-
-
 def build_artifact_meta(metadata: Dict, es_name: str, channel_id: Optional[str] = None) -> Dict:
-    target = metadata.get("target")
-    title = es_name
-    if target:
-        # One identifying value, not every field (avoids dumping url/branch into the title).
-        suffix = next((str(target[k]) for k in _TITLE_KEYS if target.get(k)), None)
-        if suffix is None:
-            suffix = next((str(v) for v in target.values()), None)
-        if suffix:
-            title = f"{es_name} - {suffix}"
-    note_parts = [
-        f"fetcher={metadata.get('fetcher_name')}",
-        f"version={metadata.get('fetcher_version')}",
-        f"run_id={metadata.get('run_id')}",
-        f"status={metadata.get('status')}",
-    ]
-    if target:
-        note_parts.append(f"target={json.dumps(target, separators=(',', ':'))}")
     meta = {
-        "title": title,
-        "note": "; ".join(note_parts),
+        "title": artifact_title(metadata, es_name),
+        "note": artifact_note(metadata),
         "effectiveDate": metadata.get("collected_at") or _utc_now(),
     }
     if channel_id:
         meta["channelId"] = channel_id
     return meta
-
-
-def artifact_content(envelope: Dict, mode: str) -> bytes:
-    """Bytes to upload: the whole envelope (default, self-describing) or just the payload."""
-    obj = envelope["payload"] if mode == "payload" else envelope
-    return json.dumps(obj, indent=2).encode("utf-8")
 
 
 def load_config(path: Optional[str]) -> Dict:
