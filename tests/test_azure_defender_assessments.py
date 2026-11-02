@@ -334,36 +334,96 @@ def test_an_unreadable_list_is_all_null_never_zero():
 
 
 def test_sla_days_are_configurable_and_defaults_are_30_90_180(monkeypatch):
-    assert da.sla_days_from_env() == ({"High": 30, "Medium": 90, "Low": 180}, True)
+    assert da.sla_days_from_env() == {"High": 30, "Medium": 90, "Low": 180}
     monkeypatch.setenv("AZURE_DEFENDER_SLA_DAYS_HIGH", "7")
-    days, ok = da.sla_days_from_env()
-    assert (days["High"], ok) == (7, True)
+    days = da.sla_days_from_env()
+    assert days["High"] == 7
     assert _summary([aged("High", 10)], sla=days)["unhealthy_past_sla_count"] == 1
 
 
-@pytest.mark.parametrize("bad", ["0", "-5", "soon", "1.5"])
-def test_a_bad_sla_value_is_recorded_keeps_the_default_and_flags_the_config(monkeypatch, bad):
+@pytest.mark.parametrize("bad", ["0", "-5", "soon", "1.5", "²", "٣x"])
+def test_a_bad_sla_value_is_recorded_and_has_no_default(monkeypatch, bad):
     monkeypatch.setenv("AZURE_DEFENDER_SLA_DAYS_LOW", bad)
     collector = Collector(logging.getLogger("test"))
-    days, ok = da.sla_days_from_env(collector)
-    assert (days["Low"], ok) == (180, False)
+    days = da.sla_days_from_env(collector)
+    assert days["Low"] is None and days["High"] == 30
     assert collector.failures[0]["operation"] == "config AZURE_DEFENDER_SLA_DAYS_LOW"
+    assert da.classify_failure_code(collector.failures) == "bad_config"
 
 
-def _run_main(monkeypatch, tmp_path, rows=()):
-    monkeypatch.setattr(da, "resource_graph_client", lambda cred: FakeGraph(list(rows)))
+def test_an_invalid_sla_nulls_that_severity_and_the_total_only():
+    s = _summary([aged("Low", 500), aged("High", 40)], sla={**da.DEFAULT_SLA_DAYS, "Low": None})
+    assert s["unhealthy_past_sla_by_severity"] == {"High": 1, "Medium": 0, "Low": None}
+    assert s["unhealthy_past_sla_count"] is None
+    assert s["unhealthy_days_open_unknown_count"] == 0
+
+
+def test_a_not_applicable_row_with_an_old_date_is_not_aged_or_counted():
+    s = _summary([aged("High", 900, status="NotApplicable"), aged("High", 900, status="Healthy")])
+    assert s["unhealthy_past_sla_by_severity"] == {"High": 0, "Medium": 0, "Low": 0}
+    assert s["unhealthy_past_sla_count"] == 0
+
+
+def test_days_open_rounds_down_so_a_finding_just_under_a_day_over_is_not_past():
+    just_under = {"status_code": "Unhealthy", "severity": "High",
+                  "status_change_date": (NOW - timedelta(days=30, hours=23)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    da.apply_sla([just_under], da.DEFAULT_SLA_DAYS, NOW)
+    assert (just_under["days_open"], just_under["past_sla"]) == (30, False)
+
+
+def test_a_date_without_an_offset_is_read_as_utc():
+    assert da._parse_iso("2026-05-01T00:00:00") == datetime(2026, 5, 1, tzinfo=timezone.utc)
+
+
+def _run_main(monkeypatch, tmp_path, rows=(), graph=None):
+    monkeypatch.setattr(da, "resource_graph_client", lambda cred: graph or FakeGraph(list(rows)))
     monkeypatch.setattr(da, "credential", lambda: object())
     monkeypatch.setattr(da, "load_dotenv", lambda: None)
-    monkeypatch.setattr(da, "report_failure", lambda reason, code: None)
+    codes = []
+    monkeypatch.setattr(da, "report_failure", lambda reason, code: codes.append(code))
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
     monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", SUB_ID)
     code = da.main()
-    return code, json.loads((tmp_path / f"azure_defender_assessments_{SUB_ID}.json").read_text())
+    evidence = json.loads((tmp_path / f"azure_defender_assessments_{SUB_ID}.json").read_text())
+    return code, evidence, codes
+
+
+def test_main_a_failed_severity_read_nulls_every_sla_count(monkeypatch, fake_models, tmp_path):
+    old = assessment(AUTH)  # catalogue rates it Low, so a fallback would measure it against 180 days
+    old.status.status_change_date = NOW - timedelta(days=60)
+    _security_module(monkeypatch, [old])
+    code, evidence, _ = _run_main(monkeypatch, tmp_path, graph=FakeGraph(fail=True))
+    s = evidence["summary"]
+    assert code == 1
+    assert s["unhealthy_past_sla_by_severity"] == {"High": None, "Medium": None, "Low": None}
+    assert s["unhealthy_past_sla_count"] is None
+    assert s["unhealthy_days_open_unknown_count"] == 0
+
+
+def test_main_a_failed_severity_read_and_catalogue_leave_no_zero_counts(monkeypatch, fake_models, tmp_path):
+    _security_module(monkeypatch, [assessment(AUTH)], catalogue_error=RuntimeError("boom"))
+    _, evidence, _ = _run_main(monkeypatch, tmp_path, graph=FakeGraph(fail=True))
+    assert evidence["summary"]["unhealthy_past_sla_by_severity"] == {"High": None, "Medium": None, "Low": None}
+
+
+def test_main_a_bad_sla_value_fails_as_bad_config_with_null_counts(monkeypatch, fake_models, tmp_path):
+    old = assessment(AUTH)
+    old.status.status_change_date = NOW - timedelta(days=500)
+    _security_module(monkeypatch, [old])
+    monkeypatch.setenv("AZURE_DEFENDER_SLA_DAYS_HIGH", "²")
+    rows = [{"id": old.id, "severity": "High"}]
+    code, evidence, codes = _run_main(monkeypatch, tmp_path, rows, graph=FakeGraph(rows))
+    s = evidence["summary"]
+    assert (code, codes) == (1, ["bad_config"])
+    assert s["sla_days_by_severity"]["High"] is None
+    assert s["unhealthy_past_sla_by_severity"]["High"] is None and s["unhealthy_past_sla_count"] is None
+    (record,) = evidence["results"]["assessments"]
+    assert (record["sla_days"], record["past_sla"]) == (None, None) and record["days_open"] > 400
 
 
 def test_main_a_failed_list_gives_null_counts(monkeypatch, fake_models, tmp_path):
     _security_module(monkeypatch, [], list_error=RuntimeError("AuthorizationFailed"))
-    code, evidence = _run_main(monkeypatch, tmp_path)
+    code, evidence, _ = _run_main(monkeypatch, tmp_path)
     assert code == 1
     assert evidence["summary"]["unhealthy_past_sla_count"] is None
     assert evidence["summary"]["unhealthy_past_sla_by_severity"]["High"] is None
@@ -375,7 +435,7 @@ def test_main_reports_days_open_and_counts_on_a_registered_subscription(monkeypa
     undated = assessment(TLS)
     _security_module(monkeypatch, [old, undated])
     rows = [{"id": old.id, "severity": "High"}, {"id": undated.id, "severity": "Medium"}]
-    code, evidence = _run_main(monkeypatch, tmp_path, rows)
+    code, evidence, _ = _run_main(monkeypatch, tmp_path, rows)
     assert code == 0
     by_name = {r["name"]: r for r in evidence["results"]["assessments"]}
     assert by_name[AUTH]["past_sla"] is True and by_name[AUTH]["days_open"] > 365
@@ -387,6 +447,6 @@ def test_main_reports_days_open_and_counts_on_a_registered_subscription(monkeypa
 
 def test_main_an_unregistered_subscription_counts_zero(monkeypatch, fake_models, tmp_path):
     _security_module(monkeypatch, [], list_error=RuntimeError("Subscription not registered"))
-    code, evidence = _run_main(monkeypatch, tmp_path)
+    code, evidence, _ = _run_main(monkeypatch, tmp_path)
     assert code == 0
     assert evidence["summary"]["unhealthy_past_sla_count"] == 0

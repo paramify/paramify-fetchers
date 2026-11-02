@@ -93,6 +93,7 @@ SEVERITY_QUERY = (
     " | project id, severity = tostring(properties.metadata.severity)"
     " | order by id asc"
 )
+SEVERITY_OPERATION = "resourcegraph.resources (SecurityResources)"
 FROM_ASSESSMENT = "assessment"
 FROM_CATALOGUE = "catalogue"
 
@@ -205,30 +206,30 @@ DEFAULT_SLA_DAYS = {"High": 30, "Medium": 90, "Low": 180}
 SLA_ENV = {s: f"AZURE_DEFENDER_SLA_DAYS_{s.upper()}" for s in SEVERITIES}
 
 
-def sla_days_from_env(collector: Optional[Collector] = None) -> tuple[dict, bool]:
-    """(SLA days per severity, all values valid); a bad value is recorded and its default kept."""
-    days = dict(DEFAULT_SLA_DAYS)
-    valid = True
+def sla_days_from_env(collector: Optional[Collector] = None) -> dict:
+    """SLA days per severity; a bad value is recorded and that severity's days are None (no default)."""
+    days: dict = dict(DEFAULT_SLA_DAYS)
     for severity, env in SLA_ENV.items():
         raw = (os.environ.get(env) or "").strip()
         if not raw:
             continue
-        if raw.isdigit() and int(raw) > 0:
+        if raw.isdecimal() and int(raw) > 0:
             days[severity] = int(raw)
             continue
-        valid = False
+        days[severity] = None
         if collector is not None:
             collector.record(f"config {env}", ValueError(f"invalid SLA days {raw!r}: needs a whole number above 0"))
-    return days, valid
+    return days
 
 
 def _parse_iso(value: Any) -> Optional[datetime]:
     if not isinstance(value, str):
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+    return moment.astimezone(timezone.utc) if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
 def apply_sla(assessments: list[dict], sla_days: dict, now: datetime) -> None:
@@ -245,17 +246,19 @@ def apply_sla(assessments: list[dict], sla_days: dict, now: datetime) -> None:
             a["past_sla"] = a["days_open"] > a["sla_days"]
 
 
-def sla_summary(assessments: list[dict], sla_days: dict, readable: bool) -> dict:
+def sla_summary(assessments: list[dict], sla_days: dict, list_read: bool, severity_read: bool = True) -> dict:
     """Unhealthy findings past SLA per severity and in total; a count is null when it can't be known.
 
-    A severity's count is null when the list or the SLA config wasn't readable, or one of its Unhealthy findings
-    has no date. The total is also null when an Unhealthy finding has no severity, so no SLA to measure against.
+    A severity's count is null when the list or the Resource Graph severity read failed, that severity's SLA
+    days are invalid, or one of its Unhealthy findings has no date. The total is also null when an Unhealthy
+    finding has no severity, so no SLA to measure against.
     """
     unhealthy = [a for a in assessments if a.get("status_code") == "Unhealthy"]
+    readable = list_read and severity_read
     by_severity: dict = {}
     for severity in SEVERITIES:
         mine = [a for a in unhealthy if a.get("severity") == severity]
-        known = readable and all(a.get("days_open") is not None for a in mine)
+        known = readable and sla_days.get(severity) is not None and all(a.get("days_open") is not None for a in mine)
         by_severity[severity] = sum(1 for a in mine if a.get("past_sla")) if known else None
     total_known = (
         readable
@@ -267,7 +270,7 @@ def sla_summary(assessments: list[dict], sla_days: dict, readable: bool) -> dict
         "unhealthy_past_sla_by_severity": by_severity,
         "unhealthy_past_sla_count": sum(by_severity.values()) if total_known else None,
         "unhealthy_days_open_unknown_count": (
-            sum(1 for a in unhealthy if a.get("days_open") is None) if readable else None
+            sum(1 for a in unhealthy if a.get("days_open") is None) if list_read else None
         ),
     }
 
@@ -388,7 +391,7 @@ def collect_assessments(subscription_id, cred, collector: Collector) -> tuple[li
     severity_by_id: dict = {}
     if raw:
         severity_by_id = collector.guard(
-            "resourcegraph.resources (SecurityResources)",
+            SEVERITY_OPERATION,
             lambda: _own_severities(cred, subscription_id),
             default={},
         )
@@ -434,7 +437,7 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
-    sla_days, sla_config_ok = sla_days_from_env(collector)
+    sla_days = sla_days_from_env(collector)
 
     assessments: list[dict] = []
     registration_status = UNKNOWN
@@ -484,7 +487,10 @@ def main() -> int:
         },
         summary={
             **summarize(assessments, registration_status),
-            **sla_summary(assessments, sla_days, registration_status != UNKNOWN and sla_config_ok),
+            **sla_summary(
+                assessments, sla_days, registration_status != UNKNOWN,
+                not any(f["operation"] == SEVERITY_OPERATION for f in collector.failures),
+            ),
             **exclusions.summary(excluded, ("assessment",), {"assessments": len(assessments)}),
         },
     )
