@@ -198,6 +198,80 @@ def project_assessment(
     }
 
 
+# --- SLA age: days an Unhealthy assessment has been open, and whether that is past its severity's SLA ---
+
+SEVERITIES = ("High", "Medium", "Low")
+DEFAULT_SLA_DAYS = {"High": 30, "Medium": 90, "Low": 180}
+SLA_ENV = {s: f"AZURE_DEFENDER_SLA_DAYS_{s.upper()}" for s in SEVERITIES}
+
+
+def sla_days_from_env(collector: Optional[Collector] = None) -> tuple[dict, bool]:
+    """(SLA days per severity, all values valid); a bad value is recorded and its default kept."""
+    days = dict(DEFAULT_SLA_DAYS)
+    valid = True
+    for severity, env in SLA_ENV.items():
+        raw = (os.environ.get(env) or "").strip()
+        if not raw:
+            continue
+        if raw.isdigit() and int(raw) > 0:
+            days[severity] = int(raw)
+            continue
+        valid = False
+        if collector is not None:
+            collector.record(f"config {env}", ValueError(f"invalid SLA days {raw!r}: needs a whole number above 0"))
+    return days, valid
+
+
+def _parse_iso(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def apply_sla(assessments: list[dict], sla_days: dict, now: datetime) -> None:
+    """Set days_open, sla_days and past_sla on each record; only Unhealthy ones are aged, the rest are null."""
+    for a in assessments:
+        a["days_open"] = a["sla_days"] = a["past_sla"] = None
+        if a.get("status_code") != "Unhealthy":
+            continue
+        changed = _parse_iso(a.get("status_change_date"))
+        if changed is not None:
+            a["days_open"] = max(0, (now - changed).days)
+        a["sla_days"] = sla_days.get(a.get("severity"))
+        if a["days_open"] is not None and a["sla_days"] is not None:
+            a["past_sla"] = a["days_open"] > a["sla_days"]
+
+
+def sla_summary(assessments: list[dict], sla_days: dict, readable: bool) -> dict:
+    """Unhealthy findings past SLA per severity and in total; a count is null when it can't be known.
+
+    A severity's count is null when the list or the SLA config wasn't readable, or one of its Unhealthy findings
+    has no date. The total is also null when an Unhealthy finding has no severity, so no SLA to measure against.
+    """
+    unhealthy = [a for a in assessments if a.get("status_code") == "Unhealthy"]
+    by_severity: dict = {}
+    for severity in SEVERITIES:
+        mine = [a for a in unhealthy if a.get("severity") == severity]
+        known = readable and all(a.get("days_open") is not None for a in mine)
+        by_severity[severity] = sum(1 for a in mine if a.get("past_sla")) if known else None
+    total_known = (
+        readable
+        and all(v is not None for v in by_severity.values())
+        and all(a.get("severity") in SEVERITIES for a in unhealthy)
+    )
+    return {
+        "sla_days_by_severity": dict(sla_days),
+        "unhealthy_past_sla_by_severity": by_severity,
+        "unhealthy_past_sla_count": sum(by_severity.values()) if total_known else None,
+        "unhealthy_days_open_unknown_count": (
+            sum(1 for a in unhealthy if a.get("days_open") is None) if readable else None
+        ),
+    }
+
+
 # --- pure transform: flat dicts in, summary out ---
 # No SDK objects touched here — just counting over the plain dicts project_assessment
 # already produced. This is what makes `summarize` easy to unit-test on its own.
@@ -360,6 +434,7 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
+    sla_days, sla_config_ok = sla_days_from_env(collector)
 
     assessments: list[dict] = []
     registration_status = UNKNOWN
@@ -385,6 +460,8 @@ def main() -> int:
             ),
         )
 
+    apply_sla(assessments, sla_days, datetime.now(timezone.utc))
+
     # An assessment follows the resource it is about; it carries no region, so location: patterns never match one.
     assessments, excluded = exclusions.split(
         assessments, "assessment", resource_id=lambda a: a["resource_id"],
@@ -407,6 +484,7 @@ def main() -> int:
         },
         summary={
             **summarize(assessments, registration_status),
+            **sla_summary(assessments, sla_days, registration_status != UNKNOWN and sla_config_ok),
             **exclusions.summary(excluded, ("assessment",), {"assessments": len(assessments)}),
         },
     )

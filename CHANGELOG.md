@@ -12,6 +12,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
+  Unhealthy assessment reports `days_open` (from `status_change_date`, null when
+  missing), its `sla_days` and `past_sla`. SLA days per severity come from
+  `sla_days_high` / `sla_days_medium` / `sla_days_low` (`AZURE_DEFENDER_SLA_DAYS_*`,
+  default 30 / 90 / 180). The summary adds `unhealthy_past_sla_by_severity` and
+  `unhealthy_past_sla_count`, each null when the assessment list, the SLA config
+  or a needed date can't be read, never 0.
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
