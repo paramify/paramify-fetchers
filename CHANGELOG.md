@@ -514,6 +514,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_backup_recovery_status` 0.3.0: restore jobs.** Each vault now lists
+  its restore jobs (`restore_jobs`) over `restore_window_days` (365 by default,
+  `AZURE_BACKUP_RESTORE_WINDOW_DAYS`), read with `backup_jobs.list` filtered to
+  operation Restore in slices of 30 days, test restores included. Each job has
+  its status, start and end, duration, protected item, and from
+  `job_details.get` its restore type, restore target and the recovery point it
+  used, with `recovery_point_age_hours` (the restore's start minus the recovery
+  point's time). The summary adds total, succeeded and failed restores, counts
+  by status, vaults with a succeeded restore, the newest succeeded restore and
+  days since it, the longest succeeded restore in minutes and the largest
+  recovery point age, each null when a vault's jobs weren't read. A restore job
+  of an excluded protected item, matched by friendly name, is listed under
+  `excluded` and gets no details read. Also maps to KSI-RPL-ARP, KSI-RPL-RRO
+  and KSI-RPL-TRC. The 0.2.0 fields are unchanged.
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
   history (`risk_history`, oldest first, with what changed and who initiated it)
