@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -410,6 +411,17 @@ def test_an_older_event_the_api_cannot_find_is_counted_and_one_that_fails_is_rec
     summary = sh.summarize(events, read, billing, 180, older_read, missed)
     assert (summary["events_in_resource_graph_not_found"], summary["events"], summary["open_events"],
             summary["open_retirement_advisories"]) == ((1, 1, 1, 0) if ok else (None, None, None, None))
+
+
+def test_older_events_are_read_by_id_in_parallel(graph):
+    graph.events = [graph_event("OLD-1"), graph_event("OLD-2")]
+    client = _Health([], by_id={"OLD-1": raw_event("OLD-1"), "OLD-2": raw_event("OLD-2")})
+    # Each GET waits for the other, so serial reads break the barrier and fail the run.
+    barrier, get = threading.Barrier(2, timeout=2), client.get
+    client.get = lambda *args: (barrier.wait(), get(*args))[1]
+    c = collector()
+    events, *_ = sh.collect(client, "s1", NOW, 180, c)
+    assert (c.ok, sorted(e["tracking_id"] for e in events)) == (True, ["OLD-1", "OLD-2"])
 
 
 @pytest.mark.parametrize("last, start", [(None, "4/5/2026"), ("0001-01-01T00:00:00", "4/5/2026"),

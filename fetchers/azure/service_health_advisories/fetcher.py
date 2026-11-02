@@ -410,17 +410,18 @@ def collect(client, subscription_id: str, now: datetime, lookback_days: int, col
         "resourcegraph.resources (Service Health impacted resources)",
         lambda: impacted_by_event(graph_rows(client.cred, subscription_id, IMPACTED_QUERY)))
     listed = {_lower(r.get("name")) for r in raw}
-    missing = sorted((t for t in graph or {} if _lower(t) not in listed), key=_lower)
-    reads = [read_by_id(client, base, t, graph[t] or window_start, collector) for t in missing]
-    older = [found for status, found in reads if found is not None]
-    not_found = sum(1 for status, _ in reads if status == NOT_FOUND)
-    older_read = graph is not None and all(status in (READ, NOT_FOUND) for status, _ in reads)
-    sources = [(r, LISTED) for r in raw] + [(r, GRAPH) for r in older]
-    billing = sum(1 for r, _ in sources if (r.get("properties") or {}).get("eventType") == BILLING)
-    wanted = [(r, by) for r, by in sources if (r.get("properties") or {}).get("eventType") != BILLING]
+    older_ids = {t: last for t, last in (graph or {}).items() if _lower(t) not in listed}
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        reads = list(pool.map(lambda t: read_by_id(client, base, t, older_ids[t] or window_start, collector),
+                              sorted(older_ids, key=_lower)))
+        older = [found for status, found in reads if found is not None]
+        sources = [(r, LISTED) for r in raw] + [(r, GRAPH) for r in older]
+        wanted = [(r, by) for r, by in sources if (r.get("properties") or {}).get("eventType") != BILLING]
         events = list(pool.map(
             lambda item: read_event(client, base, item[0], item[1], now, graph_impacted, collector), wanted))
+    billing = len(sources) - len(wanted)
+    not_found = sum(1 for status, _ in reads if status == NOT_FOUND)
+    older_read = graph is not None and all(status in (READ, NOT_FOUND) for status, _ in reads)
     return events, True, billing, older_read, not_found if older_read else None
 
 
