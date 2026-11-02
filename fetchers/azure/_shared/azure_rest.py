@@ -341,6 +341,26 @@ def int_config(env: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def bounded_int_config(collector: Collector, env: str, default: int, maximum: int) -> Tuple[int, Any]:
+    """(value to use, value as configured). One that isn't a whole number from 1 up fails the run as bad_config and
+    the default is used; one above `maximum` is capped with a warning."""
+    raw = (os.environ.get(env) or "").strip()
+    if not raw:
+        return default, default
+    try:
+        value: Optional[int] = int(raw)
+    except ValueError:
+        value = None
+    if value is None or value < 1:
+        collector.record(f"config {env}", ValueError(
+            f"invalid setting {env}={raw!r}: expected a whole number from 1 to {maximum}; used {default}"))
+        return default, raw if value is None else value
+    if value > maximum:
+        _LOGGER.warning("%s=%d is above the maximum of %d; using %d", env, value, maximum, maximum)
+        return maximum, value
+    return value, value
+
+
 def iso_duration_days(days: int) -> str:
     return f"P{days}D"
 
