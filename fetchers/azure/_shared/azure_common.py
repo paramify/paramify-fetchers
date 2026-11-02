@@ -251,7 +251,7 @@ _CODE_RULES = (
         "bad_config",
         (),
         ("subscriptionnotfound", "invalidsubscriptionid", "invalid subscription",
-         "is not a valid subscription", "no subscription"),
+         "is not a valid subscription", "no subscription", "exclusion pattern"),
     ),
     (
         # A missing azure-mgmt-* dependency is our fault, not the customer's

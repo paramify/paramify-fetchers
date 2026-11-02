@@ -1,5 +1,5 @@
 name: azure_residual_resources
-version: 0.1.0
+version: 0.2.0
 description: >
   Residual elements left behind in the subscription after changes: managed disks
   attached to nothing, network interfaces with no VM or private endpoint, network
@@ -37,6 +37,29 @@ config_schema:
     description: >
       A deployment slot not modified for this many days counts as stale, as does a
       slot that is not running.
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id; an empty resource
+      group matches through its own id), location:<region> (the region's name
+      without spaces, such as eastus2; a resource with no location never matches
+      one) or id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching orphaned
+      resource, or a role assignment made at a matching scope, is listed under
+      excluded with the pattern and left out of every count; assignments made at
+      the subscription itself stay. A role assignment carries no region, so only
+      rg: and id: patterns reach it. Orphans and deleted principals are still
+      worked out against every resource and role assignment, so an in-scope
+      identity used only by an excluded resource still reads as in use. An
+      excluded identity that nothing attaches and that holds no role is listed
+      under excluded without its federated credentials being read. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
+      resource is in scope.
 
 target_schema:
   subscription_id:
@@ -107,12 +130,13 @@ evidence_set:
     workload, such as a pipeline using workload identity federation, signs in as the
     identity. Resource Graph does not index federated credentials, so they are read
     with ARM GET <identity id>/federatedIdentityCredentials?api-version=2023-01-31
-    (following nextLink), only for identities with no attachment and no role; if
+    (following nextLink), only for in-scope identities with no attachment and no role; if
     that read fails, federated_credentials is null and the identity is not reported
     unused. Attachments and roles are read in this subscription only: an identity
     used solely by a resource or a role assignment in another subscription or a
     management group reads as unused. summary.identities_checked and
-    summary.slots_checked count every identity and slot read.
+    summary.slots_checked count every identity and slot read that no
+    resource_exclusions pattern matches.
     Role assignments come from authorizationresources (type
     microsoft.authorization/roleassignments: principalId, principalType,
     roleDefinitionId, scope, createdOn), with role names from azure-mgmt-authorization
@@ -137,4 +161,11 @@ evidence_set:
     principal_exists is null, summary.principal_check reads "failed", and the run
     fails. A principal created in the last few minutes can still be replicating
     and read as missing; created_on lets a reviewer rule that out.
-    summary.total_orphans counts every orphan of every kind.
+    summary.total_orphans counts every orphan of every kind. Orphaned resources and
+    role assignments the resource_exclusions patterns take out are listed under
+    results.excluded instead, each with the pattern that matched; the summary gives
+    resource_exclusion_patterns (the configured patterns, empty when none are set),
+    resource_exclusion_patterns_unmatched (patterns that matched nothing, such as a
+    mistyped name), excluded_orphaned_resources and excluded_role_assignments (how
+    many the patterns took out; no other count includes them), and
+    in_scope_orphaned_resources and in_scope_role_assignments (how many stayed).

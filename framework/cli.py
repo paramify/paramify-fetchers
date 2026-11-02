@@ -314,6 +314,8 @@ def _human_run_printer():
             _err(f"  {style.mark('SKIP')}  {style.name(ev['fetcher'])} {style.dim('(' + ev['reason'] + ')')}")
         elif kind == "fetcher_start":
             targets = style.dim(f"  ({ev['targets']} targets)") if ev["fanout"] else ""
+            if ev.get("depends_on"):
+                targets = style.dim(f"  (reads {', '.join(ev['depends_on'])})")
             typer.echo(f"  {style.dim('RUN')}   {style.name(ev['fetcher'])}{targets}")
         elif kind == "fetcher_note":
             _err(f"        {style.mark('NOTE')}  {style.dim(ev['note'])}")
@@ -677,9 +679,13 @@ def list_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
         # styled value formatted to a width lands short by the length of its escape.
         col = "{:50s}".format(f["name"])
         ver = "v{:8s}".format(f["version"])
+        reads = (
+            f" {style.dim('reads=')}{style.env(','.join(f['depends_on']))}"
+            if f.get("depends_on") else ""
+        )
         typer.echo(
             f"  {style.name(col)} {style.dim(ver)} [{style.dim('{:6s}'.format(tag))}]"
-            f" {style.dim('category=')}{style.env(f['category'] or '-')}"
+            f" {style.dim('category=')}{style.env(f['category'] or '-')}{reads}"
         )
 
 
@@ -724,6 +730,11 @@ def describe_cmd(
     )
     typer.echo(f"  {f['description']}")
     typer.echo(f"  {style.dim('supports_targets:')} {f['supports_targets']}")
+    if f.get("depends_on"):
+        typer.echo(
+            f"  {style.dim('depends_on:')} {', '.join(style.name(d) for d in f['depends_on'])}"
+            f"  {style.dim('(a comparator: runs after these in the same run)')}"
+        )
     for label, fields in (("config", f["config"]), ("secrets", f["secrets"]),
                           ("target_schema", f["target_schema"])):
         if fields:
@@ -1556,7 +1567,9 @@ def _read_for_edit(path: Path, json_out: bool) -> dict:
         raise typer.Exit(1)
 
 
-def _save_and_report(manifest: dict, path: Path, root: Path, json_out: bool, *, verb: str = "Wrote") -> None:
+def _save_and_report(
+    manifest: dict, path: Path, root: Path, json_out: bool, *, verb: str = "Wrote", extra: Optional[dict] = None,
+) -> None:
     """Dump + validate, then report. Exit 0 even when not-yet-runnable (errors are
     surfaced) so a manifest can be built incrementally; exit 1 only if the dump is
     rejected as structurally invalid."""
@@ -1570,7 +1583,7 @@ def _save_and_report(manifest: dict, path: Path, root: Path, json_out: bool, *, 
         raise typer.Exit(1)
     errors = api.validate(manifest, root)
     if json_out:
-        typer.echo(json.dumps({"ok": not errors, "path": str(path), "errors": errors}, indent=2))
+        typer.echo(json.dumps({"ok": not errors, "path": str(path), "errors": errors, **(extra or {})}, indent=2))
         return
     typer.echo(f"{style.dim(verb)} {style.path(str(path))}")
     if errors:
@@ -1622,12 +1635,16 @@ def manifest_add(
     file: str = typer.Option(_DEFAULT_MANIFEST, "-f", "--file", help="Manifest path"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
-    """Add a fetcher entry to the manifest."""
+    """Add a fetcher entry to the manifest; for a comparator, its inputs too."""
     root = api.find_repo_root()
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
-    api.add_entry(m, fetcher)
-    _save_and_report(m, path, root, json_out)
+    added = api.add_entry(m, fetcher, api.discover(root)["fetchers"])
+    if not json_out:
+        for name, reader in added.items():
+            typer.echo(f"added {style.name(name)}" + (style.dim(f" (input of {reader})") if reader else ""))
+    _save_and_report(m, path, root, json_out,
+                     extra={"added": [{"name": n, "input_of": r} for n, r in added.items()]})
 
 
 @manifest_app.command("remove")

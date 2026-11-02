@@ -13,6 +13,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_rest import (  # noqa: E402
     SI_API,
+    ArmError,
     basename,
     discover_workspaces,
     parse_time,
@@ -31,6 +32,7 @@ EMAIL_RE = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 CONNECTION_REF = re.compile(r"\['([^']+)'\]\['connectionId'\]")
 # Graph/Entra operations that disable, sign out, or flag an account; matched on the action's serialized inputs.
 ACCOUNT_CONTAINMENT_MARKERS = ('"accountenabled": false', "revokesigninsessions", "confirmcompromised", "dismissriskyuser")
+UNREADABLE_STATUSES = frozenset({401, 403, 404})
 
 logger = logging.getLogger(NAME)
 
@@ -118,8 +120,18 @@ def recipients(body: Dict[str, Any]) -> Tuple[List[str], int]:
     return sorted(static), dynamic
 
 
+def unreadable(exc: BaseException) -> bool:
+    """A playbook in a subscription or resource group the credential can't read, or one since deleted."""
+    return isinstance(exc, ArmError) and (exc.status in UNREADABLE_STATUSES or exc.code.lower() == "subscriptionnotfound")
+
+
 def analyse(workflow: Dict[str, Any]) -> Dict[str, Any]:
     definition = (workflow.get("properties") or {}).get("definition") or {}
+    if not definition:
+        # Everything below comes from the definition, so an unread one is unknown, not "does nothing".
+        return dict.fromkeys(
+            ("triggers", "sentinel_triggered", "connectors_used", "capabilities", "email_recipients", "dynamic_recipient_fields")
+        )
     apis = connection_apis(workflow)
     triggers = []
     for name, trigger in (definition.get("triggers") or {}).items():
@@ -198,9 +210,17 @@ def collect(client, subscription_id: str, collector) -> tuple:
     if listed is None:
         return {"playbooks": None}, {}
     by_id = {(w.get("id") or "").lower(): w for w in listed}
+    notes: List[str] = []
     for playbook_id in sorted(set(refs) - set(by_id)):
         # A rule may run a playbook from another subscription or resource group the list didn't return.
-        found = collector.guard(f"workflows.get({basename(playbook_id)})", lambda p=ids[playbook_id]: get_workflow(client, p))
+        try:
+            found = get_workflow(client, ids[playbook_id])
+        except Exception as exc:  # noqa: BLE001
+            if unreadable(exc):
+                notes.append(f"playbook {ids[playbook_id]} that an automation rule runs could not be read, so it is unresolved: {exc}")
+            else:
+                collector.record(f"workflows.get({basename(playbook_id)})", exc)
+            continue
         if found:
             by_id[playbook_id] = found
 
@@ -228,19 +248,26 @@ def collect(client, subscription_id: str, collector) -> tuple:
         })
 
     live = [p for p in playbooks if p["run_by_active_automation_rule"]]
+    # A live playbook with no definition might contain or notify, so the counts it could change read unknown.
+    unread_live = sum(1 for p in live if not p["definition_read"])
     summary = {
         "logic_apps_scanned": len(listed),
         "playbooks": len(playbooks),
         "enabled_playbooks": sum(1 for p in playbooks if p["enabled"]),
         "run_by_active_automation_rule": len(live),
-        "live_account_containment_playbooks": sum(1 for p in live if p["capabilities"]["account_containment"]),
-        "live_notifying_playbooks": sum(1 for p in live if p["capabilities"]["email"] or p["capabilities"]["teams"]),
-        "notification_recipients": sorted({e for p in live for e in p["email_recipients"]}),
+        "live_playbooks_without_definition": unread_live,
+        "live_account_containment_playbooks": None if unread_live else sum(
+            1 for p in live if p["capabilities"]["account_containment"]
+        ),
+        "live_notifying_playbooks": None if unread_live else sum(
+            1 for p in live if p["capabilities"]["email"] or p["capabilities"]["teams"]
+        ),
+        "notification_recipients": None if unread_live else sorted({e for p in live for e in p["email_recipients"]}),
         "standard_playbooks": sum(1 for p in playbooks if p["plan"] == "standard"),
         "playbooks_without_definition": sorted(p["id"] for p in playbooks if not p["definition_read"]),
         "automation_rule_references_unresolved": sorted(set(refs) - set(by_id)),
     }
-    return {"playbooks": playbooks}, summary
+    return {"playbooks": playbooks, "notes": notes}, summary
 
 
 def main() -> int:
