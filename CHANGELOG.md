@@ -885,8 +885,8 @@ schemas and the `paramify` CLI — not the internal code.
   two Azure Monitor counts are now null, as `streams` already was. Before, they
   read 0, an empty list and an empty map. The Azure Monitor counts are also
   null when any Azure Monitor stream's workspace couldn't be checked. The
-  access text now says listing streams needs Manage audit streams, as Azure
-  DevOps has no read-only permission for it.
+  access text and the Azure README now say listing streams needs Manage audit
+  streams, as Azure DevOps has no read-only permission for it.
 - **Azure DevOps: a TFVC "Access Denied" is `not_authorized`.** Azure DevOps
   answers 500 TF14098 when the caller can't read an item in a changeset. The
   shared client now reports it as `not_authorized` and doesn't retry it.
