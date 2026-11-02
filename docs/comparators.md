@@ -1,7 +1,8 @@
 # Comparators
 
-**Status:** v0.x. The framework support is built; the shipped comparator is the
-credential-free `demo_policy_check`. The walkthrough is
+**Status:** v0.x. The framework support is built. The shipped comparators are
+the credential-free `demo_policy_check` and
+[`azure_change_work_items`](../comparators/azure/change_work_items/README.md). The walkthrough is
 [`comparators_guide.md`](comparators_guide.md), and the decisions behind this
 are in [`comparators_design.md`](comparators_design.md).
 
