@@ -11,9 +11,10 @@ statement: >-
   has dispositioned (accepted, mitigated or excepted) still fails here, because that record is the
   organization's own and isn't read. Does NOT prove anything about Warning or Informational advisories,
   service issues or planned maintenance, or that advisories Microsoft did not send were absent. Fails
-  when the count is unknown (the event list could not be read).
+  when the count is unknown (the event list could not be read) or the run had a partial failure (an
+  event Resource Graph holds could not be read, so the count may be short).
 
-regex: '"open_high_severity_advisories":\s*(?<open_high_severity_advisories>\d+)'
+regex: '"partial_failure":\s*false\b[\s\S]*?"open_high_severity_advisories":\s*(?<open_high_severity_advisories>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
