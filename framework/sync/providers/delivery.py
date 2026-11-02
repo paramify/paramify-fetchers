@@ -219,7 +219,8 @@ class DeliveryProvider:
         skipped: List[Dict[str, str]] = []
         for f in entry.files:
             if f.skip_reason:
-                skipped.append({"original_file_name": f.original_file_name, "reason": f.skip_reason})
+                skipped.append({"original_file_name": f.original_file_name, "reason": f.skip_reason,
+                                "kind": f.skip_kind})
                 continue
             hits = self._scan(f)
             if hits:
@@ -441,8 +442,11 @@ class DeliveryProvider:
             self._on_event(event)
 
     def _deliver(self, action_id: str, p: Dict[str, Any], resources: Any, note: str) -> Outcome:
+        # Files that are errors (unreadable, not evidence) show in the entry state
+        # as drops, so a delivered entry that left some behind says so.
         run = _Delivered(dropped=[{"name": d["original_file_name"], "reason": d["reason"]}
-                                  for d in p.get("dropped") or []])
+                                  for d in [*(p.get("dropped") or []),
+                                            *(s for s in p.get("skipped") or [] if s.get("kind") == "error")]])
         ev_id, ar_id = p["evidence_id"], p.get("artifact_request_id")
         target = f"artifact request {ar_id}" if ar_id else f"evidence set {ev_id}"
         # Step 2: create (and record at once) or resume.

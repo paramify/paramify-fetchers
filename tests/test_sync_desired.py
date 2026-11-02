@@ -122,3 +122,14 @@ def test_overrides_and_only_file(tmp_path):
                            only_file="b.json")
     assert [f.original_file_name for f in e.files] == ["b.json"]
     assert e.reference_id == "EVD-O" and e.evidence_set["name"] == "N"
+
+
+def test_skip_kind_separates_errors_from_decisions(tmp_path):
+    no_set = env()
+    del no_set["metadata"]["evidence_set"]
+    build(tmp_path, {"a.json": env(status="failed"), "b.json": "{not json", "c.json": '{"k": 1}',
+                     "d.json": no_set, "e.json": env(inventory={"complete": False})},
+          [inv("x", ["a.json", "b.json", "c.json", "d.json", "e.json"])], {"x": {"use": "x"}})
+    [e] = desired_from_run(tmp_path, {"skip_failed": True})
+    assert {f.original_file_name: f.skip_kind for f in e.files} == {
+        "a.json": "skipped", "b.json": "error", "c.json": "error", "d.json": "error", "e.json": "skipped"}

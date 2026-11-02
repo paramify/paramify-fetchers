@@ -95,3 +95,23 @@ def test_a_run_without_a_summary_does_not_upload(harness):
     p, calls, _ = harness("MANIFEST", STUB_RUN_SUMMARY="not json")
     assert p.returncode != 0
     assert not any(c.startswith("upload") for c in calls)
+
+
+def test_root_script_uploads_the_run_it_collected(tmp_path):
+    """./run_and_upload.sh calls .venv/bin/paramify; a stub stands in for it."""
+    root = tmp_path / "root"
+    (root / ".venv" / "bin").mkdir(parents=True)
+    stub = root / ".venv" / "bin" / "paramify"
+    stub.write_text(STUB)
+    stub.chmod(0o755)
+    py = root / ".venv" / "bin" / "python"
+    py.symlink_to(shutil.which("python3"))
+    shutil.copy(REPO_ROOT / "run_and_upload.sh", root / "run_and_upload.sh")
+    log = tmp_path / "calls.log"
+    run_dir = tmp_path / "run-x"
+    env = {**os.environ, "STUB_LOG": str(log), "STUB_RUN_SUMMARY": json.dumps({"run_dir": str(run_dir)})}
+    p = subprocess.run(["bash", str(root / "run_and_upload.sh")], env=env, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    calls = log.read_text().splitlines()
+    assert calls[0].startswith("run ") and "--json" in calls[0]
+    assert calls[1] == f"upload {run_dir}"

@@ -562,7 +562,10 @@ schemas and the `paramify` CLI — not the internal code.
   `results` no longer holds `evidence_id`, `artifact_id` or `channel_id` for each
   file. The summary and the log add `plan`, `entries` and `outcomes`. Each entry
   has a state, batch, stack, channel and artifact request, and its state is
-  `planned` for a dry run. With `--with-validators` they add `validators`.
+  `planned` for a dry run. With `--with-validators` they add `validators`. A
+  file that is unreadable, not an envelope, or has no complete evidence set
+  still counts in `errors` and makes `ok` false, as before. The other files of
+  the entry still go in.
 - **New evidence sets get the approval mode
   `SUBMISSION_WITH_PASSING_VALIDATORS`** (was the API default, `SUBMISSION`).
   Set `approval` in the manifest to choose another. The upload never changes an

@@ -119,8 +119,12 @@ def main(argv=None) -> int:
         return 1
     try:
         summary = _upload(run_dir, load_config(args.config), None, None, args.dry_run, None, True, [DEPRECATION])
-    except Exception as e:  # setup errors (ValueError) and API errors both end the run
+    except ValueError as e:  # setup errors
         logger.error("%s", e)
+        return 1
+    except Exception as e:  # API and unexpected errors end the run too
+        logger.error("%s: %s", type(e).__name__, e)
+        logger.debug("traceback", exc_info=True)
         return 1
     return 0 if summary["ok"] else 1
 

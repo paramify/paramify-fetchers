@@ -43,8 +43,9 @@ envelope (`metadata.evidence_set`). The uploader reads it from the envelope, so
 it needs only the run directory — not the `fetchers/` tree.
 
 For each fetcher entry in the run the upload:
-1. reads `metadata.evidence_set` from the files of the entry. It skips a file
-   without it and gives the reason,
+1. reads `metadata.evidence_set` from the files of the entry. A file that is
+   unreadable, is not an envelope, or has no complete evidence set is an error.
+   The upload names it and sends the other files,
 2. applies any per-fetcher override from `--config`,
 3. **get-or-creates** the evidence set by `reference_id`. A new set gets the
    approval mode `SUBMISSION_WITH_PASSING_VALIDATORS` unless `approval` in the

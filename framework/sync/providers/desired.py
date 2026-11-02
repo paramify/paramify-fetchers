@@ -34,6 +34,9 @@ class DeliveryFile:
     note: str
     kind: Literal["evidence", "inventory"]
     skip_reason: Optional[str]
+    # "error": a file that could not be read or is not evidence (the old uploader
+    # counted these as errors). "skipped": a decision (skip_failed, incomplete inventory).
+    skip_kind: Literal["skipped", "error"] = "skipped"
 
 
 @dataclass(frozen=True)
@@ -118,10 +121,14 @@ def _run_metadata(run_dir: Path) -> Dict:
     return data if isinstance(data, dict) else {}
 
 
+# Skip reasons that are errors, not decisions (a file the run should not hold).
+ERROR_SKIP = "missing/incomplete evidence_set"
+
+
 def _skip_reason(metadata: Dict, es: Optional[Dict], skip_failed: bool) -> Optional[str]:
     """The uploader's skip decisions, with its wording."""
     if not es or not es.get("reference_id") or not es.get("name"):
-        return "missing/incomplete evidence_set"
+        return ERROR_SKIP
     inventory = metadata.get("inventory")
     if isinstance(inventory, dict) and inventory.get("complete") is not True:
         why = "; ".join(inventory.get("incomplete_because") or ["not marked complete"])
@@ -199,6 +206,7 @@ def desired_from_run(
                 note=artifact_note(metadata, entry_key=key) if problem is None else "",
                 kind="inventory" if isinstance(inventory, dict) else "evidence",
                 skip_reason=reason,
+                skip_kind="error" if problem or reason == ERROR_SKIP else "skipped",
             ))
         md = chosen if chosen is not None else (first_md or {})
         es_final = (chosen_es if chosen is not None else first_es) or {}

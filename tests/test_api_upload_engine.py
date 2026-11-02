@@ -434,3 +434,54 @@ def test_no_deprecations_key_by_default(fake, root, tmp_path):
     run = two_files(tmp_path)
     api.upload_run(run, root)
     assert "deprecations" not in json.loads((run / "upload_log.json").read_text())
+
+
+# ---- files that are errors, not decisions --------------------------------------
+
+def _raw_plus_good(tmp_path: Path, raw: str, extra: Dict[str, Any]) -> Path:
+    run = tmp_path / "run-1"
+    run.mkdir()
+    build(run, {"a.json": env(fetcher="x"), **extra}, [inv("x", ["a.json", "z.json"])])
+    (run / "z.json").write_text(raw)
+    return run
+
+
+@pytest.mark.parametrize("raw, reason", [
+    ('{"just": "data"}', "not envelope-wrapped"),
+    ("{not json", "cannot read as JSON"),
+])
+def test_unreadable_or_non_envelope_file_is_an_error_and_the_rest_delivers(fake, root, tmp_path, raw, reason):
+    run = _raw_plus_good(tmp_path, raw, {})
+    events: List[Dict[str, Any]] = []
+    out = api.upload_run(run, root, on_event=events.append)
+    assert out["uploaded"] == 1 and out["errors"] == 1 and out["skipped_failed"] == 0
+    assert out["ok"] is False
+    assert out["entries"]["x"]["state"] == "delivered_with_drops"
+    assert sorted(file_events(events)) == [("a.json", "uploaded"), ("z.json", "error")]
+    bad = next(e for e in events if e["event"] == "upload_file" and e["file"] == "z.json")
+    assert reason in bad["reason"]
+
+
+def test_a_missing_evidence_set_is_an_error_and_the_rest_delivers(fake, root, tmp_path):
+    no_set = env(fetcher="x")
+    del no_set["metadata"]["evidence_set"]
+    run = tmp_path / "run-1"
+    run.mkdir()
+    build(run, {"a.json": env(fetcher="x"), "z.json": no_set}, [inv("x", ["a.json", "z.json"])])
+    out = api.upload_run(run, root)
+    assert (out["uploaded"], out["errors"], out["skipped_failed"]) == (1, 1, 0)
+    assert out["ok"] is False
+
+
+def test_dry_run_reports_the_same_error_and_ok_false(no_env, root, tmp_path):
+    out = api.upload_run(_raw_plus_good(tmp_path, "{not json", {}), root, dry_run=True)
+    assert out["errors"] == 1 and out["ok"] is False
+
+
+def test_a_decision_skip_still_leaves_ok_true(fake, root, tmp_path):
+    run = tmp_path / "run-1"
+    run.mkdir()
+    build(run, {"a.json": env(fetcher="x"), "z.json": env(fetcher="x", inventory={"complete": False})},
+          [inv("x", ["a.json", "z.json"])])
+    out = api.upload_run(run, root)
+    assert (out["skipped_failed"], out["errors"], out["ok"]) == (1, 0, True)

@@ -174,6 +174,12 @@ existing set: it only adds tags to it.
 | A temporary failure (429, 5xx, network) | The batch stays `OPEN` and the entry is `held`. Run the same upload again. It sends only the missing files, then submits. |
 | A permanent failure on one file (the production WAF, 413, another 4xx) | The upload drops that file, submits the rest, and names the dropped file. The entry is `delivered_with_drops`. |
 
+A file that cannot be read, is not an envelope, or has no complete evidence set
+is an error. The upload names it and still sends the other files of the entry.
+The entry shows `delivered_with_drops`, `errors` counts the file, and the run
+exits 1. A file that `skip_failed` skips, or an incomplete inventory, is only
+skipped: it does not change the exit code.
+
 Run `paramify upload --plan` to see held batches and open batches from earlier
 runs.
 

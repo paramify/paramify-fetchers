@@ -172,6 +172,7 @@ class _Report:
         self.results: List[Dict[str, Any]] = []
         self.counts: Counter = Counter()
         self.errors_by_action: Counter = Counter()
+        self.file_errors = 0  # unreadable / non-evidence files: they make `ok` false (WAF drops do not)
         self._started: set = set()
         self._reported: Dict[str, set] = {}
         self._tag_status: Dict[str, Tuple[str, str]] = {}  # tag action id -> (status, message)
@@ -222,7 +223,10 @@ class _Report:
             return
         self._started.add(action.id)
         for s in action.payload.get("skipped") or []:
-            self.file(action, s["original_file_name"], "skipped_failed", s.get("reason"))
+            outcome = "error" if s.get("kind") == "error" else "skipped_failed"
+            if outcome == "error":
+                self.file_errors += 1
+            self.file(action, s["original_file_name"], outcome, s.get("reason"))
         for d in action.payload.get("dropped") or []:
             self.file(action, d["original_file_name"], "error", d.get("reason"))
 
@@ -290,7 +294,7 @@ class _Report:
         entries = self.entries(outcomes)
         if outcomes is None:
             refused = [a.id for a in self.plan.actions if a.verb == "refuse"]
-            ok = not refused
+            ok = not refused and self.file_errors == 0
         else:
             refused = [o.action_id for o in outcomes if o.status == "refused"]
             # Tags never block an upload; a failed set or validator sync does.
@@ -298,7 +302,8 @@ class _Report:
                 o.status in ("applied", "noop") for o in outcomes
                 if not o.action_id.startswith(f"{DELIVERY}/") and self._verb(o.action_id) != "tag"
             )
-            ok = others_ok and all(e["state"] in OK_STATES for e in entries.values())
+            ok = (others_ok and all(e["state"] in OK_STATES for e in entries.values())
+                  and self.file_errors == 0)
         errors = sum(n for aid, n in self.errors_by_action.items() if aid not in refused) + len(refused)
         return {
             "uploaded": self.counts["uploaded"],

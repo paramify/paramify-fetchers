@@ -96,13 +96,13 @@ def test_failed_status_uploads_by_default(fake, tmp_path):  # noqa: F811
     assert summary["uploaded"] == 1
 
 
-def test_unenveloped_file_is_skipped_with_its_reason_and_the_rest_upload(fake, tmp_path):  # noqa: F811
+def test_unenveloped_file_is_an_error_and_the_rest_upload(fake, tmp_path):  # noqa: F811
     run_dir = _run(tmp_path, "ok.json")
     write_evidence(run_dir, "raw.json", enveloped=False)
     summary = uploader.upload_run(run_dir)
-    assert summary["uploaded"] == 1 and summary["skipped_failed"] == 1
+    assert summary["uploaded"] == 1 and summary["errors"] == 1 and summary["ok"] is False
     [raw] = [r for r in summary["results"] if r["file"] == "raw.json"]
-    assert "not envelope-wrapped" in raw["reason"]
+    assert raw["outcome"] == "error" and "not envelope-wrapped" in raw["reason"]
 
 
 def test_https_guard_rejects_http_remote(tmp_path):
@@ -209,3 +209,18 @@ def test_main_returns_1_when_an_entry_is_refused(fake, tmp_path):  # noqa: F811
     run_dir = _run(tmp_path)
     (run_dir / "a.json").write_text((run_dir / "a.json").read_text().replace('"k": 1', '"k": "/bin/sh -c x"'))
     assert uploader.main([str(run_dir)]) == 1
+
+
+def test_main_returns_1_when_a_file_is_not_an_envelope(fake, tmp_path):  # noqa: F811
+    run_dir = _run(tmp_path, "ok.json")
+    write_evidence(run_dir, "raw.json", enveloped=False)
+    assert uploader.main([str(run_dir)]) == 1
+
+
+def test_main_names_the_exception_type_for_an_unexpected_error(no_env, tmp_path, monkeypatch, caplog):  # noqa: F811
+    def boom(*a, **k):
+        raise KeyError("x")
+
+    monkeypatch.setattr(uploader, "_upload", boom)
+    assert uploader.main([str(_run(tmp_path))]) == 1
+    assert "KeyError: " in caplog.text

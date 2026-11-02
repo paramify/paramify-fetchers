@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Customer orchestration glue: collect evidence (runner) then upload it (uploader).
+# Customer orchestration glue: collect evidence (runner) then upload that run.
 # The framework keeps these as SEPARATE stages on purpose; this script just chains
 # them — the kind of thing that lives in your CI job / cron, not in the framework.
 #
@@ -24,11 +24,23 @@ MANIFEST="${MANIFEST:-manifest.yaml}"
 
 echo "==> collect: $MANIFEST"
 # Requires the package installed in the venv: pip install -e .
-.venv/bin/paramify run "$MANIFEST"
+summary=$(.venv/bin/paramify run "$MANIFEST" --json)
 collect_rc=$?
 if [ $collect_rc -ne 0 ]; then
     echo "WARN: collect exited $collect_rc (a fetcher reported failures); uploading whatever was produced" >&2
 fi
+run_dir=$(printf '%s' "$summary" | .venv/bin/python -c 'import json,sys; print(json.load(sys.stdin)["run_dir"])' 2>/dev/null)
+if [ -z "$run_dir" ]; then
+    echo "collect produced no run directory; nothing to upload" >&2
+    printf '%s\n' "$summary" >&2
+    if [ $collect_rc -ne 0 ]; then exit $collect_rc; fi
+    exit 1
+fi
 
-echo "==> upload latest run -> ${PARAMIFY_API_BASE_URL:-<production default>}"
-.venv/bin/python uploaders/paramify_evidence/uploader.py
+echo "==> upload $run_dir -> ${PARAMIFY_API_BASE_URL:-<production default>}"
+.venv/bin/paramify upload "$run_dir"
+upload_rc=$?
+
+# Surface the worst non-zero so cron/monitoring can alert.
+if [ $collect_rc -ne 0 ]; then exit $collect_rc; fi
+exit $upload_rc

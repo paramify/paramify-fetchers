@@ -407,7 +407,7 @@ def test_files_skipped_files(tmp_path):
     a = plan_one(entry(tmp_path, files=("a.json", skipped)), observed(evidence()))
     assert a.verb == "deliver"
     assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json"]
-    assert a.payload["skipped"] == [{"original_file_name": "c.json", "reason": "status=failed and skip_failed set"}]
+    assert a.payload["skipped"] == [{"original_file_name": "c.json", "reason": "status=failed and skip_failed set", "kind": "skipped"}]
 
 
 def test_files_zero_sendable_files_plans_no_batch(tmp_path):
