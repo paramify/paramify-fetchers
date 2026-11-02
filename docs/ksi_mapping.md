@@ -104,7 +104,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2.4`, `cm-2`, `cm-2.2`, `cm-2.3`, `cm-6`, `cm-7.1`, `pl-9`, `pl-10`, `sa-5`, `si-5`, `sr-10`
 
-*5 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`wiz_host_configuration_posture`](../fetchers/wiz/host_configuration_posture)
+*6 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`azure_change_work_items`](../comparators/azure/change_work_items), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`wiz_host_configuration_posture`](../fetchers/wiz/host_configuration_posture)
 
 #### `KSI-SVC-ASM` — Automating Secret Management
 
@@ -262,7 +262,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `au-2`, `cm-3`, `cm-3.2`, `cm-4.2`, `cm-6`, `cm-8.3`, `ma-2`
 
-*13 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_devops_work_items`](../fetchers/azure/devops_work_items), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`crowdstrike_filevantage`](../fetchers/crowdstrike/filevantage), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration), [`gitlab_merge_request_summary`](../fetchers/gitlab/merge_request_summary), [`gitlab_significant_change_notifications`](../fetchers/gitlab/significant_change_notifications), [`jira_audit_records`](../fetchers/jira/audit_records), [`jira_change_requests`](../fetchers/jira/change_requests), [`jira_site_inventory`](../fetchers/jira/site_inventory)
+*14 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_change_work_items`](../comparators/azure/change_work_items), [`azure_devops_work_items`](../fetchers/azure/devops_work_items), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`crowdstrike_filevantage`](../fetchers/crowdstrike/filevantage), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration), [`gitlab_merge_request_summary`](../fetchers/gitlab/merge_request_summary), [`gitlab_significant_change_notifications`](../fetchers/gitlab/significant_change_notifications), [`jira_audit_records`](../fetchers/jira/audit_records), [`jira_change_requests`](../fetchers/jira/change_requests), [`jira_site_inventory`](../fetchers/jira/site_inventory)
 
 #### `KSI-CMT-RMV` — Redeploying vs Modifying
 
@@ -270,7 +270,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2`, `cm-3`, `cm-5`, `cm-6`, `cm-7`, `cm-8.1`, `si-3`
 
-*7 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments), [`azure_change_provenance`](../fetchers/azure/change_provenance), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config)
+*8 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments), [`azure_change_provenance`](../fetchers/azure/change_provenance), [`azure_change_work_items`](../comparators/azure/change_work_items), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config)
 
 #### ⬜ `KSI-CMT-RVP` — Reviewing Change Procedures
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-287 of 299 fetchers carry a mapping.
+288 of 300 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -505,7 +505,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (89)
+### azure  (90)
 
 | Fetcher | Indicators |
 |---|---|
@@ -524,6 +524,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_app_service_plans`](../fetchers/azure/app_service_plans) | `KSI-CNA-OFA` |
 | [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status) | `KSI-RPL-ABO` |
 | [`azure_change_provenance`](../fetchers/azure/change_provenance) | `KSI-CMT-RMV` |
+| [`azure_change_work_items`](../comparators/azure/change_work_items) | `KSI-CMT-LMC`, `KSI-CMT-RMV`, `KSI-SVC-ACM` |
 | [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration) | `KSI-CNA-MAT`, `KSI-IAM-ELP`, `KSI-SVC-SIN`, `KSI-SVC-VRI` |
 | [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration) | `KSI-CMT-RMV`, `KSI-CNA-MAT`, `KSI-CNA-ULN`, `KSI-MLA-LET`, `KSI-SVC-ASM`, `KSI-SVC-SIN` |
 | [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-IAM-SNU`, `KSI-RPL-ABO`, `KSI-SVC-SIN` |

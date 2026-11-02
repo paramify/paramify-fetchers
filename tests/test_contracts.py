@@ -215,7 +215,7 @@ def test_instructions_open_with_the_entry_path() -> None:
 # --------------------------------------------------------------------------- #
 
 TEXT_FORMAT_FETCHERS = (
-    "azure/alert_rules", "azure/entra_risky_users", "azure/sentinel_playbooks",
+    "azure/alert_rules", "azure/change_work_items", "azure/entra_risky_users", "azure/sentinel_playbooks",
     "azure/sql_managed_instance_configuration", "oci",
 )
 MAX_DESCRIPTION_WORDS = 30

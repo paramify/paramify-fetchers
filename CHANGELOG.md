@@ -12,6 +12,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
+  matches each Azure change made outside a pipeline in `azure_change_provenance`
+  (by default, direct edits and ARM deployments a person ran) to the
+  `azure_devops_work_items` records that name its caller and cover the time it
+  was made. Each change is `matched`, `ambiguous`, `unmatched`, `excluded` (a
+  caller in `CHANGE_RECORD_EXCLUDED_CALLERS`), `application` (reported apart,
+  needing no record), or `no_caller`. A callerless row takes its caller from the
+  nearest named change to the same resource within 10 minutes, as
+  `azure_change_provenance` takes its origin, or else from its deployment. The
+  checked origins, record types, which people on an item count (by default its
+  assignee, creator or closer), and the hours before creation and after
+  finishing that an item covers are settings; an emergency type (default
+  `Hotfix`) may be filed up to 72 hours after the change, and an item still
+  open covers changes only up to `CHANGE_RECORD_OPEN_ITEM_DAYS` (30) days after
+  it was created or last changed. The summary counts
+  each status, overall and by origin, the changes without a record, recorded
+  without approval and without an approved record, the approved changes whose
+  non-emergency record was approved after the change, the changes read and the
+  shortest change window read (`change_lookback_days`), so a narrow window
+  can't pass as no changes, and `work_items_cover_changes`, false when the work
+  items window starts too late for the earliest change.
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
