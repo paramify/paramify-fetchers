@@ -142,7 +142,7 @@ def gate(ok: bool, value):
 
 
 def read_settings(collector) -> dict:
-    """An invalid value fails the run; the lookback asked for is kept beside the one used."""
+    """An invalid value fails the run as bad_config; the lookback asked for is kept beside the one used."""
     raw_days = (os.environ.get(LOOKBACK_ENV) or "").strip()
     try:
         requested = int(raw_days) if raw_days else DEFAULT_LOOKBACK_DAYS

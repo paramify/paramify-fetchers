@@ -26,7 +26,7 @@ schemas and the `paramify` CLI — not the internal code.
   against it; an Unknown period longer than the objective, or an outage that runs
   past it with the Unknown time touching it, leaves the verdict unknown. An
   objective or lookback that is not a number above 0 (nan and inf included)
-  fails the run; a lookback past 30 is read as 30, and the value asked for is
+  fails the run as `bad_config`; a lookback past 30 is read as 30, and the value asked for is
   kept as `settings.lookback_days_requested`.
   Front Door Standard/Premium profiles are read too, but Resource Health judges a
   profile by whether its origins answer health probes, so their periods are
@@ -898,6 +898,9 @@ schemas and the `paramify` CLI — not the internal code.
 ### Fixed
 
 
+- **Azure: an invalid lookback or recovery time objective fails as `bad_config`.**
+  The messages matched no `bad_config` marker, so `azure_change_provenance` and
+  `azure_front_door_origins` reported an invalid lookback as `partial_failure`.
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was

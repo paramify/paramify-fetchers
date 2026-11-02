@@ -24,7 +24,7 @@ config_schema:
     description: >
       How many days of Resource Health history and health-check results to read, from 1 to 30. Resource Health keeps
       about 30 days of history, so a larger value is read as 30, and the value asked for is kept in the evidence as
-      settings.lookback_days_requested. A value that is not a whole number above 0 fails the run.
+      settings.lookback_days_requested. A value that is not a whole number above 0 fails the run as bad_config.
   recovery_time_objective_hours:
     type: string
     required: false
@@ -35,7 +35,7 @@ config_schema:
       than the objective; null when its outages are not known well enough to judge (no known hours, an Unknown period
       longer than the objective, or an outage that with the Unknown periods touching it runs longer than the
       objective); and true otherwise. Leave it unset and those fields are null. A value that is not a finite number
-      above 0 (nan and inf included) fails the run.
+      above 0 (nan and inf included) fails the run as bad_config.
   resource_exclusions:
     type: string
     required: false

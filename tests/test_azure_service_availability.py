@@ -22,6 +22,7 @@ sa = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sa)
 azure_rest = sys.modules["azure_rest"]
 Collector = sys.modules["azure_common"].Collector
+classify_failure_code = sys.modules["azure_common"].classify_failure_code
 
 NOW = datetime(2026, 6, 30, 12, 30, tzinfo=timezone.utc)
 WINDOW_START = NOW - timedelta(days=30)
@@ -684,6 +685,7 @@ def test_an_invalid_recovery_time_objective_fails_the_run(monkeypatch, raw):
     _, summary, collector = run(FakeArm(health={WEB: outage_history()}))
     assert not collector.ok and summary["recovery_time_objective_hours"] is None
     assert summary["resources_meeting_recovery_time_objective"] is None
+    assert classify_failure_code(collector.failures) == "bad_config"
 
 
 @pytest.mark.parametrize("raw, requested", [("soon", None), ("0", 0), ("-2", -2), ("1.5", None)])
@@ -692,6 +694,7 @@ def test_an_invalid_lookback_fails_the_run(monkeypatch, raw, requested):
     results, summary, collector = run(FakeArm())
     assert not collector.ok and summary["lookback_days"] == 30
     assert results["settings"]["lookback_days_requested"] == requested
+    assert classify_failure_code(collector.failures) == "bad_config"
 
 
 def test_the_lookback_is_capped_at_what_resource_health_keeps(monkeypatch):
