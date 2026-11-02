@@ -276,6 +276,7 @@ def test_collects_the_organization_and_exits_zero(tmp_path):
     assert s["azure_service_connections_with_stored_secret"] == ["legacy-spn", "signing-spn", "web-deploy"]
     assert s["service_connections_with_stored_credential"] == [
         "aks-deployer", "artifact-feed", "legacy-spn", "nuget-feed", "signing-spn", "web-deploy"]
+    assert s["service_connections_credential_unknown"] == []
     assert s["service_connections_open_to_all_pipelines"] == ["prod-wif"]
     assert s["service_connections_not_ready"] == ["artifact-feed"]
     assert s["service_connections_used_in_window"] == 1
@@ -312,6 +313,20 @@ def test_only_ids_are_kept_from_the_authorization_parameters(tmp_path):
     assert connection(evidence, "nuget-feed")["url"] == "https://nuget.example.com"
     assert connection(evidence, "nuget-feed")["stored_credential"] is True
     assert connection(evidence, "aks-deployer")["url"] == "https://aks.example.com:443"
+
+
+def test_an_unrecognised_scheme_is_listed_as_unknown_not_as_no_credential(tmp_path):
+    fake = FakeADO()
+    body = fake.routes[f"/contoso/{OPS}/_apis/serviceendpoint/endpoints"]._body
+    cert = next(c for c in body["value"] if c["id"] == CERT_ID)
+    cert["authorization"] = {"scheme": "SomethingNew", "parameters": {
+        "serviceprincipalid": CERT_APP, "tenantid": TENANT, "opaque": CERTIFICATE}}
+    _, evidence, _, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert connection(evidence, "signing-spn")["stored_credential"] is None
+    assert s["service_connections_credential_unknown"] == ["signing-spn"]
+    assert "signing-spn" not in s["azure_service_connections_with_stored_secret"]
+    assert "signing-spn" not in s["service_connections_with_stored_credential"]
 
 
 @pytest.mark.parametrize("url,scrubbed", [

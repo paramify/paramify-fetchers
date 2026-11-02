@@ -19,7 +19,8 @@ schemas and the `paramify` CLI — not the internal code.
   - how it authenticates (`auth_method`: workload identity federation, managed
     identity, or a stored service principal secret or certificate, password,
     token, key, publish profile or kubeconfig) and whether it holds a stored
-    credential (`null` when that can't be told);
+    credential (`null` when that can't be told, and listed in
+    `service_connections_credential_unknown`);
   - its service principal (app) and tenant ids, exactly as Azure DevOps gives
     them, and for AzureRM its subscription or management group and creation mode;
   - whether every YAML pipeline may use it (`null` when a project's pipeline

@@ -451,6 +451,7 @@ def summarize(connections, groups, projects, principals, days) -> Dict[str, Any]
             1 for c in azure if c["auth_method"] == "workload_identity_federation"),
         "azure_service_connections_with_stored_secret": [c["name"] for c in azure if c["stored_credential"]],
         "service_connections_with_stored_credential": [c["name"] for c in connections if c["stored_credential"]],
+        "service_connections_credential_unknown": [c["name"] for c in connections if c["stored_credential"] is None],
         "service_connections_open_to_all_pipelines": [c["name"] for c in connections if c["open_to_all_pipelines"]],
         "service_connections_not_ready": [c["name"] for c in connections if c["is_ready"] is False],
         "service_connections_used_in_window": sum(1 for c in connections if c["pipeline_runs_in_window"]),
