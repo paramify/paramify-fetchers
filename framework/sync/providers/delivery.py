@@ -11,12 +11,19 @@ For each entry, in this order (the first refusal ends the entry):
 4. WAF: a file the production WAF would block is dropped at plan time.
 
 The rules live in `delivery_routing` as pure functions; `diff` composes them.
+
+Apply, per `deliver` action: re-check that a new batch's request is still
+current (else re-plan the entry once), create the batch and record its id at
+once (or resume), upload each missing file, drop a file on a permanent
+failure and hold the batch OPEN on a temporary one, submit only when nothing
+is held, and read the batch back.
 """
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from framework.paramify.client import ApiError, ErrorKind
@@ -26,9 +33,10 @@ from framework.paramify.resources import (
     Batch,
     Channel,
     EvidenceSet,
+    Reader,
     Stack,
 )
-from framework.sync.model import UNKNOWN, Action, Ref, SyncContext
+from framework.sync.model import UNKNOWN, Action, Outcome, Ref, SyncContext
 from framework.sync.providers import waf
 from framework.sync.providers.delivery_routing import (
     DONE,
@@ -51,6 +59,8 @@ from framework.sync.state import RunState
 
 EVIDENCE_LEVEL_WARNING = "evidence-level batch: does not count toward the solution capability"
 ALL_DROPPED = "every file was dropped"
+WAF_BLOCKED = "blocked by the production WAF"
+_FAILING = ("FAIL", "ERROR")
 
 
 @dataclass
@@ -70,6 +80,32 @@ class _Route:
     channel: Optional[Channel]
     request: Optional[ArtifactRequest]  # None: deliver on the evidence set
     warning: Optional[str]
+
+
+@dataclass
+class _Delivered:
+    """What apply did for one entry; `result` is the outcome's JSON."""
+
+    batch_id: Optional[str] = None
+    batch_reference: Optional[str] = None
+    status: Optional[str] = None
+    approval: str = ""
+    uploaded: List[str] = field(default_factory=list)
+    already_present: List[str] = field(default_factory=list)
+    dropped: List[Dict[str, str]] = field(default_factory=list)  # {name, reason}
+    held: List[str] = field(default_factory=list)
+    validators_failed: List[str] = field(default_factory=list)
+
+    def result(self, state: str) -> Dict[str, Any]:
+        return {
+            "state": state, "batch_id": self.batch_id, "batch_reference": self.batch_reference,
+            "status": self.status, "uploaded": list(self.uploaded), "already_present": list(self.already_present),
+            "dropped": [dict(d) for d in self.dropped], "validators_failed": list(self.validators_failed),
+        }
+
+    @property
+    def name(self) -> str:
+        return self.batch_reference or self.batch_id or "the batch"
 
 
 def _route(entry: EntryDesired, obs: EntryObserved, today: date) -> _Route | Refusal:
@@ -131,9 +167,15 @@ class DeliveryProvider:
     name: str = "delivery"
     runs_after: tuple[str, ...] = ("evidence_sets", "validators")
 
-    def __init__(self, run_state: Optional[RunState] = None, today: Callable[[], date] = date.today) -> None:
+    def __init__(
+        self,
+        run_state: Optional[RunState] = None,
+        today: Callable[[], date] = date.today,
+        on_event: Optional[Callable[[dict], None]] = None,
+    ) -> None:
         self._run_state = run_state
         self._today = today
+        self._on_event = on_event
         self._payload_mode = "envelope"
         self._waf_hits: Dict[Tuple[str, str], List[str]] = {}
         self.entries: Dict[str, EntryDesired] = {}  # by entry key, for apply's re-plan
@@ -150,19 +192,23 @@ class DeliveryProvider:
         self.entries = {e.entry_key: e for e in entries}
         return entries
 
+    def _content(self, path: Path) -> bytes:
+        """The bytes an upload of `path` sends, in this run's payload mode. Raises OSError."""
+        raw = path.read_bytes()
+        try:
+            envelope = json.loads(raw)
+        except ValueError:
+            return raw
+        return artifact_content(envelope, self._payload_mode) if is_enveloped(envelope) else raw
+
     def _scan(self, f: DeliveryFile) -> List[str]:
         """WAF signatures in what the upload of `f` would send: the bytes, the note and the title."""
         key = (str(f.path), self._payload_mode)
         if key not in self._waf_hits:
             try:
-                raw = f.path.read_bytes()
+                content = self._content(f.path)
             except OSError:
-                raw = b""  # gone since desired(); apply reports it
-            try:
-                envelope = json.loads(raw)
-                content = artifact_content(envelope, self._payload_mode) if is_enveloped(envelope) else raw
-            except ValueError:
-                content = raw
+                content = b""  # gone since desired(); apply reports it
             self._waf_hits[key] = waf.scan(content, f.note, f.title)
         return self._waf_hits[key]
 
@@ -222,7 +268,8 @@ class DeliveryProvider:
         # the last upload): one query by this entry's file names, then only the
         # batches those artifacts name. Reads stay flat as the set's history grows.
         names = [f.original_file_name for f in e.files if f.skip_reason is None]
-        found = reader.artifacts(ev.id, original_file_names=names)
+        # No names would make the filter vanish and read the whole set's artifacts.
+        found = reader.artifacts(ev.id, original_file_names=names) if names else []
         candidates = own_batch_ids(found, e)
         if e.recorded_batch_id and e.recorded_batch_id not in candidates:
             candidates.append(e.recorded_batch_id)  # may still have no artifacts
@@ -342,3 +389,156 @@ class DeliveryProvider:
                 else f"resume {mine.reference_id} (submit only)"
         n = _count(len(payload["files"]), "file")
         return action("deliver", f"deliver {n} to {where}: {tail}", changes=changes, warnings=warnings)
+
+    # -- apply ------------------------------------------------------------ #
+    def apply(self, action: Action, resources: Any, resolve: Callable[[Any], Any]) -> Outcome:
+        p = action.payload
+        if action.verb == "noop":
+            return self._noop(action.id, p, action.summary)
+        if action.verb != "deliver":
+            return Outcome(action.id, "failed", message=f"unexpected verb {action.verb}")
+        note = ""
+        # Step 1. A resumed batch stays on its own request by design, so only a
+        # new batch on a request planned as current is re-checked.
+        if p.get("planned_current") and not p.get("resume_batch_id"):
+            current = {r.id for r in resources.artifact_requests(p["evidence_id"], current=True)}
+            if p["artifact_request_id"] not in current:
+                again = self._replan(p, resources)
+                note = f"re-planned, the artifact request rolled over: {again.summary}"
+                if again.verb == "refuse":
+                    return Outcome(action.id, "refused", _Delivered().result("refused"),
+                                   f"{again.summary}: {again.fix}")
+                if again.verb == "noop":
+                    return self._noop(action.id, again.payload, note)
+                p = resolve(again.payload)
+        return self._deliver(action.id, p, resources, note)
+
+    def _replan(self, p: Dict[str, Any], resources: Any) -> Action:
+        """This entry's action from a fresh read, once (the caller does not loop)."""
+        entry = self.entries.get(p["entry_key"])
+        if entry is None:
+            raise ValueError(f"artifact request {p['artifact_request_id']} is no longer current; plan again")
+        reader = Reader(resources)
+        ev = reader.evidence_by_reference([entry.reference_id]).get(entry.reference_id)
+        return self._plan_entry(entry, self._observe_entry(entry, ev, reader), self._today())
+
+    def _noop(self, action_id: str, p: Dict[str, Any], message: str) -> Outcome:
+        done = _Delivered(p.get("batch_id"), p.get("batch_reference"), p.get("status"))
+        return Outcome(action_id, "noop", done.result("noop"), message)
+
+    def _emit(self, action_id: str, name: str, outcome: str, n: Optional[int], of: int, size: int) -> None:
+        if self._on_event is not None:
+            self._on_event({"event": "delivery_file", "action_id": action_id, "file": name,
+                            "outcome": outcome, "n": n, "of": of, "bytes": size})
+
+    def _deliver(self, action_id: str, p: Dict[str, Any], resources: Any, note: str) -> Outcome:
+        run = _Delivered(dropped=[{"name": d["original_file_name"], "reason": d["reason"]}
+                                  for d in p.get("dropped") or []])
+        ev_id, ar_id = p["evidence_id"], p.get("artifact_request_id")
+        target = f"artifact request {ar_id}" if ar_id else f"evidence set {ev_id}"
+        # Step 2: create (and record at once) or resume.
+        try:
+            if p.get("resume_batch_id"):
+                run.batch_id = p["resume_batch_id"]
+                present = {a.original_file_name for a in resources.artifacts(ev_id, batch_id=run.batch_id)}
+            else:
+                made = (resources.create_batch(artifact_request_id=ar_id) if ar_id
+                        else resources.create_batch(evidence_id=ev_id))
+                run.batch_id, run.batch_reference, run.status = made.id, made.reference_id, made.status
+                if self._run_state is not None:
+                    self._run_state.record_batch(p["entry_key"], made.id)
+                present = set()
+        except ApiError as exc:
+            return self._failed(action_id, exc, run, resources, ev_id, target)
+
+        # Step 3: upload what the batch does not have yet.
+        files = p.get("files") or []
+        entry = self.entries.get(p["entry_key"])
+        wanted = [f.original_file_name for f in self._split(entry)[0]] if entry is not None \
+            else [f["original_file_name"] for f in files]
+        run.already_present = [n for n in wanted if n in present]
+        to_send = [f for f in files if f["original_file_name"] not in present]
+        for name in run.already_present:
+            self._emit(action_id, name, "already_present", None, len(to_send), 0)
+        for n, f in enumerate(to_send, 1):
+            name = f["original_file_name"]
+            try:
+                content = self._content(Path(f["path"]))
+            except OSError as exc:
+                run.dropped.append({"name": name, "reason": f"cannot read {name}: {exc.strerror or exc}"})
+                self._emit(action_id, name, "dropped", n, len(to_send), 0)
+                continue
+            try:
+                resources.upload_to_batch(run.batch_id, name, content, {"title": f["title"], "note": f["note"]})
+                run.uploaded.append(name)
+                outcome = "uploaded"
+            except ApiError as exc:
+                if exc.kind is ErrorKind.PERMANENT:
+                    run.dropped.append({"name": name, "reason": WAF_BLOCKED if exc.status == 403 else exc.message})
+                    outcome = "dropped"
+                elif exc.kind is ErrorKind.TEMPORARY:
+                    run.held.append(name)
+                    outcome = "held"
+                else:
+                    return self._failed(action_id, exc, run, resources, ev_id, f"batch {run.name}")
+            self._emit(action_id, name, outcome, n, len(to_send), len(content))
+
+        # Step 4: submit only when nothing is held and the batch is not empty.
+        if run.held:
+            self._read_back(run, resources, ev_id)
+            return self._held(action_id, run, f"{', '.join(run.held)} failed temporarily")
+        if not run.uploaded and not run.already_present:
+            self._read_back(run, resources, ev_id)
+            return Outcome(action_id, "failed", run.result("failed"), ALL_DROPPED)
+        try:
+            resources.submit_batch(run.batch_id)
+        except ApiError as exc:
+            if exc.kind is not ErrorKind.TEMPORARY:
+                return self._failed(action_id, exc, run, resources, ev_id, f"batch {run.name}")
+            self._read_back(run, resources, ev_id)
+            if run.status not in DONE:  # the submit may still have taken effect
+                return self._held(action_id, run, f"the submit failed temporarily ({exc.message})")
+        # Step 5: read the batch back.
+        self._read_back(run, resources, ev_id)
+        parts = [note] if note else []
+        if run.status == "SUBMITTED":
+            parts.append(f"{run.name} SUBMITTED: held because validators failed: {', '.join(run.validators_failed)}"
+                         if run.validators_failed else
+                         f"{run.name} SUBMITTED: waiting for review (approval {run.approval or 'unknown'})")
+        else:
+            parts.append(f"{run.name} {run.status}")
+        if run.dropped:
+            parts.append(f"dropped {', '.join(d['name'] for d in run.dropped)}")
+        return Outcome(action_id, "applied", run.result("delivered_with_drops" if run.dropped else "delivered"),
+                       "; ".join(parts))
+
+    def _held(self, action_id: str, run: _Delivered, why: str) -> Outcome:
+        return Outcome(action_id, "failed", run.result("held"),
+                       f"held: {why}; {run.name} stays OPEN for the next upload to resume")
+
+    def _failed(self, action_id: str, exc: ApiError, run: _Delivered, resources: Any, ev_id: str,
+                what: str) -> Outcome:
+        """A failure that ends the entry. FATAL stops the whole apply."""
+        if exc.fatal:
+            raise exc
+        if exc.kind is ErrorKind.CONFLICT and run.batch_id:
+            self._read_back(run, resources, ev_id)
+            message = f"{run.name} is {run.status or 'in an unknown state'}: {exc.message}"
+        elif exc.kind is ErrorKind.MISSING:
+            message = f"{what} no longer exists; plan the upload again"
+        else:
+            message = exc.message
+        return Outcome(action_id, "failed", run.result("failed"), message)
+
+    def _read_back(self, run: _Delivered, resources: Any, ev_id: str) -> None:
+        """Status and reference from the API; failing validators of a batch held for them."""
+        try:
+            b = resources.batch(run.batch_id)
+            run.batch_reference, run.status, run.approval = b.reference_id, b.status, b.when_to_approve
+            if b.status == "SUBMITTED" and b.when_to_approve == "SUBMISSION_WITH_PASSING_VALIDATORS":
+                arts = resources.artifacts(ev_id, batch_id=b.id)
+                run.validators_failed = list(dict.fromkeys(
+                    name for a in arts for name, result in a.validators if result in _FAILING))
+        except ApiError as exc:
+            if exc.fatal:
+                raise
