@@ -5,18 +5,21 @@ role: configuration
 statement: >-
   At least one playbook is live (an enabled Logic App that an active, unexpired Sentinel automation
   rule runs), and every live playbook's newest run in the run-history lookback (run_lookback_days,
-  default 90) succeeded, with every live playbook's run history read. So each automated response
-  ran in the window and its latest run finished without failing. Supports KSI-INR-RIR. Fails when
-  a live playbook has no run in the window, when its newest run failed, timed out, was aborted,
-  was cancelled or is still running at collection time, when any live playbook's runs couldn't be
-  read, or when no playbook is live. Does NOT prove: that a run did what the incident needed (a
-  run can succeed while an action inside it is skipped); runs of playbooks that aren't live (run
-  by hand or by a disabled or expired rule); runs older than the lookback; that the playbooks
-  cover every incident type, or that the documented response procedure was reviewed.
+  default 90) succeeded, with every live playbook's run history read and every Logic App an
+  automation rule runs read. So each automated response ran in the window and its latest run
+  finished without failing. Supports KSI-INR-RIR. Fails when a live playbook has no run in the
+  window, when its newest run failed, timed out, was aborted, was cancelled or is still running at
+  collection time, when any live playbook's runs couldn't be read, when an automation rule runs a
+  Logic App that couldn't be read (even a rule that is disabled), or when no playbook is live.
+  Does NOT prove: that a run did what the incident needed (a run can succeed while an action
+  inside it is skipped); runs of playbooks that aren't live (run by hand or by a disabled or
+  expired rule); runs older than the lookback; that the playbooks cover every incident type, or
+  that the documented response procedure was reviewed.
 
-# Both figures read null when a live playbook's runs can't be read, so \d+ fails rather than reading unknown as 0;
-# the summary's keys are written sorted, so the succeeded count comes before the live count.
-regex: '"live_playbooks_last_run_succeeded":\s*(?<live_playbooks_last_run_succeeded>\d+)[\s\S]*?"run_by_active_automation_rule":\s*(?<run_by_active_automation_rule>[1-9]\d*)'
+# A Logic App a rule runs but the fetcher couldn't read is left out of the live count, so the unresolved list must be
+# empty; both figures read null when a live playbook's runs can't be read, so \d+ fails rather than reading unknown
+# as 0. The summary's keys are written sorted: unresolved list, then succeeded count, then live count.
+regex: '"automation_rule_references_unresolved":\s*\[\s*\][\s\S]*?"live_playbooks_last_run_succeeded":\s*(?<live_playbooks_last_run_succeeded>\d+)[\s\S]*?"run_by_active_automation_rule":\s*(?<run_by_active_automation_rule>[1-9]\d*)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
