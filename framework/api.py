@@ -63,6 +63,7 @@ from framework.issue_reports import (
 )
 from framework.issue_reports import read_index as read_issue_report_index
 from framework.issue_reports import record_outputs as record_issue_reports
+from framework.paramify.client import base_url_error
 from framework.paramify_auth import (
     BASE_URL_ENV,
     READ_TOKEN_ENV,
@@ -1506,7 +1507,7 @@ def upload_preflight(
         if file_count == 0:
             errors.append(f"No evidence files found in {run_path}")
 
-    url_error = uploader._base_url_error(base_url)
+    url_error = base_url_error(base_url)
     if url_error:
         errors.append(url_error)
 

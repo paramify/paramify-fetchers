@@ -30,7 +30,6 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
-from urllib.parse import urlparse
 
 import requests
 import yaml
@@ -45,6 +44,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from framework.contract import DEFAULT_EVIDENCE_FREQUENCY  # noqa: E402
 from framework.custom_tags import ENTITY_EVIDENCE, build_tagger  # noqa: E402
+from framework.paramify.client import base_url_error  # noqa: E402
 from framework.paramify_auth import (  # noqa: E402
     READ_TOKEN_ENV,
     UPLOAD_TOKEN_ENV,
@@ -304,16 +304,6 @@ def _emit(on_event: Optional[Callable[[dict], None]], event: dict) -> None:
         on_event(event)
 
 
-def _base_url_error(base_url: str) -> Optional[str]:
-    parsed = urlparse(base_url)
-    if parsed.scheme != "https" and (parsed.hostname or "") not in ("localhost", "127.0.0.1", "::1"):
-        return (
-            "base_url must be https to protect the API token "
-            f"(got {base_url!r}); only localhost may use http"
-        )
-    return None
-
-
 def upload_run(
     run_dir: Path,
     *,
@@ -338,7 +328,7 @@ def upload_run(
     paramify_cfg = config.get("paramify") or {}
     base_url, _ = resolve_base_url(paramify_cfg.get("base_url") or base_url)
 
-    url_error = _base_url_error(base_url)
+    url_error = base_url_error(base_url)
     if url_error:
         logger.error(url_error)
         raise ValueError(url_error)
