@@ -12,6 +12,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_change_work_items` 0.2.0: approval only for chosen record types.**
+  `approval_types` (`CHANGE_RECORD_APPROVAL_TYPES`) names the record types that
+  need an approval. A change recorded only by items of other record types counts
+  as recorded and approved, and is counted in the new
+  `changes_recorded_approval_not_required`; the summary's `approval_types` lists
+  the types that need one. Left empty, every record type needs an approval, as
+  before. Each change and each of its work items also carries
+  `approval_required`.
+
 - **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
   matches each Azure change made outside a pipeline in `azure_change_provenance`
   (by default, direct edits and ARM deployments a person ran) to the

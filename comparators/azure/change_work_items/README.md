@@ -49,6 +49,9 @@ since); a record whose approval couldn't be read is not approved.
 An approval may come after the change: such a change still counts as approved,
 and `changes_approved_after_change` counts it unless the late record is one of
 `emergency_types`, which are approved after the fact.
+Only `approval_types` need an approval (every record type when it's empty): a
+record of another type counts as approved, and a change recorded only by such
+records is counted in `changes_recorded_approval_not_required`.
 
 `work_items_cover_changes` is false when a work items file's collection window
 starts too late to hold every record a change could have: its start plus
