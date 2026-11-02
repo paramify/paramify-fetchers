@@ -556,6 +556,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **Inventory records carry a `source` object.** Each item of `payload.data`
+  now requires `source`: the asset exactly as the source API returned it, with
+  no field dropped. A record without it, or with a `source` that is not an
+  object, makes the inventory incomplete. Inventory fetchers must add it. The
+  inventory template shows how.
+
 - **Upload result shape.** The `--json` summary and `upload_log.json` keep
   `uploaded`, `skipped_duplicate`, `skipped_failed`, `errors` and `ok` for one
   release. So do the `upload_start`, `upload_file` and `upload_complete` events.

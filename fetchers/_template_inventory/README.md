@@ -16,6 +16,7 @@ Each record under `payload.data`:
 | `unique_asset_identifier` | Unique ID | \<the asset's own stable ID> |
 | `name` | | \<…> |
 | `asset_type` | Asset Type | \<…> |
+| `source` | | The record exactly as \<tool>'s API returned it |
 
 ## Required env vars
 

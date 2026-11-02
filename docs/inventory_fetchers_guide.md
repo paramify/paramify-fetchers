@@ -40,6 +40,15 @@ paramify evidence evidence/run-<timestamp>/acme_asset_inventory.json
 ```
 </details>
 
+### The `source` field
+
+Every record must carry `source`. It is an object that holds the record
+exactly as the source API returned it. Do not drop, rename or reshape any of
+its fields. The other fields of the record are a short, normalized header for
+the pipeline. `source` keeps everything else, so a field you did not map is
+still in the file. An empty object is valid, but a record with no `source`
+is not.
+
 ## 3. Upload it
 
 ![paramify upload sending acme_asset_inventory.json to the EVD-ACME-INVENTORY evidence set](img/inventory_fetchers/03-upload.png)
@@ -82,7 +91,7 @@ Run and upload again, then open **Monitoring → Inventory**.
 
 | Symptom | Fix |
 |---|---|
-| `the payload breaks the inventory contract` | A record lacks an ID, or two share one (see `problems`). |
+| `the payload breaks the inventory contract` | A record lacks an ID or a `source` object, or two share an ID (see `problems`). |
 | `it holds no records` | Check the credential's scope and any filters. |
 | The pipeline finds no records | Your uploader config sets `artifact_payload: payload`. Use data path `data`. |
 | A list field can't be mapped | Map its scalar copy, such as `primary_ip_address`. |
