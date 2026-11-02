@@ -391,7 +391,8 @@ def excluded_user_record(user: dict, exclusion_fields: dict) -> dict:
 
 def summarize(accounts: List[dict], not_found: List[str], others: List[dict], policies: Optional[List[dict]],
               rules: Optional[List[dict]], workspaces: Optional[int], status: Dict[str, str], source: str,
-              named: int, legacy_blocked: Optional[bool] = None, x509: Optional[dict] = None) -> dict:
+              named: int, legacy_blocked: Optional[bool] = None, x509: Optional[dict] = None,
+              preview_rules_ok: Optional[bool] = None) -> dict:
     accounts_ok = status["accounts"] == READ
     exclusions_ok = status["policies"] == READ and status["exclusions"] == READ and accounts_ok
     rules_ok = status["alert_rules"] == READ
@@ -414,6 +415,7 @@ def summarize(accounts: List[dict], not_found: List[str], others: List[dict], po
         "exclusions_readable": status["exclusions"] == READ and accounts_ok,
         "coverage_readable": status["coverage"] == READ,
         "alert_rules_readable": rules_ok,
+        "preview_alert_rules_readable": preview_rules_ok if rules_ok else None,
         "user_sign_in_activity": status["user_sign_in_activity"],
         "registration_details": status["registration_details"],
         "multi_factor_certificate_sign_in_enabled": x509["multi_factor_sign_in_enabled"] if x509 is not None else None,
@@ -581,9 +583,10 @@ def _resolve_includes(directory: Directory, policies: List[dict]) -> Dict[str, O
 
 
 def _alert_rules(client, collector, subscription_id: str) -> tuple:
-    """(rules, Sentinel workspaces read, readable); a preview listing that fails is logged, not failed."""
+    """(rules, Sentinel workspaces read, readable, notes); a preview listing that fails is noted, not failed."""
     before = len(collector.failures)
     rules: Dict[str, dict] = {}
+    notes: List[str] = []
     workspaces = [w for w in discover_workspaces(client, subscription_id, collector) if w["sentinel_onboarded"]]
     for ws in workspaces:
         path = f"{ws['id']}/providers/Microsoft.SecurityInsights/alertRules"
@@ -594,6 +597,8 @@ def _alert_rules(client, collector, subscription_id: str) -> tuple:
             preview = client.list(path, SI_PREVIEW_API)
         except Exception as exc:  # noqa: BLE001 — NRT rules may then be missed; say so, don't fail the run
             logger.warning("alertRules at %s failed for %s (%s); NRT rules may be missing", SI_PREVIEW_API, ws["name"], exc)
+            notes.append(f"alertRules at {SI_PREVIEW_API} failed for workspace {ws['name']}, so near-real-time rules "
+                         f"may be missing and an account named only by one reads as not monitored: {exc}")
             preview = []
         for raw in preview:
             rules.setdefault((raw.get("id") or "").lower(), sentinel_rule(raw, ws["name"]))
@@ -602,7 +607,7 @@ def _alert_rules(client, collector, subscription_id: str) -> tuple:
             default=[]):
         rules[(raw.get("id") or "").lower()] = log_alert_rule(raw)
     ordered = sorted(rules.values(), key=lambda r: (r["source"], (r["display_name"] or "").lower(), r["id"] or ""))
-    return ordered, len(workspaces), len(collector.failures) == before
+    return ordered, len(workspaces), len(collector.failures) == before, notes
 
 
 def _certificate(client, collector, uid: str, method: Optional[dict]) -> tuple:
@@ -714,7 +719,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
                 accounts_in.append((None, user))
     status["accounts"] = READ if ok else NOT_READ
 
-    rules, workspaces, rules_ok = _alert_rules(client, collector, subscription_id)
+    rules, workspaces, rules_ok, rule_notes = _alert_rules(client, collector, subscription_id)
     status["alert_rules"] = READ if rules_ok else NOT_READ
 
     accounts, activity, registration = [], [], []
@@ -739,13 +744,14 @@ def collect(client, subscription_id: str, collector) -> tuple:
     logger.info("Collected %d emergency account(s) (%s), %d other excluded user(s), %d MFA policy/policies, %d alert rule(s)",
                 len(accounts), source, len(others), len(policies), len(rules))
     read_policies = policies if status["policies"] == READ else None
-    return (_results(tenant_id, source, accounts, not_found, others, read_policies, now, x509),
+    return (_results(tenant_id, source, accounts, not_found, others, read_policies, now, x509, rule_notes),
             summarize(accounts, not_found, others, read_policies, rules, workspaces, status, source, len(named),
-                      legacy_blocked, x509))
+                      legacy_blocked, x509, not rule_notes))
 
 
 def _results(tenant_id, source: str, accounts: List[dict], not_found: List[str], others: List[dict],
-             policies: Optional[List[dict]], now: datetime, x509: Optional[dict] = None) -> dict:
+             policies: Optional[List[dict]], now: datetime, x509: Optional[dict] = None,
+             notes: Optional[List[str]] = None) -> dict:
     return {
         "tenant_id": tenant_id,
         "emergency_accounts_source": source,
@@ -754,6 +760,7 @@ def _results(tenant_id, source: str, accounts: List[dict], not_found: List[str],
         "other_users_excluded_from_mfa": others,
         "mfa_policies": policies,
         "x509_certificate_method": x509,
+        "notes": notes or [],
         "evaluated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 

@@ -33,10 +33,13 @@ target_schema:
     env: AZURE_SUBSCRIPTION_ID
     description: >
       Azure subscription whose Microsoft Sentinel analytics rules and Azure Monitor log
-      search alert rules are checked for rules that name the emergency accounts.
-      Optional — omit to use the first enabled subscription the ambient credential can
-      see; set one target per subscription that holds alert rules. Users, groups and
-      Conditional Access come from the subscription's Entra tenant.
+      search alert rules are checked for rules that name the emergency accounts. It must
+      be the subscription that holds the Microsoft Sentinel workspace and the log search
+      alert rules for break-glass sign-ins; rules in any other subscription aren't read,
+      so the accounts would read as not monitored. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription that holds alert rules. Users, groups and Conditional Access come from
+      the subscription's Entra tenant.
   environment:
     type: string
     required: false
@@ -66,7 +69,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_emergency_accounts/fetcher.py
 
-    Access: Microsoft Graph Policy.Read.All, Directory.Read.All (or Organization.Read.All, User.Read.All, GroupMember.Read.All and RoleManagement.Read.Directory) and AuditLog.Read.All, and Reader on the subscription. Conditional Access, sign-in activity and the registration report need Entra ID P1 or P2. The credential must sign in to the subscription's own tenant; if Microsoft Graph answers for another tenant, the run fails without reading the directory. Emergency accounts are named in ENTRA_EMERGENCY_ACCOUNTS; without it, the enabled users excluded from every enforced MFA policy that includes all users are reported as candidates and none counts as approved.
+    Access: Microsoft Graph Policy.Read.All, Directory.Read.All (or Organization.Read.All, User.Read.All, GroupMember.Read.All and RoleManagement.Read.Directory) and AuditLog.Read.All, and Reader on the subscription, which must be the one that holds the Microsoft Sentinel workspace and log search alert rules for break-glass sign-ins (rules elsewhere aren't read, and the accounts then read as not monitored). Conditional Access, sign-in activity and the registration report need Entra ID P1 or P2. The credential must sign in to the subscription's own tenant; if Microsoft Graph answers for another tenant, the run fails without reading the directory. Emergency accounts are named in ENTRA_EMERGENCY_ACCOUNTS; without it, the enabled users excluded from every enforced MFA policy that includes all users are reported as candidates and none counts as approved.
 
     Commands Executed:
     - GET /subscriptions/{id} — the subscription's tenant
@@ -83,10 +86,10 @@ evidence_set:
     - Microsoft Graph GET /users/{id} with authorizationInfo (per emergency account) — the certificate user ids that bind a certificate to the account
     - Microsoft Graph GET /users/{id}/transitiveMemberOf/microsoft.graph.group (per emergency account with certificate user ids, only when the X.509 method is multi-factor and includes or excludes groups) — whether the method applies to the account
     - GET Microsoft.OperationalInsights/workspaces and Microsoft.SecurityInsights/onboardingStates — the subscription's Microsoft Sentinel workspaces
-    - GET Microsoft.SecurityInsights/alertRules (per Sentinel workspace, at the stable and preview API versions) — analytics rules and their queries; a failed preview read is logged, and near-real-time rules may then be missed
+    - GET Microsoft.SecurityInsights/alertRules (per Sentinel workspace, at the stable and preview API versions) — analytics rules and their queries; a failed preview read doesn't fail the run but is noted in results.notes and preview_alert_rules_readable, and near-real-time rules may then be missed
     - GET Microsoft.Insights/scheduledQueryRules — Azure Monitor log search alert rules and their queries
 
-    Output: azure_entra_emergency_accounts_<subscription>.json — each emergency account (or candidate) with its MFA policy exclusions, whether another MFA policy still covers it, last sign-in, registered methods, whether a multi-factor certificate lets it sign in, and the enabled alert rules whose query names it, the tenant's X.509 certificate method, each other user excluded from an MFA policy, each enforced MFA policy with its includes, excludes and conditions, and any named account the directory doesn't have.
+    Output: azure_entra_emergency_accounts_<subscription>.json — each emergency account (or candidate) with its MFA policy exclusions, whether another MFA policy still covers it, last sign-in, registered methods, whether a multi-factor certificate lets it sign in, and the enabled alert rules whose query names it, the tenant's X.509 certificate method, each other user excluded from an MFA policy, each enforced MFA policy with its includes, excludes and conditions, any named account the directory doesn't have, and a note for each preview alert rule listing that failed without failing the run.
 
     Summary fields:
 
@@ -99,12 +102,13 @@ evidence_set:
     - exclusions_readable — True if every user, group and role an MFA policy excludes, and every named account, was read; false if any read failed, and the exclusion figures read null
     - coverage_readable — True if every group and role that a policy counting for coverage includes was read; false if any read failed, and a user whose coverage rests on that read reads null
     - alert_rules_readable — True if every Sentinel workspace's analytics rules and the subscription's log search alert rules were read; false if not, and the monitoring figures read null
+    - preview_alert_rules_readable — True if every Sentinel workspace's analytics rules were also read at the preview API version, which lists near-real-time rules; false if one failed (the run doesn't fail; the note in results.notes names the workspace, and an account named only by a near-real-time rule there reads as not monitored); null if the alert rules weren't read
     - user_sign_in_activity — Whether the emergency accounts' sign-in activity was read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused, failed, or the accounts themselves weren't read)
     - registration_details — Whether the emergency accounts' registered methods were read: read, not_licensed or not_read, as for user_sign_in_activity
     - multi_factor_certificate_sign_in_enabled — True if the X.509 certificate method is enabled and multi-factor by default; false if it's disabled, absent or single-factor by default (authentication binding rules that make some certificates multi-factor aren't evaluated); null if it wasn't read
     - enforced_mfa_policies — Number of enabled (not report-only) Conditional Access policies that require MFA or an authentication strength, even when another control can be met instead (their exclusions all count); null if the policies weren't read
     - enforced_mfa_policies_for_all_users — Number of enforced MFA policies that include all users; null if the policies weren't read
-    - mfa_policies_counting_for_coverage — Number of enforced MFA policies that count for coverage: MFA is mandatory (the MFA control or an authentication strength that satisfies MFA, and, when any one control is enough, no compliant device, terms of use or other control that isn't MFA as an alternative), they target all cloud apps (app exclusions aren't judged), apply to browsers or to mobile and desktop apps (the two modern client app types), and have no other condition that limits when they apply (sign-in, user, insider or service principal risk, platforms, locations, a device filter or authentication flows); null if the policies weren't read
+    - mfa_policies_counting_for_coverage — Number of enforced MFA policies that count for coverage: MFA is mandatory (the MFA control or an authentication strength that satisfies MFA, and, when any one control is enough, no compliant device, terms of use or other control that isn't MFA as an alternative), they target all cloud apps (app exclusions aren't judged), apply to browsers or to mobile and desktop apps (the two modern client app types), and have no other condition that limits when they apply (sign-in, user, insider or service principal risk, platforms, locations, a device filter or authentication flows; a location condition counts even when it only leaves out trusted locations, so a policy that skips trusted networks gives no coverage); null if the policies weren't read
     - legacy_authentication_blocked_for_all_users — True if an enforced policy blocks Exchange ActiveSync and other legacy clients for all users on all cloud apps, with no risk, platform, location, device filter or authentication flow condition (excluded users, groups, roles and apps aren't checked); false if none does; null if the policies weren't read
     - sentinel_workspaces_checked — Number of Microsoft Sentinel workspaces whose analytics rules were read; null if the rules weren't all read
     - alert_rules_checked — Number of Sentinel analytics rules and log search alert rules read; null if they weren't all read

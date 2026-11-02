@@ -35,8 +35,11 @@ schemas and the `paramify` CLI — not the internal code.
   account has certificate user ids. Every other excluded user is listed too.
   With no accounts named, the users excluded from every enforced MFA policy for
   all users are reported as candidates and none counts as approved. A summary
-  field whose read failed is null, not 0. Microsoft Graph Policy.Read.All,
-  Directory.Read.All and AuditLog.Read.All, and Reader on the subscription.
+  field whose read failed is null, not 0; a failed preview listing of Sentinel
+  rules, which holds near-real-time rules, doesn't fail the run but sets
+  `preview_alert_rules_readable` false and adds a note. Microsoft Graph
+  Policy.Read.All, Directory.Read.All and AuditLog.Read.All, and Reader on the
+  subscription that holds the Sentinel workspace and the log search alert rules.
 - **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
   matches each Azure change made outside a pipeline in `azure_change_provenance`
   (by default, direct edits and ARM deployments a person ran) to the

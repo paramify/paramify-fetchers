@@ -490,13 +490,18 @@ def test_unreadable_alert_rules_null_the_monitoring_figures(monkeypatch):
     assert s["excluded_users_not_emergency_accounts"] == 2
 
 
-def test_failed_preview_rule_listing_is_logged_not_failed(monkeypatch):
+def test_failed_preview_rule_listing_is_noted_not_failed(monkeypatch):
     graph, arm = _tenant()
     errors = {f"alertRules@{SI_PREVIEW_API}": emergency.ArmError(400, "NoRegisteredProviderFound", "retired")}
     results, s, collector = _collect(monkeypatch, FakeClient(graph, arm, errors=errors), BG1)
 
     assert collector.failures == []
     assert s["alert_rules_readable"] is True and results["emergency_accounts"][0]["monitored"] is True
+    assert s["preview_alert_rules_readable"] is False
+    assert len(results["notes"]) == 1 and "workspace law" in results["notes"][0]
+
+    _results, s, _collector = _collect(monkeypatch, FakeClient(*_tenant()), BG1)
+    assert s["preview_alert_rules_readable"] is True and _results["notes"] == []
 
 
 X509_MULTI = {"id": "X509Certificate", "state": "enabled",
