@@ -1682,7 +1682,7 @@ Commands Executed:
 - `providers.get()` for Microsoft.ResourceHealth — tells an unregistered provider from a quiet subscription
 - `GET Microsoft.ResourceHealth/events` — the Service Health events last updated within the lookback window (180 days at most)
 - `ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events'` — events Resource Graph still holds, with their last update, to catch older ones the window misses
-- `GET Microsoft.ResourceHealth/events/{trackingId}` (per event Resource Graph holds that the window missed, from the day before its last update) — its full record
+- `GET Microsoft.ResourceHealth/events/{trackingId}` (per event Resource Graph holds that the window missed, from 30 days before its last update in Resource Graph) — its full record
 - `POST Microsoft.ResourceHealth/events/{trackingId}/fetchEventDetails` (per sensitive event) — the summary and updates the list leaves out
 - `ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events/impactedresources'` — the resources each event names
 - `POST Microsoft.ResourceHealth/events/{trackingId}/listSecurityAdvisoryImpactedResources` (per security advisory) — the resources the advisory names
