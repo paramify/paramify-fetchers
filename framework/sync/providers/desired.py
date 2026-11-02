@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
@@ -53,6 +54,7 @@ class EntryDesired:
     no_request: str
     files: tuple[DeliveryFile, ...]
     recorded_batch_id: Optional[str]
+    collected_on: Optional[date] = None  # the day the run started (UTC), from _run_metadata.json
 
 
 def is_enveloped(obj: Any) -> bool:
@@ -123,6 +125,13 @@ def _run_metadata(run_dir: Path) -> Dict:
 
 # Skip reasons that are errors, not decisions (a file the run should not hold).
 ERROR_SKIP = "missing/incomplete evidence_set"
+
+
+def _started_on(run_meta: Dict) -> Optional[date]:
+    try:
+        return date.fromisoformat(str(run_meta.get("started_at") or "")[:10])
+    except ValueError:
+        return None
 
 
 def _skip_reason(metadata: Dict, es: Optional[Dict], skip_failed: bool) -> Optional[str]:
@@ -224,5 +233,6 @@ def desired_from_run(
             no_request=cfg.get("no_request") or DEFAULT_NO_REQUEST,
             files=tuple(files),
             recorded_batch_id=state.batch_for(key),
+            collected_on=_started_on(run_meta),
         ))
     return result

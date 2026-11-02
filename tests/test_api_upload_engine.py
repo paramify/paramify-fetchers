@@ -554,3 +554,37 @@ def test_a_legacy_artifact_of_another_entry_is_not_this_entrys(fake, root, tmp_p
     fake.add_legacy_artifact(ev.id, "a.json", LEGACY_NOTE.replace("fetcher=x", "fetcher=z"))
     out = api.upload_run(two_files(tmp_path), root)
     assert out["entries"]["x"]["uploaded"] == ["a.json", "b.json"]
+
+
+# ---- the artifacts read is bounded by the run's collect date -------------------
+
+def _with_started_at(run: Path, started_at: str) -> Path:
+    meta = json.loads((run / "_run_metadata.json").read_text())
+    meta["started_at"] = started_at
+    (run / "_run_metadata.json").write_text(json.dumps(meta))
+    return run
+
+
+def _artifact_reads(fake) -> List[Dict[str, Any]]:
+    return [c[2] for c in fake.calls if c[0] == "GET" and c[1].endswith("/artifacts") and "originalFileName" in c[2]]
+
+
+def test_a_fresh_run_reads_artifacts_from_the_day_before_it_ran_to_tomorrow(fake, root, tmp_path):
+    fake.add_evidence("EVD-X")
+    today = date.today()
+    run = _with_started_at(two_files(tmp_path), f"{today.isoformat()}T02:00:00Z")
+    out = api.upload_run(run, root)
+    assert out["entries"]["x"]["state"] == "delivered"
+    [read] = _artifact_reads(fake)
+    assert read["createdAt"] == [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)]
+    assert read["originalFileName"] == ["a.json", "b.json"]
+    # The second upload finds the batch through the same bounded read.
+    assert api.upload_run(run, root)["entries"]["x"]["state"] == "noop"
+
+
+def test_a_run_older_than_31_days_reads_artifacts_without_a_date_filter(fake, root, tmp_path):
+    fake.add_evidence("EVD-X")
+    old = date.today() - timedelta(days=40)
+    api.upload_run(_with_started_at(two_files(tmp_path), f"{old.isoformat()}T02:00:00Z"), root)
+    [read] = _artifact_reads(fake)
+    assert "createdAt" not in read

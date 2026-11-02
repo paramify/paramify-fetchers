@@ -13,6 +13,9 @@ from framework.paramify.client import ApiError, Client, ErrorKind
 from framework.paramify_responses import already_present
 
 _PAGE_SIZE = 100
+# File names per artifacts read: the names go in the URL, so a big entry is
+# read in several requests rather than one URL the server may refuse.
+NAMES_PER_READ = 50
 
 
 @dataclass(frozen=True)
@@ -175,15 +178,32 @@ class Resources:
         *,
         batch_id: Optional[str] = None,
         original_file_names: Optional[Sequence[str]] = None,
+        created_on: Optional[Sequence[date]] = None,
     ) -> List[Artifact]:
-        """Artifacts of an evidence set; `original_file_names` is one query (a repeated parameter)."""
+        """Artifacts of an evidence set.
+
+        `original_file_names` and `created_on` are repeated parameters
+        (`originalFileName`, `createdAt` as YYYY-MM-DD; any listed value
+        matches). The names go out `NAMES_PER_READ` to a request.
+        """
         params: Dict[str, Any] = {}
         if batch_id:
             params["batchId"] = batch_id
-        if original_file_names:
-            params["originalFileName"] = list(original_file_names)
-        body = self._client.get(f"/evidence/{evidence_id}/artifacts", params or None) or {}
-        return [_artifact(a) for a in body.get("artifacts") or []]
+        if created_on:
+            params["createdAt"] = [d.isoformat() for d in created_on]
+        names = list(original_file_names or [])
+        chunks = [names[i:i + NAMES_PER_READ] for i in range(0, len(names), NAMES_PER_READ)] or [[]]
+        out: List[Artifact] = []
+        seen: set = set()
+        for chunk in chunks:
+            query = {**params, "originalFileName": chunk} if chunk else params
+            body = self._client.get(f"/evidence/{evidence_id}/artifacts", query or None) or {}
+            for row in body.get("artifacts") or []:
+                a = _artifact(row)
+                if a.id not in seen:
+                    seen.add(a.id)
+                    out.append(a)
+        return out
 
     def create_evidence(self, body: Dict[str, Any]) -> EvidenceSet:
         ref = body["referenceId"]
@@ -270,8 +290,10 @@ class Reader:
         *,
         batch_id: Optional[str] = None,
         original_file_names: Optional[Sequence[str]] = None,
+        created_on: Optional[Sequence[date]] = None,
     ) -> List[Artifact]:
         return list(self._cached(
             "artifacts", evidence_id, batch_id=batch_id,
             original_file_names=list(original_file_names) if original_file_names else None,
+            created_on=list(created_on) if created_on else None,
         ))

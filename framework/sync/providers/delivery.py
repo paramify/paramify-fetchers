@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -65,6 +65,22 @@ ALL_DROPPED = "every file was dropped"
 BEFORE_BATCHES = "already delivered before batches"
 WAF_BLOCKED = "blocked by the production WAF"
 _FAILING = ("FAIL", "ERROR")
+# The longest createdAt window the artifacts read lists day by day; an older run reads without one.
+MAX_CREATED_SPAN_DAYS = 31
+
+
+def created_window(collected_on: Optional[date], today: date) -> Optional[List[date]]:
+    """Each day from the day before the run started to tomorrow, or None (no date filter).
+
+    A day of margin each side covers the gap between UTC and the workspace's day.
+    """
+    if collected_on is None:
+        return None
+    start, end = collected_on - timedelta(days=1), today + timedelta(days=1)
+    span = (end - start).days
+    if span < 0 or span > MAX_CREATED_SPAN_DAYS:
+        return None
+    return [start + timedelta(days=n) for n in range(span + 1)]
 
 
 @dataclass
@@ -266,7 +282,8 @@ class DeliveryProvider:
         # It runs before routing: a run sent before batches existed needs no route.
         names = [f.original_file_name for f in e.files if f.skip_reason is None]
         # No names would make the filter vanish and read the whole set's artifacts.
-        found = reader.artifacts(ev.id, original_file_names=names) if names else []
+        window = created_window(e.collected_on, self._today())
+        found = reader.artifacts(ev.id, original_file_names=names, created_on=window) if names else []
         obs.before_batches = delivered_before_batches(found, e)
         channel = resolve_channel(e, ev, obs.stacks)
         if isinstance(channel, Refusal):

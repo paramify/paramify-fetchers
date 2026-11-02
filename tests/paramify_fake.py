@@ -199,7 +199,8 @@ class FakeParamify:
             rows = [a for a in self._artifacts
                     if a["_evidenceId"] == m.group(1)
                     and params.get("batchId") in (None, a["batchId"])
-                    and _matches(params.get("originalFileName"), a["originalFileName"])]
+                    and _matches(params.get("originalFileName"), a["originalFileName"])
+                    and _matches(params.get("createdAt"), a["createdAt"][:10])]
             return FakeResponse(200, {"artifacts": [{k: v for k, v in a.items() if k != "_evidenceId"} for a in rows]})
         m = re.fullmatch(r"/custom-tags/([^/]+)/([^/]+)", path)
         if method == "POST" and m:

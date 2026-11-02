@@ -88,6 +88,32 @@ def test_artifacts_filter_by_original_file_names(fake, res):
     assert url == "https://x.test/a?originalFileName=a.json&originalFileName=c.json"
 
 
+def test_artifacts_by_name_go_out_50_names_per_request(fake, res):
+    ev, req = _request_for(fake)
+    batch = res.create_batch(artifact_request_id=req.id)
+    names = [f"f{i:03}.json" for i in range(120)]
+    for name in names[::10]:
+        res.upload_to_batch(batch.id, name, b"{}", {})
+    fake.calls.clear()
+    got = res.artifacts(ev.id, original_file_names=names)
+    assert [a.original_file_name for a in got] == names[::10]
+    reads = [c[2]["originalFileName"] for c in fake.calls if c[1] == f"/evidence/{ev.id}/artifacts"]
+    assert [len(r) for r in reads] == [50, 50, 20]
+    assert [n for r in reads for n in r] == names
+
+
+def test_artifacts_created_on_is_the_repeated_createdAt_parameter(fake, res):
+    ev, req = _request_for(fake)
+    batch = res.create_batch(artifact_request_id=req.id)
+    res.upload_to_batch(batch.id, "a.json", b"{}", {})  # created on fake.today, 2026-11-01
+    days = [date(2026, 10, 31), date(2026, 11, 1), date(2026, 11, 2)]
+    got = res.artifacts(ev.id, original_file_names=["a.json"], created_on=days)
+    assert [a.original_file_name for a in got] == ["a.json"]
+    assert fake.calls[-1][2] == {"originalFileName": ["a.json"],
+                                 "createdAt": ["2026-10-31", "2026-11-01", "2026-11-02"]}
+    assert res.artifacts(ev.id, original_file_names=["a.json"], created_on=[date(2026, 10, 1)]) == []
+
+
 def test_manual_approval_submits_to_submitted_and_closed_batch_refuses(fake, res):
     ev, _ = _request_for(fake, approval="MANUAL")
     batch = res.create_batch(evidence_id=ev.id)
