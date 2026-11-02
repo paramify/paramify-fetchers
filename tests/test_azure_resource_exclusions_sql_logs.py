@@ -311,7 +311,8 @@ def test_sql_backups_unread_activity_log_leaves_failover_counts_null(monkeypatch
     assert summary["failover_history_read"] is False and summary["failover_history_days"] == 90
     assert all(summary[k] is None for k in (
         "total_failovers", "succeeded_failovers", "failed_failovers", "failover_group_failovers",
-        "latest_succeeded_failover_time", "longest_succeeded_failover_minutes", "in_scope_failovers"))
+        "latest_succeeded_failover_time", "longest_succeeded_failover_minutes", "in_scope_failovers",
+        "excluded_failovers"))
     assert {g["failovers_in_window"] for g in results["instance_failover_groups"]} == {None}
     # The rest of the evidence is unchanged by the failed read.
     assert summary["total_instance_failover_groups"] == 2 and summary["total_managed_instances"] == 3

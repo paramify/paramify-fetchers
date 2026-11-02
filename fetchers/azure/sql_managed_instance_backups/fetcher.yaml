@@ -170,7 +170,9 @@ evidence_set:
     (patterns that matched no instance or failover group, such as a mistyped name),
     and counts `excluded_managed_instances` and `excluded_instance_failover_groups`
     (a group excluded with its instances names the instance in `matched_id`),
-    `excluded_failovers` (failovers of an excluded group or instance), and
+    `excluded_failovers` (failovers of an excluded group or instance; null when
+    the Activity Log wasn't read in full, since no failover was tested against
+    the patterns), and
     `in_scope_managed_instances` and `in_scope_instance_failover_groups` (0 when
     none was read or the patterns took out every one, which a check can catch by
     requiring more than 0) and `in_scope_failovers` (null when the Activity Log

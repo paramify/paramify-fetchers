@@ -642,6 +642,12 @@ def main() -> int:
     excluded += out
     groups = [group_failover_fields(g, failovers) for g in groups]
     exclusions.warn_unmatched(logger)
+    boundary = exclusions.summary(excluded, ("managed_instance", "instance_failover_group", "failover"), {
+        "managed_instances": len(instances), "instance_failover_groups": len(groups),
+        "failovers": None if failovers is None else len(failovers)})
+    if failovers is None:
+        # No failover was read, so none was tested against the patterns.
+        boundary["excluded_failovers"] = None
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -659,9 +665,7 @@ def main() -> int:
             **summarize(instances, groups, not unlisted),
             **summarize_failovers(failovers, window, now),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("managed_instance", "instance_failover_group", "failover"), {
-                "managed_instances": len(instances), "instance_failover_groups": len(groups),
-                "failovers": None if failovers is None else len(failovers)}),
+            **boundary,
         },
     )
 
