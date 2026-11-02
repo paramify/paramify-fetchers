@@ -235,6 +235,32 @@ def test_mfa_client_types_skip_alternatives_narrowing_and_partial_scope(monkeypa
     assert by_id["p-and"]["requires_mfa_without_alternative"] is True
 
 
+def test_mfa_client_types_skip_device_filters_flows_and_other_risks(monkeypatch):
+    def narrowed(pid, **conditions):
+        policy = _with(_policy(pid, pid, controls=("mfa",)), client_apps=("browser",))
+        policy["conditions"].update(conditions)
+        return policy
+
+    types, by_id = _client_types(
+        monkeypatch,
+        narrowed("p-device", devices={"deviceFilter": {"mode": "exclude", "rule": "device.isCompliant -eq True"}}),
+        narrowed("p-flows", authenticationFlows={"transferMethods": "deviceCodeFlow,authenticationTransfer"}),
+        narrowed("p-insider", insiderRiskLevels="minor,moderate"),
+        narrowed("p-sp-risk", servicePrincipalRiskLevels=["high"]),
+        _with(_policy("p-apps", "MFA for apps", controls=("mfa",)), client_apps=("mobileAppsAndDesktopClients",)),
+        narrowed("p-no-flow", authenticationFlows={"transferMethods": "none"}, devices={}),
+    )
+    assert types == ["browser", "mobileAppsAndDesktopClients"]
+    conditions = {pid: by_id[pid]["conditions"] for pid in by_id}
+    assert conditions["p-device"]["device_filter"] == {"mode": "exclude", "rule": "device.isCompliant -eq True"}
+    assert conditions["p-flows"]["authentication_flow_transfer_methods"] == ["authenticationTransfer", "deviceCodeFlow"]
+    assert conditions["p-insider"]["insider_risk_levels"] == ["minor", "moderate"]
+    assert conditions["p-sp-risk"]["service_principal_risk_levels"] == ["high"]
+    assert conditions["p-no-flow"]["authentication_flow_transfer_methods"] == []
+    assert conditions["p-no-flow"]["device_filter"] is None
+    assert json.loads(json.dumps(by_id["p-device"])) == by_id["p-device"]
+
+
 def test_strengths_are_not_read_when_no_policy_uses_one(monkeypatch):
     seen = []
     inner = _graph([_policy("p-mfa", "Classic MFA", controls=("mfa",))])

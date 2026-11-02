@@ -83,6 +83,8 @@ CLIENT_APP_TYPES = {t.lower(): t for t in ("browser", "mobileAppsAndDesktopClien
 # authenticationMethodModes bound to the sign-in origin, so a look-alike site can't relay them.
 PHISHING_RESISTANT_MODES = frozenset({"fido2", "windowshelloforbusiness", "x509certificatemultifactor"})
 MFA_REQUIREMENT = "mfa"
+# conditionalAccessTransferMethods member for a policy with no authentication flow condition.
+NO_TRANSFER_METHOD = "none"
 
 
 # --- projections: the only code here that touches a Graph model ---
@@ -105,6 +107,8 @@ def project_conditional_access_policy(policy) -> dict:
     users = graph_attr(conditions, "users")
     platforms = graph_attr(conditions, "platforms")
     locations = graph_attr(conditions, "locations")
+    device_filter = graph_attr(graph_attr(conditions, "devices"), "device_filter")
+    flows = graph_attr(conditions, "authentication_flows")
     grant_controls = graph_attr(policy, "grant_controls")
     session_controls = graph_attr(policy, "session_controls")
     strength = graph_attr(grant_controls, "authentication_strength")
@@ -130,6 +134,13 @@ def project_conditional_access_policy(policy) -> dict:
         "client_app_types": graph_list(conditions, "client_app_types"),
         "sign_in_risk_levels": graph_list(conditions, "sign_in_risk_levels"),
         "user_risk_levels": graph_list(conditions, "user_risk_levels"),
+        "service_principal_risk_levels": graph_list(conditions, "service_principal_risk_levels"),
+        # Flag enums: kiota reads "minor,moderate" as a list of members.
+        "insider_risk_levels": graph_list(conditions, "insider_risk_levels"),
+        "device_filter": None if device_filter is None else {
+            "mode": graph_attr(device_filter, "mode"), "rule": graph_attr(device_filter, "rule")},
+        "authentication_flow_transfer_methods": [
+            m for m in graph_list(flows, "transfer_methods") if str(m).lower() != NO_TRANSFER_METHOD],
         "include_platforms": graph_list(platforms, "include_platforms"),
         "exclude_platforms": graph_list(platforms, "exclude_platforms"),
         "include_locations": graph_list(locations, "include_locations"),
@@ -271,6 +282,10 @@ def policy_record(policy: dict, strengths: dict | None = None) -> dict:
             "client_app_types": sorted(policy.get("client_app_types") or []),
             "sign_in_risk_levels": sorted(policy.get("sign_in_risk_levels") or []),
             "user_risk_levels": sorted(policy.get("user_risk_levels") or []),
+            "service_principal_risk_levels": sorted(policy.get("service_principal_risk_levels") or []),
+            "insider_risk_levels": sorted(policy.get("insider_risk_levels") or []),
+            "device_filter": policy.get("device_filter"),
+            "authentication_flow_transfer_methods": sorted(policy.get("authentication_flow_transfer_methods") or []),
             "include_platforms": sorted(policy.get("include_platforms") or []),
             "exclude_platforms": sorted(policy.get("exclude_platforms") or []),
             "include_locations": sorted(policy.get("include_locations") or []),
@@ -339,6 +354,8 @@ def _mfa_for_everyone(policy: dict) -> bool:
     return (policy["is_enforced"] and policy["requires_mfa_without_alternative"] and policy["targets_all_users"]
             and policy["targets_all_applications"] and not policy["target_resources"]["exclude"]
             and not c["sign_in_risk_levels"] and not c["user_risk_levels"]
+            and not c["service_principal_risk_levels"] and not c["insider_risk_levels"]
+            and not c["device_filter"] and not c["authentication_flow_transfer_methods"]
             and all(str(v).lower() == "all" for v in c["include_platforms"]) and not c["exclude_platforms"]
             and all(str(v).lower() == "all" for v in c["include_locations"]) and not c["exclude_locations"])
 

@@ -542,9 +542,12 @@ schemas and the `paramify` CLI — not the internal code.
   and another for mobile and desktop apps; no single policy then covers every
   client. The new summary list `mfa_client_app_types_for_all_users_and_apps` holds
   the client app types those policies cover together, counting only policies where
-  MFA has no alternative grant control and no risk, platform, location or app
+  MFA has no alternative grant control and no sign-in, user, insider or service
+  principal risk, platform, location, device filter, authentication flow or app
   exclusion narrows them. Each policy also carries
-  `requires_mfa_without_alternative`.
+  `requires_mfa_without_alternative`, and its conditions carry
+  `service_principal_risk_levels`, `insider_risk_levels`, `device_filter` and
+  `authentication_flow_transfer_methods`.
 
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
