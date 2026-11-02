@@ -32,6 +32,28 @@ if [ ! -f "$manifest" ]; then
     exit 2
 fi
 
+# One line per invocation (fetcher, target, exit code, last error line) to stderr,
+# then the run directory to stdout. Invalid JSON prints nothing.
+SUMMARY_PY='
+import json, sys
+try:
+    s = json.load(sys.stdin)
+    run_dir = s["run_dir"]
+except Exception:
+    sys.exit(1)
+for r in s.get("invocations") or []:
+    line = "    " + str(r.get("entry_key") or r.get("fetcher_name") or "?")
+    if r.get("target"):
+        line += " " + json.dumps(r["target"], separators=(",", ":"))
+    line += " exit " + str(r.get("exit_code"))
+    tail = [ln for ln in str(r.get("stderr_tail") or "").splitlines() if ln.strip()]
+    if r.get("exit_code") and tail:
+        line += ": " + tail[-1].strip()[:200]
+    print(line, file=sys.stderr)
+print("    run: " + run_dir, file=sys.stderr)
+print(run_dir)
+'
+
 echo "==> collect: $manifest"
 summary=$(paramify run "$manifest" --json)
 collect_rc=$?
@@ -39,13 +61,12 @@ if [ "$collect_rc" -ne 0 ]; then
     echo "WARN: collect exited $collect_rc (a fetcher reported failures); uploading whatever was produced" >&2
 fi
 py=$(command -v python3 || command -v python)   # the image has `python`; a laptop may only have `python3`
-run_dir=$(printf '%s' "$summary" | "$py" -c 'import json,sys; print(json.load(sys.stdin)["run_dir"])' 2>/dev/null)
+run_dir=$(printf '%s' "$summary" | "$py" -c "$SUMMARY_PY")
 if [ -z "$run_dir" ]; then
     echo "collect produced no run directory; nothing to upload" >&2
     printf '%s\n' "$summary" >&2
     exit "$([ "$collect_rc" -ne 0 ] && echo "$collect_rc" || echo 1)"
 fi
-echo "    run: $run_dir"
 
 echo "==> upload $run_dir -> ${PARAMIFY_API_BASE_URL:-<default>}"
 upload_args=("$run_dir")

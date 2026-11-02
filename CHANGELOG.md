@@ -592,7 +592,9 @@ schemas and the `paramify` CLI — not the internal code.
   no batch for any entry of the run, and the run exits 1.
 - **`deploy/run-and-upload.sh` uploads the run it just collected.** It reads the
   run directory from `paramify run --json` and no longer takes the newest run on
-  disk. An optional second argument names the stack.
+  disk. An optional second argument names the stack. It writes one line for each
+  fetcher run to stderr: the entry, the target, the exit code and the last error
+  line. `./run_and_upload.sh` does the same.
 
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk

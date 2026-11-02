@@ -97,6 +97,32 @@ def test_a_run_without_a_summary_does_not_upload(harness):
     assert not any(c.startswith("upload") for c in calls)
 
 
+SUMMARY_WITH_INVOCATIONS = {
+    "ok": False,
+    "invocations": [
+        {"fetcher_name": "aws_x", "entry_key": "aws_x", "target": {"region": "us-east-1"}, "exit_code": 0},
+        {"fetcher_name": "okta_y", "entry_key": "okta_y", "target": None, "exit_code": 1,
+         "stderr_tail": "starting\nauth failed: HTTP 401\n"},
+    ],
+}
+
+
+def _collect_summary_is_on_stderr(stderr: str, run_dir: str) -> None:
+    lines = stderr.splitlines()
+    assert any("aws_x" in ln and '"region":"us-east-1"' in ln and "exit 0" in ln for ln in lines), stderr
+    assert any("okta_y" in ln and "exit 1: auth failed: HTTP 401" in ln for ln in lines), stderr
+    assert any(run_dir in ln for ln in lines), stderr
+
+
+def test_collect_summary_goes_to_stderr(harness, tmp_path):
+    run_dir = str(tmp_path / "evidence" / "run-20260101-000000-ab12")
+    p, calls, _ = harness("MANIFEST", STUB_RUN_RC="1",
+                          STUB_RUN_SUMMARY=json.dumps({**SUMMARY_WITH_INVOCATIONS, "run_dir": run_dir}))
+    assert p.returncode == 1
+    _collect_summary_is_on_stderr(p.stderr, run_dir)
+    assert calls[1] == f"upload {run_dir}"
+
+
 def test_root_script_uploads_the_run_it_collected(tmp_path):
     """./run_and_upload.sh calls .venv/bin/paramify; a stub stands in for it."""
     root = tmp_path / "root"
@@ -109,9 +135,11 @@ def test_root_script_uploads_the_run_it_collected(tmp_path):
     shutil.copy(REPO_ROOT / "run_and_upload.sh", root / "run_and_upload.sh")
     log = tmp_path / "calls.log"
     run_dir = tmp_path / "run-x"
-    env = {**os.environ, "STUB_LOG": str(log), "STUB_RUN_SUMMARY": json.dumps({"run_dir": str(run_dir)})}
+    env = {**os.environ, "STUB_LOG": str(log),
+           "STUB_RUN_SUMMARY": json.dumps({**SUMMARY_WITH_INVOCATIONS, "run_dir": str(run_dir)})}
     p = subprocess.run(["bash", str(root / "run_and_upload.sh")], env=env, capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     calls = log.read_text().splitlines()
     assert calls[0].startswith("run ") and "--json" in calls[0]
     assert calls[1] == f"upload {run_dir}"
+    _collect_summary_is_on_stderr(p.stderr, str(run_dir))
