@@ -5925,7 +5925,7 @@ Summary fields:
 
 
 ### azure_change_work_items
-Short Description: Shows whether each direct edit or manual deployment in Azure is recorded by an Azure DevOps work item, and whether that record is approved.
+Short Description: Shows whether each direct edit or manual deployment in Azure is recorded by an Azure DevOps work item, and whether that record is approved where its type needs an approval.
 
 Script: comparators/azure/change_work_items/fetcher.py (a comparator; uses the shared reader comparators/_lib/comparator_inputs.py)
 
@@ -5935,7 +5935,7 @@ Commands Executed:
 - Read `azure_change_provenance` evidence from the same run — every Azure change with its origin, caller, time and deployment
 - Read `azure_devops_work_items` evidence from the same run — each work item's type, state, people, dates and approval
 
-Output: `azure_change_work_items.json` — each Azure change made outside a pipeline with its status, the work items that record it, and whether they are approved.
+Output: `azure_change_work_items.json` — each Azure change made outside a pipeline with its status, the work items that record it, and whether they are approved or need no approval.
 
 Summary fields:
 
@@ -5967,10 +5967,13 @@ Summary fields:
 - `percent_recorded` — Percentage of changes needing a record that a work item records = `changes_recorded` / `changes_needing_record` × 100 (a whole number, 0–100); 0 when `changes_needing_record` is 0
 
 **Are the records approved?**
-- `changes_recorded_without_approval` — Number of recorded changes whose record isn't approved (has no approval in effect as `azure_devops_work_items` reads it: moved into an approval state or given an approval comment, quoted text left out, and not withdrawn since; and a record whose approval couldn't be read counts as not approved); a change several items could record counts as approved only if every one is approved
-- `changes_without_approved_record` — Number of changes needing a record with no approved work item: `changes_without_record` plus `changes_recorded_without_approval`
-- `changes_without_approved_record_by_origin` — Number of changes without an approved record for each checked origin
-- `changes_approved_after_change` — Number of changes with an approved record where a record that isn't an emergency type (`emergency_types`) was approved after the change was made; counted, not treated as unapproved
+- `approval_types` — List of record types that need an approval: the record types named in the `approval_types` setting, or every record type when the setting is empty
+- `approval_types_not_record_types` — List of names in the `approval_types` setting that match no record type, such as a misspelt type name; the type meant would need no approval, so this should be empty
+- `changes_recorded_without_approval` — Number of recorded changes whose record needs an approval and isn't approved (has no approval in effect as `azure_devops_work_items` reads it: moved into an approval state or given an approval comment, quoted text left out, and not withdrawn since; and a record whose approval couldn't be read counts as not approved); a change several items could record counts as approved only if every one is approved or is of a type that needs no approval
+- `changes_recorded_approval_not_required` — Number of recorded changes whose every record is of a type not in `approval_types`; such a change counts as approved
+- `changes_without_approved_record` — Number of changes needing a record that have no approved work item, a record of a type that needs no approval counting as approved: `changes_without_record` plus `changes_recorded_without_approval`
+- `changes_without_approved_record_by_origin` — Number of changes without an approved record, as `changes_without_approved_record` counts them, for each checked origin
+- `changes_approved_after_change` — Number of changes with an approved record where a record that needs an approval and isn't an emergency type (`emergency_types`) was approved after the change was made; counted, not treated as unapproved
 
 
 ### checkov_bicep
