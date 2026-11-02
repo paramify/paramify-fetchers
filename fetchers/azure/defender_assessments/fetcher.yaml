@@ -20,7 +20,8 @@ description: >
   per-severity SLA (30 / 90 / 180 days for High / Medium / Low by default); the
   summary counts the Unhealthy findings past SLA per severity and in total, each
   null when the list, the Resource Graph severities or a needed date could not be
-  read, or that severity's SLA days are invalid. Needs Reader (or Security Reader).
+  read, a finding's severity came from the catalogue, or that severity's SLA days
+  are invalid. Needs Reader (or Security Reader).
 category: azure
 
 supports_targets: true
@@ -135,8 +136,9 @@ evidence_set:
     sla_days_by_severity, unhealthy_past_sla_by_severity and unhealthy_past_sla_count
     (a severity's count is null when the assessment list or the Resource Graph
     severity read failed, that severity's SLA days are invalid, or one of its
-    Unhealthy findings has no date; the total is null when any severity's count is
-    null or an Unhealthy finding has no severity) and
+    Unhealthy findings has no date or took its severity from the catalogue, which
+    can rate a check lower and so give it a longer SLA; the total is null when any
+    severity's count is null or an Unhealthy finding has no severity) and
     unhealthy_days_open_unknown_count (null only when the list could not be read).
     An invalid SLA value (not a whole number above 0) fails the run as bad_config
     and its sla_days is null, with no fallback to the default.

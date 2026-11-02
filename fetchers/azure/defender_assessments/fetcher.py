@@ -250,15 +250,18 @@ def sla_summary(assessments: list[dict], sla_days: dict, list_read: bool, severi
     """Unhealthy findings past SLA per severity and in total; a count is null when it can't be known.
 
     A severity's count is null when the list or the Resource Graph severity read failed, that severity's SLA
-    days are invalid, or one of its Unhealthy findings has no date. The total is also null when an Unhealthy
-    finding has no severity, so no SLA to measure against.
+    days are invalid, or one of its Unhealthy findings has no date or took its severity from the catalogue,
+    which can rate a check lower than its assessment and so give it a longer SLA. The total is also null when
+    an Unhealthy finding has no severity, so no SLA to measure against.
     """
     unhealthy = [a for a in assessments if a.get("status_code") == "Unhealthy"]
     readable = list_read and severity_read
     by_severity: dict = {}
     for severity in SEVERITIES:
         mine = [a for a in unhealthy if a.get("severity") == severity]
-        known = readable and sla_days.get(severity) is not None and all(a.get("days_open") is not None for a in mine)
+        known = readable and sla_days.get(severity) is not None and all(
+            a.get("days_open") is not None and a.get("severity_source") != FROM_CATALOGUE for a in mine
+        )
         by_severity[severity] = sum(1 for a in mine if a.get("past_sla")) if known else None
     total_known = (
         readable
