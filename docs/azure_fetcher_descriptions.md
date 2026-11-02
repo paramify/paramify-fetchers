@@ -2548,7 +2548,7 @@ Summary fields:
 
 
 ### azure_service_availability
-Short Description: Shows when each App Service app, Front Door profile and SQL Managed Instance was unavailable and for how long, the Azure incident behind each outage, and each app's health-check results.
+Short Description: Shows when each App Service app and SQL Managed Instance was unavailable and for how long, why, Front Door origin probe failures, and each app's health-check results.
 
 Script: fetchers/azure/service_availability/fetcher.py (uses the shared helper fetchers/azure/_shared/resource_exclusions.py)
 
@@ -2562,7 +2562,7 @@ Commands Executed:
 - `GET {app}/config/web` (per app) — the app's health check path
 - `GET {app}/providers/Microsoft.Insights/metrics` for HealthCheckStatus (per app with a health check path) — hourly health-check results over the lookback
 
-Output: `azure_service_availability_<subscription>.json` — each resource with its availability now, every period it was unavailable, degraded or unknown in the lookback with its cause and linked Azure incidents, and for apps the health check results, plus a rollup per region and pointers to the fetchers that hold Front Door origin health (azure_front_door_origins) and Service Health events (azure_service_health_advisories).
+Output: `azure_service_availability_<subscription>.json` — each resource with its availability now and every period it was unavailable, degraded or unknown in the lookback with its cause, linked Azure incidents and whether it counts as an outage, Front Door profiles' periods as origin probe failures (Resource Health judges a profile by its origins' health probes), and for apps the health check results, plus a rollup per region and pointers to the fetchers that hold Front Door origin health (azure_front_door_origins) and Service Health events (azure_service_health_advisories).
 
 Summary fields:
 
@@ -2588,38 +2588,47 @@ Summary fields:
   - not_authorized (the read was refused; fails the run)
   - not_registered (Resource Health is not registered; fails the run)
   - error (any other failure; fails the run)
+- `windows_not_listed` — Number of periods counted but not listed: each resource lists only its 100 newest periods, and every count includes the periods left off the list
 
-**Is each resource available now?**
-- `resources_available_now` — Number of resources whose current state is Available or Degraded
-- `resources_unavailable_now` — Number of resources whose current state is Unavailable
-- `resources_degraded_now` — Number of resources whose current state is Degraded
-- `resources_availability_unknown_now` — Number of resources whose current state is Unknown or was not read
+**Is each app and SQL Managed Instance available now?**
+- `resources_available_now` — Number of apps and SQL Managed Instances whose current state is Available or Degraded; Front Door profiles are counted under their own question, because Resource Health judges them by their origins
+- `resources_unavailable_now` — Number of apps and SQL Managed Instances whose current state is Unavailable
+- `resources_degraded_now` — Number of apps and SQL Managed Instances whose current state is Degraded
+- `resources_availability_unknown_now` — Number of apps and SQL Managed Instances whose current state is Unknown or was not read
 
 **Were there outages, and how long did recovery take?**
-- `resources_with_outage_in_window` — Number of read resources with at least one outage in the lookback; an outage is a continuous Unavailable period the customer did not start, and Degraded (still serving, with reduced performance) is not one
-- `outages_in_window` — Number of outages in the lookback across read resources
-- `ongoing_outages` — Number of read resources Unavailable now, in an outage
+- `resources_with_outage_in_window` — Number of read apps and SQL Managed Instances with at least one outage in the lookback; an outage is a continuous Unavailable period the customer did not start, and Degraded (still serving, with reduced performance) and Unknown (Resource Health had no information) are not outages
+- `outages_in_window` — Number of outages in the lookback across read apps and SQL Managed Instances
+- `ongoing_outages` — Number of read apps and SQL Managed Instances Unavailable now, in an outage
 - `customer_initiated_unavailable_windows` — Number of Unavailable periods the customer started (a stop, restart or scale, where Resource Health names the customer or user as the cause), which are not outages
-- `longest_outage_hours` — Hours of the longest outage across read resources, its full length including any part before the lookback (0 when none had one); null when none was read
-- `lowest_availability_percentage` — Percentage of the lowest availability across read resources, where a resource's availability = (observed hours − outage hours in the lookback) / observed hours × 100, to three decimals, and observed hours run from the later of the lookback start and the resource's oldest status; when a resource's observed hours is 0 it has no availability and is left out; null when no resource has one
+- `longest_outage_hours` — Hours of the longest outage across read apps and SQL Managed Instances, its full length including any part before the lookback (0 when none had one); null when none was read
+- `longest_degraded_hours` — Hours of the longest Degraded period across read apps and SQL Managed Instances (0 when none had one); null when none was read
+- `longest_unknown_hours` — Hours of the longest Unknown period across read apps and SQL Managed Instances (0 when none had one); null when none was read
+- `lowest_availability_percentage` — Percentage of the lowest availability across read apps and SQL Managed Instances, where a resource's availability = (known hours − outage hours in the lookback) / known hours × 100, to three decimals; known hours are the observed hours less the Unknown hours, and observed hours run from the later of the lookback start and the resource's oldest status; when a resource's known hours is 0 it has no availability and is left out; null when no resource has one
 - `service_impacting_events` — Number of distinct Azure incidents Resource Health linked to the periods in the lookback
 
 **Is recovery within the recovery time objective?**
 - `recovery_time_objective_hours` — Hours of the configured recovery time objective; null if none is set
-- `resources_meeting_recovery_time_objective` — Number of resources whose longest outage is within the objective
-- `resources_missing_recovery_time_objective` — Number of resources with an outage longer than the objective, ongoing ones included
-- `resources_recovery_time_objective_unknown` — Number of resources whose availability was not read; null if no objective is set
-- `all_resources_meet_recovery_time_objective` — True if every resource meets the objective; false if any misses it; null if any is unknown, a list failed, there are no resources or no objective is set
+- `resources_meeting_recovery_time_objective` — Number of apps and SQL Managed Instances whose longest outage is within the objective and with no Unknown period longer than it
+- `resources_missing_recovery_time_objective` — Number of apps and SQL Managed Instances with an outage longer than the objective, ongoing ones included
+- `resources_recovery_time_objective_unknown` — Number of apps and SQL Managed Instances whose outages are not known well enough to judge: availability not read, no known hours, or an Unknown period longer than the objective that could hide a miss; null if no objective is set
+- `all_resources_meet_recovery_time_objective` — True if every app and SQL Managed Instance meets the objective; false if any misses it; null if any is unknown, the app or instance list failed, there are none, or no objective is set
+
+**Are Front Door's origins answering health probes?**
+- `front_door_profiles_failing_origin_probes_now` — Number of read Front Door profiles whose current Resource Health state is Unavailable or Degraded: Resource Health judges a profile by whether its origins answer health probes, so this means one or more origins are failing them, not that Front Door stopped serving
+- `front_door_origin_probe_failure_windows` — Number of Unavailable or Degraded periods in the lookback across read Front Door profiles; none counts as an outage, and per-origin health and traffic are in azure_front_door_origins
+- `front_door_longest_origin_probe_failure_hours` — Hours of the longest Unavailable or Degraded period across read Front Door profiles (0 when none had one); null when none was read
 
 **Do apps have a health check, and is it passing?**
+- `apps_stopped` — Number of apps whose state is Stopped; their health-check results get no healthy or unhealthy verdict
 - `apps_with_health_check` — Number of apps with a health check path set
 - `apps_without_health_check` — Number of apps with no health check path
 - `apps_health_check_unknown` — Number of apps whose configuration read failed
 - `all_apps_have_health_check` — True if every app has a health check path; false if any has none; null if any is unknown, the app list failed or there are no apps
-- `apps_health_check_healthy_last_hour` — Number of apps whose newest hourly result in the last 3 hours is fully healthy: the hour's lowest HealthCheckStatus is 100
-- `apps_health_check_unhealthy_last_hour` — Number of apps whose newest hourly result in the last 3 hours is below 100
-- `apps_health_check_without_recent_data` — Number of apps with a health check path, or an unknown one, and no result in the last 3 hours
-- `apps_with_unhealthy_hours` — Number of apps with at least one hour below 100 in the lookback
+- `apps_health_check_healthy_last_hour` — Number of running apps whose newest hourly result in the last 3 hours is fully healthy: the hour's lowest HealthCheckStatus is 100
+- `apps_health_check_unhealthy_last_hour` — Number of running apps whose newest hourly result in the last 3 hours is below 100
+- `apps_health_check_without_recent_data` — Number of running apps with a health check path, or an unknown one, and no result in the last 3 hours
+- `apps_with_unhealthy_hours` — Number of running apps with at least one hour below 100 in the lookback
 - `health_check_metric_unread` — Number of apps whose health-check metric read failed
 
 **Which resources are out of scope?**
