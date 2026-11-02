@@ -144,7 +144,7 @@ def test_every_status_and_the_counts_a_validator_reads(tmp_path, monkeypatch):
         "changes_by_application_by_caller": {APP: 1},
         "changes_excluded_by_caller": {SERVICE: 1},
         "record_types": ["hotfix", "task"], "record_types_not_selected": [], "approval_types": ["hotfix", "task"],
-        "record_work_items": 3, "work_items_cover_changes": True,
+        "approval_types_not_record_types": [], "record_work_items": 3, "work_items_cover_changes": True,
     }
 
 
@@ -398,34 +398,78 @@ def test_an_approval_after_the_change_is_counted_but_still_approved(tmp_path, mo
 
 
 def test_only_approval_types_need_an_approval(tmp_path, monkeypatch):
-    changes = [change("fix", "2026-10-02T12:00:00Z"), change("major", "2026-10-12T12:00:00Z", by=BOB),
+    changes = [change("bug", "2026-10-02T12:00:00Z"), change("cr", "2026-10-12T12:00:00Z", by=BOB),
                change("both", "2026-10-21T12:00:00Z")]
     items = [
-        item(1, type_="Bug Fix"),
-        item(2, assigned=BOB, type_="Major Change", created="2026-10-10T09:00:00Z", closed="2026-10-14T09:00:00Z"),
-        item(3, type_="Bug Fix", created="2026-10-20T09:00:00Z", closed="2026-10-22T09:00:00Z"),
-        item(4, type_="Major Change", created="2026-10-20T09:00:00Z", closed="2026-10-22T09:00:00Z",
+        item(1, type_="Bug"),
+        item(2, assigned=BOB, type_="Change Request", created="2026-10-10T09:00:00Z", closed="2026-10-14T09:00:00Z"),
+        item(3, type_="Bug", created="2026-10-20T09:00:00Z", closed="2026-10-22T09:00:00Z"),
+        item(4, type_="Change Request", created="2026-10-20T09:00:00Z", closed="2026-10-22T09:00:00Z",
              approval=approved(at="2026-10-20T10:00:00Z")),
     ]
-    results, summary = compare(tmp_path, monkeypatch, changes, items, types=("Bug Fix", "Major Change"),
-                               env={"CHANGE_RECORD_APPROVAL_TYPES": "major change"})
-    assert (results["fix"]["approved"], results["fix"]["approval_required"]) == (True, False)
-    assert (results["major"]["approved"], results["major"]["approval_required"]) == (False, True)
-    # An unapproved Bug Fix next to an approved Major Change: approved, as the Bug Fix needs no approval.
+    results, summary = compare(tmp_path, monkeypatch, changes, items, types=("Bug", "Change Request"),
+                               env={"CHANGE_RECORD_APPROVAL_TYPES": "change request"})
+    assert (results["bug"]["approved"], results["bug"]["approval_required"]) == (True, False)
+    assert results["bug"]["approved_after_change"] is None  # nothing was approved
+    assert (results["cr"]["approved"], results["cr"]["approval_required"]) == (False, True)
+    # An unapproved Bug next to an approved Change Request: approved, as the Bug needs no approval.
     assert (results["both"]["approved"], results["both"]["approval_required"]) == (True, True)
-    assert summary["approval_types"] == ["major change"]
+    assert summary["approval_types"] == ["change request"] and summary["approval_types_not_record_types"] == []
     assert summary["changes_recorded_without_approval"] == 1
     assert summary["changes_recorded_approval_not_required"] == 1
     assert summary["changes_without_approved_record"] == 1
+    assert summary["changes_without_approved_record_by_origin"] == {"direct": 1, "manual_deployment": 0}
 
 
-@pytest.mark.parametrize(("approval_types", "expect"), [("none", []), ("Bug Fix", ["bug fix"])])
-def test_a_type_that_needs_no_approval_is_never_approved_late(tmp_path, monkeypatch, approval_types, expect):
-    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T09:00:00Z")],
-                               [item(1, type_="Task", approval=approved(at="2026-10-02T10:00:00Z"))],
-                               types=("Task", "Bug Fix"), env={"CHANGE_RECORD_APPROVAL_TYPES": approval_types})
+def test_an_exempt_record_does_not_approve_an_unapproved_required_one(tmp_path, monkeypatch):
+    items = [item(1, type_="Bug"), item(2, type_="Change Request")]
+    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], items,
+                               types=("Bug", "Change Request"), env={"CHANGE_RECORD_APPROVAL_TYPES": "Change Request"})
+    assert results["c"]["status"] == "ambiguous"
+    assert (results["c"]["approved"], results["c"]["approval_required"]) == (False, True)
+    assert summary["changes_recorded_without_approval"] == 1
+    assert summary["changes_recorded_approval_not_required"] == 0
+    assert summary["changes_without_approved_record_by_origin"] == {"direct": 1, "manual_deployment": 0}
+
+
+@pytest.mark.parametrize(("type_", "approved_"), [("Bug", True), ("Change Request", False)])
+def test_an_unread_approval_blocks_only_a_type_that_needs_one(tmp_path, monkeypatch, type_, approved_):
+    results, _ = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")],
+                         [item(1, type_=type_, approval=None, approval_read=False)],
+                         types=("Bug", "Change Request"), env={"CHANGE_RECORD_APPROVAL_TYPES": "Change Request"})
+    assert results["c"]["work_items"][0]["approved"] is None and results["c"]["approved"] is approved_
+
+
+def test_an_emergency_type_that_needs_no_approval(tmp_path, monkeypatch):
+    # Filed 48 hours after the change and never approved: still the change's record, and approved by type.
+    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")],
+                               [item(1, type_="Hotfix", created="2026-10-04T12:00:00Z", closed="2026-10-05T12:00:00Z")],
+                               types=("Hotfix", "Change Request"),
+                               env={"CHANGE_RECORD_APPROVAL_TYPES": "Change Request"})
+    assert results["c"]["status"] == "matched"
+    assert (results["c"]["approved"], results["c"]["approval_required"]) == (True, False)
+    assert summary["changes_recorded_approval_not_required"] == 1 and summary["changes_without_approved_record"] == 0
+
+
+def test_a_late_approval_on_a_type_that_needs_none_is_not_counted_late(tmp_path, monkeypatch):
+    items = [item(1, type_="Bug", approval=approved(at="2026-10-02T14:00:00Z")),
+             item(2, type_="Change Request", approval=approved(at="2026-10-02T08:00:00Z"))]
+    results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], items,
+                               types=("Bug", "Change Request"), env={"CHANGE_RECORD_APPROVAL_TYPES": "Change Request"})
     assert results["c"]["approved"] is True and results["c"]["approved_after_change"] is False
-    assert summary["approval_types"] == expect and summary["changes_recorded_approval_not_required"] == 1
+    assert summary["changes_approved_after_change"] == 0
+
+
+@pytest.mark.parametrize(("setting", "needed", "unknown"), [
+    ("Change Requst", [], ["change requst"]),                       # misspelt: nothing needs an approval
+    ("Change Request, Hotfx", ["change request"], ["hotfx"]),       # one of two misspelt
+    ("none", [], ["none"]),                                         # not a way to switch approval off
+])
+def test_an_approval_type_that_is_not_a_record_type_is_listed(tmp_path, monkeypatch, setting, needed, unknown):
+    _, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")],
+                         [item(1, type_="Change Request")], types=("Change Request", "Hotfix"),
+                         env={"CHANGE_RECORD_APPROVAL_TYPES": setting})
+    assert summary["approval_types"] == needed and summary["approval_types_not_record_types"] == unknown
 
 
 def test_nothing_to_check_reads_zero_not_null(tmp_path, monkeypatch):

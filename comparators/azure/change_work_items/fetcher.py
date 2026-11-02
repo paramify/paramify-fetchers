@@ -35,7 +35,8 @@ SUMMARY_KEYS = (
     "changes_without_approved_record", "changes_approved_after_change", "percent_recorded",
     "changes_needing_record_by_origin", "changes_without_record_by_origin", "changes_without_approved_record_by_origin",
     "changes_without_record_by_caller", "changes_by_application_by_caller", "changes_excluded_by_caller",
-    "record_types", "record_types_not_selected", "approval_types", "record_work_items", "work_items_cover_changes",
+    "record_types", "record_types_not_selected", "approval_types", "approval_types_not_record_types",
+    "record_work_items", "work_items_cover_changes",
 )
 
 
@@ -222,7 +223,8 @@ def check_with(cfg):
                 "client_type": c.get("client_type"), "origin": c.get("origin"), "deployment_id": c.get("deployment_id"),
                 "caller": caller, "caller_type": caller_type, "caller_from": source,
                 "status": status, "work_items": found, "approved": approved, "approval_required": required,
-                "approved_after_change": approved_after(found, at, cfg["emergency_types"]) if approved else None,
+                "approved_after_change": approved_after(found, at, cfg["emergency_types"]) if approved and required
+                else None,
             })
         results.sort(key=lambda r: (str(r["timestamp"]), str(r["change_id"])))
         read = {
@@ -232,9 +234,13 @@ def check_with(cfg):
             else None,
             "origins": sorted(cfg["origins"]),
         }
-        approval_types = sorted(t for t in types if not cfg["approval_types"] or t in cfg["approval_types"])
-        return results, {**read, **summarize(results, items, types, unselected, approval_types, cover_from,
-                                             cfg["origins"])}
+        approval = {
+            "approval_types": sorted(t for t in types if not cfg["approval_types"] or t in cfg["approval_types"]),
+            # A misspelt name would leave the type meant needing no approval.
+            "approval_types_not_record_types": sorted(cfg["approval_types"] - set(types)),
+        }
+        return results, {**read, **summarize(results, items, types, unselected, cover_from, cfg["origins"]),
+                         **approval}
     return check
 
 
@@ -246,7 +252,7 @@ def approved_record(r):
     return r["status"] in RECORDED and bool(r["approved"])
 
 
-def summarize(results, items, types, unselected, approval_types, cover_from, origins):
+def summarize(results, items, types, unselected, cover_from, origins):
     count = {s: sum(1 for r in results if r["status"] == s) for s in STATUSES}
     needing = [r for r in results if needs_record(r)]
     recorded = count["matched"] + count["ambiguous"]
@@ -287,7 +293,6 @@ def summarize(results, items, types, unselected, approval_types, cover_from, ori
         "record_types": types,
         # Selected by tag at most, so the work items fetcher may have left some out.
         "record_types_not_selected": unselected,
-        "approval_types": approval_types,
         "record_work_items": len(items),
         "work_items_cover_changes": bool(cover_from) and (
             earliest is None or all(start is not None and start <= earliest for start in cover_from)),

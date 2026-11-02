@@ -12,15 +12,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- **`azure_change_work_items` 0.2.0: approval only for chosen record types.**
-  `approval_types` (`CHANGE_RECORD_APPROVAL_TYPES`) names the record types that
-  need an approval. A change recorded only by items of other record types counts
-  as recorded and approved, and is counted in the new
-  `changes_recorded_approval_not_required`; the summary's `approval_types` lists
-  the types that need one. Left empty, every record type needs an approval, as
-  before. Each change and each of its work items also carries
-  `approval_required`.
-
 - **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
   matches each Azure change made outside a pipeline in `azure_change_provenance`
   (by default, direct edits and ARM deployments a person ran) to the
@@ -38,10 +29,16 @@ schemas and the `paramify` CLI — not the internal code.
   it was created or last changed. The summary counts
   each status, overall and by origin, the changes without a record, recorded
   without approval and without an approved record, the approved changes whose
-  non-emergency record was approved after the change, the changes read and the
+  non-emergency record that needs an approval was approved after the change, the
+  changes read and the
   shortest change window read (`change_lookback_days`), so a narrow window
   can't pass as no changes, and `work_items_cover_changes`, false when the work
-  items window starts too late for the earliest change.
+  items window starts too late for the earliest change. Only the record types in
+  `CHANGE_RECORD_APPROVAL_TYPES` (by default, every one) need an approval: a
+  change recorded only by items of other types counts as approved and is counted
+  in `changes_recorded_approval_not_required`, each change and work item says
+  whether it needs one (`approval_required`), and
+  `approval_types_not_record_types` lists names that match no record type.
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
