@@ -50,6 +50,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Security posture, policy and backup | [azure_policy_compliance](#azure_policy_compliance) | `EVD-AZURE-POLICY-COMPLIANCE` |
 | Security posture, policy and backup | [azure_residual_resources](#azure_residual_resources) | `EVD-AZURE-RESIDUAL-RESOURCES` |
 | Security posture, policy and backup | [azure_resource_inventory](#azure_resource_inventory) | `EVD-AZURE-RESOURCE-INVENTORY` |
+| Security posture, policy and backup | [azure_service_availability](#azure_service_availability) | `EVD-AZURE-SERVICE-AVAILABILITY` |
 | Security posture, policy and backup | [azure_vm_hardening_status](#azure_vm_hardening_status) | `EVD-AZURE-VM-HARDENING` |
 | Network and edge | [azure_api_management_configuration](#azure_api_management_configuration) | `EVD-AZURE-API-MANAGEMENT-CONFIG` |
 | Network and edge | [azure_app_gateway_backend_tls](#azure_app_gateway_backend_tls) | `EVD-AZURE-APPGW-BACKEND-TLS` |
@@ -1890,38 +1891,49 @@ Summary fields:
 - `closed_close_time_not_retained` — Number of closed incidents whose close record is older than the `SecurityIncident` table's retention, so the close time is gone; null if any workspace's incidents or close times couldn't be read
 
 ### azure_sentinel_playbooks
-Short Description: Shows which Sentinel playbooks are live and whether they contain accounts, isolate devices, update incidents or notify people.
+Short Description: Shows which Logic Apps Sentinel runs as playbooks, what they do to accounts, devices and people, whether an active automation rule runs them, and how their recent runs ended.
 
 Script: fetchers/azure/sentinel_playbooks/fetcher.py
 
-Access: Reader (or Logic App Reader) and Microsoft Sentinel Reader.
+Access: Reader on the subscription (or Logic App Reader and Microsoft Sentinel Reader, plus Logic Apps Standard Reader for Standard workflows). Optional: Reader on other subscriptions whose Logic Apps an automation rule runs; without it, those playbooks are listed as unresolved and the run succeeds.
 
 Commands Executed:
 - `GET /subscriptions` — picks a subscription when none is set
-- `GET Microsoft.OperationalInsights/workspaces` and `onboardingStates` (per workspace) — finds the Sentinel workspaces
-- `GET Microsoft.SecurityInsights/automationRules` — which playbooks the rules run
-- `GET Microsoft.Logic/workflows` — the Logic Apps
-- `GET {workflow id}` (when a definition is missing) — the playbook's definition
+- `GET Microsoft.OperationalInsights/workspaces` and `GET Microsoft.SecurityInsights/onboardingStates` (per workspace) — the workspaces Sentinel is on
+- `GET Microsoft.SecurityInsights/automationRules` (per Sentinel workspace) — which automation rules run which Logic Apps, and whether each rule is active
+- `GET Microsoft.Logic/workflows` — every Consumption Logic App in the subscription with its definition
+- `GET {Logic App id}` (per Logic App an automation rule runs that the list didn't return, or listed without a definition) — its definition; a Standard workflow is read at `Microsoft.Web/sites/{app}/workflows` and its definition from workflow.json
+- `GET Microsoft.Logic/workflows/{name}/runs` (per playbook) — its runs in the lookback, newest first; a Standard workflow's runs come from `Microsoft.Web/sites/{app}/hostruntime/runtime/webhooks/workflow/api/management/workflows/{name}/runs`
 
-Output: `azure_sentinel_playbooks_<subscription>.json` — each playbook with its triggers, connectors and capabilities, who it emails, the automation rules that run it, and whether it's live.
+Output: `azure_sentinel_playbooks_<subscription>.json` — each playbook with its state, triggers, connectors, what it does to accounts, devices and incidents, whom it emails, the automation rules that run it, and its recent runs.
 
 Summary fields:
 
-**Which playbooks exist, and which are live?**
-- `logic_apps_scanned` — Number of Logic Apps in the subscription
-- `playbooks` — Number of Logic Apps that are Sentinel playbooks (triggered by Sentinel or run by an automation rule)
+**What was checked?**
+- `logic_apps_scanned` — Number of Consumption Logic Apps listed in the subscription
+- `playbooks` — Number of playbooks: Logic Apps triggered by the Sentinel connector (on an incident, alert or entity), plus any Logic App an automation rule runs, Standard (single-tenant) workflows included
+- `standard_playbooks` — Number of playbooks that are Standard workflows; these are found only when an automation rule runs them
+- `playbooks_without_definition` — List of the resource ids of playbooks whose definition wasn't read; the triggers, connectors and capabilities of a playbook listed here read null
+- `automation_rule_references_unresolved` — List of the resource ids (lowercased) of Logic Apps an automation rule runs that couldn't be read: one in a subscription or resource group the credential can't read (401, 403, 404 or SubscriptionNotFound, each also given a note), or one since deleted; any other error fails the run
+
+**Which playbooks are live?**
 - `enabled_playbooks` — Number of playbooks that are enabled
-- `run_by_active_automation_rule` — Number of live playbooks: enabled and run by an active automation rule
-- `standard_playbooks` — Number of playbooks on the Standard (single-tenant) Logic Apps plan
+- `run_by_active_automation_rule` — Number of live playbooks: enabled, and run by at least one active automation rule (enabled and not expired) in a Sentinel workspace of the subscription
+- `live_playbooks_without_definition` — Number of live playbooks whose definition wasn't read, so whether they contain accounts or notify anyone is unknown
 
-**What do the live playbooks do?**
-- `live_account_containment_playbooks` — Number of live playbooks that lock down a user account
-- `live_notifying_playbooks` — Number of live playbooks that send email or Teams messages
-- `notification_recipients` — List of fixed email addresses that live playbooks send to
+**Do live playbooks contain accounts and notify people?**
+- `live_account_containment_playbooks` — Number of live playbooks with an action that disables a user (accountEnabled false), revokes sign-in sessions, confirms a user compromised or dismisses a risky user, matched on each action's inputs, nested branches included; null when `live_playbooks_without_definition` is above 0
+- `live_notifying_playbooks` — Number of live playbooks that send email (Office 365, Outlook, SendGrid, SMTP or Gmail) or a Teams message; null when `live_playbooks_without_definition` is above 0
+- `notification_recipients` — List of the static email addresses live playbooks send to; addresses built from the incident when the playbook runs aren't included; null when `live_playbooks_without_definition` is above 0
 
-**Could anything not be read?**
-- `playbooks_without_definition` — List of playbooks whose definition couldn't be read
-- `automation_rule_references_unresolved` — List of playbooks that automation rules point to but that couldn't be found
+**Do live playbooks run, and do their runs succeed?**
+- `run_lookback_days` — Days of run history read for each playbook (`SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS`, default 90)
+- `playbooks_run_history_unread` — List of the resource ids of playbooks whose runs couldn't be read (401, 403 or 404, each also given a note; any other error fails the run); their run fields read null
+- `live_playbooks_run_history_unread` — Number of live playbooks whose runs couldn't be read, so how their runs ended is unknown
+- `live_playbooks_last_run_succeeded` — Number of live playbooks whose newest run in the lookback succeeded; null when `live_playbooks_run_history_unread` is above 0
+- `live_playbooks_last_run_failed` — Number of live playbooks whose newest run in the lookback failed, timed out, was aborted or faulted; null when `live_playbooks_run_history_unread` is above 0
+- `live_playbooks_without_runs` — Number of live playbooks with no run in the lookback; null when `live_playbooks_run_history_unread` is above 0
+- `live_playbook_failed_runs` — Number of runs of live playbooks in the lookback that failed, timed out, were aborted or faulted; null when `live_playbooks_run_history_unread` is above 0
 
 
 ## Security posture, policy and backup
@@ -2569,6 +2581,104 @@ Summary fields:
 
 **What does nothing cover?**
 - `resources_covered_by_neither_by_type` — Number of resources of each type that have neither a Defender assessment nor a Policy state. It counts every such resource, so it holds both the missing resources listed above and the types neither service covers on any resource; null if either query failed
+
+
+### azure_service_availability
+Short Description: Shows when each App Service app and SQL Managed Instance was unavailable and for how long, why, Front Door origin probe failures, and each app's health-check results.
+
+Script: fetchers/azure/service_availability/fetcher.py (uses the shared helper fetchers/azure/_shared/resource_exclusions.py)
+
+Access: Reader on the subscription.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET Microsoft.Web/sites`, `GET Microsoft.Cdn/profiles` and `GET Microsoft.Sql/managedInstances` — the App Service apps (web and function apps), Front Door Standard and Premium profiles and SQL Managed Instances in the subscription
+- `GET providers/Microsoft.ResourceHealth` — whether Resource Health is registered on the subscription
+- `GET {resource}/providers/Microsoft.ResourceHealth/availabilityStatuses` (per resource) — the resource's availability history: each change of state, its cause, and the Azure incident Resource Health links to it
+- `GET {app}/config/web` (per app) — the app's health check path
+- `GET {app}/providers/Microsoft.Insights/metrics` for HealthCheckStatus (per app with a health check path) — hourly health-check results over the lookback
+
+Output: `azure_service_availability_<subscription>.json` — each resource with its availability now and every period it was unavailable, degraded or unknown in the lookback with its cause, linked Azure incidents and whether it counts as an outage, Front Door profiles' periods as origin probe failures (Resource Health judges a profile by its origins' health probes), and for apps the health check results, plus a rollup per region and pointers to the fetchers that hold Front Door origin health (azure_front_door_origins) and Service Health events (azure_service_health_advisories).
+
+Summary fields:
+
+**What was checked?**
+- `lookback_days` — Number of days of history read; Resource Health keeps about 30, and each status lasts until the next one, the newest until the run
+- `resource_health_registration` — Whether Resource Health is registered on the subscription: registered, not_registered (nothing can be read, and the run fails) or unknown (the registration read failed; the per-resource reads still ran)
+- `resources` — Number of in-scope resources checked; null if any of the three lists failed
+- `app_services` — Number of in-scope App Service apps; null if the app list failed
+- `web_apps` — Number of in-scope web apps; null if the app list failed
+- `function_apps` — Number of in-scope function apps; null if the app list failed
+- `front_door_profiles` — Number of in-scope Front Door Standard and Premium profiles; null if the profile list failed
+- `sql_managed_instances` — Number of in-scope SQL Managed Instances; null if the instance list failed
+- `regions` — List of the regions the in-scope resources are in (global for Front Door)
+
+**Was each resource's availability read?**
+- `resource_health_read` — Number of resources whose Resource Health history was read
+- `resource_health_unknown` — Number of resources whose availability is unknown: the read failed, was refused, returned no history, or Resource Health does not cover the resource type; null if any of the three lists failed
+- `resource_health_by_status` — Number of resources for each read status:
+  - read (history read)
+  - no_data (Resource Health returned no status)
+  - not_supported (Resource Health does not cover the resource type)
+  - not_found (the resource or its history was not found)
+  - not_authorized (the read was refused; fails the run)
+  - not_registered (Resource Health is not registered; fails the run)
+  - error (any other failure; fails the run)
+- `windows_not_listed` — Number of periods counted but not listed: each resource lists only its 100 newest periods, and every count includes the periods left off the list; null if any of the three lists failed
+
+**Is each app and SQL Managed Instance available now?**
+- `resources_available_now` — Number of apps and SQL Managed Instances whose current state is Available or Degraded, as Resource Health reports it, so a stopped app can count as available; Front Door profiles are counted under their own question, because Resource Health judges them by their origins; null if the app or SQL Managed Instance list failed
+- `resources_unavailable_now` — Number of apps and SQL Managed Instances whose current state is Unavailable; null if the app or SQL Managed Instance list failed
+- `resources_degraded_now` — Number of apps and SQL Managed Instances whose current state is Degraded; null if the app or SQL Managed Instance list failed
+- `resources_availability_unknown_now` — Number of apps and SQL Managed Instances whose current state is Unknown or was not read; null if the app or SQL Managed Instance list failed
+
+**Were there outages, and how long did recovery take?**
+- `resources_with_outage_in_window` — Number of read apps and SQL Managed Instances with known hours that had at least one outage in the lookback; an outage is a continuous Unavailable period the customer did not start, and Degraded (still serving, with reduced performance) and Unknown (Resource Health had no information) are not outages; null if the app or SQL Managed Instance list failed or none has known hours
+- `outages_in_window` — Number of outages in the lookback across read apps and SQL Managed Instances with known hours; null if the app or SQL Managed Instance list failed or none has known hours
+- `ongoing_outages` — Number of read apps and SQL Managed Instances with known hours that are Unavailable now, in an outage; null if the app or SQL Managed Instance list failed or none has known hours
+- `customer_initiated_unavailable_windows` — Number of Unavailable periods the customer started (a stop, restart or scale, where Resource Health names the customer or user as the cause), which are not outages and count as available time; null if the app or SQL Managed Instance list failed or none was read
+- `longest_outage_hours` — Hours of the longest outage across read apps and SQL Managed Instances with known hours, its full length back to the oldest status Resource Health keeps (about 30 days), including any part before the lookback (0 when none had one); null if the app or SQL Managed Instance list failed or none has known hours
+- `longest_degraded_hours` — Hours of the longest Degraded period across read apps and SQL Managed Instances, its full length back to the oldest status Resource Health keeps (about 30 days) (0 when none had one); null if the app or SQL Managed Instance list failed or none was read
+- `longest_unknown_hours` — Hours of the longest Unknown period across read apps and SQL Managed Instances, its full length back to the oldest status Resource Health keeps (about 30 days) (0 when none had one); null if the app or SQL Managed Instance list failed or none was read
+- `lowest_availability_percentage` — Percentage of the lowest availability across read apps and SQL Managed Instances, where a resource's availability = (known hours − outage hours in the lookback) / known hours × 100, to three decimals; known hours are the observed hours less the Unknown hours, and observed hours run from the later of the lookback start and the resource's oldest status; Unavailable time the customer started counts as available, and a stopped app counts as Resource Health reports it, which can be Available and 100; when a resource's known hours is 0 it has no availability and is left out; null if the app or SQL Managed Instance list failed or no resource has one
+- `resources_without_availability` — Number of read apps and SQL Managed Instances left out of lowest_availability_percentage and the outage counts because their known hours is 0, such as one whose only status is Unknown now; null if the app or SQL Managed Instance list failed
+- `resources_with_unknown_hours` — Number of read apps and SQL Managed Instances with known hours and some Unknown hours in the lookback, whose availability covers only their known hours; null if the app or SQL Managed Instance list failed
+- `resources_with_partial_history` — Number of read apps and SQL Managed Instances whose oldest status is after the lookback start, so their availability covers only part of the lookback (Resource Health has no earlier status for them); a resource can be in this count and in resources_with_unknown_hours or resources_without_availability; null if the app or SQL Managed Instance list failed
+- `service_impacting_events` — Number of distinct Azure incidents Resource Health linked to the periods in the lookback; null if any of the three lists failed
+
+**Is recovery within the recovery time objective?**
+- `recovery_time_objective_hours` — Hours of the configured recovery time objective; null if none is set
+- `resources_meeting_recovery_time_objective` — Number of apps and SQL Managed Instances whose longest outage is within the objective, with no Unknown period longer than it and no outage that with the Unknown periods touching it runs longer than it; null if no objective is set or the app or SQL Managed Instance list failed
+- `resources_missing_recovery_time_objective` — Number of apps and SQL Managed Instances with an outage longer than the objective, ongoing ones included; null if no objective is set or the app or SQL Managed Instance list failed
+- `resources_recovery_time_objective_unknown` — Number of apps and SQL Managed Instances whose outages are not known well enough to judge: availability not read, no known hours, an Unknown period longer than the objective, or an outage that with the Unknown periods touching it runs longer than the objective, any of which could hide a miss; null if no objective is set or the app or SQL Managed Instance list failed
+- `all_resources_meet_recovery_time_objective` — True if every app and SQL Managed Instance meets the objective; false if any misses it; null if any is unknown, the app or instance list failed, there are none, or no objective is set
+
+**Are Front Door's origins answering health probes?**
+- `front_door_profiles_failing_origin_probes_now` — Number of read Front Door profiles whose current Resource Health state is Unavailable or Degraded: Resource Health judges a profile by whether its origins answer health probes, so this means one or more origins are failing them, not that Front Door stopped serving; null if the profile list failed
+- `front_door_origin_probe_failure_windows` — Number of Unavailable or Degraded periods in the lookback across read Front Door profiles; none counts as an outage, and per-origin health and traffic are in azure_front_door_origins; null if the profile list failed or none was read
+- `front_door_longest_origin_probe_failure_hours` — Hours of the longest Unavailable or Degraded period across read Front Door profiles, its full length back to the oldest status Resource Health keeps (about 30 days) (0 when none had one); null if the profile list failed or none was read
+
+**Do apps have a health check, and is it passing?**
+- `apps_stopped` — Number of apps whose state is Stopped; their health-check results get no healthy or unhealthy verdict, while their availability counts as Resource Health reports it; null if the app list failed
+- `apps_with_health_check` — Number of apps with a health check path set; null if the app list failed
+- `apps_without_health_check` — Number of apps with no health check path; null if the app list failed
+- `apps_health_check_unknown` — Number of apps whose configuration read failed; null if the app list failed
+- `all_apps_have_health_check` — True if every app has a health check path; false if any has none; null if any is unknown, the app list failed or there are no apps
+- `apps_health_check_healthy_last_hour` — Number of running apps whose newest hourly result in the last 3 hours is fully healthy: the hour's lowest HealthCheckStatus is 100; null if the app list failed
+- `apps_health_check_unhealthy_last_hour` — Number of running apps whose newest hourly result in the last 3 hours is below 100; null if the app list failed
+- `apps_health_check_without_recent_data` — Number of running apps with a health check path, or an unknown one, and no result in the last 3 hours; null if the app list failed
+- `apps_with_unhealthy_hours` — Number of running apps with at least one hour below 100 in the lookback; null if the app list failed
+- `health_check_metric_unread` — Number of apps whose health-check metric read failed; null if the app list failed
+
+**Which resources are out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource exclusion patterns
+- `resource_exclusion_patterns_unmatched` — List of the patterns that matched nothing
+- `excluded_apps` — Number of apps the patterns took out; null if the app list failed
+- `excluded_front_door_profiles` — Number of Front Door profiles the patterns took out; null if the profile list failed
+- `excluded_sql_managed_instances` — Number of SQL Managed Instances the patterns took out; null if the instance list failed
+- `in_scope_apps` — Number of apps left in scope; null if the app list failed
+- `in_scope_front_door_profiles` — Number of Front Door profiles left in scope; null if the profile list failed
+- `in_scope_sql_managed_instances` — Number of SQL Managed Instances left in scope; null if the instance list failed
 
 
 ### azure_vm_hardening_status
