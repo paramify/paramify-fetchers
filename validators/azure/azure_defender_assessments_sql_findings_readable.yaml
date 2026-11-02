@@ -5,18 +5,21 @@ role: integrity
 statement: >
   At least one Defender for Cloud recommendation on an Azure SQL database (Managed Instance or SQL
   server) was read with a resource_id naming the database, a severity of High, Medium or Low, a
-  recognised status_code and a first_evaluation_date. The run had no partial failure, and no
-  Unhealthy record's severity is unknown or taken from the catalogue (which can rate a check lower).
-  So the SQL database findings were read in a shape azure_defender_assessments_no_open_high_sql_findings
-  can count, and zero open High findings means none rather than unreadable. Supports KSI-PIY-RVD:
-  each SQL vulnerability finding carries its id, the database it applies to, severity, first-evaluated
-  date and status. Fails when the evidence holds no SQL database findings at all, so a subscription
-  with no Azure SQL databases, or with SQL vulnerability assessment off, fails here by design. Does
-  NOT prove any posture.
+  recognised status_code and a first_evaluation_date. The run had no partial failure, and no Unhealthy
+  record anywhere has a severity that is unknown or taken from the catalogue (which can rate a check
+  lower). So the records are in the shape azure_defender_assessments_no_open_high_sql_resources counts:
+  a renamed resource_id, severity or status_code fails here rather than reading as zero open findings.
+  Supports KSI-PIY-RVD: SQL database findings are recorded with their id, database, severity, status
+  and first-evaluated date (checked on at least one record, not on every one), and every Unhealthy
+  finding has a known, assessment-sourced severity. Fails when the evidence holds no SQL database
+  findings at all, so a subscription with no Azure SQL databases, or with SQL vulnerability
+  assessment off everywhere, fails here by design. Does NOT prove any posture, that every database
+  record carries every field, or that every SQL instance is scanned (the posture check fails an
+  unscanned instance through Defender's own recommendation on it).
 
 # Anchored at the document start so it matches at most once. The nested group finds one
 # database record carrying all four fields, each lookahead fenced to that one object.
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false\b)(?=[\s\S]*?"unhealthy_severity_from_catalogue_count":\s*0\b)(?=[\s\S]*?"unhealthy_severity_unknown_count":\s*0\b)(?=[\s\S]*?\{(?=[^{}]*"first_evaluation_date":\s*"\d{4}-\d\d-\d\dT)(?=[^{}]*"resource_id":\s*"[^"]*/[pP]roviders/[mM]icrosoft\.[sS]ql/(?:[mM]anaged[iI]nstances|[sS]ervers)/[^"/]+/[dD]atabases/[^"/]+")(?=[^{}]*"severity":\s*"(?:[hH]igh|[mM]edium|[lL]ow)")(?=[^{}]*"status_code":\s*"(?:[hH]ealthy|[uU]nhealthy|[nN]ot[aA]pplicable)"))'
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false\b)(?=[\s\S]*?"unhealthy_severity_from_catalogue_count":\s*0\b)(?=[\s\S]*?"unhealthy_severity_unknown_count":\s*0\b)(?=[\s\S]*?\{(?=(?:[^{}"]|"(?:[^"\\]|\\.)*")*?"first_evaluation_date":\s*"\d{4}-\d\d-\d\dT)(?=(?:[^{}"]|"(?:[^"\\]|\\.)*")*?"resource_id":\s*"[^"]*/[pP][rR][oO][vV][iI][dD][eE][rR][sS]/[mM][iI][cC][rR][oO][sS][oO][fF][tT]\.[sS][qQ][lL]/(?:[mM][aA][nN][aA][gG][eE][dD][iI][nN][sS][tT][aA][nN][cC][eE][sS]|[sS][eE][rR][vV][eE][rR][sS])/[^"/]+/[dD][aA][tT][aA][bB][aA][sS][eE][sS]/[^"/]+")(?=(?:[^{}"]|"(?:[^"\\]|\\.)*")*?"severity":\s*"(?:[hH]igh|[mM]edium|[lL]ow)")(?=(?:[^{}"]|"(?:[^"\\]|\\.)*")*?"status_code":\s*"(?:[hH]ealthy|[uU]nhealthy|[nN]ot[aA]pplicable)"))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

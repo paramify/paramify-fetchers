@@ -17,9 +17,12 @@ cases:
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 5", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example/providers/Microsoft.Security/assessments/guid-5",
     "implementation_effort": "Low", "name": "guid-5", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example",
+    "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Healthy", "status_description": null,
+    "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 9", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example/providers/Microsoft.Security/assessments/guid-9",
+    "implementation_effort": "Low", "name": "guid-9", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example",
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}], "excluded": [], "provider_registration_status": "registered"}, "summary": {"provider_registration_status": "registered", "sla_days_by_severity": {"High":
-    30, "Low": 180, "Medium": 90}, "total_assessments": 5, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": 0, "unhealthy_past_sla_by_severity":
+    30, "Low": 180, "Medium": 90}, "total_assessments": 6, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": 0, "unhealthy_past_sla_by_severity":
     {"High": 0, "Low": 0, "Medium": 0}, "unhealthy_past_sla_count": 0, "unhealthy_severity_from_catalogue_count": 0, "unhealthy_severity_unknown_count": 0}}}'
 - name: findings_past_sla
   expect: FAIL
@@ -38,9 +41,12 @@ cases:
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 5", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example/providers/Microsoft.Security/assessments/guid-5",
     "implementation_effort": "Low", "name": "guid-5", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example",
+    "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Healthy", "status_description": null,
+    "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 9", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example/providers/Microsoft.Security/assessments/guid-9",
+    "implementation_effort": "Low", "name": "guid-9", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example",
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}], "excluded": [], "provider_registration_status": "registered"}, "summary": {"provider_registration_status": "registered", "sla_days_by_severity": {"High":
-    30, "Low": 180, "Medium": 90}, "total_assessments": 5, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": 0, "unhealthy_past_sla_by_severity":
+    30, "Low": 180, "Medium": 90}, "total_assessments": 6, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": 0, "unhealthy_past_sla_by_severity":
     {"High": 1, "Low": 0, "Medium": 2}, "unhealthy_past_sla_count": 3, "unhealthy_severity_from_catalogue_count": 0, "unhealthy_severity_unknown_count": 0}}}'
 - name: count_null_unreadable
   expect: FAIL
@@ -60,9 +66,12 @@ cases:
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 5", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example/providers/Microsoft.Security/assessments/guid-5",
     "implementation_effort": "Low", "name": "guid-5", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example",
+    "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Healthy", "status_description": null,
+    "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 9", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example/providers/Microsoft.Security/assessments/guid-9",
+    "implementation_effort": "Low", "name": "guid-9", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example",
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}], "excluded": [], "provider_registration_status": "registered"}, "summary": {"provider_registration_status": "registered", "sla_days_by_severity": {"High":
-    30, "Low": 180, "Medium": 90}, "total_assessments": 5, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": null, "unhealthy_past_sla_by_severity":
+    30, "Low": 180, "Medium": 90}, "total_assessments": 6, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": null, "unhealthy_past_sla_by_severity":
     {"High": null, "Low": 0, "Medium": 0}, "unhealthy_past_sla_count": null, "unhealthy_severity_from_catalogue_count": 0, "unhealthy_severity_unknown_count": 0}}}'
 - name: fetcher_0_3_0_no_sla_fields
   expect: FAIL
@@ -82,8 +91,11 @@ cases:
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 5", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example/providers/Microsoft.Security/assessments/guid-5",
     "implementation_effort": "Low", "name": "guid-5", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example",
+    "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Healthy", "status_description": null,
+    "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 9", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example/providers/Microsoft.Security/assessments/guid-9",
+    "implementation_effort": "Low", "name": "guid-9", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example",
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
-    null, "threats": [], "user_impact": "Low"}], "excluded": [], "provider_registration_status": "registered"}, "summary": {"provider_registration_status": "registered", "total_assessments": 5, "unhealthy_by_severity":
+    null, "threats": [], "user_impact": "Low"}], "excluded": [], "provider_registration_status": "registered"}, "summary": {"provider_registration_status": "registered", "total_assessments": 6, "unhealthy_by_severity":
     {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_severity_from_catalogue_count": 0, "unhealthy_severity_unknown_count": 0}}}'
 - name: run_used_other_sla_days
   expect: FAIL
@@ -103,9 +115,12 @@ cases:
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 5", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example/providers/Microsoft.Security/assessments/guid-5",
     "implementation_effort": "Low", "name": "guid-5", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example",
+    "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Healthy", "status_description": null,
+    "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 9", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example/providers/Microsoft.Security/assessments/guid-9",
+    "implementation_effort": "Low", "name": "guid-9", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example",
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}], "excluded": [], "provider_registration_status": "registered"}, "summary": {"provider_registration_status": "registered", "sla_days_by_severity": {"High":
-    15, "Low": 180, "Medium": 90}, "total_assessments": 5, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": 0, "unhealthy_past_sla_by_severity":
+    15, "Low": 180, "Medium": 90}, "total_assessments": 6, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": 0, "unhealthy_past_sla_by_severity":
     {"High": 0, "Low": 0, "Medium": 0}, "unhealthy_past_sla_count": 0, "unhealthy_severity_from_catalogue_count": 0, "unhealthy_severity_unknown_count": 0}}}'
 - name: partial_failure
   expect: FAIL
@@ -124,9 +139,12 @@ cases:
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 5", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example/providers/Microsoft.Security/assessments/guid-5",
     "implementation_effort": "Low", "name": "guid-5", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example",
+    "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Healthy", "status_description": null,
+    "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 9", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example/providers/Microsoft.Security/assessments/guid-9",
+    "implementation_effort": "Low", "name": "guid-9", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example",
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}], "excluded": [], "provider_registration_status": "registered"}, "summary": {"provider_registration_status": "registered", "sla_days_by_severity": {"High":
-    30, "Low": 180, "Medium": 90}, "total_assessments": 5, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": 0, "unhealthy_past_sla_by_severity":
+    30, "Low": 180, "Medium": 90}, "total_assessments": 6, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": 0, "unhealthy_past_sla_by_severity":
     {"High": 0, "Low": 0, "Medium": 0}, "unhealthy_past_sla_count": 0, "unhealthy_severity_from_catalogue_count": 0, "unhealthy_severity_unknown_count": 0}}}'
 - name: count_renamed
   expect: FAIL
@@ -145,7 +163,10 @@ cases:
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 5", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example/providers/Microsoft.Security/assessments/guid-5",
     "implementation_effort": "Low", "name": "guid-5", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/managedInstances/mi-example",
+    "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Healthy", "status_description": null,
+    "threats": [], "user_impact": "Low"}, {"assessment_type": "BuiltIn", "categories": ["Data"], "display_name": "check 9", "first_evaluation_date": "2026-09-01T00:00:00Z", "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example/providers/Microsoft.Security/assessments/guid-9",
+    "implementation_effort": "Low", "name": "guid-9", "policy_definition_id": null, "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Sql/virtualClusters/vc-example",
     "resource_source": "Azure", "severity": "High", "severity_source": "assessment", "status_cause": null, "status_change_date": "2026-10-01T00:00:00Z", "status_code": "Unhealthy", "status_description":
     null, "threats": [], "user_impact": "Low"}], "excluded": [], "provider_registration_status": "registered"}, "summary": {"provider_registration_status": "registered", "sla_days_by_severity": {"High":
-    30, "Low": 180, "Medium": 90}, "total_assessments": 5, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": 0, "unhealthy_past_sla_by_severity":
+    30, "Low": 180, "Medium": 90}, "total_assessments": 6, "unhealthy_by_severity": {"High": 2, "Low": 1, "Medium": 1}, "unhealthy_count": 4, "unhealthy_days_open_unknown_count": 0, "unhealthy_past_sla_by_severity":
     {"High": 0, "Low": 0, "Medium": 0}, "unhealthy_past_sla_total": 0, "unhealthy_severity_from_catalogue_count": 0, "unhealthy_severity_unknown_count": 0}}}'

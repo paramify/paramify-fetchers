@@ -8,10 +8,10 @@ statement: >
   NotApplicable), so the assessment list was read in a shape a posture check can count.
   Also fails when Defender for Cloud was never turned on (provider not registered). Does
   NOT prove any posture. The posture checks attached are
-  azure_defender_assessments_no_open_high_sql_findings (SQL databases) and
-  azure_defender_assessments_no_findings_past_sla (any resource, once past its SLA), so this
-  evidence set passes on readable records while a High finding within its SLA is open on any
-  resource other than a SQL database.
+  azure_defender_assessments_no_open_high_sql_resources (Azure SQL instances, servers and their
+  databases) and azure_defender_assessments_no_findings_past_sla (any resource, once past its SLA),
+  so this evidence set passes on readable records even while a High finding within its SLA is open
+  on a resource that is not an Azure SQL instance, server or database.
 
 regex: '^\s*\{(?=[\s\S]*?"provider_registration_status":\s*"registered")(?=[\s\S]*?"severity":\s*(?:"[^"]*"|null)\s*,[^{}]*?"status_code":\s*"(?:[Hh]ealthy|[Uu]nhealthy|[Nn]ot[Aa]pplicable)")'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
