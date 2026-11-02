@@ -3,6 +3,7 @@
 and App Service health-check results."""
 
 import logging
+import math
 import os
 import sys
 from collections import Counter
@@ -141,20 +142,20 @@ def gate(ok: bool, value):
 
 
 def read_settings(collector) -> dict:
+    """An invalid value fails the run; the lookback asked for is kept beside the one used."""
     raw_days = (os.environ.get(LOOKBACK_ENV) or "").strip()
-    days = DEFAULT_LOOKBACK_DAYS
-    if raw_days:
-        try:
-            days = int(raw_days)
-        except ValueError:
-            days = 0
-        if days <= 0:
-            collector.record(f"config {LOOKBACK_ENV}",
-                             ValueError(f"invalid lookback {raw_days!r}: expected whole days > 0"))
-            days = DEFAULT_LOOKBACK_DAYS
-    if days > MAX_LOOKBACK_DAYS:
+    try:
+        requested = int(raw_days) if raw_days else DEFAULT_LOOKBACK_DAYS
+    except ValueError:
+        requested = None
+    days = requested
+    if requested is None or requested <= 0:
+        collector.record(f"config {LOOKBACK_ENV}",
+                         ValueError(f"invalid lookback {raw_days!r}: expected whole days > 0"))
+        days = DEFAULT_LOOKBACK_DAYS
+    elif requested > MAX_LOOKBACK_DAYS:
         logger.warning("%s=%d is past the %d days Resource Health keeps; using %d",
-                       LOOKBACK_ENV, days, MAX_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS)
+                       LOOKBACK_ENV, requested, MAX_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS)
         days = MAX_LOOKBACK_DAYS
     raw = (os.environ.get(RTO_ENV) or "").strip()
     rto = None
@@ -163,10 +164,11 @@ def read_settings(collector) -> dict:
             rto = float(raw)
         except ValueError:
             rto = None
-        if rto is None or rto <= 0:
+        # float() takes nan, inf and 1e999 (inf); each would pass every outage.
+        if rto is None or not (math.isfinite(rto) and rto > 0):
             collector.record(f"config {RTO_ENV}", ValueError(f"invalid recovery time objective {raw!r}: expected hours > 0"))
             rto = None
-    return {"lookback_days": days, "recovery_time_objective_hours": rto}
+    return {"lookback_days": days, "lookback_days_requested": requested, "recovery_time_objective_hours": rto}
 
 
 # --- resources ---

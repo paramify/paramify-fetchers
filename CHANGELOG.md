@@ -24,7 +24,10 @@ schemas and the `paramify` CLI — not the internal code.
   own period, and the time around it stays an outage. With
   `recovery_time_objective_hours` set, each resource's longest outage is checked
   against it; an Unknown period longer than the objective, or an outage that runs
-  past it with the Unknown time touching it, leaves the verdict unknown.
+  past it with the Unknown time touching it, leaves the verdict unknown. An
+  objective or lookback that is not a number above 0 (nan and inf included)
+  fails the run; a lookback past 30 is read as 30, and the value asked for is
+  kept as `settings.lookback_days_requested`.
   Front Door Standard/Premium profiles are read too, but Resource Health judges a
   profile by whether its origins answer health probes, so their periods are
   reported as origin probe failures and never as outages. For apps, the health

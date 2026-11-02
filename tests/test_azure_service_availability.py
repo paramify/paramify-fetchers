@@ -678,25 +678,28 @@ def test_the_recovery_time_objective_is_checked_per_resource(monkeypatch):
         "all_resources_meet_recovery_time_objective": False}
 
 
-@pytest.mark.parametrize("raw", ["soon", "0", "-2"])
+@pytest.mark.parametrize("raw", ["soon", "0", "-2", "nan", "inf", "-inf", "1e999"])
 def test_an_invalid_recovery_time_objective_fails_the_run(monkeypatch, raw):
     monkeypatch.setenv(sa.RTO_ENV, raw)
-    _, summary, collector = run(FakeArm())
+    _, summary, collector = run(FakeArm(health={WEB: outage_history()}))
     assert not collector.ok and summary["recovery_time_objective_hours"] is None
+    assert summary["resources_meeting_recovery_time_objective"] is None
 
 
-@pytest.mark.parametrize("raw", ["soon", "0", "-2", "1.5"])
-def test_an_invalid_lookback_fails_the_run(monkeypatch, raw):
+@pytest.mark.parametrize("raw, requested", [("soon", None), ("0", 0), ("-2", -2), ("1.5", None)])
+def test_an_invalid_lookback_fails_the_run(monkeypatch, raw, requested):
     monkeypatch.setenv(sa.LOOKBACK_ENV, raw)
-    _, summary, collector = run(FakeArm())
+    results, summary, collector = run(FakeArm())
     assert not collector.ok and summary["lookback_days"] == 30
+    assert results["settings"]["lookback_days_requested"] == requested
 
 
 def test_the_lookback_is_capped_at_what_resource_health_keeps(monkeypatch):
     monkeypatch.setenv(sa.LOOKBACK_ENV, "90")
-    results, summary, _ = run(FakeArm())
-    assert summary["lookback_days"] == 30
-    assert results["settings"]["window_start"] == ts(timedelta(days=30))
+    results, summary, collector = run(FakeArm())
+    assert collector.ok and summary["lookback_days"] == 30
+    assert (results["settings"]["lookback_days_requested"], results["settings"]["window_start"]) == (
+        90, ts(timedelta(days=30)))
 
 
 def test_every_summary_field_is_documented():
