@@ -565,6 +565,8 @@ def summarize(records: list[dict], listed: dict, settings: dict, registration: s
         "longest_degraded_hours": biggest(h["longest_degraded_hours"] for h in own_read),
         "longest_unknown_hours": biggest(h["longest_unknown_hours"] for h in own_read),
         "lowest_availability_percentage": smallest(h["availability_percentage"] for h in own_read),
+        "resources_without_availability": sum(1 for h in own_read if h["availability_percentage"] is None),
+        "resources_with_unknown_hours": sum(1 for h in own_read if h["unknown_hours_in_window"]),
         "service_impacting_events": len(distinct_events(e for h in read for e in h["service_impacting_events"])),
         "resources_meeting_recovery_time_objective": sum(
             1 for r in own if r["meets_recovery_time_objective"] is True),

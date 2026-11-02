@@ -436,6 +436,15 @@ def test_a_long_unknown_period_leaves_the_objective_unknown(monkeypatch):
             summary["longest_unknown_hours"]) == (1, None, 336.0)
 
 
+def test_the_summary_counts_resources_whose_availability_leaves_out_unknown_time():
+    quiet = [status("Available", timedelta(days=40), "a"), status("Unknown", timedelta(days=20), "q"),
+             status("Available", timedelta(days=6), "b")]
+    unknown_now = [status("Unknown", timedelta(0), "current")]
+    _, summary, _ = run(FakeArm(health={WEB: quiet, FUNC: unknown_now}))
+    assert (summary["lowest_availability_percentage"], summary["resources_without_availability"],
+            summary["resources_with_unknown_hours"], summary["resources_availability_unknown_now"]) == (100.0, 1, 1, 1)
+
+
 def test_a_stopped_app_is_not_counted_as_failing_its_health_check():
     results, summary, _ = run(FakeArm(web_state="Stopped", web_metric=metric([point(2, 0), point(1, 0)])))
     web = next(r for r in results["resources"] if r["id"] == WEB)["health_check"]

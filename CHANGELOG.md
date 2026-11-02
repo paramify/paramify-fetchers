@@ -17,7 +17,8 @@ schemas and the `paramify` CLI — not the internal code.
   unavailable, from its Resource Health history over a lookback of up to 30 days:
   every Unavailable, Degraded and Unknown period with start, end, length, cause
   and the Azure incident Resource Health links to it, availability over the hours
-  Resource Health knew about, and a rollup per region. Periods the customer
+  Resource Health knew about (with counts of resources it leaves out or only
+  partly covers), and a rollup per region. Periods the customer
   started (stop, restart, scale) are listed but are not outages. With
   `recovery_time_objective_hours` set, each resource's longest outage is checked
   against it; an Unknown period longer than the objective leaves it unknown.
