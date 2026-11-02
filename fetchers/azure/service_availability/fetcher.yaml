@@ -113,7 +113,7 @@ evidence_set:
       - not_authorized (the read was refused; fails the run)
       - not_registered (Resource Health is not registered; fails the run)
       - error (any other failure; fails the run)
-    - windows_not_listed — Number of periods counted but not listed: each resource lists only its 100 newest periods, and every count covers all of them
+    - windows_not_listed — Number of periods counted but not listed: each resource lists only its 100 newest periods, and every count includes the periods left off the list
 
     Is each app and SQL Managed Instance available now?
     - resources_available_now — Number of apps and SQL Managed Instances whose current state is Available or Degraded; Front Door profiles are counted under their own question, because Resource Health judges them by their origins
