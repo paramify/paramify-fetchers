@@ -51,6 +51,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Security posture, policy and backup | [azure_policy_compliance](#azure_policy_compliance) | `EVD-AZURE-POLICY-COMPLIANCE` |
 | Security posture, policy and backup | [azure_residual_resources](#azure_residual_resources) | `EVD-AZURE-RESIDUAL-RESOURCES` |
 | Security posture, policy and backup | [azure_resource_inventory](#azure_resource_inventory) | `EVD-AZURE-RESOURCE-INVENTORY` |
+| Security posture, policy and backup | [azure_service_availability](#azure_service_availability) | `EVD-AZURE-SERVICE-AVAILABILITY` |
 | Security posture, policy and backup | [azure_vm_hardening_status](#azure_vm_hardening_status) | `EVD-AZURE-VM-HARDENING` |
 | Network and edge | [azure_api_management_configuration](#azure_api_management_configuration) | `EVD-AZURE-API-MANAGEMENT-CONFIG` |
 | Network and edge | [azure_app_gateway_backend_tls](#azure_app_gateway_backend_tls) | `EVD-AZURE-APPGW-BACKEND-TLS` |
@@ -1961,38 +1962,49 @@ Summary fields:
 - `closed_close_time_not_retained` — Number of closed incidents whose close record is older than the `SecurityIncident` table's retention, so the close time is gone; null if any workspace's incidents or close times couldn't be read
 
 ### azure_sentinel_playbooks
-Short Description: Shows which Sentinel playbooks are live and whether they contain accounts, isolate devices, update incidents or notify people.
+Short Description: Shows which Logic Apps Sentinel runs as playbooks, what they do to accounts, devices and people, whether an active automation rule runs them, and how their recent runs ended.
 
 Script: fetchers/azure/sentinel_playbooks/fetcher.py
 
-Access: Reader (or Logic App Reader) and Microsoft Sentinel Reader.
+Access: Reader on the subscription (or Logic App Reader and Microsoft Sentinel Reader, plus Logic Apps Standard Reader for Standard workflows). Optional: Reader on other subscriptions whose Logic Apps an automation rule runs; without it, those playbooks are listed as unresolved and the run succeeds.
 
 Commands Executed:
 - `GET /subscriptions` — picks a subscription when none is set
-- `GET Microsoft.OperationalInsights/workspaces` and `onboardingStates` (per workspace) — finds the Sentinel workspaces
-- `GET Microsoft.SecurityInsights/automationRules` — which playbooks the rules run
-- `GET Microsoft.Logic/workflows` — the Logic Apps
-- `GET {workflow id}` (when a definition is missing) — the playbook's definition
+- `GET Microsoft.OperationalInsights/workspaces` and `GET Microsoft.SecurityInsights/onboardingStates` (per workspace) — the workspaces Sentinel is on
+- `GET Microsoft.SecurityInsights/automationRules` (per Sentinel workspace) — which automation rules run which Logic Apps, and whether each rule is active
+- `GET Microsoft.Logic/workflows` — every Consumption Logic App in the subscription with its definition
+- `GET {Logic App id}` (per Logic App an automation rule runs that the list didn't return, or listed without a definition) — its definition; a Standard workflow is read at `Microsoft.Web/sites/{app}/workflows` and its definition from workflow.json
+- `GET Microsoft.Logic/workflows/{name}/runs` (per playbook) — its runs in the lookback, newest first; a Standard workflow's runs come from `Microsoft.Web/sites/{app}/hostruntime/runtime/webhooks/workflow/api/management/workflows/{name}/runs`
 
-Output: `azure_sentinel_playbooks_<subscription>.json` — each playbook with its triggers, connectors and capabilities, who it emails, the automation rules that run it, and whether it's live.
+Output: `azure_sentinel_playbooks_<subscription>.json` — each playbook with its state, triggers, connectors, what it does to accounts, devices and incidents, whom it emails, the automation rules that run it, and its recent runs.
 
 Summary fields:
 
-**Which playbooks exist, and which are live?**
-- `logic_apps_scanned` — Number of Logic Apps in the subscription
-- `playbooks` — Number of Logic Apps that are Sentinel playbooks (triggered by Sentinel or run by an automation rule)
+**What was checked?**
+- `logic_apps_scanned` — Number of Consumption Logic Apps listed in the subscription
+- `playbooks` — Number of playbooks: Logic Apps triggered by the Sentinel connector (on an incident, alert or entity), plus any Logic App an automation rule runs, Standard (single-tenant) workflows included
+- `standard_playbooks` — Number of playbooks that are Standard workflows; these are found only when an automation rule runs them
+- `playbooks_without_definition` — List of the resource ids of playbooks whose definition wasn't read; the triggers, connectors and capabilities of a playbook listed here read null
+- `automation_rule_references_unresolved` — List of the resource ids (lowercased) of Logic Apps an automation rule runs that couldn't be read: one in a subscription or resource group the credential can't read (401, 403, 404 or SubscriptionNotFound, each also given a note), or one since deleted; any other error fails the run
+
+**Which playbooks are live?**
 - `enabled_playbooks` — Number of playbooks that are enabled
-- `run_by_active_automation_rule` — Number of live playbooks: enabled and run by an active automation rule
-- `standard_playbooks` — Number of playbooks on the Standard (single-tenant) Logic Apps plan
+- `run_by_active_automation_rule` — Number of live playbooks: enabled, and run by at least one active automation rule (enabled and not expired) in a Sentinel workspace of the subscription
+- `live_playbooks_without_definition` — Number of live playbooks whose definition wasn't read, so whether they contain accounts or notify anyone is unknown
 
-**What do the live playbooks do?**
-- `live_account_containment_playbooks` — Number of live playbooks that lock down a user account
-- `live_notifying_playbooks` — Number of live playbooks that send email or Teams messages
-- `notification_recipients` — List of fixed email addresses that live playbooks send to
+**Do live playbooks contain accounts and notify people?**
+- `live_account_containment_playbooks` — Number of live playbooks with an action that disables a user (accountEnabled false), revokes sign-in sessions, confirms a user compromised or dismisses a risky user, matched on each action's inputs, nested branches included; null when `live_playbooks_without_definition` is above 0
+- `live_notifying_playbooks` — Number of live playbooks that send email (Office 365, Outlook, SendGrid, SMTP or Gmail) or a Teams message; null when `live_playbooks_without_definition` is above 0
+- `notification_recipients` — List of the static email addresses live playbooks send to; addresses built from the incident when the playbook runs aren't included; null when `live_playbooks_without_definition` is above 0
 
-**Could anything not be read?**
-- `playbooks_without_definition` — List of playbooks whose definition couldn't be read
-- `automation_rule_references_unresolved` — List of playbooks that automation rules point to but that couldn't be found
+**Do live playbooks run, and do their runs succeed?**
+- `run_lookback_days` — Days of run history read for each playbook (`SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS`, default 90)
+- `playbooks_run_history_unread` — List of the resource ids of playbooks whose runs couldn't be read (401, 403 or 404, each also given a note; any other error fails the run); their run fields read null
+- `live_playbooks_run_history_unread` — Number of live playbooks whose runs couldn't be read, so how their runs ended is unknown
+- `live_playbooks_last_run_succeeded` — Number of live playbooks whose newest run in the lookback succeeded; null when `live_playbooks_run_history_unread` is above 0
+- `live_playbooks_last_run_failed` — Number of live playbooks whose newest run in the lookback failed, timed out, was aborted or faulted; null when `live_playbooks_run_history_unread` is above 0
+- `live_playbooks_without_runs` — Number of live playbooks with no run in the lookback; null when `live_playbooks_run_history_unread` is above 0
+- `live_playbook_failed_runs` — Number of runs of live playbooks in the lookback that failed, timed out, were aborted or faulted; null when `live_playbooks_run_history_unread` is above 0
 
 
 ## Security posture, policy and backup
@@ -2077,7 +2089,7 @@ Summary fields:
 
 
 ### azure_backup_recovery_status
-Short Description: Shows whether each Recovery Services vault backs up its items successfully, keeps backups at least 30 days, and protects the backups themselves from deletion.
+Short Description: Shows whether each Recovery Services vault backs up its items successfully, keeps backups at least 30 days, protects the backups from deletion, and has had restores succeed.
 
 Script: fetchers/azure/backup_recovery_status/fetcher.py
 
@@ -2089,18 +2101,20 @@ Commands Executed:
 - `vaults.list_by_subscription_id()` — every Recovery Services vault with its soft delete, immutability, cross-region restore and encryption settings
 - `backup_policies.list()` (per in-scope vault) — each backup policy's schedule and retention
 - `backup_protected_items.list()` (per in-scope vault) — each backed-up item with its policy, protection state and last backup
+- `backup_jobs.list()` filtered to restores (per in-scope vault, 30 days at a time) — every restore run in the window, test restores included
+- `job_details.get()` (per in-scope restore job) — the restore type, the restore target and the recovery point the restore used
 
-Output: `azure_backup_recovery_status_<subscription>.json` — each Recovery Services vault with its protection settings, its backup policies and their retention, and the items it backs up with their state and last backup.
+Output: `azure_backup_recovery_status_<subscription>.json` — each Recovery Services vault with its protection settings, its backup policies and their retention, the items it backs up with their state and last backup, and the restores it ran with their result, duration and recovery point age.
 
 Summary fields:
 
 **What was checked?**
-- `total_recovery_services_vaults` — Number of Recovery Services vaults in scope (not taken out by a resource_exclusions pattern)
-- `vaults_with_protected_items` — Number of vaults that back up at least one item
-- `vaults_without_protected_items` — Number of in-scope vaults that back up nothing, including a vault whose protected items were all taken out of scope
-- `total_backup_policies` — Number of backup policies across all vaults
-- `total_protected_items` — Number of protected items (VMs, file shares, databases and other workloads registered for backup) across all vaults
-- `protected_items_by_workload_type` — Number of protected items for each workload type, keyed by Azure's name for the type; common keys:
+- `total_recovery_services_vaults` — Number of Recovery Services vaults in scope (not taken out by a resource_exclusions pattern); null if the vault list couldn't be read
+- `vaults_with_protected_items` — Number of vaults that back up at least one item; null if the vault list couldn't be read
+- `vaults_without_protected_items` — Number of in-scope vaults that back up nothing, including a vault whose protected items were all taken out of scope; null if the vault list couldn't be read
+- `total_backup_policies` — Number of backup policies across all vaults; null if the vault list couldn't be read
+- `total_protected_items` — Number of protected items (VMs, file shares, databases and other workloads registered for backup) across all vaults; null if the vault list couldn't be read
+- `protected_items_by_workload_type` — Number of protected items for each workload type, keyed by Azure's name for the type; null if the vault list couldn't be read; common keys:
   - VM (Azure virtual machine)
   - AzureFileShare (Azure Files share)
   - SQLDataBase (SQL Server database in a VM)
@@ -2111,27 +2125,50 @@ Summary fields:
 **Which resources are left out of scope?**
 - `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
 - `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no Recovery Services vault, protected item or protected resource, such as a mistyped name
-- `excluded_recovery_services_vaults` — Number of Recovery Services vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, no other count includes them, and their backup policies and protected items are never read
+- `excluded_recovery_services_vaults` — Number of Recovery Services vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, no other count includes them, and their backup policies, protected items and restore jobs are never read
 - `excluded_protected_items` — Number of protected items in in-scope vaults left out of scope because an id: pattern matched the item, or a pattern matched its protected resource by resource group or id; each is listed under excluded. An excluded vault's items are never read, so they are not counted here
-- `in_scope_recovery_services_vaults` — Number of Recovery Services vaults read and in scope; 0 means none was read or the patterns took out every vault, which a check can catch by requiring more than 0
-- `in_scope_protected_items` — Number of protected items read and in scope
+- `in_scope_recovery_services_vaults` — Number of Recovery Services vaults read and in scope; 0 means the subscription has none or the patterns took out every vault, which a check can catch by requiring more than 0; null if the vault list couldn't be read
+- `in_scope_protected_items` — Number of protected items read and in scope; null if the vault list couldn't be read
+- `excluded_restore_jobs` — Number of restore jobs in in-scope vaults left out of scope because they restored an excluded protected item, matched by the item's friendly name in the same vault (a job names its item no other way); a job stays in scope when an in-scope item in that vault has the same friendly name, or when its item is no longer listed (protection stopped and its data deleted). Each is listed under excluded and its details are never read
+- `in_scope_restore_jobs` — Number of restore jobs read and in scope; null if the vault list or a vault's restore jobs couldn't be read
 
 **Are backups kept long enough?**
 - `retention_threshold_days` — Days of retention a backup policy must reach to meet the threshold (30)
-- `policies_meeting_retention_threshold` — Number of backup policies that meet the retention threshold: the policy's longest retention, taken across its daily, weekly, monthly, yearly and flat retention and any per-database sub-policies and converted to days (a week as 7, a month as 30, a year as 365), is at least `retention_threshold_days`
-- `policies_without_readable_retention` — Number of backup policies with no retention the fetcher could convert to days
-- `protected_items_meeting_retention_threshold` — Number of protected items whose backup policy in the same vault meets the retention threshold; an item with no policy, or whose policy isn't found, doesn't count
-- `retention_threshold_percentage` — Percentage of protected items whose policy meets the retention threshold = `protected_items_meeting_retention_threshold` / `total_protected_items` × 100 (a whole number, 0–100); 0 when `total_protected_items` is 0
+- `policies_meeting_retention_threshold` — Number of backup policies that meet the retention threshold: the policy's longest retention, taken across its daily, weekly, monthly, yearly and flat retention and any per-database sub-policies and converted to days (a week as 7, a month as 30, a year as 365), is at least `retention_threshold_days`; null if the vault list couldn't be read
+- `policies_without_readable_retention` — Number of backup policies with no retention the fetcher could convert to days; null if the vault list couldn't be read
+- `protected_items_meeting_retention_threshold` — Number of protected items whose backup policy in the same vault meets the retention threshold; an item with no policy, or whose policy isn't found, doesn't count; null if the vault list couldn't be read
+- `retention_threshold_percentage` — Percentage of protected items whose policy meets the retention threshold = `protected_items_meeting_retention_threshold` / `total_protected_items` × 100 (a whole number, 0–100); 0 when `total_protected_items` is 0; null if the vault list couldn't be read
 
 **Are the backups themselves protected?**
-- `soft_delete_enabled_vaults` — Number of vaults with soft delete Enabled or AlwaysON (on and can't be turned off), so deleted backups are kept for a recovery period
-- `immutability_enabled_vaults` — Number of vaults with immutability Unlocked or Locked, so recovery points can't be deleted before they expire; only Locked can't be turned off
-- `cross_region_restore_vaults` — Number of vaults with cross-region restore Enabled, so backups can be restored in the paired region
+- `soft_delete_enabled_vaults` — Number of vaults with soft delete Enabled or AlwaysON (on and can't be turned off), so deleted backups are kept for a recovery period; null if the vault list couldn't be read
+- `immutability_enabled_vaults` — Number of vaults with immutability Unlocked or Locked, so recovery points can't be deleted before they expire; only Locked can't be turned off; null if the vault list couldn't be read
+- `cross_region_restore_vaults` — Number of vaults with cross-region restore Enabled, so backups can be restored in the paired region; null if the vault list couldn't be read
 
 **Are protected items actually being backed up?**
-- `protected_items_with_policy` — Number of protected items that have a backup policy assigned
-- `protected_items_in_protected_state` — Number of protected items whose protection state is Protected (not stopped, paused, pending or in error)
-- `protected_items_with_healthy_last_backup` — Number of protected items whose last backup status is Completed, Success, Succeeded or Healthy
+- `protected_items_with_policy` — Number of protected items that have a backup policy assigned; null if the vault list couldn't be read
+- `protected_items_in_protected_state` — Number of protected items whose protection state is Protected (not stopped, paused, pending or in error); null if the vault list couldn't be read
+- `protected_items_with_healthy_last_backup` — Number of protected items whose last backup status is Completed, Success, Succeeded or Healthy; null if the vault list couldn't be read
+
+**Have restores been run, and did they work?**
+- `restore_job_window_days` — Days back that restore jobs are read, ending at the run (365 unless AZURE_BACKUP_RESTORE_WINDOW_DAYS sets it); a vault keeps job history for a limited time, so the oldest days may hold nothing
+- `restore_jobs_read` — True if every in-scope vault's restore jobs were read; false if the vault list or any vault's restore jobs couldn't be read, and then every restore field below is null
+- `total_restore_jobs` — Number of restore jobs in the window across in-scope vaults, test restores included, whatever their result; null if a vault's restore jobs couldn't be read
+- `succeeded_restore_jobs` — Number of restore jobs in the window whose status is Completed (a CompletedWithWarnings restore, which left some data out, doesn't count); null if a vault's restore jobs couldn't be read
+- `failed_restore_jobs` — Number of restore jobs in the window whose status is Failed; null if a vault's restore jobs couldn't be read
+- `restore_jobs_by_status` — Number of restore jobs in the window for each status, keyed by Azure Backup's name for it; null if a vault's restore jobs couldn't be read:
+  - Completed (the restore finished)
+  - CompletedWithWarnings (the restore finished but left some data out)
+  - Failed (the restore stopped with an error)
+  - InProgress (still running when the fetcher ran)
+  - Cancelled (stopped by someone before it finished)
+- `vaults_with_succeeded_restore` — Number of in-scope vaults with at least one Completed restore in the window; null if a vault's restore jobs couldn't be read
+- `latest_succeeded_restore_time` — Time of the end, in UTC, of the newest Completed restore in the window; null if there was none or a vault's restore jobs couldn't be read
+- `days_since_latest_succeeded_restore` — Days from the end of the newest Completed restore to the run; null if there was none or a vault's restore jobs couldn't be read
+
+**How long did restores take, and how old was the data they restored?**
+- `longest_succeeded_restore_minutes` — Longest time a Completed restore in the window took, in minutes, to compare with the recovery time objective; null if there was none or a vault's restore jobs couldn't be read
+- `max_recovery_point_age_hours` — Hours between the recovery point a restore used and the restore's start, the largest among Completed restores: how old the restored data was when the restore started. The person restoring chooses the point, so a deliberate restore of an older point raises it; it isn't the recovery point objective a restore could achieve; null if no Completed restore named a readable recovery point time, a Completed restore's details couldn't be read, or a vault's restore jobs couldn't be read
+- `succeeded_restores_without_recovery_point_time` — Number of Completed restores left out of `max_recovery_point_age_hours`: their details named no recovery point time the fetcher could read (it reads day/month/year in 24-hour form, as SQL restores write it, and month/day/year with AM/PM, as Azure Files restores write it), the time named was after the restore's start, or the details couldn't be read; null if a vault's restore jobs couldn't be read
 
 
 ### azure_defender_assessments
@@ -2331,7 +2368,7 @@ Summary fields:
 
 
 ### azure_policy_assignments
-Short Description: Lists every Azure Policy assignment in effect on the subscription and shows which ones actually enforce their policies and which only audit.
+Short Description: Lists every Azure Policy assignment and exemption in effect on the subscription, showing which assignments actually enforce their policies, which only audit, and what each exemption waives and until when.
 
 Script: fetchers/azure/policy_assignments/fetcher.py
 
@@ -2343,13 +2380,20 @@ Commands Executed:
 - `policy_assignments.list()` — every assignment on the subscription and those inherited from management groups
 - `policy_definitions` / `policy_set_definitions` `get_built_in()`, `get()` or `get_at_management_group()` (per distinct definition) — display name, built-in or custom, and the policy effect
 - `policy_definitions.list_built_in()` (once, when an initiative is assigned) — the effect of each built-in member policy
+- `GET Microsoft.Authorization/policyExemptions` (a preview version, the only kind Azure offers) — every exemption on the subscription, inherited from management groups, or on its resource groups and resources, Defender for Cloud recommendation exemptions included
 
-Output: `azure_policy_assignments_<subscription>.json` — each policy assignment with its scope, exclusions, parameters, enforcement mode and policy definition, the effect of each policy it applies, and whether it actually enforces.
+Output: `azure_policy_assignments_<subscription>.json` — each policy assignment with its scope, exclusions, parameters, enforcement mode and policy definition, the effect of each policy it applies, whether it actually enforces, and each policy exemption with what it exempts, its category, reason and expiry; exemptions the resource_exclusions patterns take out are listed under excluded instead.
 
 Summary fields:
 
+**Which exemptions are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every exemption is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no exemption, such as a mistyped name or any location: pattern, since exemptions carry no region
+- `excluded_policy_exemptions` — Number of exemptions left out of scope because a pattern matched the resource group or id of the scope they were made at (a resource group, or a resource and its group); exemptions made at the subscription or a management group stay, and each excluded one is listed under excluded with the pattern; null when the exemptions couldn't be read. Policy assignments are never left out
+- `in_scope_policy_exemptions` — Number of exemptions read and in scope; null when the exemptions couldn't be read
+
 **What policy assignments exist?**
-- `total_policy_assignments` — Number of policy assignments in effect on the subscription, its own and inherited
+- `total_policy_assignments` — Number of policy assignments in effect on the subscription, its own and inherited; null when the assignment list fails, and then every assignment and effect field in this summary is null too and the run fails
 - `initiative_assignments` — Number of assignments of an initiative (a policy set bundling many policies)
 - `single_definition_assignments` — Number of assignments of a single policy definition
 - `built_in_definition_assignments` — Number of assignments whose definition or initiative is built in by Microsoft
@@ -2388,6 +2432,39 @@ Summary fields:
 - `member_policy_effect_counts` — Number of policies with each effect across every assignment, counting each policy of an initiative (an initiative assigned twice counts twice), plus unresolved for policies whose effect couldn't be resolved
 - `unresolved_member_policies` — Number of policies across every assignment whose effect couldn't be resolved, counting the unresolved policies inside partly resolved initiatives, which are classed by their resolved policies alone
 - `unresolved_member_policies_not_enforced` — Number of policies whose effect couldn't be resolved inside assignments with enforcement mode DoNotEnforce, where an enforcing effect may be held back unseen
+
+**Were the exemptions read?**
+- `exemptions_read_status` — Whether the exemptions were read: read, failed (the list call failed, and the run fails), api_version_unavailable (Azure refused the pinned preview version with InvalidApiVersionParameter, NoRegisteredProviderFound or InvalidResourceType; the run doesn't fail, and any other error counts as failed) or not_read (no subscription or credential); every exemption count below is null unless it is read
+- `exemptions_api_version` — What the fetcher pins the exemptions API to: the preview version 2024-12-01-preview, set in its code
+- `total_policy_exemptions` — Number of in-scope exemptions in effect on the subscription, its own, inherited from a management group, or on a resource group or resource inside it, expired ones included
+
+**What do the exemptions waive?**
+- `waiver_exemptions` — Number of in-scope exemptions in category Waiver (the resource is accepted as non-compliant), matched without regard to case
+- `mitigated_exemptions` — Number of in-scope exemptions in category Mitigated (the policy's intent is met another way), matched without regard to case
+- `whole_assignment_exemptions` — Number of in-scope exemptions that exempt every policy of an assignment rather than named members of an initiative
+- `defender_benchmark_exemptions` — Number of in-scope exemptions on Defender for Cloud's own assignment (SecurityCenterBuiltIn), which is how Defender recommendation exemptions are stored
+- `active_exemptions_lifting_enforcement` — Number of unexpired in-scope exemptions that lift enforcement: they exempt a policy with an enforcing effect (deny, modify, deployIfNotExists and the others listed above) on an assignment with enforcement mode Default
+- `exemptions_lifting_enforcement_unknown` — Number of in-scope exemptions where that can't be told; each one's lifts_enforcement_unknown_reason says why: the exempted assignment isn't listed, the assignments or the initiative's members couldn't be read, an exempted policy isn't in the initiative's current definition, or an exempted policy's effect couldn't be resolved
+- `exemptions_naming_members_not_in_initiative` — Number of in-scope exemptions naming at least one initiative member that the initiative's current definition doesn't have: a policy since removed from the initiative, or one in an older version the assignment still uses
+- `assignments_with_exemptions` — Number of listed assignments with at least one in-scope exemption; null when an exemption's assignment can't be checked because the assignment list failed
+- `exemptions_of_unlisted_assignments` — Number of in-scope exemptions whose assignment isn't among the assignments listed for the subscription, usually an assignment since deleted, whose exemptions Azure leaves in place; null when the assignment list failed
+- `unlisted_assignments_with_exemptions` — Number of distinct assignments that in-scope exemptions point at but that aren't among the listed assignments; null when the assignment list failed
+
+**Where were the exemptions made?**
+- `exemptions_by_scope_kind` — Number of in-scope exemptions made at each kind of scope:
+  - management_group (a management group above the subscription)
+  - subscription (the subscription itself)
+  - resource_group (one resource group)
+  - resource (one resource)
+  - unknown (a scope the fetcher can't classify)
+- `inherited_exemptions` — Number of in-scope exemptions made at a management group above the subscription
+
+**Do the exemptions expire?**
+- `active_exemptions` — Number of in-scope exemptions that are unexpired, including those with no expiry date
+- `expired_exemptions` — Number of in-scope exemptions whose expiry date has passed; Azure keeps them but no longer applies them
+- `exemptions_without_expiry` — Number of in-scope exemptions with no expiry date, which apply until someone deletes them
+- `exemptions_expiring_within_30_days` — Number of unexpired in-scope exemptions that expire in under 30 days
+- `exemptions_with_unreadable_expiry` — Number of in-scope exemptions whose expiry date couldn't be parsed, so whether they expired is unknown
 
 
 ### azure_policy_compliance
@@ -2615,6 +2692,104 @@ Summary fields:
 
 **What does nothing cover?**
 - `resources_covered_by_neither_by_type` — Number of resources of each type that have neither a Defender assessment nor a Policy state. It counts every such resource, so it holds both the missing resources listed above and the types neither service covers on any resource; null if either query failed
+
+
+### azure_service_availability
+Short Description: Shows when each App Service app and SQL Managed Instance was unavailable and for how long, why, Front Door origin probe failures, and each app's health-check results.
+
+Script: fetchers/azure/service_availability/fetcher.py (uses the shared helper fetchers/azure/_shared/resource_exclusions.py)
+
+Access: Reader on the subscription.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET Microsoft.Web/sites`, `GET Microsoft.Cdn/profiles` and `GET Microsoft.Sql/managedInstances` — the App Service apps (web and function apps), Front Door Standard and Premium profiles and SQL Managed Instances in the subscription
+- `GET providers/Microsoft.ResourceHealth` — whether Resource Health is registered on the subscription
+- `GET {resource}/providers/Microsoft.ResourceHealth/availabilityStatuses` (per resource) — the resource's availability history: each change of state, its cause, and the Azure incident Resource Health links to it
+- `GET {app}/config/web` (per app) — the app's health check path
+- `GET {app}/providers/Microsoft.Insights/metrics` for HealthCheckStatus (per app with a health check path) — hourly health-check results over the lookback
+
+Output: `azure_service_availability_<subscription>.json` — each resource with its availability now and every period it was unavailable, degraded or unknown in the lookback with its cause, linked Azure incidents and whether it counts as an outage, Front Door profiles' periods as origin probe failures (Resource Health judges a profile by its origins' health probes), and for apps the health check results, plus a rollup per region and pointers to the fetchers that hold Front Door origin health (azure_front_door_origins) and Service Health events (azure_service_health_advisories).
+
+Summary fields:
+
+**What was checked?**
+- `lookback_days` — Number of days of history read; Resource Health keeps about 30, and each status lasts until the next one, the newest until the run
+- `resource_health_registration` — Whether Resource Health is registered on the subscription: registered, not_registered (nothing can be read, and the run fails) or unknown (the registration read failed; the per-resource reads still ran)
+- `resources` — Number of in-scope resources checked; null if any of the three lists failed
+- `app_services` — Number of in-scope App Service apps; null if the app list failed
+- `web_apps` — Number of in-scope web apps; null if the app list failed
+- `function_apps` — Number of in-scope function apps; null if the app list failed
+- `front_door_profiles` — Number of in-scope Front Door Standard and Premium profiles; null if the profile list failed
+- `sql_managed_instances` — Number of in-scope SQL Managed Instances; null if the instance list failed
+- `regions` — List of the regions the in-scope resources are in (global for Front Door)
+
+**Was each resource's availability read?**
+- `resource_health_read` — Number of resources whose Resource Health history was read
+- `resource_health_unknown` — Number of resources whose availability is unknown: the read failed, was refused, returned no history, or Resource Health does not cover the resource type; null if any of the three lists failed
+- `resource_health_by_status` — Number of resources for each read status:
+  - read (history read)
+  - no_data (Resource Health returned no status)
+  - not_supported (Resource Health does not cover the resource type)
+  - not_found (the resource or its history was not found)
+  - not_authorized (the read was refused; fails the run)
+  - not_registered (Resource Health is not registered; fails the run)
+  - error (any other failure; fails the run)
+- `windows_not_listed` — Number of periods counted but not listed: each resource lists only its 100 newest periods, and every count includes the periods left off the list; null if any of the three lists failed
+
+**Is each app and SQL Managed Instance available now?**
+- `resources_available_now` — Number of apps and SQL Managed Instances whose current state is Available or Degraded, as Resource Health reports it, so a stopped app can count as available; Front Door profiles are counted under their own question, because Resource Health judges them by their origins; null if the app or SQL Managed Instance list failed
+- `resources_unavailable_now` — Number of apps and SQL Managed Instances whose current state is Unavailable; null if the app or SQL Managed Instance list failed
+- `resources_degraded_now` — Number of apps and SQL Managed Instances whose current state is Degraded; null if the app or SQL Managed Instance list failed
+- `resources_availability_unknown_now` — Number of apps and SQL Managed Instances whose current state is Unknown or was not read; null if the app or SQL Managed Instance list failed
+
+**Were there outages, and how long did recovery take?**
+- `resources_with_outage_in_window` — Number of read apps and SQL Managed Instances with known hours that had at least one outage in the lookback; an outage is a continuous Unavailable period the customer did not start, and Degraded (still serving, with reduced performance) and Unknown (Resource Health had no information) are not outages; null if the app or SQL Managed Instance list failed or none has known hours
+- `outages_in_window` — Number of outages in the lookback across read apps and SQL Managed Instances with known hours; null if the app or SQL Managed Instance list failed or none has known hours
+- `ongoing_outages` — Number of read apps and SQL Managed Instances with known hours that are Unavailable now, in an outage; null if the app or SQL Managed Instance list failed or none has known hours
+- `customer_initiated_unavailable_windows` — Number of Unavailable periods the customer started (a stop, restart or scale, where Resource Health names the customer or user as the cause), which are not outages and count as available time; null if the app or SQL Managed Instance list failed or none was read
+- `longest_outage_hours` — Hours of the longest outage across read apps and SQL Managed Instances with known hours, its full length back to the oldest status Resource Health keeps (about 30 days), including any part before the lookback (0 when none had one); null if the app or SQL Managed Instance list failed or none has known hours
+- `longest_degraded_hours` — Hours of the longest Degraded period across read apps and SQL Managed Instances, its full length back to the oldest status Resource Health keeps (about 30 days) (0 when none had one); null if the app or SQL Managed Instance list failed or none was read
+- `longest_unknown_hours` — Hours of the longest Unknown period across read apps and SQL Managed Instances, its full length back to the oldest status Resource Health keeps (about 30 days) (0 when none had one); null if the app or SQL Managed Instance list failed or none was read
+- `lowest_availability_percentage` — Percentage of the lowest availability across read apps and SQL Managed Instances, where a resource's availability = (known hours − outage hours in the lookback) / known hours × 100, to three decimals; known hours are the observed hours less the Unknown hours, and observed hours run from the later of the lookback start and the resource's oldest status; Unavailable time the customer started counts as available, and a stopped app counts as Resource Health reports it, which can be Available and 100; when a resource's known hours is 0 it has no availability and is left out; null if the app or SQL Managed Instance list failed or no resource has one
+- `resources_without_availability` — Number of read apps and SQL Managed Instances left out of lowest_availability_percentage and the outage counts because their known hours is 0, such as one whose only status is Unknown now; null if the app or SQL Managed Instance list failed
+- `resources_with_unknown_hours` — Number of read apps and SQL Managed Instances with known hours and some Unknown hours in the lookback, whose availability covers only their known hours; null if the app or SQL Managed Instance list failed
+- `resources_with_partial_history` — Number of read apps and SQL Managed Instances whose oldest status is after the lookback start, so their availability covers only part of the lookback (Resource Health has no earlier status for them); a resource can be in this count and in resources_with_unknown_hours or resources_without_availability; null if the app or SQL Managed Instance list failed
+- `service_impacting_events` — Number of distinct Azure incidents Resource Health linked to the periods in the lookback; null if any of the three lists failed
+
+**Is recovery within the recovery time objective?**
+- `recovery_time_objective_hours` — Hours of the configured recovery time objective; null if none is set
+- `resources_meeting_recovery_time_objective` — Number of apps and SQL Managed Instances whose longest outage is within the objective, with no Unknown period longer than it and no outage that with the Unknown periods touching it runs longer than it; null if no objective is set or the app or SQL Managed Instance list failed
+- `resources_missing_recovery_time_objective` — Number of apps and SQL Managed Instances with an outage longer than the objective, ongoing ones included; null if no objective is set or the app or SQL Managed Instance list failed
+- `resources_recovery_time_objective_unknown` — Number of apps and SQL Managed Instances whose outages are not known well enough to judge: availability not read, no known hours, an Unknown period longer than the objective, or an outage that with the Unknown periods touching it runs longer than the objective, any of which could hide a miss; null if no objective is set or the app or SQL Managed Instance list failed
+- `all_resources_meet_recovery_time_objective` — True if every app and SQL Managed Instance meets the objective; false if any misses it; null if any is unknown, the app or instance list failed, there are none, or no objective is set
+
+**Are Front Door's origins answering health probes?**
+- `front_door_profiles_failing_origin_probes_now` — Number of read Front Door profiles whose current Resource Health state is Unavailable or Degraded: Resource Health judges a profile by whether its origins answer health probes, so this means one or more origins are failing them, not that Front Door stopped serving; null if the profile list failed
+- `front_door_origin_probe_failure_windows` — Number of Unavailable or Degraded periods in the lookback across read Front Door profiles; none counts as an outage, and per-origin health and traffic are in azure_front_door_origins; null if the profile list failed or none was read
+- `front_door_longest_origin_probe_failure_hours` — Hours of the longest Unavailable or Degraded period across read Front Door profiles, its full length back to the oldest status Resource Health keeps (about 30 days) (0 when none had one); null if the profile list failed or none was read
+
+**Do apps have a health check, and is it passing?**
+- `apps_stopped` — Number of apps whose state is Stopped; their health-check results get no healthy or unhealthy verdict, while their availability counts as Resource Health reports it; null if the app list failed
+- `apps_with_health_check` — Number of apps with a health check path set; null if the app list failed
+- `apps_without_health_check` — Number of apps with no health check path; null if the app list failed
+- `apps_health_check_unknown` — Number of apps whose configuration read failed; null if the app list failed
+- `all_apps_have_health_check` — True if every app has a health check path; false if any has none; null if any is unknown, the app list failed or there are no apps
+- `apps_health_check_healthy_last_hour` — Number of running apps whose newest hourly result in the last 3 hours is fully healthy: the hour's lowest HealthCheckStatus is 100; null if the app list failed
+- `apps_health_check_unhealthy_last_hour` — Number of running apps whose newest hourly result in the last 3 hours is below 100; null if the app list failed
+- `apps_health_check_without_recent_data` — Number of running apps with a health check path, or an unknown one, and no result in the last 3 hours; null if the app list failed
+- `apps_with_unhealthy_hours` — Number of running apps with at least one hour below 100 in the lookback; null if the app list failed
+- `health_check_metric_unread` — Number of apps whose health-check metric read failed; null if the app list failed
+
+**Which resources are out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource exclusion patterns
+- `resource_exclusion_patterns_unmatched` — List of the patterns that matched nothing
+- `excluded_apps` — Number of apps the patterns took out; null if the app list failed
+- `excluded_front_door_profiles` — Number of Front Door profiles the patterns took out; null if the profile list failed
+- `excluded_sql_managed_instances` — Number of SQL Managed Instances the patterns took out; null if the instance list failed
+- `in_scope_apps` — Number of apps left in scope; null if the app list failed
+- `in_scope_front_door_profiles` — Number of Front Door profiles left in scope; null if the profile list failed
+- `in_scope_sql_managed_instances` — Number of SQL Managed Instances left in scope; null if the instance list failed
 
 
 ### azure_vm_hardening_status
@@ -5011,7 +5186,7 @@ Summary fields:
 
 
 ### azure_sql_managed_instance_backups
-Short Description: Shows whether each SQL Managed Instance database keeps at least 7 days of point-in-time restore and long-term backups, and whether backups and the instance survive a zone or region loss.
+Short Description: Shows whether each SQL Managed Instance database keeps at least 7 days of point-in-time restore and long-term backups, survives a zone or region loss, and which failovers ran.
 
 Script: fetchers/azure/sql_managed_instance_backups/fetcher.py (shared helper: fetchers/azure/_shared/sql_managed_instance.py)
 
@@ -5025,8 +5200,9 @@ Commands Executed:
 - `managed_databases.list_by_instance()` (per in-scope instance) — the databases and their earliest restore points
 - `managed_backup_short_term_retention_policies.get()` (per user database) — point-in-time restore retention in days
 - `managed_instance_long_term_retention_policies.get()` (per user database) — weekly, monthly and yearly long-term retention
+- `activity_logs.list()` for resource provider Microsoft.Sql — every failover of a failover group or instance in the Activity Log's last 90 days
 
-Output: `azure_sql_managed_instance_backups_<subscription>.json` — each SQL Managed Instance with its state, backup storage redundancy, zone redundancy and failover groups, and each database's earliest restore point and short- and long-term retention; system databases are kept but not counted.
+Output: `azure_sql_managed_instance_backups_<subscription>.json` — each SQL Managed Instance with its state, backup storage redundancy, zone redundancy and failover groups, each database's earliest restore point and short- and long-term retention, and each failover in the window with its result, duration and the region that took over; system databases are kept but not counted.
 
 Summary fields:
 
@@ -5043,6 +5219,8 @@ Summary fields:
 - `excluded_instance_failover_groups` — Number of instance failover groups left out of scope because every instance the group pairs in this subscription is out of scope; each is listed under excluded with the pattern
 - `in_scope_managed_instances` — Number of SQL Managed Instances read and in scope; 0 means none was read or the patterns took out every instance, which a check can catch by requiring more than 0
 - `in_scope_instance_failover_groups` — Number of instance failover groups read and in scope
+- `excluded_failovers` — Number of failovers left out of scope because the failover group or instance they moved is out of scope, or, when that group or instance is no longer listed, because a pattern matched the failover's resource id; each is listed under excluded with the pattern
+- `in_scope_failovers` — Number of failovers read and in scope; null if the Activity Log couldn't be read in full
 
 **Does every user database keep at least 7 days of point-in-time restore?**
 - `databases_retention_at_least_7_days` — Number of user databases whose short-term (point-in-time restore) retention is 7 days or more
@@ -5067,6 +5245,20 @@ Summary fields:
 - `instances_failover_group_unknown` — Number of instances whose failover group membership is unknown: the failover group list for their resource group and region couldn't be read, and no other region's list showed them in a group
 - `total_instance_failover_groups` — Number of in-scope instance failover groups found in the resource groups and regions holding an instance, each counted once although Azure lists a group from every region it spans; null if a failover group list couldn't be read for a resource group and region holding an in-scope instance (a failed list where every instance is excluded is only logged as a warning)
 - `failover_groups_manual_policy` — Number of instance failover groups whose failover policy is Manual, so a person has to start a failover (Automatic fails over on its own); null if a failover group list couldn't be read for a resource group and region holding an in-scope instance
+
+**Have failovers been run, and how long did they take?**
+- `failover_history_days` — Days back that failovers are read from the Activity Log, ending at the run (90, the most the Activity Log keeps, unless AZURE_SQL_MI_FAILOVER_HISTORY_DAYS sets fewer)
+- `failover_history_read` — True if the Activity Log was read in full over the window; false if the read failed or stopped at 200,000 events, and then every failover field below is null
+- `total_failovers` — Number of failovers in the window, each one request (its Activity Log events share a correlation id), whatever its result; null if the Activity Log couldn't be read in full
+- `failover_group_failovers` — Number of failovers of an instance failover group, planned or forced; null if the Activity Log couldn't be read in full
+- `forced_failovers_allowing_data_loss` — Number of failover group failovers forced with possible data loss (forceFailoverAllowDataLoss); null if the Activity Log couldn't be read in full
+- `managed_instance_failovers` — Number of failovers between one managed instance's own replicas, started by someone rather than by a failover group; null if the Activity Log couldn't be read in full
+- `succeeded_failovers` — Number of failovers whose final status is Succeeded; null if the Activity Log couldn't be read in full
+- `failed_failovers` — Number of failovers whose final status is Failed; null if the Activity Log couldn't be read in full
+- `failover_groups_with_succeeded_failover` — Number of instance failover groups with at least one Succeeded failover in the window; null if the Activity Log couldn't be read in full
+- `latest_succeeded_failover_time` — Time of the end, in UTC, of the newest Succeeded failover; null if there was none or the Activity Log couldn't be read in full
+- `days_since_latest_succeeded_failover` — Days from the end of the newest Succeeded failover to the run; null if there was none or the Activity Log couldn't be read in full
+- `longest_succeeded_failover_minutes` — Longest time a Succeeded failover took, from its first Activity Log event to its final status, in minutes, to compare with the recovery time objective; null if there was none or the Activity Log couldn't be read in full
 
 
 ### azure_sql_managed_instance_configuration
