@@ -559,11 +559,30 @@ def test_variable_groups_count_secrets_and_key_vault_expiry(tmp_path):
     assert (s["key_vault_secrets_expired"], s["key_vault_secrets_without_expiry"]) == (1, 1)
 
 
+def test_a_disabled_expired_key_vault_secret_is_not_counted_as_expired(tmp_path):
+    fake = FakeADO()
+    group = {**KV_GROUP, "variables": {**KV_GROUP["variables"], "old-sql-admin": {
+        "value": None, "isSecret": True, "enabled": False, "contentType": "", "expires": ago(days=60)}}}
+    fake.routes[f"/contoso/{WEB}/_apis/distributedtask/variablegroups"]._body["value"][1] = group
+    fake.routes[f"/contoso/{OPS}/_apis/distributedtask/variablegroups"] = Resp(body={"value": [group]})
+    _, evidence, _, _, _ = run(tmp_path, fake)
+    kv = next(g for g in evidence["results"]["variable_groups"] if g["name"] == "kv-secrets")
+    assert [s["name"] for s in kv["key_vault_secrets"]] == ["old-sql-admin", "sql-admin", "storage-key"]
+    assert evidence["summary"]["key_vault_secrets_expired"] == 1
+
+
+def test_people_who_created_or_changed_objects_are_not_written(tmp_path):
+    _, _, _, _, path = run(tmp_path)
+    text = path.read_text()
+    for value in ("Ada Admin", "ada@example.com", "Bo Builder", "bo@example.com", "created_by", "modified_by"):
+        assert value not in text
+
+
 def test_secure_files_are_listed_by_name(tmp_path):
     _, evidence, _, fake, _ = run(tmp_path)
     web = next(p for p in evidence["results"]["projects"] if p["name"] == "Web")
     assert [f["name"] for f in web["secure_files"]] == ["signing.pfx"]
-    assert set(web["secure_files"][0]) == {"id", "name", "project", "created_on", "modified_on", "modified_by"}
+    assert set(web["secure_files"][0]) == {"id", "name", "project", "created_on", "modified_on"}
     assert evidence["summary"]["secure_files_total"] == 1
     assert {p["api-version"] for _, path, p in fake.calls if path.endswith("/securefiles")} == {mod.SECURE_FILES_API}
 

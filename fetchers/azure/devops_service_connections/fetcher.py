@@ -120,12 +120,6 @@ def scrub_url(value: Any) -> Optional[str]:
     return f"{scheme.lower()}://{host.lower()}"
 
 
-def person(ref: Any) -> Optional[Dict[str, Any]]:
-    if not isinstance(ref, dict):
-        return None
-    return {"id": ref.get("id"), "display_name": ref.get("displayName"), "login": ref.get("uniqueName")}
-
-
 def project_refs(refs: Any) -> List[Dict[str, Any]]:
     """Each project sharing the object, with the object's own name there (pipelines refer to it by that name)."""
     out = [{"id": (r.get("projectReference") or {}).get("id"), "name": (r.get("projectReference") or {}).get("name"),
@@ -182,7 +176,6 @@ def connection_record(raw: Dict[str, Any]) -> Dict[str, Any]:
         "azure": {out: data.get(key) for key, out in AZURE_DATA.items()} if azure else None,
         "is_ready": raw.get("isReady"),
         "is_shared": raw.get("isShared"),
-        "created_by": person(raw.get("createdBy")),
         "projects": project_refs(raw.get("serviceEndpointProjectReferences")),
     }
 
@@ -308,7 +301,6 @@ def variable_group_record(raw: Dict[str, Any]) -> Dict[str, Any]:
         "key_vault_secrets": kv_secrets,
         "created_on": iso(parse_time(raw.get("createdOn"))),
         "modified_on": iso(parse_time(raw.get("modifiedOn"))),
-        "modified_by": person(raw.get("modifiedBy")),
         "is_shared": raw.get("isShared"),
         "projects": project_refs(raw.get("variableGroupProjectReferences")),
     }
@@ -321,7 +313,6 @@ def secure_file_record(raw: Dict[str, Any], project: Dict[str, Any]) -> Dict[str
         "project": project["name"],
         "created_on": iso(parse_time(raw.get("createdOn"))),
         "modified_on": iso(parse_time(raw.get("modifiedOn"))),
-        "modified_by": person(raw.get("modifiedBy")),
     }
 
 
@@ -472,7 +463,9 @@ def summarize(connections, groups, projects, principals, days) -> Dict[str, Any]
                                                            if g["secret_variables_outside_key_vault"]],
         "secret_variables_total": sum(g["secret_variables"] for g in groups),
         "secret_variables_outside_key_vault": sum(g["secret_variables_outside_key_vault"] for g in groups),
-        "key_vault_secrets_expired": sum(1 for s in kv_secrets if s["expires"] and s["expires"] < now),
+        # A disabled, expired secret is the usual state after rotation.
+        "key_vault_secrets_expired": sum(1 for s in kv_secrets
+                                         if s["expires"] and s["expires"] < now and s["enabled"] is not False),
         "key_vault_secrets_without_expiry": sum(1 for s in kv_secrets if not s["expires"]),
         "secure_files_total": len(files),
         "not_collected": dict(NOT_COLLECTED),
