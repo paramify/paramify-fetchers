@@ -1,0 +1,26 @@
+key: sentinel_playbooks_live_notify_named_contacts
+name: Azure Sentinel Live Playbooks Notify Named Contacts
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one live playbook (an enabled Logic App that an active, unexpired Sentinel automation
+  rule runs) sends email or a Teams message, and the live playbooks email at least one fixed
+  address, with every live playbook's definition read. So escalation contacts are written into the
+  automated response. Supports the part of KSI-INR-RIR this evidence can see. Fails when no live
+  playbook notifies anyone, when the live playbooks only post to Teams or only email addresses built
+  from the incident when they run (the owner, say), or when a live playbook's definition couldn't
+  be read. Does NOT prove: that the addresses are current or match the escalation roster; that
+  mail was delivered or read; who a Teams message reaches; or that a notifying playbook ran
+  (sentinel_playbooks_live_last_run_succeeded covers that).
+
+# Both read null when a live playbook's definition can't be read, so the digit and the opening quote fail rather
+# than reading unknown as empty; the summary's keys are written sorted.
+regex: '"live_notifying_playbooks":\s*(?<live_notifying_playbooks>[1-9]\d*)[\s\S]*?"notification_recipients":\s*\[\s*"(?<first_recipient>[^"@]+@[^"]+)"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-PLAYBOOKS
