@@ -33,6 +33,8 @@ ALL = "all"
 # clientAppTypes: a user signs in through both modern types; the legacy types can't present MFA.
 MODERN_CLIENT_TYPES = {"browser": "browser", "mobileappsanddesktopclients": "mobileAppsAndDesktopClients"}
 LEGACY_CLIENT_TYPES = frozenset({"exchangeactivesync", "other"})
+# authenticationFlows.transferMethods when a policy has no authentication flow condition.
+NO_TRANSFER_METHOD = "none"
 GUESTS = "GuestsOrExternalUsers"
 GUEST_FILTER = "userType eq 'Guest'"
 # guestOrExternalUserTypes that hold users of type Guest; an include naming both, for every tenant, covers them all.
@@ -118,7 +120,8 @@ def narrowing_conditions(conditions: Dict[str, Any]) -> List[str]:
         found.append("locations")
     if (conditions.get("devices") or {}).get("deviceFilter"):
         found.append("device_filter")
-    if conditions.get("authenticationFlows"):
+    flows = str((conditions.get("authenticationFlows") or {}).get("transferMethods") or "")
+    if {m.strip().lower() for m in flows.split(",")} - {"", NO_TRANSFER_METHOD}:
         found.append("authentication_flows")
     return found
 

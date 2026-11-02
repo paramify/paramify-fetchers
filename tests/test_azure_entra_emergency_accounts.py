@@ -287,6 +287,15 @@ def test_policies_for_some_apps_or_with_conditions_do_not_cover(monkeypatch):
     assert s["users_excluded_from_mfa"] == 3
 
 
+def test_only_a_named_transfer_method_is_an_authentication_flow_condition():
+    flows = [{"transferMethods": "none"}, {"transferMethods": "deviceCodeFlow,authenticationTransfer"}, None]
+    found = [emergency.narrowing_conditions({"authenticationFlows": f}) for f in flows]
+    assert found == [[], ["authentication_flows"], []]
+    assert emergency.narrowing_conditions({"insiderRiskLevels": "minor,moderate", "servicePrincipalRiskLevels": ["high"],
+                                           "devices": {"deviceFilter": {"mode": "exclude", "rule": "r"}}}) == [
+        "service_principal_risk", "insider_risk", "device_filter"]
+
+
 def test_policies_split_by_client_type_cover_together(monkeypatch):
     graph, arm = _tenant()
     graph["/identity/conditionalAccess/policies"] += [
