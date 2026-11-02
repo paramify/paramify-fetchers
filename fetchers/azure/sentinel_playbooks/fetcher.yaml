@@ -78,7 +78,7 @@ evidence_set:
     - logic_apps_scanned — Number of Consumption Logic Apps listed in the subscription
     - playbooks — Number of playbooks: Logic Apps triggered by the Sentinel connector (on an incident, alert or entity), plus any Logic App an automation rule runs, Standard (single-tenant) workflows included
     - standard_playbooks — Number of playbooks that are Standard workflows; these are found only when an automation rule runs them
-    - playbooks_without_definition — List of the resource ids of playbooks whose definition wasn't read; what each of them does reads null
+    - playbooks_without_definition — List of the resource ids of playbooks whose definition wasn't read; the triggers, connectors and capabilities of a playbook listed here read null
     - automation_rule_references_unresolved — List of the resource ids (lowercased) of Logic Apps an automation rule runs that couldn't be read: one in a subscription or resource group the credential can't read (401, 403, 404 or SubscriptionNotFound, each also given a note), or one since deleted; any other error fails the run
 
     Which playbooks are live?
