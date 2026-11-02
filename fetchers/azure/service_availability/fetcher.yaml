@@ -126,7 +126,7 @@ evidence_set:
     - ongoing_outages — Number of read resources Unavailable now, in an outage
     - customer_initiated_unavailable_windows — Number of Unavailable periods the customer started (a stop, restart or scale, where Resource Health names the customer or user as the cause), which are not outages
     - longest_outage_hours — Hours of the longest outage across read resources, its full length including any part before the lookback (0 when none had one); null when none was read
-    - lowest_availability_percentage — Percentage of the lowest availability across read resources, where a resource's availability is 100 x (observed hours - outage hours in the lookback) / observed hours, and observed hours run from the later of the lookback start and the oldest status
+    - lowest_availability_percentage — Percentage of the lowest availability across read resources, where a resource's availability = (observed hours - outage hours in the lookback) / observed hours x 100, to three decimals, and observed hours run from the later of the lookback start and the resource's oldest status; when a resource's observed hours is 0 it has no availability and is left out; null when no resource has one
     - service_impacting_events — Number of distinct Azure incidents Resource Health linked to the periods in the lookback
 
     Is recovery within the recovery time objective?
