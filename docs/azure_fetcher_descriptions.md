@@ -1681,8 +1681,8 @@ Commands Executed:
 - `subscriptions.list()` — picks a subscription when none is set
 - `providers.get()` for Microsoft.ResourceHealth — tells an unregistered provider from a quiet subscription
 - `GET Microsoft.ResourceHealth/events` — the Service Health events last updated within the lookback window (180 days at most)
-- `ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events'` — events Resource Graph still holds, to catch older ones the window misses
-- `GET Microsoft.ResourceHealth/events/{trackingId}` (per event Resource Graph holds that the window missed) — its full record
+- `ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events'` — events Resource Graph still holds, with their last update, to catch older ones the window misses
+- `GET Microsoft.ResourceHealth/events/{trackingId}` (per event Resource Graph holds that the window missed, from the day before its last update) — its full record
 - `POST Microsoft.ResourceHealth/events/{trackingId}/fetchEventDetails` (per sensitive event) — the summary and updates the list leaves out
 - `ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events/impactedresources'` — the resources each event names
 - `POST Microsoft.ResourceHealth/events/{trackingId}/listSecurityAdvisoryImpactedResources` (per security advisory) — the resources the advisory names
@@ -1694,7 +1694,8 @@ Summary fields:
 **What did Microsoft report to the subscription?**
 - `lookback_days` — Number of days back the event list reaches, counted against each event's last update (180 by default, and at most 180, because the list answers an error for a longer window)
 - `events` — Number of Service Health events in scope: events last updated within the window plus older events Resource Graph still holds, billing communications left out; null, like every count below except the scope lists, when the event list couldn't be read
-- `events_from_resource_graph` — Number of events in scope that the windowed list left out and Resource Graph still holds, such as a retirement announced long ago; null when Resource Graph's events couldn't be read
+- `events_from_resource_graph` — Number of events in scope that the windowed list left out and Resource Graph still holds, such as a retirement announced long ago, each read by its tracking id; null when Resource Graph's events couldn't be read
+- `events_in_resource_graph_not_found` — Number of events Resource Graph holds, outside the windowed list, that the event API did not find when read by tracking id; such an event is missing from every other count, so above 0 the evidence is short; null when Resource Graph's events could not be read
 - `events_by_type` — Number of events of each type; a type with none is left out:
   - ServiceIssue (an outage or degradation of an Azure service)
   - PlannedMaintenance (scheduled maintenance that may affect availability)
@@ -1702,11 +1703,11 @@ Summary fields:
   - SecurityAdvisory (a security notice for the subscription)
   - RCA (a post-incident review of an earlier service issue)
   - EmergingIssues (a broad issue Microsoft is still investigating)
-- `events_by_status` — Number of events in each status Microsoft gives: Active or Resolved
-- `events_by_level` — Number of events at each level Microsoft gives: Critical, Error, Warning or Informational
+- `events_by_status` — Number of events in each status Microsoft gives: Active, Resolved, or unknown when Microsoft gives none
+- `events_by_level` — Number of events at each level Microsoft gives: Critical, Error, Warning, Informational, or unknown when Microsoft gives none
 - `retirement_advisories` — Number of health advisories that announce a retirement (sub-type Retirement)
 - `billing_events_skipped` — Number of billing communications left out of the evidence
-- `provider_registration_status` — Whether Microsoft.ResourceHealth is registered on the subscription: registered, not_registered or unknown
+- `provider_registration_status` — Whether Microsoft.ResourceHealth is registered on the subscription: registered, not_registered or unknown (the lookup failed). Only registered makes 0 events mean none: with the provider not registered, the event list may come back empty without an error, so 0 events means unreadable, not quiet
 
 **Which events are still open, and what do they ask for?**
 - `open_events` — Number of open events. Open follows Microsoft's own rule for an active event: a service issue while its status is Active, and any other event until its impact mitigation time passes (or while its status is Active, when it has none)
@@ -1735,7 +1736,7 @@ Summary fields:
 **Which resources are left out of scope?**
 - `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
 - `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no resource an event names, such as a mistyped name
-- `excluded_impacted_resources` — Number of resources named by events that a pattern took out by resource group, region or id; each is listed under excluded with the pattern and the event, and no other count includes them; null while any event's resource list is unread
+- `excluded_impacted_resources` — Number of distinct resources named by events that a pattern took out by resource group, region or id; each is listed under excluded with the pattern, once for each event that names it, and no other count includes them; null while any event's resource list is unread
 - `excluded_events` — Number of events left out because a pattern took out every resource they name; each is listed under excluded
 
 
