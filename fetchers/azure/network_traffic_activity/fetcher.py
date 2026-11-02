@@ -532,7 +532,8 @@ def profile_record(profile: dict, settings, origins: list[dict], workspaces: dic
     rows = _rows(workspaces, counted, "fd_profiles", rid)
     requests = sum(_num(r.get("Requests")) for r in rows)
     arriving = _arriving(requests, wids, workspaces, FD_TABLE)
-    known = arriving is not None and _answered(counted, workspaces, FD_TABLE)
+    # The copy that wasn't read could be the fuller one.
+    known = bool(wids) and _answered(wids, workspaces, FD_TABLE)
     clients = _rows(workspaces, counted, "fd_clients", rid)
     return {
         "id": profile.get("id"),
@@ -594,7 +595,7 @@ def origin_app_record(entry: dict, settings, workspaces: dict, ranges_known: boo
     rows = _rows(workspaces, counted, "origin_sources", rid)
     requests = sum(_num(r.get("Requests")) for r in rows)
     arriving = _arriving(requests, wids, workspaces, HTTP_TABLE)
-    known = ranges_known and arriving is not None and _answered(counted, workspaces, HTTP_TABLE)
+    known = ranges_known and bool(wids) and _answered(wids, workspaces, HTTP_TABLE)
     by_source = {s: 0 for s in SOURCES}
     served = {s: 0 for s in SOURCES}
     clients = {s: 0 for s in SOURCES}

@@ -335,6 +335,17 @@ def test_profile_without_readable_logs_reads_unknown(settings, workspaces, arriv
     assert rec["requests"] == requests
 
 
+def test_profile_figures_need_every_exporting_workspace():
+    rid = PROFILE.lower()
+    workspaces = {LAW.lower(): fd_ws(fd_profiles=[{"ResourceId": rid, "Requests": 10, "Status5xx": 1}]),
+                  LAW2.lower(): fd_ws(status=nta.WS_NOT_AUTHORIZED, read=())}
+    rec = nta.profile_record({"id": PROFILE, "name": "fd1"},
+                             [setting(category="FrontDoorAccessLog"), setting(workspace=LAW2, group="allLogs")],
+                             [], workspaces, sample=5)
+    assert rec["access_logs_arriving"] is True
+    assert rec["requests"] is None and rec["status_classes"] is None
+
+
 def test_match_origin_apps_by_host_and_by_resource():
     sites = [{"id": SITE, "name": "app1", "properties": {"enabledHostNames": ["app1.azurewebsites.net", "app1.scm.azurewebsites.net"]}},
              {"id": f"{SITE}2", "name": "app2", "properties": {"defaultHostName": "app2.azurewebsites.net"}}]
@@ -371,6 +382,17 @@ def test_origin_bypass_counts_public_requests():
     assert (rec["requests_outside_front_door"], rec["requests_outside_front_door_served"]) == (12, 2)
     assert rec["top_clients_outside_front_door"] == [{"client_ip": "198.51.100.2", "requests": 10, "served": 2}]
     assert rec["http_logs_arriving"] is True
+
+
+def test_origin_figures_need_every_exporting_workspace():
+    rid = SITE.lower()
+    workspaces = {LAW.lower(): {"status": nta.WS_QUERIED, "read_tables": [nta.HTTP_TABLE],
+                                "origin_sources": [{"ResourceId": rid, "Source": "front_door", "Requests": 9}]},
+                  LAW2.lower(): {"status": nta.WS_ERROR, "read_tables": []}}
+    rec = nta.origin_app_record(app_entry(), [setting(category="AppServiceHTTPLogs"), setting(workspace=LAW2, group="allLogs")],
+                                workspaces, True, sample=5)
+    assert rec["http_logs_arriving"] is True
+    assert rec["requests_by_source"] is None and rec["requests_outside_front_door"] is None
 
 
 @pytest.mark.parametrize("settings, ranges_known", [
