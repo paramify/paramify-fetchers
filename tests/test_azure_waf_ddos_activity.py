@@ -246,7 +246,7 @@ def test_redirect_counts_as_blocked():
 
 def test_detection_mode_block_rows_count_as_would_block():
     blocked = f"countif({wda._BLOCK} and Mode != 'detection')"
-    would = f"countif({wda._BLOCK} and Mode == 'detection')"
+    would = f"countif(({wda._BLOCK} and Mode == 'detection') or Action == 'detected')"
     assert f"Blocked = {blocked} > 0" in wda.WAF_QUERIES["requests"]
     assert f"WouldBlock = {would} > 0" in wda.WAF_QUERIES["requests"]
     assert f"Blocked = {blocked} by ResourceId, Rule" in wda.WAF_QUERIES["rules"]
@@ -260,6 +260,26 @@ def test_detection_mode_block_rows_count_as_would_block():
     assert (by_policy["detect"]["requests_blocked"], by_policy["detect"]["requests_would_block"]) == (0, 3)
     summary = wda.summarize([rec], [], [], [], 30, 0, total_ips=0)
     assert (summary["waf_requests_blocked"], summary["waf_requests_would_block"]) == (4, 3)
+
+def test_a_gateway_detected_row_counts_as_would_block():
+    # Detection mode: rule matches log Matched, the anomaly-score rule 949110 logs Detected on the same transaction.
+    for base in ("agw", "agw_dedicated"):
+        assert "Mode = iff(Action == 'detected', 'detection', '')" in wda.WAF_BASES[base][1]
+    assert "detected" not in wda.LOG_ACTIONS and "Action == 'detected'" in wda._WOULD_BLOCK
+    requests = wda.WAF_QUERIES["requests"]
+    assert "Mode = take_anyif(Mode, isnotempty(Mode))" in requests
+    assert "by ResourceId, Policy, Ref " in requests and "by ResourceId, Policy, Mode, Ref" not in requests
+    gateway = wda.gateway_waf_resource({"id": AGW, "name": "agw1", "properties": {
+        "sku": {"tier": "WAF_v2", "name": "WAF_v2"}, "firewallPolicy": {"id": AGW_POLICY}}})
+    rows = [requests_row(rid=AGW, policy=AGW_POLICY, mode="detection", requests=3, would_block=3, logged=0),
+            requests_row(rid=AGW, policy=AGW_POLICY, mode="", requests=2, logged=2)]
+    workspaces = {LAW.lower(): {"status": wda.WS_QUERIED, "read_tables": [wda.DIAG_TABLE], "agw:requests": rows}}
+    policies = {AGW_POLICY.lower(): {"id": AGW_POLICY, "name": "agwpolicy", "mode": "Detection", "enabled": True}}
+    rec = wda.waf_activity(gateway, [setting(category="ApplicationGatewayFirewallLog")], workspaces, policies, [], sample=5)
+    assert (rec["requests_matched"], rec["requests_would_block"], rec["requests_logged_only"]) == (5, 3, 2)
+    assert rec["detection_mode"] is True
+    assert rec["activity_by_policy"][0]["logged_modes"] == ["detection"]
+
 
 def test_gateway_with_dedicated_tables_reads_agw_firewall_logs():
     gateway = wda.gateway_waf_resource({"id": AGW, "name": "agw1", "properties": {

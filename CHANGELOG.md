@@ -17,7 +17,9 @@ schemas and the `paramify` CLI — not the internal code.
   - WAF: each Front Door profile with a WAF policy and each WAF-tier App Gateway, with
     its WAF log export and, from Log Analytics, requests blocked, logged only and
     allowed per policy, the most-matched rules and the last event. A request that
-    matched several rules counts once. Detection-mode policies are flagged.
+    matched several rules counts once. Detection-mode policies are flagged, and a
+    request one would have blocked in Prevention mode counts as would-block: a
+    Front Door blocking action, or an App Gateway's `Detected` (rule 949110).
   - Alerts: rules on WAF metrics or logs and on `IfUnderDDoSAttack` or DDoS logs,
     resolved to their receivers through `_shared/alert_routing.py`.
   - DDoS: each internet-facing public IP's own protection mode, DDoS log export,

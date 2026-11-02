@@ -69,7 +69,7 @@ QUERY_CODE = re.compile(r"^\((\d{3})\)\s*(\S*)")
 
 # Redirect sends the request elsewhere, so it never reaches the origin.
 BLOCK_ACTIONS = ("block", "blocked", "jschallengeblock", "redirect")
-LOG_ACTIONS = ("log", "anomalyscoring", "logandscore", "detected", "matched")
+LOG_ACTIONS = ("log", "anomalyscoring", "logandscore", "matched")
 ALLOW_ACTIONS = ("allow", "allowed")
 
 # Each WAF log normalised to Action, Policy, Mode, Rule and Ref (the request), whatever table it sits in.
@@ -108,16 +108,17 @@ WAF_BASES = {
 _BLOCK = "Action in ({})".format(", ".join(f"'{a}'" for a in BLOCK_ACTIONS))
 _LOG = "Action in ({})".format(", ".join(f"'{a}'" for a in LOG_ACTIONS))
 _ALLOW = "Action in ({})".format(", ".join(f"'{a}'" for a in ALLOW_ACTIONS))
-# A Detection-mode policy logs the action Prevention would take but never blocks.
+# In Detection mode Front Door logs the action Prevention would take; a gateway's mandatory rules (949110) log Detected.
 _BLOCKED = f"{_BLOCK} and Mode != 'detection'"
-_WOULD_BLOCK = f"{_BLOCK} and Mode == 'detection'"
-# One request can match several rules, so each is folded to one row before it is counted.
+_WOULD_BLOCK = f"({_BLOCK} and Mode == 'detection') or Action == 'detected'"
+# One request can match several rules, so each is folded to one row, with the mode of any row that has one.
 WAF_QUERIES = {
     "requests": "| extend Ref = iff(isempty(Ref), tostring(new_guid()), Ref) "
                 f"| summarize Events = count(), Blocked = countif({_BLOCKED}) > 0, WouldBlock = countif({_WOULD_BLOCK}) > 0, "
                 f"Logged = countif({_LOG}) > 0, Allowed = countif({_ALLOW}) > 0, "
                 f"Challenged = countif(Action has 'challenge' and not({_BLOCK})) > 0, "
-                "First = min(TimeGenerated), Last = max(TimeGenerated) by ResourceId, Policy, Mode, Ref "
+                "Mode = take_anyif(Mode, isnotempty(Mode)), "
+                "First = min(TimeGenerated), Last = max(TimeGenerated) by ResourceId, Policy, Ref "
                 "| summarize Events = sum(Events), Requests = count(), RequestsBlocked = countif(Blocked), "
                 "RequestsWouldBlock = countif(WouldBlock and not(Blocked)), "
                 "RequestsLoggedOnly = countif(Logged and not(Blocked) and not(WouldBlock) and not(Allowed)), "
