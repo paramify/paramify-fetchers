@@ -80,7 +80,8 @@ evidence_set:
     then GET /directoryRoles/{id}/members per privileged role and
     GET /groups/{id}/transitiveMembers per role-assignable group holding one;
     GET /organization. Collections paged via @odata.nextLink. Coverage over all users
-    leaves out users with no registration-details row (the report omits disabled
-    accounts, so their MFA is unknown); coverage over enabled users counts them as
-    without MFA. A failed users read leaves every figure null, and a failed
+    leaves out disabled users with no registration-details row (the report omits
+    disabled accounts, so their MFA is unknown), and users_counted_in_all_users_coverage
+    gives its denominator; an enabled user with no row counts as without MFA, there and
+    in the coverage over enabled users. A failed users read leaves every figure null, and a failed
     registration-details read every figure that relies on it.

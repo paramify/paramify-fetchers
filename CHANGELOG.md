@@ -854,10 +854,11 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
   report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`
-  counted every one as without MFA. It is now taken over the users with a row,
-  and the new `users_with_registration_details` gives its denominator. The
-  figures over enabled users and admins are unchanged: there a user with no row
-  still counts as without MFA. A failed read no longer reads as 0: when the users
+  counted every one as without MFA. It now leaves out disabled users with no row,
+  and the new `users_counted_in_all_users_coverage` gives its denominator; an
+  enabled user with no row still counts as without MFA, as in the figures over
+  enabled users and admins, which are unchanged. The new
+  `users_with_registration_details` counts the users with a row. A failed read no longer reads as 0: when the users
   list can't be read in full every figure is null, and when the registration
   report can't be, every figure that relies on it.
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
