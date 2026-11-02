@@ -473,7 +473,8 @@ def utc_now() -> datetime:
 
 
 def read_failover_history(subscription_id, cred, collector: Collector, days: int, now: datetime):
-    """Microsoft.Sql failover events in [now - days, now]; events is None on a failed or cut read, which would undercount."""
+    """Microsoft.Sql failover events in [now - days, now]; events is None on a failed or cut read, which would undercount,
+    and either is recorded as a failure."""
     start = now - min(timedelta(days=days), timedelta(days=ACTIVITY_LOG_MAX_DAYS) - ACTIVITY_LOG_RETENTION_MARGIN)
     window: dict = {"days": days, "start_time": _iso(start), "end_time": _iso(now), "complete": False,
                     "cut_reason": None, "events_read": 0}
@@ -489,7 +490,9 @@ def read_failover_history(subscription_id, cred, collector: Collector, days: int
         for event in monitor.activity_logs.list(filter=query):
             if window["events_read"] >= ACTIVITY_LOG_MAX_EVENTS:
                 window["cut_reason"] = "max_events"
-                logger.warning("Activity Log read stopped at %d events; failover counts read null", ACTIVITY_LOG_MAX_EVENTS)
+                collector.record("monitor.activity_logs.list", RuntimeError(
+                    f"stopped after {ACTIVITY_LOG_MAX_EVENTS} Microsoft.Sql events without reaching the window's start, "
+                    f"so the failover counts are unknown; shorten {FAILOVER_DAYS_ENV}"))
                 return None, window
             window["events_read"] += 1
             projected = project_event(event)

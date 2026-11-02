@@ -113,7 +113,7 @@ evidence_set:
     Automatic policy may leave no Activity Log entry. `results.failover_history_window`
     gives the window read and whether it was read in full; when the read failed
     or stopped at 200,000 events, `results.failovers` and every failover count
-    are null, never 0. Summary: `failover_history_days`, `failover_history_read`,
+    are null, never 0, and the run fails (partial_failure). Summary: `failover_history_days`, `failover_history_read`,
     `total_failovers`, `failover_group_failovers`,
     `forced_failovers_allowing_data_loss`, `managed_instance_failovers`,
     `succeeded_failovers`, `failed_failovers`,

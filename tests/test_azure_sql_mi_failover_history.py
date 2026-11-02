@@ -153,11 +153,14 @@ def test_read_names_both_ends_of_the_window_and_keeps_only_failover_events(monke
     assert (window["complete"], window["events_read"], window["days"]) == (True, 2, 30)
 
 
-def test_a_read_cut_at_the_event_limit_reads_null(monkeypatch):
+def test_a_read_cut_at_the_event_limit_reads_null_and_fails_the_run(monkeypatch):
     monkeypatch.setattr(backups, "ACTIVITY_LOG_MAX_EVENTS", 1)
     _monitor(monkeypatch, [ns(), ns()])
-    events, window = backups.read_failover_history("s1", object(), Collector(logging.getLogger("t")), 90, NOW)
+    collector = Collector(logging.getLogger("t"))
+    events, window = backups.read_failover_history("s1", object(), collector, 90, NOW)
     assert events is None and (window["complete"], window["cut_reason"]) == (False, "max_events")
+    assert [f["operation"] for f in collector.failures] == ["monitor.activity_logs.list"]
+    assert backups.classify_failure_code(collector.failures) == "partial_failure"
 
 
 def test_real_sdk_event_projects():

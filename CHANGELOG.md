@@ -548,7 +548,8 @@ schemas and the `paramify` CLI — not the internal code.
   groups with a succeeded failover (by group id, so groups sharing a name in
   different resource groups count apart), the newest succeeded failover and days since
   it, and the longest succeeded failover in minutes; each is null, not 0, when
-  the Activity Log wasn't read in full. A failover follows its failover group or
+  the Activity Log wasn't read in full, and a read that failed or stopped at
+  200,000 events fails the run. A failover follows its failover group or
   instance out of scope under `resource_exclusions`. Also maps to KSI-RPL-RRO
   and KSI-RPL-TRC. The 0.2.0 fields are unchanged.
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
