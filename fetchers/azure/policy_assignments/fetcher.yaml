@@ -1,5 +1,5 @@
 name: azure_policy_assignments
-version: 0.3.0
+version: 0.4.0
 description: >
   Every Azure Policy assignment in effect on the subscription — its own and the ones
   inherited from a management group: display name, the referenced policy definition
@@ -15,7 +15,14 @@ description: >
   which assignments actually enforce (an enforcing effect under enforcementMode
   Default) and which only audit. An effect value it does not recognise is reported
   as unresolved with that value in its reason, and the summary counts unresolved
-  member policies, overall and under DoNotEnforce.
+  member policies, overall and under DoNotEnforce. Every policy exemption in effect
+  is listed too — the subscription's own, those inherited from a management group,
+  and those on resource groups and resources inside it, Defender for Cloud
+  recommendation exemptions included — with the assignment and initiative members
+  it exempts, its scope, category (Waiver or Mitigated), description, metadata,
+  creator and expiry, flagging expired ones, ones with no expiry, and ones that lift
+  an enforcing effect. Exemptions come from a preview api-version
+  (2024-12-01-preview), the only kind Azure offers for them.
 category: azure
 
 supports_targets: true
@@ -46,6 +53,26 @@ target_schema:
       Deployment environment label (e.g. prod / preprod) written into the evidence
       metadata. Optional — set per target for multi-subscription runs.
 
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group>, location:<region> or id:<resource id> (also
+      matches that resource's child resources). * matches any run of characters and
+      ? one character. Only policy exemptions follow them: an exemption follows the
+      scope it was made at, matched through its own id, so rg: takes out one made in
+      that resource group or on a resource in it and id: one made on that resource
+      (or the exemption itself); one made at the subscription or a management group
+      stays. Exemptions carry no region, so a location: pattern never matches one
+      and they stay in scope. Each match is listed under excluded with the pattern
+      and left out of every exemption count and each assignment's exemption_count.
+      Policy assignments are not affected. A pattern without one of these prefixes
+      fails the run.
+
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
@@ -64,5 +91,9 @@ evidence_set:
     or get_at_management_group(). For initiatives, policy_definitions.list_built_in() once
     to read built-in member definitions, and the same getters for custom members; each
     effect is read from policyRule.then.effect and resolved through the assignment and
-    definition parameters. Reader, plus management-group read for MG-scoped custom
-    definitions.
+    definition parameters. Policy exemptions: one raw ARM GET of
+    /subscriptions/<id>/providers/Microsoft.Authorization/policyExemptions at the preview
+    api-version 2024-12-01-preview (no filter, so inherited, resource-group, resource and
+    expired exemptions are all returned), following nextLink; a 400 or 404 on that
+    api-version reports the exemptions as unknown (null counts) without failing the run.
+    Reader, plus management-group read for MG-scoped custom definitions.

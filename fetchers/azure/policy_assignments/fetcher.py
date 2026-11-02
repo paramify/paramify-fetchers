@@ -20,18 +20,25 @@ definition, or of every member of its initiative, resolved through the parameter
 (assignment value, then initiative default, then definition default) — and
 `actually_enforces`, which needs both an enforcing effect and enforcementMode Default.
 Resolution is best-effort in the same way as the display name.
+
+Policy exemptions (Microsoft.Authorization/policyExemptions, Defender recommendation
+exemptions included) exist only in preview api-versions, which the stable SDK does not
+ship, so they are listed by a raw ARM GET pinned to EXEMPTIONS_API_VERSION.
 """
 
 import logging
-import re
+import math
 import os
+import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from arm_rest import arm_rest_client, list_all  # noqa: E402
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
@@ -45,11 +52,12 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_policy_assignments")
 
@@ -127,6 +135,20 @@ SOURCE_DEFINITION_DEFAULT = "definition_default"
 # "[parameters('effect')]" — the one expression form the effect chain can follow.
 # Anything else ("[if(...)]", a concat) is reported as unresolved with its raw text.
 PARAMETER_REFERENCE = re.compile(r"^\[\s*parameters\(\s*'([^']+)'\s*\)\s*\]$", re.IGNORECASE)
+
+# Exemptions have no GA api-version; a 400 or 404 on this one reads as unknown, not as none.
+EXEMPTIONS_API_VERSION = "2024-12-01-preview"
+EXEMPTION_SEGMENT = "/providers/microsoft.authorization/policyexemptions/"
+EXEMPTION_CATEGORIES = ("Waiver", "Mitigated")
+EXPIRING_SOON_DAYS = 30
+EXCLUDED_KINDS = ("policy_exemption",)
+
+# exemptions_read_status values.
+EXEMPTIONS_READ = "read"
+EXEMPTIONS_FAILED = "failed"
+EXEMPTIONS_API_UNAVAILABLE = "api_version_unavailable"
+EXEMPTIONS_NOT_READ = "not_read"
+FRACTION = re.compile(r"(\.\d{6})\d+")
 
 
 # --- projection: the only azure-mgmt model access ---
@@ -622,6 +644,211 @@ def summarize_effects(assignments: list[dict]) -> dict:
     }
 
 
+# --- policy exemptions (wire JSON in, evidence records out) ---
+
+def project_policy_exemption(item: dict) -> dict:
+    """Flatten one policyExemptions list item (raw ARM JSON, not an SDK model)."""
+    props = item.get("properties") or {}
+    system = item.get("systemData") or {}
+    return {
+        "id": item.get("id"),
+        "name": item.get("name"),
+        "display_name": props.get("displayName"),
+        "description": props.get("description"),
+        "policy_assignment_id": props.get("policyAssignmentId"),
+        "policy_definition_reference_ids": list(props.get("policyDefinitionReferenceIds") or []),
+        "exemption_category": props.get("exemptionCategory"),
+        "expires_on": props.get("expiresOn"),
+        "metadata": props.get("metadata"),
+        "assignment_scope_validation": props.get("assignmentScopeValidation"),
+        "resource_selectors": list(props.get("resourceSelectors") or []),
+        "created_by": system.get("createdBy"),
+        "created_by_type": system.get("createdByType"),
+        "created_at": system.get("createdAt"),
+        "last_modified_by": system.get("lastModifiedBy"),
+        "last_modified_at": system.get("lastModifiedAt"),
+    }
+
+
+def exemption_scope(exemption_id) -> str | None:
+    """The scope an exemption was made at: its id up to /providers/Microsoft.Authorization/policyExemptions/."""
+    text = str(exemption_id or "")
+    index = text.lower().rfind(EXEMPTION_SEGMENT)
+    if index < 0:
+        return None
+    return text[:index] or None
+
+
+def parse_time(value) -> datetime | None:
+    """An ARM timestamp as an aware UTC datetime; ARM writes up to 7 fractional digits."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(FRACTION.sub(r"\1", value.strip()).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _arm_id_key(value) -> str:
+    return str(value or "").lower().rstrip("/")
+
+
+def _exempted_members(reference_ids: list, assignment: dict | None) -> list[dict]:
+    """Each exempted initiative member, joined to the assignment's resolved member by reference id."""
+    members = {
+        str(m.get("reference_id") or "").lower(): m
+        for m in ((assignment or {}).get("policy_effects") or {}).get("members") or []
+        if m.get("reference_id")
+    }
+    rows = []
+    for reference_id in reference_ids:
+        member = members.get(str(reference_id).lower()) or {}
+        rows.append({
+            "reference_id": reference_id,
+            "policy_definition_name": member.get("policy_definition_name"),
+            "display_name": member.get("display_name"),
+            "effect": member.get("effect"),
+        })
+    return rows
+
+
+def _lifts_enforcement(whole: bool, members: list[dict], assignment: dict | None):
+    """True when the exemption covers an enforcing effect of an enforced assignment, False when it can't, None
+    when unknown."""
+    if assignment is None:
+        return None
+    if not assignment.get("enforced", True):
+        return False
+    if whole:
+        block = assignment.get("policy_effects") or {}
+        if block.get("enforcing_member_count"):
+            return True
+        return False if block and block.get("status") == RESOLVED else None
+    effects = [m.get("effect") for m in members]
+    if any(e in ENFORCING_EFFECTS for e in effects):
+        return True
+    return None if any(e is None or e == UNRESOLVED_EFFECT for e in effects) else False
+
+
+def exemption_record(exemption: dict, assignments_by_id: dict | None, now: datetime) -> dict:
+    """Normalize one projected exemption, joined to the assignment it exempts.
+
+    `assignments_by_id` is None when the assignment list could not be read, which makes
+    every assignment-derived field unknown rather than "not found".
+    """
+    scope = exemption_scope(exemption.get("id"))
+    kind = scope_kind(scope)
+    assignment_id = exemption.get("policy_assignment_id")
+    assignment = (assignments_by_id or {}).get(_arm_id_key(assignment_id))
+    found = None if assignments_by_id is None else assignment is not None
+    reference_ids = exemption.get("policy_definition_reference_ids") or []
+    whole = not reference_ids
+    members = [] if whole else _exempted_members(reference_ids, assignment)
+    if whole:
+        member_count = ((assignment or {}).get("policy_effects") or {}).get("member_count")
+    else:
+        member_count = len(reference_ids)
+    assignment_name = str(assignment_id or "").rstrip("/").rsplit("/", 1)[-1] or None
+    expires = parse_time(exemption.get("expires_on"))
+    no_expiry = not exemption.get("expires_on")
+    days_left = None if expires is None else math.floor((expires - now).total_seconds() / 86400)
+    return {
+        "id": exemption.get("id"),
+        "name": exemption.get("name"),
+        "display_name": exemption.get("display_name"),
+        "description": exemption.get("description"),
+        "scope": scope,
+        "scope_kind": kind,
+        "inherited_from_management_group": kind == MANAGEMENT_GROUP_SCOPE,
+        "policy_assignment_id": assignment_id,
+        "policy_assignment_name": assignment_name,
+        "assignment_found": found,
+        "assignment_display_name": (assignment or {}).get("display_name"),
+        "on_defender_benchmark_assignment": (
+            str(assignment_name or "").lower() == SECURITY_CENTER_BUILTIN_ASSIGNMENT.lower()
+        ),
+        "exemption_category": exemption.get("exemption_category"),
+        "policy_definition_reference_ids": reference_ids,
+        "exempts_whole_assignment": whole,
+        "exempted_member_count": member_count,
+        "exempted_members": members,
+        "lifts_enforcement": _lifts_enforcement(whole, members, assignment if found else None),
+        "expires_on": exemption.get("expires_on"),
+        "no_expiry": no_expiry,
+        # An expiry that doesn't parse leaves expired unknown, never false.
+        "expired": None if expires is None and not no_expiry else (expires is not None and expires <= now),
+        "days_until_expiry": days_left,
+        "metadata": exemption.get("metadata"),
+        "assignment_scope_validation": exemption.get("assignment_scope_validation"),
+        "resource_selectors": exemption.get("resource_selectors") or [],
+        "created_by": exemption.get("created_by"),
+        "created_by_type": exemption.get("created_by_type"),
+        "created_at": exemption.get("created_at"),
+        "last_modified_by": exemption.get("last_modified_by"),
+        "last_modified_at": exemption.get("last_modified_at"),
+    }
+
+
+def apply_exemption_counts(assignments: list[dict], exemptions: list[dict] | None) -> None:
+    """Each assignment's in-scope exemption count; null when the exemptions were not read."""
+    counts: dict[str, int] = {}
+    for exemption in exemptions or []:
+        key = _arm_id_key(exemption.get("policy_assignment_id"))
+        counts[key] = counts.get(key, 0) + 1
+    for assignment in assignments:
+        assignment["exemption_count"] = (
+            None if exemptions is None else counts.get(_arm_id_key(assignment.get("id")), 0)
+        )
+
+
+def summarize_exemptions(exemptions: list[dict] | None, status: str) -> dict:
+    """Exemption counts over the in-scope exemptions; every count is null when they were not read."""
+    known = exemptions is not None
+    rows = exemptions or []
+
+    def count(predicate):
+        return sum(1 for e in rows if predicate(e)) if known else None
+
+    by_scope = None
+    if known:
+        by_scope = {k: 0 for k in (MANAGEMENT_GROUP_SCOPE, SUBSCRIPTION_SCOPE, "resource_group", "resource",
+                                   UNKNOWN_SCOPE)}
+        for e in rows:
+            by_scope[e["scope_kind"]] = by_scope.get(e["scope_kind"], 0) + 1
+    unknown_assignments = any(e["assignment_found"] is None for e in rows)
+    return {
+        "exemptions_read_status": status,
+        "exemptions_api_version": EXEMPTIONS_API_VERSION,
+        "total_policy_exemptions": len(rows) if known else None,
+        "waiver_exemptions": count(lambda e: e["exemption_category"] == "Waiver"),
+        "mitigated_exemptions": count(lambda e: e["exemption_category"] == "Mitigated"),
+        "active_exemptions": count(lambda e: e["expired"] is False),
+        "expired_exemptions": count(lambda e: e["expired"] is True),
+        "exemptions_with_unreadable_expiry": count(lambda e: e["expired"] is None),
+        "exemptions_without_expiry": count(lambda e: e["no_expiry"]),
+        f"exemptions_expiring_within_{EXPIRING_SOON_DAYS}_days": count(
+            lambda e: e["expired"] is False and e["days_until_expiry"] is not None
+            and e["days_until_expiry"] < EXPIRING_SOON_DAYS
+        ),
+        "whole_assignment_exemptions": count(lambda e: e["exempts_whole_assignment"]),
+        "inherited_exemptions": count(lambda e: e["inherited_from_management_group"]),
+        "exemptions_by_scope_kind": by_scope,
+        "defender_benchmark_exemptions": count(lambda e: e["on_defender_benchmark_assignment"]),
+        "active_exemptions_lifting_enforcement": count(
+            lambda e: e["expired"] is False and e["lifts_enforcement"] is True
+        ),
+        "exemptions_lifting_enforcement_unknown": count(lambda e: e["lifts_enforcement"] is None),
+        "exemptions_of_unlisted_assignments": (
+            None if not known or unknown_assignments else count(lambda e: e["assignment_found"] is False)
+        ),
+        "assignments_with_exemptions": (
+            len({_arm_id_key(e["policy_assignment_id"]) for e in rows if e["assignment_found"]})
+            if known and not unknown_assignments else None
+        ),
+    }
+
+
 # --- collection (lazy azure imports) ---
 
 def policy_client(cred, subscription_id):
@@ -710,7 +937,7 @@ def _built_in_definitions(client) -> dict[str, dict]:
         return {}
 
 
-def collect_policy_assignments(subscription_id, cred, collector: Collector) -> list[dict]:
+def collect_policy_assignments(subscription_id, cred, collector: Collector) -> list[dict] | None:
     """One policy_assignments.list(), then one cached definition GET per definition.
 
     `list()` at subscription scope returns the subscription's own assignments AND the ones
@@ -722,7 +949,7 @@ def collect_policy_assignments(subscription_id, cred, collector: Collector) -> l
     """
     client = collector.guard("policy.PolicyClient (init)", lambda: policy_client(cred, subscription_id))
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself, so pagination is handled.
@@ -731,7 +958,9 @@ def collect_policy_assignments(subscription_id, cred, collector: Collector) -> l
             for assignment in client.policy_assignments.list()
         ]
 
-    assignments = collector.guard("policy.policy_assignments.list", _list, default=[])
+    assignments = collector.guard("policy.policy_assignments.list", _list)
+    if assignments is None:
+        return None
 
     cache: dict[str, dict] = {}
     projected: dict[str, dict | None] = {}
@@ -778,6 +1007,56 @@ def collect_policy_assignments(subscription_id, cred, collector: Collector) -> l
     return sorted(assignments, key=lambda r: r.get("id") or "")
 
 
+def _status_code(exc) -> int | None:
+    return getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+
+
+def collect_policy_exemptions(subscription_id, cred, collector: Collector) -> tuple[list[dict] | None, str]:
+    """Every exemption in effect on the subscription: its own, inherited, and those on anything inside it.
+
+    The unfiltered list at subscription scope returns all three, expired ones included. A 400 or 404 means
+    the pinned preview api-version is no longer served: logged and reported as unknown, not as a failed run.
+    """
+    def _list():
+        client = arm_rest_client(cred)
+        path = f"/subscriptions/{subscription_id}/providers/Microsoft.Authorization/policyExemptions"
+        return [project_policy_exemption(item) for item in list_all(client, path, EXEMPTIONS_API_VERSION)["items"]]
+
+    try:
+        return _list(), EXEMPTIONS_READ
+    except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
+        if _status_code(exc) in (400, 404):
+            logger.warning(
+                "policyExemptions list refused api-version %s (%s) — reporting exemptions as unknown: %s",
+                EXEMPTIONS_API_VERSION, _status_code(exc), " ".join(str(exc).split())[:200],
+            )
+            return None, EXEMPTIONS_API_UNAVAILABLE
+        collector.record("policy.policy_exemptions.list", exc)
+        return None, EXEMPTIONS_FAILED
+
+
+def exemption_results(
+    projected: list[dict] | None, assignments: list[dict] | None, exclusions: ResourceExclusions, now: datetime
+) -> tuple[list[dict] | None, list[dict]]:
+    """(in-scope exemption records or None, excluded entries). An exemption follows the scope it was made at:
+    rg: and id: patterns match it through its own id; it carries no region, so location: never does."""
+    if projected is None:
+        return None, []
+    kept, excluded = exclusions.split(projected, "policy_exemption", location=lambda e: None)
+    by_id = None if assignments is None else {_arm_id_key(a.get("id")): a for a in assignments}
+    records = [exemption_record(e, by_id, now) for e in kept]
+    return sorted(records, key=lambda r: r.get("id") or ""), excluded
+
+
+def boundary_summary(exclusions: ResourceExclusions, excluded: list[dict], exemptions: list[dict] | None) -> dict:
+    """The patterns, the unmatched ones, and excluded / in-scope exemption counts, null when none were read."""
+    in_scope = None if exemptions is None else len(exemptions)
+    summary = exclusions.summary(excluded, EXCLUDED_KINDS, {"policy_exemptions": in_scope})
+    if exemptions is None:
+        summary["excluded_policy_exemptions"] = None
+    return summary
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -794,8 +1073,12 @@ def main() -> int:
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
 
-    assignments: list[dict] = []
+    listed: list[dict] | None = None
+    projected_exemptions: list[dict] | None = None
+    exemptions_status = EXEMPTIONS_NOT_READ
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Microsoft.Authorization is registered on every subscription in practice, but the
@@ -809,7 +1092,8 @@ def main() -> int:
                 "reporting status not_registered",
                 subscription_id,
             )
-        assignments = collect_policy_assignments(subscription_id, cred, collector)
+        listed = collect_policy_assignments(subscription_id, cred, collector)
+        projected_exemptions, exemptions_status = collect_policy_exemptions(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -819,15 +1103,28 @@ def main() -> int:
             ),
         )
 
+    assignments = listed or []
+    exemptions, excluded = exemption_results(projected_exemptions, listed, exclusions, datetime.now(timezone.utc))
+    apply_exemption_counts(assignments, exemptions)
+    exclusions.warn_unmatched(logger)
+    boundary = boundary_summary(exclusions, excluded, exemptions)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
             "policy_assignments": assignments,
+            "policy_exemptions": exemptions,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(assignments), "provider_registration_status": registration},
+        summary={
+            **summarize(assignments),
+            **summarize_exemptions(exemptions, exemptions_status),
+            "provider_registration_status": registration,
+            **boundary,
+        },
     )
 
     filename = (

@@ -126,6 +126,8 @@ schemas and the `paramify` CLI — not the internal code.
     route needs it. Metric and smart detector rules carry the location `global`
     and action groups and processing rules none, so `location:` reaches only log
     search rules.
+  - `azure_policy_assignments` 0.4.0: policy exemptions, by the scope they were
+    made at (`rg:` and `id:` only; exemptions carry no region). Assignments stay.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or
@@ -514,6 +516,25 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_policy_assignments` 0.4.0: policy exemptions.** Every exemption in
+  effect on the subscription (`results.policy_exemptions`): its own, those
+  inherited from a management group, and those on resource groups and resources
+  inside it, expired ones and Defender for Cloud recommendation exemptions
+  included. Each names the assignment and initiative members it exempts (joined
+  to their resolved effects), its scope, category (Waiver or Mitigated),
+  description, metadata, creator and expiry, with `expired`, `no_expiry`,
+  `days_until_expiry`, `on_defender_benchmark_assignment` and
+  `lifts_enforcement` (an exempted enforcing effect on an enforced assignment;
+  null when an exempted member's effect is unknown). Each assignment gains
+  `exemption_count`. The summary adds exemption counts by category, expiry, scope
+  and enforcement, and `exemptions_read_status`. Exemptions exist only in preview
+  api-versions, which the stable SDK leaves out, so they are read by a raw ARM GET
+  pinned to 2024-12-01-preview; a 400 or 404 on that version leaves every
+  exemption count null (`api_version_unavailable`) without failing the run, and
+  any other failed read fails it with the counts null. Adopts
+  `resource_exclusions` for exemptions only: rg: and id: patterns match an
+  exemption through the scope it was made at, location: never matches one, and
+  assignments are not affected. The 0.3.0 fields are unchanged.
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
   history (`risk_history`, oldest first, with what changed and who initiated it)
