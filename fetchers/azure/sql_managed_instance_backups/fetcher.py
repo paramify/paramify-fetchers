@@ -358,15 +358,22 @@ def attach_failovers(records: list[dict] | None, instances: list[dict], groups: 
     and one whose target isn't listed any more leaves only when a pattern matches its resource id."""
     if records is None:
         return None, []
-    by_group = {lower(g.get("name")): g for g in groups}
+    out_entries = [e for e in excluded if e["kind"] == "instance_failover_group"]
+    by_group = {key: g for g in groups for key in _group_keys(g)}
+    out_groups = {key: e for e in out_entries for key in _group_keys(e)}
     by_instance = {lower(i.get("id")): i for i in instances}
-    out_groups = {lower(e.get("name")): e for e in excluded if e["kind"] == "instance_failover_group"}
     out_instances = {lower(e.get("id")): e for e in excluded if e["kind"] == "managed_instance"}
     kept, dropped = [], []
     for record in records:
         if record["kind"] == "failover_group":
-            target = by_group.get(lower(record["failover_group"]))
-            entry = out_groups.get(lower(record["failover_group"]))
+            key = (lower(resource_group_from_id(record["resource_id"])), lower(record["failover_group"]))
+            target, entry = by_group.get(key), out_groups.get(key)
+            if target is None and entry is None:
+                # A resource group no listed view names: the name decides, but only when one group has it.
+                same = ([(g, None) for g in groups if lower(g.get("name")) == key[1]]
+                        + [(None, e) for e in out_entries if lower(e.get("name")) == key[1]])
+                if len(same) == 1:
+                    target, entry = same[0]
         else:
             match = re.match(r".*?/providers/microsoft\.sql/managedinstances/[^/]+", lower(record["resource_id"]))
             instance_id = match.group(0) if match else lower(record["resource_id"])
@@ -380,12 +387,21 @@ def attach_failovers(records: list[dict] | None, instances: list[dict], groups: 
                 id=record["resource_id"], resource_group=resource_group_from_id(record["resource_id"]),
                 location=record["new_primary_location"], correlation_id=record["correlation_id"]))
             continue
+        is_group = record["kind"] == "failover_group"
         kept.append({
             **record,
             "target_found": target is not None,
-            "failover_policy": (target or {}).get("failover_policy") if record["kind"] == "failover_group" else None,
+            "failover_group_id": (target or {}).get("id") if is_group else None,
+            "failover_policy": (target or {}).get("failover_policy") if is_group else None,
         })
     return kept, dropped
+
+
+def _group_keys(group: dict) -> set:
+    """(resource group, name) for every region Azure lists a failover group from; a failover is sent to one of them."""
+    views = group.get("regional_views") or [group]
+    return {(lower(v.get("resource_group") or resource_group_from_id(v.get("id"))), lower(group.get("name")))
+            for v in views}
 
 
 def group_failover_fields(group: dict, failovers: list[dict] | None) -> dict:
@@ -393,7 +409,7 @@ def group_failover_fields(group: dict, failovers: list[dict] | None) -> dict:
     if failovers is None:
         return {**group, "failovers_in_window": None, "succeeded_failovers_in_window": None,
                 "latest_succeeded_failover_time": None}
-    mine = [f for f in failovers if f["kind"] == "failover_group" and lower(f["failover_group"]) == lower(group.get("name"))]
+    mine = [f for f in failovers if f.get("failover_group_id") and lower(f["failover_group_id"]) == lower(group.get("id"))]
     succeeded = [f for f in mine if f["succeeded"]]
     return {
         **group,

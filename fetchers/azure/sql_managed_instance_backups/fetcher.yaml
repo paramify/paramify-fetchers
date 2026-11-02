@@ -104,7 +104,10 @@ evidence_set:
     finished), `duration_minutes`, `status`, `succeeded`, the caller and its
     identity type, `new_primary_location` (a group failover is sent to the region
     that takes over, read from the event's resource id), `target_found` (the
-    group or instance is still listed) and the group's `failover_policy`. Each
+    group or instance is still listed), `failover_group_id` (the group it
+    moved, matched by resource group and name against every region the group
+    is listed from, or by name alone when only one group has that name) and
+    the group's `failover_policy`. Each
     failover group gains `failovers_in_window`, `succeeded_failovers_in_window`
     and `latest_succeeded_failover_time`. A failover Azure starts itself under an
     Automatic policy may leave no Activity Log entry. `results.failover_history_window`

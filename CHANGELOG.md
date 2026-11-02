@@ -520,8 +520,9 @@ schemas and the `paramify` CLI — not the internal code.
   each failover request in `results.failovers`: a failover group's planned
   failover, its forced failover allowing data loss, or a failover between one
   managed instance's replicas, with start and end, duration, final status,
-  caller, the region that took over, and the failover group's policy. Each
-  failover group gains its failover count and newest succeeded failover. The
+  caller, the region that took over, and the failover group it moved
+  (`failover_group_id`, matched by resource group and name) with its policy.
+  Each failover group gains its failover count and newest succeeded failover. The
   summary adds total, group, forced, instance, succeeded and failed failovers,
   groups with a succeeded failover, the newest succeeded failover and days since
   it, and the longest succeeded failover in minutes; each is null, not 0, when

@@ -74,6 +74,34 @@ def test_one_request_logged_on_both_regional_views_is_one_failover():
     assert (record["new_primary_location"], record["duration_minutes"]) == ("regionwest", 4.0)
 
 
+def _group(rg, policy="Manual"):
+    view = f"/subscriptions/s1/resourceGroups/{rg}/providers/Microsoft.Sql/locations/regionwest/instanceFailoverGroups/fog-a"
+    other = view.replace("regionwest", "regioneast")
+    return {"id": view, "name": "fog-a", "resource_group": rg, "failover_policy": policy,
+            "regional_views": [{"id": view, "resource_group": rg}, {"id": other, "resource_group": rg}]}
+
+
+def test_failovers_join_their_group_by_resource_group_and_name():
+    dev, prod = _group("rg-dev"), _group("rg-prod", policy="Automatic")
+    # Sent to the region taking over, so the event names the group's other regional view.
+    records = backups.failover_records([_event(prod["regional_views"][1]["id"], "Succeeded", 0)])
+    kept, dropped = backups.attach_failovers(records, [], [dev, prod], [], None)
+    assert dropped == []
+    assert [(f["failover_group_id"], f["failover_policy"], f["target_found"]) for f in kept] == [
+        (prod["id"], "Automatic", True)]
+    assert [(g["failovers_in_window"], g["succeeded_failovers_in_window"])
+            for g in (backups.group_failover_fields(g, kept) for g in (dev, prod))] == [(0, 0), (1, 1)]
+
+
+def test_a_failover_from_an_unlisted_resource_group_joins_by_name_only_when_one_group_has_it():
+    event = "/subscriptions/s1/resourceGroups/rg-other/providers/Microsoft.Sql/locations/regionwest/instanceFailoverGroups/fog-a"
+    records = backups.failover_records([_event(event, "Succeeded", 0)])
+    [one], _ = backups.attach_failovers(records, [], [_group("rg-dev")], [], None)
+    assert (one["target_found"], one["failover_group_id"]) == (True, _group("rg-dev")["id"])
+    [two], _ = backups.attach_failovers(records, [], [_group("rg-dev"), _group("rg-prod")], [], None)
+    assert (two["target_found"], two["failover_group_id"], two["failover_policy"]) == (False, None, None)
+
+
 def test_forced_failover_allows_data_loss():
     [record] = backups.failover_records([_event(
         GROUP, "Succeeded", 0, operation="Microsoft.Sql/locations/instanceFailoverGroups/forceFailoverAllowDataLoss/action")])
