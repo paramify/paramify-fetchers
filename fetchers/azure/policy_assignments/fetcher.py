@@ -139,7 +139,14 @@ PARAMETER_REFERENCE = re.compile(r"^\[\s*parameters\(\s*'([^']+)'\s*\)\s*\]$", r
 # Exemptions have no GA api-version; a 400 or 404 on this one reads as unknown, not as none.
 EXEMPTIONS_API_VERSION = "2024-12-01-preview"
 EXEMPTION_SEGMENT = "/providers/microsoft.authorization/policyexemptions/"
-EXEMPTION_CATEGORIES = ("Waiver", "Mitigated")
+CANONICAL_CATEGORIES = {"waiver": "Waiver", "mitigated": "Mitigated"}
+
+# lifts_enforcement_unknown_reason values.
+LIFT_ASSIGNMENTS_UNREAD = "assignments_unread"
+LIFT_ASSIGNMENT_NOT_LISTED = "assignment_not_listed"
+LIFT_INITIATIVE_UNREAD = "initiative_members_unread"
+LIFT_MEMBER_NOT_IN_INITIATIVE = "member_not_in_initiative"
+LIFT_EFFECT_UNRESOLVED = "effect_unresolved"
 EXPIRING_SOON_DAYS = 30
 EXCLUDED_KINDS = ("policy_exemption",)
 
@@ -694,18 +701,32 @@ def _arm_id_key(value) -> str:
     return str(value or "").lower().rstrip("/")
 
 
+def canonical_category(value):
+    """Waiver or Mitigated in that spelling; ARM accepts any case and returns it as stored."""
+    return CANONICAL_CATEGORIES.get(str(value or "").strip().lower(), value)
+
+
+def _initiative_members(assignment: dict | None) -> dict | None:
+    """The assignment's initiative members by lower-cased reference id; None when they weren't read."""
+    block = (assignment or {}).get("policy_effects") or {}
+    if dig(assignment or {}, "policy_definition", "kind") != SET_DEFINITION_KIND or not block.get("member_count"):
+        return None
+    return {str(m.get("reference_id") or "").lower(): m for m in block.get("members") or [] if m.get("reference_id")}
+
+
 def _exempted_members(reference_ids: list, assignment: dict | None) -> list[dict]:
-    """Each exempted initiative member, joined to the assignment's resolved member by reference id."""
-    members = {
-        str(m.get("reference_id") or "").lower(): m
-        for m in ((assignment or {}).get("policy_effects") or {}).get("members") or []
-        if m.get("reference_id")
-    }
+    """Each exempted initiative member, joined to the assignment's resolved member by reference id.
+
+    `in_initiative` is False for a reference id the initiative's current definition doesn't have: a member since
+    removed, or one in an older version the assignment still uses.
+    """
+    members = _initiative_members(assignment)
     rows = []
     for reference_id in reference_ids:
-        member = members.get(str(reference_id).lower()) or {}
+        member = (members or {}).get(str(reference_id).lower()) or {}
         rows.append({
             "reference_id": reference_id,
+            "in_initiative": None if members is None else bool(member),
             "policy_definition_name": member.get("policy_definition_name"),
             "display_name": member.get("display_name"),
             "effect": member.get("effect"),
@@ -713,22 +734,30 @@ def _exempted_members(reference_ids: list, assignment: dict | None) -> list[dict
     return rows
 
 
-def _lifts_enforcement(whole: bool, members: list[dict], assignment: dict | None):
-    """True when the exemption covers an enforcing effect of an enforced assignment, False when it can't, None
-    when unknown."""
+def _lifts_enforcement(whole: bool, members: list[dict], assignment: dict | None, found) -> tuple:
+    """(True when the exemption covers an enforcing effect of an enforced assignment, False when it can't, None
+    when unknown; why it is unknown)."""
+    if found is None:
+        return None, LIFT_ASSIGNMENTS_UNREAD
     if assignment is None:
-        return None
+        return None, LIFT_ASSIGNMENT_NOT_LISTED
     if not assignment.get("enforced", True):
-        return False
+        return False, None
     if whole:
         block = assignment.get("policy_effects") or {}
         if block.get("enforcing_member_count"):
-            return True
-        return False if block and block.get("status") == RESOLVED else None
-    effects = [m.get("effect") for m in members]
-    if any(e in ENFORCING_EFFECTS for e in effects):
-        return True
-    return None if any(e is None or e == UNRESOLVED_EFFECT for e in effects) else False
+            return True, None
+        return (False, None) if block and block.get("status") == RESOLVED else (None, LIFT_EFFECT_UNRESOLVED)
+    if any(m.get("effect") in ENFORCING_EFFECTS for m in members):
+        return True, None
+    for reason, unknown in (
+        (LIFT_INITIATIVE_UNREAD, lambda m: m.get("in_initiative") is None),
+        (LIFT_MEMBER_NOT_IN_INITIATIVE, lambda m: m.get("in_initiative") is False),
+        (LIFT_EFFECT_UNRESOLVED, lambda m: m.get("effect") in (None, UNRESOLVED_EFFECT)),
+    ):
+        if any(unknown(m) for m in members):
+            return None, reason
+    return False, None
 
 
 def exemption_record(exemption: dict, assignments_by_id: dict | None, now: datetime) -> dict:
@@ -750,6 +779,7 @@ def exemption_record(exemption: dict, assignments_by_id: dict | None, now: datet
     else:
         member_count = len(reference_ids)
     assignment_name = str(assignment_id or "").rstrip("/").rsplit("/", 1)[-1] or None
+    lifts, lift_reason = _lifts_enforcement(whole, members, assignment, found)
     expires = parse_time(exemption.get("expires_on"))
     no_expiry = not exemption.get("expires_on")
     days_left = None if expires is None else math.floor((expires - now).total_seconds() / 86400)
@@ -768,12 +798,14 @@ def exemption_record(exemption: dict, assignments_by_id: dict | None, now: datet
         "on_defender_benchmark_assignment": (
             str(assignment_name or "").lower() == SECURITY_CENTER_BUILTIN_ASSIGNMENT.lower()
         ),
-        "exemption_category": exemption.get("exemption_category"),
+        "exemption_category": canonical_category(exemption.get("exemption_category")),
         "policy_definition_reference_ids": reference_ids,
         "exempts_whole_assignment": whole,
         "exempted_member_count": member_count,
         "exempted_members": members,
-        "lifts_enforcement": _lifts_enforcement(whole, members, assignment if found else None),
+        "names_members_not_in_initiative": any(m["in_initiative"] is False for m in members),
+        "lifts_enforcement": lifts,
+        "lifts_enforcement_unknown_reason": lift_reason,
         "expires_on": exemption.get("expires_on"),
         "no_expiry": no_expiry,
         # An expiry that doesn't parse leaves expired unknown, never false.
@@ -839,8 +871,13 @@ def summarize_exemptions(exemptions: list[dict] | None, status: str) -> dict:
             lambda e: e["expired"] is False and e["lifts_enforcement"] is True
         ),
         "exemptions_lifting_enforcement_unknown": count(lambda e: e["lifts_enforcement"] is None),
+        "exemptions_naming_members_not_in_initiative": count(lambda e: e["names_members_not_in_initiative"]),
         "exemptions_of_unlisted_assignments": (
             None if not known or unknown_assignments else count(lambda e: e["assignment_found"] is False)
+        ),
+        "unlisted_assignments_with_exemptions": (
+            len({_arm_id_key(e["policy_assignment_id"]) for e in rows if e["assignment_found"] is False})
+            if known and not unknown_assignments else None
         ),
         "assignments_with_exemptions": (
             len({_arm_id_key(e["policy_assignment_id"]) for e in rows if e["assignment_found"]})

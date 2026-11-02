@@ -96,4 +96,15 @@ evidence_set:
     api-version 2024-12-01-preview (no filter, so inherited, resource-group, resource and
     expired exemptions are all returned), following nextLink; a 400 or 404 on that
     api-version reports the exemptions as unknown (null counts) without failing the run.
+    Exemption categories are matched without regard to case and written as Waiver or
+    Mitigated. lifts_enforcement is null, with lifts_enforcement_unknown_reason saying why,
+    when the exempted assignment isn't listed (assignment_not_listed: usually an
+    assignment since deleted, whose exemptions Azure leaves in place), the assignments
+    weren't read (assignments_unread), the initiative's members couldn't be read
+    (initiative_members_unread), an exempted reference id isn't a member of the
+    initiative's current definition (member_not_in_initiative: a member since removed, or
+    one in an older version the assignment still uses; flagged per member as
+    in_initiative false), or an exempted member's effect couldn't be resolved
+    (effect_unresolved). The summary counts exemptions on unlisted assignments and the
+    distinct unlisted assignments they name.
     Reader, plus management-group read for MG-scoped custom definitions.

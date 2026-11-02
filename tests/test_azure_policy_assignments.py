@@ -357,7 +357,64 @@ def test_summary_counts_exemptions():
     assert summary["active_exemptions_lifting_enforcement"] == 2
     assert summary["exemptions_lifting_enforcement_unknown"] == 1
     assert summary["exemptions_of_unlisted_assignments"] == 1
+    assert summary["unlisted_assignments_with_exemptions"] == 1
     assert summary["assignments_with_exemptions"] == 1
+    assert summary["exemptions_naming_members_not_in_initiative"] == 0
+
+
+@pytest.mark.parametrize("raw, canonical", [("waiver", "Waiver"), ("MITIGATED", "Mitigated"), ("Other", "Other")])
+def test_category_is_matched_without_regard_to_case(raw, canonical):
+    record = exemption(wire_exemption(category=raw))
+    assert record["exemption_category"] == canonical
+    summary = fx.summarize_exemptions([record], fx.EXEMPTIONS_READ)
+    assert (summary["waiver_exemptions"], summary["mitigated_exemptions"]) == (
+        int(canonical == "Waiver"), int(canonical == "Mitigated"))
+
+
+def test_member_missing_from_the_initiative_is_flagged_and_leaves_the_lift_unknown():
+    record = exemption(wire_exemption(references=["retired-member"]), [initiative_assignment(["deny", "audit"])])
+    (member,) = record["exempted_members"]
+    assert (member["in_initiative"], member["effect"]) == (False, None)
+    assert record["names_members_not_in_initiative"] is True
+    assert (record["lifts_enforcement"], record["lifts_enforcement_unknown_reason"]) == (
+        None, "member_not_in_initiative")
+    summary = fx.summarize_exemptions([record], fx.EXEMPTIONS_READ)
+    assert summary["exemptions_naming_members_not_in_initiative"] == 1
+
+
+def test_member_found_in_the_initiative_is_marked_so():
+    record = exemption(wire_exemption(references=["r1"]), [initiative_assignment(["deny", "audit"])])
+    assert record["exempted_members"][0]["in_initiative"] is True
+    assert (record["lifts_enforcement"], record["lifts_enforcement_unknown_reason"]) == (False, None)
+
+
+def test_unreadable_initiative_leaves_membership_unknown():
+    target = resolved(assignment(definition_id=BUILT_IN_SET), None, [])
+    record = exemption(wire_exemption(references=["r0"]), [target])
+    assert record["exempted_members"][0]["in_initiative"] is None
+    assert record["names_members_not_in_initiative"] is False
+    assert (record["lifts_enforcement"], record["lifts_enforcement_unknown_reason"]) == (
+        None, "initiative_members_unread")
+
+
+def test_unresolved_member_effect_gives_its_reason():
+    record = exemption(wire_exemption(references=["r0"]), [initiative_assignment(["SomethingNew"])])
+    assert (record["lifts_enforcement"], record["lifts_enforcement_unknown_reason"]) == (None, "effect_unresolved")
+
+
+def test_unknown_lift_names_the_missing_assignment():
+    missing = exemption(wire_exemption(assignment_name="gone"), [initiative_assignment(["deny"])])
+    assert missing["lifts_enforcement_unknown_reason"] == "assignment_not_listed"
+    unread = exemption(wire_exemption(), unread=True)
+    assert unread["lifts_enforcement_unknown_reason"] == "assignments_unread"
+
+
+def test_unlisted_assignments_are_counted_once_each():
+    target = initiative_assignment(["deny"])
+    records = [exemption(wire_exemption(f"e{i}", assignment_name=name), [target])
+               for i, name in enumerate(["gone1", "gone1", "GONE1", "gone2", "a1"])]
+    summary = fx.summarize_exemptions(records, fx.EXEMPTIONS_READ)
+    assert (summary["exemptions_of_unlisted_assignments"], summary["unlisted_assignments_with_exemptions"]) == (4, 2)
 
 
 @pytest.mark.parametrize("status", ["failed", "api_version_unavailable", "not_read"])
@@ -371,7 +428,8 @@ def test_unread_exemptions_summarize_as_null_not_zero(status):
 def test_unlisted_assignment_count_is_null_when_assignments_were_unread():
     summary = fx.summarize_exemptions([exemption(wire_exemption(), unread=True)], fx.EXEMPTIONS_READ)
     assert summary["total_policy_exemptions"] == 1
-    assert (summary["exemptions_of_unlisted_assignments"], summary["assignments_with_exemptions"]) == (None, None)
+    assert (summary["exemptions_of_unlisted_assignments"], summary["assignments_with_exemptions"],
+            summary["unlisted_assignments_with_exemptions"]) == (None, None, None)
 
 
 def test_assignment_exemption_count_is_null_when_unread():
