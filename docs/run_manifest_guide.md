@@ -169,6 +169,7 @@ The manifest is runnable. Next: [run it, then upload](cli_guide.md#collect-then-
 | `no such manifest: …` | `-f` is missing (the default is `./manifest.yaml`) or misspelled. The error lists the manifests it found. |
 | `Not created: …/daily.yaml` | It already exists. Keep editing it with `-f daily`. |
 | `entry[0] uses unknown fetcher` | The typo was saved. `paramify manifest remove <typo> -f daily`, then add the name `paramify list` shows. |
+| `reads <input>, which is not in the manifest` | A [comparator](comparators.md#inputs) reads that fetcher's evidence from the same run. `paramify manifest add <input> -f daily`. Adding a comparator adds its inputs, and the run takes every fetcher before any comparator. |
 | `target[0] missing per_target secret` | `paramify manifest set-target <fetcher> 0 <every field> --secret api_token=<VAR> -f daily`. It replaces the whole target, so pass every field. |
 | `does not support targets but manifest has targets[]` | That fetcher runs once. `paramify manifest remove-target <fetcher> 0 -f daily`. |
 | `Not written: refusing to write schema-invalid manifest` | Usually a lowercase variable name. Use uppercase letters, digits, and `_`. |

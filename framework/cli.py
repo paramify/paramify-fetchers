@@ -95,6 +95,12 @@ from framework.issue_reports import (
     CLOSE_CYCLE_VALUES,
     ISSUE_REPORTS_DIR,
 )
+from framework.runner.executor import is_credential_env_name
+from framework.secret_resolver import (
+    env_var_name,
+    is_env_ref_attempt,
+    is_partial_env_ref,
+)
 
 _DEFAULT_MANIFEST = "manifest.yaml"
 
@@ -225,7 +231,21 @@ def _parse_kv(arg: str, path, json_out: bool):
     return arg.split("=", 1)
 
 
-def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool):
+def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool, target: bool = False):
+    # The runner resolves ${env:VAR} in string config fields only, so anywhere else
+    # a reference would be saved as literal text (or coerced to false).
+    if is_env_ref_attempt(value) or is_partial_env_ref(value):
+        if target:
+            _fail(path, f"{key}: target fields aren't resolved, so ${{env:}} references don't work there", json_out)
+        if is_partial_env_ref(value):
+            _fail(path, f"config '{key}': a ${{env:}} reference must be the whole value, not part of it", json_out)
+        var = env_var_name(value)
+        if var and is_credential_env_name(var):
+            _fail(path, f"config '{key}' reads ${{env:{var}}}, which holds a secret; config references can't read "
+                        f"secrets", json_out)
+        if typ != "string":
+            _fail(path, f"config '{key}' is {typ}; ${{env:}} references work on string config fields only", json_out)
+        return value
     try:
         return _coerce(value, typ)
     except ValueError:
@@ -267,6 +287,13 @@ def _platform_config_type(root: Path, category: str, key: str) -> str:
     return "string"
 
 
+def _category_fetcher_types(root: Path, category: str, key: str) -> List[str]:
+    """The types the category's fetchers declare for `key`, since a platform value reaches each of them."""
+    cat = api.catalog(root)
+    return [fld["type"] for c in cat["categories"] if c["name"] == category
+            for f in c["fetchers"] for fld in f["config"] if fld["name"] == key]
+
+
 def _target_field_type(root: Path, fetcher_name: str, key: str) -> str:
     cat = api.catalog(root)
     f = _find_fetcher(cat, fetcher_name)
@@ -287,6 +314,8 @@ def _human_run_printer():
             _err(f"  {style.mark('SKIP')}  {style.name(ev['fetcher'])} {style.dim('(' + ev['reason'] + ')')}")
         elif kind == "fetcher_start":
             targets = style.dim(f"  ({ev['targets']} targets)") if ev["fanout"] else ""
+            if ev.get("depends_on"):
+                targets = style.dim(f"  (reads {', '.join(ev['depends_on'])})")
             typer.echo(f"  {style.dim('RUN')}   {style.name(ev['fetcher'])}{targets}")
         elif kind == "fetcher_note":
             _err(f"        {style.mark('NOTE')}  {style.dim(ev['note'])}")
@@ -650,9 +679,13 @@ def list_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
         # styled value formatted to a width lands short by the length of its escape.
         col = "{:50s}".format(f["name"])
         ver = "v{:8s}".format(f["version"])
+        reads = (
+            f" {style.dim('reads=')}{style.env(','.join(f['depends_on']))}"
+            if f.get("depends_on") else ""
+        )
         typer.echo(
             f"  {style.name(col)} {style.dim(ver)} [{style.dim('{:6s}'.format(tag))}]"
-            f" {style.dim('category=')}{style.env(f['category'] or '-')}"
+            f" {style.dim('category=')}{style.env(f['category'] or '-')}{reads}"
         )
 
 
@@ -697,6 +730,11 @@ def describe_cmd(
     )
     typer.echo(f"  {f['description']}")
     typer.echo(f"  {style.dim('supports_targets:')} {f['supports_targets']}")
+    if f.get("depends_on"):
+        typer.echo(
+            f"  {style.dim('depends_on:')} {', '.join(style.name(d) for d in f['depends_on'])}"
+            f"  {style.dim('(a comparator: runs after these in the same run)')}"
+        )
     for label, fields in (("config", f["config"]), ("secrets", f["secrets"]),
                           ("target_schema", f["target_schema"])):
         if fields:
@@ -1529,7 +1567,9 @@ def _read_for_edit(path: Path, json_out: bool) -> dict:
         raise typer.Exit(1)
 
 
-def _save_and_report(manifest: dict, path: Path, root: Path, json_out: bool, *, verb: str = "Wrote") -> None:
+def _save_and_report(
+    manifest: dict, path: Path, root: Path, json_out: bool, *, verb: str = "Wrote", extra: Optional[dict] = None,
+) -> None:
     """Dump + validate, then report. Exit 0 even when not-yet-runnable (errors are
     surfaced) so a manifest can be built incrementally; exit 1 only if the dump is
     rejected as structurally invalid."""
@@ -1543,7 +1583,7 @@ def _save_and_report(manifest: dict, path: Path, root: Path, json_out: bool, *, 
         raise typer.Exit(1)
     errors = api.validate(manifest, root)
     if json_out:
-        typer.echo(json.dumps({"ok": not errors, "path": str(path), "errors": errors}, indent=2))
+        typer.echo(json.dumps({"ok": not errors, "path": str(path), "errors": errors, **(extra or {})}, indent=2))
         return
     typer.echo(f"{style.dim(verb)} {style.path(str(path))}")
     if errors:
@@ -1595,12 +1635,16 @@ def manifest_add(
     file: str = typer.Option(_DEFAULT_MANIFEST, "-f", "--file", help="Manifest path"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
-    """Add a fetcher entry to the manifest."""
+    """Add a fetcher entry to the manifest; for a comparator, its inputs too."""
     root = api.find_repo_root()
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
-    api.add_entry(m, fetcher)
-    _save_and_report(m, path, root, json_out)
+    added = api.add_entry(m, fetcher, api.discover(root)["fetchers"])
+    if not json_out:
+        for name, reader in added.items():
+            typer.echo(f"added {style.name(name)}" + (style.dim(f" (input of {reader})") if reader else ""))
+    _save_and_report(m, path, root, json_out,
+                     extra={"added": [{"name": n, "input_of": r} for n, r in added.items()]})
 
 
 @manifest_app.command("remove")
@@ -1665,7 +1709,7 @@ def manifest_add_target(
     vals = {}
     for kv in (values or []):
         k, raw = _parse_kv(kv, path, json_out)
-        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out)
+        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out, target=True)
     secret_env = {}
     for s in (secret or []):
         k, v = _parse_kv(s, path, json_out)
@@ -1694,7 +1738,7 @@ def manifest_set_target(
     vals = {}
     for kv in (values or []):
         k, raw = _parse_kv(kv, path, json_out)
-        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out)
+        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out, target=True)
     secret_env = {}
     for sv in (secret or []):
         k, v = _parse_kv(sv, path, json_out)
@@ -1733,7 +1777,10 @@ def manifest_set_platform_config(
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
-    value = _coerce_or_fail(raw, _platform_config_type(root, category, key), key, path, json_out)
+    typ = _platform_config_type(root, category, key)
+    if is_env_ref_attempt(raw) and typ == "string":
+        typ = next((t for t in _category_fetcher_types(root, category, key) if t != "string"), typ)
+    value = _coerce_or_fail(raw, typ, key, path, json_out)
     api.set_platform_config(m, category, key, value)
     _save_and_report(m, path, root, json_out)
 

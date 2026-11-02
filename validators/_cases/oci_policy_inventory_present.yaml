@@ -1,0 +1,16 @@
+validator: oci_policy_inventory_present
+cases:
+  - name: oci_policy_inventory_present_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"manage_all_resources_in_tenancy_outside_default_admin_policy": 0, "total_policies": 3}}'
+
+  - name: oci_policy_inventory_present_fails
+    expect: FAIL
+    note: >
+      The point of the validator: its partners' zeros are only meaningful when
+      something was counted.
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"manage_all_resources_in_tenancy_outside_default_admin_policy": 0, "total_policies": 0}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"manage_all_resources_in_tenancy_outside_default_admin_policy": 0, "total-policies": 3}}'

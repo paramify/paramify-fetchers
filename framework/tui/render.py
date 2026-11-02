@@ -18,7 +18,11 @@ from framework.issue_reports import (
     CLOSE_CYCLE_FIELD,
     CLOSE_NEVER,
 )
-from framework.secret_resolver import env_var_name, is_env_ref_attempt
+from framework.secret_resolver import (
+    env_var_name,
+    is_env_ref_attempt,
+    view_runtime_value,
+)
 from framework.tui import kinds, palette
 
 
@@ -112,6 +116,12 @@ def _config_values(config_view: Optional[List[dict]]) -> dict:
     return {c["name"]: c.get("value") for c in config_view or [] if c.get("value") not in (None, "")}
 
 
+def _close_policy(config_view: Optional[List[dict]]) -> Optional[str]:
+    # A referenced policy counts once it resolves to a known one; the view itself shows the reference.
+    policy = view_runtime_value(next((c for c in config_view or [] if c["name"] == CLOSE_CYCLE_FIELD), None))
+    return policy if policy in (CLOSE_AFTER_RUN, CLOSE_NEVER) else None
+
+
 def _close_label(policy: Optional[str]) -> Text:
     if policy == CLOSE_AFTER_RUN:
         return Text("after each complete run (after_run)", style=palette.FG)
@@ -133,8 +143,8 @@ def destination_cell(descriptor: Optional[dict], config_view: Optional[List[dict
         if not aid:
             return Text("no assessment — press A", style=palette.WARN)
         cell = Text(str(values.get(ASSESSMENT_NAME_FIELD) or aid), style=palette.FG)
-        policy = values.get(CLOSE_CYCLE_FIELD)
-        if policy in (CLOSE_AFTER_RUN, CLOSE_NEVER):
+        policy = _close_policy(config_view)
+        if policy:
             cell.append(f" · {policy}", style="dim")
         else:
             cell.append(" · close unset", style=palette.WARN)
@@ -159,7 +169,7 @@ def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest:
                 rows.append(("assessment", Text(str(values.get(ASSESSMENT_NAME_FIELD) or aid), style=palette.FG)))
             else:
                 rows.append(("assessment", Text(f"unset — press A to pick a {atype} assessment", style=palette.WARN)))
-            rows.append(("cycle closes", _close_label(values.get(CLOSE_CYCLE_FIELD))))
+            rows.append(("cycle closes", _close_label(_close_policy(config_view))))
         else:
             rows.append(("assessment", Text(f"a {atype} assessment, chosen per manifest", style=palette.FG)))
         fmt = ir.get("format")
@@ -293,7 +303,18 @@ def entry_detail(
         rows = []
         for c in config_fields:
             source = c.get("source")
-            if source == "entry":
+            ref = c.get("reference")
+            if ref:
+                # Shown as written, like a secret: never the variable's value.
+                state = c.get("reference_state")
+                style = {"set": palette.OK, "unset": palette.WARN}.get(state, palette.FAIL)
+                value = Text(ref if state == "set" else f"{ref}  ({state})", style=style)
+                if state == "set" and source != "entry":
+                    value.append(f"  ({source})", style="dim")
+                elif state == "unset" and source:
+                    value.append(f"  → {c['value']} ({source})", style="dim")
+                rows.append((c["name"], value))
+            elif source == "entry":
                 rows.append((c["name"], Text(str(c["value"]), style=palette.FG)))
             elif source and source.startswith("platforms."):
                 value = Text(str(c["value"]), style=palette.FG)

@@ -422,7 +422,7 @@ def test_main_exit_code_for_a_refused_or_failed_detail_read(monkeypatch, tmp_pat
     def refused_read(resource, resource_id, query_options):
         raise queued.pop(0)
 
-    def collect(subscription_id, cred, collector, limits):
+    def collect(subscription_id, cred, collector, limits, exclusions=None):
         collected = fx.empty_collection()
         collected["states"] = [state(APP)]
         collected["details"] = fx.collect_evaluation_details(
@@ -688,7 +688,8 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit(monke
          "policy_assignment_id": ASSIGN, "policy_definition_reference_id": "r2", "total_deployments": 2},
     ]
     monkeypatch.setattr(fx, "RESOURCE_FILTER_BATCH", 1)
-    rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 10, fx.Collector(logging.getLogger("t")))
+    collector = fx.Collector(logging.getLogger("t"))
+    rows, truncated, _ = fx.collect_remediation_deployments(client, "s1", tasks, 10, collector)
     assert listed == [("subscription", "t1"), ("resource_group", "rg1", "t2"), ("subscription", "t3")]
 
     def query(ref, *resources):
@@ -707,14 +708,14 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit(monke
     assert filters == [query("r1", VM, NSG)]
 
     listed.clear()
-    rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 1, fx.Collector(logging.getLogger("t")))
+    rows, truncated, _ = fx.collect_remediation_deployments(client, "s1", tasks, 1, collector)
     assert len(rows) == 1 and truncated is True
     assert listed == [("subscription", "t1")]
 
     # 0 skips them: nothing is listed and nothing reads as truncated.
     listed.clear()
     assert fx.collect_remediation_deployments(client, "s1", tasks, 0, fx.Collector(logging.getLogger("t"))) == (
-        [], False)
+        [], False, [])
     assert listed == []
 
 
@@ -746,11 +747,42 @@ def test_collect_remediation_deployments_at_management_group_and_resource():
          "policy_assignment_id": ASSIGN},
     ]
     collector = fx.Collector(logging.getLogger("t"))
-    rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 10, collector)
+    rows, truncated, _ = fx.collect_remediation_deployments(client, "s1", tasks, 10, collector)
     assert listed == [("management_group", "mg1", "t3"), ("resource", NSG.lstrip("/"), "t4")]
     assert [(r["remediation_task_id"].rsplit("/", 1)[-1], r["error_code"], r["now_compliant"]) for r in rows] == [
         ("t3", "Denied", None), ("t4", "Denied", None)]
     assert truncated is False and collector.ok
+
+
+# --- in-scope recount ---
+
+def test_in_scope_compliance_recounts_initiative_members_and_falls_back_to_the_evaluated_effect():
+    record = fx.assignment_record({
+        "policy_assignment_id": ASSIGN, "policy_set_definition_id": "/providers/x/policySetDefinitions/s1",
+        "results": {"non_compliant_resources": 3, "non_compliant_policies": 2,
+                    "resource_details": {"NonCompliant": 3, "Compliant": 1}},
+        "policy_definitions": [
+            {"policy_definition_id": DEF, "policy_definition_reference_id": "R1", "effect": "deny",
+             "results": {"non_compliant_resources": 3}},
+            {"policy_definition_id": DEF, "policy_definition_reference_id": "r2", "effect": "audit",
+             "results": {"non_compliant_resources": 1}},
+        ],
+    })
+    rows = [{**state(VM, assignment=ASSIGN.upper()), "policy_definition_action": "deny"},
+            {**state(NSG), "policy_definition_action": "deny"},
+            {**state(NSG, ref="r3"), "policy_definition_action": "modify"}]
+    service = {"non_compliant_resources": 3, "non_compliant_policies": 2, "resource_details": {"NonCompliant": 3}}
+    results, (rebuilt,) = fx.in_scope_compliance(service, [record], rows, known=True)
+    # r2's only non-compliant resource is out of scope; r3 is not in the service's list, so its evaluated effect is used.
+    assert [(m["policy_definition_reference_id"], m["effect"], m["non_compliant_resources"])
+            for m in rebuilt["non_compliant_member_policies"]] == [("R1", "deny", 2), ("r3", "modify", 1)]
+    assert (rebuilt["non_compliant_resources"], rebuilt["non_compliant_policies"], rebuilt["is_compliant"],
+            rebuilt["member_policy_count"], rebuilt["compliance_percentage"]) == (2, 2, False, 2, None)
+    assert (results["non_compliant_resources"], results["non_compliant_policies"], results["resource_details"]) == (
+        2, 2, {"NonCompliant": 2})
+    results, (unknown,) = fx.in_scope_compliance(service, [record], rows, known=False)
+    assert (results["non_compliant_resources"], unknown["is_compliant"], unknown["non_compliant_member_policies"]) == (
+        None, None, None)
 
 
 # --- wiring ---
@@ -766,7 +798,7 @@ def test_main_writes_the_new_results_and_summary(monkeypatch, tmp_path):
     monkeypatch.setattr(fx, "provider_registration_status", lambda *a: "registered")
     seen = {}
 
-    def collect(subscription_id, cred, collector, limits):
+    def collect(subscription_id, cred, collector, limits, exclusions=None):
         seen.update(limits)
         return fx.empty_collection()
 

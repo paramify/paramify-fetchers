@@ -1,0 +1,25 @@
+key: oci_console_users_all_have_mfa
+name: OCI Console Users All Have MFA
+type: AUTOMATED
+role: configuration
+statement: >
+  Every OCI user who can sign in to the console has MFA activated. Asserts the
+  percentage the fetcher computes over console-capable users, so a tenancy whose
+  only accounts are service users with no console access reports 0 and fails
+  rather than passing vacuously. Does NOT assert the MFA factor is
+  phishing-resistant, which the IAM API does not report, nor anything about
+  API-key or token authentication — those are non-user credentials and are
+  covered by oci_no_tenancy_admin_api_keys. Fails when any console-capable user
+  has no MFA, and when the summary key is renamed.
+regex: '"mfa_percentage_of_console_users":\s*(?<mfa_percentage_of_console_users>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-OCI-IAM-USERS-CREDENTIALS

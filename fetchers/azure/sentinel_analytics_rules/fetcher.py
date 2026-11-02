@@ -1,17 +1,70 @@
 #!/usr/bin/env python3
-"""Microsoft Sentinel analytics (detection) rules per workspace, with their enabled state and the templates in use."""
+"""Microsoft Sentinel analytics (detection) rules per workspace: enabled state, queries, the tables each reads, and whether those tables get data."""
 
+import hashlib
 import logging
+import os
+import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
-from azure_rest import SI_API, SI_PREVIEW_API, run_workspaces  # noqa: E402
+from azure_rest import (  # noqa: E402
+    LAW_API,
+    SI_API,
+    SI_PREVIEW_API,
+    int_config,
+    iso_duration_days,
+    run_workspaces,
+)
+from sentinel_ingestion import (  # noqa: E402
+    ALERT_PRODUCTS_QUERY,
+    ALERTS_TABLE,
+    DEFAULT_WINDOW_DAYS,
+    INGESTION_QUERY,
+    NON_SOURCE_TABLES,
+    WINDOW_ENV,
+)
 
 NAME = "azure_sentinel_analytics_rules"
+# Detection queries routinely hold text a web firewall refuses (/etc/passwd, <script, ; rm -rf), which would cost
+# the whole evidence file, so the full text is opt-in; the hash and length identify each query without it.
+QUERY_TEXT_ENV = "SENTINEL_RULE_QUERY_TEXT"
 FUSION_TEMPLATE = "f71aba3d-28fb-450b-b192-4e76a83015c8"
+INCIDENT_CREATION = "MicrosoftSecurityIncidentCreation"
+# Kinds with no query of their own: their template's connectors are optional signals, not tables the rule needs.
+NO_QUERY_KINDS = frozenset({"Fusion", "MLBehaviorAnalytics", "ThreatIntelligence"})
+# Each product an incident-creation rule can filter on, and the kind of the connection that sends its alerts.
+ALERT_PRODUCT_KINDS = {
+    "azure active directory identity protection": "AzureActiveDirectory",
+    "azure advanced threat protection": "AzureAdvancedThreatProtection",
+    "azure security center": "AzureSecurityCenter",
+    "azure security center for iot": "IOT",
+    "microsoft cloud app security": "MicrosoftCloudAppSecurity",
+    "microsoft defender advanced threat protection": "MicrosoftDefenderAdvancedThreatProtection",
+    "office 365 advanced threat protection": "OfficeATP",
+}
+# Defender XDR's connection (only the preview listing returns it) carries these kinds' alerts, not Defender for Cloud's or IoT's.
+DEFENDER_XDR = "MicrosoftThreatProtection"
+DEFENDER_XDR_CARRIES = frozenset({
+    "AzureActiveDirectory", "AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity",
+    "MicrosoftDefenderAdvancedThreatProtection", "OfficeATP",
+})
+
+# Verbatim strings (@"…") escape only a doubled quote, so a trailing backslash still closes them.
+_KQL_TOKEN = re.compile(
+    r"//[^\n]*|```.*?```|@\"[^\"\n]*(?:\"\"[^\"\n]*)*\"|@'[^'\n]*(?:''[^'\n]*)*'|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|[A-Za-z_]\w*|\S",
+    re.S,
+)
+_CUSTOM_TABLE = re.compile(r"\w+_CL$")
+_IDENTIFIER = re.compile(r"[A-Za-z_]\w*$")
+_SOURCE_AFTER = {None, "|", ";", ")", ",", "}", "on"}
+_SOURCE_BEFORE = {None, ";", "{", "union", "join", "lookup"}
+_TABULAR_CALLS = {"materialize", "toscalar", "union", "join", "lookup", "in"}
+_OPERATOR_PARAMS = {"kind", "isfuzzy", "withsource"}
+_LITERALS = {"true", "false", "null"}
 
 logger = logging.getLogger(NAME)
 
@@ -19,6 +72,7 @@ logger = logging.getLogger(NAME)
 def project_rule(rule: Dict[str, Any]) -> Dict[str, Any]:
     props = rule.get("properties") or {}
     incident = props.get("incidentConfiguration") or {}
+    query = props.get("query")
     return {
         "name": rule.get("name"),
         "display_name": props.get("displayName"),
@@ -36,6 +90,12 @@ def project_rule(rule: Dict[str, Any]) -> Dict[str, Any]:
         "trigger_threshold": props.get("triggerThreshold"),
         "creates_incidents": incident.get("createIncident"),
         "product_filter": props.get("productFilter"),
+        "query": query,
+        # Identify the query without its text, which can hold strings a WAF refuses (paths, script tags, shell).
+        "query_sha256": hashlib.sha256(query.encode("utf-8")).hexdigest() if isinstance(query, str) else None,
+        "query_length": len(query) if isinstance(query, str) else None,
+        "suppression_enabled": props.get("suppressionEnabled"),
+        "suppression_duration": props.get("suppressionDuration"),
     }
 
 
@@ -51,6 +111,234 @@ def merge_rules(stable: List[Dict[str, Any]], preview: List[Dict[str, Any]] | No
         else:
             merged[key] = {**project_rule(rule), "seen_in": ["preview"]}
     return sorted(merged.values(), key=lambda r: ((r["kind"] or ""), (r["display_name"] or ""), (r["name"] or "")))
+
+
+def _is_source(toks: List[str], i: int) -> bool:
+    """Whether toks[i] stands where a tabular source goes rather than a column (`Operation` is both)."""
+    at = lambda j: toks[j] if 0 <= j < len(toks) else None  # noqa: E731
+    if at(i + 1) not in _SOURCE_AFTER:
+        return False
+    prev = at(i - 1)
+    if prev in _SOURCE_BEFORE or (prev == "=" and at(i - 3) == "let") or (at(i - 2) == "=" and at(i - 3) in _OPERATOR_PARAMS):
+        return True
+    if prev == "(":
+        before = at(i - 2)
+        return before is None or not re.match(r"\w", before) or before in _TABULAR_CALLS or (at(i - 3) == "=" and at(i - 4) in _OPERATOR_PARAMS)
+    if prev == ",":
+        j = i - 1
+        while j >= 0 and toks[j] not in {"|", ";", "(", ")", "union"}:
+            j -= 1
+        return at(j) == "union" or (at(j) == "(" and at(j - 1) == "in")
+    return False
+
+
+def _unlisted_table(toks: List[str], i: int, skip: Set[str]) -> bool:
+    """A name the workspace doesn't list, standing where only a table can: a table it never provisioned. `in (…)`
+    lists tables only after find or search, and `= (…)` holds one only in a let."""
+    tok = toks[i]
+    if not _IDENTIFIER.match(tok) or tok.startswith("_") or tok.lower() in _LITERALS or tok in skip:
+        return False
+    if (i > 0 and toks[i - 1] == ".") or not _is_source(toks, i):
+        return False
+    at = lambda j: toks[j] if 0 <= j < len(toks) else None  # noqa: E731
+    opener = i - 1
+    if at(opener) == ",":
+        while opener >= 0 and toks[opener] not in {"|", ";", "(", ")", "union"}:
+            opener -= 1
+    if at(opener) != "(":
+        return True
+    before = at(opener - 1)
+    if before == "in":
+        j = opener - 2
+        while j >= 0 and toks[j] not in {"|", ";"}:
+            if toks[j] in {"find", "search"}:
+                return True
+            j -= 1
+        return False
+    if before == "=":
+        return at(opener - 3) == "let"
+    return before is None or bool(re.match(r"\w", before))
+
+
+def _call_name(toks: List[str], i: int) -> Optional[str]:
+    """The name called with toks[i] among its arguments, if any."""
+    depth = 0
+    for j in range(i - 1, -1, -1):
+        if toks[j] == ")":
+            depth += 1
+        elif toks[j] == "(":
+            if depth == 0:
+                return toks[j - 1] if j > 0 else None
+            depth -= 1
+    return None
+
+
+def _tokens(query: Optional[str]) -> Tuple[List[str], Set[int]]:
+    """KQL tokens without comments, and the positions of bracket-quoted names (['T']) read as bare names."""
+    raw = [t for t in _KQL_TOKEN.findall(query or "") if not t.startswith("//")]
+    toks: List[str] = []
+    quoted: Set[int] = set()
+    i = 0
+    while i < len(raw):
+        name = raw[i + 1].strip("\"'") if raw[i] == "[" and i + 2 < len(raw) and raw[i + 2] == "]" else ""
+        if raw[i + 1:i + 2] and raw[i + 1][0] in "\"'" and _IDENTIFIER.match(name):
+            quoted.add(len(toks))
+            toks.append(name)
+            i += 3
+            continue
+        toks.append(raw[i])
+        i += 1
+    return toks, quoted
+
+
+def _binding_positions(toks: List[str]) -> Set[int]:
+    """Where the query names a column or result rather than reading one: mv-expand and mv-apply targets,
+    `as` names and the withsource= column."""
+    at: Set[int] = set()
+    for k, tok in enumerate(toks):
+        if (tok in {"expand", "apply"} and toks[k - 2:k] == ["mv", "-"]) or (tok == "as" and k > 0 and toks[k - 1] == "|"):
+            j = k + 1
+            while j < len(toks) and toks[j] not in {"|", ";", "on"}:
+                at.add(j)
+                j += 1
+        if tok == "withsource" and toks[k + 1:k + 2] == ["="] and k + 2 < len(toks):
+            at.add(k + 2)
+    return at
+
+
+def query_tables(
+    query: Optional[str], tables: Set[str], columns: Set[str], workspace_functions: Optional[Set[str]] = None
+) -> List[str]:
+    """Local workspace tables a KQL query names, in code or as a string passed to table() or a function it defines.
+
+    Given the workspace's functions, a name it doesn't list counts too where only a table can stand."""
+    toks, quoted = _tokens(query)
+    functions = {toks[k + 1] for k in range(len(toks) - 3) if toks[k] == "let" and toks[k + 2] == "=" and toks[k + 3] == "("}
+    binding = _binding_positions(toks)
+    # Names the query assigns, declares or binds (`extend X =`, `let X =`, `datatable(X:string)`, `mv-expand X`) count
+    # only where a table can stand; so does a bracket-quoted name, which can be an index.
+    ambiguous = columns | {toks[k] for k in range(len(toks) - 1) if toks[k + 1] in {"=", ":"}} | {toks[k] for k in binding}
+    unlisted = workspace_functions is not None
+    skip = ambiguous | functions | (workspace_functions or set())
+    found = set()
+    for i, tok in enumerate(toks):
+        if i in binding:
+            continue
+        listed = tok in tables or _CUSTOM_TABLE.match(tok)
+        if i in quoted:
+            if (listed or (unlisted and tok not in skip)) and _is_source(toks, i):
+                found.add(tok)
+        elif tok[0] in "\"'@`":
+            literal = tok.lstrip("@").strip("\"'`")
+            argument = i > 0 and toks[i - 1] in {"(", ","} and i + 1 < len(toks) and toks[i + 1] in {")", ","}
+            call = _call_name(toks, i) if argument else None
+            if call in functions | {"table"} and (literal in tables or _CUSTOM_TABLE.match(literal)):
+                found.add(literal)
+            elif call == "table" and unlisted and _IDENTIFIER.match(literal):
+                found.add(literal)
+        elif listed and (i == 0 or toks[i - 1] != "."):
+            if tok not in ambiguous or _is_source(toks, i):
+                found.add(tok)
+        elif unlisted and _unlisted_table(toks, i, skip):
+            found.add(tok)
+    return sorted(found)
+
+
+def template_tables(template: Optional[Dict[str, Any]], workspace_functions: Optional[Set[str]] = None) -> List[str]:
+    """The template's requiredDataConnectors dataTypes, `SecurityAlert (ASC)` read as SecurityAlert. They name
+    tables, so one the workspace doesn't list is a table it never provisioned; `_`-prefixed parsers aren't tables."""
+    connectors = ((template or {}).get("properties") or {}).get("requiredDataConnectors") or []
+    names = {dt.split(" (")[0].strip() for c in connectors for dt in c.get("dataTypes") or [] if isinstance(dt, str)}
+    return sorted(
+        n for n in names if _IDENTIFIER.match(n) and not n.startswith("_") and n not in (workspace_functions or set())
+    )
+
+
+def rule_tables(
+    rule: Dict[str, Any], tables: Set[str], columns: Set[str], templates: Dict[str, Dict[str, Any]],
+    workspace_functions: Optional[Set[str]] = None,
+) -> Tuple[Optional[List[str]], Optional[str]]:
+    """(tables read, where that came from): the query, else the template, else unknown."""
+    if rule.get("kind") == INCIDENT_CREATION:
+        return [ALERTS_TABLE], "alert_product"
+    found = query_tables(rule.get("query"), tables, columns, workspace_functions)
+    if found:
+        return found, "query"
+    if rule.get("kind") in NO_QUERY_KINDS:
+        return None, None
+    found = template_tables(templates.get(rule.get("alert_rule_template_name") or ""), workspace_functions)
+    if found:
+        return found, "template"
+    return None, None
+
+
+def tables_without_data(
+    rule: Dict[str, Any], ingested: Optional[Dict[str, Any]], products: Optional[Dict[str, Any]]
+) -> Optional[List[str]]:
+    """Tables read that got nothing in the window; an incident-creation rule needs its product's alerts, a template rule any one source."""
+    read = rule.get("tables_read")
+    if read is None or ingested is None:
+        return None
+    if rule.get("kind") == INCIDENT_CREATION:
+        if products is None:
+            return None
+        return [] if (rule.get("product_filter") or "").lower() in products else [ALERTS_TABLE]
+    if rule.get("tables_from") == "template":
+        return read if not any(t in ingested for t in read) else []
+    return [t for t in read if t not in ingested]
+
+
+def sends_alerts(connection: Dict[str, Any]) -> bool:
+    alerts = ((connection.get("properties") or {}).get("dataTypes") or {}).get("alerts") or {}
+    return (alerts.get("state") or "").lower() == "enabled"
+
+
+def alert_connections(product: Optional[str], connections: List[Dict[str, Any]]) -> List[str]:
+    """Kinds of the connections with alerts enabled that send a product's alerts: its own, or Defender XDR's."""
+    kind = ALERT_PRODUCT_KINDS.get((product or "").lower())
+    feeds = {kind, DEFENDER_XDR} if kind in DEFENDER_XDR_CARRIES else {kind}
+    return sorted({c["kind"] for c in connections if kind and c.get("kind") in feeds and sends_alerts(c)})
+
+
+def quiet_rules(client, path: str, ws: Dict[str, Any], rules: List[Dict[str, Any]], collector, notes: List[str]) -> Optional[List[Dict[str, Any]]]:
+    """Enabled incident-creation rules whose product sent no alert while a connection sending its alerts has them
+    enabled: no alert is normal for these. None when a rule isn't quiet by the connections read and a listing failed."""
+    missing = [
+        r for r in rules
+        if r.get("enabled") is True and r.get("kind") == INCIDENT_CREATION and r.get("tables_without_data")
+    ]
+    if not missing:
+        return []
+    stable = collector.guard(
+        f"securityinsights.dataConnectors.list({ws['name']})", lambda: client.list(f"{path}/dataConnectors", SI_API)
+    )
+    preview = None
+    try:
+        preview = client.list(f"{path}/dataConnectors", SI_PREVIEW_API)
+    except Exception as exc:  # noqa: BLE001 — only the preview lists Defender XDR, so a rule it may feed stays unknown
+        notes.append(
+            f"data connector listing at {SI_PREVIEW_API} failed, so an incident-creation rule Defender XDR may feed "
+            f"reads as unknown rather than quiet: {exc}"
+        )
+    quiet = []
+    for r in missing:
+        through = alert_connections(r.get("product_filter"), (stable or []) + (preview or []))
+        if through:
+            own = ALERT_PRODUCT_KINDS[(r.get("product_filter") or "").lower()] in through
+            quiet.append({
+                "name": r["name"], "display_name": r["display_name"], "product_filter": r.get("product_filter"),
+                "alerts_enabled_on": through,
+                "reason": "its product sent no alert in the window, and "
+                + ("its own connection" if own else "Defender XDR, which carries that product's alerts,")
+                + " has alerts enabled",
+            })
+        elif stable is None or preview is None:
+            return None
+    return quiet
+
+
+def include_query_text() -> bool:
+    return os.environ.get(QUERY_TEXT_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def is_fusion(rule: Dict[str, Any]) -> bool:
@@ -71,10 +359,74 @@ def rule_summary(rules: List[Dict[str, Any]]) -> Dict[str, Any]:
         "fusion_present": bool(fusion),
         "fusion_enabled": any(r.get("enabled") is True for r in fusion) if fusion else None,
         "rules_only_in_preview": sum(1 for r in rules if r.get("seen_in") == ["preview"]),
+        "enabled_rules_suppressed": sum(1 for r in enabled if r.get("suppression_enabled") is True),
     }
 
 
+def coverage(rules: List[Dict[str, Any]], ingested: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Which ingesting tables enabled rules read, which they don't, and which enabled rules read tables with no data."""
+    enabled = [r for r in rules if r.get("enabled") is True]
+    readers: Dict[str, int] = {}
+    # A template's data types are the sources a rule may read, not ones its query is known to read.
+    by_template: Dict[str, int] = {}
+    for r in enabled:
+        for t in r.get("tables_read") or []:
+            readers[t] = readers.get(t, 0) + 1
+            if r.get("tables_from") == "template":
+                by_template[t] = by_template.get(t, 0) + 1
+    sources = [t for t in ingested or {} if t not in NON_SOURCE_TABLES | {ALERTS_TABLE}]
+    return {
+        "enabled_rules_tables_unknown": sum(1 for r in enabled if r.get("tables_read") is None),
+        "tables_read_by_enabled_rules": [
+            {"table": t, "enabled_rules": n, "enabled_rules_by_template": by_template.get(t, 0),
+             "last_ingested": ingested.get(t) if ingested is not None else None}
+            for t, n in sorted(readers.items(), key=lambda kv: kv[0].lower())
+        ],
+        "ingesting_tables_not_read": (
+            sorted((t for t in sources if t not in readers), key=str.lower) if ingested is not None else None
+        ),
+        "ingesting_tables_read_only_by_templates": (
+            sorted((t for t in sources if t in readers and readers[t] == by_template.get(t, 0)), key=str.lower)
+            if ingested is not None else None
+        ),
+        "enabled_rules_missing_data": (
+            [
+                {"name": r["name"], "display_name": r["display_name"], "tables_without_data": r["tables_without_data"]}
+                for r in enabled if r.get("tables_without_data")
+            ]
+            if ingested is not None else None
+        ),
+    }
+
+
+def table_vocabulary(listed: List[Dict[str, Any]]) -> Tuple[Set[str], Set[str]]:
+    """Table names, and the names that are also some table's column."""
+    names: Set[str] = {t["name"] for t in listed if t.get("name")}
+    columns: Set[str] = set()
+    for t in listed:
+        schema = (t.get("properties") or {}).get("schema") or {}
+        columns.update(c["name"] for c in (schema.get("standardColumns") or []) + (schema.get("columns") or []) if c.get("name"))
+    return names, names & columns
+
+
+def preview_templates(
+    client, path: str, rules: List[Dict[str, Any]], templates: List[Dict[str, Any]], notes: List[str]
+) -> List[Dict[str, Any]]:
+    """Templates the stable listing lacks (NRT), read one by one at the preview api-version for the rules using them."""
+    listed = {t.get("name") for t in templates}
+    wanted = sorted({r["alert_rule_template_name"] for r in rules if r.get("alert_rule_template_name")} - listed)
+    found: List[Dict[str, Any]] = []
+    for name in wanted:
+        try:
+            found.append(client.get(f"{path}/alertRuleTemplates/{name}", SI_PREVIEW_API))
+        except Exception as exc:  # noqa: BLE001 — a template only adds data types to fall back on
+            if getattr(exc, "status", None) != 404:  # a deleted template has nothing to read
+                notes.append(f"template {name} at {SI_PREVIEW_API} failed, so rules using it have no template to fall back on: {exc}")
+    return found
+
+
 def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
+    days = int_config(WINDOW_ENV, DEFAULT_WINDOW_DAYS)
     path = f"{ws['id']}/providers/Microsoft.SecurityInsights"
     stable = collector.guard(f"securityinsights.alertRules.list({ws['name']})", lambda: client.list(f"{path}/alertRules", SI_API))
     notes: List[str] = []
@@ -86,18 +438,84 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     templates = collector.guard(
         f"securityinsights.alertRuleTemplates.list({ws['name']})", lambda: client.list(f"{path}/alertRuleTemplates", SI_API)
     )
+    listed_tables = collector.guard(
+        f"operationalinsights.tables.list({ws['name']})", lambda: client.list(f"{ws['id']}/tables", LAW_API)
+    )
+    workspace_functions = None
+    try:
+        saved = client.list(f"{ws['id']}/savedSearches", LAW_API)
+        workspace_functions = {a for a in ((s.get("properties") or {}).get("functionAlias") for s in saved) if a}
+    except Exception as exc:  # noqa: BLE001 — without them an unlisted name might be a function, so it stays unknown
+        notes.append(
+            "saved search listing failed, so a name the workspace doesn't list reads as unknown rather than as a "
+            f"table that gets no data: {exc}"
+        )
+    rows = None
+    if ws.get("customer_id"):
+        rows = collector.guard(
+            f"loganalytics.query(table ingestion, {ws['name']})",
+            lambda: client.query(ws["customer_id"], INGESTION_QUERY.format(days=days), iso_duration_days(days)),
+        )
+    else:
+        collector.record(f"workspace customerId ({ws['name']})", LookupError("workspace has no customerId to query"))
+    ingested = {r["ParamifySourceTable"]: r.get("LastIngested") for r in rows if r.get("ParamifySourceTable")} if rows is not None else None
 
     rules = merge_rules(stable, preview) if stable is not None else None
+    if rules is not None and templates is not None:
+        templates = templates + preview_templates(client, path, rules, templates, notes)
+    if rules is not None:
+        names, columns = table_vocabulary(listed_tables) if listed_tables is not None else (None, set())
+        by_template = {t.get("name"): t for t in templates or []}
+        for r in rules:
+            r["tables_read"], r["tables_from"] = (
+                rule_tables(r, names, columns, by_template, workspace_functions) if names is not None else (None, None)
+            )
+        products: Optional[Dict[str, Any]] = {}
+        if ingested and ALERTS_TABLE in ingested and any(r["kind"] == INCIDENT_CREATION for r in rules):
+            alert_rows = collector.guard(
+                f"loganalytics.query(SecurityAlert products, {ws['name']})",
+                lambda: client.query(ws["customer_id"], ALERT_PRODUCTS_QUERY.format(days=days), iso_duration_days(days)),
+            )
+            products = {(p.get("ProductName") or "").lower(): p.get("LastIngested") for p in alert_rows} if alert_rows is not None else None
+        for r in rules:
+            r["tables_without_data"] = tables_without_data(r, ingested, products)
+    quiet = None
+    if rules is not None and listed_tables is not None and ingested is not None:
+        quiet = quiet_rules(client, path, ws, rules, collector, notes)
+
+    with_text = include_query_text()
+    for r in rules or []:
+        if not with_text:
+            r.pop("query", None)
     used = {r.get("alert_rule_template_name") for r in rules or [] if r.get("alert_rule_template_name")}
     template_names = {t.get("name") for t in templates or []}
     return {
         "api_versions": {"stable": SI_API, "preview": SI_PREVIEW_API},
+        "ingestion_window_days": days,
+        "query_text_included": with_text,
         "rules": rules,
         **(rule_summary(rules) if rules is not None else {}),
+        **(coverage(rules, ingested) if rules is not None and listed_tables is not None else {}),
+        **({"enabled_rules_quiet": quiet} if rules is not None and listed_tables is not None else {}),
+        "workspace_tables_listed": len(listed_tables) if listed_tables is not None else None,
         "templates_available": len(template_names) if templates is not None else None,
         "templates_in_use": len(used & template_names) if templates is not None else None,
         "notes": notes,
     }
+
+
+def _total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]:
+    """Sum over the workspaces that have the field; None when none does, so a failed query never reads as zero."""
+    values = [w[field] for w in workspaces if w.get(field) is not None]
+    return sum(len(v) if isinstance(v, list) else v for v in values) if values else None
+
+
+def _paired_total(workspaces: List[Dict[str, Any]], field: str, pair: str) -> Optional[int]:
+    """Count over the workspaces where `pair` is known; None if any of them lacks `field`, so the two compare."""
+    known = [w for w in workspaces if w.get(pair) is not None]
+    if not known or any(w.get(field) is None for w in known):
+        return None
+    return sum(len(w[field]) for w in known)
 
 
 def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -108,6 +526,11 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
         "min_enabled_rules": min(enabled) if enabled else None,
         "workspaces_with_no_enabled_rules": sum(1 for e in enabled if e == 0),
         "workspaces_with_fusion_enabled": sum(1 for w in collected if w.get("fusion_enabled") is True),
+        "enabled_rules_missing_data": _total(collected, "enabled_rules_missing_data"),
+        "enabled_rules_quiet": _paired_total(collected, "enabled_rules_quiet", "enabled_rules_missing_data"),
+        "ingesting_tables_not_read": _total(collected, "ingesting_tables_not_read"),
+        "ingesting_tables_read_only_by_templates": _total(collected, "ingesting_tables_read_only_by_templates"),
+        "enabled_rules_tables_unknown": _total(collected, "enabled_rules_tables_unknown"),
     }
 
 

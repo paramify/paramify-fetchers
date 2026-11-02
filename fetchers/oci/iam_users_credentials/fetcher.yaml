@@ -1,0 +1,76 @@
+name: oci_iam_users_credentials
+version: 0.1.0
+description: >-
+  Shows every user's MFA state, console access and tenancy administrator membership, and every standing credential each holds with its age.
+category: oci
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_iam_users_credentials.json
+
+secrets: []
+
+ksis:
+  - KSI-IAM-APM      # Strong passwords with MFA — console users without MFA
+  - KSI-IAM-SNU      # Non-user authentication secured and reviewed — API keys, tokens, secret keys and their ages
+  - KSI-IAM-ELP      # Least privilege — who is a tenancy administrator, and which of them hold API keys
+
+evidence_set:
+  reference_id: EVD-OCI-IAM-USERS-CREDENTIALS
+  name: User MFA and Standing Credentials
+  instructions: |
+    Script: oci/iam_users_credentials/fetcher.py
+
+    Access: inspect and read all-resources in the tenancy; users are tenancy-scoped, so the tenancy root is read whatever target is set. No credential secret is read.
+
+    Commands Executed:
+    - identity.list_groups — group names, to resolve memberships
+    - identity.list_users — users in the Default identity domain
+    - identity.list_user_group_memberships (per user) — the groups each user belongs to
+    - identity.list_api_keys, list_auth_tokens, list_customer_secret_keys, list_smtp_credentials, list_db_credentials and list_o_auth_client_credentials (per user) — each standing credential and when it was created
+    - identity.list_compartments — every compartment, since an identity domain can live in any
+    - identity.list_domains (per compartment) — identity domains other than Default
+    - identity_domains.list_users (per other domain, every page) — that domain's users, with MFA state, last login and capabilities, read from the domain's own endpoint
+    - identity_domains.list_api_keys, list_auth_tokens, list_customer_secret_keys, list_smtp_credentials, list_user_db_credentials and list_o_auth2_client_credentials (per domain user) — that user's credentials
+
+    Output: oci_iam_users_credentials_<tenancy>.json — every user across every identity domain with MFA state, console capability, last login, groups and each credential's age.
+
+    Summary fields:
+
+    Who exists?
+    - total_users — Number of users across every identity domain
+    - active_users — Number of users in the ACTIVE state
+    - users_with_unknown_state — Number of users whose state could not be read; they are judged as if active
+    - identity_domains_collected — List of identity domain names read
+    - users_by_identity_domain — Number of users for each identity domain name
+    - users_never_logged_in — Number of live users with no successful login on record
+
+    Does everyone who can sign in have MFA?
+    - console_capable_users — Number of live users able to sign in with a console password
+    - console_capable_users_without_mfa — Number of console-capable users with MFA not activated
+    - console_users_without_mfa_who_have_logged_in — Number of those who have signed in at least once, separating used accounts from never-activated ones
+    - mfa_percentage_of_console_users — Percentage of console-capable users with MFA = (console_capable_users minus console_capable_users_without_mfa) / console_capable_users × 100, a whole number; 0 when console_capable_users is 0
+    - users_without_mfa — List of names of console-capable users without MFA
+
+    Who administers the tenancy?
+    - tenancy_admins — Number of live Default-domain users in the Administrators group
+    - tenancy_admin_names — List of their names
+    - tenancy_admins_with_api_keys — Number of tenancy administrators holding at least one active API signing key
+    - secondary_domain_admins — List of users, as domain/name, in another domain's Domain_Administrators group; they administer that domain, not the tenancy
+
+    Which standing credentials exist, and how old are they?
+    - credentials_by_type — Number of active credentials and of those older than 90 days for each credential type:
+      - api_keys (API signing keys)
+      - auth_tokens (auth tokens)
+      - customer_secret_keys (S3-compatible secret keys)
+      - smtp_credentials (SMTP credentials)
+      - db_credentials (database credentials)
+      - oauth2_client_credentials (OAuth2 client credentials)
+    - active_credentials_older_than_90_days — Number of active credentials of every type created more than 90 days before the run
+    - users_with_unreadable_credentials — Number of users for whom at least one credential type could not be listed

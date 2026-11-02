@@ -57,7 +57,9 @@ grep -nE 'os\.environ|get_env\("' fetchers/gitlab/ci_cd_pipeline_config/fetcher.
 
 Every read is declared or set by the runner except `LOG_LEVEL`, which never
 arrives, so under the runner this fetcher always logs at `INFO`. Grep any
-`_shared/` module a script imports the same way.
+`_shared/` module a script imports the same way. A
+[comparator](comparators.md#how-the-runner-runs-one) gets none of its category's
+env, plus `COMPARATOR_INPUTS`.
 
 ## 3. Run it with fake credentials
 
@@ -178,7 +180,7 @@ rather than writing the file yourself.
 | `error` holds log lines (timestamps, `Evidence saved to …`) | The fetcher exited non-zero without calling `report_failure`, so the runner fell back to the stderr tail. |
 | Exit 124 | The runner killed the fetcher at its `runtime.timeout` (default 600 seconds). Raise it in `fetcher.yaml`. |
 | Step 6 reaches the network instead of failing with `bad_config` | A `.env` at the repo root sets the `GITLAB_` variables. The script's `load_dotenv()` reads it whatever the runner passed. |
-| A `dropping unrecognized status code` warning | `report_failure` accepts only `auth_failed`, `not_authorized`, `target_unreachable`, `rate_limited`, `bad_config`, `partial_failure`, and `internal_error`. |
+| A `dropping unrecognized status code` warning | `report_failure` accepts only `auth_failed`, `not_authorized`, `target_unreachable`, `rate_limited`, `bad_config`, `partial_failure`, `internal_error`, and, for a comparator, `input_failed`. |
 
 **More detail:** [one run through the framework](architecture_guide.md) ·
 [envelope fields](envelope_guide.md#2-read-its-envelope)

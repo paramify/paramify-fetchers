@@ -1,0 +1,13 @@
+validator: oci_zpr_no_internet_source_statements
+cases:
+  - name: oci_zpr_no_internet_source_statements_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"zpr_enabled": true, "statements_allowing_internet_source": 0}}'
+
+  - name: oci_zpr_no_internet_source_statements_fails
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"zpr_enabled": true, "statements_allowing_internet_source": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"zpr_enabled": true, "statements-allowing-internet-source": 0}}'

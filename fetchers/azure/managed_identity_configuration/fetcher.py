@@ -31,7 +31,15 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
-from entra_graph import paginate, with_graph_client  # noqa: E402
+from entra_graph import (  # noqa: E402
+    DEFAULT_ACCESS_ROLE_ID,
+    MICROSOFT_GRAPH_APP_ID,
+    is_denied,
+    is_graph_resource,
+    is_privileged_graph_permission,
+    paginate,
+    with_graph_client,
+)
 from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_managed_identity_configuration")
@@ -225,39 +233,17 @@ def project_role_assignment(assignment, roles: dict) -> dict:
     }
 
 
-MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
-DEFAULT_ACCESS_ROLE_ID = "00000000-0000-0000-0000-000000000000"
-# Read-only application permissions that still reach every mailbox, file, site, chat or calendar in the tenant.
-TENANT_WIDE_READ_PERMISSIONS = {
-    "Mail.Read",
-    "Mail.ReadBasic.All",
-    "Files.Read.All",
-    "Sites.Read.All",
-    "Calendars.Read",
-    "Contacts.Read",
-    "Chat.Read.All",
-    "ChannelMessage.Read.All",
-    "Notes.Read.All",
-}
-
-
 def privileged_graph_permission(value, resource_app_id=MICROSOFT_GRAPH_APP_ID):
-    """Microsoft Graph application permissions that can change the tenant or read every mailbox, file or site.
+    """Whether a Microsoft Graph application permission is privileged (`entra_graph`'s judgment).
 
     Only Microsoft Graph's permissions are judged: a ReadWrite role on a custom API is not a Graph
     privilege, so it is False. Null when the permission or its resource could not be resolved.
     """
     if resource_app_id is None or value is None:
         return None
-    if str(resource_app_id).lower() != MICROSOFT_GRAPH_APP_ID:
+    if not is_graph_resource(resource_app_id):
         return False
-    text = str(value)
-    return (
-        "ReadWrite" in text
-        or "FullControl" in text
-        or text in ("Mail.Send", "Mail.Send.Shared")
-        or text in TENANT_WIDE_READ_PERMISSIONS
-    )
+    return is_privileged_graph_permission(value)
 
 
 def any_true(values):
@@ -365,12 +351,6 @@ def list_federated_credentials(rest, identity_id: str) -> list:
                 raise
             last = exc
     raise last
-
-
-def is_denied(exc) -> bool:
-    status = getattr(exc, "response_status_code", None)
-    text = str(exc).lower()
-    return status in (401, 403) or "authorization_requestdenied" in text or "insufficient privileges" in text
 
 
 async def read_graph_roles(collector: Collector, cred, principal_ids: list) -> tuple:

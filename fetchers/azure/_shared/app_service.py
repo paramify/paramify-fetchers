@@ -22,6 +22,12 @@ def is_web_app(kind) -> bool:
     )
 
 
+def is_not_authorized(exc: BaseException) -> bool:
+    """A 403: the caller lacks an opt-in permission such as config/list, not a broken call."""
+    message = str(exc).lower()
+    return getattr(exc, "status_code", None) == 403 or "authorizationfailed" in message
+
+
 def web_client(subscription_id, cred, collector: Collector):
     def _client():
         from azure.mgmt.web import WebSiteManagementClient  # lazy

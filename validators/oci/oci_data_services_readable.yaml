@@ -1,0 +1,20 @@
+key: oci_data_services_readable
+name: OCI Data Services Readable
+type: AUTOMATED
+role: configuration
+statement: >
+  The managed data service listings were read in at least one compartment, so
+  a zero from its partner means no reachable service rather than no service
+  looked at. The fetcher writes false when every compartment's listing failed.
+  A tenancy with no Autonomous Database, file system or integration instance
+  still passes: the listings answered, and empty. Does NOT assert anything
+  about posture. Fails when the summary key is renamed.
+regex: '"data_services_readable":\s*(?<data_services_readable>true)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-DATA-SERVICE-EXPOSURE

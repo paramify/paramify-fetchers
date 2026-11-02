@@ -1,15 +1,7 @@
 name: azure_entra_service_principals
-version: 0.1.0
-description: >
-  Every Microsoft Entra ID service principal, the tenant's non-user accounts, with
-  its type (application, managed identity, legacy, social IdP), whether it is
-  enabled, who owns the application behind it (Microsoft first-party, this tenant,
-  or another tenant), and every credential it can present: secrets and
-  certificates held on the service principal, plus, for applications registered
-  in this tenant, the application's own secrets, certificates and federated
-  identity credentials. Summarizes how non-user accounts authenticate (managed
-  identity, federated, certificate, secret) and which stored credentials are
-  expired, expire within 30 days, or never expire.
+version: 0.2.0
+description: >-
+  Shows how each non-user account in Entra ID signs in, whether its credentials expire, who owns it, and which API permissions it holds, flagging privileged Microsoft Graph access.
 category: azure
 
 supports_targets: true
@@ -56,23 +48,115 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 # Microsoft Graph permission (application permission, admin consent):
-#   Application.Read.All   — /servicePrincipals, /applications and their
-#                            federatedIdentityCredentials. Directory.Read.All also
-#                            covers them.
+#   Application.Read.All   — /servicePrincipals, /applications, their owners,
+#                            federatedIdentityCredentials and appRoleAssignments.
+#                            Directory.Read.All also covers them.
+#   DelegatedPermissionGrant.Read.All — optional; /oauth2PermissionGrants (delegated
+#                            grants). Directory.Read.All also covers it. Without either the
+#                            delegated figures read null.
+#   User.Read.All          — optional; user owners' names and account state. With
+#                            Application.Read.All alone Graph returns user owners as an id
+#                            only, and the disabled-owner figure reads null.
 #   Organization.Read.All  — optional; the tenant name/domain recorded as provenance.
-# A denied read is recorded as an API failure and the run exits non-zero.
+# The Directory Readers role covers all of them. Any other denied read is recorded as
+# an API failure and the run exits non-zero.
 
 ksis:
   - KSI-IAM-SNU
+  - KSI-PIY-GIV
+  - KSI-IAM-ELP
 
 evidence_set:
   reference_id: EVD-AZURE-ENTRA-SERVICE-PRINCIPALS
   name: Microsoft Entra ID Service Principals and Non-User Account Credentials
-  instructions: >
-    Script: azure/entra_service_principals/fetcher.py. Microsoft Graph calls (permission: Application.Read.All):
-    GET /servicePrincipals with
-    $select=id,appId,displayName,servicePrincipalType,accountEnabled,appOwnerOrganizationId,alternativeNames,passwordCredentials,keyCredentials;
-    GET /applications with $select=id,appId,displayName,passwordCredentials,keyCredentials
-    and $expand=federatedIdentityCredentials (only this tenant's own applications,
-    never one call per application); GET /organization. Both collections paged via
-    @odata.nextLink and joined on appId.
+  instructions: |
+    Script: azure/entra_service_principals/fetcher.py
+
+    Access: Microsoft Graph Application.Read.All, or the Directory Readers role. Optional: DelegatedPermissionGrant.Read.All (or Directory.Read.All; the Directory Readers role covers both); without it, the delegated grant fields read null. Optional: User.Read.All (or Directory.Read.All; the Directory Readers role covers it); without it, user owners come back as an id only, so their names and account state read null and service_principals_with_only_disabled_owners reads null. Optional: Organization.Read.All; without it, the tenant's name and domain read null.
+
+    Commands Executed:
+    - Microsoft Graph GET /organization — the tenant's name and domain
+    - Microsoft Graph GET /servicePrincipals — every service principal and the secrets and certificates it holds
+    - Microsoft Graph GET /applications — this tenant's app registrations with their secrets, certificates and federated credentials
+    - Microsoft Graph GET /applications and GET /servicePrincipals, expanding owners — who owns each app registration and service principal
+    - Microsoft Graph GET /servicePrincipals, expanding app role assignments — the application permissions each service principal holds
+    - Microsoft Graph GET /applications/{id}/owners, GET /servicePrincipals/{id}/owners and GET /servicePrincipals/{id}/appRoleAssignments (only when an expansion returned 20, its limit, or an assignment without its API) — the whole list
+    - Microsoft Graph GET /servicePrincipals/{id} (per API an assignment names) — the names of that API's app roles
+    - Microsoft Graph GET /oauth2PermissionGrants — delegated grants (a 403 means DelegatedPermissionGrant.Read.All isn't granted)
+
+    Output: azure_entra_service_principals_<tenant>.json — each service principal with its type, who owns it, the credentials it can sign in with and when they expire, and the API permissions it holds, plus app registrations that have no service principal.
+
+    Summary fields:
+
+    What was checked?
+    - total_service_principals — Number of service principals (apps, managed identities and other non-user accounts) in the tenant
+    - disabled_service_principals — Number of service principals that are disabled
+    - owners_readable — True if the owners (the users or service principals listed as able to manage an app registration or service principal) of every app registration and service principal were read; false if any owner read failed, and every count that needs owners reads null
+    - owner_details_readable — True if owners were read and every service principal that can have one (any service principal except Microsoft's own apps and managed identities), and every app registration with no service principal, either has an owner known to be enabled or has every owner's account state (enabled or disabled); false if not, and service_principals_with_only_disabled_owners reads null
+    - application_permissions_readable — True if every service principal's application permissions (app roles on an API, used with no user signed in) and their names were read; false if any read failed, and the application permission fields read null
+    - delegated_grants_readable — True if the delegated grants (permissions to call an API on behalf of a signed-in user) were read; false if they couldn't be (usually DelegatedPermissionGrant.Read.All isn't granted), and the delegated grant fields read null
+    - delegated_grants_status — How the delegated grant read went: ok; not_authorized (Graph answered 401 or 403, or with its Authorization_RequestDenied code, usually because DelegatedPermissionGrant.Read.All isn't granted; the run still succeeds); or failed (any other error, which fails the run, or the read was never reached)
+
+    What kinds of non-user accounts exist?
+    - application_service_principals — Number of service principals of type Application (the identity of an app)
+    - managed_identities — Number of managed identities (identities Azure creates and rotates for a resource)
+    - system_assigned_managed_identities — Number of managed identities tied to one resource and deleted with it
+    - user_assigned_managed_identities — Number of managed identities created on their own and attachable to several resources
+    - legacy_service_principals — Number of service principals of type Legacy (created before app registrations existed)
+    - social_idp_service_principals — Number of service principals of type SocialIdp (a social identity provider)
+
+    Who registered the app behind each account?
+    - microsoft_first_party_service_principals — Number of service principals for Microsoft's own apps (owned by Microsoft's tenants)
+    - tenant_owned_service_principals — Number of service principals for apps registered in this tenant
+    - other_tenant_service_principals — Number of service principals for apps registered in another organization's tenant
+    - unknown_owner_service_principals — Number of service principals, other than managed identities, with no owning organization recorded
+
+    How do non-user accounts authenticate?
+    - federated_service_principals — Number of service principals whose app has a federated credential (signs in with a token another identity provider issues, with no stored secret); a service principal can count in several of these fields
+    - certificate_based_service_principals — Number of service principals holding a certificate someone in the tenant manages
+    - secret_based_service_principals — Number of service principals holding a client secret (password)
+    - tenant_owned_service_principals_without_credentials — Number of service principals for apps registered in this tenant with no secret, certificate or federated credential, which can't sign in as themselves
+    - federated_identity_credentials — Number of federated credentials on apps that have a service principal
+
+    Do stored credentials expire and get rotated?
+    - total_credentials — Number of managed credentials: secrets and certificates someone in the tenant manages, held on service principals or on their apps. The certificate Azure issues and rotates for each managed identity isn't a managed credential and is left out
+    - service_principal_held_credentials — Number of managed credentials held on the service principal itself
+    - application_held_credentials — Number of managed credentials held on the app registration
+    - password_credentials — Number of managed credentials that are client secrets
+    - certificate_credentials — Number of managed credentials that are certificates
+    - expired_credentials — Number of managed credentials whose end date has passed
+    - credentials_expiring_soon — Number of managed credentials that expire within rotation_threshold_days days and haven't expired
+    - credentials_without_expiry — Number of managed credentials with no end date
+    - healthy_credentials — Number of managed credentials that have an end date, haven't expired and don't expire within rotation_threshold_days days
+    - rotation_threshold_days — Days before expiry at which a credential counts as expiring soon (30)
+    - credential_rotation_compliance_percentage — Percentage of managed credentials that are healthy = healthy_credentials / total_credentials × 100 (a whole number, 0–100); 0 when total_credentials is 0
+    - platform_managed_credentials — Number of certificates Azure issues and rotates for managed identities, which no one in the tenant can rotate or let lapse
+
+    Are there app registrations with no service principal?
+    - tenant_applications_without_service_principal — Number of app registrations in this tenant with no service principal here, which can't sign in to this tenant until one is created
+    - federated_identity_credentials_on_applications_without_service_principal — Number of federated credentials on app registrations with no service principal here
+    - ownerless_applications_without_service_principal — Number of app registrations with no service principal here and no owner; null if owners couldn't be read
+
+    Does every app and service principal have a named owner?
+    - owner_eligible_service_principals — Number of service principals that can have an owner: all except Microsoft's own apps and managed identities
+    - service_principals_without_owner — Number of service principals that can have an owner where neither the service principal nor its app registration in this tenant lists an owner; null if owners couldn't be read. Apps registered in another organization's tenant usually have no owner here (their owners are set in the publisher's tenant), so they make up most of this count
+    - tenant_owned_service_principals_without_owner — Number of service principals for apps registered in this tenant where neither the service principal nor its app registration lists an owner; null if owners couldn't be read
+    - ownerless_service_principals_with_credentials — Number of service principals that can have an owner, have no owner, and hold a secret, certificate or federated credential someone manages; null if owners couldn't be read
+    - service_principals_with_only_disabled_owners — Number of service principals that can have an owner, have at least one, and whose every owner (on the service principal or its app registration) is a disabled account; null if owners or their account state couldn't be read
+
+    What API permissions do non-Microsoft accounts hold?
+    - service_principals_with_application_permissions — Number of service principals, other than Microsoft's own apps, holding at least one application permission or default-access assignment (access to an API with no named app role); null if application permissions couldn't be read
+    - application_permission_assignments — Number of application permissions and default-access assignments held by service principals other than Microsoft's own apps; null if application permissions couldn't be read
+    - unnamed_graph_application_permissions — Number of Microsoft Graph application permissions (or ones whose API is unknown), held by service principals other than Microsoft's own apps, whose name couldn't be found in the API's app roles, so whether each is privileged is unknown; null if application permissions couldn't be read
+    - unnamed_other_application_permissions — Number of application permissions on APIs other than Microsoft Graph, held by service principals other than Microsoft's own apps and other than default-access assignments, whose name couldn't be found in the API's app roles; only Microsoft Graph permissions are judged, so each permission on another API, named or not, reads privileged null with judged false, and so does the holder's has_privileged_permission unless it holds a privileged Graph permission; null if application permissions couldn't be read
+    - service_principals_with_delegated_grants — Number of service principals, other than Microsoft's own apps, holding at least one delegated grant; null if delegated grants couldn't be read
+    - delegated_permission_grants — Number of delegated grants held by service principals other than Microsoft's own apps; null if delegated grants couldn't be read
+    - admin_consented_delegated_grants — Number of delegated grants, held by service principals other than Microsoft's own apps, that an admin consented to for every user; null if delegated grants couldn't be read
+
+    Which accounts hold privileged Microsoft Graph permissions?
+    - service_principals_with_privileged_application_permissions — Number of service principals, other than Microsoft's own apps, holding a privileged Microsoft Graph application permission: one on the list in privileged_application_graph_permissions_checked, which lets the holder grant itself more access, take over users' sign-in, change the tenant's security controls, or read or write tenant-wide data such as mail, files, sites and chats, or any whose name contains ReadWrite or FullControl (privileged_application_graph_permission_substrings), matched in any case. azure_managed_identity_configuration judges a managed identity's Graph permissions the same way; permissions that couldn't be named aren't included (see unnamed_graph_application_permissions); null if application permissions couldn't be read
+    - managed_identities_with_privileged_application_permissions — Number of managed identities holding a privileged Microsoft Graph application permission; permissions that couldn't be named aren't included (see unnamed_graph_application_permissions); null if application permissions couldn't be read
+    - ownerless_service_principals_with_privileged_application_permissions — Number of service principals that can have an owner, have no owner, and hold a privileged Microsoft Graph application permission; permissions that couldn't be named aren't included (see unnamed_graph_application_permissions); null if owners or application permissions couldn't be read
+    - privileged_application_permissions_held — List of the privileged Microsoft Graph application permissions held by service principals other than Microsoft's own apps; permissions that couldn't be named aren't included (see unnamed_graph_application_permissions); null if application permissions couldn't be read
+    - service_principals_with_privileged_delegated_grants — Number of service principals, other than Microsoft's own apps, with a delegated grant that includes a privileged Microsoft Graph permission: one on the list in privileged_delegated_graph_permissions_checked, which leaves out the tenant-wide data permissions because, delegated, they reach only what the signed-in user can already open; null if delegated grants couldn't be read
+    - privileged_delegated_permissions_granted — List of the privileged Microsoft Graph permissions in delegated grants to service principals other than Microsoft's own apps; null if delegated grants couldn't be read

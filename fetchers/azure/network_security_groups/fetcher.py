@@ -37,8 +37,11 @@ from azure_common import (  # noqa: E402
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
+    vnet_id_of,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_network_security_groups")
 
@@ -597,6 +600,33 @@ def summarize(
     }
 
 
+def subnet_match(nic: dict, exclusions: ResourceExclusions):
+    """(pattern, reason, matched id) for the first pattern naming the NIC's virtual network or one of its subnets."""
+    for subnet_id in nic["subnet_ids"]:
+        vnet_id = subnet_id[: len(vnet_id_of(subnet_id))]
+        for reason, matched_id in (("virtual_network_matched", vnet_id), ("subnet_matched", subnet_id)):
+            pattern = exclusions.match(matched_id) if matched_id else None
+            if pattern:
+                return pattern, reason, matched_id
+    return None
+
+
+def split_network_interfaces(nics: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
+    """A NIC leaves scope when a pattern matches it, the virtual network its subnets sit in, or one of those subnets."""
+    kept, excluded = exclusions.split(nics, "network_interface")
+    in_scope = []
+    for nic in kept:
+        match = subnet_match(nic, exclusions) if exclusions else None
+        if match is None:
+            in_scope.append(nic)
+        else:
+            pattern, reason, matched_id = match
+            excluded.append(excluded_item(
+                "network_interface", nic["name"], pattern, reason, id=nic["id"],
+                resource_group=nic["resource_group"], location=nic["location"], matched_id=matched_id))
+    return in_scope, excluded
+
+
 # --- collection (lazy azure imports) ---
 
 def collect_network(
@@ -696,6 +726,15 @@ def main() -> int:
             ),
         )
 
+    # NIC coverage and east-west verdicts were resolved against every NSG and VNet, so in-scope verdicts don't change.
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    security_groups, excluded = exclusions.split(security_groups, "network_security_group")
+    virtual_networks, excluded_vnets = exclusions.split(virtual_networks, "virtual_network")
+    network_interfaces, excluded_nics = split_network_interfaces(network_interfaces, exclusions)
+    excluded += excluded_vnets + excluded_nics
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -705,10 +744,14 @@ def main() -> int:
             "virtual_networks": virtual_networks,
             "network_interfaces": network_interfaces,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(security_groups, virtual_networks, network_interfaces),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("network_security_group", "virtual_network", "network_interface"), {
+                "network_security_groups": len(security_groups), "virtual_networks": len(virtual_networks),
+                "network_interfaces": len(network_interfaces)}),
         },
     )
 

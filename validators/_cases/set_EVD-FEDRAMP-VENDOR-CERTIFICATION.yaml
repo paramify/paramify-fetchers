@@ -1,0 +1,24 @@
+# Set-level: every validator naming EVD-FEDRAMP-VENDOR-CERTIFICATION, combined the way Paramify does.
+# Both certification options name this set, so the strict one decides: a
+# Ready vendor fails the set. Detach one of the two in Paramify to choose.
+evidence_set: EVD-FEDRAMP-VENDOR-CERTIFICATION
+cases:
+  - name: all_certified_fresh
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"vendors_total":3,"vendors_certified":3,"vendors_in_process":0,"vendors_ready":0,"vendors_in_remediation":0,"vendors_delisted_or_not_listed":0,"vendors_not_certified":0,"vendors_not_certified_or_in_process":0,"vendors_unresolved":0},"feed":{"feed_age_hours":20},"vendors":[{"vendor_name":"Example","certification_state":"certified"}]}}'
+
+  - name: one_ready
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"vendors_total":3,"vendors_certified":2,"vendors_in_process":0,"vendors_ready":1,"vendors_in_remediation":0,"vendors_delisted_or_not_listed":0,"vendors_not_certified":1,"vendors_not_certified_or_in_process":0,"vendors_unresolved":0},"feed":{"feed_age_hours":20},"vendors":[{"vendor_name":"Example","certification_state":"certified"}]}}'
+
+  - name: one_delisted
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"vendors_total":3,"vendors_certified":2,"vendors_in_process":0,"vendors_ready":0,"vendors_in_remediation":0,"vendors_delisted_or_not_listed":1,"vendors_not_certified":1,"vendors_not_certified_or_in_process":1,"vendors_unresolved":1},"feed":{"feed_age_hours":20},"vendors":[{"vendor_name":"Example","certification_state":"certified"}]}}'
+
+  - name: feed_stale
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"vendors_total":3,"vendors_certified":3,"vendors_in_process":0,"vendors_ready":0,"vendors_in_remediation":0,"vendors_delisted_or_not_listed":0,"vendors_not_certified":0,"vendors_not_certified_or_in_process":0,"vendors_unresolved":0},"feed":{"feed_age_hours":100},"vendors":[{"vendor_name":"Example","certification_state":"certified"}]}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"GET data.json returned HTTP 503"},"payload":{"vendors":[],"metadata":{"partial_failure":true}}}'

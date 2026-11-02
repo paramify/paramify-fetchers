@@ -1,0 +1,13 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them. One validator: the unmonitored list must be empty.
+evidence_set: EVD-OCI-AUDIT-LOGGING-EVENTS
+cases:
+  - name: every_category_monitored
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"unmonitored_change_categories": []}}}'
+
+  - name: a_category_unmonitored
+    expect: FAIL
+    note: >
+      A non-empty list never renders as a bare [] in the fetcher's indent=2 output; the compact form here stands in for it.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"unmonitored_change_categories": ["x"]}}}'

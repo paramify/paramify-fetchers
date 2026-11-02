@@ -1,0 +1,102 @@
+# OCI identity evidence — who exists, what they hold, and what they may do:
+#
+#   oci_iam_users_credentials  every user, MFA state, tenancy admins, and each
+#                              standing credential with its age
+#   oci_iam_policies           every policy statement parsed; broad and
+#                              unguarded grants counted
+#   oci_iam_password_policy    each identity domain's password rules against the
+#                              CIS thresholds
+#   oci_bastion_sessions       whether administrative access is genuinely
+#                              just-in-time: session TTL, CIDR allow-list
+#
+# Auth is an API signing key the runner injects as secrets — nothing is written
+# to disk, because the SDK accepts the PEM as `key_content` in a config dict and
+# refuses the same key in a config file. Set before running:
+#
+#   export OCI_TENANCY_OCID=ocid1.tenancy.oc1..xxxxx
+#   export OCI_USER_OCID=ocid1.user.oc1..xxxxx
+#   export OCI_FINGERPRINT=aa:bb:cc:...
+#   export OCI_PRIVATE_KEY="$(cat ~/.oci/collector.pem)"    # the PEM CONTENT
+#   export OCI_REGION=us-phoenix-1
+#
+# On a compute instance or in Functions/OKE, set none of them: every secret here
+# is optional, and OCI_CLI_AUTH=instance_principal (or the resource-principal env
+# the SDK sets itself) selects a workload identity instead. That is why the
+# manifest still validates with nothing exported.
+#
+# Collect as a dedicated read-only user, NOT the tenancy administrator — see
+# fetchers/oci/README.md. It matters more here than elsewhere: oci_iam_users_-
+# credentials reports which tenancy administrators hold API signing keys, so
+# collecting as an admin makes the collector's own key a finding in the evidence
+# it produces. The policy statements the category needs are in that README.
+#
+# THE TRAP WORTH KNOWING: OCI answers 404, not 403, for a missing permission. An
+# unexpected 404 in metadata.api_failures is almost always a policy gap.
+#
+# Note the two shapes in here. Users and password rules are TENANCY-scoped —
+# the resources simply are — so those fetchers declare `supports_targets: false`
+# and take `environment` as config; giving them a targets[] is an error
+# `paramify validate` catches. Policies and bastions are compartment resources
+# and fan out per target, one entry per compartment.
+run:
+  output_dir: ./evidence
+
+  platforms:
+    oci:
+      # Region for the API-key path, plus the selectors for the other three auth
+      # paths. Each only takes effect if actually set; none is a secret. The
+      # category file already declares this set — repeating it here documents
+      # which auth path this run expects.
+      auth:
+        passthrough_env:
+          - OCI_REGION
+          - OCI_CLI_AUTH
+
+  fetchers:
+    # Names human identities by construction: in OCI a user's `name` frequently
+    # IS an email address, because that is how the identity is formed. No
+    # separate email field is collected.
+    - use: oci_iam_users_credentials
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      config:
+        environment: preprod
+
+    # Parses every statement rather than substring-matching it, so
+    # `allow any-user to manage all-resources in tenancy` is counted as the
+    # unguarded grant it is.
+    - use: oci_iam_policies
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - environment: preprod
+
+    # Reads lockout settings as well as complexity: a policy can meet every CIS
+    # length and history threshold and still never lock an account out.
+    - use: oci_iam_password_policy
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      config:
+        environment: preprod
+
+    # Zero bastions is a passing result for a tenancy with no administrative
+    # access path, not an empty one. `include_subcompartments` is on by default;
+    # set it false to collect the named compartment only.
+    - use: oci_bastion_sessions
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod

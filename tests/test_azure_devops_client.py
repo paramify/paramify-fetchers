@@ -93,6 +93,16 @@ def test_body_continuation_token_stops_on_has_more_false():
     assert len(s.calls) == 2
 
 
+def test_each_page_is_read_from_the_first_item_key_it_fills():
+    path = "vsaex.dev.azure.com/contoso/_apis/userentitlements"
+    c, _ = client({
+        (path, None): Resp(body={"items": [{"id": 1}], "members": [{"id": 9}], "continuationToken": "p2"}),
+        (path, "p2"): Resp(body={"items": [], "members": [{"id": 2}]}),
+    })
+    items = c.list("_apis/userentitlements", service="vsaex", item_key=("items", "members"))
+    assert [i["id"] for i in items] == [1, 2]
+
+
 def test_iter_lets_a_caller_stop_before_the_next_page():
     path = "dev.azure.com/contoso/_apis/projects"
     c, s = client({(path, None): Resp(body={"value": [{"id": 1}, {"id": 2}]}, headers={"x-ms-continuationtoken": "t2"})})
@@ -153,6 +163,15 @@ def test_project_not_found_or_hidden_is_not_authorized():
     with pytest.raises(dr.DevOpsError) as err:
         c.list("x/_apis/build/definitions")
     assert err.value.failure_code == "not_authorized"
+
+
+def test_an_unreadable_changeset_is_not_authorized_and_not_retried():
+    body = {"message": "TF14098: Access Denied: User x needs Read permission(s) for at least one item in changeset 7."}
+    c, session = client({"dev.azure.com/contoso/_apis/tfvc/changesets/7": Resp(500, body)})
+    with pytest.raises(dr.DevOpsError) as err:
+        c.get("_apis/tfvc/changesets/7")
+    assert (err.value.code, err.value.failure_code) == ("TF14098", "not_authorized")
+    assert len(session.calls) == 1
 
 
 def test_sign_in_page_with_203_is_an_auth_failure():

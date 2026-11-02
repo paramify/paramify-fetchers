@@ -17,6 +17,8 @@ from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace as ns
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
 sys.path.insert(0, str(REPO_ROOT / "fetchers" / "_lib"))
@@ -262,6 +264,14 @@ def test_denied_role_members_read_is_recorded_and_makes_membership_unknown():
     assert asyncio.run(mfa_status._privileged_role_assignments(collector, graph)) is None
     assert not collector.ok
     assert mfa_status.classify_failure_code(collector.failures) == "not_authorized"
+
+
+@pytest.mark.parametrize("status, code", [
+    (403, "not_authorized"), (429, "rate_limited"), (503, "target_unreachable"), (504, "target_unreachable"),
+])
+def test_graph_status_text_is_classified_like_arm(status, code):
+    failures = [{"operation": "graph.op", "type": "ODataError", "message": f"Something went wrong (status {status})"}]
+    assert mfa_status.classify_failure_code(failures) == code
 
 
 def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, monkeypatch):

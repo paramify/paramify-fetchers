@@ -1,0 +1,80 @@
+name: azure_sentinel_playbooks
+version: 0.2.0
+description: >-
+  Shows which Logic Apps Microsoft Sentinel runs as playbooks, whether they disable accounts, isolate devices or notify people, and whether an active automation rule runs them.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_sentinel_playbooks.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+  workspaces:
+    type: string
+    required: false
+    env: SENTINEL_WORKSPACES
+    description: >
+      Comma-separated workspace names or resource ids whose automation rules are
+      read. Optional — omit to read every Sentinel workspace in the subscription.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-IAM-SUS      # Responding to suspicious activity — automated account containment
+  - KSI-MLA-RVL      # Reviewing logs — who Sentinel notifies
+
+evidence_set:
+  reference_id: EVD-AZURE-SENTINEL-PLAYBOOKS
+  name: Azure Sentinel Playbooks
+  instructions: |
+    Script: azure/sentinel_playbooks/fetcher.py
+
+    Access: Reader on the subscription (or Logic App Reader and Microsoft Sentinel Reader). Optional: Reader on other subscriptions whose Logic Apps an automation rule runs; without it, those playbooks are listed as unresolved and the run succeeds.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.OperationalInsights/workspaces and GET Microsoft.SecurityInsights/onboardingStates (per workspace) — the workspaces Sentinel is on
+    - GET Microsoft.SecurityInsights/automationRules (per Sentinel workspace) — which automation rules run which Logic Apps, and whether each rule is active
+    - GET Microsoft.Logic/workflows — every Consumption Logic App in the subscription with its definition
+    - GET {Logic App id} (per Logic App an automation rule runs that the list didn't return, or listed without a definition) — its definition; a Standard workflow is read at Microsoft.Web/sites/{app}/workflows and its definition from workflow.json
+
+    Output: azure_sentinel_playbooks_<subscription>.json — each playbook with its state, triggers, connectors, what it does to accounts, devices and incidents, whom it emails, and the automation rules that run it.
+
+    Summary fields:
+
+    What was checked?
+    - logic_apps_scanned — Number of Consumption Logic Apps listed in the subscription
+    - playbooks — Number of playbooks: Logic Apps triggered by the Sentinel connector (on an incident, alert or entity), plus any Logic App an automation rule runs, Standard (single-tenant) workflows included
+    - standard_playbooks — Number of playbooks that are Standard workflows; these are found only when an automation rule runs them
+    - playbooks_without_definition — List of the resource ids of playbooks whose definition wasn't read; what each of them does reads null
+    - automation_rule_references_unresolved — List of the resource ids (lowercased) of Logic Apps an automation rule runs that couldn't be read: one in a subscription or resource group the credential can't read (401, 403, 404 or SubscriptionNotFound, each also given a note), or one since deleted; any other error fails the run
+
+    Which playbooks are live?
+    - enabled_playbooks — Number of playbooks that are enabled
+    - run_by_active_automation_rule — Number of live playbooks: enabled, and run by at least one active automation rule (enabled and not expired) in a Sentinel workspace of the subscription
+    - live_playbooks_without_definition — Number of live playbooks whose definition wasn't read, so whether they contain accounts or notify anyone is unknown
+
+    Do live playbooks contain accounts and notify people?
+    - live_account_containment_playbooks — Number of live playbooks with an action that disables a user (accountEnabled false), revokes sign-in sessions, confirms a user compromised or dismisses a risky user, matched on each action's inputs, nested branches included; null when live_playbooks_without_definition is above 0
+    - live_notifying_playbooks — Number of live playbooks that send email (Office 365, Outlook, SendGrid, SMTP or Gmail) or a Teams message; null when live_playbooks_without_definition is above 0
+    - notification_recipients — List of the static email addresses live playbooks send to; addresses built from the incident when the playbook runs aren't included; null when live_playbooks_without_definition is above 0

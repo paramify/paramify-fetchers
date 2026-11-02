@@ -26,6 +26,8 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 from sql_managed_instance import (  # noqa: E402
     list_databases,
     list_instances,
@@ -192,6 +194,25 @@ def instance_record(
     }
 
 
+def split_failover_groups(
+    groups: list[dict], listed: set, excluded: list[dict]
+) -> tuple[list[dict], list[dict]]:
+    """A group follows its instances: it leaves scope only when every instance of it this run listed is excluded."""
+    out = {lower(e["id"]): e for e in excluded}
+    kept, dropped = [], []
+    for group in groups:
+        local = sorted(instance_ids_in(group) & listed)
+        if local and all(i in out for i in local):
+            entry = out[local[0]]
+            dropped.append(excluded_item(
+                "instance_failover_group", group.get("name"), entry["pattern"], "managed_instance_matched",
+                id=group.get("id"), resource_group=group.get("resource_group"), location=group.get("location"),
+                matched_id=entry["id"]))
+        else:
+            kept.append(group)
+    return kept, dropped
+
+
 def summarize(
     instances: list[dict], failover_groups: list[dict], failover_groups_collected: bool
 ) -> dict:
@@ -237,27 +258,36 @@ def summarize(
 
 # --- collection (lazy azure imports) ---
 
-def collect(subscription_id, cred, collector: Collector) -> tuple[list[dict], list[dict], set]:
+def list_failover_groups(client, group_name: str, location: str) -> list[dict]:
+    return [project_failover_group(g) for g in client.instance_failover_groups.list_by_location(group_name, location)]
+
+
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None) -> tuple[list[dict], list[dict], set]:
+    """Failover groups are listed and matched across every instance; excluded instances get no database reads."""
     client = sql_client(subscription_id, cred, collector)
     if client is None:
         return [], [], set()
     projected = list_instances(client, collector, project_instance)
+    in_scope, out = exclusions.split(projected, "managed_instance") if exclusions else (projected, [])
+    in_scope_pairs = {(i["resource_group"], i.get("location")) for i in in_scope}
 
     views: dict[tuple, list[dict]] = {}
     unlisted: set = set()
     for group_name, location in sorted({(i["resource_group"], i.get("location")) for i in projected}):
-        if not location:
-            unlisted.add((group_name, location))
-            continue
-        listed = collector.guard(
-            f"sql.instance_failover_groups.list_by_location ({group_name}, {location})",
-            lambda: [
-                project_failover_group(g)
-                for g in client.instance_failover_groups.list_by_location(group_name, location)
-            ],
-        )
+        operation = f"sql.instance_failover_groups.list_by_location ({group_name}, {location})"
+        listed = None
+        if location and (group_name, location) in in_scope_pairs:
+            listed = collector.guard(operation, lambda: list_failover_groups(client, group_name, location))
+        elif location:
+            # Only excluded instances here: a failed list is a warning and leaves no in-scope count unknown.
+            try:
+                listed = list_failover_groups(client, group_name, location)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("%s failed, but every instance there is excluded: %s", operation, exc)
         if listed is None:
-            unlisted.add((group_name, location))
+            if (group_name, location) in in_scope_pairs:
+                unlisted.add((group_name, location))
             continue
         for group in listed:
             key = (lower(group.get("name")), tuple(sorted(instance_ids_in(group))))
@@ -269,7 +299,7 @@ def collect(subscription_id, cred, collector: Collector) -> tuple[list[dict], li
     )
 
     instances: list[dict] = []
-    for instance in projected:
+    for instance in in_scope:
         group_name, name = instance["resource_group"], instance["name"]
         databases = list_databases(client, collector, instance)
         records = []
@@ -306,6 +336,10 @@ def collect(subscription_id, cred, collector: Collector) -> tuple[list[dict], li
             )
         )
 
+    out.sort(key=lambda e: e["id"] or "")
+    groups, dropped = split_failover_groups(groups, {lower(i.get("id")) for i in projected}, out)
+    if excluded is not None:
+        excluded += out + dropped
     return sorted(instances, key=lambda i: i.get("id") or ""), groups, unlisted
 
 
@@ -327,6 +361,8 @@ def main() -> int:
     instances: list[dict] = []
     groups: list[dict] = []
     unlisted: set = set()
+    excluded: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(
@@ -338,7 +374,7 @@ def main() -> int:
                 "Instance in use; reporting status not_registered",
                 subscription_id,
             )
-        instances, groups, unlisted = collect(subscription_id, cred, collector)
+        instances, groups, unlisted = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -348,6 +384,9 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -356,10 +395,13 @@ def main() -> int:
             "managed_instances": instances,
             "instance_failover_groups": groups,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(instances, groups, not unlisted),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("managed_instance", "instance_failover_group"), {
+                "managed_instances": len(instances), "instance_failover_groups": len(groups)}),
         },
     )
 

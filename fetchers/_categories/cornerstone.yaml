@@ -1,0 +1,98 @@
+# Cornerstone fetchers are python (requests) against Cornerstone's Reporting API
+# (RAPI): read-only OData views over the Real-time Data Warehouse, reached with
+# an OAuth 2.0 client-credentials token. No ambient identity: one OAuth client id
+# and secret per portal, declared once here and shared by every fetcher in the
+# category.
+display_name: Cornerstone
+description: >-
+  Cornerstone OnDemand Learning (Cornerstone LMS). Security training completion
+  from the Reporting API transcript and training views: general security
+  awareness for all users, role-based training for high-risk roles, secure
+  development training, and incident response / contingency training. The
+  courses to measure are named in config; one OAuth 2.0 client per portal.
+
+requires:
+  python_packages:
+    - requests
+
+secrets:
+  - name: client_id
+    env: CSOD_CLIENT_ID
+    description: >-
+      Client ID of the OAuth 2.0 application registered in Cornerstone (Admin >
+      Tools > Edge > API Management > Manage OAuth 2.0 Applications).
+  - name: client_secret
+    env: CSOD_CLIENT_SECRET
+    description: >-
+      Client secret of that OAuth 2.0 application. Cornerstone shows it once;
+      regenerate it if lost. The application's user needs only the 'Reporting
+      API - Read Only' security permission.
+
+config_schema:
+  portal_url:
+    type: string
+    required: true
+    env: CSOD_PORTAL_URL
+    description: >-
+      Cornerstone portal URL, e.g. https://<corpname>.csod.com (use the pilot or
+      stage portal host to test). Only https hosts directly under csod.com are
+      accepted, so the client secret cannot be sent anywhere else.
+  user_population_filter:
+    type: string
+    required: false
+    env: CSOD_USER_POPULATION_FILTER
+    description: >-
+      OData $filter over the vw_rpt_user view selecting every user who must
+      take security training, normally active employees (confirm the column
+      names in the portal's User RTDW spec, e.g. "user_status_id eq 1" if that
+      is the active status). Shared by all four fetchers; each can override it
+      with its own population_filter. With a population, users who have no
+      transcript record are reported as not_assigned; without one, the
+      completion rate is null and runs report partial_or_empty, because users
+      who were never assigned a course are invisible in the transcript view.
+      Adds the vw_rpt_user:read scope.
+  withdrawn_status_ids:
+    type: string
+    required: false
+    env: CSOD_WITHDRAWN_STATUS_IDS
+    description: >-
+      Comma-separated transcript status ids that mean the user withdrew from
+      the training (from the portal's transcript status lookup). Rows in these
+      statuses are reported as withdrawn and never as current.
+  failed_status_ids:
+    type: string
+    required: false
+    env: CSOD_FAILED_STATUS_IDS
+    description: >-
+      Comma-separated transcript status ids that mean the attempt failed. A row
+      with a completion date and user_lo_pass false is reported as failed even
+      without this list.
+  page_size:
+    type: integer
+    required: false
+    default: 1000
+    env: CSOD_PAGE_SIZE
+    description: Rows requested per page (Prefer odata.maxpagesize), 1 to 10000.
+  max_pages:
+    type: integer
+    required: false
+    default: 500
+    env: CSOD_MAX_PAGES
+    description: >-
+      Pages allowed per view read before the run stops and reports PageCap.
+      Raise it (or page_size) for very large transcript views.
+  http_timeout:
+    type: integer
+    required: false
+    default: 120
+    env: CSOD_HTTP_TIMEOUT
+    description: Seconds to wait for each Reporting API response.
+  min_request_interval:
+    type: string
+    required: false
+    default: "0.25"
+    env: CSOD_MIN_REQUEST_INTERVAL
+    description: >-
+      Minimum seconds between requests (decimal allowed). The Reporting API
+      allows about 400 requests per minute per portal, shared with other
+      integrations.
