@@ -27,7 +27,11 @@ schemas and the `paramify` CLI — not the internal code.
   - its execution history over the lookback, read newest first: plan type (Build
     or Release), definition, run or release id, link, times and result, plus its
     last use and last pipeline run whenever they were. A release logs a record
-    per stage; runs are counted once.
+    per stage; runs are counted once. The read stops early only once the whole
+    first page is shown newest first, and looks for the last pipeline run at most
+    5 pages past the window (`last_pipeline_run_search_stopped` when it stopped
+    there). A shared connection's history is read once when it shows another
+    project's runs, as it then isn't filtered by project.
 
   `service_principals` groups connections by tenant and app id, compared
   case-insensitively, with their pipeline runs: the join key from an Azure change

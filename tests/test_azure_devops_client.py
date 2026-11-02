@@ -110,6 +110,16 @@ def test_iter_lets_a_caller_stop_before_the_next_page():
     assert len(s.calls) == 1
 
 
+def test_pages_yields_each_page_whole():
+    path = "dev.azure.com/contoso/_apis/projects"
+    c, s = client({
+        (path, None): Resp(body={"value": [{"id": 1}, {"id": 2}]}, headers={"x-ms-continuationtoken": "t2"}),
+        (path, "t2"): Resp(body={"value": [{"id": 3}]}),
+    })
+    assert [[p["id"] for p in page] for page in c.pages("_apis/projects")] == [[1, 2], [3]]
+    assert len(s.calls) == 2
+
+
 def test_same_host_next_link_is_followed():
     c, s = client({
         "dev.azure.com/contoso/_apis/things": Resp(body={"value": [1], "nextLink": f"{ORG}/_apis/things2?skip=1"}),

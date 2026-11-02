@@ -31,8 +31,10 @@ PREVIEW_API = "7.1-preview.1"
 # Learn documents secure files only at 7.2-preview.1.
 SECURE_FILES_API = "7.2-preview.1"
 HISTORY_PAGE = 100
-# Per connection and project; history is read newest first, past the window only to find the last pipeline run.
-MAX_HISTORY_RECORDS = 5000
+# Per connection and project.
+MAX_HISTORY_PAGES = 50
+# Past the window, history is read only to find the last pipeline run, for at most this many pages.
+PAGES_PAST_WINDOW = 5
 
 SCOPE_ENDPOINTS = "Service Connections (Read)"
 SCOPE_BUILD = "Build (Read)"
@@ -233,28 +235,40 @@ def execution_history(client, project, connection_id, since: datetime) -> Dict[s
     newest: Optional[datetime] = None
     newest_run: Optional[datetime] = None
     previous: Optional[datetime] = None
-    newest_first, past_window, complete, read = True, False, True, 0
-    for raw in client.iter(path, PREVIEW_API, params={"top": HISTORY_PAGE}):
-        if not isinstance(raw, dict):
-            continue
-        if read >= MAX_HISTORY_RECORDS:
-            complete = past_window and newest_first
+    projects: Set[str] = set()
+    newest_first, complete, stopped, pages_past = True, True, False, 0
+    for number, page in enumerate(client.pages(path, PREVIEW_API, params={"top": HISTORY_PAGE}), 1):
+        if number > MAX_HISTORY_PAGES:
+            complete = pages_past > 0 and newest_first
+            stopped = newest_run is None or not newest_first
             break
-        read += 1
-        when, record = execution_record(raw)
-        if when is not None:
-            newest = when if newest is None or when > newest else newest
-            if record["pipeline_run"]:
-                newest_run = when if newest_run is None or when > newest_run else newest_run
-            newest_first = newest_first and (previous is None or when <= previous)
-            previous = when
-        if when is None or when >= since:
-            in_window.append(record)
-        elif newest_first:
-            past_window = True
+        past = False
+        for raw in page:
+            if not isinstance(raw, dict):
+                continue
+            when, record = execution_record(raw)
+            if record["project"]:
+                projects.add(record["project"].lower())
+            if when is not None:
+                newest = when if newest is None or when > newest else newest
+                if record["pipeline_run"]:
+                    newest_run = when if newest_run is None or when > newest_run else newest_run
+                newest_first = newest_first and (previous is None or when <= previous)
+                previous = when
+            if when is None or when >= since:
+                in_window.append(record)
+            else:
+                past = True
+        pages_past += 1 if past or pages_past else 0
+        # The first page is read whole and its order checked before the read may stop early.
+        if number > 1 and pages_past and newest_first:
             if newest_run is not None:
                 break
-    return {"executions": in_window, "last_used": newest, "last_pipeline_run": newest_run, "complete": complete}
+            if pages_past >= PAGES_PAST_WINDOW:
+                stopped = True
+                break
+    return {"executions": in_window, "last_used": newest, "last_pipeline_run": newest_run, "complete": complete,
+            "run_search_stopped": stopped, "projects": projects}
 
 
 def pipeline_permissions(body: Any, project: Dict[str, Any]) -> Dict[str, Any]:
@@ -319,15 +333,20 @@ def collect_project(client, collector, project, connections, groups, since) -> D
         if not isinstance(raw, dict) or not raw.get("id"):
             continue
         key = str(raw["id"]).lower()
-        conn = connections.setdefault(key, {**connection_record(raw), "_permissions": [], "_history": []})
+        conn = connections.setdefault(key, {**connection_record(raw), "_permissions": [], "_history": [],
+                                            "_history_shared": False})
         cid = raw["id"]
         perms = call(collector, f"pipelinepermissions.endpoint({pname}/{raw.get('name')})", SCOPE_BUILD,
                      lambda cid=cid: client.get(f"{pid}/_apis/pipelines/pipelinepermissions/endpoint/{cid}",
                                                 PREVIEW_API))
         conn["_permissions"].append(None if perms is None else pipeline_permissions(perms, project))
+        if conn["_history_shared"]:
+            continue
         history = call(collector, f"serviceendpoint.executionhistory({pname}/{raw.get('name')})", SCOPE_ENDPOINTS,
                        lambda cid=cid: execution_history(client, project, cid, since))
         conn["_history"].append(history)
+        # Another project's runs in it mean the history isn't filtered by project, so one read covers them all.
+        conn["_history_shared"] = bool(history and history["projects"] - {str(pname).lower(), str(pid).lower()})
 
     variable_groups = call(collector, f"distributedtask.variablegroups.list({pname})", SCOPE_VARIABLE_GROUPS,
                            lambda: client.list(f"{pid}/_apis/distributedtask/variablegroups"))
@@ -356,6 +375,7 @@ def run_keys(executions: List[Dict[str, Any]]) -> Set[Tuple[Any, ...]]:
 def finish_connection(conn: Dict[str, Any]) -> Dict[str, Any]:
     permissions = conn.pop("_permissions")
     histories = conn.pop("_history")
+    conn.pop("_history_shared")
     seen = set()
     executions = []
     for history in histories:
@@ -375,6 +395,7 @@ def finish_connection(conn: Dict[str, Any]) -> Dict[str, Any]:
         "executions_complete": bool(read) and all(h["complete"] for h in read),
         "last_used": newest("last_used"),
         "last_pipeline_run": newest("last_pipeline_run"),
+        "last_pipeline_run_search_stopped": any(h["run_search_stopped"] for h in read),
         "executions_in_window": len(executions),
         "pipeline_runs_in_window": len(run_keys(executions)),
         "executions": executions,

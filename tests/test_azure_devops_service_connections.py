@@ -189,9 +189,8 @@ class FakeADO:
                 # Never read: the previous page reached past the window.
                 "849": Resp(500, {"message": "should not be read"}),
             },
-            # A shared connection's history read from the other project repeats a record.
+            # Each project's history holds only its own runs here; see the unfiltered test for the other case.
             f"/contoso/{OPS}/_apis/serviceendpoint/{WIF_ID}/executionhistory": Resp(body={"value": [
-                execution(901, "Release", (4, "infra-release"), 77, "Release-77", ago(hours=2)),
                 execution(950, "Release", (5, "ops-release"), 80, "Release-80", ago(days=1), project="Ops"),
             ]}),
             f"/contoso/{WEB}/_apis/serviceendpoint/{SECRET_ID}/executionhistory": Resp(body={"value": [
@@ -411,15 +410,81 @@ def test_history_reads_past_the_window_until_it_finds_a_pipeline_run(tmp_path):
 
 
 def test_the_cap_past_the_window_leaves_the_window_complete(tmp_path, monkeypatch):
-    monkeypatch.setattr(mod, "MAX_HISTORY_RECORDS", 2)
+    monkeypatch.setattr(mod, "MAX_HISTORY_PAGES", 1)
     fake = FakeADO()
-    fake.routes[f"/contoso/{WEB}/_apis/serviceendpoint/{SECRET_ID}/executionhistory"] = Resp(body={"value": [
-        execution(i, "ServiceEndpointProxy", (None, None), None, None, ago(days=days))
-        for i, days in ((1, 1), (2, 40), (3, 50))]})
+    fake.routes[f"/contoso/{WEB}/_apis/serviceendpoint/{SECRET_ID}/executionhistory"] = {
+        None: Resp(body={"value": [execution(i, "ServiceEndpointProxy", (None, None), None, None, ago(days=days))
+                                   for i, days in ((1, 1), (2, 40))]}, headers={"x-ms-continuationtoken": "t"}),
+        "t": Resp(body={"value": [execution(3, "Build", (12, "web-ci"), 3, "3", ago(days=50))]}),
+    }
     _, evidence, _, _, _ = run(tmp_path, fake)
     legacy = connection(evidence, "legacy-spn")
     assert legacy["executions_in_window"] == 1 and legacy["executions_complete"] is True
-    assert legacy["last_pipeline_run"] is None
+    assert legacy["last_pipeline_run"] is None and legacy["last_pipeline_run_search_stopped"] is True
+
+
+def test_history_stops_a_few_pages_past_the_window_without_a_pipeline_run(tmp_path):
+    fake = FakeADO()
+    path = f"/contoso/{WEB}/_apis/serviceendpoint/{SECRET_ID}/executionhistory"
+    route = {None: Resp(body={"value": [
+        execution(0, "ServiceEndpointProxy", (None, None), None, None, ago(days=1)),
+        execution(1, "ServiceEndpointProxy", (None, None), None, None, ago(days=40))]},
+        headers={"x-ms-continuationtoken": "t1"})}
+    for n in range(1, mod.PAGES_PAST_WINDOW + 1):
+        route[f"t{n}"] = Resp(body={"value": [
+            execution(n + 1, "ServiceEndpointProxy", (None, None), None, None, ago(days=40 + n))]},
+            headers={"x-ms-continuationtoken": f"t{n + 1}"})
+    route[f"t{mod.PAGES_PAST_WINDOW}"] = Resp(500, {"message": "should not be read"})
+    fake.routes[path] = route
+    code, evidence, _, fake, _ = run(tmp_path, fake)
+    assert code == 0
+    legacy = connection(evidence, "legacy-spn")
+    assert len([1 for _, called, _ in fake.calls if called == path]) == mod.PAGES_PAST_WINDOW
+    assert legacy["executions_in_window"] == 1 and legacy["executions_complete"] is True
+    assert legacy["last_used"] is not None and legacy["last_pipeline_run"] is None
+    assert legacy["last_pipeline_run_search_stopped"] is True
+    assert connection(evidence, "prod-wif")["last_pipeline_run_search_stopped"] is False
+
+
+@pytest.mark.parametrize("pages", [
+    # The first record is an old pipeline run: the whole first page is still read.
+    [[90, 5, 1]],
+    [[90], [5, 1]],
+])
+def test_history_oldest_first_is_read_to_the_end(tmp_path, pages):
+    fake = FakeADO()
+    route, number = {}, 0
+    for i, page in enumerate(pages):
+        records = []
+        for days in page:
+            number += 1
+            records.append(execution(number, "Build", (12, "web-ci"), number, str(number), ago(days=days)))
+        route[None if i == 0 else f"t{i}"] = Resp(
+            body={"value": records}, headers={"x-ms-continuationtoken": f"t{i + 1}"} if i + 1 < len(pages) else None)
+    fake.routes[f"/contoso/{WEB}/_apis/serviceendpoint/{SECRET_ID}/executionhistory"] = route
+    _, evidence, _, _, _ = run(tmp_path, fake)
+    legacy = connection(evidence, "legacy-spn")
+    assert [r["execution_id"] for r in legacy["executions"]] == [3, 2]
+    assert legacy["executions_complete"] is True and legacy["pipeline_runs_in_window"] == 2
+    assert legacy["last_pipeline_run"] == legacy["executions"][0]["start_time"]
+    assert "legacy-spn" not in evidence["summary"]["service_connections_unused_in_window"]
+
+
+def test_history_not_filtered_by_project_is_read_once(tmp_path):
+    fake = FakeADO()
+    web, ops = (f"/contoso/{p}/_apis/serviceendpoint/{WIF_ID}/executionhistory" for p in (WEB, OPS))
+    shared = fake.routes[web]
+    shared[None]._body["value"].insert(1, execution(
+        950, "Release", (5, "ops-release"), 80, "Release-80", ago(days=1), project="Ops"))
+    fake.routes[ops] = shared
+    code, evidence, _, fake, _ = run(tmp_path, fake)
+    assert code == 0
+    assert [p.get("continuationToken") for _, called, p in fake.calls if called == ops] == [None, "899"]
+    assert not [1 for _, called, _ in fake.calls if called == web]
+    wif = connection(evidence, "prod-wif")
+    assert [r["execution_id"] for r in wif["executions"]] == [901, 950, 900, 899]
+    assert wif["executions_collected"] is True and wif["pipeline_runs_in_window"] == 3
+    assert len(wif["pipeline_permissions"]) == 2  # still read in every project
 
 
 def test_service_principals_group_connections_case_insensitively(tmp_path):
@@ -529,14 +594,14 @@ def test_as_an_entra_identity_a_refusal_names_the_missing_permission(tmp_path, m
 
 
 def test_history_past_the_cap_is_marked_incomplete(tmp_path, monkeypatch):
-    monkeypatch.setattr(mod, "MAX_HISTORY_RECORDS", 2)
+    monkeypatch.setattr(mod, "MAX_HISTORY_PAGES", 1)
     _, evidence, _, _, _ = run(tmp_path)
     wif = connection(evidence, "prod-wif")
     assert wif["executions_complete"] is False
 
 
 def test_an_exactly_full_last_page_at_the_cap_is_complete(tmp_path, monkeypatch):
-    monkeypatch.setattr(mod, "MAX_HISTORY_RECORDS", 2)
+    monkeypatch.setattr(mod, "MAX_HISTORY_PAGES", 1)
     fake = FakeADO()
     fake.routes[f"/contoso/{WEB}/_apis/serviceendpoint/{SECRET_ID}/executionhistory"] = Resp(body={"value": [
         execution(i, "Build", (12, "web-ci"), i, str(i), ago(days=i)) for i in (1, 2)]})

@@ -79,7 +79,7 @@ evidence_set:
     - GET _apis/projects — lists projects
     - GET {project}/_apis/serviceendpoint/endpoints (per project) — service connections, failed ones included, with their sign-in scheme and service principal and tenant ids
     - GET {project}/_apis/pipelines/pipelinepermissions/endpoint/{id} (per connection and project; preview API) — which YAML pipelines may use it
-    - GET {project}/_apis/serviceendpoint/{id}/executionhistory (per connection and project; preview API missing from Microsoft's REST reference, so its newest-first order is checked rather than assumed) — the runs that used it
+    - GET {project}/_apis/serviceendpoint/{id}/executionhistory (per connection, through each project that lists it until a read shows another project's runs, as the history then isn't filtered by project; preview API missing from Microsoft's REST reference, so its newest-first order is checked on the whole first page before the read stops early) — the runs that used it, and its last pipeline run, looked for at most 5 pages past the window (each connection's last_pipeline_run_search_stopped is true when the search stopped there without finding one)
     - GET {project}/_apis/distributedtask/variablegroups (per project) — variable groups, their secret counts and Key Vault links
     - GET {project}/_apis/distributedtask/securefiles (per project; preview API) — secure files, by name
 
