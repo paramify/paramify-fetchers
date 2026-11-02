@@ -701,3 +701,36 @@ def test_an_interrupted_apply_records_unapplied_entries_as_skipped(fake, root, t
     assert by_id["delivery/y"] == {"action_id": "delivery/y", "status": "skipped", "result": {},
                                    "message": "not applied: upload interrupted"}
     assert log["errors"] >= 1
+
+
+# ---- the real collect path, then the upload --------------------------------------
+
+def test_a_collected_demo_run_uploads_with_its_entry_key_and_paramify_block(fake, repo_root, tmp_path):
+    import yaml
+
+    prod, gov = fake.add_stack("Prod"), fake.add_stack("Gov")
+    ev = fake.add_evidence("EVD-DEMO-HELLO", channels=[prod.id, gov.id], approval="SUBMISSION")
+    today = date.today()
+    fake.add_request(ev.id, ev.channels[1].id, today - timedelta(days=5), today + timedelta(days=5))
+
+    manifest = yaml.safe_load((repo_root / "examples" / "demo.yaml").read_text())
+    manifest["run"]["output_dir"] = str(tmp_path / "out")
+    manifest["run"]["paramify"] = {"stack": prod.id, "stack_name": "Prod", "approval": "MANUAL"}
+    manifest["run"]["fetchers"][0]["paramify"] = {"stack": gov.id}  # the entry's own stack, no label
+    collected = api.run(manifest, repo_root)
+    run_dir = Path(collected["run_dir"])
+
+    out = api.upload_run(run_dir, repo_root)
+    entry = out["entries"]["demo_hello"]
+    assert entry["state"] == "delivered" and out["ok"] is True
+    assert entry["stack"] == {"id": gov.id, "name": "Gov"} and entry["channel"] == "CH-2"
+    assert entry["artifact_request"]["reference_id"] == "AR-1"
+    [noop] = [a for a in out["plan"]["actions"] if a["id"] == "evidence_sets/EVD-DEMO-HELLO"]
+    # The run-level approval survived the collect; the entry stack took no run-level label.
+    assert "approval is SUBMISSION here; new sets get MANUAL" in noop["warnings"]
+    [delivery] = [a for a in out["plan"]["actions"] if a["id"] == "delivery/demo_hello"]
+    assert not any("now named" in w for w in delivery["warnings"])
+    [art] = fake._artifacts
+    tokens = art["note"].split("; ")
+    assert f"run_id={collected['run_id']}" in tokens and "entry=demo_hello" in tokens
+    assert api.upload_run(run_dir, repo_root)["entries"]["demo_hello"]["state"] == "noop"
