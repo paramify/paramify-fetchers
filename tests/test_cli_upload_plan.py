@@ -117,6 +117,23 @@ def test_dry_run_prints_the_offline_plan_without_a_token(no_env, tmp_path):  # n
     assert "routing unknown offline" in res.output and "[DRY] a.json" in res.output
 
 
+def test_dry_run_with_validators_names_the_planned_sync(no_env, tmp_path, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(api, "sync_validators", lambda *a, **k: pytest.fail("synced in a dry run"))
+    run = two_files(tmp_path)
+    res = cli("upload", str(run), "--dry-run", "--with-validators")
+    assert res.exit_code == 0, res.output
+    assert "validators: sync validators for 1 evidence set (dry run: nothing synced)" in res.output
+    js = cli("upload", str(run), "--dry-run", "--with-validators", "--json")
+    assert json.loads(js.output)["validators"]["planned"] == "sync validators for 1 evidence set"
+
+
+def test_done_line_counts_dropped_files(fake, tmp_path):  # noqa: F811
+    fake.fail_upload("a.json", 413)
+    res = cli("upload", str(two_files(tmp_path)))
+    assert res.exit_code == 0, res.output
+    assert "errors=0 dropped=1" in res.output
+
+
 def test_stack_and_validators_reach_upload_run(no_env, tmp_path, monkeypatch):  # noqa: F811
     seen: Dict[str, Any] = {}
 

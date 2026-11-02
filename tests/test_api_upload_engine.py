@@ -221,7 +221,10 @@ def test_upload_log_records_batch_and_stack(fake, root, tmp_path):
     log = json.loads((run / "upload_log.json").read_text())
     assert out["log_path"] == str(run / "upload_log.json")
     assert {"uploaded_at", "run_dir", "uploaded", "skipped_duplicate", "skipped_failed", "errors",
-            "tags", "results"} <= set(log)
+            "dropped", "tags", "results", "plan", "outcomes"} <= set(log)
+    assert log["dropped"] == 0 and "validators" not in log
+    assert [a["id"] for a in log["plan"]["actions"]] == [a["id"] for a in out["plan"]["actions"]]
+    assert log["outcomes"] == json.loads(json.dumps(out["outcomes"], default=str))
     assert log["uploaded"] == 2 and [r["file"] for r in log["results"]] == ["a.json", "b.json"]
     entry = log["entries"]["x"]
     assert entry["state"] == "delivered" and entry["batch_id"] == "bt-1"
@@ -314,9 +317,10 @@ def test_skips_and_drops_are_counted_and_reported_per_file(fake, root, tmp_path)
           [inv("x", ["a.json", "b.json", "c.json"])])
     events: List[Dict[str, Any]] = []
     out = api.upload_run(run, root, on_event=events.append)
-    assert (out["uploaded"], out["skipped_failed"], out["errors"]) == (1, 1, 1)
+    # A drop is not an error (Ruling 19): `dropped` counts it, and ok == (errors == 0).
+    assert (out["uploaded"], out["skipped_failed"], out["errors"], out["dropped"]) == (1, 1, 0, 1)
     assert out["entries"]["x"]["state"] == "delivered_with_drops" and out["ok"] is True
-    assert sorted(file_events(events)) == [("a.json", "uploaded"), ("b.json", "error"),
+    assert sorted(file_events(events)) == [("a.json", "uploaded"), ("b.json", "dropped"),
                                            ("c.json", "skipped_failed")]
     drop = next(e for e in events if e["event"] == "upload_file" and e["file"] == "b.json")
     assert drop["reason"].startswith("blocked by the production WAF")
@@ -588,3 +592,86 @@ def test_a_run_older_than_31_days_reads_artifacts_without_a_date_filter(fake, ro
     api.upload_run(_with_started_at(two_files(tmp_path), f"{old.isoformat()}T02:00:00Z"), root)
     [read] = _artifact_reads(fake)
     assert "createdAt" not in read
+
+
+# ---- dropped files are counted apart from errors (Ruling 19) --------------------
+
+def test_a_file_dropped_at_apply_is_dropped_not_an_error(fake, root, tmp_path):
+    fake.fail_upload("a.json", 413, "too large")
+    events: List[Dict[str, Any]] = []
+    out = api.upload_run(two_files(tmp_path), root, on_event=events.append)
+    assert out["entries"]["x"]["state"] == "delivered_with_drops"
+    assert (out["uploaded"], out["errors"], out["dropped"], out["ok"]) == (1, 0, 1, True)
+    assert ("a.json", "dropped") in file_events(events)
+    log = json.loads((tmp_path / "run-1" / "upload_log.json").read_text())
+    assert (log["errors"], log["dropped"], log["ok"]) == (0, 1, True)
+
+
+def test_every_file_dropped_at_apply_fails_the_entry_and_counts_one_error(fake, root, tmp_path):
+    fake.fail_upload("a.json", 413)
+    fake.fail_upload("b.json", 413)
+    out = api.upload_run(two_files(tmp_path), root)
+    assert out["entries"]["x"]["state"] == "failed"
+    assert (out["dropped"], out["errors"], out["ok"]) == (2, 1, False)
+
+
+def test_dry_run_counts_plan_time_drops_as_dropped(no_env, root, tmp_path):
+    run = tmp_path / "run-1"
+    run.mkdir()
+    bad = env(fetcher="x")
+    bad["payload"] = {"cmd": "/bin/sh -c x"}
+    build(run, {"a.json": env(fetcher="x"), "b.json": bad}, [inv("x", ["a.json", "b.json"])])
+    out = api.upload_run(run, root, dry_run=True)
+    assert (out["errors"], out["dropped"], out["ok"]) == (0, 1, True)
+
+
+def test_ok_is_errors_equal_zero_across_outcomes(fake, root, tmp_path, monkeypatch):
+    # held, delivered_with_drops, delivered: ok must track errors == 0.
+    seen = []
+    for i, setup in enumerate(("held", "drop", "clean")):
+        f = FakeParamify()
+        f.set_today(date.today())
+        monkeypatch.setattr(upload_mod, "Client", functools.partial(
+            Client, session=f.session, sleep=lambda _s: None, retry_budget_s=3))
+        if setup == "held":
+            f.fail_upload("a.json", 502)
+        elif setup == "drop":
+            f.fail_upload("a.json", 413)
+        base = tmp_path / f"case{i}"
+        base.mkdir()
+        out = api.upload_run(two_files(base), root)
+        seen.append((setup, out["ok"], out["errors"]))
+        assert out["ok"] is (out["errors"] == 0), seen
+    assert [s[1] for s in seen] == [False, True, True]
+
+
+# ---- --dry-run --with-validators ---------------------------------------------------
+
+def test_dry_run_with_validators_reports_the_planned_sync(no_env, root, tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "sync_validators", lambda *a, **k: pytest.fail("synced in a dry run"))
+    out = api.upload_run(two_files(tmp_path), root, dry_run=True, with_validators=True)
+    assert out["validators"] == {"dry_run": True, "planned": "sync validators for 1 evidence set",
+                                 "reference_ids": ["EVD-X"]}
+
+
+def test_upload_log_records_the_validator_sync(fake, root, tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "sync_validators", lambda *a, **k: {"ok": True, "created": 2})
+    run = two_files(tmp_path)
+    api.upload_run(run, root, with_validators=True)
+    log = json.loads((run / "upload_log.json").read_text())
+    assert log["validators"] == {"ok": True, "created": 2}
+
+
+def test_a_file_unreadable_at_apply_is_an_error_not_a_drop(fake, root, tmp_path, monkeypatch):
+    real = upload_mod.DeliveryProvider._content
+
+    def content(self, path):
+        if path.name == "b.json":
+            raise OSError(2, "No such file or directory")
+        return real(self, path)
+
+    monkeypatch.setattr(upload_mod.DeliveryProvider, "_content", content)
+    out = api.upload_run(two_files(tmp_path), root)
+    assert (out["uploaded"], out["errors"], out["dropped"], out["ok"]) == (1, 1, 0, False)
+    [b] = [r for r in out["results"] if r["file"] == "b.json"]
+    assert b["outcome"] == "error" and b["reason"].startswith("cannot read b.json")

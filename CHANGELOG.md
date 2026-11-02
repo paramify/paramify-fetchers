@@ -10,6 +10,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Breaking
+
+- **Inventory records must carry a `source` object.** Each item of
+  `payload.data` now requires `source`: the asset exactly as the source API
+  returned it, with no field dropped. Existing inventory fetchers must add
+  `source` to each item. If they do not, the inventory is incomplete, and
+  `paramify upload` does not send it. The inventory template shows how.
+
 ### Added
 
 - **Evidence uploads go out as batches.** `paramify upload` now sends the files
@@ -22,7 +30,10 @@ schemas and the `paramify` CLI — not the internal code.
   exists. `no_request: evidence` sends the batch to the set instead. A temporary
   failure holds the batch open, and the same upload resumes it. A file that
   fails for good is dropped and named, and the rest goes in. Uploading the same
-  run again changes nothing. This needs Paramify API 0.14.0 or later. An older
+  run again changes nothing, also for a run that the earlier uploader sent
+  before batches. When the API refuses a write (400, 405, 415, 422) for one
+  set or batch, only that entry fails. Only a 401 or 403 stops the upload. A
+  refused tag is a warning. This needs Paramify API 0.14.0 or later. An older
   workspace stops with an error before anything is planned.
 - **`paramify upload --plan`** reads the workspace and changes nothing. It
   prints the plan. For each entry it shows the set, stack, channel and artifact
@@ -556,22 +567,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
-- **Inventory records carry a `source` object.** Each item of `payload.data`
-  now requires `source`: the asset exactly as the source API returned it, with
-  no field dropped. A record without it, or with a `source` that is not an
-  object, makes the inventory incomplete. Inventory fetchers must add it. The
-  inventory template shows how.
-
 - **Upload result shape.** The `--json` summary and `upload_log.json` keep
   `uploaded`, `skipped_duplicate`, `skipped_failed`, `errors` and `ok` for one
   release. So do the `upload_start`, `upload_file` and `upload_complete` events.
   `results` no longer holds `evidence_id`, `artifact_id` or `channel_id` for each
-  file. The summary and the log add `plan`, `entries` and `outcomes`. Each entry
-  has a state, batch, stack, channel and artifact request, and its state is
-  `planned` for a dry run. With `--with-validators` they add `validators`. A
-  file that is unreadable, not an envelope, or has no complete evidence set
-  still counts in `errors` and makes `ok` false, as before. The other files of
-  the entry still go in.
+  file. The summary and the log add `dropped`, `plan`, `entries` and
+  `outcomes`. Each entry has a state, batch, stack, channel and artifact
+  request, and its state is `planned` for a dry run. With `--with-validators`
+  they add `validators`. A dry run with `--with-validators` names the sync it
+  would do and syncs nothing. `dropped` counts the files that the upload
+  dropped. `errors` does not count them, so `ok` is true only when `errors` is
+  0. A dropped file has the outcome `dropped` in `results` and does not change
+  the exit code. A file that is unreadable, not an envelope, or has no complete
+  evidence set still counts in `errors` and makes `ok` false, as before. The
+  other files of the entry still go in.
 - **New evidence sets get the approval mode
   `SUBMISSION_WITH_PASSING_VALIDATORS`** (was the API default, `SUBMISSION`).
   Set `approval` in the manifest to choose another. The upload never changes an
@@ -579,7 +588,8 @@ schemas and the `paramify` CLI — not the internal code.
 - **Run ids gain a 4-hex suffix** (`run-2026-11-01T02-00-00Z-a1b2`). Two runs
   that start together no longer share a directory. Readers accept both forms.
 - **`--with-validators` now runs before delivery.** A new set has its validators
-  before its first batch goes in.
+  before its first batch goes in. If the validator sync fails, the upload sends
+  no batch for any entry of the run, and the run exits 1.
 - **`deploy/run-and-upload.sh` uploads the run it just collected.** It reads the
   run directory from `paramify run --json` and no longer takes the newest run on
   disk. An optional second argument names the stack.

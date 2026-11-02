@@ -515,7 +515,8 @@ class DeliveryProvider:
                 content = self._content(Path(f["path"]))
             except OSError as exc:
                 run.dropped.append({"name": name, "reason": f"cannot read {name}: {exc.strerror or exc}"})
-                self._emit(action_id, name, "dropped", n, len(to_send), 0, run.dropped[-1]["reason"])
+                # An unreadable file is an error, as it is at plan time; the rest still goes in.
+                self._emit(action_id, name, "error", n, len(to_send), 0, run.dropped[-1]["reason"])
                 continue
             reason: Optional[str] = None
             try:

@@ -737,6 +737,7 @@ class UploadPage(ButtonRowNav, Vertical):
             f"uploaded={ev.get('uploaded', 0)} "
             f"duplicates={ev.get('skipped_duplicate', 0)} "
             f"errors={ev.get('errors', 0)}"
+            + (f" dropped={ev['dropped']}" if ev.get("dropped") else "")
             + (f" jobs_failed={ev['jobs_failed']}" if ev.get("jobs_failed") else ""),
             style=style,
         )

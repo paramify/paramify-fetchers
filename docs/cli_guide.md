@@ -219,10 +219,10 @@ needs Paramify API 0.14.0 or later.
 | `--dry-run` | Lists what would upload. Makes no API calls and needs no token. Routing shows as unknown. |
 | `--plan` | Reads the workspace (no changes) and prints the full plan. Applies nothing. |
 | `--stack STACK` | Sends every entry to this stack (an id or a name). It replaces the stack the run recorded. |
-| `--with-validators` | Syncs validators for the run's evidence sets before the batches go out. |
+| `--with-validators` | Syncs validators for the evidence sets of the run before the batches go out. If the sync fails, the upload sends no batch. With `--dry-run`, it only names the sync it would do. |
 | `--no-tags` | Skips the default custom tags for this upload. |
 | `--config`, `-f`, `-o` | Choose the uploader config, the manifest, and the output directory. |
-| `--json` | Prints the summary: the legacy counts, plus `plan`, `entries`, `outcomes` and, with `--with-validators`, `validators`. |
+| `--json` | Prints the summary: the legacy counts, plus `dropped`, `plan`, `entries`, `outcomes` and, with `--with-validators`, `validators`. |
 
 Set the stack in the manifest under `run.paramify` (`stack`, `stack_name`,
 `approval`, `no_request`). An entry can set the same keys in its own `paramify`

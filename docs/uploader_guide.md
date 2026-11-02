@@ -180,6 +180,10 @@ existing set: it only adds tags to it.
 | The API refuses a write (400, 405, 415, 422) for one evidence set or batch | That set or entry fails, with the message from the API. The other entries still upload. Only a 401 or 403 stops the whole upload. |
 | The API refuses a tag | The upload sends the evidence without the tag and shows a warning. |
 
+A dropped file counts in `dropped`, not in `errors`. It does not change the
+exit code. When the upload drops every file of an entry, the entry fails and
+counts one error.
+
 A file that cannot be read, is not an envelope, or has no complete evidence set
 is an error. The upload names it and still sends the other files of the entry.
 The entry shows `delivered_with_drops`, `errors` counts the file, and the run
@@ -194,6 +198,8 @@ runs.
 `paramify upload --json` and `upload_log.json` keep `uploaded`,
 `skipped_duplicate`, `skipped_failed`, `errors` and `ok`, and add:
 
+- `dropped`: the number of files the upload dropped. `errors` does not count
+  them. `ok` is true only when `errors` is 0.
 - `plan`: the actions the upload planned.
 - `entries`: one record for each fetcher entry, with its `state`
   (`planned` for a dry run, then `delivered`, `delivered_with_drops`, `held`,
@@ -201,11 +207,17 @@ runs.
   request.
 - `outcomes`: what each action did.
 - `validators`: the validator sync summary, when you pass `--with-validators`.
+  With `--dry-run`, it names the sync that the upload would do.
 
 The `results` list no longer holds `evidence_id`, `artifact_id` or `channel_id`
-for each file. Read the batch and its channel from `entries`. The exit code is 0
-when every entry was delivered (with or without dropped files) or needed no
-change, and 1 otherwise.
+for each file. A dropped file has the outcome `dropped`. Read the batch and its
+channel from `entries`. The exit code is 0 when every entry was delivered (with
+or without dropped files) or needed no change, and 1 otherwise.
+
+**A failed validator sync stops the upload.** With `--with-validators`, the
+upload syncs the validators before it sends a batch. If the sync fails, the
+upload sends no batch for any entry of the run, and the run exits 1. Correct the
+sync problem, then run the same upload again.
 
 ## 5. Sync scripts and validators (optional)
 

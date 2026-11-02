@@ -5,7 +5,7 @@ It loads the uploader config, builds the providers (evidence sets, then the
 validator sync when asked, then delivery), checks the API version, plans and
 applies under the run lock, and maps the outcomes to what front-ends have
 always read: the `uploaded` / `skipped_duplicate` / `skipped_failed` /
-`errors` / `ok` summary, the `upload_start` / `upload_file` /
+`errors` / `ok` summary (plus `dropped`; `ok` is `errors == 0`), the `upload_start` / `upload_file` /
 `upload_complete` events and `upload_log.json`. The plan, each entry's state
 and the engine's own events are added beside them.
 
@@ -55,7 +55,7 @@ NO_TAGS = "--no-tags"
 DELIVERY = "delivery"
 # delivery_file outcome -> the legacy upload_file outcome
 _FILE_OUTCOME = {"uploaded": "uploaded", "already_present": "skipped_duplicate",
-                 "dropped": "error", "held": "error"}
+                 "dropped": "dropped", "held": "error", "error": "error"}
 # A planned-only entry state, for a dry run.
 _PLANNED_STATE = {"deliver": "planned", "noop": "noop", "refuse": "refused"}
 
@@ -172,7 +172,7 @@ class _Report:
         self.results: List[Dict[str, Any]] = []
         self.counts: Counter = Counter()
         self.errors_by_action: Counter = Counter()
-        self.file_errors = 0  # unreadable / non-evidence files: they make `ok` false (WAF drops do not)
+        self.file_errors = 0  # unreadable / non-evidence files: they make `ok` false (drops do not)
         self._started: set = set()
         self._reported: Dict[str, set] = {}
         self._tag_status: Dict[str, Tuple[str, str]] = {}  # tag action id -> (status, message)
@@ -228,7 +228,7 @@ class _Report:
                 self.file_errors += 1
             self.file(action, s["original_file_name"], outcome, s.get("reason"))
         for d in action.payload.get("dropped") or []:
-            self.file(action, d["original_file_name"], "error", d.get("reason"))
+            self.file(action, d["original_file_name"], "dropped", d.get("reason"))
 
     # -- dry run ---------------------------------------------------------- #
     def planned(self) -> None:
@@ -267,7 +267,10 @@ class _Report:
         if action is None or ev.get("event") != "delivery_file":
             return
         self._start(action)
-        self.file(action, ev["file"], _FILE_OUTCOME.get(ev.get("outcome", ""), "error"), ev.get("reason"))
+        outcome = _FILE_OUTCOME.get(ev.get("outcome", ""), "error")
+        if ev.get("outcome") == "error":  # unreadable at apply: an error, as at plan time
+            self.file_errors += 1
+        self.file(action, ev["file"], outcome, ev.get("reason"))
 
     # -- summary ---------------------------------------------------------- #
     def entries(self, outcomes: Optional[Sequence[Outcome]]) -> Dict[str, Dict[str, Any]]:
@@ -304,16 +307,35 @@ class _Report:
             )
             ok = (others_ok and all(e["state"] in OK_STATES for e in entries.values())
                   and self.file_errors == 0)
-        errors = sum(n for aid, n in self.errors_by_action.items() if aid not in refused) + len(refused)
         return {
             "uploaded": self.counts["uploaded"],
             "skipped_duplicate": self.counts["skipped_duplicate"],
             "skipped_failed": self.counts["skipped_failed"],
-            "errors": errors,
+            "errors": self._errors(entries, refused, applied=outcomes is not None),
+            "dropped": self.counts["dropped"],
             "ok": ok,
             "plan": self.plan.to_json(),
             "entries": entries,
         }
+
+    def _errors(self, entries: Dict[str, Dict[str, Any]], refused: List[str], *, applied: bool) -> int:
+        """Error files, one per refusal, and at least one per entry that did not end well.
+
+        Dropped files are not errors (they have their own count), so an entry
+        whose files were all dropped still counts one: `ok` is `errors == 0`.
+        """
+        errors = sum(1 for aid in refused if not aid.startswith(f"{DELIVERY}/"))
+        for a in self.plan.actions:
+            if a.provider != DELIVERY:
+                continue
+            if a.id in refused:
+                errors += 1
+                continue
+            n = self.errors_by_action[a.id]
+            if applied and n == 0 and entries[a.key]["state"] not in OK_STATES:
+                n = 1
+            errors += n
+        return errors
 
     def _verb(self, action_id: str) -> str:
         action = self.actions.get(action_id)
@@ -388,6 +410,10 @@ def run_upload(
         report.planned()
         summary = {**base, **report.summary(None), "tags": report.tags(policy, None),
                    "results": report.results, "log_path": None}
+        planned = next((a for a in report.plan.actions if a.provider == "validators"), None)
+        if planned is not None:  # what --with-validators would sync; nothing is synced
+            summary["validators"] = {"dry_run": True, "planned": planned.summary,
+                                     "reference_ids": list(planned.payload.get("reference_ids") or [])}
         emit({"event": "upload_complete", **summary})
         return summary
 
@@ -449,7 +475,8 @@ def _apply_locked(
 
 
 def _write_log(run_dir: Path, summary: Dict[str, Any], error: Optional[str]) -> Optional[str]:
-    """upload_log.json: the fields it has always had, plus each entry's batch, stack, channel and request."""
+    """upload_log.json: the fields it has always had, plus `dropped`, `plan`, `entries`
+    (each entry's batch, stack, channel and request), `outcomes` and the validator sync."""
     log: Dict[str, Any] = {
         "uploaded_at": _utc_now(),
         "run_dir": summary["run_dir"],
@@ -457,11 +484,16 @@ def _write_log(run_dir: Path, summary: Dict[str, Any], error: Optional[str]) -> 
         "skipped_duplicate": summary["skipped_duplicate"],
         "skipped_failed": summary["skipped_failed"],
         "errors": summary["errors"],
+        "dropped": summary["dropped"],
         "ok": summary["ok"],
         "tags": summary["tags"],
         "results": summary["results"],
+        "plan": summary["plan"],
         "entries": summary["entries"],
+        "outcomes": summary["outcomes"],
     }
+    if "validators" in summary:
+        log["validators"] = summary["validators"]
     if summary.get("deprecations"):
         log["deprecations"] = summary["deprecations"]
     if error is not None:

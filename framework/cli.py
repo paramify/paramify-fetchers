@@ -420,8 +420,12 @@ def _human_upload_printer(noun: str = "file", log_name: str = "upload_log.json")
                 f"skipped_duplicate={ev['skipped_duplicate']} "
                 f"skipped_failed={ev['skipped_failed']} "
                 f"errors={ev['errors']}"
+                + (f" dropped={ev['dropped']}" if ev.get("dropped") else "")
                 + (f" jobs_failed={ev['jobs_failed']}" if "jobs_failed" in ev else "")
             )
+            planned = ev.get("validators") or {}
+            if ev.get("dry_run") and planned.get("planned"):
+                typer.echo(f"validators: {planned['planned']} (dry run: nothing synced)")
             if ev.get("halted"):
                 typer.echo(f"\nStopped early: {ev['halted']}")
             for line in _tags_done_lines(ev.get("tags")):
