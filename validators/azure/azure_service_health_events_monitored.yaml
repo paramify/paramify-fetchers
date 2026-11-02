@@ -3,7 +3,7 @@ name: Azure Service Health Events Monitored Over At Least 90 Days
 type: AUTOMATED
 role: configuration
 statement: >-
-  Microsoft's Service Health notices to the subscription were read in full for the lookback window: the
+  Microsoft's Service Health notices to the subscription were listed in full for the lookback window: the
   event list covered at least the last 90 days (lookback_days of 90 or more), the older events Resource
   Graph still holds were read too (events_from_resource_graph is a number and
   events_in_resource_graph_not_found is 0), Microsoft.ResourceHealth is registered (so 0 events means none,
@@ -15,8 +15,10 @@ statement: >-
   (the upstream provider's notices are monitored automatically). Does NOT prove that anyone reviewed an
   advisory, decided whether it applies, or tracked a configuration change to completion: those
   dispositions are the organization's own record and aren't read. Does NOT cover an advisory last updated
-  before the window that Resource Graph no longer holds. Microsoft names impacted resources only for some
-  events, so a missing resource list does not mean an advisory doesn't apply.
+  before the window that Resource Graph no longer holds. Does NOT check that a sensitive event's details or
+  a security advisory's resource list could be read: without the optional actions those reads are refused
+  and the fields read unknown, and this validator still passes. Microsoft names impacted resources only
+  for some events, so a missing resource list does not mean an advisory doesn't apply.
 
 regex: '"partial_failure":\s*false\b[\s\S]*?"summary":\s*\{[\s\S]*?"events":\s*\d+,[\s\S]*?"events_from_resource_graph":\s*\d+,[\s\S]*?"events_in_resource_graph_not_found":\s*0\b[\s\S]*?"lookback_days":\s*(?:9\d|[1-9]\d{2,})\b[\s\S]*?"provider_registration_status":\s*"registered"'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
