@@ -193,18 +193,24 @@ def batches(descriptors: List[str]) -> List[List[str]]:
     return out
 
 
-def read_identities(client, batch: List[str]) -> List[Any]:
-    """One batch; a 404 is split until it names one descriptor, which then reads as not found."""
+def read_identities(client, batch: List[str], split: bool = False) -> List[Any]:
+    """One batch; a 404 is split until it names one descriptor, which then reads as not found.
+
+    A 404 that hides a refusal raises, and so does a batch whose split finds no one, so it reads as unread.
+    """
     try:
         return client.list("_apis/identities", SECURITY_API, params={
             "descriptors": ",".join(batch), "queryMembership": "None"}, service=GRAPH)
     except DevOpsError as exc:
-        if exc.status != 404:
+        if exc.status != 404 or exc.failure_code == "not_authorized":
             raise
         if len(batch) == 1:
             return []
         half = len(batch) // 2
-        return read_identities(client, batch[:half]) + read_identities(client, batch[half:])
+        rows = read_identities(client, batch[:half], True) + read_identities(client, batch[half:], True)
+        if not rows and not split:
+            raise
+        return rows
 
 
 def resolve(client, collector, descriptors: List[str]) -> Tuple[Dict[str, Dict[str, Any]], Set[str]]:

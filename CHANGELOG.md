@@ -884,7 +884,11 @@ schemas and the `paramify` CLI — not the internal code.
   thousand characters. The failed batches left their identities unresolved, so
   every admin-group figure read null and the run failed. Batches now also stop
   at 2,000 encoded characters, and a batch that still answers 404 is split
-  until a single descriptor that answers 404 reads as not found.
+  until a single descriptor that answers 404 reads as not found. A 404 that
+  hides a refusal (`TF401019`, `VS800075`) is reported as `not_authorized`, and
+  a batch whose split finds no one is a failure, so its identities read as
+  unread and the admin-group figures null, rather than every admin group read
+  as an ordinary group.
 - **Azure DevOps: a TFVC "Access Denied" is `not_authorized`.** Azure DevOps
   answers 500 TF14098 when the caller can't read an item in a changeset. The
   shared client now reports it as `not_authorized` and doesn't retry it.

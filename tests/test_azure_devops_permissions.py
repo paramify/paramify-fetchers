@@ -310,6 +310,36 @@ def test_a_404_batch_is_split_and_an_unknown_descriptor_is_not_a_failure(tmp_pat
     assert s["unresolved_identities"] == 1 and s["high_impact_grants_outside_admin_groups"] is not None
 
 
+def test_a_batch_in_which_no_descriptor_is_found_is_unread_not_unknown(tmp_path, monkeypatch):
+    # Every descriptor answering 404, as a wrong host would, must not read the admin groups as other groups.
+    monkeypatch.setattr(mod, "IDENTITY_BATCH", 4)
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = err(404, "Not Found")
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 1 and status["code"] == "internal_error"
+    assert [f["operation"] for f in evidence["metadata"]["api_failures"]] == ["identities.read(1)", "identities.read(2)"]
+    s = evidence["summary"]
+    assert s["unresolved_identities"] == 7
+    assert s["high_impact_grants_outside_admin_groups"] is None
+    assert s["identities_with_high_impact_rights_outside_admin_groups"] is None
+    pca = entry(evidence, "AuditLog", "AllPermissions", PCA)
+    assert pca["identity"]["admin_group"] is None and pca["high_impact_outside_admin_groups"] is None
+
+
+@pytest.mark.parametrize("message", [
+    "TF401019: The Git repository with name or identifier x does not exist or you do not have permissions.",
+    "VS800075: The project with id 'x' does not exist, or you do not have permission to access it.",
+])
+def test_a_404_that_hides_a_refusal_is_not_authorized_and_not_split(tmp_path, message):
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = err(404, message)
+    code, evidence, status, fake = run(tmp_path, fake)
+    assert code == 1 and status["code"] == "not_authorized"
+    assert len([1 for _, _, path, _ in fake.calls if path.endswith("/_apis/identities")]) == 1
+    s = evidence["summary"]
+    assert s["unresolved_identities"] == 7 and s["high_impact_grants_outside_admin_groups"] is None
+
+
 def test_a_project_filter_drops_other_projects_entries(tmp_path, monkeypatch):
     monkeypatch.setenv("AZURE_DEVOPS_PROJECTS", "Web")
     _, evidence, _, _ = run(tmp_path)
