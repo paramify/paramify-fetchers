@@ -50,6 +50,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Security posture, policy and backup | [azure_policy_compliance](#azure_policy_compliance) | `EVD-AZURE-POLICY-COMPLIANCE` |
 | Security posture, policy and backup | [azure_residual_resources](#azure_residual_resources) | `EVD-AZURE-RESIDUAL-RESOURCES` |
 | Security posture, policy and backup | [azure_resource_inventory](#azure_resource_inventory) | `EVD-AZURE-RESOURCE-INVENTORY` |
+| Security posture, policy and backup | [azure_service_availability](#azure_service_availability) | `EVD-AZURE-SERVICE-AVAILABILITY` |
 | Security posture, policy and backup | [azure_vm_hardening_status](#azure_vm_hardening_status) | `EVD-AZURE-VM-HARDENING` |
 | Network and edge | [azure_api_management_configuration](#azure_api_management_configuration) | `EVD-AZURE-API-MANAGEMENT-CONFIG` |
 | Network and edge | [azure_app_gateway_backend_tls](#azure_app_gateway_backend_tls) | `EVD-AZURE-APPGW-BACKEND-TLS` |
@@ -2544,6 +2545,92 @@ Summary fields:
 
 **What does nothing cover?**
 - `resources_covered_by_neither_by_type` — Number of resources of each type that have neither a Defender assessment nor a Policy state. It counts every such resource, so it holds both the missing resources listed above and the types neither service covers on any resource; null if either query failed
+
+
+### azure_service_availability
+Short Description: Shows when each App Service app, Front Door profile and SQL Managed Instance was unavailable and for how long, the Azure incident behind each outage, and each app's health-check results.
+
+Script: fetchers/azure/service_availability/fetcher.py (uses the shared helper fetchers/azure/_shared/resource_exclusions.py)
+
+Access: Reader on the subscription.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET Microsoft.Web/sites`, `GET Microsoft.Cdn/profiles` and `GET Microsoft.Sql/managedInstances` — the App Service apps (web and function apps), Front Door Standard and Premium profiles and SQL Managed Instances in the subscription
+- `GET providers/Microsoft.ResourceHealth` — whether Resource Health is registered on the subscription
+- `GET {resource}/providers/Microsoft.ResourceHealth/availabilityStatuses` (per resource) — the resource's availability history: each change of state, its cause, and the Azure incident Resource Health links to it
+- `GET {app}/config/web` (per app) — the app's health check path
+- `GET {app}/providers/Microsoft.Insights/metrics` for HealthCheckStatus (per app with a health check path) — hourly health-check results over the lookback
+
+Output: `azure_service_availability_<subscription>.json` — each resource with its availability now, every period it was unavailable, degraded or unknown in the lookback with its cause and linked Azure incidents, and for apps the health check results, plus a rollup per region and pointers to the fetchers that hold Front Door origin health (azure_front_door_origins) and Service Health events (azure_service_health_advisories).
+
+Summary fields:
+
+**What was checked?**
+- `lookback_days` — Number of days of history read; Resource Health keeps 30, and each status lasts until the next one, the newest until the run
+- `resource_health_registration` — Whether Resource Health is registered on the subscription: registered, not_registered (nothing can be read, and the run fails) or unknown (the registration read failed; the per-resource reads still ran)
+- `resources` — Number of in-scope resources checked; null if any of the three lists failed
+- `app_services` — Number of in-scope App Service apps; null if the app list failed
+- `web_apps` — Number of in-scope web apps; null if the app list failed
+- `function_apps` — Number of in-scope function apps; null if the app list failed
+- `front_door_profiles` — Number of in-scope Front Door Standard and Premium profiles; null if the profile list failed
+- `sql_managed_instances` — Number of in-scope SQL Managed Instances; null if the instance list failed
+- `regions` — List of the regions the in-scope resources are in (global for Front Door)
+
+**Was each resource's availability read?**
+- `resource_health_read` — Number of resources whose Resource Health history was read
+- `resource_health_unknown` — Number of resources whose availability is unknown: the read failed, was refused, returned no history, or Resource Health does not cover the resource type
+- `resource_health_by_status` — Number of resources for each read status:
+  - read (history read)
+  - no_data (Resource Health returned no status)
+  - not_supported (Resource Health does not cover the resource type)
+  - not_found (the resource or its history was not found)
+  - not_authorized (the read was refused; fails the run)
+  - not_registered (Resource Health is not registered; fails the run)
+  - error (any other failure; fails the run)
+
+**Is each resource available now?**
+- `resources_available_now` — Number of resources whose current state is Available or Degraded
+- `resources_unavailable_now` — Number of resources whose current state is Unavailable
+- `resources_degraded_now` — Number of resources whose current state is Degraded
+- `resources_availability_unknown_now` — Number of resources whose current state is Unknown or was not read
+
+**Were there outages, and how long did recovery take?**
+- `resources_with_outage_in_window` — Number of read resources with at least one outage in the lookback; an outage is a continuous Unavailable period the customer did not start, and Degraded (still serving, with reduced performance) is not one
+- `outages_in_window` — Number of outages in the lookback across read resources
+- `ongoing_outages` — Number of read resources Unavailable now, in an outage
+- `customer_initiated_unavailable_windows` — Number of Unavailable periods the customer started (a stop, restart or scale, where Resource Health names the customer or user as the cause), which are not outages
+- `longest_outage_hours` — Hours of the longest outage across read resources, its full length including any part before the lookback (0 when none had one); null when none was read
+- `lowest_availability_percentage` — Percentage of the lowest availability across read resources, where a resource's availability = (observed hours − outage hours in the lookback) / observed hours × 100, to three decimals, and observed hours run from the later of the lookback start and the resource's oldest status; when a resource's observed hours is 0 it has no availability and is left out; null when no resource has one
+- `service_impacting_events` — Number of distinct Azure incidents Resource Health linked to the periods in the lookback
+
+**Is recovery within the recovery time objective?**
+- `recovery_time_objective_hours` — Hours of the configured recovery time objective; null if none is set
+- `resources_meeting_recovery_time_objective` — Number of resources whose longest outage is within the objective
+- `resources_missing_recovery_time_objective` — Number of resources with an outage longer than the objective, ongoing ones included
+- `resources_recovery_time_objective_unknown` — Number of resources whose availability was not read; null if no objective is set
+- `all_resources_meet_recovery_time_objective` — True if every resource meets the objective; false if any misses it; null if any is unknown, a list failed, there are no resources or no objective is set
+
+**Do apps have a health check, and is it passing?**
+- `apps_with_health_check` — Number of apps with a health check path set
+- `apps_without_health_check` — Number of apps with no health check path
+- `apps_health_check_unknown` — Number of apps whose configuration read failed
+- `all_apps_have_health_check` — True if every app has a health check path; false if any has none; null if any is unknown, the app list failed or there are no apps
+- `apps_health_check_healthy_last_hour` — Number of apps whose newest hourly result in the last 3 hours is fully healthy: the hour's lowest HealthCheckStatus is 100
+- `apps_health_check_unhealthy_last_hour` — Number of apps whose newest hourly result in the last 3 hours is below 100
+- `apps_health_check_without_recent_data` — Number of apps with a health check path, or an unknown one, and no result in the last 3 hours
+- `apps_with_unhealthy_hours` — Number of apps with at least one hour below 100 in the lookback
+- `health_check_metric_unread` — Number of apps whose health-check metric read failed
+
+**Which resources are out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource exclusion patterns
+- `resource_exclusion_patterns_unmatched` — List of the patterns that matched nothing
+- `excluded_apps` — Number of apps the patterns took out; null if the app list failed
+- `excluded_front_door_profiles` — Number of Front Door profiles the patterns took out; null if the profile list failed
+- `excluded_sql_managed_instances` — Number of SQL Managed Instances the patterns took out; null if the instance list failed
+- `in_scope_apps` — Number of apps left in scope; null if the app list failed
+- `in_scope_front_door_profiles` — Number of Front Door profiles left in scope; null if the profile list failed
+- `in_scope_sql_managed_instances` — Number of SQL Managed Instances left in scope; null if the instance list failed
 
 
 ### azure_vm_hardening_status
