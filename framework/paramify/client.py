@@ -139,9 +139,14 @@ class Client:
         is_upload: bool = False,
     ) -> Any:
         attempt = 0
+        # A POST may already be committed server-side when it times out or
+        # answers 500/502/504; retrying would duplicate the create or upload.
+        # Only a refusal (429/503) or a failed connection is safe to repeat.
+        safe_to_retry = method == "GET"
         while True:
             status: Optional[int] = None
             retry_after: Optional[float] = None
+            retryable = True
             try:
                 resp = self.session.request(
                     method,
@@ -151,12 +156,21 @@ class Client:
                     files=files,
                     timeout=self.timeout,
                 )
-            except (requests.ConnectionError, requests.Timeout) as exc:
+            except requests.ConnectionError as exc:
                 reason = f"{type(exc).__name__}: {exc}"
+            except requests.RequestException as exc:
+                reason = f"{type(exc).__name__}: {exc}"
+                retryable = safe_to_retry and isinstance(exc, requests.Timeout)
             else:
                 status = resp.status_code
                 if status < 400:
-                    return _decode(resp)
+                    try:
+                        return _decode(resp)
+                    except ValueError as exc:
+                        raise ApiError(
+                            f"{method} {path} returned a body that is not valid JSON",
+                            status=status, kind=ErrorKind.FATAL, method=method, path=path,
+                        ) from exc
                 body = resp.text or ""
                 kind = classify(method, path, status, body, is_upload)
                 reason = f"HTTP {status}: {body[:300]}"
@@ -165,8 +179,16 @@ class Client:
                         f"{method} {path} failed ({reason})",
                         status=status, kind=kind, method=method, path=path,
                     )
+                retryable = safe_to_retry or status in (429, 503)
                 retry_after = _retry_after(resp.headers)
+            if not retryable:
+                raise ApiError(
+                    f"{method} {path} failed, not retried because it may have taken effect ({reason})",
+                    status=status, kind=ErrorKind.TEMPORARY, method=method, path=path,
+                )
             delay = retry_after if retry_after is not None else min(2.0**attempt, _BACKOFF_CAP_S)
+            if not delay >= 1.0:  # also catches NaN: every retry costs at least 1 s of budget
+                delay = 1.0
             if delay > self._budget_left:
                 raise ApiError(
                     f"{method} {path} failed after retrying ({reason})",

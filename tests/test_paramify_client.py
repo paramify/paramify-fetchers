@@ -184,3 +184,72 @@ def test_require_batches_on_old_api():
 def test_require_batches_ok():
     c, _, _ = make([FakeResponse(200, {"batches": []})])
     require_batches(c)
+
+
+def test_retry_after_zero_cannot_spin():
+    c, _, sleeps = make([FakeResponse(429, headers={"Retry-After": "0"})] * 50, retry_budget_s=3)
+    with pytest.raises(ApiError) as ei:
+        c.get("/x")
+    assert ei.value.kind is ErrorKind.TEMPORARY
+    assert sleeps == [1.0, 1.0, 1.0]
+
+
+@pytest.mark.parametrize("value", ["-5", "nan"])
+def test_retry_after_negative_or_nan_is_floored(value):
+    c, _, sleeps = make([FakeResponse(429, headers={"Retry-After": value}), FakeResponse(200, {})])
+    c.get("/x")
+    assert sleeps == [1.0]
+
+
+def test_retry_after_http_date_falls_back_to_backoff():
+    hdr = {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}
+    c, _, sleeps = make([FakeResponse(503, headers=hdr), FakeResponse(503, headers=hdr), FakeResponse(200, {})])
+    c.get("/x")
+    assert sleeps == [1, 2]
+
+
+def test_post_502_is_not_retried():
+    c, s, sleeps = make([FakeResponse(502), FakeResponse(200, {})])
+    with pytest.raises(ApiError) as ei:
+        c.post_json("/batches", {})
+    assert ei.value.kind is ErrorKind.TEMPORARY and ei.value.status == 502
+    assert len(s.calls) == 1 and sleeps == []
+
+
+def test_post_timeout_is_not_retried():
+    c, s, sleeps = make([requests.Timeout("t"), FakeResponse(200, {})])
+    with pytest.raises(ApiError) as ei:
+        c.post_file("/batches/b/artifacts/upload", "f", b"x", {})
+    assert ei.value.kind is ErrorKind.TEMPORARY and len(s.calls) == 1 and sleeps == []
+
+
+def test_post_503_then_200_retries_once():
+    c, s, sleeps = make([FakeResponse(503), FakeResponse(200, {"ok": 1})])
+    assert c.post_json("/batches", {}) == {"ok": 1}
+    assert len(s.calls) == 2 and sleeps == [1]
+
+
+def test_post_connection_error_retries():
+    c, _, sleeps = make([requests.ConnectionError("x"), FakeResponse(200, {"ok": 1})])
+    assert c.post_json("/batches", {}) == {"ok": 1}
+    assert sleeps == [1]
+
+
+def test_get_502_then_200_succeeds():
+    c, s, sleeps = make([FakeResponse(502), FakeResponse(200, {"ok": 1})])
+    assert c.get("/x") == {"ok": 1}
+    assert sleeps == [1]
+
+
+def test_other_request_exception_becomes_temporary_api_error():
+    c, s, _ = make([requests.exceptions.InvalidURL("bad")])
+    with pytest.raises(ApiError) as ei:
+        c.get("/x")
+    assert ei.value.kind is ErrorKind.TEMPORARY and len(s.calls) == 1
+
+
+def test_invalid_json_on_success_becomes_fatal_api_error():
+    c, _, _ = make([FakeResponse(200, text="<html>not json")])
+    with pytest.raises(ApiError) as ei:
+        c.get("/x")
+    assert ei.value.kind is ErrorKind.FATAL and ei.value.status == 200
