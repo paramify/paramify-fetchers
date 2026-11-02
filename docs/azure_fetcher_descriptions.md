@@ -2331,14 +2331,16 @@ Summary fields:
 - `total_policy_exemptions` — Number of in-scope exemptions in effect on the subscription, its own, inherited from a management group, or on a resource group or resource inside it, expired ones included
 
 **What do the exemptions waive?**
-- `waiver_exemptions` — Number of in-scope exemptions in category Waiver (the resource is accepted as non-compliant)
-- `mitigated_exemptions` — Number of in-scope exemptions in category Mitigated (the policy's intent is met another way)
+- `waiver_exemptions` — Number of in-scope exemptions in category Waiver (the resource is accepted as non-compliant), matched without regard to case
+- `mitigated_exemptions` — Number of in-scope exemptions in category Mitigated (the policy's intent is met another way), matched without regard to case
 - `whole_assignment_exemptions` — Number of in-scope exemptions that exempt every policy of an assignment rather than named members of an initiative
 - `defender_benchmark_exemptions` — Number of in-scope exemptions on Defender for Cloud's own assignment (SecurityCenterBuiltIn), which is how Defender recommendation exemptions are stored
 - `active_exemptions_lifting_enforcement` — Number of unexpired in-scope exemptions that lift enforcement: they exempt a policy with an enforcing effect (deny, modify, deployIfNotExists and the others listed above) on an assignment with enforcement mode Default
-- `exemptions_lifting_enforcement_unknown` — Number of in-scope exemptions where that can't be told: the exempted assignment isn't listed, or an exempted policy's effect couldn't be resolved or isn't found in the initiative
+- `exemptions_lifting_enforcement_unknown` — Number of in-scope exemptions where that can't be told; each one's lifts_enforcement_unknown_reason says why: the exempted assignment isn't listed, the assignments or the initiative's members couldn't be read, an exempted policy isn't in the initiative's current definition, or an exempted policy's effect couldn't be resolved
+- `exemptions_naming_members_not_in_initiative` — Number of in-scope exemptions naming at least one initiative member that the initiative's current definition doesn't have: a policy since removed from the initiative, or one in an older version the assignment still uses
 - `assignments_with_exemptions` — Number of listed assignments with at least one in-scope exemption; null when an exemption's assignment can't be checked because the assignment list failed
-- `exemptions_of_unlisted_assignments` — Number of in-scope exemptions whose assignment isn't among the listed assignments (for example an assignment since deleted); null when the assignment list failed
+- `exemptions_of_unlisted_assignments` — Number of in-scope exemptions whose assignment isn't among the assignments listed for the subscription, usually an assignment since deleted, whose exemptions Azure leaves in place; null when the assignment list failed
+- `unlisted_assignments_with_exemptions` — Number of distinct assignments that in-scope exemptions point at but that aren't among the listed assignments; null when the assignment list failed
 
 **Where were the exemptions made?**
 - `exemptions_by_scope_kind` — Number of in-scope exemptions made at each kind of scope:
