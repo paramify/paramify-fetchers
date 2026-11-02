@@ -2605,6 +2605,8 @@ Summary fields:
 - `longest_degraded_hours` — Hours of the longest Degraded period across read apps and SQL Managed Instances (0 when none had one); null when none was read
 - `longest_unknown_hours` — Hours of the longest Unknown period across read apps and SQL Managed Instances (0 when none had one); null when none was read
 - `lowest_availability_percentage` — Percentage of the lowest availability across read apps and SQL Managed Instances, where a resource's availability = (known hours − outage hours in the lookback) / known hours × 100, to three decimals; known hours are the observed hours less the Unknown hours, and observed hours run from the later of the lookback start and the resource's oldest status; when a resource's known hours is 0 it has no availability and is left out; null when no resource has one
+- `resources_without_availability` — Number of read apps and SQL Managed Instances left out of lowest_availability_percentage because their known hours is 0, such as one whose only status is Unknown now
+- `resources_with_unknown_hours` — Number of read apps and SQL Managed Instances with Unknown hours in the lookback, whose availability covers only their known hours
 - `service_impacting_events` — Number of distinct Azure incidents Resource Health linked to the periods in the lookback
 
 **Is recovery within the recovery time objective?**
