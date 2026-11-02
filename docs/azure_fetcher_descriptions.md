@@ -34,6 +34,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Logging and monitoring | [azure_monitor_fired_alerts](#azure_monitor_fired_alerts) | `EVD-AZURE-MONITOR-FIRED-ALERTS` |
 | Logging and monitoring | [azure_network_flow_logs](#azure_network_flow_logs) | `EVD-AZURE-NETWORK-FLOW-LOGS` |
 | Logging and monitoring | [azure_resource_diagnostic_settings](#azure_resource_diagnostic_settings) | `EVD-AZURE-RESOURCE-DIAG-SETTINGS` |
+| Logging and monitoring | [azure_service_health_advisories](#azure_service_health_advisories) | `EVD-AZURE-SERVICE-HEALTH` |
 | Logging and monitoring | [azure_service_log_records](#azure_service_log_records) | `EVD-AZURE-SERVICE-LOG-RECORDS` |
 | Microsoft Sentinel | [azure_sentinel_analytics_rules](#azure_sentinel_analytics_rules) | `EVD-AZURE-SENTINEL-ANALYTICS-RULES` |
 | Microsoft Sentinel | [azure_sentinel_automation_rules](#azure_sentinel_automation_rules) | `EVD-AZURE-SENTINEL-AUTOMATION-RULES` |
@@ -1667,6 +1668,75 @@ Summary fields:
 **Are all audit logs captured?**
 - `resources_with_audit_categories` — Number of log-producing resources whose type has audit log categories
 - `resources_capturing_all_audit_categories` — Number of resources that export every audit log category their type has
+
+
+### azure_service_health_advisories
+Short Description: Lists the Microsoft service issues, planned maintenance, health and security advisories reported to the subscription, with their status, recommended actions and the in-scope resources they name.
+
+Script: fetchers/azure/service_health_advisories/fetcher.py
+
+Access: Reader on the subscription. Optional: `Microsoft.ResourceHealth/events/fetchEventDetails/action` for security advisory summaries and updates, and `Microsoft.ResourceHealth/events/listSecurityAdvisoryImpactedResources/action` for the resources a security advisory names; without them, those read unknown.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `providers.get()` for Microsoft.ResourceHealth — tells an unregistered provider from a quiet subscription
+- `GET Microsoft.ResourceHealth/events` — the Service Health events last updated within the lookback window (180 days at most)
+- `ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events'` — events Resource Graph still holds, to catch older ones the window misses
+- `GET Microsoft.ResourceHealth/events/{trackingId}` (per event Resource Graph holds that the window missed) — its full record
+- `POST Microsoft.ResourceHealth/events/{trackingId}/fetchEventDetails` (per sensitive event) — the summary and updates the list leaves out
+- `ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events/impactedresources'` — the resources each event names
+- `POST Microsoft.ResourceHealth/events/{trackingId}/listSecurityAdvisoryImpactedResources` (per security advisory) — the resources the advisory names
+
+Output: `azure_service_health_advisories_<subscription>.json` — each Service Health event with its type, status, level, Microsoft's description, impacted services and regions, impact start and end, published and last update times, recommended actions and the in-scope resources it names; resources outside the boundary are listed separately.
+
+Summary fields:
+
+**What did Microsoft report to the subscription?**
+- `lookback_days` — Number of days back the event list reaches, counted against each event's last update (180 by default, and at most 180, because the list answers an error for a longer window)
+- `events` — Number of Service Health events in scope: events last updated within the window plus older events Resource Graph still holds, billing communications left out; null, like every count below except the scope lists, when the event list couldn't be read
+- `events_from_resource_graph` — Number of events in scope that the windowed list left out and Resource Graph still holds, such as a retirement announced long ago; null when Resource Graph's events couldn't be read
+- `events_by_type` — Number of events of each type; a type with none is left out:
+  - ServiceIssue (an outage or degradation of an Azure service)
+  - PlannedMaintenance (scheduled maintenance that may affect availability)
+  - HealthAdvisory (a change that needs attention, such as a retirement)
+  - SecurityAdvisory (a security notice for the subscription)
+  - RCA (a post-incident review of an earlier service issue)
+  - EmergingIssues (a broad issue Microsoft is still investigating)
+- `events_by_status` — Number of events in each status Microsoft gives: Active or Resolved
+- `events_by_level` — Number of events at each level Microsoft gives: Critical, Error, Warning or Informational
+- `retirement_advisories` — Number of health advisories that announce a retirement (sub-type Retirement)
+- `billing_events_skipped` — Number of billing communications left out of the evidence
+- `provider_registration_status` — Whether Microsoft.ResourceHealth is registered on the subscription: registered, not_registered or unknown
+
+**Which events are still open, and what do they ask for?**
+- `open_events` — Number of open events. Open follows Microsoft's own rule for an active event: a service issue while its status is Active, and any other event until its impact mitigation time passes (or while its status is Active, when it has none)
+- `open_events_by_type` — Number of open events of each type; a type with none is left out
+- `open_service_issues` — Number of open service issues
+- `open_security_advisories` — Number of open security advisories
+- `open_health_advisories` — Number of open health advisories, retirements included
+- `open_retirement_advisories` — Number of open health advisories that announce a retirement
+- `upcoming_planned_maintenance` — Number of planned maintenance events whose maintenance hasn't ended
+- `open_events_action_recommended` — Number of open events that ask for action: Microsoft tagged them Action Recommended or listed recommended actions
+- `open_high_severity_advisories` — Number of open health or security advisories at level Critical or Error
+
+**Which resources do the events name?**
+- `impacted_resources` — Number of distinct in-scope resources named by any event; null while any event's resource list is unread
+- `impacted_resources_by_type` — Number of distinct in-scope resources named by any event, for each resource type; null while any event's resource list is unread
+- `events_with_impacted_resources` — Number of events that name at least one in-scope resource; null while any event's resource list is unread
+- `open_events_with_impacted_resources` — Number of open events that name at least one in-scope resource; null while any event's resource list is unread
+- `events_impacted_resources_unread` — Number of events whose resource list was refused or failed (Resource Graph's list, or a security advisory's own); above 0, the resource counts are null
+- `events_impacted_resources_not_authorized` — Number of security advisories whose resource list was refused because the optional action isn't granted
+
+**Can the security advisories be read in full?**
+- `sensitive_events` — Number of events Microsoft marks sensitive, whose summary and updates the event list leaves out
+- `sensitive_event_details_read` — Number of sensitive events whose summary and updates were read with fetchEventDetails
+- `sensitive_event_details_not_authorized` — Number of sensitive events whose details were refused because the optional action isn't granted; their summary and updates read null
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no resource an event names, such as a mistyped name
+- `excluded_impacted_resources` — Number of resources named by events that a pattern took out by resource group, region or id; each is listed under excluded with the pattern and the event, and no other count includes them; null while any event's resource list is unread
+- `excluded_events` — Number of events left out because a pattern took out every resource they name; each is listed under excluded
 
 
 ### azure_service_log_records
