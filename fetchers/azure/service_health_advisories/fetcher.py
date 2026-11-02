@@ -91,7 +91,7 @@ LIMITATIONS = [
     "lists.",
 ]
 
-# Null, not 0, when the event list was not read.
+# Null, not 0, when the event list, Resource Graph's events or an older event was not read: each can change these.
 EVENT_COUNTS = (
     "events", "events_by_type", "events_by_status", "events_by_level", "retirement_advisories",
     "billing_events_skipped", "open_events", "open_events_by_type", "open_service_issues",
@@ -260,7 +260,7 @@ def apply_scope(scope: ResourceExclusions, events: list[dict]) -> tuple[list[dic
 
 
 def summarize(events: list[dict], events_read: bool, billing_skipped, lookback_days: int,
-              graph_read: bool = True, graph_not_found: int = 0) -> dict:
+              older_read: bool = True, graph_not_found=0) -> dict:
     open_events = [e for e in events if e["open"]]
     unread = [e for e in events if e["impacted_resources"] is None]
     resources: dict[str, dict] = {}
@@ -276,8 +276,8 @@ def summarize(events: list[dict], events_read: bool, billing_skipped, lookback_d
     summary = {
         "lookback_days": lookback_days,
         "events": len(events),
-        "events_from_resource_graph": sum(1 for e in events if e.get("listed_by") == GRAPH) if graph_read else None,
-        "events_in_resource_graph_not_found": graph_not_found if graph_read else None,
+        "events_from_resource_graph": sum(1 for e in events if e.get("listed_by") == GRAPH),
+        "events_in_resource_graph_not_found": graph_not_found,
         "events_by_type": sorted_counts(Counter(e["event_type"] or "unknown" for e in events)),
         "events_by_status": sorted_counts(Counter(e["status"] or "unknown" for e in events)),
         "events_by_level": sorted_counts(Counter(e["event_level"] or "unknown" for e in events)),
@@ -305,7 +305,8 @@ def summarize(events: list[dict], events_read: bool, billing_skipped, lookback_d
         "events_with_impacted_resources": sum(1 for e in events if e["impacted_resources"]),
         "open_events_with_impacted_resources": sum(1 for e in open_events if e["impacted_resources"]),
     }
-    unknown = (() if events_read else EVENT_COUNTS + RESOURCE_COUNTS) + (RESOURCE_COUNTS if unread else ())
+    complete = events_read and older_read
+    unknown = (() if complete else EVENT_COUNTS + RESOURCE_COUNTS) + (RESOURCE_COUNTS if unread else ())
     return {**summary, **dict.fromkeys(unknown, None)}
 
 
@@ -394,8 +395,8 @@ def graph_events(rows: list[dict]) -> dict:
 
 
 def collect(client, subscription_id: str, now: datetime, lookback_days: int, collector: Collector) -> tuple:
-    """(events, whether the event list was read, billing events skipped, whether Resource Graph's events were read,
-    how many events Resource Graph holds that the event API did not find)."""
+    """(events, whether the event list was read, billing events skipped, whether Resource Graph's events and every older
+    event were read, how many events Resource Graph holds that the event API did not find)."""
     base = f"/subscriptions/{subscription_id}/providers/{NAMESPACE}/events"
     window_start = now - timedelta(days=lookback_days)
     start = query_start(window_start)
@@ -413,13 +414,14 @@ def collect(client, subscription_id: str, now: datetime, lookback_days: int, col
     reads = [read_by_id(client, base, t, graph[t] or window_start, collector) for t in missing]
     older = [found for status, found in reads if found is not None]
     not_found = sum(1 for status, _ in reads if status == NOT_FOUND)
+    older_read = graph is not None and all(status in (READ, NOT_FOUND) for status, _ in reads)
     sources = [(r, LISTED) for r in raw] + [(r, GRAPH) for r in older]
     billing = sum(1 for r, _ in sources if (r.get("properties") or {}).get("eventType") == BILLING)
     wanted = [(r, by) for r, by in sources if (r.get("properties") or {}).get("eventType") != BILLING]
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         events = list(pool.map(
             lambda item: read_event(client, base, item[0], item[1], now, graph_impacted, collector), wanted))
-    return events, True, billing, graph is not None, not_found if graph is not None else None
+    return events, True, billing, older_read, not_found if older_read else None
 
 
 def collect_subscription(client, subscription_id: str, collector: Collector) -> tuple:
@@ -433,7 +435,7 @@ def collect_subscription(client, subscription_id: str, collector: Collector) -> 
                        LOOKBACK_ENV, requested, MAX_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS)
     now = datetime.now(timezone.utc)
     registration = provider_registration_status(collector, subscription_id, client.cred, NAMESPACE)
-    events, events_read, billing, graph_read, not_found = collect(client, subscription_id, now, lookback_days,
+    events, events_read, billing, older_read, not_found = collect(client, subscription_id, now, lookback_days,
                                                                   collector)
     events, excluded = apply_scope(scope, events)
     scope.warn_unmatched(logger)
@@ -455,12 +457,12 @@ def collect_subscription(client, subscription_id: str, collector: Collector) -> 
     # One entry per event that names the resource; the count is of distinct resources, like impacted_resources.
     boundary["excluded_impacted_resources"] = len({arm_id_key(x["id"]) or _lower(x["name"])
                                                    for x in excluded if x["kind"] == RESOURCE_KIND})
-    if not events_read:
+    if not (events_read and older_read):
         boundary.update({"excluded_events": None, "excluded_impacted_resources": None})
     elif any(e["impacted_resources"] is None for e in events):
         boundary["excluded_impacted_resources"] = None
     summary = {
-        **summarize(events, events_read, billing, lookback_days, graph_read, not_found),
+        **summarize(events, events_read, billing, lookback_days, older_read, not_found),
         "provider_registration_status": registration,
         **boundary,
     }

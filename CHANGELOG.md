@@ -22,6 +22,8 @@ schemas and the `paramify` CLI — not the internal code.
   a 270-day window answers 502), and any older event Resource Graph still holds
   is added, read by its tracking id from 30 days before its last update; one
   the event API can't find is counted in `events_in_resource_graph_not_found`.
+  When Resource Graph's events or one of those older events can't be read,
+  every event count is null, since an older event can change any of them.
   The resources each event names come from
   Resource Graph, because the REST impactedResources list came back empty for
   the same events. Open follows Microsoft's own active rule, and Microsoft's

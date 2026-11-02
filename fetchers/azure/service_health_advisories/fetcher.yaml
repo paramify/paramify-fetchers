@@ -99,9 +99,9 @@ evidence_set:
 
     What did Microsoft report to the subscription?
     - lookback_days — Number of days back the event list reaches, counted against each event's last update (180 by default, and at most 180)
-    - events — Number of Service Health events in scope: those last updated within the window plus older ones Resource Graph still holds, billing communications left out; null, like every count below except the scope lists, when the event list could not be read
-    - events_from_resource_graph — Number of events in scope that the windowed list left out and Resource Graph still holds, such as a retirement announced long ago, each read by its tracking id; null when Resource Graph's events could not be read
-    - events_in_resource_graph_not_found — Number of events Resource Graph holds, outside the windowed list, that the event API did not find when read by tracking id; such an event is missing from every other count, so above 0 the evidence is short; null when Resource Graph's events could not be read
+    - events — Number of Service Health events in scope: those last updated within the window plus older ones Resource Graph still holds, billing communications left out; null, like every count below except the scope lists, when the event list, Resource Graph's events or an older event read by its tracking id could not be read, because an older event left out, such as a retirement announced long ago, can change any count
+    - events_from_resource_graph — Number of events in scope that the windowed list left out and Resource Graph still holds, such as a retirement announced long ago, each read by its tracking id; null when Resource Graph's events or any of those older events could not be read
+    - events_in_resource_graph_not_found — Number of events Resource Graph holds, outside the windowed list, that the event API did not find when read by tracking id; such an event is missing from every other count, so above 0 the evidence is short; null when Resource Graph's events or any of those older events could not be read
     - events_by_type — Number of events of each type; a type with none is left out:
       - ServiceIssue (an outage or degradation of an Azure service)
       - PlannedMaintenance (scheduled maintenance that may affect availability)
@@ -142,5 +142,5 @@ evidence_set:
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource an event names, such as a mistyped name
-    - excluded_impacted_resources — Number of distinct resources named by events that a pattern took out by resource group, region or id; each is listed under excluded with the pattern, once for each event that names it, and no other count includes them; null while any event's resource list is unread
-    - excluded_events — Number of events left out because a pattern took out every resource they name; each is listed under excluded
+    - excluded_impacted_resources — Number of distinct resources named by events that a pattern took out by resource group, region or id; each is listed under excluded with the pattern, once for each event that names it, and no other count includes them; null while any event's resource list is unread, or when the events could not all be read
+    - excluded_events — Number of events left out because a pattern took out every resource they name; each is listed under excluded; null when the events could not all be read

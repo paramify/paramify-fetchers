@@ -386,23 +386,30 @@ def test_a_failed_resource_graph_read_leaves_impacted_resources_unknown(graph):
     assert (summary["events_impacted_resources_unread"], summary["events"]) == (2, 2)
 
 
+EVERY_COUNT = sh.EVENT_COUNTS + sh.RESOURCE_COUNTS
+
+
 def test_a_failed_resource_graph_event_read_leaves_older_events_unknown(graph):
     graph.events = azure_rest.ArmError(403, "AuthorizationFailed", "no")
     c = collector()
-    events, read, billing, graph_read, not_found = sh.collect(_Health([raw_event("HA-1")]), "s1", NOW, 180, c)
-    assert (len(events), graph_read, not_found, c.ok) == (1, False, None, False)
-    summary = sh.summarize(events, read, billing, 180, graph_read, not_found)
-    assert (summary["events_from_resource_graph"], summary["events_in_resource_graph_not_found"]) == (None, None)
+    events, read, billing, older_read, not_found = sh.collect(_Health([raw_event("HA-1")]), "s1", NOW, 180, c)
+    assert (len(events), older_read, not_found, c.ok) == (1, False, None, False)
+    summary = sh.summarize(events, read, billing, 180, older_read, not_found)
+    # An older retirement Resource Graph holds could be open, so no event count is known.
+    assert {k: summary[k] for k in EVERY_COUNT} == dict.fromkeys(EVERY_COUNT, None)
+    assert summary["lookback_days"] == 180
 
 
-@pytest.mark.parametrize("status, not_found, ok", [(404, 1, True), (500, 0, False)])
+@pytest.mark.parametrize("status, not_found, ok", [(404, 1, True), (403, None, False), (500, None, False)])
 def test_an_older_event_the_api_cannot_find_is_counted_and_one_that_fails_is_recorded(graph, status, not_found, ok):
-    graph.events = [graph_event("OLD-1")]
+    graph.events = [graph_event("HA-1"), graph_event("OLD-1")]
     c = collector()
-    client = _Health([], refuse={"/OLD-1": azure_rest.ArmError(status, "Code", "x")})
-    events, read, billing, graph_read, missed = sh.collect(client, "s1", NOW, 180, c)
-    assert (events, missed, c.ok) == ([], not_found, ok)
-    assert sh.summarize(events, read, billing, 180, graph_read, missed)["events_in_resource_graph_not_found"] == not_found
+    client = _Health([raw_event("HA-1")], refuse={"/OLD-1": azure_rest.ArmError(status, "Code", "x")})
+    events, read, billing, older_read, missed = sh.collect(client, "s1", NOW, 180, c)
+    assert ([e["tracking_id"] for e in events], missed, older_read, c.ok) == (["HA-1"], not_found, ok, ok)
+    summary = sh.summarize(events, read, billing, 180, older_read, missed)
+    assert (summary["events_in_resource_graph_not_found"], summary["events"], summary["open_events"],
+            summary["open_retirement_advisories"]) == ((1, 1, 1, 0) if ok else (None, None, None, None))
 
 
 @pytest.mark.parametrize("last, start", [(None, "4/5/2026"), ("0001-01-01T00:00:00", "4/5/2026"),
@@ -460,6 +467,18 @@ def test_collect_subscription_leaves_exclusion_counts_unknown_when_nothing_was_r
     assert (summary["excluded_events"], summary["excluded_impacted_resources"], summary["events"],
             summary["events_from_resource_graph"]) == (None, None, None, None)
     assert {f["operation"] for f in c.failures} == {"config AZURE_RESOURCE_EXCLUSIONS", "resourceHealth.events.list"}
+
+
+def test_an_unread_older_event_leaves_the_event_and_exclusion_counts_unknown(monkeypatch, fixed_now, graph):
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:rg-data")
+    monkeypatch.setattr(sh, "provider_registration_status", lambda *a: azure_common.REGISTERED)
+    graph.events = [graph_event("HA-1"), graph_event("OLD-1")]
+    graph.impacted = [graph_resource("HA-1", DB), graph_resource("HA-1")]
+    client = _Health([raw_event("HA-1")], refuse={"/OLD-1": azure_rest.ArmError(500, "Internal", "x")})
+    results, summary = sh.collect_subscription(client, "s1", collector())
+    assert [e["tracking_id"] for e in results["events"]] == ["HA-1"]
+    assert (summary["events"], summary["open_health_advisories"], summary["excluded_events"],
+            summary["excluded_impacted_resources"]) == (None, None, None, None)
 
 
 @pytest.mark.parametrize("requested, used, start", [(30, 30, "10/2/2026"), (365, 180, "5/5/2026")])
