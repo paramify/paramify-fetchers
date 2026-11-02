@@ -2285,7 +2285,7 @@ Summary fields:
 - `in_scope_policy_exemptions` — Number of exemptions read and in scope; null when the exemptions couldn't be read
 
 **What policy assignments exist?**
-- `total_policy_assignments` — Number of policy assignments in effect on the subscription, its own and inherited
+- `total_policy_assignments` — Number of policy assignments in effect on the subscription, its own and inherited; null when the assignment list fails, and then every assignment and effect field in this summary is null too and the run fails
 - `initiative_assignments` — Number of assignments of an initiative (a policy set bundling many policies)
 - `single_definition_assignments` — Number of assignments of a single policy definition
 - `built_in_definition_assignments` — Number of assignments whose definition or initiative is built in by Microsoft
