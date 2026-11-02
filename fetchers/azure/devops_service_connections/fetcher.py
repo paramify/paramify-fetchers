@@ -72,7 +72,8 @@ NOT_COLLECTED = {
                                       "pipeline may use any connection its editor holds the User role on.",
     "connection_roles": "Who holds the User, Creator and Administrator roles on each connection.",
     "projects_not_visible": "Projects and connections the collecting identity (metadata.collecting_identity) "
-                            "cannot see.",
+                            "cannot see; Azure DevOps lists only the connections it holds a role on, and refuses "
+                            "nothing for the rest.",
 }
 
 URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*")
@@ -347,6 +348,9 @@ def collect_project(client, collector, project, connections, groups, since) -> D
         conn["_history"].append(history)
         # Another project's runs in it mean the history isn't filtered by project, so one read covers them all.
         conn["_history_shared"] = bool(history and history["projects"] - {str(pname).lower(), str(pid).lower()})
+    if listed == []:
+        logger.warning("Project %s lists no service connections; Azure DevOps lists only those the identity holds a "
+                       "role on, so none may be visible rather than none exist", pname)
 
     variable_groups = call(collector, f"distributedtask.variablegroups.list({pname})", SCOPE_VARIABLE_GROUPS,
                            lambda: client.list(f"{pid}/_apis/distributedtask/variablegroups"))
@@ -443,6 +447,8 @@ def summarize(connections, groups, projects, principals, days) -> Dict[str, Any]
     return {
         "lookback_days": days,
         "projects_collected": len(projects),
+        "projects_with_no_service_connections_listed": [p["name"] for p in projects
+                                                        if p["service_connections_listed"] == 0],
         "service_connections_total": len(connections),
         "service_connections_by_type": sorted_counts(Counter(c["type"] or "unknown" for c in connections)),
         "service_connections_by_auth_method": sorted_counts(Counter(c["auth_method"] or "unknown" for c in connections)),

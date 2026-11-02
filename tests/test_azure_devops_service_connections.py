@@ -266,7 +266,7 @@ def test_collects_the_organization_and_exits_zero(tmp_path):
     assert code == 0 and status is None
     assert evidence["metadata"]["partial_failure"] is False
     s = evidence["summary"]
-    assert s["projects_collected"] == 2
+    assert s["projects_collected"] == 2 and s["projects_with_no_service_connections_listed"] == []
     assert s["service_connections_total"] == 7  # the shared connection once
     assert s["service_connections_by_auth_method"] == {
         "none": 1, "publish_profile": 1, "service_principal_certificate": 1, "service_principal_secret": 1,
@@ -578,6 +578,30 @@ def test_a_missing_scope_fails_the_run_and_names_it(tmp_path):
     assert failure["operation"] == "distributedtask.variablegroups.list(Web)"
     assert "PAT scope needed: Variable Groups (Read)" in failure["message"]
     assert evidence["summary"]["service_connections_total"] == 7  # the rest is still collected
+
+
+def test_an_empty_connection_list_is_flagged_as_maybe_not_visible(tmp_path, monkeypatch, caplog):
+    monkeypatch.delenv("AZURE_DEVOPS_PAT")
+    monkeypatch.setattr(dr, "entra_credential", lambda: SimpleNamespace(
+        get_token=lambda scope: SimpleNamespace(token="t", expires_on=NOW.timestamp() + 3600)))
+    fake = FakeADO()
+    # Without a role on the connections, Azure DevOps answers 200 with an empty list, not a refusal.
+    fake.routes[f"/contoso/{OPS}/_apis/serviceendpoint/endpoints"] = Resp(body={"count": 0, "value": []})
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    assert code == 0
+    s = evidence["summary"]
+    assert s["projects_with_no_service_connections_listed"] == ["Ops"]
+    assert next(p for p in evidence["results"]["projects"] if p["name"] == "Ops")["service_connections_listed"] == 0
+    assert "Project Ops lists no service connections" in caplog.text
+
+
+def test_a_refused_connection_list_is_unknown_not_empty(tmp_path):
+    fake = FakeADO()
+    fake.routes[f"/contoso/{OPS}/_apis/serviceendpoint/endpoints"] = err(403, "Access denied.", "AccessDeniedException")
+    code, evidence, status, _, _ = run(tmp_path, fake)
+    assert code == 1 and status["code"] == "not_authorized"
+    assert next(p for p in evidence["results"]["projects"] if p["name"] == "Ops")["service_connections_listed"] is None
+    assert evidence["summary"]["projects_with_no_service_connections_listed"] == []
 
 
 def test_a_refused_history_read_is_a_failure_not_an_unused_connection(tmp_path):

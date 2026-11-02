@@ -43,7 +43,10 @@ schemas and the `paramify` CLI — not the internal code.
   URL is cut to scheme and host; credentials, variable values and secure file
   contents are never written. Read-only PAT scopes: Service Connections, Variable
   Groups, Secure Files, Build (pipeline permissions), and Project and Team; or an
-  Entra identity with Reader on the service connections and the Library.
+  Entra identity with Reader on the service connections and the Library. Azure
+  DevOps lists only the connections the identity holds a role on, and refuses
+  nothing for the rest, so `projects_with_no_service_connections_listed` names
+  each project whose list came back empty.
 
 - **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
   matches each Azure change made outside a pipeline in `azure_change_provenance`

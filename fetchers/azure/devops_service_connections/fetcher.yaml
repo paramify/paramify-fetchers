@@ -60,7 +60,9 @@ secrets:
       Administrators, Endpoint Creators and each connection's creator hold a
       role there) and Reader on the Library (Project Valid Users hold it by
       default). Collection covers what the signed-in identity can see, recorded
-      as metadata.collecting_identity.
+      as metadata.collecting_identity. Without a role on the service connections
+      the list comes back empty rather than refused, which the summary shows in
+      projects_with_no_service_connections_listed.
 
 ksis:
   - KSI-SVC-ASM      # pipeline secrets: federated or stored, Key Vault-backed variable groups and their expiry
@@ -91,6 +93,7 @@ evidence_set:
     - lookback_days — Number of days back the fetcher looks for runs that used a service connection
     - projects_collected — Number of projects read
     - service_connections_total — Number of service connections, each counted once however many projects share it
+    - projects_with_no_service_connections_listed — List of projects whose service connection list came back empty. Azure DevOps lists only the connections the identity holds a role on (Reader or above) and refuses nothing when it holds none, so an empty project may have connections the identity can't see; by default only Endpoint Administrators, Endpoint Creators and each connection's creator hold a role
     - service_connections_by_type — Number of service connections of each type (for example azurerm for Azure Resource Manager, Generic, GitHub, kubernetes)
     - secure_files_total — Number of secure files (certificates, keys and other files pipelines download)
 
@@ -120,4 +123,4 @@ evidence_set:
     - key_vault_secrets_without_expiry — Number of Key Vault-linked secrets with no expiry date set
 
     What isn't collected?
-    - not_collected — What the fetcher deliberately doesn't collect, by area: secret values (credentials, secret variables and secure file contents; of a connection's sign-in parameters only the service principal and tenant ids are kept, and its URL is cut to scheme and host); when a service principal's secret or certificate expires (Azure DevOps doesn't expose it); which classic pipelines may use a connection (pipeline permissions limit YAML pipelines only); who holds the User, Creator and Administrator roles on each connection; and projects the identity can't see
+    - not_collected — What the fetcher deliberately doesn't collect, by area: secret values (credentials, secret variables and secure file contents; of a connection's sign-in parameters only the service principal and tenant ids are kept, and its URL is cut to scheme and host); when a service principal's secret or certificate expires (Azure DevOps doesn't expose it); which classic pipelines may use a connection (pipeline permissions limit YAML pipelines only); who holds the User, Creator and Administrator roles on each connection; and projects and connections the identity can't see (Azure DevOps lists only the connections it holds a role on, with no refusal for the rest)
