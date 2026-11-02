@@ -420,7 +420,8 @@ def waf_activity(resource: dict, settings, workspaces: dict, policies: dict, ale
         arriving = True
     else:
         arriving = False if all(x["read"] for x in reads) else None
-    known = arriving is not None
+    # The copy that wasn't read could be the fuller one.
+    known = bool(wids) and all(x["read"] for x in reads)
     per_policy: dict = defaultdict(Counter)
     modes: dict = defaultdict(set)
     for r in rows:
@@ -532,8 +533,8 @@ def ddos_record(ip: dict, settings, workspaces: dict, alert_rules: list[dict] | 
         **alerts,
         "attack_alert_can_fire": alerts["attack_alert_routes_to_receiver"] if zero_means_none else None,
         "attack_hours": hours if hours or (zero_means_none and hours is not None) else None,
-        "mitigations_started": _num(best.get("MitigationsStarted")) if records or (zero_means_none and read_all) else None,
-        "mitigation_reports": _num(best.get("Reports")) if records or (zero_means_none and read_all) else None,
+        "mitigations_started": _num(best.get("MitigationsStarted")) if read_all and (records or zero_means_none) else None,
+        "mitigation_reports": _num(best.get("Reports")) if read_all and (records or zero_means_none) else None,
         "last_ddos_event": _latest(r.get("LastEvent") for r in rows),
     }
 
@@ -556,6 +557,7 @@ def summarize(waf: list[dict], ips: list[dict], rules: list[dict] | None, worksp
     facing = [i for i in ips if i["attached"]]
     protected = [i for i in facing if i["ddos_protection_known_on"]]
     last = _latest(w["last_event"] for w in waf)
+    attacked = sum(1 for i in facing if i["attack_hours"])
 
     def alerts(count):
         """An alert figure, or null when the alert rules couldn't be listed."""
@@ -598,7 +600,8 @@ def summarize(waf: list[dict], ips: list[dict], rules: list[dict] | None, worksp
         "protected_ips_without_attack_alert":
             alerts(lambda: sum(1 for i in protected if not i["attack_alert_rules"])) if protected else None,
         "ddos_attack_alert_rules": alerts(lambda: sum(1 for r in rules or [] if r["watches_ddos_attack"])),
-        "public_ips_attacked": sum(1 for i in facing if i["attack_hours"]) if protected or any(i["attack_hours"] for i in facing) else None,
+        "public_ips_attacked":
+            None if any(i["attack_hours"] is None for i in protected) else (attacked if protected or attacked else None),
         "ddos_mitigations_started": _total(i["mitigations_started"] for i in protected) if protected else None,
         "log_workspaces": len(workspaces),
         "log_workspaces_queried": status[WS_QUERIED],

@@ -401,6 +401,28 @@ def test_summary_ddos_figures_are_null_without_protected_ips():
     assert summary["public_ips_exporting_ddos_logs"] == 1
 
 
+def test_public_ips_attacked_is_null_when_a_protected_ip_metric_is_unread():
+    read = wda.ddos_record(public_ip("Enabled"), DDOS_SETTINGS, ddos_ws(), [], [], {LAW.lower(): True})
+    unread = wda.ddos_record({**public_ip("Enabled"), "id": f"{IP}2"}, DDOS_SETTINGS, ddos_ws(), [], None, {LAW.lower(): True})
+    assert wda.summarize([], [read], [], [], 30, 0, total_ips=1)["public_ips_attacked"] == 0
+    assert wda.summarize([], [read, unread], [], [], 30, 0, total_ips=2)["public_ips_attacked"] is None
+
+
+def test_figures_need_every_exporting_workspace():
+    rows = [requests_row(events=10, requests=6)]
+    workspaces = {LAW.lower(): {"status": wda.WS_QUERIED, "read_tables": [wda.DIAG_TABLE], "fd:requests": rows},
+                  LAW2.lower(): {"status": wda.WS_NOT_AUTHORIZED, "read_tables": []}}
+    settings = [setting(category="FrontDoorWebApplicationFirewallLog"), setting(workspace=LAW2, group="allLogs")]
+    rec = wda.waf_activity(fd_resource(), settings, workspaces, POLICIES, [], sample=5)
+    assert rec["waf_logs_arriving"] is True
+    assert rec["waf_events"] is None and rec["requests_matched"] is None and rec["top_rules"] is None
+    ddos = [{"ResourceId": IP.lower(), "Notifications": 2, "MitigationsStarted": 1, "Reports": 3, "FlowLogRecords": 4}]
+    ip = wda.ddos_record(public_ip("Enabled"), [setting(group="allLogs"), setting(workspace=LAW2, group="allLogs")],
+                         {**ddos_ws(ddos), LAW2.lower(): {"status": wda.WS_NOT_AUTHORIZED, "read_tables": []}}, [], [],
+                         {LAW.lower(): True, LAW2.lower(): False})
+    assert (ip["mitigations_started"], ip["mitigation_reports"]) == (None, None)
+
+
 # --- workspace reads and collection ---
 
 class FakeClient:
