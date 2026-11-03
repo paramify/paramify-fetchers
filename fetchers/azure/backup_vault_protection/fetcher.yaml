@@ -1,0 +1,175 @@
+name: azure_backup_vault_protection
+version: 0.1.0
+description: >-
+  Shows whether each Backup vault's backup instances have a recent recovery point, how long each policy keeps backups, and whether the vault has soft delete, immutability and geo-redundant storage.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_backup_vault_protection.json
+  aggregation: per_target
+
+config_schema:
+  retention_threshold_days:
+    type: integer
+    required: false
+    default: 30
+    env: AZURE_BACKUP_RETENTION_THRESHOLD_DAYS
+    description: >
+      The fewest days a policy must keep a backup for the policy, and every backup
+      instance it governs, to count as meeting the retention threshold.
+  recovery_point_window_hours:
+    type: integer
+    required: false
+    default: 48
+    env: AZURE_BACKUP_RECOVERY_POINT_WINDOW_HOURS
+    description: >
+      How recent a backup instance's newest recovery point must be for the instance
+      to count as backed up. Recovery points inside this window are also counted.
+  recovery_point_lookback_days:
+    type: integer
+    required: false
+    default: 35
+    env: AZURE_BACKUP_RECOVERY_POINT_LOOKBACK_DAYS
+    description: >
+      How far back recovery points are read. It must cover the window and the
+      recovery point objective, or the run fails as bad_config; keep it at least
+      twice the longest backup interval in use, or recovery_point_overdue reads null
+      for those instances.
+  recovery_point_objective_hours:
+    type: integer
+    required: false
+    env: AZURE_BACKUP_RPO_HOURS
+    description: >
+      The defined recovery point objective, in hours. When set, each backup instance
+      reports meets_recovery_point_objective: true when its newest recovery point is
+      no older than this. Leave it unset and those fields are null. A value that is
+      not a positive integer fails the run as bad_config.
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2) or id:<resource id>
+      (also matches that resource's child resources). * matches any run of
+      characters and ? one character. A matching Backup vault is listed under
+      excluded with the pattern and its policies and instances are never read; a
+      matching backup instance, or one whose protected resource matches, is listed
+      under excluded and gets no recovery point calls. Both are left out of every
+      count. A pattern without one of these prefixes fails the run. Set it once
+      under platforms.azure.config for every Azure fetcher that has this field;
+      fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in
+      scope.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-RPL-ABO   # each backup instance's newest recovery point and policy retention, against the window and objective
+  - KSI-CNA-OFA   # vault store redundancy and cross-region restore, which decide whether backups survive a region loss
+
+  # No RPL-TRC: nothing here shows a restore was tested.
+
+evidence_set:
+  reference_id: EVD-AZURE-BACKUP-VAULT-PROTECTION
+  name: Azure Backup Vault Protection
+  instructions: |
+    Script: azure/backup_vault_protection/fetcher.py
+
+    Access: Reader on the subscription. This reads Backup vaults (Microsoft.DataProtection), the newer vault type; Recovery Services vaults are read by azure_backup_recovery_status.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET providers/Microsoft.DataProtection — whether the provider is registered, and which API version this cloud supports
+    - GET Microsoft.DataProtection/backupVaults — every Backup vault with its storage redundancy, soft delete, immutability and cross-region restore settings
+    - GET backupVaults/{vault}/backupPolicies (per vault) — each policy's backup schedule and retention rules
+    - GET backupVaults/{vault}/backupInstances (per vault) — each protected resource, its policy and protection state
+    - GET backupInstances/{instance}/recoveryPoints (per backup instance, within the lookback) — when it was last backed up
+
+    Output: azure_backup_vault_protection_<subscription>.json — each Backup vault with its settings, policies and backup instances, and each instance's newest recovery point judged against the window, its policy's interval and the objective.
+
+    Summary fields:
+
+    Which Backup vaults exist, and do their own settings protect the backups?
+    - total_backup_vaults — Number of Backup vaults in the subscription
+    - vaults_instances_listed — True if every vault's backup instance list was read; false if any failed, and then the two counts below and the two all_ fields are null and the run fails
+    - vaults_with_backup_instances — Number of vaults protecting at least one resource
+    - vaults_without_backup_instances — Number of vaults protecting nothing
+    - vaults_by_vault_store_redundancy — Number of vaults for each redundancy of their vault store, where the backups are kept:
+      - LocallyRedundant (three copies in one datacenter)
+      - ZoneRedundant (copies across availability zones of the region)
+      - GeoRedundant (copies in the paired region too)
+      - None (no vault store listed)
+    - soft_delete_enabled_vaults — Number of vaults whose soft delete is On or AlwaysOn, so a deleted backup can be recovered for the retention period
+    - immutability_enabled_vaults — Number of vaults whose immutability is Unlocked or Locked, so recovery points cannot be deleted before they expire
+    - cross_region_restore_vaults — Number of vaults with cross-region restore enabled; a geo-redundant vault without it keeps copies in the paired region that cannot be restored there
+    - resource_guard_protected_vaults — Number of vaults protected by a Resource Guard, which requires a second approval for destructive operations
+    - provider_registration_status — Whether Microsoft.DataProtection is registered on the subscription: registered, not_registered (no Backup vaults in use; every count is 0), or unknown (the lookup failed)
+    - api_version — The Microsoft.DataProtection API version the run used, the newest stable version this cloud lists at or below the one the fetcher was written against
+
+    How long do the policies keep backups?
+    - total_backup_policies — Number of backup policies across every vault
+    - retention_threshold_days — The fewest days a policy must keep a backup to count as adequate (retention_threshold_days setting, default 30)
+    - policies_meeting_retention_threshold — Number of policies whose longest retention rule keeps a backup for at least retention_threshold_days; months count as 30 days and years as 365
+    - policies_without_readable_retention — Number of policies with no retention rule the fetcher could read; these never count as meeting the threshold
+
+    Which resources are protected, and is their protection healthy?
+    - total_backup_instances — Number of backup instances, each one resource a vault protects, across every vault
+    - backup_instances_by_datasource_type — Number of backup instances for each datasource type, as the service names it (Microsoft.Compute/disks, Microsoft.Storage/storageAccounts/blobServices, Microsoft.DBforPostgreSQL/flexibleServers, Microsoft.ContainerService/managedClusters and others)
+    - backup_instances_by_protection_state — Number of backup instances for each current protection state (ProtectionConfigured, ProtectionError, ProtectionStopped, SoftDeleted and others)
+    - backup_instances_protected — Number of backup instances whose current protection state is ProtectionConfigured
+    - backup_instances_in_error — Number of backup instances in ProtectionError or ConfiguringProtectionFailed, or carrying a protection error
+    - backup_instances_without_policy — Number of backup instances with no policy id, which have no schedule or retention
+    - backup_instances_meeting_retention_threshold — Number of backup instances whose policy meets the retention threshold
+    - backup_instances_retention_unknown — Number of backup instances whose policy was not read (the policy list failed, or the policy id names none listed), so their retention is unknown rather than short
+    - retention_threshold_percentage — Percentage of backup instances whose policy meets the retention threshold: backup_instances_meeting_retention_threshold * 100 / total_backup_instances, 0 when there are none
+
+    Has every backup instance been backed up recently?
+    - recovery_point_window_hours — How recent the newest recovery point must be for an instance to count as backed up (recovery_point_window_hours setting, default 48)
+    - recovery_point_lookback_days — How far back recovery points were read (recovery_point_lookback_days setting, default 35)
+    - backup_instances_recovery_points_read — Number of backup instances whose recovery points were read
+    - backup_instances_recovery_points_not_applicable — Number of backup instances with operational (continuous) blob backup, which restores to a point in time and has no recovery points to list
+    - backup_instances_recovery_points_unknown — Number of backup instances whose recovery point list failed, so whether they are backed up is unknown; the run fails
+    - backup_instances_backed_up_in_window — Number of backup instances whose newest recovery point is within recovery_point_window_hours
+    - backup_instances_not_backed_up_in_window — Number of backup instances read whose newest recovery point is older than the window, or that have none in the lookback
+    - backup_instances_without_recovery_point — Number of backup instances read with no recovery point in the lookback
+    - backup_instances_overdue — Number of backup instances whose newest recovery point is older than twice their policy's backup interval, or that have none, so at least one scheduled backup was missed; instances whose policy has no readable interval, or whose interval doubled is longer than the lookback, are not counted
+    - max_latest_recovery_point_age_hours — Hours since the oldest of the newest recovery points, across the instances read; null when none had one
+    - all_backup_instances_backed_up — True if every applicable backup instance is backed up in the window; false if any is not; null if any is unknown, there are none, or a vault's instance list was not read
+
+    Does the backup frequency meet the recovery point objective?
+    - recovery_point_objective_hours — The defined recovery point objective (recovery_point_objective_hours setting); null when unset, and then the three fields below are null too
+    - backup_instances_meeting_recovery_point_objective — Number of backup instances whose newest recovery point is no older than the objective
+    - backup_instances_missing_recovery_point_objective — Number of backup instances read whose newest recovery point is older than the objective, or that have none
+    - all_backup_instances_meet_recovery_point_objective — True if every applicable backup instance meets the objective; false if any does not; null if any is unknown, there are none, a vault's instance list was not read, or no objective is set
+
+    What was left out of scope?
+    - resource_exclusion_patterns — List of the resource_exclusions patterns as given
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name
+    - excluded_backup_vaults — Number of vaults a pattern took out of scope
+    - excluded_backup_instances — Number of backup instances a pattern took out of scope, by their own id or the resource they protect
+    - in_scope_backup_vaults — Number of vaults assessed
+    - in_scope_backup_instances — Number of backup instances assessed

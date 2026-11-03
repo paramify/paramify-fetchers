@@ -12,6 +12,32 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_backup_vault_protection`** (`EVD-AZURE-BACKUP-VAULT-PROTECTION`): every
+  Backup vault (Microsoft.DataProtection, the vault type `azure_backup_recovery_status`
+  does not read) with its vault store redundancy, soft delete, immutability,
+  cross-region restore and Resource Guard settings; each policy's backup interval
+  and longest retention against a threshold (default 30 days); and each backup
+  instance's protection state, protection error and newest recovery point, judged
+  against a window (default 48 hours), twice its policy's own interval
+  (`recovery_point_overdue`) and an optional recovery point objective. Recovery
+  points are read within a lookback (default 35 days) with a date filter, and
+  without one when the cloud refuses it. Operational (continuous) blob backup,
+  which lists no recovery points, is reported as not applicable rather than as not
+  backed up. The API version is the newest stable one the cloud lists at or below
+  2025-07-01, so Azure Government runs without a pinned variant. Reader is enough.
+- **`azure_zone_redundancy`** (`EVD-AZURE-ZONE-REDUNDANCY`): one Resource Graph
+  query over scale sets, VMs, disks, AKS clusters (per node pool), application
+  gateways, load balancers (per frontend, public ones through their public IP),
+  public IPs, NAT gateways, firewalls, Bastion hosts, Redis caches, storage
+  accounts, App Service plans, Backup and Recovery Services vaults, Cosmos DB
+  accounts (per replica), PostgreSQL and MySQL flexible servers and SQL databases,
+  each classified zone_redundant, zonal, regional, mixed or unknown, with a
+  geo-redundancy flag where the service has one. The subscription's region list
+  gives each region's availability zones and paired region, so the summary
+  measures zone redundancy only against resources of a type that has a
+  zone-redundant mode (not single VMs, disks, NAT gateways or Basic SKUs) in regions
+  that have zones, and reports the regions in use, `multi_region`, and the resources
+  sitting in regions with no zones. Reader is enough.
 - **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
   Unhealthy assessment reports `days_open` (from `status_change_date`, null when
   missing; it starts again at 0 when a finding turns Healthy and then Unhealthy
