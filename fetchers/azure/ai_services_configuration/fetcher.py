@@ -569,8 +569,8 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    accounts: list | None = []
-    search_services: list | None = []
+    accounts: list | None = None
+    search_services: list | None = None
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN

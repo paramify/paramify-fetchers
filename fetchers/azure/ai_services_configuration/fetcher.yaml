@@ -121,7 +121,7 @@ evidence_set:
     Search services: network_exposure is private when publicNetworkAccess is disabled, restricted when
     IP rules are set, open otherwise; auth_mode is entra_only, api_key_only or entra_or_api_key;
     cmk_enforcement is the service's customer-managed key enforcement.
-    Lists that could not be read are null and set metadata.partial_failure. provider_registration_status
+    A per-account list that could not be read is null and sets metadata.partial_failure. When the account or search service list itself was not read (a refused call, or no credential or subscription), its results list stays empty and the summary counts of that kind are null. provider_registration_status
     (registered / not_registered / unknown) is the Microsoft.CognitiveServices resource provider's state.
     Accounts and search services the resource_exclusions patterns take out are listed under excluded instead of accounts and search_services.
     resource_exclusion_patterns lists the configured patterns, empty when none are set; resource_exclusion_patterns_unmatched the ones that matched no

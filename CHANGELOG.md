@@ -163,13 +163,13 @@ schemas and the `paramify` CLI — not the internal code.
     Learning workspaces; an excluded workspace's connections, datastores,
     endpoints, computes and diagnostic settings are not read, and every project
     of an excluded hub leaves with it (named in `matched_id`). A workspace list
-    that could not be read makes every count null, `in_scope_*`, `excluded_*`
+    that could not be read (refused, or no credential or subscription) makes every count null, `in_scope_*`, `excluded_*`
     and `total_*` included, rather than 0.
   - `azure_ai_services_configuration` 0.2.0: AI services accounts and AI Search
     services; an excluded account's deployments, content filter policies,
     projects, connections and diagnostic settings are not read. An `id:` naming
     a project under an account matches nothing. An account or search service list
-    that could not be read makes the counts of that kind null, not 0.
+    that could not be read (refused, or no credential or subscription) makes the counts of that kind null, not 0.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or

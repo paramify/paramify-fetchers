@@ -40,10 +40,13 @@ def _set_patterns(monkeypatch, patterns):
         monkeypatch.setenv(ENV, patterns)
 
 
-def _common(monkeypatch, m, tmp_path, diag_reads):
+def _common(monkeypatch, m, tmp_path, diag_reads, cred=True):
     monkeypatch.setattr(m, "load_dotenv", lambda: None)
     monkeypatch.setattr(m, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
-    monkeypatch.setattr(m, "credential", lambda: object())
+    if cred:
+        monkeypatch.setattr(m, "credential", lambda: object())
+    else:
+        monkeypatch.setattr(m, "credential", lambda: (_ for _ in ()).throw(RuntimeError("no credential")))
     monkeypatch.setattr(m, "provider_registration_status", lambda *a: "registered")
     monkeypatch.setattr(m, "monitor_client", lambda sub, cred: "monitor")
     monkeypatch.setattr(m, "list_diagnostic_settings", lambda monitor, rid: diag_reads.append(rid) or [])
@@ -64,7 +67,7 @@ def _hub_id(rg, name):
     return f"{SUB}/resourceGroups/{rg}/{ML}/{name}"
 
 
-def run_hub(monkeypatch, tmp_path, patterns, workspaces=None, connections=None, refuse_list=False):
+def run_hub(monkeypatch, tmp_path, patterns, workspaces=None, connections=None, refuse_list=False, cred=True):
     """Returns (exit code, evidence, paths read, diagnostic-settings reads)."""
     workspaces = workspaces if workspaces is not None else [
         _ws("rg-in", "hub-in", "Hub"),
@@ -87,7 +90,7 @@ def run_hub(monkeypatch, tmp_path, patterns, workspaces=None, connections=None, 
         return {"items": connections.get(path, []), "pages": 1}
 
     m = hub_fetcher
-    _common(monkeypatch, m, tmp_path, diag)
+    _common(monkeypatch, m, tmp_path, diag, cred)
     monkeypatch.setattr(m, "arm_rest_client", lambda cred: "rest")
     monkeypatch.setattr(m, "list_all", list_all)
     _set_patterns(monkeypatch, patterns)
@@ -201,7 +204,7 @@ class _Calls:
         return list(self.rows)
 
 
-def run_services(monkeypatch, tmp_path, patterns, refuse=()):
+def run_services(monkeypatch, tmp_path, patterns, refuse=(), cred=True):
     accounts = [_account("rg-in", "acct-in"), _account("rg-out", "acct-out"),
                 _account("rg-in", "acct-east", location="regioneast"), _account("rg-in", "speech", kind="SpeechServices")]
     search = [_search("rg-in", "srch-in"), _search("rg-out", "srch-out"), _search("rg-in", "srch-east", "regioneast")]
@@ -226,7 +229,7 @@ def run_services(monkeypatch, tmp_path, patterns, refuse=()):
         return {"items": search if path.endswith("searchServices") else [], "pages": 1}
 
     m = services_fetcher
-    _common(monkeypatch, m, tmp_path, diag)
+    _common(monkeypatch, m, tmp_path, diag, cred)
     monkeypatch.setattr(m, "arm_rest_client", lambda cred: "rest")
     monkeypatch.setattr(m, "list_all", list_all)
     _set_patterns(monkeypatch, patterns)
@@ -301,3 +304,19 @@ def test_services_unread_account_list_leaves_search_counts(monkeypatch, tmp_path
     assert (summary["total_accounts"], summary["excluded_accounts"], summary["in_scope_accounts"]) == (None, None, None)
     assert (summary["total_search_services"], summary["excluded_search_services"],
             summary["in_scope_search_services"]) == (2, 1, 2)
+
+
+def test_hub_no_credential_makes_every_count_null(monkeypatch, tmp_path):
+    code, evidence, *_ = run_hub(monkeypatch, tmp_path, "rg:rg-out", cred=False)
+    summary = evidence["summary"]
+    assert code == 1 and evidence["results"]["workspaces"] == []
+    counts = [k for k, v in summary.items() if k.startswith(("total_", "excluded_", "in_scope_"))]
+    assert "total_workspaces" in counts and all(summary[k] is None for k in counts)
+
+
+def test_services_no_credential_makes_every_count_null(monkeypatch, tmp_path):
+    code, evidence, *_ = run_services(monkeypatch, tmp_path, "rg:rg-out", cred=False)
+    summary = evidence["summary"]
+    assert code == 1 and evidence["results"]["accounts"] == [] and evidence["results"]["search_services"] == []
+    counts = [k for k, v in summary.items() if k.startswith(("total_", "excluded_", "in_scope_"))]
+    assert {"total_accounts", "total_search_services"} <= set(counts) and all(summary[k] is None for k in counts)

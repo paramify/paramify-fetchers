@@ -123,7 +123,7 @@ evidence_set:
     count as two. diagnostic_logs_exported is true when a diagnostic setting with a destination enables
     any log category or category group (workspaces offer about 27), with exported_log_categories and
     exported_log_category_groups naming them, and null when settings could not be read. A summary with total_endpoints or total_computes 0 proves
-    nothing about endpoint or compute exposure: there is nothing deployed yet. Lists that could not be read are null and set metadata.partial_failure.
+    nothing about endpoint or compute exposure: there is nothing deployed yet. A per-workspace list that could not be read is null and sets metadata.partial_failure. When the workspace list itself was not read (a refused call, or no credential or subscription), results.workspaces stays empty and every summary count is null.
     provider_registration_status (registered / not_registered / unknown) is the
     Microsoft.MachineLearningServices resource provider's state.
     Workspaces the resource_exclusions patterns take out are listed under excluded instead of workspaces.

@@ -444,7 +444,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    workspaces: list | None = []
+    workspaces: list | None = None
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
