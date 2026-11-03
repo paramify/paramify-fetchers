@@ -158,6 +158,39 @@ schemas and the `paramify` CLI — not the internal code.
     route needs it. Metric and smart detector rules carry the location `global`
     and action groups and processing rules none, so `location:` reaches only log
     search rules.
+
+  Fetchers whose records point at resources rather than list them drop the
+  records whose subject is excluded. These records carry no region, so only
+  `rg:` and `id:` reach them:
+  - `azure_change_provenance` 0.2.0: changes by their target resource or its
+    resource group; changes to the subscription itself stay. Every change is
+    attributed against every change and deployment first, so an in-scope change
+    keeps an origin it took from an excluded one; then every count and
+    breakdown covers in-scope changes. `deployments_in_history`,
+    `resource_groups_at_deployment_history_cap` and `results.deployments` still
+    describe everything read. An excluded change keeps its caller, time and
+    deployment in `results.excluded`, and `azure_change_work_items` 0.1.1 still
+    lends that caller to a callerless in-scope change.
+  - `azure_rbac_role_assignments` 0.4.0: role assignments and PIM-eligible
+    assignments by their scope when it is a resource group or a resource;
+    grants on the subscription, a management group or the root stay. A grant on
+    a user-assigned identity a pattern matches stays while that identity holds
+    an active grant at an in-scope scope, or couldn't be read (one ARM read per
+    such identity, only when patterns set aside a grant on one), marked
+    `kept_by_identity_rule` with the pattern, which counts as matched; a grant
+    on the whole resource group still leaves. Each grant still takes its
+    standing from the full PIM schedule list.
+  - `azure_rbac_custom_roles` 0.2.0: a custom role leaves only when every
+    assignable scope is a resource group or resource a pattern matches, listed
+    with each scope and its pattern. `total_role_definitions` and
+    `builtin_role_definitions` still count every role read.
+  - `azure_monitor_fired_alerts` 0.2.0: alert rules by their own resource group
+    or id, and fired alerts by their target resource; alerts on the
+    subscription stay. An excluded alert's history is not read, and it leaves
+    every count and each rule's `fire_count`, `last_fired_at` and
+    `open_alerts`; an in-scope alert fired by an excluded rule still counts.
+    `all_alerts_listed` still compares every alert listed with Azure's own
+    total, and `alerts_summary_total` reads null with patterns set.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or

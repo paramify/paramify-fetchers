@@ -182,6 +182,23 @@ def test_a_callerless_deployment_row_takes_its_caller_from_the_deployment(tmp_pa
     assert summary["changes_without_record_by_origin"] == {"direct": 0, "manual_deployment": 1}
 
 
+def test_a_change_the_boundary_excluded_still_lends_its_caller(tmp_path, monkeypatch):
+    plan = f"{RG}/Microsoft.Web/serverfarms/plan-1"
+    out = change("site", "2026-10-02T12:00:00Z", origin="manual_deployment", deployment="d1")
+    lent = {"kind": "change", "name": "site", "pattern": "rg:rg-app", "reason": "target_matched",
+            "id": out["change_id"], "target_id": out["target_resource_id"], "timestamp": out["timestamp"],
+            "changed_by": ALICE, "changed_by_type": "User", "deployment_id": "d1"}
+    callerless = change("plan", "2026-10-02T12:01:00Z", by="System", by_type="System", target=plan,
+                        origin="manual_deployment", deployment="d1")
+    files = [inv(envelope(tmp_path / "changes.json", mod.CHANGES,
+                          {"lookback_days": 14, "changes": [callerless], "excluded": [lent]}))]
+    results, summary = compare(tmp_path, monkeypatch, [], [item(1)], change_files=files)
+    assert list(results) == ["plan"]
+    assert (results["plan"]["status"], results["plan"]["caller"], results["plan"]["caller_from"]) == \
+        ("matched", ALICE, "deployment")
+    assert summary["changes_needing_record_by_origin"] == {"direct": 0, "manual_deployment": 1}
+
+
 @pytest.mark.parametrize(("at", "status"), [
     ("2026-09-30T09:00:00Z", "matched"),     # 24 hours before the item was created
     ("2026-09-30T08:59:59Z", "unmatched"),

@@ -1,5 +1,5 @@
 name: azure_monitor_fired_alerts
-version: 0.1.0
+version: 0.2.0
 description: >-
   Lists every Azure Monitor alert fired in the last 30 days, who acknowledged and closed it and when, and how often each alert rule fired.
 category: azure
@@ -14,6 +14,35 @@ output:
   type: json
   path: azure_monitor_fired_alerts.json
   aggregation: per_target
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A fired alert whose target resource (or its resource group)
+      matches, and an alert rule whose own resource group or id matches, are
+      listed under excluded with the pattern and left out of every count. An
+      excluded alert's history is not read, and it leaves each rule's
+      fire_count, last_fired_at and open_alerts too; an in-scope alert fired by
+      an excluded rule stays in the alert counts. Alerts on the subscription
+      itself stay. Alerts and rules here carry no region, so only rg: and id:
+      patterns reach them. all_alerts_listed still compares every alert listed
+      with Azure's alert summary, and alerts_summary_total, a total Azure can't
+      split by resource, reads null with patterns set. A pattern without one of
+      these prefixes fails the run. Set it once under platforms.azure.config for
+      every Azure fetcher that has this field; fetchers without it ignore it.
+      Each item is a pattern, or a pattern with a reason. Empty: every resource
+      is in scope.
 
 target_schema:
   subscription_id:
@@ -56,15 +85,15 @@ evidence_set:
     - GET Microsoft.AlertsManagement/smartDetectorAlertRules — smart detector alert rules, to count their fires
     - GET Microsoft.Insights/activityLogAlerts — activity log alert rules, to count their fires
 
-    Output: azure_monitor_fired_alerts_<subscription>.json — each fired alert with its rule, severity, state, times and history, and each alert rule with how often and when it last fired. Descriptions and comments past 500 characters are cut and marked as truncated.
+    Output: azure_monitor_fired_alerts_<subscription>.json — each fired alert with its rule, severity, state, times and history, and each alert rule with how often and when it last fired. Descriptions and comments past 500 characters are cut and marked as truncated. Alerts on a resource the resource_exclusions patterns match (target_id names it) and alert rules a pattern matches are listed under results.excluded instead, each with the pattern; every count below covers only what is left, unless it says otherwise.
 
     Summary fields:
 
     Were all fired alerts collected?
     - window_days — Number of days of fired alerts collected (30, all Azure keeps)
     - alerts_fired — Number of alerts fired in the window; null if the alert list wasn't read
-    - alerts_summary_total — Number of alerts in the window by Azure's own alert summary; null if it couldn't be read or Microsoft.AlertsManagement isn't registered
-    - all_alerts_listed — True if at least alerts_summary_total alerts were listed; false if fewer were; null if the summary or the alert list couldn't be read, or Microsoft.AlertsManagement isn't registered
+    - alerts_summary_total — Number of alerts in the window by Azure's own alert summary; null if it couldn't be read or Microsoft.AlertsManagement isn't registered, and null whenever resource_exclusions patterns are set, since it also counts alerts on excluded resources
+    - all_alerts_listed — True if at least as many alerts were listed as Azure's alert summary counts, alerts on excluded resources included; false if fewer were; null if the summary or the alert list couldn't be read, or Microsoft.AlertsManagement isn't registered
     - alert_histories_read — Number of alerts whose state history was read; null if the alert list wasn't read
     - alert_histories_unread — Number of alerts whose state history couldn't be read (deleted, refused or failed), so who acknowledged or closed them is unknown; when every history is refused the run fails as not authorized; null if the alert list wasn't read
     - provider_registration_status — Whether Microsoft.AlertsManagement and Microsoft.Insights are registered on the subscription: registered, not_registered or unknown for each
@@ -96,3 +125,11 @@ evidence_set:
     - rules_that_fired — Number of alert rules, listed or not, with at least one alert in the window; built-in rules (rule type builtin) aren't counted; null if the alert list wasn't read (Microsoft.AlertsManagement not registered, or the list failed)
     - enabled_rules_never_fired — Number of enabled listed alert rules with no alert in the window; null if the alert list wasn't read or a rule list failed
     - rules_fired_not_listed — Number of alert rules that fired an alert in the window but aren't in the subscription's rule lists: in another subscription, deleted, a kind the fetcher doesn't list (such as Prometheus rule groups or classic alert rules), or its provider isn't registered; built-in rules (rule type builtin) aren't counted; null if the alert list wasn't read or a rule list failed
+
+    Which alerts and rules are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every alert and rule is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no alert's target resource and no alert rule, such as a mistyped name
+    - excluded_alerts — Number of fired alerts left out of scope because a pattern matched their target resource's resource group or id; each is listed under excluded with the pattern and target_id, its history isn't read, and no other count includes it
+    - excluded_alert_rules — Number of alert rules left out of scope because a pattern matched their own resource group or id; their alerts on in-scope resources still count
+    - in_scope_alerts — Number of fired alerts listed and in scope (the same as alerts_fired); null if the alert list wasn't read
+    - in_scope_alert_rules — Number of alert rules in results.alert_rules, listed or not, that are in scope

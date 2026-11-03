@@ -1,5 +1,5 @@
 name: azure_rbac_custom_roles
-version: 0.1.0
+version: 0.2.0
 description: >
   Every custom Azure RBAC role definition in the subscription with its assignable
   scopes and its full permission set — control-plane actions and notActions, data-plane
@@ -21,6 +21,32 @@ output:
   type: json
   path: azure_rbac_custom_roles.json
   aggregation: per_target
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A custom role is listed under excluded, with each assignable
+      scope and the pattern that matched it, and left out of every count only
+      when every assignable scope is a resource group or resource a pattern
+      matches; a role that may also be assigned on the subscription, a
+      management group, the tenant root or any in-scope resource group stays. An
+      assignable scope carries no region, so only rg: and id: patterns reach it.
+      total_role_definitions and builtin_role_definitions still count every role
+      read. A pattern without one of these prefixes fails the run. Set it once
+      under platforms.azure.config for every Azure fetcher that has this field;
+      fetchers without it ignore it. Each item is a pattern, or a pattern with a
+      reason. Empty: every resource is in scope.
 
 target_schema:
   subscription_id:
@@ -54,3 +80,15 @@ evidence_set:
     role_definitions.list(scope="/subscriptions/{id}"), reading assignableScopes and
     permissions[{actions, notActions, dataActions, notDataActions}]; and
     resource.providers.get for Microsoft.Authorization.
+    Custom roles the resource_exclusions patterns take out (every assignable
+    scope excluded) are listed under results.excluded instead, with reason
+    all_scopes_matched and matched_scopes naming each scope and its pattern; every
+    custom-role count and percentage covers only the roles left, while
+    total_role_definitions counts every role read (built-in, in-scope and
+    excluded custom roles). The summary gives resource_exclusion_patterns (the
+    configured patterns, empty when none are set),
+    resource_exclusion_patterns_unmatched (patterns that matched no assignable
+    scope of a role whose scopes are all resource groups or resources, such as a
+    mistyped name), excluded_custom_roles (how many the patterns took out; no
+    other count includes them) and in_scope_custom_roles (how many stayed, the
+    same as custom_role_definitions).

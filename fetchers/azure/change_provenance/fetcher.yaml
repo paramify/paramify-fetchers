@@ -1,5 +1,5 @@
 name: azure_change_provenance
-version: 0.1.0
+version: 0.2.0
 description: >
   Every control-plane change to the subscription's resources, resource groups and
   the subscription itself over the last 14 days (Azure Resource Graph change
@@ -50,6 +50,31 @@ config_schema:
       apply changes, and ARM deployments they run count as redeployments even when
       the identity is a user. Leave empty and only ARM deployments run by an
       application count; deployments run by a person are `manual_deployment`.
+
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A change to a matching resource or resource group is listed
+      under excluded with the pattern and left out of every count and breakdown;
+      changes to the subscription itself stay. A change carries no region, so
+      only rg: and id: patterns reach it. Every change is still attributed
+      against every other change and deployment first, so an in-scope change
+      keeps an origin it took from an excluded one, and the deployment history
+      (deployments_in_history, results.deployments) is still every deployment
+      read. A pattern without one of these prefixes fails the run. Set it once
+      under platforms.azure.config for every Azure fetcher that has this field;
+      fetchers without it ignore it. Each item is a pattern, or a pattern with a
+      reason. Empty: every resource is in scope.
 
 target_schema:
   subscription_id:
@@ -140,4 +165,14 @@ evidence_set:
     reads as direct; summary.direct_changes_in_deleted_resource_groups counts the
     direct changes whose resource group no longer exists. Resource Graph keeps 14
     days of changes, so the fetcher must run at least every 14 days to see every
-    change.
+    change. Changes the resource_exclusions patterns take out (by their target
+    resource or its resource group) are listed under results.excluded instead,
+    each with the pattern that matched and the target in target_id; every summary
+    count, percentage and breakdown covers only the changes left, while
+    deployments_in_history, resource_groups_at_deployment_history_cap and
+    results.change_sources still describe everything read. The summary gives
+    resource_exclusion_patterns (the configured patterns, empty when none are
+    set), resource_exclusion_patterns_unmatched (patterns that matched no
+    change's target, such as a mistyped name), excluded_changes (how many the
+    patterns took out; no other count includes them) and in_scope_changes (how
+    many stayed, the same as total_changes).

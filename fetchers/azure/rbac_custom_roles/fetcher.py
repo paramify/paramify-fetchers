@@ -35,11 +35,14 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
+    resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_rbac_custom_roles")
 
@@ -240,7 +243,23 @@ def custom_role_record(role: dict) -> dict:
     }
 
 
-def summarize(custom_roles: list[dict], total_definitions: int) -> dict:
+def split_custom_roles(roles: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
+    """A custom role leaves only when every assignable scope is a resource group or resource a pattern matches."""
+    kept, excluded = [], []
+    for role in roles:
+        scopes = role["assignable_scopes"]
+        below = bool(exclusions) and bool(scopes) and all(resource_group_from_id(s) for s in scopes)
+        matched = [(s, exclusions.match(s)) for s in scopes] if below else []
+        if matched and all(pattern for _, pattern in matched):
+            excluded.append(excluded_item(
+                "custom_role", role["role_name"], matched[0][1], "all_scopes_matched", id=role["id"],
+                matched_scopes=[{"scope": s, "pattern": pattern} for s, pattern in matched]))
+        else:
+            kept.append(role)
+    return kept, excluded
+
+
+def summarize(custom_roles: list[dict], total_definitions: int, excluded_custom_roles: int = 0) -> dict:
     """Escalation-capable custom roles are the headline.
 
     `total_role_definitions` and `builtin_role_definitions` are reported alongside so
@@ -250,7 +269,7 @@ def summarize(custom_roles: list[dict], total_definitions: int) -> dict:
     escalating = [r for r in custom_roles if r["can_escalate_privileges"]]
     return {
         "total_role_definitions": total_definitions,
-        "builtin_role_definitions": total_definitions - len(custom_roles),
+        "builtin_role_definitions": total_definitions - len(custom_roles) - excluded_custom_roles,
         "custom_role_definitions": len(custom_roles),
         # --- the headline ---
         "custom_roles_with_privilege_escalation": len(escalating),
@@ -351,6 +370,8 @@ def main() -> int:
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
 
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
@@ -381,6 +402,9 @@ def main() -> int:
             ),
         )
 
+    custom_roles, excluded = split_custom_roles(custom_roles, exclusions)
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -392,10 +416,12 @@ def main() -> int:
             "privilege_escalation_actions_checked": dict(
                 sorted(PRIVILEGE_ESCALATION_ACTIONS.items())
             ),
+            "excluded": excluded,
         },
         summary={
-            **summarize(custom_roles, total_definitions),
+            **summarize(custom_roles, total_definitions, len(excluded)),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("custom_role",), {"custom_roles": len(custom_roles)}),
         },
     )
 

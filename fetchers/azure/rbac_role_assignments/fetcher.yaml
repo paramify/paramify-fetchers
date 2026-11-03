@@ -1,5 +1,5 @@
 name: azure_rbac_role_assignments
-version: 0.3.0
+version: 0.4.0
 description: >-
   Lists who holds which Azure role at every scope of a subscription, flags over-broad and access-granting roles, and shows whether each grant is permanent or just-in-time through PIM.
 category: azure
@@ -14,6 +14,38 @@ output:
   type: json
   path: azure_rbac_role_assignments.json
   aggregation: per_target
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A role assignment or PIM-eligible assignment made on a matching
+      resource group or resource is listed under excluded with the pattern and
+      left out of every count; grants made on the subscription, a management
+      group or the tenant root stay, and the PIM settings read on the
+      subscription are unchanged. A grant carries no region, so only rg: and id:
+      patterns reach it. A grant made on a user-assigned managed identity
+      stays, though a pattern matches it, while that identity holds an active
+      grant at an in-scope scope (or the identity couldn't be read): whoever
+      holds it can act as the identity inside the boundary. Such a grant
+      carries kept_by_identity_rule, the pattern it was kept despite. A grant made on a
+      whole matching resource group still leaves even when the group holds such
+      an identity, so don't exclude a resource group that holds managed
+      identities with roles inside the boundary. Each grant still takes its
+      standing from the full PIM schedule list. A pattern without one of these prefixes fails the run. Set
+      it once under platforms.azure.config for every Azure fetcher that has this
+      field; fetchers without it ignore it. Each item is a pattern, or a pattern
+      with a reason. Empty: every resource is in scope.
 
 target_schema:
   subscription_id:
@@ -57,8 +89,9 @@ evidence_set:
     - role_assignment_schedule_instances.list_for_scope() on the subscription, unfiltered — the PIM schedule behind each active grant at, above and below it
     - role_eligibility_schedule_instances.list_for_scope() on the subscription, unfiltered — PIM-eligible assignments at, above and below it
     - role_management_policy_assignments.list_for_scope() on the subscription — the subscription's PIM settings for the four over-broad roles (Owner, Contributor, User Access Administrator and Role Based Access Control Administrator)
+    - GET {user-assigned identity id}?api-version=2023-01-31 — only with resource_exclusions set, once for each excluded user-assigned identity a grant is made on: its principal id, to see whether it holds a grant inside the boundary
 
-    Output: azure_rbac_role_assignments_<subscription>.json — every role assignment with its scope, user, group or app, role and flags, whether it is permanent, time-bound or activated through PIM, plus PIM-eligible assignments and the over-broad roles' PIM settings.
+    Output: azure_rbac_role_assignments_<subscription>.json — every role assignment with its scope, user, group or app, role and flags, whether it is permanent, time-bound or activated through PIM, plus PIM-eligible assignments and the over-broad roles' PIM settings. Role assignments and PIM-eligible assignments made on a resource group or resource the resource_exclusions patterns match are listed under results.excluded instead, each with the pattern, its scope, principal_id and role_name; every count below covers only the grants left. The exception is a grant made on a user-assigned managed identity that still holds an active grant at an in-scope scope (or couldn't be read): it stays, marked kept_by_identity_rule with the pattern.
 
     Summary fields:
 
@@ -155,3 +188,11 @@ evidence_set:
     - max_over_broad_activation_hours — Hours: the longest maximum PIM activation time set on any over-broad role on the subscription; null if any of the four over-broad roles' settings weren't read, set no maximum or set one that doesn't parse as a duration, or if PIM isn't available
     - over_broad_roles_allowing_permanent_active_assignment — List of over-broad role names whose PIM settings let an admin assign the role through PIM with no end date; null if any of the four over-broad roles' settings weren't read or lack the rule this reads, or if PIM isn't available
     - over_broad_roles_allowing_permanent_eligible_assignment — List of over-broad role names whose PIM settings let an admin make someone eligible with no end date; null if any of the four over-broad roles' settings weren't read or lack the rule this reads, or if PIM isn't available
+
+    Which grants are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every grant is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource group or resource a role assignment or PIM-eligible assignment is made on, such as a mistyped name
+    - excluded_role_assignments — Number of role assignments left out of scope because a pattern matched the resource group or resource they are made on; each is listed under excluded with the pattern, and no other count includes them
+    - excluded_eligible_role_assignments — Number of PIM-eligible assignments left out of scope the same way
+    - in_scope_role_assignments — Number of role assignments read and in scope, at every scope (the same as all_scopes_total_role_assignments)
+    - in_scope_eligible_role_assignments — Number of PIM-eligible assignments read and in scope (the same as total_eligible_role_assignments); null if they couldn't be read
