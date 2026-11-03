@@ -460,16 +460,56 @@ def test_a_late_approval_on_a_type_that_needs_none_is_not_counted_late(tmp_path,
     assert summary["changes_approved_after_change"] == 0
 
 
-@pytest.mark.parametrize(("setting", "needed", "unknown"), [
-    ("Change Requst", [], ["change requst"]),                       # misspelt: nothing needs an approval
-    ("Change Request, Hotfx", ["change request"], ["hotfx"]),       # one of two misspelt
-    ("none", [], ["none"]),                                         # not a way to switch approval off
+@pytest.mark.parametrize(("setting", "needed", "unknown", "approved_"), [
+    ("Change Requst", [], ["change requst"], True),                     # misspelt: nothing would need an approval
+    ("Change Request, Hotfx", ["change request"], ["hotfx"], False),    # one of two misspelt
+    ("none", [], ["none"], True),                                       # names no type, so it fails too
 ])
-def test_an_approval_type_that_is_not_a_record_type_is_listed(tmp_path, monkeypatch, setting, needed, unknown):
-    _, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")],
-                         [item(1, type_="Change Request")], types=("Change Request", "Hotfix"),
-                         env={"CHANGE_RECORD_APPROVAL_TYPES": setting})
-    assert summary["approval_types"] == needed and summary["approval_types_not_record_types"] == unknown
+def test_an_approval_type_that_is_not_a_record_type_is_listed(tmp_path, monkeypatch, run_env, setting, needed,
+                                                              unknown, approved_):
+    # Record types read from the work items: the comparison is written, then the run fails.
+    monkeypatch.setenv(ci.INPUTS_ENV, str(index(tmp_path, [change("c", "2026-10-02T12:00:00Z")],
+                                                [item(1, type_="Change Request")], types=("Change Request", "Hotfix"))))
+    monkeypatch.setenv("CHANGE_RECORD_APPROVAL_TYPES", setting)
+    assert mod.main() == 1
+    payload, status = run_env()
+    assert status["code"] == "bad_config" and f"{unknown}" in status["error"]
+    assert payload["summary"]["approval_types"] == needed
+    assert payload["summary"]["approval_types_not_record_types"] == unknown
+    assert payload["results"][0]["approved"] is approved_
+    assert payload["metadata"]["partial_failure"] is True
+    assert [f["type"] for f in payload["metadata"]["api_failures"]] == ["bad_config"]
+
+
+def test_an_approval_type_outside_the_set_record_types_fails_before_anything_is_read(tmp_path, monkeypatch, run_env):
+    monkeypatch.setenv(ci.INPUTS_ENV, str(tmp_path / "never-read.json"))
+    monkeypatch.setenv("CHANGE_RECORD_TYPES", "Change Request, Hotfix")
+    monkeypatch.setenv("CHANGE_RECORD_APPROVAL_TYPES", "Change Requst")
+    assert mod.main() == 1
+    payload, status = run_env()
+    assert payload is None and status["code"] == "bad_config"
+    assert "['change requst']" in status["error"] and "change request, hotfix" in status["error"]
+
+
+def test_a_set_approval_type_with_no_items_in_the_window_is_not_listed(tmp_path, monkeypatch, run_env):
+    monkeypatch.setenv(ci.INPUTS_ENV, str(index(tmp_path, [change("c", "2026-10-02T12:00:00Z")],
+                                                [item(1, type_="Bug")], types=("Bug", "Change Request"))))
+    monkeypatch.setenv("CHANGE_RECORD_APPROVAL_TYPES", "Change Request")
+    assert mod.main() == 0
+    payload, status = run_env()
+    assert status is None and payload["summary"]["approval_types_not_record_types"] == []
+
+
+def test_unread_record_types_are_input_failed_not_bad_config(tmp_path, monkeypatch, run_env):
+    # A failed work items fetcher writes no selection, so which record types exist is unknown.
+    failed = {**inv(envelope(tmp_path / "failed.json", mod.WORK_ITEMS, {})), "status": "failed", "exit_code": 1,
+              "error": "HTTP 401"}
+    monkeypatch.setenv(ci.INPUTS_ENV, str(index(tmp_path, [change("c", "2026-10-02T12:00:00Z")], [],
+                                                work_files=[failed])))
+    monkeypatch.setenv("CHANGE_RECORD_APPROVAL_TYPES", "Change Request")
+    assert mod.main() == 1
+    payload, status = run_env()
+    assert status["code"] == "input_failed" and payload["summary"]["approval_types_not_record_types"] is None
 
 
 def test_nothing_to_check_reads_zero_not_null(tmp_path, monkeypatch):

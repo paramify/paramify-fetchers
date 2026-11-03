@@ -52,9 +52,11 @@ and `changes_approved_after_change` counts it unless the late record is one of
 Only `approval_types` need an approval (every record type when it's empty): a
 record of another type counts as approved, and a change recorded only by such
 records is counted in `changes_recorded_approval_not_required`. A name in
-`approval_types` that matches no record type, such as a misspelling, is listed
-in `approval_types_not_record_types`, since the type meant would need no
-approval.
+`approval_types` that matches no record type, such as a misspelling, fails the
+run with `bad_config`, since the type meant would need no approval. With
+`record_types` set, it fails before anything is read. Otherwise the record
+types come from the work items, so the file is written first, with the name in
+`approval_types_not_record_types`.
 
 `work_items_cover_changes` is false when a work items file's collection window
 starts too late to hold every record a change could have: its start plus
@@ -71,6 +73,8 @@ is missing, every summary value is `null`. If an input failed or is partial, the
 comparison still runs, and the comparator exits 1 with `input_failed`. If the
 comparison itself raises, the file is still written with every summary value
 `null`, and the comparator exits 1 with `internal_error`. A bad setting exits 1
-with `bad_config` before anything is read.
+with `bad_config` before anything is read, except an approval type checked
+against the record types the work items selected, which exits 1 with
+`bad_config` after the file is written.
 
 See [`docs/comparators_guide.md`](../../../docs/comparators_guide.md).

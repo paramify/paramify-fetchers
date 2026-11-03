@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))  # comparators/_lib
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "fetchers" / "_lib"))
 
-from comparator_inputs import run  # noqa: E402
+from comparator_inputs import ConfigError, run  # noqa: E402
 from fetcher_status import report_failure  # noqa: E402
 
 CHANGES = "azure_change_provenance"
@@ -59,15 +59,25 @@ def span_env(env, default, unit="hours"):
     return timedelta(**{unit: int(raw)})
 
 
+def not_record_types(names, types):
+    return (f"CHANGE_RECORD_APPROVAL_TYPES names {sorted(names)}, which match no record type, so the type meant would "
+            f"need no approval; record types are {', '.join(sorted(types)) or 'none'}")
+
+
 def settings():
+    types = [t.lower() for t in csv_env("CHANGE_RECORD_TYPES")]
+    # Empty: every record type needs an approval.
+    approval_types = {t.lower() for t in csv_env("CHANGE_RECORD_APPROVAL_TYPES")}
+    # Unset record types come from the work items, so check() tests the names against those.
+    if types and approval_types - set(types):
+        raise ValueError(not_record_types(approval_types - set(types), types))
     return {
         "origins": set(listed_env("CHANGE_RECORD_ORIGINS", "direct,manual_deployment", ORIGINS)),
         "excluded": {c.lower() for c in csv_env("CHANGE_RECORD_EXCLUDED_CALLERS")},
         "environments": {e.lower() for e in csv_env("CHANGE_RECORD_ENVIRONMENTS")},
-        "types": [t.lower() for t in csv_env("CHANGE_RECORD_TYPES")],
+        "types": types,
         "emergency_types": {t.lower() for t in csv_env("CHANGE_RECORD_EMERGENCY_TYPES", "Hotfix")},
-        # Empty: every record type needs an approval.
-        "approval_types": {t.lower() for t in csv_env("CHANGE_RECORD_APPROVAL_TYPES")},
+        "approval_types": approval_types,
         "people": listed_env("CHANGE_RECORD_PEOPLE", DEFAULT_PEOPLE, PEOPLE),
         "before": span_env("CHANGE_RECORD_HOURS_BEFORE", 24),
         "emergency_before": span_env("CHANGE_RECORD_EMERGENCY_HOURS_BEFORE", 72),
@@ -177,6 +187,11 @@ def records(files, cfg):
     return out, sorted(types), sorted(unselected), cover_from
 
 
+def selection_read(files):
+    return all(isinstance(((f.payload.get("results") or {}).get("selection") or {}).get("work_item_types"), list)
+               for f in files)
+
+
 def approved_after(found, at, emergency_types):
     """Whether a record that needs approval, and isn't an emergency type, was approved after the change."""
     return any(w["approval_required"] and str(w["type"]).lower() not in emergency_types and when(w["approved_at"])
@@ -234,13 +249,17 @@ def check_with(cfg):
             else None,
             "origins": sorted(cfg["origins"]),
         }
+        # Unknown when a work items file doesn't say which types it selected, as a failed one doesn't.
+        known = cfg["types"] or selection_read(inputs[WORK_ITEMS].files)
+        unknown = sorted(cfg["approval_types"] - set(types)) if known else None
         approval = {
             "approval_types": sorted(t for t in types if not cfg["approval_types"] or t in cfg["approval_types"]),
-            # A misspelt name would leave the type meant needing no approval.
-            "approval_types_not_record_types": sorted(cfg["approval_types"] - set(types)),
+            "approval_types_not_record_types": unknown,
         }
-        return results, {**read, **summarize(results, items, types, unselected, cover_from, cfg["origins"]),
-                         **approval}
+        summary = {**read, **summarize(results, items, types, unselected, cover_from, cfg["origins"]), **approval}
+        if unknown:
+            raise ConfigError(not_record_types(unknown, types), results, summary)
+        return results, summary
     return check
 
 

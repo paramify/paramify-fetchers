@@ -66,8 +66,11 @@ config_schema:
     description: >
       Comma-separated record types that need an approval, matched without regard to case. A change recorded
       only by items of other record types counts as approved; one that several items could record needs every
-      item of these types approved. Leave empty for every record type to need one. A name that is not a record
-      type is listed in approval_types_not_record_types.
+      item of these types approved. Leave empty for every record type to need one; no value switches approval
+      off. A name that is not a record type is bad_config, as the type meant would need no approval: checked
+      against record_types before anything is read when that is set, and otherwise against the types the work
+      items selected, after the comparison, whose file is still written with the name in
+      approval_types_not_record_types.
   record_people:
     type: string
     required: false
@@ -160,7 +163,7 @@ evidence_set:
 
     Are the records approved?
     - approval_types — List of record types that need an approval: the record types named in the approval_types setting, or every record type when it's empty
-    - approval_types_not_record_types — List of names in the approval_types setting that match no record type, such as a misspelt type name; the type meant needs no approval, so a validator should require this to be empty
+    - approval_types_not_record_types — List of names in the approval_types setting that match no record type, such as a misspelt type name; when it isn't empty the run fails with bad_config, since the type meant would need no approval; null when a work items file doesn't say which types it selected, as a failed one doesn't
     - changes_recorded_without_approval — Number of recorded changes whose record needs an approval and isn't approved (has no approval in effect as azure_devops_work_items reads it: moved into an approval state or given an approval comment, quoted text left out, and not withdrawn since; and a record whose approval couldn't be read counts as not approved); a change several items could record counts as approved only if every one is approved or is of a type that needs no approval
     - changes_recorded_approval_not_required — Number of recorded changes whose every record is of a type that needs no approval (not in approval_types); they count as approved
     - changes_without_approved_record — Number of changes needing a record that have no approved work item, a record of a type that needs no approval counting as approved: changes_without_record plus changes_recorded_without_approval

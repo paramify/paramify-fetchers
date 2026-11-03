@@ -38,7 +38,10 @@ schemas and the `paramify` CLI — not the internal code.
   change recorded only by items of other types counts as approved and is counted
   in `changes_recorded_approval_not_required`, each change and work item says
   whether it needs one (`approval_required`), and
-  `approval_types_not_record_types` lists names that match no record type.
+  `approval_types_not_record_types` lists names that match no record type. Such
+  a name fails the run with `bad_config`, since the type meant would need no
+  approval: before anything is read when `CHANGE_RECORD_TYPES` is set, and
+  otherwise after the comparison, whose file is still written.
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
