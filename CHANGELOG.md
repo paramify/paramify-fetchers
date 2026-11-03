@@ -10,13 +10,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
-### Fixed
-
-- Evidence envelope wrapping rejects the nonstandard JSON constants `NaN`,
-  `Infinity` and `-Infinity`, and no longer writes non-finite numbers from
-  metadata or numeric overflow into a new envelope. Invalid files are logged
-  and preserved unchanged, using the existing per-file skip behavior.
-
 ### Added
 
 - **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
@@ -922,6 +915,11 @@ schemas and the `paramify` CLI — not the internal code.
   unchanged.
 
 ### Fixed
+
+- Evidence envelope wrapping rejects the nonstandard JSON constants `NaN`,
+  `Infinity` and `-Infinity`, and no longer writes non-finite numbers from
+  metadata or numeric overflow into a new envelope. Invalid files are logged
+  and preserved unchanged, using the existing per-file skip behavior.
 
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
