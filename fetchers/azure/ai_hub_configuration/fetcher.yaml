@@ -130,4 +130,4 @@ evidence_set:
     resource_exclusion_patterns lists the configured patterns, empty when none are set; resource_exclusion_patterns_unmatched the ones that matched no
     workspace, such as a mistyped name; excluded_hubs, excluded_projects and excluded_other_workspaces count the workspaces left out of scope because a
     pattern matched their resource group, region or id, or their hub was excluded; in_scope_hubs, in_scope_projects and in_scope_other_workspaces count
-    those read and in scope, and 0 for all three means none was read or the patterns took out every workspace, which a check can catch by requiring more than 0.
+    those read and in scope. These counts and every total_* and per-workspace count are null when the workspace list could not be read; 0 means the patterns took out every workspace, which a check can catch by requiring more than 0.

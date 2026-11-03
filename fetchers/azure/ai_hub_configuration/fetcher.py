@@ -276,6 +276,17 @@ def summarize(workspaces: list[dict]) -> dict:
     }
 
 
+def unread_summary(exclusions: ResourceExclusions, registration: str) -> dict:
+    """The summary when the workspace list was not read: every count is null, never 0."""
+    counts = {k: None for k in summarize([])}
+    return {
+        **counts,
+        "provider_registration_status": registration,
+        **exclusions.summary([], KINDS, {"hubs": None, "projects": None, "other_workspaces": None}),
+        **{f"excluded_{k}s": None for k in KINDS},
+    }
+
+
 def workspace_kind(workspace: dict) -> str:
     kind = compact(workspace["kind"])
     return kind if kind in ("hub", "project") else "other_workspace"
@@ -301,20 +312,21 @@ def split_workspaces(listed: list[dict], exclusions: ResourceExclusions) -> tupl
 
 
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-            excluded: list | None = None) -> list[dict]:
-    """Workspaces the exclusions take out go to `excluded` and get no reads."""
+            excluded: list | None = None) -> list[dict] | None:
+    """Workspaces the exclusions take out go to `excluded` and get no reads; None when the list was not read."""
     exclusions = exclusions or ResourceExclusions()
     client = collector.guard("arm_rest.arm_rest_client (init)", lambda: arm_rest_client(cred))
     if client is None:
-        return []
+        return None
     listed = collector.guard(
         "machinelearningservices.workspaces.list",
         lambda: [
             project_workspace(w)
             for w in list_all(client, f"/subscriptions/{subscription_id}{WORKSPACES_PATH}", WORKSPACES_API)["items"]
         ],
-        default=[],
     )
+    if listed is None:
+        return None
     workspaces, out = split_workspaces(listed, exclusions)
     if excluded is not None:
         excluded += sorted(out, key=lambda e: e["id"] or "")
@@ -432,7 +444,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    workspaces: list = []
+    workspaces: list | None = []
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
@@ -458,6 +470,8 @@ def main() -> int:
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
 
+    read = workspaces is not None
+    workspaces = workspaces or []
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -471,7 +485,7 @@ def main() -> int:
                 "projects": sum(1 for w in workspaces if workspace_kind(w) == "project"),
                 "other_workspaces": sum(1 for w in workspaces if workspace_kind(w) == "other_workspace"),
             }),
-        },
+        } if read else unread_summary(exclusions, registration),
     )
     filename = f"azure_ai_hub_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

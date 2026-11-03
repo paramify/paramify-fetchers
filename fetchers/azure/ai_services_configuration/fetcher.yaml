@@ -126,5 +126,5 @@ evidence_set:
     Accounts and search services the resource_exclusions patterns take out are listed under excluded instead of accounts and search_services.
     resource_exclusion_patterns lists the configured patterns, empty when none are set; resource_exclusion_patterns_unmatched the ones that matched no
     account or search service, such as a mistyped name; excluded_accounts and excluded_search_services count those left out of scope because a pattern matched
-    their resource group, region or id; in_scope_accounts and in_scope_search_services count those read and in scope, and 0 means none was read or the
+    their resource group, region or id; in_scope_accounts and in_scope_search_services count those read and in scope. They, and the total_* and other counts of a kind, are null when that list could not be read; 0 means the
     patterns took out every one, which a check can catch by requiring more than 0.

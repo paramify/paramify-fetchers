@@ -64,7 +64,7 @@ def _hub_id(rg, name):
     return f"{SUB}/resourceGroups/{rg}/{ML}/{name}"
 
 
-def run_hub(monkeypatch, tmp_path, patterns, workspaces=None, connections=None):
+def run_hub(monkeypatch, tmp_path, patterns, workspaces=None, connections=None, refuse_list=False):
     """Returns (exit code, evidence, paths read, diagnostic-settings reads)."""
     workspaces = workspaces if workspaces is not None else [
         _ws("rg-in", "hub-in", "Hub"),
@@ -81,6 +81,8 @@ def run_hub(monkeypatch, tmp_path, patterns, workspaces=None, connections=None):
     def list_all(client, path, version):
         paths.append(path)
         if path.endswith(ML):
+            if refuse_list:
+                raise PermissionError("403 Forbidden")
             return {"items": workspaces, "pages": 1}
         return {"items": connections.get(path, []), "pages": 1}
 
@@ -162,6 +164,16 @@ def test_hub_distinct_connections_count_only_in_scope_workspaces(monkeypatch, tm
     assert [p for p in paths if "connections" in p] == [f"{kept_id}/connections"]
 
 
+def test_hub_unread_workspace_list_makes_every_count_null(monkeypatch, tmp_path):
+    code, evidence, *_ = run_hub(monkeypatch, tmp_path, "rg:rg-out", refuse_list=True)
+    summary = evidence["summary"]
+    assert code == 1 and evidence["metadata"]["partial_failure"]
+    counts = [k for k, v in summary.items() if k.startswith(("total_", "excluded_", "in_scope_"))]
+    assert {"total_workspaces", "excluded_hubs", "in_scope_hubs", "in_scope_other_workspaces"} <= set(counts)
+    assert all(summary[k] is None for k in counts)
+    assert summary["resource_exclusion_patterns"] == ["rg:rg-out"]
+
+
 def test_hub_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence, *_ = run_hub(monkeypatch, tmp_path, "rg-out")
     assert code == 1
@@ -189,14 +201,19 @@ class _Calls:
         return list(self.rows)
 
 
-def run_services(monkeypatch, tmp_path, patterns):
+def run_services(monkeypatch, tmp_path, patterns, refuse=()):
     accounts = [_account("rg-in", "acct-in"), _account("rg-out", "acct-out"),
                 _account("rg-in", "acct-east", location="regioneast"), _account("rg-in", "speech", kind="SpeechServices")]
     search = [_search("rg-in", "srch-in"), _search("rg-out", "srch-out"), _search("rg-in", "srch-east", "regioneast")]
     calls: list = []
     paths: list = []
     diag: list = []
-    client = NS(accounts=NS(list=lambda: accounts), deployments=_Calls(calls, "deployments"),
+    def list_accounts():
+        if "accounts" in refuse:
+            raise PermissionError("403 Forbidden")
+        return accounts
+
+    client = NS(accounts=NS(list=list_accounts), deployments=_Calls(calls, "deployments"),
                 rai_policies=_Calls(calls, "rai_policies"), projects=_Calls(calls, "projects"))
     module = types.ModuleType("azure.mgmt.cognitiveservices")
     module.CognitiveServicesManagementClient = lambda **k: client
@@ -204,6 +221,8 @@ def run_services(monkeypatch, tmp_path, patterns):
 
     def list_all(rest, path, version):
         paths.append(path)
+        if path.endswith("searchServices") and "search" in refuse:
+            raise PermissionError("403 Forbidden")
         return {"items": search if path.endswith("searchServices") else [], "pages": 1}
 
     m = services_fetcher
@@ -264,3 +283,21 @@ def test_services_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence, *_ = run_services(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["summary"]["total_accounts"] == 4
+
+
+def test_services_unread_lists_make_their_counts_null(monkeypatch, tmp_path):
+    code, evidence, *_ = run_services(monkeypatch, tmp_path, "rg:rg-out", refuse=("accounts", "search"))
+    summary = evidence["summary"]
+    assert code == 1 and evidence["metadata"]["partial_failure"]
+    counts = [k for k, v in summary.items() if k.startswith(("total_", "excluded_", "in_scope_"))]
+    assert {"total_accounts", "total_search_services", "excluded_accounts", "in_scope_search_services"} <= set(counts)
+    assert all(summary[k] is None for k in counts)
+
+
+def test_services_unread_account_list_leaves_search_counts(monkeypatch, tmp_path):
+    code, evidence, *_ = run_services(monkeypatch, tmp_path, "rg:rg-out", refuse=("accounts",))
+    summary = evidence["summary"]
+    assert code == 1
+    assert (summary["total_accounts"], summary["excluded_accounts"], summary["in_scope_accounts"]) == (None, None, None)
+    assert (summary["total_search_services"], summary["excluded_search_services"],
+            summary["in_scope_search_services"]) == (2, 1, 2)
