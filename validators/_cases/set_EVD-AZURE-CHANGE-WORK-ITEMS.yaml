@@ -27,8 +27,8 @@ cases:
 
   - name: a_misspelt_approval_type
     expect: FAIL
-    note: The type meant would need no approval, so changes_without_approved_record reads 0; the approved validator fails on the unknown name.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"change_lookback_days":14,"changes_read":40,"origins":["direct","manual_deployment"],"changes_needing_record":3,"changes_without_record":0,"approval_types":[],"approval_types_not_record_types":["change requst"],"changes_recorded_approval_not_required":3,"changes_without_approved_record":0,"inputs_complete":true}}}'
+    note: The comparator exits 1 with bad_config on a name that isn't a record type. The type meant would need no approval, so changes_without_approved_record reads 0; the approved validator still fails on the unknown name.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error_code":"bad_config"},"payload":{"metadata":{"partial_failure":true},"summary":{"change_lookback_days":14,"changes_read":40,"origins":["direct","manual_deployment"],"changes_needing_record":3,"changes_without_record":0,"approval_types":[],"approval_types_not_record_types":["change requst"],"changes_recorded_approval_not_required":3,"changes_without_approved_record":0,"inputs_complete":true}}}'
 
   - name: evidence_from_before_approval_types
     expect: FAIL
