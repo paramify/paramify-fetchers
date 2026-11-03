@@ -33,12 +33,13 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_cosmosdb_configuration")
 
@@ -296,6 +297,11 @@ def main() -> int:
             ),
         )
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    accounts, excluded = exclusions.split(accounts, "cosmosdb_account")
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -303,8 +309,13 @@ def main() -> int:
         results={
             "cosmosdb_accounts": accounts,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(accounts), "provider_registration_status": registration},
+        summary={
+            **summarize(accounts),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("cosmosdb_account",), {"cosmosdb_accounts": len(accounts)}),
+        },
     )
 
     filename = (

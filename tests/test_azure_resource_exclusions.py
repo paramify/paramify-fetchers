@@ -44,6 +44,22 @@ def test_match_returns_the_first_configured_pattern_and_marks_every_match_used()
     assert exclusions.unmatched() == ["rg:typo"]
 
 
+def test_match_own_id_skips_a_trailing_star_pattern_that_names_the_parent():
+    log = f"{SUB}/resourceGroups/NetworkWatcherRG/providers/Microsoft.Network/networkWatchers/NetworkWatcher_xeast/flowLogs/fl1"
+    assert ResourceExclusions(["id:*/networkWatchers/NetworkWatcher_x*"]).match_own_id(log) is None
+    assert ResourceExclusions(["id:*/networkWatchers/NetworkWatcher_x*/flowLogs/fl1"]).match_own_id(log) \
+        == "id:*/networkWatchers/NetworkWatcher_x*/flowLogs/fl1"
+    assert ResourceExclusions([f"id:{log}"]).match_own_id(log) == f"id:{log}"
+
+
+def test_match_own_id_names_only_the_resource_itself():
+    rules = ResourceExclusions(["rg:rg-out", f"id:{VAULT}", f"id:{KEY}", "location:*"])
+    assert rules.match_own_id(KEY) == f"id:{KEY}"
+    assert rules.match_own_id(f"{VAULT}/keys/key-2") is None
+    assert rules.match_own_id(None) is None
+    assert rules.unmatched() == ["rg:rg-out", f"id:{VAULT}", "location:*"]
+
+
 @pytest.mark.parametrize("pattern", ["rg-out", "region:east", "rg:", "location: ", "scope:x"])
 def test_bare_or_unknown_prefixes_are_invalid_and_fail_the_run(pattern):
     exclusions = ResourceExclusions([pattern])

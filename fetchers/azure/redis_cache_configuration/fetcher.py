@@ -31,6 +31,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from diagnostics import audit_logging_summary, list_diagnostic_settings  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_redis_cache_configuration")
 
@@ -307,7 +308,8 @@ def _patch_schedule(client, rg, name):
         return []
 
 
-def collect_caches(subscription_id, cred, collector: Collector) -> list[dict]:
+def collect_caches(subscription_id, cred, collector: Collector, exclusions=None, excluded=None) -> list[dict]:
+    """Per-cache reads are skipped for excluded caches, which are appended to `excluded`."""
     def _clients():
         from azure.mgmt.monitor import MonitorManagementClient  # lazy
         from azure.mgmt.redis import RedisManagementClient  # lazy
@@ -327,6 +329,10 @@ def collect_caches(subscription_id, cred, collector: Collector) -> list[dict]:
         lambda: [project_cache(c) for c in client.redis.list_by_subscription()],
         default=[],
     )
+    if exclusions:
+        caches, out = exclusions.split(caches, "redis_cache")
+        if excluded is not None:
+            excluded.extend(out)
     records = []
     for cache in caches:
         rg, name, cid = resource_group_from_id(cache.get("id")), cache.get("name"), cache.get("id")
@@ -360,6 +366,9 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    excluded: list[dict] = []
     caches: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
@@ -369,7 +378,7 @@ def main() -> int:
                 "Microsoft.Cache is not registered on subscription %s — reporting status not_registered",
                 subscription_id,
             )
-        caches = collect_caches(subscription_id, cred, collector)
+        caches = collect_caches(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -379,12 +388,18 @@ def main() -> int:
             ),
         )
 
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"redis_caches": caches, "provider_registration_status": registration},
-        summary={**summarize(caches), "provider_registration_status": registration},
+        results={"redis_caches": caches, "provider_registration_status": registration, "excluded": excluded},
+        summary={
+            **summarize(caches),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("redis_cache",), {"redis_caches": len(caches)}),
+        },
     )
     filename = f"azure_redis_cache_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

@@ -33,6 +33,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from diagnostics import audit_logging_summary  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_api_management_configuration")
 
@@ -584,7 +585,12 @@ def summarize(services: list[dict]) -> dict:
     }
 
 
-def collect(subscription_id, cred, collector: Collector) -> list[dict]:
+KINDS = ("service",)
+
+
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None) -> list[dict]:
+    """An excluded service gets no per-service reads; its APIs, products, backends and hostnames leave with it."""
     def _client():
         from azure.mgmt.apimanagement import ApiManagementClient  # lazy
 
@@ -599,6 +605,9 @@ def collect(subscription_id, cred, collector: Collector) -> list[dict]:
         lambda: [project_service(s, now) for s in client.api_management_service.list()],
         default=[],
     )
+    services, out = (exclusions or ResourceExclusions()).split(services, "service")
+    if excluded is not None:
+        excluded += sorted(out, key=lambda e: e["id"] or "")
     monitor = (
         collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))
         if services
@@ -625,6 +634,8 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     services: list = []
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.ApiManagement")
@@ -633,7 +644,7 @@ def main() -> int:
                 "Microsoft.ApiManagement is not registered on subscription %s — reporting status not_registered",
                 subscription_id,
             )
-        services = collect(subscription_id, cred, collector)
+        services = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -643,12 +654,19 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"services": services, "provider_registration_status": registration},
-        summary={**summarize(services), "provider_registration_status": registration},
+        results={"services": services, "provider_registration_status": registration, "excluded": excluded},
+        summary={
+            **summarize(services),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, KINDS, {"services": len(services)}),
+        },
     )
     filename = f"azure_api_management_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

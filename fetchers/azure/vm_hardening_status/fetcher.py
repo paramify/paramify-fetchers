@@ -34,12 +34,14 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_vm_hardening_status")
 
@@ -395,6 +397,21 @@ def virtual_machine_record(vm: dict) -> dict:
     }
 
 
+def follow_scale_sets(machines: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
+    """A scale set's virtual machines leave with it: each Flexible-mode VM has its own id and may sit in another group."""
+    kept, excluded = [], []
+    for vm in machines:
+        set_id = vm.get("virtual_machine_scale_set_id")
+        pattern = exclusions.match(set_id) if set_id and exclusions else None
+        if pattern is None:
+            kept.append(vm)
+        else:
+            excluded.append(excluded_item(
+                "virtual_machine", vm.get("name"), pattern, "scale_set_matched", id=vm.get("id"),
+                resource_group=vm.get("resource_group"), location=vm.get("location"), matched_id=set_id))
+    return kept, excluded
+
+
 def scale_set_record(scale_set: dict) -> dict:
     """Normalize one projected scale set, with Prowler's load-balancer reading."""
     resource_id = scale_set.get("id")
@@ -501,8 +518,12 @@ def scale_set_name_from_id(resource_id: str | None) -> str | None:
     return None
 
 
+KINDS = ("virtual_machine", "scale_set")
+
+
 def collect_compute(
-    subscription_id, cred, collector: Collector
+    subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+    excluded: list | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Two subscription-wide list calls plus two per-resource enrichments.
 
@@ -531,6 +552,10 @@ def collect_compute(
         ],
         default=[],
     )
+    exclusions = exclusions or ResourceExclusions()
+    virtual_machines, out_vms = exclusions.split(virtual_machines, "virtual_machine")
+    virtual_machines, out_members = follow_scale_sets(virtual_machines, exclusions)
+    out_vms += out_members
     for vm in virtual_machines:
         group, name = vm.get("resource_group"), vm.get("name")
         if not group or not name:
@@ -564,6 +589,9 @@ def collect_compute(
         ],
         default=[],
     )
+    scale_sets, out_sets = exclusions.split(scale_sets, "scale_set")
+    if excluded is not None:
+        excluded += sorted(out_vms + out_sets, key=lambda e: (e["kind"], e["id"] or ""))
     for scale_set in scale_sets:
         group = scale_set.get("resource_group")
         name = scale_set_name_from_id(scale_set.get("id")) or scale_set.get("name")
@@ -613,6 +641,8 @@ def main() -> int:
 
     virtual_machines: list[dict] = []
     scale_sets: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list calls, so a zero-VM result is legible: Azure returns
@@ -626,7 +656,9 @@ def main() -> int:
                 "machines in use; reporting status not_registered",
                 subscription_id,
             )
-        virtual_machines, scale_sets = collect_compute(subscription_id, cred, collector)
+        virtual_machines, scale_sets = collect_compute(
+            subscription_id, cred, collector, exclusions, excluded
+        )
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -636,6 +668,9 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -644,10 +679,13 @@ def main() -> int:
             "virtual_machines": virtual_machines,
             "virtual_machine_scale_sets": scale_sets,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(virtual_machines, scale_sets),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, KINDS, {
+                "virtual_machines": len(virtual_machines), "scale_sets": len(scale_sets)}),
         },
     )
 

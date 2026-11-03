@@ -40,17 +40,19 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_function_app_configuration")
 
 # `kind` is comma-joined: "functionapp", "functionapp,linux", … . Prowler's split.
 FUNCTION_APP_KIND_PREFIX = "functionapp"
+KINDS = ("function_app",)
 
 # Per-block collection status for the two privileged POST /action calls.
 COLLECTED = "collected"
@@ -383,7 +385,8 @@ def _privileged_call(collector: Collector, operation: str, app_name: str, fn):
         return None, UNAVAILABLE, exc
 
 
-def collect_function_apps(subscription_id, cred, collector: Collector) -> list[dict]:
+def collect_function_apps(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+                          excluded: list | None = None) -> list[dict]:
     """One web_apps.list(), then three per-app calls: `config/web` (GET, Reader) for the
     runtime and FTPS state, `host/listkeys` and `config/appsettings/list` (POST /action,
     beyond Reader) for the key and settings posture.
@@ -406,6 +409,9 @@ def collect_function_apps(subscription_id, cred, collector: Collector) -> list[d
         ]
 
     apps = collector.guard("web.web_apps.list", _list, default=[])
+    apps, out = (exclusions or ResourceExclusions()).split(apps, "function_app")
+    if excluded is not None:
+        excluded += sorted(out, key=lambda e: e["id"] or "")
 
     for app in apps:
         group, name = app.get("resource_group"), app.get("name")
@@ -476,6 +482,8 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     apps: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list call, so a zero-app result is legible: Azure returns
@@ -489,7 +497,7 @@ def main() -> int:
                 "in use; reporting status not_registered",
                 subscription_id,
             )
-        apps = collect_function_apps(subscription_id, cred, collector)
+        apps = collect_function_apps(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -499,6 +507,9 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -506,8 +517,13 @@ def main() -> int:
         results={
             "function_apps": apps,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(apps), "provider_registration_status": registration},
+        summary={
+            **summarize(apps),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, KINDS, {"function_apps": len(apps)}),
+        },
     )
 
     filename = (

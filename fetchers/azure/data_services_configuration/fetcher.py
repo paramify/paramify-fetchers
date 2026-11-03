@@ -40,6 +40,7 @@ from ip_ranges import (  # noqa: E402
     ipv4_range,
     union_address_count,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_data_services_configuration")
 
@@ -430,7 +431,8 @@ def summarize(mongo: list, kusto: list, eventhub: list) -> dict:
     }
 
 
-def collect(subscription_id, cred, collector: Collector) -> tuple:
+def collect(subscription_id, cred, collector: Collector, exclusions=None, excluded=None) -> tuple:
+    """Excluded resources are appended to `excluded` before any per-resource read."""
     def _clients():
         from azure.mgmt.eventhub import EventHubManagementClient  # lazy
         from azure.mgmt.kusto import KustoManagementClient  # lazy
@@ -455,6 +457,12 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
     eventhub = collector.guard(
         "eventhub.namespaces.list", lambda: [project_namespace(n) for n in eh_client.namespaces.list()], default=[]
     )
+    if exclusions:
+        mongo, out_mongo = exclusions.split(mongo, "mongo_cluster")
+        kusto, out_kusto = exclusions.split(kusto, "data_explorer_cluster")
+        eventhub, out_eh = exclusions.split(eventhub, "event_hub_namespace")
+        if excluded is not None:
+            excluded.extend(out_mongo + out_kusto + out_eh)
     monitor = (
         collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))
         if mongo or kusto or eventhub
@@ -573,6 +581,9 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    excluded: list[dict] = []
     mongo: list = []
     kusto: list = []
     eventhub: list = []
@@ -588,7 +599,7 @@ def main() -> int:
                     namespace,
                     subscription_id,
                 )
-        mongo, kusto, eventhub = collect(subscription_id, cred, collector)
+        mongo, kusto, eventhub = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -598,6 +609,8 @@ def main() -> int:
             ),
         )
 
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -606,9 +619,16 @@ def main() -> int:
             "mongo_clusters": mongo,
             "data_explorer_clusters": kusto,
             "event_hub_namespaces": eventhub,
+            "excluded": excluded,
             **registration,
         },
-        summary={**summarize(mongo, kusto, eventhub), **registration},
+        summary={
+            **summarize(mongo, kusto, eventhub),
+            **registration,
+            **exclusions.summary(excluded, ("mongo_cluster", "data_explorer_cluster", "event_hub_namespace"), {
+                "mongo_clusters": len(mongo), "data_explorer_clusters": len(kusto),
+                "event_hub_namespaces": len(eventhub)}),
+        },
     )
     filename = f"azure_data_services_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

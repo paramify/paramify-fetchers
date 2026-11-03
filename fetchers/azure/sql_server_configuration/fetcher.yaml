@@ -1,5 +1,5 @@
 name: azure_sql_server_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   For each Azure SQL logical server in the subscription, reports the network,
   authentication and audit posture around the data: public network access and
@@ -12,6 +12,30 @@ description: >
   vulnerability assessment's storage container path plus its recurring-scan and
   admin-notification settings.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching SQL logical server is listed under excluded with the
+      pattern and left out of every count and verdict; its firewall
+      rules, auditing settings and Defender settings leave with it and
+      are not read. An in-scope server that audits to an excluded
+      destination keeps its verdict. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -60,3 +84,14 @@ evidence_set:
     server_blob_auditing_policies.list_by_server(),
     server_security_alert_policies.get(), server_vulnerability_assessments.get().
     Records each server's network, authentication and audit posture.
+
+    SQL servers the resource_exclusions patterns take out are listed under results.excluded instead,
+    each with the pattern that matched; their firewall rules and audit settings follow them (never
+    read, in no total). An audit destination is not a resource this fetcher reads, so excluding it
+    does not change an in-scope server's auditing verdict.
+
+    Which resources are left out of scope?
+      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every server is in scope
+      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no SQL server, such as a mistyped name
+      - excluded_sql_servers — Number of SQL servers left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+      - in_scope_sql_servers — Number of SQL servers read and in scope; 0 means none was read or the patterns took out every server, which a check can catch by requiring more than 0
