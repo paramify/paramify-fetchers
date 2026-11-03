@@ -62,6 +62,12 @@ DISPOSITION_REMEDIATED = "Remediated"
 DISPOSITION_PARTIALLY = "Partially Mitigated"
 DISPOSITION_FALSE_POSITIVE = "False Positive"
 
+# VER-TFR-MAV accepts a vulnerability that "is not or will not be fully
+# mitigated or remediated within 192 days of evaluation". A Fully Mitigated one
+# already is, and a False Positive is "not actually present", so neither is
+# accepted by age. Read from _final_disposition so both rules stay in step.
+NOT_TIME_ACCEPTED_DISPOSITIONS = (DISPOSITION_FULLY, DISPOSITION_FALSE_POSITIVE)
+
 # Paramify records some issues with a Unix-epoch evaluationDate
 # ("1970-01-01T00:00:00.000Z"). An epoch (or otherwise implausibly ancient)
 # timestamp is a missing-data sentinel, not a real evaluation event. Any date
@@ -302,9 +308,12 @@ def accepted_deviation(issue: Dict) -> Optional[Dict]:
 
 
 def is_192_day_accepted(issue: Dict, now: Optional[datetime] = None) -> bool:
-    """VER-TFR-MAV: open AND evaluated 192+ days ago. Missing/sentinel evaluation
-    dates mean no evaluation happened, so the clock has not started."""
+    """VER-TFR-MAV: open, not Fully Mitigated or False Positive, AND evaluated
+    192+ days ago. Missing/sentinel evaluation dates mean no evaluation
+    happened, so the clock has not started."""
     if issue.get("status") not in OPEN_ISSUE_STATUSES:
+        return False
+    if _final_disposition(issue) in NOT_TIME_ACCEPTED_DISPOSITIONS:
         return False
     evaluated = effective_evaluation_date(issue)
     if evaluated is None:

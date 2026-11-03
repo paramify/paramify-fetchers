@@ -1088,6 +1088,16 @@ schemas and the `paramify` CLI — not the internal code.
   minimal customer effects, so it is not Fully Mitigated. Closed issues remain
   `Remediated`, and an accepted `FALSE_POSITIVE` deviation still takes
   precedence.
+- **Paramify VER fetchers no longer accept Fully Mitigated or False Positive
+  issues after 192 days.** VER-TFR-MAV accepts a vulnerability that "is not or
+  will not be fully mitigated or remediated within 192 days of evaluation". An
+  open issue reported as `Fully Mitigated` already is, and one with an accepted
+  `FALSE_POSITIVE` deviation is not actually present, so neither moves to the
+  Accepted Vulnerability Info report by age. Both now stay in the Vulnerability
+  Detail Report (and the active list of Historical VER Activity) with their
+  disposition, instead of appearing as accepted with the rationale "without full
+  mitigation". Partially mitigated and unrated open issues are still accepted
+  after 192 days, and accepted deviations still make an issue accepted.
 - **Paramify VER fetchers report closed issues as `Remediated`.** A closed
   issue is no longer detected, which FedRAMP defines as a remediated
   vulnerability; "Fully Mitigated" means still detected at negligible impact.

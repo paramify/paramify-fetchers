@@ -16,6 +16,7 @@ Run: ``pytest tests/test_ver_disposition.py``
 from __future__ import annotations
 
 import importlib.util
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -254,3 +255,91 @@ def test_rating_and_disposition_stay_in_schema(vc, pain, level, status):
     assert vc._final_disposition(issue) in SCHEMA_DISPOSITIONS | {None}
     rating = vc._current_nrating(issue)
     assert rating is None or rating in range(0, 6)
+
+
+# --- VER-TFR-MAV: what the 192-day clock may accept ---------------------------
+# VER-TFR-MAV accepts a vulnerability that "is not or will not be fully mitigated
+# or remediated within 192 days of evaluation". A Fully Mitigated vulnerability
+# already is; a False Positive is "not actually present" (FRD-FPV). Neither is
+# accepted by age, so both stay in VDT. Anything still carrying risk is.
+_FETCHERS = REPO_ROOT / "fetchers" / "paramify"
+_NOW = datetime(2026, 11, 3, tzinfo=timezone.utc)
+
+
+def _evaluated(issue: dict, days_ago: int, now: datetime = _NOW) -> dict:
+    issue["evaluationDate"] = (now - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return issue
+
+
+def _load_fetcher(name: str):
+    spec = importlib.util.spec_from_file_location(f"{name}_under_test", _FETCHERS / name / "fetcher.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_open_n0_past_192_days_is_not_time_accepted(vc):
+    issue = _evaluated(_rated("OPEN", pain="N0"), 400)
+    assert vc._final_disposition(issue) == "Fully Mitigated"
+    assert vc.is_192_day_accepted(issue, now=_NOW) is False
+
+
+def test_open_false_positive_past_192_days_is_not_time_accepted(vc):
+    issue = _evaluated(_rated("OPEN", pain="N2", deviations=[_deviation("FALSE_POSITIVE")]), 400)
+    assert vc._final_disposition(issue) == "False Positive"
+    assert vc.is_192_day_accepted(issue, now=_NOW) is False
+
+
+@pytest.mark.parametrize("pain", ["N1", "N2", "N5", None])
+def test_open_issue_with_risk_left_is_still_time_accepted(vc, pain):
+    issue = _evaluated(_rated("OPEN", pain=pain), 400)
+    assert vc.is_192_day_accepted(issue, now=_NOW) is True
+
+
+def test_partially_mitigated_past_192_days_is_still_time_accepted(vc):
+    # Partially mitigated still has risk, so it was not fully mitigated in time.
+    issue = _evaluated(_rated("OPEN", pain="N2", milestones=[{"description": "patch"}]), 400)
+    assert vc._final_disposition(issue) == "Partially Mitigated"
+    assert vc.is_192_day_accepted(issue, now=_NOW) is True
+
+
+def test_pending_false_positive_does_not_stop_the_clock(vc):
+    # A deviation that is not ACCEPTED is a request, not a decision.
+    issue = _evaluated(_rated("OPEN", pain="N2", deviations=[_deviation("FALSE_POSITIVE", "PENDING")]), 400)
+    assert vc.is_192_day_accepted(issue, now=_NOW) is True
+
+
+@pytest.mark.parametrize("days, expected", [(191, False), (192, True)])
+def test_192_day_boundary_is_unchanged(vc, days, expected):
+    issue = _evaluated(_rated("OPEN", pain="N2"), days)
+    assert vc.is_192_day_accepted(issue, now=_NOW) is expected
+
+
+def test_accepted_deviation_still_accepts_an_open_n0_issue(vc):
+    # Only the 192-day path changed; an accepted operational requirement is still accepted.
+    issue = _evaluated(_rated("OPEN", pain="N0", deviations=[_deviation("OPERATIONAL_REQUIREMENT")]), 400)
+    assert vc.is_192_day_accepted(issue, now=_NOW) is False
+    assert vc.is_accepted(issue) is True
+
+
+def test_old_fully_mitigated_and_false_positive_issues_are_reported_in_vdt_not_avi():
+    now = datetime.now(timezone.utc)
+    n0 = _evaluated(_rated("OPEN", pain="N0"), 400, now)
+    fp = _evaluated(_rated("OPEN", pain="N2", deviations=[_deviation("FALSE_POSITIVE")]), 400, now)
+    n2 = _evaluated(_rated("OPEN", pain="N2"), 400, now)
+    for issue, tracking_id in ((n0, "N0-OLD"), (fp, "FP-OLD"), (n2, "N2-OLD")):
+        issue["poamId"] = tracking_id
+    issues = [n0, fp, n2]
+
+    vdt = _load_fetcher("vulnerability_detail_report").build_report(issues, "https://example.test/cpo", "a", "b")
+    avi = _load_fetcher("accepted_vulnerabilities").build_report(issues, "https://example.test/cpo", "a", "b")
+    mrh = _load_fetcher("historical_ver_activity").build_report(issues, "https://example.test/cpo", "now")
+
+    assert {v["providerTrackingId"]: v["finalDisposition"] for v in vdt["vulnerabilities"]} == {
+        "N0-OLD": "Fully Mitigated", "FP-OLD": "False Positive"}
+    assert [a["vulnerabilityDetail"]["providerTrackingId"] for a in avi["acceptedVulnerabilities"]] == ["N2-OLD"]
+    assert [v["providerTrackingId"] for v in mrh["activeVulnerabilities"]] == ["N0-OLD", "FP-OLD"]
+    assert [a["vulnerabilityDetail"]["providerTrackingId"] for a in mrh["acceptedVulnerabilities"]] == ["N2-OLD"]
+    # No AVI record pairs a Fully Mitigated or False Positive disposition with a 192-day rationale.
+    for record in avi["acceptedVulnerabilities"] + mrh["acceptedVulnerabilities"]:
+        assert record["vulnerabilityDetail"].get("finalDisposition") not in ("Fully Mitigated", "False Positive")
