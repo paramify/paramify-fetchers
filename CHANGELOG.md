@@ -12,6 +12,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
+  Unhealthy assessment reports `days_open` (from `status_change_date`, null when
+  missing; it starts again at 0 when a finding turns Healthy and then Unhealthy
+  again), its `sla_days` and `past_sla`. SLA days per severity come from
+  `sla_days_high` / `sla_days_medium` / `sla_days_low` (`AZURE_DEFENDER_SLA_DAYS_*`,
+  default 30 / 90 / 180; an invalid value fails the run as `bad_config` and has no
+  default fallback). The summary adds `sla_days_by_severity`,
+  `unhealthy_past_sla_by_severity`, `unhealthy_past_sla_count` and
+  `unhealthy_days_open_unknown_count`. The two past-SLA counts are null, never 0,
+  when the assessment list or the Resource Graph severity read failed, a severity's
+  SLA days are invalid or a needed date is missing. When any Unhealthy finding took
+  its severity from the catalogue, every severity's count and the total are null.
 - **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
   matches each Azure change made outside a pipeline in `azure_change_provenance`
   (by default, direct edits and ARM deployments a person ran) to the
