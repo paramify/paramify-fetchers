@@ -989,6 +989,13 @@ schemas and the `paramify` CLI — not the internal code.
   still counts as without MFA. A failed read no longer reads as 0: when the users
   list can't be read in full every figure is null, and when the registration
   report can't be, every figure that relies on it.
+- **`azure_entra_mfa_status` 0.3.1: an enabled user with no registration row
+  counts against the all-users coverage.** 0.3.0 left every user without a row
+  out of `mfa_coverage_percentage_all_users`, so an enabled user the report
+  omitted raised it. Only disabled users with no row are left out now; an
+  enabled one counts as without MFA, as in the enabled-user figures. The new
+  `users_counted_in_all_users_coverage` is the figure's denominator, and
+  `users_with_registration_details` still counts the users with a row.
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
