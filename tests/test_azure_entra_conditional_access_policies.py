@@ -251,6 +251,7 @@ def test_mfa_client_types_skip_device_filters_flows_and_other_risks(monkeypatch)
         narrowed("p-no-flow", authenticationFlows={"transferMethods": "none"}, devices={}),
     )
     assert types == ["browser", "mobileAppsAndDesktopClients"]
+    assert sorted(pid for pid in by_id if ca._mfa_for_everyone(by_id[pid])) == ["p-apps", "p-no-flow"]
     conditions = {pid: by_id[pid]["conditions"] for pid in by_id}
     assert conditions["p-device"]["device_filter"] == {"mode": "exclude", "rule": "device.isCompliant -eq True"}
     assert conditions["p-flows"]["authentication_flow_transfer_methods"] == ["authenticationTransfer", "deviceCodeFlow"]
