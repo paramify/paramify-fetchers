@@ -9,6 +9,7 @@ import importlib.util
 import logging
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 import yaml
@@ -52,10 +53,14 @@ def _load_original(name):
 
 @pytest.fixture
 def recorder(monkeypatch):
-    import azure.mgmt.cdn
-
+    # A stand-in module, so these tests also run in the CI test job, which does not
+    # install the azure extra. test_azure_sdk_surface.py pins the real SDK surface.
     _RecordingCdnClient.built = []
-    monkeypatch.setattr(azure.mgmt.cdn, "CdnManagementClient", _RecordingCdnClient)
+    monkeypatch.setitem(sys.modules, "azure.mgmt.cdn", ModuleType("azure.mgmt.cdn"))
+    sys.modules["azure.mgmt.cdn"].CdnManagementClient = _RecordingCdnClient
+    # front_door_waf_coverage also builds a Monitor client; with no profiles it is never called.
+    monkeypatch.setitem(sys.modules, "azure.mgmt.monitor", ModuleType("azure.mgmt.monitor"))
+    sys.modules["azure.mgmt.monitor"].MonitorManagementClient = lambda **kwargs: object()
     return _RecordingCdnClient
 
 
