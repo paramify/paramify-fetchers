@@ -12,6 +12,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_front_door_origins_gov`**, **`azure_front_door_tls_gov`** and
+  **`azure_front_door_waf_coverage_gov`**: Azure Government variants of the
+  three Front Door fetchers. Azure Government does not yet offer the
+  Microsoft.Cdn API versions the public-cloud fetchers use (the azure-mgmt-cdn
+  default and the pinned 2026-07-01), so every call failed with
+  `InvalidResourceType`. Each variant runs the public-cloud fetcher unchanged
+  with every Microsoft.Cdn client pinned to 2025-12-01, the newest stable
+  version Azure Government lists for every `profiles/*` type read, and sends to
+  the same evidence set. Fields that only newer versions return (such as
+  security policies' `isProfileLevel` and `associations[].routes`) can be
+  empty; check a real Azure Government run before relying on them. The
+  public-cloud fetchers are unchanged.
 - **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
   matches each Azure change made outside a pipeline in `azure_change_provenance`
   (by default, direct edits and ARM deployments a person ran) to the
