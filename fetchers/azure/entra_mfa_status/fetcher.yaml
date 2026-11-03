@@ -1,5 +1,5 @@
 name: azure_entra_mfa_status
-version: 0.3.0
+version: 0.3.1
 description: >
   For every user in the Microsoft Entra ID tenant, reports whether the account is
   enabled, when it last signed in, and whether it is MFA-capable — joining the
