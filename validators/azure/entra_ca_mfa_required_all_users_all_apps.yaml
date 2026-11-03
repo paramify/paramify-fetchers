@@ -4,17 +4,19 @@ type: AUTOMATED
 role: configuration
 statement: >-
   Enabled (not report-only) Conditional Access policies that include All users and All
-  cloud apps with no app excluded, and have no sign-in or user risk, device platform or
-  location condition, together require MFA from both modern client app types: browsers
-  and mobile and desktop apps. One policy can cover every client, or two policies can
-  split the client types. A policy counts only when MFA is mandatory: MFA alone, an
-  authentication strength that satisfies MFA alone, or MFA under AND, with no terms of
-  use or other grant control as an alternative. Substantiates that every enabled account
-  is covered by an enforced policy requiring MFA (KSI-IAM-APM). Does not judge excluded
-  users, groups or roles, guest type exclusions, device filters or authentication flows,
-  and does not credit Security Defaults. Legacy clients are judged by
-  entra_ca_legacy_auth_blocked. Needs azure_entra_conditional_access_policies 0.2.0 or
-  later; earlier evidence lacks the list and fails.
+  cloud apps with no app excluded, and have no sign-in, user, insider or service principal
+  risk, device platform, location, device filter or authentication flow condition,
+  together require MFA from both modern client app types: browsers and mobile and desktop
+  apps. One policy can cover every client, or two policies can split the client types. A
+  policy counts only when MFA is mandatory: MFA alone, an authentication strength that
+  satisfies MFA alone, or MFA under AND, with no terms of use or other grant control as an
+  alternative. Substantiates that every enabled account is covered by an enforced policy
+  requiring MFA (KSI-IAM-APM). Does not judge excluded users, groups or roles or guest
+  type exclusions, and does not credit Security Defaults. Legacy clients are judged by
+  entra_ca_legacy_auth_blocked. Needs azure_entra_conditional_access_policies 0.2.1 or
+  later: 0.2.0 evidence still counts a policy with a device filter, authentication flow or
+  insider or service principal risk condition, and earlier evidence lacks the list and
+  fails.
 
 # Reads the fetcher's list of client app types that the qualifying policies cover
 # together; it reads null when the policies weren't read, so that can't match.
