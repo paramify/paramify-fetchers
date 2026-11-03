@@ -1,5 +1,5 @@
 name: azure_private_endpoint_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   Inventories Azure private endpoints (Microsoft.Network/privateEndpoints) in the subscription. For
   every endpoint: the target resource and sub-resource (group id) it connects to, the connection's
@@ -9,6 +9,28 @@ description: >
   so the evidence shows that traffic to the service stays on the private network. For every endpoint
   subnet: whether its network security group and route table apply to private endpoint traffic.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching private endpoint is listed under excluded with the
+      pattern and left out of every count and verdict, and so is a target resource
+      only excluded endpoints connect to. An excluded endpoint gets none of the
+      per-endpoint reads (zone groups, Resource Graph lookups), so a failure
+      reading it cannot fail the run. The patterns are matched against the
+      endpoints only: an in-scope endpoint whose target resource a pattern would
+      match stays in scope with its verdicts, and that target still counts. A
+      pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
+      ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -82,7 +104,7 @@ evidence_set:
     whose public access is not disabled but whose firewall defaults to Deny (reachable only from
     allow-listed networks). connections_by_target_type keys are lowercased because ARM ids keep the
     creator's casing. Each endpoint's subnet is read from its virtual network in the same Resource
-    Graph lookup (mv-expand limit 2000 over the VNet's subnets; a VNet that returns fewer subnet rows
+    Graph lookup (mv-expand s = properties.subnets limit 2000; a VNet that returns fewer subnet rows
     than it has reads its subnets as unknown rather than dropping them): subnet_private_endpoint_network_policies is the subnet's
     privateEndpointNetworkPolicies. Azure applies a subnet's NSG to private endpoint traffic only when
     it is Enabled or NetworkSecurityGroupEnabled (subnet_nsg_applies_to_endpoint), and its route table
@@ -90,8 +112,23 @@ evidence_set:
     one is attached. It says the NSG is in the path, not what its rules allow; the rules themselves
     are evidenced by azure_network_security_groups. summary.endpoint_subnets_with_nsg_not_applied counts subnets with an
     NSG attached that Azure does not apply to their endpoints. private_ip_addresses come from the endpoint's
-    network interfaces. summary.approved_endpoints over summary.total_private_endpoints is approval
+    network interfaces, and are null (unknown, never an empty list) when one of them was not read: its
+    lookup failed (recorded in metadata.api_failures and setting metadata.partial_failure) or Resource Graph
+    did not return it. summary.approved_endpoints over summary.total_private_endpoints is approval
     coverage; summary.target_resources_public_access_disabled over summary.target_resources_found is
     the share of private-linked services closed to the public internet;
     summary.target_resources_public_access_enabled and summary.target_resources_public_access_unset
     split the remainder.
+
+    Resources the resource_exclusions patterns take out are listed under excluded
+    instead, each with the pattern that matched; every summary count, target
+    resources and endpoint subnets included, covers only the in-scope endpoints.
+    total_target_resources and the target_resources_* counts still include a target
+    in an excluded resource group or region when an in-scope endpoint connects to it:
+    they describe what the in-scope endpoints reach.
+
+    Which resources are left out of scope?
+      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no private endpoint, such as a mistyped name
+      - excluded_private_endpoints — Number of private endpoints left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or the target resources only they connect to
+      - in_scope_private_endpoints — Number of private endpoints read and in scope; 0 means none was read or the patterns took out every one, which a check can catch by requiring more than 0

@@ -1,5 +1,5 @@
 name: azure_app_service_plans
-version: 0.1.0
+version: 0.2.0
 description: >
   Every App Service plan in the subscription with its SKU (name and tier — Free and
   Shared carry no SLA), provisioned instance count (sku.capacity), zone redundancy,
@@ -19,6 +19,26 @@ output:
   type: json
   path: azure_app_service_plans.json
   aggregation: per_target
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2) or id:<resource id>
+      (also matches that resource's child resources). * matches any run of
+      characters and ? one character. A matching site (web app or function app)
+      is listed under excluded with the pattern and left out of every count and
+      verdict. A matching plan leaves scope only when no in-scope site runs on
+      it; while one does, the plan stays in the plan list and in every
+      plan-level count. A pattern without one of these
+      prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in
+      scope.
 
 target_schema:
   subscription_id:
@@ -49,4 +69,19 @@ evidence_set:
     Script: azure/app_service_plans/fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Web"), then
     azure-mgmt-web WebSiteManagementClient app_service_plans.list(detailed=True) and
     web_apps.list(); sites are joined to plans by server_farm_id. Reader is
-    sufficient — all GETs. Maps to KSI-CNA-OFA.
+    sufficient — all GETs. Maps to KSI-CNA-OFA. Plans and sites the
+    resource_exclusions patterns take out are listed under excluded instead,
+    and each plan lists only its in-scope sites; its number_of_sites counts
+    those listed sites, where Azure's own numberOfSites would also count
+    excluded ones. A plan a pattern matches is taken out only when no in-scope
+    site runs on it. While one does, the plan stays in app_service_plans and in
+    every plan-level count (total_app_service_plans, single_instance_plans,
+    no_sla_tier_plans, zone_redundant_percentage and the rest), is not listed
+    under excluded, and its pattern counts as matched. Every count covers only
+    what is in scope, and empty_plans counts plans with no in-scope site.
+    resource_exclusion_patterns echoes the patterns,
+    resource_exclusion_patterns_unmatched lists those that matched nothing,
+    excluded_app_service_plans and excluded_sites count what was taken out, and
+    in_scope_app_service_plans (plans kept for an in-scope site included) and
+    in_scope_sites what is left (0 means none was read or the patterns took out
+    everything).

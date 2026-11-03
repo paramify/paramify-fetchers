@@ -52,6 +52,23 @@ paramify manifest set-secret rippling_all_employees api_token RIPPLING_API_TOKEN
 **Key names aren't checked.** A misspelled key is saved, passes `validate`,
 and never reaches the fetcher.
 
+A string config field can also be `${env:VAR}`, read from the environment at
+run time. If `VAR` is unset or empty, the next value down applies (platform
+config, then the default), and the run prints a note. Integer and boolean
+fields and target fields don't take `${env:VAR}` (a target's secrets do), and
+`manifest` and `validate` refuse one there.
+
+The reference must be the whole value: `qa.* ${env:VAR}` is refused. So is a
+reference to a variable whose name looks like a credential's (it contains
+`SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `CREDENTIAL`, `PRIVATE_KEY` or
+`CONNECTION_STRING`, or has a `KEY`, `KEYS`, `APIKEY`, `PAT`, `PASS`, `PWD` or
+`SAS` part, such as `DATADOG_API_KEY`), and, by `validate` and the run, a
+reference to any variable that holds a secret: one a fetcher or category in the
+catalog declares, or one a `secrets:` reference anywhere in the manifest reads.
+The run masks the value it reads out of the fetcher's logs and the run metadata,
+but a fetcher may still write it into its evidence, as the Azure scope
+exclusions do with their patterns.
+
 ## 3. Check it
 
 It matches the worked example.
@@ -89,5 +106,6 @@ paramify evidence evidence/run-<timestamp>/rippling_all_employees.json
 |---|---|
 | `Secret reference ${env:…} could not be resolved` | Export that variable in the shell that runs `paramify`. |
 | `NOTE target selects AWS_PROFILE; ignored ambient credentials …` | Expected: a target's `profile:` overrides static AWS keys. Remove it to use them. |
+| `a comparator ignores platforms.<category>.config` | A [comparator](comparators.md#how-the-runner-runs-one) gets none of its category's config, secrets or passthrough env. Set its own config on its entry with `paramify manifest set-config`. |
 
 **More detail:** [shared platform config](run_manifest_guide.md#4-set-shared-config-once)

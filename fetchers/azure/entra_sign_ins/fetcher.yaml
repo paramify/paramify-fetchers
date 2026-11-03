@@ -1,0 +1,136 @@
+name: azure_entra_sign_ins
+version: 0.1.0
+description: >-
+  Shows how users actually sign in: whether each sign-in required and passed MFA, which methods were used, whether Conditional Access applied, and which sign-ins Entra rated risky.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800          # up to 200 pages of 1000 sign-ins, with throttling retries; 600 is too tight
+
+output:
+  type: json
+  path: azure_entra_sign_ins.json
+  aggregation: per_target
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 7
+    env: ENTRA_SIGN_IN_LOOKBACK_DAYS
+    description: >
+      Days of sign-ins to read, ending now. Capped at 30, the retention of Entra ID
+      sign-in logs. Set it to at least the interval between runs, or the sign-ins
+      between two lookbacks are never read.
+
+target_schema:
+  # Microsoft Graph data is TENANT-scoped, so the fanout unit here is the tenant,
+  # not the subscription: one target per Entra tenant.
+  tenant_id:
+    type: string
+    required: false
+    env: AZURE_TENANT_ID
+    description: >
+      Entra tenant id to collect from, and the discriminator for this fetcher's
+      output filename. Optional — omit to use whichever tenant the ambient
+      credential authenticates into, in which case the tenant is read back from
+      Microsoft Graph's organization endpoint.
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id. Optional and NOT used to scope collection — Graph data
+      is tenant-wide. Set it only to correlate this tenant's evidence with the
+      subscription-scoped Azure evidence from the same manifest; it is recorded in
+      the payload metadata and nowhere else.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-tenant runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+# Microsoft Graph permissions (application permission, admin consent):
+#   AuditLog.Read.All      — /auditLogs/signIns; also needs Entra ID P1 or P2.
+#   Policy.Read.ConditionalAccess (or Policy.Read.All) — optional; the Conditional
+#                            Access policies applied to each sign-in. Without it Graph
+#                            leaves them out and they read null; conditionalAccessStatus
+#                            is still read.
+#   Organization.Read.All  — optional; the tenant name/domain recorded as provenance.
+# Risk levels need Entra ID P2; without it Graph reports them as hidden.
+# A denied read is recorded as an API failure and the run exits non-zero. A tenant
+# without P1/P2 is a state, not a failure: sign_in_logs reads not_licensed (the first
+# page's 403 with code Authentication_RequestFromNonPremiumTenantOrB2CTenant only).
+
+ksis:
+  - KSI-IAM-APM
+  - KSI-IAM-SUS
+
+evidence_set:
+  reference_id: EVD-AZURE-ENTRA-SIGN-INS
+  name: Microsoft Entra ID Sign-ins (MFA, Methods, Conditional Access and Risk)
+  instructions: |
+    Script: azure/entra_sign_ins/fetcher.py
+
+    Access: Microsoft Graph AuditLog.Read.All and an Entra ID P1 or P2 licence. Optional: Policy.Read.ConditionalAccess (or Policy.Read.All); without it, Graph leaves out which Conditional Access policies applied to each sign-in and they read null. Optional: Organization.Read.All; without it, no tenant name or domain is recorded. Risk levels need Entra ID P2; without it the risky sign-in figures read null.
+
+    Commands Executed:
+    - Microsoft Graph GET /organization — the tenant's name and domain
+    - Microsoft Graph GET /auditLogs/signIns on the beta endpoint, from the start of the lookback — every interactive sign-in with its MFA requirement, methods, Conditional Access result and risk (beta because v1.0 has no MFA requirement or methods)
+
+    Output: azure_entra_sign_ins_<tenant>.json — sign-in counts per app, and per user for each user with a single-factor, no-Conditional-Access or risky sign-in, over the lookback, and those sign-ins listed one by one.
+
+    Summary fields:
+
+    What was checked?
+    - sign_in_logs — Whether the sign-in logs were read: read, not_licensed (Graph refused the first page because the tenant has no Entra ID P1 or P2, so there are no logs to read; the run still succeeds) or not_read (refused or failed before any sign-in was read)
+    - lookback_days — Days of sign-ins read, ending at the run (7 unless ENTRA_SIGN_IN_LOOKBACK_DAYS sets it, at most 30). It should be at least the interval between runs, or some sign-ins are never read
+    - window_start — Time of the lookback's start, in UTC
+    - window_end — Time of the lookback's end (the run), in UTC
+    - sign_ins_complete — True if every sign-in in the lookback was read; false if a read failed part-way or stopped at the limit of about 200,000, and the counts cover only the newest sign-ins read (window_start still shows the configured start)
+    - sign_ins_truncated — True if reading stopped at about 200,000 sign-ins (checked after each page of 1000); false otherwise
+    - total_sign_ins — Number of interactive sign-ins in the lookback: a user signing in themselves. Non-interactive sign-ins (a client refreshing a token for a user), service principal and managed identity sign-ins aren't read; null if the logs weren't read
+    - successful_sign_ins — Number of sign-ins that succeeded (error code 0); null if the logs weren't read
+    - failed_sign_ins — Number of sign-ins with a non-zero error code. That includes interrupted steps that are a normal part of a successful sign-in, such as the MFA prompt (50074) or keep me signed in (50140), so it isn't a count of failed attempts; null if the logs weren't read
+    - users_signing_in — Number of distinct users with at least one sign-in. A sign-in with no user id, such as an attempt at a name that doesn't exist, counts in the totals but not here; null if the logs weren't read
+    - users_listed — Number of users listed one by one in the evidence: those with at least one successful single-factor sign-in, successful sign-in no Conditional Access policy applied to, or risky sign-in. Every user figure here counts all users signing in, listed or not; null if the logs weren't read
+    - apps_signed_in_to — Number of distinct apps signed in to; null if the logs weren't read
+
+    Did each sign-in require and pass MFA?
+    - successful_windows_device_sign_ins — Number of successful Windows device logons: sign-ins to the Windows Sign In app, made when someone signs in to a Windows computer rather than to an app. They count in successful_sign_ins but never in the single-factor, multi-factor or no-Conditional-Access figures below, and are listed one by one only when risky; null if the logs weren't read
+    - successful_single_factor_sign_ins — Number of successful sign-ins to apps (not Windows device logons) that required only one factor (a password alone, for example). This and multi_factor_percentage follow what Entra required for the sign-in (authenticationRequirement), not the method the user presented, so a passwordless sign-in that no policy required MFA for counts as single-factor; null if the logs weren't read
+    - successful_multi_factor_sign_ins — Number of successful sign-ins to apps (not Windows device logons) that required and passed MFA; null if the logs weren't read
+    - successful_sign_ins_with_unknown_requirement — Number of successful sign-ins to apps (not Windows device logons) whose MFA requirement Graph didn't report (null or unknownFutureValue). They count in successful_sign_ins but in neither single- nor multi-factor sign-ins, so they lower multi_factor_percentage; null if the logs weren't read
+    - multi_factor_percentage — Percentage of successful sign-ins to apps that passed MFA = successful_multi_factor_sign_ins / (successful_sign_ins − successful_windows_device_sign_ins) × 100 (a whole number, 0–100), counting a sign-in with an unreported requirement as not MFA and leaving Windows device logons out of both; null when successful_sign_ins − successful_windows_device_sign_ins is 0 or the logs weren't read
+    - users_with_single_factor_sign_ins — Number of users with at least one successful single-factor sign-in to an app (not a Windows device logon); null if the logs weren't read
+    - apps_with_single_factor_sign_ins — Number of apps with at least one successful single-factor sign-in (the Windows Sign In app never counts); null if the logs weren't read
+    - successful_legacy_authentication_sign_ins — Number of successful sign-ins from legacy clients that can't do MFA: any client other than a browser, modern mobile and desktop apps or modern clients (Microsoft's own rule), such as IMAP, POP, SMTP or Exchange ActiveSync; a client Graph reports as Unknown isn't counted. A floor: only interactive sign-ins are read, and Microsoft's guidance is to check non-interactive sign-ins for legacy authentication too; null if the logs weren't read
+
+    Which methods were used?
+    - methods_used — Number of successful sign-ins that used each authentication method (Password, Authenticator App, SMS, FIDO2 security key and so on); a sign-in using two methods counts under both; null if the logs weren't read
+    - successful_phishing_resistant_sign_ins — Number of successful sign-ins that used a phishing-resistant method: a FIDO2 security key, a passkey, Windows Hello for Business, a platform credential, or a certificate that alone satisfied MFA (any other method beside it must be phishing-resistant too, and a reused earlier step rules it out). A step that reused an earlier authentication (Previously satisfied, Satisfied by token) never counts, so this is a floor when the earlier factor was phishing-resistant; null if the logs weren't read
+    - users_using_phishing_resistant_methods — Number of users with at least one successful phishing-resistant sign-in, a floor since a step that reused an earlier authentication never counts; null if the logs weren't read
+
+    Did Conditional Access apply?
+    - successful_sign_ins_without_conditional_access — Number of successful sign-ins to apps (not Windows device logons) that no Conditional Access policy applied to; null if the logs weren't read
+    - users_with_sign_ins_without_conditional_access — Number of users with at least one successful sign-in to an app (not a Windows device logon) that no Conditional Access policy applied to; null if the logs weren't read
+    - conditional_access_failures — Number of sign-ins a Conditional Access policy blocked or failed; null if the logs weren't read
+
+    Which sign-ins did Entra rate risky?
+    - risk_levels_available — True if Entra ID Protection rated the sign-ins (the tenant has Entra ID P2); false if every risk level read hidden; null if the logs weren't read or there were no sign-ins
+    - risky_sign_ins — Number of risky sign-ins: rated low, medium or high risk, or with a risk state of at risk or confirmed compromised; null if the logs weren't read or risk_levels_available is false (no Entra ID P2, so risk is unknown, not none)
+    - risky_sign_ins_by_level — Number of risky sign-ins at each risk level (low, medium, high, or none for one flagged only by its risk state); null if the logs weren't read or risk_levels_available is false
+    - risky_sign_ins_by_state — Number of risky sign-ins in each risk state (for example atRisk, remediated, dismissed); null if the logs weren't read or risk_levels_available is false
+    - users_with_risky_sign_ins — Number of users with at least one risky sign-in; null if the logs weren't read or risk_levels_available is false
+
+    Which sign-ins are listed one by one?
+    - exception_sign_ins — Number of exceptions: successful single-factor sign-ins to apps, successful sign-ins to apps no Conditional Access policy applied to, and risky sign-ins (Windows device logons included). Each listed sign-in names its reasons: single_factor, single_factor_phishing_resistant (a FIDO2 key, passkey or similar alone, with no policy requiring MFA), no_conditional_access and risky. When risk_levels_available is false no sign-in counts as risky, so one flagged only by its risk state isn't an exception; null if the logs weren't read
+    - exception_sign_ins_listed — Number of exceptions listed in the evidence, the newest first, at most 1000; null if the logs weren't read

@@ -1,0 +1,26 @@
+key: oci_network_reachability_resolved
+name: OCI Network Reachability Fully Resolved
+type: AUTOMATED
+role: configuration
+statement: >
+  Every internet-open security-list rule could be resolved to a route table,
+  so reachable_internet_ingress_rules is an answer and not a floor. A rule on
+  a subnet whose route table was not read — unreadable, or sitting in a
+  compartment outside this target's scope, as landing zones place them — is
+  counted as unknown rather than as unreachable. Integrity partner of
+  oci_no_internet_reachable_ingress: without it, a target scoped below the
+  network compartment reported zero reachable rules while never looking. Does
+  NOT assert anything about posture. Fails when any rule's reachability is
+  unknown, and when the summary key is renamed.
+regex: '"internet_ingress_rules_with_unknown_reachability":\s*(?<internet_ingress_rules_with_unknown_reachability>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-NETWORK-EXPOSURE

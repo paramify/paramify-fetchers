@@ -62,6 +62,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
     report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_policy_compliance")
 
@@ -93,7 +94,8 @@ HISTORY = "default"
 RECURRENCE_WINDOW_DAYS = 30
 # Grouped history rows read before stopping: one per (resource, policy, state).
 MAX_HISTORY_ROWS = 50000
-HISTORY_GROUP_KEYS = ("ResourceId, PolicyAssignmentId, PolicyDefinitionId, "
+# ResourceLocation adds no groups (a resource has one region); it lets location: patterns reach history.
+HISTORY_GROUP_KEYS = ("ResourceId, ResourceLocation, PolicyAssignmentId, PolicyDefinitionId, "
                       "PolicyDefinitionReferenceId, ComplianceState")
 # Pairs seen both compliant and non-compliant each cost one ordered-history query.
 DEFAULT_MAX_RECURRENCE_PAIRS = 100
@@ -258,6 +260,7 @@ def project_history_group(row) -> dict:
     extra = model_attr(row, "additional_properties") or {}
     return {
         "resource_id": model_attr(row, "resource_id"),
+        "resource_location": model_attr(row, "resource_location"),
         "policy_assignment_id": model_attr(row, "policy_assignment_id"),
         "policy_definition_id": model_attr(row, "policy_definition_id"),
         "policy_definition_reference_id": model_attr(row, "policy_definition_reference_id"),
@@ -376,11 +379,12 @@ def assignment_record(summary: dict) -> dict:
         "compliance_percentage": coverage_percentage(compliant, compliant + non_compliant),
         "is_compliant": (results.get("non_compliant_resources") or 0) == 0,
         "member_policy_count": len(members),
-        "non_compliant_member_policies": sorted(
-            failing,
-            key=lambda m: (-m["non_compliant_resources"], m.get("policy_definition_reference_id") or ""),
-        ),
+        "non_compliant_member_policies": sorted(failing, key=_member_order),
     }
+
+
+def _member_order(member: dict) -> tuple:
+    return -member["non_compliant_resources"], member.get("policy_definition_reference_id") or ""
 
 
 def state_record(state: dict) -> dict:
@@ -673,6 +677,80 @@ def summarize(
     }
 
 
+def _member_key(record: dict) -> tuple:
+    return arm_id_key(record.get("policy_definition_id")), arm_id_key(record.get("policy_definition_reference_id"))
+
+
+def _with_non_compliant(details: dict | None, count) -> dict:
+    """A {state: count} map cut to its NonCompliant entry, the only one recounted in scope."""
+    return {state: count for state in (details or {}) if str(state).lower() == NON_COMPLIANT}
+
+
+def in_scope_assignment(record: dict, states: list[dict], known: bool) -> dict:
+    """An assignment's non-compliant side recounted over its in-scope listed states; None throughout when unknown."""
+    if not known:
+        return {**record, "non_compliant_resources": None, "non_compliant_policies": None, "is_compliant": None,
+                "compliant_resources": None, "compliance_percentage": None,
+                "resource_details": _with_non_compliant(record["resource_details"], None),
+                "non_compliant_member_policies": None}
+    service = {_member_key(m): m for m in record["non_compliant_member_policies"]}
+    by_member: dict[tuple, tuple[dict, set]] = {}
+    for state in states:
+        by_member.setdefault(_member_key(state), (state, set()))[1].add(arm_id_key(state.get("resource_id")))
+    members = [
+        {**(service.get(key) or {
+            "policy_definition_id": state.get("policy_definition_id"),
+            "policy_definition_name": basename(state.get("policy_definition_id")),
+            "policy_definition_reference_id": state.get("policy_definition_reference_id"),
+            # A member the service didn't list as failing: the effect its evaluation ran under.
+            "effect": state.get("policy_definition_action"),
+        }), "non_compliant_resources": len(ids)}
+        for key, (state, ids) in by_member.items()
+    ]
+    resources = len({arm_id_key(s.get("resource_id")) for s in states})
+    return {**record, "non_compliant_resources": resources, "non_compliant_policies": len(by_member),
+            "compliant_resources": None, "compliance_percentage": None,
+            "resource_details": _with_non_compliant(record["resource_details"], resources),
+            "is_compliant": resources == 0, "non_compliant_member_policies": sorted(members, key=_member_order)}
+
+
+def in_scope_compliance(results: dict, assignments: list[dict], states: list[dict], known: bool) -> tuple:
+    """(results, assignments) with the non-compliant side recounted over the in-scope listed states; None if unknown."""
+    resources = len({arm_id_key(s.get("resource_id")) for s in states}) if known else None
+    # A policy per assignment, as the service counts them.
+    policies = len({(arm_id_key(s.get("policy_assignment_id")), *_member_key(s)) for s in states}) if known else None
+    by_assignment: dict[str, list[dict]] = {}
+    for state in states:
+        by_assignment.setdefault(arm_id_key(state.get("policy_assignment_id")), []).append(state)
+    return (
+        {**results, "non_compliant_resources": resources, "non_compliant_policies": policies,
+         "resource_details": _with_non_compliant(results.get("resource_details"), resources),
+         "policy_details": _with_non_compliant(results.get("policy_details"), policies)},
+        [in_scope_assignment(a, by_assignment.get(arm_id_key(a["policy_assignment_id"]), []), known)
+         for a in assignments],
+    )
+
+
+def in_scope_summary(results: dict, assignments: list[dict], deployments: list[dict] | None) -> dict:
+    """The summary fields recounted over in-scope records, the compliant side null; deployments is None when that list is incomplete."""
+    known = results.get("non_compliant_resources") is not None
+    statuses = Counter(str(d.get("status") or "").lower() for d in deployments or [])
+    return {
+        "non_compliant_resources": results.get("non_compliant_resources"),
+        "non_compliant_policies": results.get("non_compliant_policies"),
+        # The service's compliant side can't be split by resource, so it is null rather than subscription-wide.
+        "compliant_resources": None,
+        "resources_evaluated": None,
+        "resource_compliance_percentage": None,
+        "resources_by_compliance_state": results.get("resource_details") or {},
+        "policies_by_compliance_state": results.get("policy_details") or {},
+        "non_compliant_assignments": sum(1 for a in assignments if a["is_compliant"] is False) if known else None,
+        "compliant_assignments": sum(1 for a in assignments if a["is_compliant"]) if known else None,
+        "remediation_failed_deployments": statuses["failed"] if deployments is not None else None,
+        "remediation_successful_deployments": statuses["succeeded"] if deployments is not None else None,
+    }
+
+
 def summarize_evaluation_details(states: list[dict], details: dict) -> dict:
     by_status = Counter(s.get("evaluation_details_status") or DETAILS_NOT_REQUESTED for s in states)
     return {
@@ -763,13 +841,25 @@ def empty_collection() -> dict:
         "assignments": [],
         "states": [],
         "states_truncated": False,
+        "states_complete": False,
         "remediations": [],
         "details": {"eligible": 0, "requested": 0, "truncated": False, "not_authorized": 0},
         "recurrence": {"window": None, "pairs": {}, "records": [], "history_collected": False,
                        "history_truncated": False, "pairs_truncated": False},
         "deployments": [],
         "deployments_truncated": False,
+        "deployments_complete": False,
+        "excluded": [],
     }
+
+
+EXCLUDED_KINDS = ("policy_assignment", "policy_state", "remediation_task", "remediation_deployment")
+
+
+def excluded_entry(exclusions: ResourceExclusions, record: dict, kind: str, **accessors) -> dict | None:
+    """The record's excluded entry when a pattern matches it, else None."""
+    _, entries = exclusions.split([record], kind, **accessors)
+    return entries[0] if entries else None
 
 
 def collect_evaluation_details(client, states: list[dict], limit: int, collector: Collector) -> dict:
@@ -815,7 +905,8 @@ def collect_evaluation_details(client, states: list[dict], limit: int, collector
             "truncated": limit > 0 and len(eligible) > limit, "not_authorized": len(refused)}
 
 
-def collect_recurrence(client, subscription_id, limit: int, collector: Collector, now=None) -> dict:
+def collect_recurrence(client, subscription_id, limit: int, collector: Collector, now=None,
+                       exclusions: ResourceExclusions | None = None) -> dict:
     """30 days of history grouped per (resource, policy, state), then each flipping pair's order."""
     from azure.mgmt.policyinsights.models import QueryOptions  # lazy
 
@@ -868,6 +959,11 @@ def collect_recurrence(client, subscription_id, limit: int, collector: Collector
         logger.warning("history query returned %d of %d groups", len(rows), expected)
         truncated = True
     pairs = history_pairs(rows)
+    if exclusions:
+        # A pair follows its resource, matched by the resource's id, group and region.
+        regions = {pair_key(r): r["resource_location"] for r in rows if r.get("resource_location")}
+        pairs = {key: pair for key, pair in pairs.items()
+                 if not exclusions.match(pair.get("resource_id"), regions.get(key))}
     flipping = intermittent_pairs(pairs)
     records = []
     for pair in flipping[:limit]:
@@ -902,13 +998,17 @@ def collect_recurrence(client, subscription_id, limit: int, collector: Collector
 
 
 def collect_remediation_deployments(
-    client, subscription_id, remediations: list[dict], limit: int, collector: Collector
-) -> tuple[list[dict], bool]:
-    """Each task's per-resource deployments, checked against the latest states, up to `limit`."""
+    client, subscription_id, remediations: list[dict], limit: int, collector: Collector,
+    exclusions: ResourceExclusions | None = None, unread: list | None = None,
+) -> tuple[list[dict], bool, list[dict]]:
+    """In-scope deployments up to `limit`, checked against the latest states; excluded ones come back as entries.
+    Tasks whose deployments could not be listed go to `unread`."""
     from azure.mgmt.policyinsights.models import QueryOptions  # lazy
 
+    exclusions = exclusions if exclusions is not None else ResourceExclusions()
+    unread = unread if unread is not None else []
     if limit <= 0:
-        return [], False
+        return [], False, []
     listers = {
         "subscription": lambda name, scope: client.remediations.list_deployments_at_subscription(name),
         "resource_group": lambda name, scope: client.remediations.list_deployments_at_resource_group(
@@ -919,6 +1019,7 @@ def collect_remediation_deployments(
             scope.lstrip("/"), name),
     }
     deployments: list[dict] = []
+    excluded: list[tuple] = []
     truncated = False
 
     def _current(policy: tuple, resource_ids: list[str]) -> dict:
@@ -942,27 +1043,37 @@ def collect_remediation_deployments(
     read_by_policy: dict[tuple, set] = {}
     for task in remediations:
         remaining = limit - len(deployments)
-        if remaining <= 0:
+        # Past the limit, and only with patterns set, a task is read to find whether it holds an in-scope deployment.
+        if remaining <= 0 and (not exclusions or task.get("total_deployments") == 0):
             truncated = truncated or task.get("total_deployments") != 0
             continue
         kind, scope = remediation_scope(task.get("id"))
         name = task.get("name")
         if kind not in listers:
             logger.warning("remediation %s has an unrecognised scope; deployments not read", task.get("id"))
+            unread.append(task.get("id"))
             continue
 
-        def _list(kind=kind, scope=scope, name=name, remaining=remaining):
+        def _list(kind=kind, scope=scope, name=name, remaining=remaining, task_id=task.get("id")):
             nonlocal truncated
             rows = []
             for deployment in listers[kind](name, scope):
+                row = project_remediation_deployment(deployment)
+                entry = excluded_entry(
+                    exclusions, row, "remediation_deployment", resource_id=lambda d: d["remediated_resource_id"],
+                    location=lambda d: d["resource_location"], name=lambda d: basename(task_id))
+                if entry:
+                    excluded.append((task_id or "", row["remediated_resource_id"] or "", entry))
+                    continue
                 if len(rows) >= remaining:
                     truncated = True
                     break
-                rows.append(project_remediation_deployment(deployment))
+                rows.append(row)
             return rows
 
-        rows = collector.guard(f"policyinsights.remediations.list_deployments_at_{kind}({name})", _list,
-                               default=[])
+        rows = collector.guard(f"policyinsights.remediations.list_deployments_at_{kind}({name})", _list)
+        if rows is None:
+            unread.append(task.get("id"))
         if not rows:
             continue
 
@@ -980,11 +1091,13 @@ def collect_remediation_deployments(
                 default={},
             ) or {})
         deployments.extend(deployment_record(d, task, current) for d in rows)
-    return sorted(deployments, key=lambda d: (d.get("remediation_task_id") or "",
-                                              d.get("remediated_resource_id") or "")), truncated
+    deployments = sorted(deployments, key=lambda d: (d.get("remediation_task_id") or "",
+                                                     d.get("remediated_resource_id") or ""))
+    return deployments, truncated, [entry for *_, entry in sorted(excluded, key=lambda e: e[:2])]
 
 
-def collect_compliance(subscription_id, cred, collector: Collector, limits: dict) -> dict:
+def collect_compliance(subscription_id, cred, collector: Collector, limits: dict,
+                       exclusions: ResourceExclusions | None = None) -> dict:
     """The policyinsights reads, each guarded on its own.
 
     A failure in one still leaves the others in the evidence, and still fails the run.
@@ -992,6 +1105,7 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
     from azure.mgmt.policyinsights import PolicyInsightsClient  # lazy
     from azure.mgmt.policyinsights.models import QueryOptions  # lazy
 
+    exclusions = exclusions if exclusions is not None else ResourceExclusions()
     collected = empty_collection()
     client = collector.guard(
         "policyinsights.PolicyInsightsClient (init)",
@@ -1017,35 +1131,53 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
 
     summarized = collector.guard("policyinsights.policy_states.summarize_for_subscription", _summarize)
     subscription_results, assignments = summarized or (collected["subscription_results"], [])
+    # Only assignments made inside an excluded group or resource go; the service's counts can't be split by resource.
+    assignments, excluded = exclusions.split(
+        assignments, "policy_assignment", resource_id=lambda a: a["policy_assignment_id"],
+        name=lambda a: a["policy_assignment_name"])
 
     limit = limits["non_compliant"]
     states: list[dict] = []
+    excluded_states: list[dict] = []
     truncated = False
+    # Set only when the listing finishes or stops at the limit; a failed read leaves a partial list.
+    states_complete = False
     if limit > 0:
         def _states():
-            nonlocal truncated
-            # top = limit + 1: the one extra row is how truncation is detected
-            # without a second count query. ItemPaged follows nextLink.
-            options = QueryOptions(filter="complianceState eq 'NonCompliant'", top=limit + 1)
+            nonlocal truncated, states_complete
+            # top = limit + 1 detects truncation without a count query; with patterns the limit counts in-scope only.
+            options = QueryOptions(filter="complianceState eq 'NonCompliant'", top=None if exclusions else limit + 1)
             for state in client.policy_states.list_query_results_for_subscription(
                 LATEST, subscription_id, query_options=options
             ):
+                record = state_record(project_policy_state(state))
+                # States, history and deployments follow the resource they are about; tasks follow their own scope.
+                entry = excluded_entry(exclusions, record, "policy_state", resource_id=lambda s: s["resource_id"],
+                                       location=lambda s: s["resource_location"],
+                                       name=lambda s: s["policy_definition_name"])
+                if entry:
+                    excluded_states.append(entry)
+                    continue
                 if len(states) >= limit:
                     truncated = True
                     break
-                states.append(state_record(project_policy_state(state)))
+                states.append(record)
+            states_complete = True
 
         collector.guard("policyinsights.policy_states.list_query_results_for_subscription", _states)
 
-    remediations = collector.guard(
+    listed_tasks = collector.guard(
         "policyinsights.remediations.list_for_subscription",
         lambda: [project_remediation(r) for r in client.remediations.list_for_subscription()],
-        default=[],
     )
+    remediations, excluded_tasks = exclusions.split(listed_tasks or [], "remediation_task")
     details = collect_evaluation_details(client, states, limits["detail_resources"], collector)
-    recurrence = collect_recurrence(client, subscription_id, limits["recurrence_pairs"], collector)
-    deployments, deployments_truncated = collect_remediation_deployments(
-        client, subscription_id, remediations, limits["remediation_deployments"], collector
+    recurrence = collect_recurrence(client, subscription_id, limits["recurrence_pairs"], collector,
+                                    exclusions=exclusions)
+    unread_tasks: list = []
+    deployments, deployments_truncated, excluded_deployments = collect_remediation_deployments(
+        client, subscription_id, remediations, limits["remediation_deployments"], collector, exclusions,
+        unread=unread_tasks,
     )
 
     logger.info(
@@ -1073,11 +1205,14 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
                            s.get("policy_definition_reference_id") or ""),
         ),
         "states_truncated": truncated,
+        "states_complete": states_complete,
         "remediations": sorted(remediations, key=lambda r: r.get("id") or ""),
         "details": details,
         "recurrence": recurrence,
         "deployments": deployments,
         "deployments_truncated": deployments_truncated,
+        "deployments_complete": listed_tasks is not None and not unread_tasks,
+        "excluded": excluded + excluded_states + excluded_tasks + excluded_deployments,
     }
 
 
@@ -1105,6 +1240,8 @@ def main() -> int:
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
 
     collected = empty_collection()
     registration = REGISTRATION_UNKNOWN
@@ -1121,7 +1258,7 @@ def main() -> int:
                 subscription_id,
             )
         else:
-            collected = collect_compliance(subscription_id, cred, collector, limits)
+            collected = collect_compliance(subscription_id, cred, collector, limits, exclusions)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -1132,7 +1269,31 @@ def main() -> int:
             ),
         )
 
-    subscription_results = collected["subscription_results"]
+    exclusions.warn_unmatched(logger)
+
+    service_results = collected["subscription_results"]
+    subscription_results, assignments = service_results, collected["assignments"]
+    summary = {
+        **summarize(
+            service_results,
+            collected["assignments"],
+            collected["states"],
+            collected["states_truncated"],
+            collected["remediations"],
+        ),
+        **summarize_evaluation_details(collected["states"], collected["details"]),
+    }
+    if exclusions:
+        # The service's counts can't be split by resource: recount over the in-scope lists, null where one is cut
+        # short or a read failed.
+        subscription_results, assignments = in_scope_compliance(
+            service_results, assignments, collected["states"],
+            known=(limits["non_compliant"] > 0 and collected["states_complete"]
+                   and not collected["states_truncated"]))
+        deployments_known = (limits["remediation_deployments"] > 0 and collected["deployments_complete"]
+                             and not collected["deployments_truncated"])
+        summary.update(in_scope_summary(subscription_results, assignments,
+                                        collected["deployments"] if deployments_known else None))
     recurrence = collected["recurrence"]
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -1140,9 +1301,9 @@ def main() -> int:
         collector=collector,
         results={
             "subscription_compliance": subscription_results,
-            "evaluation_window": evaluation_window(subscription_results.get("query_results_uri")),
+            "evaluation_window": evaluation_window(service_results.get("query_results_uri")),
             "policy_states_resource": LATEST,
-            "assignment_compliance": collected["assignments"],
+            "assignment_compliance": assignments,
             "non_compliant_states": collected["states"],
             "non_compliant_states_limit": limits["non_compliant"],
             "evaluation_details_resource_limit": limits["detail_resources"],
@@ -1153,16 +1314,10 @@ def main() -> int:
             "non_compliance_recurrence": recurrence["records"],
             "recurrence_pair_limit": limits["recurrence_pairs"],
             "provider_registration_status": registration,
+            "excluded": collected["excluded"],
         },
         summary={
-            **summarize(
-                subscription_results,
-                collected["assignments"],
-                collected["states"],
-                collected["states_truncated"],
-                collected["remediations"],
-            ),
-            **summarize_evaluation_details(collected["states"], collected["details"]),
+            **summary,
             **summarize_recurrence(
                 recurrence["pairs"], recurrence["records"], recurrence["history_truncated"],
                 recurrence["pairs_truncated"], recurrence["history_collected"],
@@ -1171,6 +1326,10 @@ def main() -> int:
                 collected["deployments"], collected["deployments_truncated"]
             ),
             "provider_registration_status": registration,
+            **exclusions.summary(collected["excluded"], EXCLUDED_KINDS, {
+                "policy_assignments": len(collected["assignments"]), "policy_states": len(collected["states"]),
+                "remediation_tasks": len(collected["remediations"]),
+                "remediation_deployments": len(collected["deployments"])}),
         },
     )
 

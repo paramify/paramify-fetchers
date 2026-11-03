@@ -31,7 +31,7 @@ dependencies = [
 # same app on 1.x.
 tui = ["textual>=8,<9"]
 checkov = ["checkov"]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "pytest-xdist", "ruff", "mypy"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every
 # one producing wrong or empty evidence rather than an error. Keep the two files
@@ -71,6 +71,7 @@ azure = [
     "azure-mgmt-containerregistry>=15.0.0,<16",
     "azure-mgmt-keyvault>=14.0.1,<15",
     "azure-keyvault-keys>=4.11.1,<5",
+    "azure-keyvault-certificates>=4.11.3,<5",
     # <7 is load-bearing: 7.0.0 ships no diagnostic_settings operations at all.
     "azure-mgmt-monitor>=6.0.2,<7",
     "azure-mgmt-loganalytics>=14.0.0,<15",
@@ -104,6 +105,16 @@ gcp = [
     "google-cloud-kms",
     "google-cloud-api-keys",
 ]
+# OCI category (fetchers/oci/*). One distribution covers every OCI service: the
+# SDK is generated from a single spec and ships all clients in the `oci` package,
+# so there is no per-service list to keep in step. Major is left open — the SDK is
+# generated and additive, and the fetchers read generated models whose field names
+# tools/oci_schema_check.py verifies against the installed version.
+#
+# Unlike the gcp extra, this one carries test signal: every tests/test_oci_*.py
+# opens with pytest.importorskip("oci"), so without it installed they SKIP rather
+# than fail. Out of `all` for the same reason as Azure and GCP.
+oci = ["oci"]
 # Convenience: every front-end + dev tooling in one install.
 all = ["textual>=8,<9", "checkov", "pytest", "ruff", "mypy"]
 

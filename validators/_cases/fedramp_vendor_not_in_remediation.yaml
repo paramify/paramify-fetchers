@@ -1,0 +1,17 @@
+validator: fedramp_vendor_not_in_remediation
+cases:
+  - name: none_in_remediation
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"vendors_total":3,"vendors_certified":3,"vendors_in_process":0,"vendors_ready":0,"vendors_in_remediation":0,"vendors_delisted_or_not_listed":0,"vendors_not_certified":0,"vendors_not_certified_or_in_process":0,"vendors_unresolved":0},"feed":{"feed_age_hours":20},"vendors":[{"vendor_name":"Example","certification_state":"certified"}]}}'
+
+  - name: one_in_remediation
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"vendors_total":3,"vendors_certified":2,"vendors_in_process":0,"vendors_ready":0,"vendors_in_remediation":1,"vendors_delisted_or_not_listed":0,"vendors_not_certified":1,"vendors_not_certified_or_in_process":1,"vendors_unresolved":0},"feed":{"feed_age_hours":20},"vendors":[{"vendor_name":"Example","certification_state":"certified"}]}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"vendors_total":3,"vendors_certified":3,"vendors_in_process":0,"vendors_ready":0,"count_vendors_in_remediation":1,"vendors_delisted_or_not_listed":0,"vendors_not_certified":0,"vendors_not_certified_or_in_process":0,"vendors_unresolved":0},"feed":{"feed_age_hours":20},"vendors":[{"vendor_name":"Example","certification_state":"certified"}]}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"GET data.json returned HTTP 503"},"payload":{"vendors":[],"metadata":{"partial_failure":true}}}'

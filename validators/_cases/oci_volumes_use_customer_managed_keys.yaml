@@ -1,0 +1,13 @@
+validator: oci_volumes_use_customer_managed_keys
+cases:
+  - name: oci_volumes_use_customer_managed_keys_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_volumes": 3, "volumes_with_oracle_managed_key": 0}}'
+
+  - name: oci_volumes_use_customer_managed_keys_fails
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_volumes": 3, "volumes_with_oracle_managed_key": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_volumes": 3, "volumes-with-oracle-managed-key": 0}}'

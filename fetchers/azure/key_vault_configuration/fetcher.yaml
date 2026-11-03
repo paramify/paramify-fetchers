@@ -1,5 +1,5 @@
 name: azure_key_vault_configuration
-version: 0.2.0
+version: 0.3.0
 description: >
   Every key vault in the subscription with the configuration that governs access to
   the keys and secrets it holds: which authorization model is in force
@@ -16,6 +16,24 @@ description: >
   operations are not logged anywhere. Management plane only — no key material or
   secret value is read.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: string
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns separated by commas or spaces, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching key vault is listed under excluded with the pattern
+      and left out of every count and verdict; its diagnostic settings are not
+      read, so a vault the identity can't read doesn't fail the run. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -56,9 +74,13 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-KEYVAULT-CFG
   name: Azure Key Vault Configuration
-  instructions: >
-    Script: azure/key_vault_configuration/fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient):
-    vaults.list_by_subscription(). Then per vault (azure-mgmt-monitor<7
-    MonitorManagementClient): diagnostic_settings.list(resource_uri=<vault resource
-    id without the leading slash>). Reader is sufficient — both are GETs. Management
-    plane only.
+  instructions: |
+    Script: azure/key_vault_configuration/fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient): vaults.list_by_subscription(). Then per in-scope vault (azure-mgmt-monitor<7 MonitorManagementClient): diagnostic_settings.list(resource_uri=<vault resource id without the leading slash>). Reader is sufficient — both are GETs. Management plane only.
+
+    Key vaults the resource_exclusions patterns take out are listed under excluded instead of key_vaults.
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no key vault, such as a mistyped name
+    - excluded_key_vaults — Number of key vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+    - in_scope_key_vaults — Number of key vaults read and in scope; 0 means none was read or the patterns took out every vault, which a check can catch by requiring more than 0

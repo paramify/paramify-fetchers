@@ -44,7 +44,7 @@ scanned.
 
 These write a CSV for an assessment's pipeline instead of an evidence set. Setup,
 config and the `close_cycle` warning are in
-[docs/wiz_pipeline_fetchers.md](../../docs/wiz_pipeline_fetchers.md).
+[docs/wiz_pipeline_guide.md](../../docs/wiz_pipeline_guide.md).
 
 | Fetcher | Assessment type | What it sends | Wiz scopes |
 |---|---|---|---|
