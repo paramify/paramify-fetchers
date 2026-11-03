@@ -291,7 +291,7 @@ STRING_FETCHER, STRING_FIELD = "azure_storage_encryption_status", "owner_tag_key
                  "azure_front_door_origins: config 'scope_exclusions': ${env:} references aren't read for a "
                  "pattern list", id="pattern-list"),
     pytest.param("azure_key_vault_configuration", None, {"resource_exclusions": "${env:AZURE_RESOURCE_EXCLUSIONS}"},
-                 None, "azure_key_vault_configuration: config 'resource_exclusions': ${env:} references aren't read",
+                 None, "platforms.azure.config: config 'resource_exclusions': ${env:} references aren't read",
                  id="platform-pattern-list"),
 ])
 def test_validate_reports_references_the_runner_refuses(use, config, platform, target, message):

@@ -281,8 +281,8 @@ def _config_type(root: Path, fetcher_name: str, key: str) -> str:
     return "string"
 
 
-def _platform_config_type(root: Path, category: str, key: str) -> str:
-    cat = api.catalog(root)
+def _platform_config_type(root: Path, category: str, key: str, cat: Optional[dict] = None) -> str:
+    cat = cat or api.catalog(root)
     for c in cat["categories"]:
         if c["name"] == category and c.get("platform"):
             for fld in c["platform"]["config"]:
@@ -291,9 +291,9 @@ def _platform_config_type(root: Path, category: str, key: str) -> str:
     return "string"
 
 
-def _category_fetcher_types(root: Path, category: str, key: str) -> List[str]:
+def _category_fetcher_types(root: Path, category: str, key: str, cat: Optional[dict] = None) -> List[str]:
     """The types the category's fetchers declare for `key`, since a platform value reaches each of them."""
-    cat = api.catalog(root)
+    cat = cat or api.catalog(root)
     return [fld["type"] for c in cat["categories"] if c["name"] == category
             for f in c["fetchers"] for fld in f["config"] if fld["name"] == key]
 
@@ -1255,8 +1255,9 @@ def validate_cmd(
         else:
             _err(f"Validation failed: {e}")
         raise typer.Exit(1)
-    errors = api.validate(m, root)
-    notes = api.validate_notes(m, root)
+    discovered = {"fetchers": api.discover_fetchers(root), "platforms": api.discover_platforms(root)}
+    errors = api.validate(m, root, **discovered)
+    notes = api.validate_notes(m, root, **discovered)
     if json_out:
         typer.echo(json.dumps({"ok": not errors, "errors": errors, "notes": notes}, indent=2))
         raise typer.Exit(0 if not errors else 1)
@@ -1790,8 +1791,9 @@ def manifest_set_platform_config(
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
-    typ = _platform_config_type(root, category, key)
-    fetcher_types = _category_fetcher_types(root, category, key)
+    cat = api.catalog(root)
+    typ = _platform_config_type(root, category, key, cat)
+    fetcher_types = _category_fetcher_types(root, category, key, cat)
     if typ == "string" and patterns.TYPE in fetcher_types:
         typ = patterns.TYPE
     elif is_env_ref_attempt(raw) and typ == "string":
@@ -1817,17 +1819,24 @@ def manifest_set_passthrough(
 
 
 def _pattern_target(root: Path, target: str, path, json_out: bool):
+    """(scope, fields, mixed, category): the category is the one a fetcher target inherits pattern lists from."""
+    fetchers = api.discover_fetchers(root)
     try:
-        return api.pattern_fields(target, api.discover_fetchers(root), api.discover_platforms(root))
+        scope, fields, mixed = api.pattern_fields(target, fetchers, api.discover_platforms(root))
     except LookupError as e:
         _fail(path, str(e), json_out)
+    return scope, fields, mixed, api.platform_category(fetchers[target]) if scope == "entry" else None
+
+
+def _pattern_names(items) -> str:
+    return ", ".join(item.pattern for item in items)
 
 
 @manifest_app.command("exclude")
 def manifest_exclude(
     target: str = typer.Argument(..., help="A category (every fetcher of it) or a fetcher name"),
     pattern: str = typer.Argument(..., help="The pattern, such as location:eastus2 or rg:rg-sandbox-*"),
-    reason: Optional[str] = typer.Option(None, "--reason", help="Why it is out of scope, for the evidence"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Why it is out of scope, kept with the pattern"),
     field: Optional[str] = typer.Option(None, "--field", help="The pattern list, when more than one takes it"),
     file: str = typer.Option(_DEFAULT_MANIFEST, "-f", "--file", help="Manifest path"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
@@ -1836,10 +1845,10 @@ def manifest_exclude(
     root = api.find_repo_root()
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
-    scope, fields, mixed = _pattern_target(root, target, path, json_out)
+    scope, fields, mixed, category = _pattern_target(root, target, path, json_out)
     try:
         name = api.pick_pattern_field(fields, pattern, field)
-        outcome = api.add_pattern(m, scope, target, name, pattern, reason)
+        outcome, copied = api.add_pattern(m, scope, target, name, pattern, reason, category)
     except ValueError as e:
         hint = ""
         if mixed and (field in mixed or field is None and str(e).startswith("no pattern list")):
@@ -1847,8 +1856,11 @@ def manifest_exclude(
                     f"each fetcher (paramify manifest exclude <fetcher> {pattern})")
         _fail(path, f"{e}{hint}", json_out)
     where = f"{api.pattern_location(scope, target)}.{name}"
+    if copied and not json_out:
+        typer.echo(f"Copied {len(copied)} platform pattern{'' if len(copied) == 1 else 's'} from "
+                   f"platforms.{category}.config.{name} so {target} keeps them: {_pattern_names(copied)}")
     _save_and_report(m, path, root, json_out, verb=f"{outcome.capitalize()} {pattern} in {where}:",
-                     extra={"field": name, "outcome": outcome})
+                     extra={"field": name, "outcome": outcome, "copied": [c.pattern for c in copied]})
 
 
 @manifest_app.command("unexclude")
@@ -1864,7 +1876,7 @@ def manifest_unexclude(
     root = api.find_repo_root()
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
-    scope, fields, mixed = _pattern_target(root, target, path, json_out)
+    scope, fields, mixed, category = _pattern_target(root, target, path, json_out)
     names = [field] if field else [*fields, *mixed]
     if all_ and (pattern is not None or not field) or not all_ and pattern is None:
         _fail(path, "give a pattern, or --all with --field", json_out)
@@ -1874,11 +1886,27 @@ def manifest_unexclude(
         removed = {n: api.remove_pattern(m, scope, target, n, None if all_ else pattern) for n in names}
     except ValueError as e:
         _fail(path, str(e), json_out)
-    if not any(removed.values()):
+    hit = [n for n, k in removed.items() if k is not None]
+    if not hit:
         _fail(path, f"{pattern or field} is not in {target}'s pattern lists", json_out)
-    gone = ", ".join(f"{api.pattern_location(scope, target)}.{n}" for n, k in removed.items() if k)
+    # A fetcher whose own list is gone takes its category's again.
+    inherits = {}
+    for n in hit:
+        own = next((e.get("config") or {} for e in m["run"].get("fetchers") or [] if e.get("use") == target), {})
+        if scope == "entry" and n not in own:
+            try:
+                inherits[n] = api.inherited_patterns(m, category, n)
+            except ValueError:
+                continue
+    if not json_out:
+        for n, items in inherits.items():
+            if items:
+                typer.echo(f"{target} has no {n} of its own now, so it takes platforms.{category}.config.{n} "
+                           f"again: {_pattern_names(items)}")
+    gone = ", ".join(f"{api.pattern_location(scope, target)}.{n}" for n in hit)
     _save_and_report(m, path, root, json_out, verb=f"Removed {pattern or 'every pattern'} from {gone}:",
-                     extra={"fields": [n for n, k in removed.items() if k]})
+                     extra={"fields": hit, "removed": sum(removed[n] or 0 for n in hit),
+                            "inherits": {n: [i.pattern for i in items] for n, items in inherits.items() if items}})
 
 
 @manifest_app.command("set-output-dir")

@@ -472,7 +472,10 @@ schemas and the `paramify` CLI — not the internal code.
   <pattern> [--reason TEXT] [--field NAME]` and `unexclude` edit the lists,
   choosing the field whose prefixes take the pattern; a category-wide write is
   refused for a field its fetchers declare with different prefixes, such as
-  `scope_exclusions`. `set-config` and `set-platform-config` take a
+  `scope_exclusions`. A fetcher's first pattern starts from a copy of its
+  category's list, which `exclude` names, so the fetcher keeps those patterns;
+  when `unexclude` removes a fetcher's last pattern, it names the category
+  patterns the fetcher takes again. `set-config` and `set-platform-config` take a
   comma-separated list. `describe` shows what a pattern list takes instead of its
   env var. `validate` adds a note for each category-wide list, naming the entries
   that take it, the ones with their own list, and the ones without the field
@@ -583,7 +586,9 @@ schemas and the `paramify` CLI — not the internal code.
   `route:` or a bare host name; DNS: a bare record-set name) are
   `type: patterns`. A bad pattern now fails `validate`, and stops the entry
   before the fetcher starts, rather than failing the run; a `${env:VAR}` value is
-  refused, so write the patterns in the manifest. A platform-wide
+  refused, so write the patterns in the manifest. A pattern listed twice, even
+  in different case (`rg:a, rg:A`), now fails `validate`; the fetchers used to
+  drop the second one silently. A platform-wide
   `scope_exclusions` with a `route:` pattern fails `validate` for
   `azure_dns_configuration`. Fetcher code and evidence are unchanged. Versions:
   `azure_alert_rules`, `azure_app_service_backups`,
@@ -605,8 +610,7 @@ schemas and the `paramify` CLI — not the internal code.
   category file) declares, a `platforms:` block for no category, and an entry
   key its fetcher doesn't declare. Each is now an error with a did-you-mean
   hint, and a platform key only a comparator declares says the comparator reads
-  it from its own entry. Setting `api.UNKNOWN_CONFIG_KEYS_ARE_ERRORS` to False
-  reports them as `validate` notes instead.
+  it from its own entry.
 - **`azure_entra_conditional_access_policies` judges authentication strengths by
   their allowed sign-in methods** (0.1.0 → 0.2.0). Only a strength's name was kept,
   and any strength counted as MFA, so phishing-resistant enforcement couldn't be

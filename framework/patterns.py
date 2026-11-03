@@ -46,7 +46,10 @@ def parse(value: Any) -> Tuple[List[Item], List[str]]:
     problems: List[str] = []
     for n, raw in enumerate(value, 1):
         if isinstance(raw, str):
-            items.append(Item(raw.strip()))
+            if raw.strip():
+                items.append(Item(raw.strip()))
+            else:
+                problems.append(f"item {n} is empty")
             continue
         if not isinstance(raw, dict):
             problems.append(f"item {n} is {type(raw).__name__}; write a pattern or a pattern/reason pair")
@@ -91,10 +94,19 @@ def check(items: Sequence[Item], prefixes: Sequence[str] = (), bare: bool = True
 
 def problems(value: Any, prefixes: Sequence[str] = (), bare: bool = True) -> List[str]:
     """Everything wrong with a manifest value for a patterns field; empty when the runner can hand it over."""
-    if isinstance(value, str) and "${env:" in value:
+    if is_reference(value):
         return [ENV_REF_REFUSAL]
     items, shape = parse(value)
     return shape + check(items, prefixes, bare)
+
+
+def is_reference(value: Any) -> bool:
+    return isinstance(value, str) and "${env:" in value
+
+
+def count(value: Any) -> int:
+    """How many patterns a value holds; a reference holds none, since it is never read."""
+    return 0 if is_reference(value) else len(parse(value)[0])
 
 
 def to_env(value: Any) -> str:

@@ -938,7 +938,7 @@ def pattern_fields(target: str, fetchers: Mapping, platforms: Mapping) -> Tuple[
     fields: Dict[str, ConfigField] = {}
     for d in declared:
         if d.type == patterns.TYPE:
-            grammars.setdefault(d.name, set()).add((d.prefixes, d.bare))
+            grammars.setdefault(d.name, set()).add((frozenset(d.prefixes), d.bare))
             fields.setdefault(d.name, d)
     mixed = sorted(n for n, g in grammars.items() if len(g) > 1)
     return "platform", {n: d for n, d in fields.items() if n not in mixed}, mixed
@@ -986,7 +986,7 @@ def _existing_pattern_holder(m: dict, scope: str, target: str) -> Optional[dict]
 
 def _pattern_items(holder: Optional[dict], field: str, where: str) -> List[patterns.Item]:
     value = (holder or {}).get(field)
-    if isinstance(value, str) and "${env:" in value:
+    if patterns.is_reference(value):
         raise ValueError(f"{where}.{field} is {value!r}; {patterns.ENV_REF_REFUSAL} "
                          f"(clear it first: paramify manifest unexclude ... --field {field} --all)")
     items, problems = patterns.parse(value)
@@ -999,34 +999,49 @@ def pattern_location(scope: str, target: str) -> str:
     return f"platforms.{target}.config" if scope == "platform" else f"{target}.config"
 
 
-def add_pattern(m: dict, scope: str, target: str, field: str, pattern: str, reason: Optional[str] = None) -> str:
-    """Add a pattern (or give a listed one this reason) in a fetcher's or a category's pattern list: "added",
-    "updated" or "unchanged". A string value becomes a list."""
-    holder = _pattern_holder(m, scope, target)
-    items = _pattern_items(holder, field, pattern_location(scope, target))
+def inherited_patterns(m: dict, category: Optional[str], field: str) -> List[patterns.Item]:
+    """The patterns a fetcher with no list of its own takes from platforms.<category>.config."""
+    if not category:
+        return []
+    return _pattern_items(_existing_pattern_holder(m, "platform", category), field, f"platforms.{category}.config")
+
+
+def add_pattern(m: dict, scope: str, target: str, field: str, pattern: str, reason: Optional[str] = None,
+                category: Optional[str] = None) -> Tuple[str, List[patterns.Item]]:
+    """Add a pattern (or give a listed one this reason) to a fetcher's or a category's pattern list, and say "added",
+    "updated" or "unchanged". A string value becomes a list. A fetcher's own list replaces its category's, so when it
+    has none yet the category's patterns are copied in first, and returned, so it keeps them."""
+    held = _existing_pattern_holder(m, scope, target)
+    where = pattern_location(scope, target)
+    own = held is not None and field in held
+    copied = [] if own or scope != "entry" else inherited_patterns(m, category, field)
+    items = _pattern_items(held, field, where) if own else list(copied)
     pattern, reason = pattern.strip(), (reason or "").strip() or None
+    outcome = "added"
     for i, item in enumerate(items):
         if item.pattern.lower() == pattern.lower():
             if reason is None or reason == item.reason:
-                return "unchanged"
-            items[i] = patterns.Item(item.pattern, reason)
-            holder[field] = [it.as_manifest() for it in items]
-            return "updated"
-    holder[field] = [*(it.as_manifest() for it in items), patterns.Item(pattern, reason).as_manifest()]
-    return "added"
+                return "unchanged", []
+            items[i], outcome = patterns.Item(item.pattern, reason), "updated"
+            break
+    else:
+        items.append(patterns.Item(pattern, reason))
+    _pattern_holder(m, scope, target)[field] = [it.as_manifest() for it in items]
+    return outcome, copied
 
 
-def remove_pattern(m: dict, scope: str, target: str, field: str, pattern: Optional[str] = None) -> int:
-    """Remove a pattern (every pattern when None) from a pattern list; the field goes once it is empty. How many went."""
+def remove_pattern(m: dict, scope: str, target: str, field: str, pattern: Optional[str] = None) -> Optional[int]:
+    """Remove a pattern (every pattern when None) from a pattern list, dropping the field once it is empty: how many
+    went, or None when the field or the pattern isn't there."""
     holder = _existing_pattern_holder(m, scope, target)
     if not holder or field not in holder:
-        return 0
+        return None
     if pattern is None:
-        return len(patterns.parse(holder.pop(field))[0]) or 1
+        return patterns.count(holder.pop(field))
     items = _pattern_items(holder, field, pattern_location(scope, target))
     kept = [it for it in items if it.pattern.lower() != pattern.strip().lower()]
     if len(kept) == len(items):
-        return 0
+        return None
     if kept:
         holder[field] = [it.as_manifest() for it in kept]
     else:
@@ -1103,8 +1118,10 @@ def validate_notes(manifest: dict, root: Path, fetchers=None, platforms=None) ->
             taking = [e.use for e, _ in entries if key in schemas[e.use] and key not in e.config]
             own = [e.use for e, _ in entries if key in schemas[e.use] and key in e.config]
             ignoring = [e.use for e, _ in entries if key not in schemas[e.use]]
-            n = len(patterns.parse(value)[0])
-            note = (f"platforms.{cat}.config.{key} ({n} pattern{'' if n == 1 else 's'}) applies to {len(taking)} of "
+            n = patterns.count(value)
+            held = "a ${env:} reference, refused" if patterns.is_reference(value) else \
+                f"{n} pattern{'' if n == 1 else 's'}"
+            note = (f"platforms.{cat}.config.{key} ({held}) applies to {len(taking)} of "
                     f"{len(entries)} {cat} entries: {', '.join(taking) or 'none'}")
             if own:
                 note += f"; replaced by their own list in {', '.join(own)}"
@@ -1143,6 +1160,8 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     secret_vars = secret_env_vars(fetchers.values(), platforms.values(), parsed.entries)
     if UNKNOWN_CONFIG_KEYS_ARE_ERRORS:
         errors += unknown_config_keys(parsed, fetchers, platforms)
+    # A bad category-wide pattern list is one mistake, reported once with the entries it reaches.
+    shared: Dict[Tuple[Optional[str], str], List[str]] = {}
 
     for i, entry in enumerate(parsed.entries):
         if entry.use not in fetchers:
@@ -1187,7 +1206,12 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
 
         # The references the runner would refuse, so a hand edit fails here rather than at run time.
         merged = merged_config(fetcher, spec, platform_cfg, entry, secret_vars)
-        errors += [f"{entry.use}: {problem}" for problem in merged.errors.values()]
+        for name, problem in merged.errors.items():
+            fdef = merged.schema.get(name)
+            if merged.sources.get(name) == "platform" and fdef is not None and fdef.type == patterns.TYPE:
+                shared.setdefault((platform_category(fetcher), problem), []).append(entry.use)
+            else:
+                errors.append(f"{entry.use}: {problem}")
         for j, t in enumerate(entry.targets):
             errors += [f"{entry.use} target[{j}]: {k} is {v!r}, but target fields aren't resolved, so ${{env:}} "
                        f"references don't work there" for k, v in t.values.items() if is_env_ref_attempt(v) or is_partial_env_ref(v)]
@@ -1245,6 +1269,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                 if secret.name not in entry.secrets:
                     errors.append(f"{entry.use}: missing secret '{secret.name}'")
 
+    errors += [f"platforms.{cat}.config: {problem} (for {', '.join(uses)})" for (cat, problem), uses in shared.items()]
     return errors
 
 

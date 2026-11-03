@@ -58,6 +58,7 @@ def test_a_list_holds_patterns_and_pattern_reason_pairs():
     ([{"pattern": "rg:a", "note": "x"}], "item 1 has note; an item takes only pattern and reason"),
     ([{"reason": "x"}], "item 1 has no pattern"),
     ([{"pattern": "rg:a", "reason": 5}], "item 1's reason is int"),
+    (["", "www"], "item 1 is empty"),
 ])
 def test_a_badly_shaped_value_is_refused(value, problem):
     assert any(p.startswith(problem) for p in patterns.problems(value, RESOURCE, False))
@@ -185,8 +186,18 @@ def test_a_platform_list_validates_and_the_note_names_who_takes_it():
 def test_a_pattern_one_fetcher_refuses_fails_validate_for_that_fetcher():
     m = manifest("azure_front_door_origins", "azure_dns_configuration", platform={"scope_exclusions": ["route:qa-*"]})
     assert api.validate(m, REPO_ROOT) == [
-        "azure_dns_configuration: config 'scope_exclusions': pattern 'route:qa-*' has the unknown prefix 'route:'; "
-        "this field takes no prefixes"]
+        "platforms.azure.config: config 'scope_exclusions': pattern 'route:qa-*' has the unknown prefix 'route:'; "
+        "this field takes no prefixes (for azure_dns_configuration)"]
+
+
+def test_a_bad_platform_list_is_one_error_and_its_reference_is_no_pattern():
+    m = manifest("azure_key_vault_configuration", "azure_alert_rules",
+                 platform={"resource_exclusions": "${env:AZURE_RESOURCE_EXCLUSIONS}"})
+    assert api.validate(m, REPO_ROOT) == [
+        f"platforms.azure.config: config 'resource_exclusions': {patterns.ENV_REF_REFUSAL} (for "
+        "azure_key_vault_configuration, azure_alert_rules)"]
+    [note] = api.validate_notes(m, REPO_ROOT)
+    assert note.startswith("platforms.azure.config.resource_exclusions (a ${env:} reference, refused) applies")
 
 
 def test_unknown_config_keys_fail_validate_with_a_suggestion():
@@ -232,16 +243,45 @@ def test_category_lists_exclude_fields_whose_prefixes_differ_between_fetchers():
 def test_add_and_remove_keep_order_and_reasons():
     m = api.init_manifest()
     api.set_platform_config(m, "azure", "resource_exclusions", "rg:a location:b")
-    assert api.add_pattern(m, "platform", "azure", "resource_exclusions", "id:/c", "why") == "added"
-    assert api.add_pattern(m, "platform", "azure", "resource_exclusions", "RG:A") == "unchanged"
-    assert api.add_pattern(m, "platform", "azure", "resource_exclusions", "rg:a", "boundary") == "updated"
+    assert api.add_pattern(m, "platform", "azure", "resource_exclusions", "id:/c", "why") == ("added", [])
+    assert api.add_pattern(m, "platform", "azure", "resource_exclusions", "RG:A") == ("unchanged", [])
+    assert api.add_pattern(m, "platform", "azure", "resource_exclusions", "rg:a", "boundary") == ("updated", [])
     held = m["run"]["platforms"]["azure"]["config"]
     assert held["resource_exclusions"] == [{"pattern": "rg:a", "reason": "boundary"}, "location:b",
                                            {"pattern": "id:/c", "reason": "why"}]
     assert api.remove_pattern(m, "platform", "azure", "resource_exclusions", "LOCATION:B") == 1
-    assert api.remove_pattern(m, "platform", "azure", "resource_exclusions", "rg:zzz") == 0
+    assert api.remove_pattern(m, "platform", "azure", "resource_exclusions", "rg:zzz") is None
     assert api.remove_pattern(m, "platform", "azure", "resource_exclusions") == 2
     assert "resource_exclusions" not in held
+    assert api.remove_pattern(m, "platform", "azure", "resource_exclusions") is None
+    api.set_platform_config(m, "azure", "resource_exclusions", [])
+    assert api.remove_pattern(m, "platform", "azure", "resource_exclusions") == 0
+
+
+def test_a_fetchers_first_pattern_starts_from_its_categorys_list():
+    m = api.init_manifest()
+    api.add_entry(m, "azure_alert_rules")
+    api.set_platform_config(m, "azure", "resource_exclusions", [{"pattern": "rg:a", "reason": "boundary"}, "rg:b"])
+    outcome, copied = api.add_pattern(m, "entry", "azure_alert_rules", "resource_exclusions", "rg:x", None, "azure")
+    assert (outcome, copied) == ("added", [patterns.Item("rg:a", "boundary"), patterns.Item("rg:b")])
+    assert m["run"]["fetchers"][0]["config"]["resource_exclusions"] == [
+        {"pattern": "rg:a", "reason": "boundary"}, "rg:b", "rg:x"]
+    assert api.add_pattern(m, "entry", "azure_alert_rules", "resource_exclusions", "rg:y", None, "azure") == (
+        "added", [])
+    m2 = api.init_manifest()
+    api.add_entry(m2, "azure_alert_rules")
+    api.set_platform_config(m2, "azure", "resource_exclusions", ["rg:a"])
+    assert api.add_pattern(m2, "entry", "azure_alert_rules", "resource_exclusions", "RG:A", None, "azure") == (
+        "unchanged", [])
+    assert "config" not in m2["run"]["fetchers"][0]
+
+
+def test_grammars_that_differ_only_in_prefix_order_are_one_grammar(tmp_path):
+    a = fetcher(tmp_path, exclusions=field(prefixes=("rg", "location")))
+    b = fetcher(tmp_path, exclusions=field(prefixes=("location", "rg")))
+    b.name = "t_other"
+    _, fields, mixed = api.pattern_fields("testcat", {"t_fetcher": a, "t_other": b}, {})
+    assert (list(fields), mixed) == (["exclusions"], [])
 
 
 def test_add_refuses_a_field_holding_a_reference():
@@ -291,6 +331,32 @@ def test_exclude_and_unexclude_write_the_manifest(m_path):
                                                     "to 1 of 2 azure entries: azure_key_vault_configuration")
 
 
+def test_exclude_on_a_fetcher_copies_the_platform_list_and_says_so(m_path):
+    cli("manifest", "exclude", "azure", "rg:a", "--reason", "boundary", "-f", m_path)
+    cli("manifest", "exclude", "azure", "rg:b", "-f", m_path)
+    r = runner.invoke(app, ["manifest", "exclude", "azure_key_vault_configuration", "rg:x", "-f", m_path])
+    assert r.exit_code == 0
+    assert ("Copied 2 platform patterns from platforms.azure.config.resource_exclusions so "
+            "azure_key_vault_configuration keeps them: rg:a, rg:b") in r.output
+    shown = cli("manifest", "show", "-f", m_path)[1]
+    assert next(e for e in shown["run"]["fetchers"] if e["use"] == "azure_key_vault_configuration")["config"] == {
+        "resource_exclusions": [{"pattern": "rg:a", "reason": "boundary"}, "rg:b", "rg:x"]}
+    assert cli("manifest", "exclude", "azure_key_vault_configuration", "rg:y", "-f", m_path)[1]["copied"] == []
+
+
+def test_unexclude_of_a_fetchers_last_pattern_says_it_inherits_again(m_path):
+    cli("manifest", "exclude", "azure", "rg:a", "-f", m_path)
+    cli("manifest", "set-config", "azure_key_vault_configuration", "resource_exclusions=rg:x", "-f", m_path)
+    r = runner.invoke(app, ["manifest", "unexclude", "azure_key_vault_configuration", "rg:x", "-f", m_path])
+    assert r.exit_code == 0
+    assert ("azure_key_vault_configuration has no resource_exclusions of its own now, so it takes "
+            "platforms.azure.config.resource_exclusions again: rg:a") in r.output
+    cli("manifest", "set-config", "azure_key_vault_configuration", "resource_exclusions=rg:x", "-f", m_path)
+    code, out = cli("manifest", "unexclude", "azure_key_vault_configuration", "--field", "resource_exclusions",
+                    "--all", "-f", m_path)
+    assert (code, out["removed"], out["inherits"]) == (0, 1, {"resource_exclusions": ["rg:a"]})
+
+
 def test_set_platform_config_writes_a_patterns_field_as_a_list(m_path):
     assert cli("manifest", "set-platform-config", "azure", "resource_exclusions=rg:a, location:b", "-f", m_path)[0] == 0
     shown = cli("manifest", "show", "-f", m_path)[1]
@@ -302,3 +368,19 @@ def test_describe_shows_what_a_patterns_field_takes_and_not_its_env_var(monkeypa
     out = runner.invoke(app, ["describe", "azure_key_vault_configuration"]).output
     [line] = [ln for ln in out.splitlines() if "resource_exclusions" in ln and "patterns" in ln]
     assert "takes=rg:, location: or id: patterns" in line and "AZURE_RESOURCE_EXCLUSIONS" not in line
+
+
+def test_the_tui_detail_shows_a_list_as_its_patterns():
+    pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
+    from rich.console import Console
+
+    from framework.tui import render
+
+    m = manifest("azure_key_vault_configuration", platform={"resource_exclusions": BOUNDARY})
+    view = api.effective_config(m, ["azure_key_vault_configuration"], REPO_ROOT)["azure_key_vault_configuration"]
+    console = Console(width=240, record=True)
+    console.print(render.entry_detail({"name": "azure_key_vault_configuration", "secrets": [], "config": []},
+                                      m["run"]["fetchers"][0], config_view=view))
+    shown = console.export_text()
+    assert "location:regioneast, location:regionwest, rg:rg-out-of-scope  (platforms.azure)" in shown
+    assert "'pattern'" not in shown
