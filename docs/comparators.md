@@ -177,6 +177,13 @@ The payload is `{metadata, results, summary}`, built by `run()`:
   expected), or its result isn't JSON, `api_failures` gains an `internal_error`
   entry, `results` is empty, every value in `summary_keys` is `null`, and the
   comparator exits 1 with `internal_error`.
+- A setting that only the inputs show is wrong, such as a type name the inputs
+  don't have, is `bad_config`: `check` raises
+  `ConfigError(message, results, summary)`. The file keeps those results and
+  that summary, `api_failures` gains a `bad_config` entry
+  (`operation: check settings`), and the comparator exits 1 with `bad_config`.
+  Check a setting that needs no input before calling `run()`, as other bad
+  settings are.
 - `results` holds verdicts only: enough to read each one, and never a copy of
   the input records. Those stay in their own files and evidence sets.
 - `summary` always carries `inputs_complete`. Counts follow the fetchers'

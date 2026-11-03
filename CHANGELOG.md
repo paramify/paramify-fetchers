@@ -401,7 +401,9 @@ schemas and the `paramify` CLI — not the internal code.
   incomplete, are compared and the result is partial (exit 1); a missing input,
   a file that isn't a complete envelope from this run, or an inventory with
   `records_included: false` makes every summary value `null`; the file is
-  written even when the index can't be read or the comparison fails. Ships with
+  written even when the index can't be read or the comparison fails. A `check`
+  that raises `ConfigError`, a setting the inputs show is wrong, keeps its
+  results and summary and exits 1 with `bad_config`. Ships with
   `comparators/_template/`, the credential-free `demo_policy_check`
   (`EVD-DEMO-POLICY-CHECK`, `examples/demo_comparator.yaml`),
   `docs/comparators.md`, `docs/comparators_guide.md` and
