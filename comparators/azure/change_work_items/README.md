@@ -75,6 +75,8 @@ comparison itself raises, the file is still written with every summary value
 `null`, and the comparator exits 1 with `internal_error`. A bad setting exits 1
 with `bad_config` before anything is read, except an approval type checked
 against the record types the work items selected, which exits 1 with
-`bad_config` after the file is written.
+`bad_config` after the file is written. When several apply, `internal_error`
+comes first, then `bad_config`, then `input_failed`: a partial input and a bad
+approval type exit `bad_config`, and `api_failures` holds both entries.
 
 See [`docs/comparators_guide.md`](../../../docs/comparators_guide.md).

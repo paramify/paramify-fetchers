@@ -465,8 +465,8 @@ def test_a_late_approval_on_a_type_that_needs_none_is_not_counted_late(tmp_path,
     ("Change Request, Hotfx", ["change request"], ["hotfx"], False),    # one of two misspelt
     ("none", [], ["none"], True),                                       # names no type, so it fails too
 ])
-def test_an_approval_type_that_is_not_a_record_type_is_listed(tmp_path, monkeypatch, run_env, setting, needed,
-                                                              unknown, approved_):
+def test_an_approval_type_that_is_not_a_record_type_fails_the_run(tmp_path, monkeypatch, run_env, setting,
+                                                                  needed, unknown, approved_):
     # Record types read from the work items: the comparison is written, then the run fails.
     monkeypatch.setenv(ci.INPUTS_ENV, str(index(tmp_path, [change("c", "2026-10-02T12:00:00Z")],
                                                 [item(1, type_="Change Request")], types=("Change Request", "Hotfix"))))

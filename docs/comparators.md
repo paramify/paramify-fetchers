@@ -184,6 +184,9 @@ The payload is `{metadata, results, summary}`, built by `run()`:
   (`operation: check settings`), and the comparator exits 1 with `bad_config`.
   Check a setting that needs no input before calling `run()`, as other bad
   settings are.
+- When several apply, the exit status is `internal_error`, then `bad_config`,
+  then `input_failed`: a partial input and a bad setting exit `bad_config`,
+  and `api_failures` holds both entries.
 - `results` holds verdicts only: enough to read each one, and never a copy of
   the input records. Those stay in their own files and evidence sets.
 - `summary` always carries `inputs_complete`. Counts follow the fetchers'
