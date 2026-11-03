@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import requests
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _VER_COMMON = REPO_ROOT / "fetchers" / "paramify" / "_shared" / "ver_common.py"
@@ -343,3 +344,122 @@ def test_old_fully_mitigated_and_false_positive_issues_are_reported_in_vdt_not_a
     # No AVI record pairs a Fully Mitigated or False Positive disposition with a 192-day rationale.
     for record in avi["acceptedVulnerabilities"] + mrh["acceptedVulnerabilities"]:
         assert record["vulnerabilityDetail"].get("finalDisposition") not in ("Fully Mitigated", "False Positive")
+
+
+# --- FRD-ODV: what can be overdue ---------------------------------------------
+# An overdue vulnerability is one the provider "intends to fully mitigate or
+# remediate but has not" (FRD-ODV). A False Positive is not present (FRD-FPV) and
+# a Fully Mitigated one needs no more mitigation, so neither is overdue, except a
+# Fully Mitigated KEV: VDR-TFR-KEV says KEVs SHOULD be remediated "even if the
+# vulnerability has been fully mitigated", a time frame FRD-ODV counts.
+
+
+def _due(issue: dict, days_ago: int, kev="unset") -> dict:
+    issue["dueDate"] = (_NOW - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    if kev != "unset":
+        issue["_kevListed"] = kev
+    return issue
+
+
+def test_fully_mitigated_non_kev_issue_past_due_is_not_overdue(vc):
+    status = vc._overdue_status(_due(_rated("OPEN", pain="N0"), 5, kev=False), now=_NOW)
+    assert status == {"isOverdue": False}
+
+
+def test_fully_mitigated_kev_issue_past_due_stays_overdue(vc):
+    status = vc._overdue_status(_due(_rated("OPEN", pain="N0"), 5, kev=True), now=_NOW)
+    assert status["isOverdue"] is True
+    assert "Known Exploited Vulnerabilities" in status["explanation"]
+    assert "VDR-TFR-KEV" in status["explanation"]
+    assert "not yet fully mitigated" not in status["explanation"]
+
+
+@pytest.mark.parametrize("kev", [None, "unset"])
+def test_fully_mitigated_issue_with_unknown_kev_status_stays_overdue(vc, kev):
+    status = vc._overdue_status(_due(_rated("OPEN", pain="N0"), 5, kev=kev), now=_NOW)
+    assert status["isOverdue"] is True
+    assert "could not be checked" in status["explanation"]
+
+
+@pytest.mark.parametrize("kev", [True, False, None])
+def test_false_positive_past_due_is_never_overdue(vc, kev):
+    issue = _due(_rated("OPEN", pain="N2", deviations=[_deviation("FALSE_POSITIVE")]), 5, kev=kev)
+    assert vc._overdue_status(issue, now=_NOW) == {"isOverdue": False}
+
+
+@pytest.mark.parametrize("pain", ["N1", "N3", None])
+def test_issue_with_risk_left_past_due_is_overdue_as_before(vc, pain):
+    status = vc._overdue_status(_due(_rated("OPEN", pain=pain), 5, kev=False), now=_NOW)
+    assert status["isOverdue"] is True
+    assert status["explanation"].endswith("not yet fully mitigated or remediated.")
+
+
+def test_fully_mitigated_kev_issue_not_yet_due_is_not_overdue(vc):
+    assert vc._overdue_status(_due(_rated("OPEN", pain="N0"), -5, kev=True), now=_NOW) == {"isOverdue": False}
+
+
+def test_detail_for_fully_mitigated_issue_agrees_with_itself(vc):
+    detail = vc.map_vulnerability_detail(_due(_rated("OPEN", pain="N0"), 400, kev=False))
+    assert detail["finalDisposition"] == "Fully Mitigated"
+    assert detail["overdueStatus"] == {"isOverdue": False}
+    assert "_kevListed" not in detail
+
+
+class _FakeParamify:
+    """Stands in for paramify_get: the full list, and the KEV subset for kev=true."""
+
+    def __init__(self, issues, kev_ids=(), kev_error=None):
+        self.issues, self.kev_ids, self.kev_error, self.calls = issues, set(kev_ids), kev_error, []
+
+    def __call__(self, base_url, token, path, params):
+        self.calls.append(dict(params))
+        if params.get("kev") == "true":
+            if self.kev_error:
+                raise self.kev_error
+            return {"issues": [i for i in self.issues if i["id"] in self.kev_ids]}
+        return {"issues": [dict(i) for i in self.issues]}
+
+
+def _api_issue(issue_id, pain):
+    return {"id": issue_id, "status": "OPEN", "painRating": pain, "deviations": [], "milestones": []}
+
+
+def _fetch(vc, monkeypatch, fake):
+    monkeypatch.setattr(vc, "paramify_get", fake)
+    failures = []
+    issues = vc.fetch_all_issues("https://api.test", "token", "project", "2026-10-01", "2026-10-31", failures)
+    return {i["id"]: i for i in issues}, failures
+
+
+def test_fetch_marks_kev_issues_when_a_fully_mitigated_issue_exists(vc, monkeypatch):
+    fake = _FakeParamify([_api_issue("a", "N0"), _api_issue("b", "N0"), _api_issue("c", "N2")], kev_ids={"b"})
+    issues, failures = _fetch(vc, monkeypatch, fake)
+    assert fake.calls == [{"projectId": "project"}, {"projectId": "project", "kev": "true"}]
+    assert {k: v["_kevListed"] for k, v in issues.items()} == {"a": False, "b": True, "c": False}
+    assert failures == []
+
+
+def test_fetch_skips_the_kev_call_without_a_fully_mitigated_issue(vc, monkeypatch):
+    fake = _FakeParamify([_api_issue("c", "N2"), _api_issue("d", None)])
+    issues, failures = _fetch(vc, monkeypatch, fake)
+    assert fake.calls == [{"projectId": "project"}]
+    assert all("_kevListed" not in i for i in issues.values()) and failures == []
+
+
+def test_failed_kev_call_is_recorded_and_keeps_fully_mitigated_issues_overdue(vc, monkeypatch):
+    fake = _FakeParamify([_api_issue("a", "N0")], kev_error=requests.exceptions.ConnectionError("down"))
+    issues, failures = _fetch(vc, monkeypatch, fake)
+    assert [f["query"] for f in failures] == ["kev_issues"]
+    assert issues["a"]["_kevListed"] is None
+    status = vc._overdue_status(_due(issues["a"], 5), now=_NOW)
+    assert status["isOverdue"] is True and "could not be checked" in status["explanation"]
+
+
+def test_unexpected_kev_response_is_recorded_not_read_as_no_kevs(vc, monkeypatch):
+    fake = _FakeParamify([_api_issue("a", "N0")])
+    real = fake.__call__
+    monkeypatch.setattr(vc, "paramify_get",
+                        lambda b, t, p, params: {"error": "x"} if params.get("kev") else real(b, t, p, params))
+    failures = []
+    issues = vc.fetch_all_issues("https://api.test", "token", "project", "2026-10-01", "2026-10-31", failures)
+    assert [f["query"] for f in failures] == ["kev_issues"] and issues[0]["_kevListed"] is None

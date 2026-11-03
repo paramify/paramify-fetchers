@@ -1098,6 +1098,21 @@ schemas and the `paramify` CLI — not the internal code.
   disposition, instead of appearing as accepted with the rationale "without full
   mitigation". Partially mitigated and unrated open issues are still accepted
   after 192 days, and accepted deviations still make an issue accepted.
+- **Paramify VER fetchers no longer mark Fully Mitigated or False Positive
+  issues overdue, except Fully Mitigated KEVs.** An overdue vulnerability is one
+  the provider "intends to fully mitigate or remediate but has not" (FedRAMP
+  definition). An open issue reported as `Fully Mitigated` past its `dueDate`
+  now reads `overdueStatus.isOverdue: false` instead of `true` with "not yet
+  fully mitigated or remediated", and so does an issue with an accepted
+  `FALSE_POSITIVE` deviation. VDR-TFR-KEV says a Known Exploited
+  Vulnerability should still be remediated "even if the vulnerability has been
+  fully mitigated", so a Fully Mitigated issue whose CVE IDs are in the CISA KEV
+  catalog stays overdue, with an explanation that says why. When a project has
+  a Fully Mitigated issue, the fetchers make one extra `GET /issues?kev=true`
+  call to find them; if that call fails it is recorded in `apiFailures` and
+  Fully Mitigated issues stay overdue, so no KEV is hidden. The `overdue`
+  counts in the Vulnerability Detail Report and Historical VER Activity
+  summaries change to match.
 - **Paramify VER fetchers report closed issues as `Remediated`.** A closed
   issue is no longer detected, which FedRAMP defines as a remediated
   vulnerability; "Fully Mitigated" means still detected at negligible impact.

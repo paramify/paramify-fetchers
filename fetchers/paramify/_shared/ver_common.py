@@ -62,11 +62,22 @@ DISPOSITION_REMEDIATED = "Remediated"
 DISPOSITION_PARTIALLY = "Partially Mitigated"
 DISPOSITION_FALSE_POSITIVE = "False Positive"
 
-# VER-TFR-MAV accepts a vulnerability that "is not or will not be fully
-# mitigated or remediated within 192 days of evaluation". A Fully Mitigated one
-# already is, and a False Positive is "not actually present", so neither is
-# accepted by age. Read from _final_disposition so both rules stay in step.
-NOT_TIME_ACCEPTED_DISPOSITIONS = (DISPOSITION_FULLY, DISPOSITION_FALSE_POSITIVE)
+# Dispositions that leave nothing to mitigate. A Fully Mitigated vulnerability
+# already is, and a False Positive is "not actually present" (FRD-FPV). So
+# neither is accepted by age (VER-TFR-MAV: "is not or will not be fully
+# mitigated or remediated within 192 days of evaluation") nor overdue (FRD-ODV:
+# "intends to fully mitigate or remediate but has not"), apart from the KEV
+# rule in _overdue_status. Read from _final_disposition so the rules agree.
+NO_FURTHER_RESPONSE_DISPOSITIONS = (DISPOSITION_FULLY, DISPOSITION_FALSE_POSITIVE)
+
+# Set by fetch_all_issues on each issue when the project has a Fully Mitigated
+# issue: True when its CVE IDs are in CISA's Known Exploited Vulnerabilities
+# catalog (GET /issues?kev=true), False when not, None when that lookup failed.
+# VDR-TFR-KEV: providers SHOULD remediate a KEV "according to the due dates in
+# the CISA Known Exploited Vulnerabilities Catalog (even if the vulnerability has
+# been fully mitigated)". FRD-ODV counts time frames "recommended or required
+# by FedRAMP", so a Fully Mitigated KEV can still be overdue.
+KEV_FLAG = "_kevListed"
 
 # Paramify records some issues with a Unix-epoch evaluationDate
 # ("1970-01-01T00:00:00.000Z"). An epoch (or otherwise implausibly ancient)
@@ -223,7 +234,33 @@ def fetch_all_issues(
             return False
         return start <= sd < end
 
-    return [i for i in issues if i.get("status") in OPEN_ISSUE_STATUSES or in_window(i)]
+    kept = [i for i in issues if i.get("status") in OPEN_ISSUE_STATUSES or in_window(i)]
+    # Only a Fully Mitigated issue's overdue status depends on KEV, so skip the
+    # extra call when there is none.
+    if any(_final_disposition(i) == DISPOSITION_FULLY for i in kept):
+        kev_ids = fetch_kev_issue_ids(base_url, token, project_id, api_failures)
+        for issue in kept:
+            issue[KEV_FLAG] = None if kev_ids is None else issue.get("id") in kev_ids
+    return kept
+
+
+def fetch_kev_issue_ids(
+    base_url: str, token: str, project_id: str, api_failures: List[Dict[str, Any]]
+) -> Optional[set]:
+    """Ids of the project's issues whose CVE IDs are in CISA's KEV catalog, from
+    GET /issues?kev=true. None (and an api_failures entry) when the call fails or
+    returns something other than an issues list, so no issue reads as not-KEV
+    by mistake."""
+    try:
+        payload = paramify_get(base_url, token, "/issues", {"projectId": project_id, "kev": "true"})
+    except requests.exceptions.RequestException as e:
+        api_failures.append({"query": "kev_issues", "type": type(e).__name__, "message": str(e)})
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("issues"), list):
+        api_failures.append({"query": "kev_issues", "type": "UnexpectedResponse",
+                             "message": "GET /issues?kev=true did not return an issues list"})
+        return None
+    return {i.get("id") for i in payload["issues"] if isinstance(i, dict) and i.get("id")}
 
 
 # --- Date handling ----------------------------------------------------------
@@ -313,7 +350,7 @@ def is_192_day_accepted(issue: Dict, now: Optional[datetime] = None) -> bool:
     happened, so the clock has not started."""
     if issue.get("status") not in OPEN_ISSUE_STATUSES:
         return False
-    if _final_disposition(issue) in NOT_TIME_ACCEPTED_DISPOSITIONS:
+    if _final_disposition(issue) in NO_FURTHER_RESPONSE_DISPOSITIONS:
         return False
     evaluated = effective_evaluation_date(issue)
     if evaluated is None:
@@ -380,20 +417,36 @@ def _final_disposition(issue: Dict) -> Optional[str]:
 
 
 def _overdue_status(issue: Dict, now: Optional[datetime] = None) -> Dict:
-    """INTERIM: open past dueDate => overdue (explanation required by schema)."""
+    """INTERIM: open past dueDate => overdue (explanation required by schema).
+
+    FRD-ODV: overdue means the provider "intends to fully mitigate or remediate
+    but has not", so a False Positive is never overdue and a Fully Mitigated
+    issue is not either, unless it is a KEV (VDR-TFR-KEV says it should still
+    be remediated) or its KEV status could not be read."""
     if issue.get("status") not in OPEN_ISSUE_STATUSES:
+        return {"isOverdue": False}
+    disposition = _final_disposition(issue)
+    kev = issue.get(KEV_FLAG)
+    if disposition == DISPOSITION_FALSE_POSITIVE or (disposition == DISPOSITION_FULLY and kev is False):
         return {"isOverdue": False}
     due = _parse_iso(issue.get("dueDate"))
     if due is None:
         return {"isOverdue": False}
     now = now or datetime.now(timezone.utc)
     if now > due:
+        if disposition != DISPOSITION_FULLY:
+            reason = "not yet fully mitigated or remediated."
+        elif kev:
+            reason = ("fully mitigated, but listed in the CISA Known Exploited Vulnerabilities "
+                      "catalog, so it should still be remediated (VDR-TFR-KEV).")
+        else:
+            reason = ("fully mitigated, but its Known Exploited Vulnerabilities status could not "
+                      "be checked, so it stays overdue until remediated (VDR-TFR-KEV).")
         return {
             "isOverdue": True,
             "explanation": (
                 f"Open past its remediation due date "
-                f"({due.astimezone(timezone.utc).strftime(TIMESTAMP_FORMAT)}); "
-                "not yet fully mitigated or remediated."
+                f"({due.astimezone(timezone.utc).strftime(TIMESTAMP_FORMAT)}); {reason}"
             ),
         }
     return {"isOverdue": False}
