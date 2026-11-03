@@ -916,16 +916,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
-- **`azure_entra_conditional_access_policies` 0.2.1: device filters,
-  authentication flows and insider and service principal risk narrow MFA
-  coverage.** In 0.2.0 a policy with any of these conditions still added its
-  client app types to `mfa_client_app_types_for_all_users_and_apps`; now it
-  doesn't, as with sign-in and user risk, platforms and locations. A transfer
-  method of `none` doesn't narrow. Each policy's conditions now carry
+- **`azure_entra_conditional_access_policies` 0.2.1: application filters,
+  device filters, authentication flows and insider and service principal risk
+  narrow MFA coverage.** In 0.2.0 a policy with any of these conditions still
+  added its client app types to `mfa_client_app_types_for_all_users_and_apps`;
+  now it doesn't, as with excluded apps, sign-in and user risk, platforms and
+  locations. An application filter narrows in either mode: in exclude mode it
+  leaves apps out, and in include mode it narrows the target. A transfer
+  method of `none` doesn't narrow. Each policy's `target_resources` now has
+  `application_filter`, and its conditions have
   `service_principal_risk_levels`, `insider_risk_levels`, `device_filter` and
   `authentication_flow_transfer_methods`. When the policies couldn't be read,
   the Graph client included, `authentication_strengths` is null rather than an
-  empty list.
+  empty list, and `authentication_strengths_readable` stays true.
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
   report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`

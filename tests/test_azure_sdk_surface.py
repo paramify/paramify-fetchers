@@ -2826,6 +2826,13 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/entra_conditional_access_policies — without it a device filter reads as absent",
     ),
     (
+        "msgraph.generated.models.conditional_access_applications",
+        "ConditionalAccessApplications",
+        ["application_filter"],
+        "azure/entra_conditional_access_policies — without it an application filter reads as "
+        "absent, so a policy that filters apps would count for MFA coverage",
+    ),
+    (
         "msgraph.generated.models.authentication_strength_policy",
         "AuthenticationStrengthPolicy",
         ["id", "display_name", "requirements_satisfied"],
