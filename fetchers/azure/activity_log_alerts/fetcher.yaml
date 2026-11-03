@@ -1,5 +1,5 @@
 name: azure_activity_log_alerts
-version: 0.2.0
+version: 0.3.0
 description: >
   Every activity log alert rule in the subscription — enabled state, scopes,
   description, notification action groups and the decoded conditions each rule fires
@@ -13,6 +13,32 @@ description: >
   reach a person. One evidence set answers all of it, rather than one fetcher per
   operation.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. Activity log alert rules carry the location Global, which only
+      location:global matches, and action groups and processing rules carry none,
+      so these need rg: or id:. A matching activity log alert rule, action group
+      or processing rule is listed under excluded with the pattern and left out
+      of every count and verdict, so both coverage maps and the routing counts
+      cover only in-scope rules. Routing is still worked out against every action
+      group and processing rule, so an in-scope rule routing through an excluded
+      action group, or muted by an excluded suppression rule, keeps its verdict.
+      A pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -71,3 +97,14 @@ evidence_set:
     (results.change_operations, site and slot operations) are true when an alert that
     reaches a person covers the operation, null when only one that might, false
     otherwise; change_operations_possibly_covered counts the nulls.
+
+    Resources the resource_exclusions patterns take out are listed under excluded
+    instead, each with the pattern that matched. The summary echoes
+    resource_exclusion_patterns, lists resource_exclusion_patterns_unmatched
+    (patterns that matched no activity log alert rule, action group or processing
+    rule, such as a mistyped name), and counts excluded_activity_log_alerts,
+    excluded_action_groups and excluded_processing_rules, and
+    in_scope_activity_log_alerts, in_scope_action_groups and
+    in_scope_processing_rules (0 alerts in scope when none was read or the
+    patterns took out every one, which a check can catch by requiring more than
+    0). The rest of the summary counts in-scope rules only.

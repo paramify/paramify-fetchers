@@ -27,6 +27,7 @@ from azure_rest import (  # noqa: E402
     table_retention,
     workspace_identity,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 NAME = "azure_sentinel_incidents"
 LOOKBACK_ENV = "SENTINEL_INCIDENT_LOOKBACK_DAYS"
@@ -737,11 +738,16 @@ def summarize(workspaces: List[Dict[str, Any]], discovered: bool) -> Dict[str, A
 
 
 def main() -> int:
+    exclusions = ResourceExclusions.from_env()
+
     # run_workspaces, except that summarize learns whether discovery failed, so finding none isn't read as none there.
     def per_workspace(client, subscription_id: str, collector) -> tuple:
+        excluded: List[Dict[str, Any]] = []
         failures = len(collector.failures)
-        found = discover_workspaces(client, subscription_id, collector)
+        found = discover_workspaces(client, subscription_id, collector, exclusions, excluded)
         discovered = len(collector.failures) == failures
+        exclusions.record_invalid(collector)
+        exclusions.warn_unmatched(logger)
         workspaces: List[Dict[str, Any]] = []
         without_sentinel: List[str] = []
         for ws in found:
@@ -751,9 +757,10 @@ def main() -> int:
             detail = collector.guard(f"collect({ws['name']})", lambda ws=ws: collect(client, ws, collector), default={})
             workspaces.append({**workspace_identity(ws), **(detail or {})})
         results = {"workspaces": workspaces, "workspace_filter": requested_workspaces() or None,
-                   "workspaces_without_sentinel": without_sentinel}
+                   "workspaces_without_sentinel": without_sentinel, "excluded": excluded}
         summary = {"workspaces_collected": len(workspaces), **summarize(workspaces, discovered),
-                   "workspaces_without_sentinel": len(without_sentinel)}
+                   "workspaces_without_sentinel": len(without_sentinel),
+                   **exclusions.summary(excluded, ("workspace",), {"workspaces": len(found)})}
         return results, summary
 
     return run_subscription(fetcher=NAME, logger=logger, collect=per_workspace)

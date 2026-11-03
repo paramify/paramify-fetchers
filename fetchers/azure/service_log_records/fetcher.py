@@ -23,6 +23,7 @@ from azure_rest import (  # noqa: E402
     run_subscription,
     table_missing,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 NAME = "azure_service_log_records"
 WEB_API = "2023-12-01"
@@ -103,6 +104,7 @@ TOTAL_RETENTION = "total_retention_in_days"
 ENTRA = "entra"
 SQL_LOGIN = "sql_login"
 STOPPED = "stopped"
+KINDS = ("app", "managed_instance")
 
 logger = logging.getLogger(NAME)
 
@@ -560,17 +562,25 @@ def _settings(client, resource_id: str, collector):
 
 
 def collect(client, subscription_id: str, collector) -> tuple:
+    """Excluded apps (with their slots), slots and instances get no further reads, so a workspace only they use isn't read."""
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
     days = int_config(LOOKBACK_ENV, DEFAULT_LOOKBACK_DAYS)
     sample = int_config(SAMPLE_ENV, DEFAULT_SAMPLE_SIZE)
     base = f"/subscriptions/{subscription_id}/providers"
-    sites = collector.guard("web.sites.list", lambda: client.list(f"{base}/Microsoft.Web/sites", WEB_API)) or []
+    listed = collector.guard("web.sites.list", lambda: client.list(f"{base}/Microsoft.Web/sites", WEB_API)) or []
+    sites, excluded = exclusions.split(listed, "app")
     for site in list(sites):
         slots = collector.guard(f"web.sites.slots.list({site.get('name')})",
                                 lambda site=site: client.list(f"{site['id']}/slots", WEB_API))
-        sites.extend(slots or [])
-    instances = collector.guard(
+        kept, out = exclusions.split(slots or [], "app")
+        sites.extend(kept)
+        excluded += out
+    instances, out = exclusions.split(collector.guard(
         "sql.managedInstances.list", lambda: client.list(f"{base}/Microsoft.Sql/managedInstances", SQL_API)
-    ) or []
+    ) or [], "managed_instance")
+    excluded += out
+    exclusions.warn_unmatched(logger)
     databases = {
         id_key(mi["id"]): collector.guard(
             f"sql.managedDatabases.list({mi.get('name')})",
@@ -612,8 +622,10 @@ def collect(client, subscription_id: str, collector) -> tuple:
         "lookback_days": days,
         "sample_size": sample,
         "queries": filled_queries(subscription_id, days, sample),
+        "excluded": sorted(excluded, key=lambda e: (e["kind"], id_key(e["id"]))),
     }
-    return results, summarize(apps, mis, dependencies, workspace_records, days)
+    summary = summarize(apps, mis, dependencies, workspace_records, days)
+    return results, {**summary, **exclusions.summary(excluded, KINDS, {"apps": len(apps), "managed_instances": len(mis)})}
 
 
 def main() -> int:

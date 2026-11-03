@@ -158,6 +158,33 @@ schemas and the `paramify` CLI — not the internal code.
     route needs it. Metric and smart detector rules carry the location `global`
     and action groups and processing rules none, so `location:` reaches only log
     search rules.
+  - `azure_activity_log_alerts` 0.3.0: activity log alert rules, action groups
+    and alert processing rules. Rules carry the location Global, so
+    `location:` reaches a rule only as `location:global`. Both coverage maps
+    and the routing counts cover in-scope rules; routing is still worked out
+    against every action group and processing rule, and another
+    subscription's action group is read only when an in-scope route needs it.
+  - `azure_log_analytics_deletion_rights` 0.2.0 and
+    `azure_log_analytics_query_audit` 0.2.0: workspaces, which then get no
+    role-assignment, diagnostic-setting or LAQueryLogs reads. An in-scope
+    workspace keeps every assignment that applies at it, and one auditing to an
+    excluded workspace is still queried there.
+  - `azure_log_storage_immutability` 0.2.0: storage accounts, whose containers
+    are then not read; an `id:` pattern can take a single log container out of
+    an in-scope account. `storage_accounts_scanned` counts in-scope accounts.
+  - `azure_sentinel_analytics_rules` 0.3.0, `azure_sentinel_automation_rules`
+    0.2.0, `azure_sentinel_data_sources` 0.3.0 and `azure_sentinel_incidents`
+    0.3.0: workspaces, taken out before their Sentinel onboarding is read, so
+    an excluded workspace gets no reads and isn't counted in
+    `workspaces_without_sentinel`. Incidents are never dropped by the entities
+    they name. The shared `run_workspaces` and `discover_workspaces` take the
+    exclusions for this.
+  - `azure_service_log_records` 0.2.0: App Service apps and slots, and SQL
+    managed instances, which get no diagnostic-setting, slot or database reads;
+    records about them count toward nothing. Workspaces are not taken out on
+    their own: an in-scope app sending to a workspace in an excluded group is
+    still read there. App dependency rows are keyed by Application Insights
+    component, not app, and are not split.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or

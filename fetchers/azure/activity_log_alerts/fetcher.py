@@ -20,6 +20,15 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from alert_routing import (  # noqa: E402
+    add_referenced_groups,
+    collect_action_groups,
+    collect_processing_rules,
+    matching_processing_rules,
+    route,
+    tri_state,
+)
+from arm_rest import arm_rest_client  # noqa: E402
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
@@ -32,20 +41,13 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
-from alert_routing import (  # noqa: E402
-    add_referenced_groups,
-    collect_action_groups,
-    collect_processing_rules,
-    route,
-    tri_state,
-)
-from arm_rest import arm_rest_client  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_activity_log_alerts")
 
@@ -104,6 +106,7 @@ CHANGE_OPERATIONS = {
 # category == ServiceHealth and properties.incidentType == Incident on one rule.
 SERVICE_HEALTH_CATEGORY = "servicehealth"
 SERVICE_HEALTH_INCIDENT_TYPE = "incident"
+KINDS = ("activity_log_alert", "action_group", "processing_rule")
 
 
 # --- projection: the only code that touches an azure-mgmt model ---
@@ -348,6 +351,9 @@ def main() -> int:
     alerts: list[dict] = []
     group_records: list[dict] = []
     processing_rules: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
+    excluded_processing: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     alerts_mgmt = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
@@ -361,7 +367,8 @@ def main() -> int:
                 "activity log alerts can exist; reporting status not_registered",
                 subscription_id,
             )
-        alerts = collect_activity_log_alerts(subscription_id, cred, collector)
+        alerts, excluded = exclusions.split(collect_activity_log_alerts(subscription_id, cred, collector),
+                                            "activity_log_alert")
         alerts_mgmt = provider_registration_status(collector, subscription_id, cred, "Microsoft.AlertsManagement")
         rest = collector.guard("arm_rest.ARMPipelineClient (init)", lambda: arm_rest_client(cred))
         if rest is not None:
@@ -377,10 +384,15 @@ def main() -> int:
                 )
                 processing_rules = apr["rules"] if apr else []
             by_id = {(g["id"] or "").lower(): g for g in group_records}
+            # Other subscriptions' groups are read only for in-scope alerts' routes and in-scope processing rules.
+            in_scope_processing, excluded_processing = exclusions.split(processing_rules, "processing_rule")
             referenced = [g for a in alerts for g in a["action_groups"]]
-            referenced += [g for p in processing_rules for g in p["added_action_group_ids"]]
+            referenced += [g for a in alerts for m in matching_processing_rules(a["scopes"], processing_rules)
+                           for g in m["rule"]["added_action_group_ids"]]
+            referenced += [g for p in in_scope_processing for g in p["added_action_group_ids"]]
             add_referenced_groups(rest, referenced, by_id, collector)
             alerts = [with_routing(a, by_id, processing_rules) for a in alerts]
+            processing_rules = in_scope_processing
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -389,6 +401,12 @@ def main() -> int:
                 "ambient Azure credential that can list subscriptions)"
             ),
         )
+
+    # Routing is resolved against every group and processing rule first, so an in-scope alert keeps its verdict.
+    exclusions.record_invalid(collector)
+    group_records, excluded_groups = exclusions.split(group_records, "action_group")
+    excluded += excluded_groups + excluded_processing
+    exclusions.warn_unmatched(logger)
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -407,8 +425,14 @@ def main() -> int:
             "processing_rules": sorted(processing_rules, key=lambda p: (p["id"] or "").lower()),
             "provider_registration_status": registration,
             "alerts_management_registration_status": alerts_mgmt,
+            "excluded": excluded,
         },
-        summary={**summarize(alerts), "provider_registration_status": registration},
+        summary={
+            **summarize(alerts),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, KINDS, {"activity_log_alerts": len(alerts), "action_groups": len(group_records),
+                                                   "processing_rules": len(processing_rules)}),
+        },
     )
 
     filename = (

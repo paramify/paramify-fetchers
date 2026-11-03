@@ -24,6 +24,7 @@ from azure_common import (
     write_evidence,
 )
 from entra_graph import graph_host
+from resource_exclusions import ResourceExclusions
 
 SI_API = "2025-09-01"
 # NRT and other rule kinds exist only in preview specs; bump when this one retires.
@@ -279,7 +280,10 @@ def sentinel_onboarded(client: AzureRestClient, workspace_id: str) -> bool:
     return any((s.get("name") or "").lower() == "default" for s in states)
 
 
-def discover_workspaces(client: AzureRestClient, subscription_id: str, collector: Collector) -> List[Dict[str, Any]]:
+def discover_workspaces(client: AzureRestClient, subscription_id: str, collector: Collector,
+                        exclusions: Optional[ResourceExclusions] = None,
+                        excluded: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """The (selected) workspaces with their Sentinel onboarding; ones `exclusions` takes out go to `excluded`, unread."""
     listed = collector.guard(
         "operationalinsights.workspaces.list",
         lambda: client.list(f"/subscriptions/{subscription_id}/providers/Microsoft.OperationalInsights/workspaces", LAW_API),
@@ -294,8 +298,13 @@ def discover_workspaces(client: AzureRestClient, subscription_id: str, collector
                 LookupError(f"workspace {name!r} not found in subscription {subscription_id}"),
             )
     selected = [ws for ws in listed if not wanted or any(_matches(ws, n) for n in wanted)]
+    selected = sorted(selected, key=lambda w: (w.get("id") or "").lower())
+    if exclusions:
+        selected, out_of_scope = exclusions.split(selected, "workspace")
+        if excluded is not None:
+            excluded.extend(out_of_scope)
     out = []
-    for ws in sorted(selected, key=lambda w: (w.get("id") or "").lower()):
+    for ws in selected:
         onboarded = collector.guard(
             f"securityinsights.onboardingStates.list({ws.get('name')})",
             lambda ws=ws: sentinel_onboarded(client, ws["id"]),
@@ -443,14 +452,21 @@ def run_workspaces(
     collect: Callable[[AzureRestClient, Dict[str, Any], Collector], Dict[str, Any]],
     summarize: Callable[[List[Dict[str, Any]]], Dict[str, Any]],
     sentinel_only: bool = True,
+    resource_exclusions: bool = False,
     session: Any = None,
 ) -> int:
-    """Find the subscription's (Sentinel) workspaces and collect each into one evidence file."""
+    """Find the subscription's (Sentinel) workspaces and collect each into one evidence file. With
+    resource_exclusions, workspaces its patterns match are listed under excluded and not read."""
 
     def per_workspace(client: AzureRestClient, subscription_id: str, collector: Collector) -> tuple:
+        exclusions = ResourceExclusions.from_env() if resource_exclusions else None
+        excluded: List[Dict[str, Any]] = []
+        if exclusions is not None:
+            exclusions.record_invalid(collector)
+        found = discover_workspaces(client, subscription_id, collector, exclusions, excluded)
         workspaces: List[Dict[str, Any]] = []
         without_sentinel: List[str] = []
-        for ws in discover_workspaces(client, subscription_id, collector):
+        for ws in found:
             if sentinel_only and not ws["sentinel_onboarded"]:
                 without_sentinel.append(ws["name"])
                 continue
@@ -461,6 +477,10 @@ def run_workspaces(
         if sentinel_only:
             results["workspaces_without_sentinel"] = without_sentinel
             summary["workspaces_without_sentinel"] = len(without_sentinel)
+        if exclusions is not None:
+            exclusions.warn_unmatched(logger)
+            results["excluded"] = excluded
+            summary.update(exclusions.summary(excluded, ("workspace",), {"workspaces": len(found)}))
         return results, summary
 
     return run_subscription(fetcher=fetcher, logger=logger, collect=per_workspace, session=session)
