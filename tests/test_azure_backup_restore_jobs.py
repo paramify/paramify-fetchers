@@ -29,12 +29,19 @@ def _collector():
     return Collector(logging.getLogger("test_backup_restore_jobs"))
 
 
+# Only workload jobs have a workload type: VM and Azure Files jobs carry a backup management type alone.
+JOB_SHAPES = {
+    "sql": {"job_type": "AzureWorkloadJob", "backup_management_type": "AzureWorkload", "workload_type": "SQLDataBase"},
+    "files": {"job_type": "AzureStorageJob", "backup_management_type": "AzureStorage"},
+    "vm": {"job_type": "AzureIaaSVMJob", "backup_management_type": "AzureIaasVM"},
+}
+
+
 def _job(name, status="Completed", start="2026-09-20T10:00:00Z", end="2026-09-20T10:45:00Z", duration="PT45M",
-         operation="Restore", entity="db-a", workload="SQLDataBase"):
+         operation="Restore", entity="db-a", kind="sql"):
     return ns(id=f"{VAULT}/backupJobs/{name}", name=name,
               properties=ns(operation=operation, status=status, start_time=start, end_time=end, duration=duration,
-                            entity_friendly_name=entity, job_type="AzureWorkloadJob", workload_type=workload,
-                            backup_management_type="AzureWorkload"))
+                            entity_friendly_name=entity, **JOB_SHAPES[kind]))
 
 
 def _details(bag):
@@ -56,12 +63,14 @@ def test_duration_seconds_reads_iso_and_timedelta(value, seconds):
     ("05/09/2026 15:08:12", "SQLDataBase", datetime(2026, 9, 5, 15, 8, 12, tzinfo=timezone.utc)),
     ("24/09/2026 15:08", "SQLDataBase", datetime(2026, 9, 24, 15, 8, tzinfo=timezone.utc)),
     ("09/24/2026 3:08:12 PM", "SQLDataBase", None),
-    # Month first with AM/PM, as Azure Files restores write it (az CLI's test_afs_cross_region_restore recording).
-    ("9/25/2026 6:36:19 AM", "AzureFileShare", datetime(2026, 9, 25, 6, 36, 19, tzinfo=timezone.utc)),
-    ("09/24/2026 3:08:12 PM", "AzureFileShare", datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
-    ("24/09/2026 15:08:12", "AzureFileShare", None),
+    # Month first with AM/PM, as Azure Files and VM restores write it (az CLI's afs and VM restore recordings).
+    ("9/25/2026 6:36:19 AM", "AzureStorage", datetime(2026, 9, 25, 6, 36, 19, tzinfo=timezone.utc)),
+    ("09/24/2026 3:08:12 PM", "AzureStorage", datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
+    ("24/09/2026 15:08:12", "AzureStorage", None),
+    ("9/23/2026 8:07:34 PM", "AzureIaasVM", datetime(2026, 9, 23, 20, 7, 34, tzinfo=timezone.utc)),
+    ("24/09/2026 15:08:12", "AzureIaasVM", None),
     # ISO 8601 reads for any workload.
-    ("2026-09-24T15:08:12Z", "VM", datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
+    ("2026-09-24T15:08:12Z", "AzureWorkload", datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
     ("2026-09-24T15:08:12Z", None, datetime(2026, 9, 24, 15, 8, 12, tzinfo=timezone.utc)),
     ("24/09/2026 3:08:12 PM", "SQLDataBase", None), ("soon", "SQLDataBase", None), (None, "SQLDataBase", None),
 ])
@@ -70,11 +79,11 @@ def test_recovery_point_time_reads_the_form_its_workload_writes_or_iso(text, wor
 
 
 @pytest.mark.parametrize("workload, expected", [
-    ("SQLDataBase", datetime(2026, 5, 3, 14, 0, tzinfo=timezone.utc)), ("AzureFileShare", None), ("VM", None),
+    ("SQLDataBase", datetime(2026, 5, 3, 14, 0, tzinfo=timezone.utc)), ("AzureStorage", None), ("AzureIaasVM", None),
     ("SAPHanaDatabase", None), (None, None),
 ])
 def test_an_ambiguous_time_reads_only_for_a_workload_whose_form_is_known(workload, expected):
-    # 03/05 is 3 May day first and 5 March month first; no real sample shows which a VM or SAP HANA restore writes.
+    # 03/05 is 3 May day first and 5 March month first; a 24-hour time isn't the VM or Azure Files form.
     assert backup.parse_recovery_point_time("03/05/2026 14:00:00", workload) == expected
 
 
@@ -240,9 +249,9 @@ def test_unread_details_on_a_succeeded_restore_leave_the_max_age_null():
     assert summary["succeeded_restores_without_recovery_point_time"] == 1
 
 
-def test_a_restore_whose_workload_form_is_unknown_keeps_its_text_and_is_counted_without_a_time():
-    vm = backup.restore_job_record(backup.project_job(_job("j-vm", workload="VM", entity="vm-a")),
-                                   {"Recovery Point Time in UTC": "03/05/2026 14:00:00"})
+def test_a_restore_whose_time_is_not_in_its_jobs_form_keeps_its_text_and_is_counted_without_a_time():
+    vm = backup.restore_job_record(backup.project_job(_job("j-vm", kind="vm", entity="vm-a")),
+                                   {"Recovery point time ": "03/05/2026 14:00:00"})
     assert (vm["recovery_point_time_text"], vm["recovery_point_time"], vm["recovery_point_age_hours"]) == (
         "03/05/2026 14:00:00", None, None)
     sql = backup.restore_job_record(backup.project_job(_job("j-sql")), {"Recovery Point Time in UTC": "20/09/2026 04:00:00"})
@@ -368,3 +377,24 @@ def test_real_sdk_models_project():
         "Restore (Full)", "2026-09-24T15:11:29Z", 181.8)
     assert (record["recovery_point_time"], record["recovery_point_age_hours"]) == ("2026-09-24T15:08:12Z", 0.05)
     assert record["restore_target"] == {"Target resource group": "rg-b"}
+
+
+@pytest.mark.parametrize("job_type, management, key, text, start, point, age", [
+    # Recorded in az CLI's test_backup_restore and test_afs_backup_restore: month first with AM/PM, in UTC.
+    ("AzureIaaSVMJob", "AzureIaasVM", "Recovery point time ", "9/23/2026 8:07:34 PM", "2026-09-24T01:00:00Z",
+     "2026-09-23T20:07:34Z", 4.87),
+    ("AzureStorageJob", "AzureStorage", "Recovery Point Time in UTC", "9/24/2026 11:56:21 AM", "2026-09-24T13:00:00Z",
+     "2026-09-24T11:56:21Z", 1.06),
+], ids=["vm", "azure_files"])
+def test_real_sdk_vm_and_files_restores_read_their_recovery_point_time(job_type, management, key, text, start,
+                                                                       point, age):
+    models = pytest.importorskip("azure.mgmt.recoveryservicesbackup.models")
+    job = models.JobResource({
+        "id": f"{VAULT}/backupJobs/j1", "name": "j1",
+        "properties": {"jobType": job_type, "backupManagementType": management, "operation": "Restore",
+                       "status": "Completed", "entityFriendlyName": "res-a", "startTime": start,
+                       "endTime": "2026-09-24T14:00:00Z", "extendedInfo": {"propertyBag": {key: text}}},
+    })
+    record = backup.restore_job_record(backup.project_job(job), backup.project_job_property_bag(job))
+    assert (record["workload_type"], record["backup_management_type"]) == (None, management)
+    assert (record["recovery_point_time"], record["recovery_point_age_hours"]) == (point, age)

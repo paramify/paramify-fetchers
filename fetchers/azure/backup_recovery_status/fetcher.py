@@ -69,10 +69,11 @@ FAILED_JOB_STATUS = "failed"
 RECOVERY_POINT_TIME_KEYS = ("recoverypointtime", "recoverypointtimeinutc")
 RESTORE_TYPE_KEYS = ("jobtype", "restoretype")
 RESTORE_TARGET_KEYS = ("restoredestination",)
-# By job workload: SQL in a VM writes day first in 24-hour form, Azure Files month first with AM/PM; others ISO only.
+# By workload type, else backup management type: SQL writes day first 24-hour, VM and Azure Files month first AM/PM.
 RECOVERY_POINT_TIME_FORMATS = {
     "sqldatabase": ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"),
-    "azurefileshare": ("%m/%d/%Y %I:%M:%S %p",),
+    "azureiaasvm": ("%m/%d/%Y %I:%M:%S %p",),
+    "azurestorage": ("%m/%d/%Y %I:%M:%S %p",),
 }
 _ISO_DURATION = re.compile(r"^P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$")
 _URL_QUERY = re.compile(r"(https?://[^\s?\"'<>]+)\?[^\s\"'<>]*", re.IGNORECASE)
@@ -578,15 +579,14 @@ def _bag_value(bag: dict, keys: tuple) -> str | None:
     return None
 
 
-def parse_recovery_point_time(text: str | None, workload_type: str | None) -> datetime | None:
-    """The property bag's recovery point time in UTC: ISO-8601, or the form RECOVERY_POINT_TIME_FORMATS gives the
-    job's workload; None for any other text."""
+def parse_recovery_point_time(text: str | None, job_kind: str | None) -> datetime | None:
+    """The property bag's recovery point time in UTC: ISO-8601 or job_kind's RECOVERY_POINT_TIME_FORMATS form, else None."""
     if not text:
         return None
     parsed = parse_time(text)
     if parsed is not None:
         return parsed
-    for fmt in RECOVERY_POINT_TIME_FORMATS.get(str(workload_type or "").strip().lower(), ()):
+    for fmt in RECOVERY_POINT_TIME_FORMATS.get(str(job_kind or "").strip().lower(), ()):
         try:
             return datetime.strptime(text.strip(), fmt).replace(tzinfo=timezone.utc)
         except ValueError:
@@ -606,7 +606,8 @@ def restore_job_record(job: dict, bag: dict | None) -> dict:
     """One restore job joined to its details (`bag` None: the read failed); a recovery point after the start is null."""
     start = parse_time(job.get("start_time"))
     point_text = _bag_value(bag, RECOVERY_POINT_TIME_KEYS) if bag is not None else None
-    point = parse_recovery_point_time(point_text, job.get("workload_type"))
+    # Only workload jobs (SQL, SAP HANA) have a workload type; VM and Azure Files jobs have a backup management type.
+    point = parse_recovery_point_time(point_text, job.get("workload_type") or job.get("backup_management_type"))
     if point is not None and start is not None and point > start:
         point = None
     status = str(job.get("status") or "").strip().lower()
