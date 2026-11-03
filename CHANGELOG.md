@@ -473,14 +473,21 @@ schemas and the `paramify` CLI — not the internal code.
   choosing the field whose prefixes take the pattern; a category-wide write is
   refused for a field its fetchers declare with different prefixes, such as
   `scope_exclusions`. A fetcher's first pattern starts from a copy of its
-  category's list, which `exclude` names, so the fetcher keeps those patterns;
-  when `unexclude` removes a fetcher's last pattern, it names the category
-  patterns the fetcher takes again. `set-config` and `set-platform-config` take a
+  category's list, which `exclude` names, so the fetcher keeps those patterns.
+  When `unexclude` removes a fetcher's last pattern and its category lists
+  patterns, the fetcher keeps an empty list, so the category's patterns don't
+  come back to it, and `unexclude` says so. `set-config` and `set-platform-config` take a
   comma-separated list. `describe` shows what a pattern list takes instead of its
   env var. `validate` adds a note for each category-wide list, naming the entries
   that take it, the ones with their own list, and the ones without the field
   (`--json` carries them as `notes`). The TUI shows a list as its patterns and
   leaves it out of the entry editor, which would save it back as one string.
+  A list or a map given to a config field that isn't `type: patterns`, such as
+  a category-wide list reaching a fetcher that declares the key a string, fails
+  `validate` and the run instead of reaching the fetcher as Python text. A
+  pattern list the manifest leaves unset reaches the fetcher as an empty
+  variable, so a `.env` file can't fill it, and `passthrough_env` doesn't carry
+  it.
 - **A string config field can be a `${env:VAR}` reference.** The runner
   resolves it the way it resolves a secret. An unset or empty variable gives way
   to the next value down (platform config, then the default; an error for a
