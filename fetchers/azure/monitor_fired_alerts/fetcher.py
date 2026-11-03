@@ -410,11 +410,16 @@ def collect_subscription(client, subscription_id: str, collector: Collector) -> 
         "excluded": excluded,
     }
     alerts_listed = len(alerts) + sum(1 for e in excluded if e["kind"] == "alert")
+    counts = exclusions.summary(excluded, ("alert_rule", "alert"), {"alert_rules": len(rules), "alerts": len(alerts)})
+    # Unknown, like the other rule and alert counts, when a list wasn't read.
+    if not rules_read:
+        counts.update(excluded_alert_rules=None, in_scope_alert_rules=None)
+    if not alerts_read:
+        counts.update(excluded_alerts=None, in_scope_alerts=None)
     summary = {
         **summarize(alerts, rules, total, alerts_read, rules_read, alerts_listed=alerts_listed),
         "provider_registration_status": registration,
-        **exclusions.summary(excluded, ("alert_rule", "alert"), {
-            "alert_rules": len(rules), "alerts": len(alerts) if alerts_read else None}),
+        **counts,
     }
     if exclusions:
         # Azure's total also counts alerts on excluded resources and can't be split by resource.

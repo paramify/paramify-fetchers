@@ -456,11 +456,18 @@ def identity_principal_ids(cred, scopes: list[str]) -> dict[str, str | None]:
 
 def reaching_identity_scopes(scopes: list[str], grants: list[dict], exclusions: ResourceExclusions,
                              principals: dict) -> frozenset:
-    """Excluded identity scopes whose identity holds an active grant at an in-scope scope, or couldn't be read:
-    a grant on such an identity controls access into the boundary, so it stays in scope."""
-    reaching = {g.get("principal_id") for g in grants if g.get("principal_id") and not scope_excluded(g, exclusions)}
-    return frozenset(s.lower() for s in scopes
-                     if s.lower() not in principals or principals[s.lower()] in reaching)
+    """Excluded identity scopes whose identity holds an active grant at an in-scope scope, or on an identity already
+    kept, or couldn't be read: a grant on such an identity controls access into the boundary, so it stays in scope.
+    Repeated until nothing changes, so a chain of identities reaching in stays whole."""
+    held = [(g["principal_id"], (g.get("scope") or "").lower(), scope_excluded(g, exclusions))
+            for g in grants if g.get("principal_id")]
+    keep: frozenset = frozenset()
+    while True:
+        reaching = {principal for principal, scope, excluded in held if not excluded or scope in keep}
+        grown = frozenset(s.lower() for s in scopes if s.lower() not in principals or principals[s.lower()] in reaching)
+        if grown == keep:
+            return keep
+        keep = grown
 
 
 def split_by_scope(records: list[dict], kind: str, exclusions: ResourceExclusions,
@@ -716,7 +723,7 @@ def authorization_client(subscription_id, cred, collector: Collector):
 
 def collect_role_assignments(
     subscription_id, client, collector: Collector
-) -> tuple[list[dict], list[dict], dict]:
+) -> tuple[list[dict] | None, list[dict] | None, dict]:
     """One role_definitions.list() to name the roles, two role_assignments lists.
 
     The definitions call comes first because an assignment references its role only by
@@ -733,7 +740,7 @@ def collect_role_assignments(
     second set is what it returns minus the first, by assignment id, rather than a
     re-classification by scope string, so the two sets partition the listing exactly
     whatever a scope string looks like. Returns (at_scope, below_subscription,
-    role_names).
+    role_names); a list that couldn't be read is None.
     """
     scope = f"/subscriptions/{subscription_id}"
 
@@ -760,10 +767,10 @@ def collect_role_assignments(
         ]
 
     assignments = collector.guard(
-        "authorization.role_assignments.list_for_subscription", _list_assignments, default=[]
+        "authorization.role_assignments.list_for_subscription", _list_assignments
     )
 
-    at_scope_ids = {str(a.get("id") or "").lower() for a in assignments}
+    at_scope_ids = {str(a.get("id") or "").lower() for a in assignments or []}
 
     def _list_below_subscription():
         # ItemPaged, like the call above. No filter: every assignment in the
@@ -780,19 +787,18 @@ def collect_role_assignments(
     below = collector.guard(
         "authorization.role_assignments.list_for_subscription(unfiltered)",
         _list_below_subscription,
-        default=[],
     )
     logger.info(
         "Collected %d role assignment(s) at subscription scope or above and %d below it, "
         "against %d role definition(s)",
-        len(assignments),
-        len(below),
+        len(assignments or []),
+        len(below or []),
         len(role_names),
     )
     # Sorted by ARM id so a re-run against unchanged access is byte-stable.
     return (
-        sorted(assignments, key=lambda a: a.get("id") or ""),
-        sorted(below, key=lambda a: a.get("id") or ""),
+        None if assignments is None else sorted(assignments, key=lambda a: a.get("id") or ""),
+        None if below is None else sorted(below, key=lambda a: a.get("id") or ""),
         role_names,
     )
 
@@ -882,8 +888,8 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    assignments: list[dict] = []
-    below_subscription: list[dict] = []
+    assignments: list[dict] | None = None
+    below_subscription: list[dict] | None = None
     pim: dict = {"available": None, "schedules": None, "eligible": None, "policies": None, "notes": []}
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
@@ -913,6 +919,8 @@ def main() -> int:
             ),
         )
 
+    listed = assignments is not None and below_subscription is not None
+    assignments, below_subscription = assignments or [], below_subscription or []
     # Each grant takes its PIM schedule from the full schedule list before grants at excluded scopes leave.
     add_pim_fields(assignments + below_subscription, pim["schedules"])
     keep: frozenset = frozenset()
@@ -930,6 +938,13 @@ def main() -> int:
         excluded += excluded_eligible
     exclusions.warn_unmatched(logger)
     everything = assignments + below_subscription
+    counts = exclusions.summary(excluded, ("role_assignment", "eligible_role_assignment"), {
+        "role_assignments": len(everything), "eligible_role_assignments": len(pim["eligible"] or [])})
+    # Unknown, not none, when a list wasn't read.
+    if not listed:
+        counts.update(excluded_role_assignments=None, in_scope_role_assignments=None)
+    if pim["eligible"] is None:
+        counts.update(excluded_eligible_role_assignments=None, in_scope_eligible_role_assignments=None)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -960,9 +975,7 @@ def main() -> int:
                 pim["policies"],
                 pim["available"],
             ),
-            **exclusions.summary(excluded, ("role_assignment", "eligible_role_assignment"), {
-                "role_assignments": len(everything),
-                "eligible_role_assignments": None if pim["eligible"] is None else len(pim["eligible"])}),
+            **counts,
         },
     )
 

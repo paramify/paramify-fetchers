@@ -1,5 +1,5 @@
 name: azure_change_provenance
-version: 0.2.0
+version: 0.2.1
 description: >
   Every control-plane change to the subscription's resources, resource groups and
   the subscription itself over the last 14 days (Azure Resource Graph change
@@ -175,4 +175,5 @@ evidence_set:
     set), resource_exclusion_patterns_unmatched (patterns that matched no
     change's target, such as a mistyped name), excluded_changes (how many the
     patterns took out; no other count includes them) and in_scope_changes (how
-    many stayed, the same as total_changes).
+    many stayed, the same as total_changes); both are null when a change table
+    couldn't be read.

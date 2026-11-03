@@ -397,6 +397,10 @@ def main() -> int:
     in_scope, excluded = split_changes(attributed, exclusions)
     exclusions.warn_unmatched(logger)
     existing = None if groups is None else {g.lower() for g in groups}
+    counts = exclusions.summary(excluded, ("change",), {"changes": len(in_scope)})
+    # Unknown, not none, when a change table wasn't read.
+    if set(sources) != set(CHANGE_TABLES):
+        counts.update(excluded_changes=None, in_scope_changes=None)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -413,7 +417,7 @@ def main() -> int:
         },
         summary={
             **summarize(in_scope, deployments, at_cap, existing),
-            **exclusions.summary(excluded, ("change",), {"changes": len(in_scope)}),
+            **counts,
         },
     )
 

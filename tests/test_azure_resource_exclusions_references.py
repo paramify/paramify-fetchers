@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -108,7 +109,8 @@ def _cp_records():
 def run_cp(monkeypatch, tmp_path, patterns):
     changes, deployments = _cp_records()
     monkeypatch.setattr(cp, "pinned_credential", lambda sub: object())
-    monkeypatch.setattr(cp, "collect_changes", lambda sub, cred, days, collector: (changes, {}))
+    monkeypatch.setattr(cp, "collect_changes", lambda sub, cred, days, collector: (
+        changes, {t: {} for t in cp.CHANGE_TABLES}))
     monkeypatch.setattr(cp, "collect_deployments", lambda sub, cred, collector: (deployments, [], ["rg-in", "rg-out"]))
     monkeypatch.delenv("AZURE_PIPELINE_PRINCIPALS", raising=False)
     monkeypatch.delenv("AZURE_CHANGE_LOOKBACK_DAYS", raising=False)
@@ -161,6 +163,21 @@ def test_a_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     assert code == 1
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
     assert evidence["summary"]["total_changes"] == 7
+
+
+def test_change_provenance_exclusion_counts_are_null_when_a_change_table_was_refused(monkeypatch, tmp_path):
+    def query(client, sub, q):
+        if q.startswith("resourcecontainerchanges"):
+            raise PermissionError("(AuthorizationFailed) 403")
+        return {"rows": [], "total_records": 0, "pages": 1}
+
+    monkeypatch.setattr(cp, "pinned_credential", lambda sub: object())
+    monkeypatch.setattr(cp, "resource_graph_client", lambda cred: object())
+    monkeypatch.setattr(cp, "query_all", query)
+    monkeypatch.setattr(cp, "collect_deployments", lambda sub, cred, collector: ([], [], []))
+    code, evidence = _run(cp, monkeypatch, tmp_path, "rg:rg-out", "azure_change_provenance")
+    assert code == 1
+    assert (evidence["summary"]["excluded_changes"], evidence["summary"]["in_scope_changes"]) == (None, None)
 
 
 # --- rbac_role_assignments ---
@@ -263,10 +280,10 @@ MSI = "providers/Microsoft.ManagedIdentity/userAssignedIdentities"
 IDENTITIES = tuple(f"{OUT_RG}/{MSI}/{n}" for n in ("id-reach", "id-idle", "id-unread"))
 
 
-def _run_identity_grants(monkeypatch, tmp_path, patterns):
+def _run_identity_grants(monkeypatch, tmp_path, patterns, extra=(), principals=None):
     reach, idle, unread = IDENTITIES
     at_scope, below, schedules, eligible = _ra_records()
-    below += [
+    below += [*extra,
         _grant("b-on-reach", reach, ra.OWNER_ROLE_ID, "p10"),  # controls an identity that holds a role in rg-in
         _grant("b-reach-in", IN_RG, READER, "pid-reach"),
         _grant("b-on-idle", idle, ra.OWNER_ROLE_ID, "p11"),  # its identity holds roles only in the excluded group
@@ -276,7 +293,7 @@ def _run_identity_grants(monkeypatch, tmp_path, patterns):
     eligible += [_eligible("e-on-reach", reach, ra.OWNER_ROLE_ID, "p13")]
     reads: list = []
     monkeypatch.setattr(ra, "identity_principal_ids", lambda cred, scopes: reads.extend(scopes) or {
-        reach.lower(): "pid-reach", idle.lower(): "pid-idle"})
+        reach.lower(): "pid-reach", idle.lower(): "pid-idle", **(principals or {})})
     monkeypatch.setattr(ra, "credential", lambda: object())
     monkeypatch.setattr(ra, "provider_registration_status", lambda *a: "registered")
     monkeypatch.setattr(ra, "authorization_client", lambda *a: object())
@@ -318,6 +335,49 @@ def test_rbac_an_id_pattern_on_a_reaching_identity_counts_as_matched_though_its_
     assert "matched nothing" not in caplog.text
     kept = [a["name"] for a in evidence["results"]["role_assignments_below_subscription"] if "kept_by_identity_rule" in a]
     assert kept == ["b-on-reach"]
+
+
+def test_rbac_an_identity_that_can_act_as_a_kept_identity_keeps_its_grants_too(monkeypatch, tmp_path):
+    reach, idle, _ = IDENTITIES
+    chain, chain_idle = (f"{OUT_RG}/{MSI}/{n}" for n in ("id-chain", "id-chain-idle"))
+    code, evidence, _ = _run_identity_grants(monkeypatch, tmp_path, "rg:rg-out", extra=[
+        _grant("b-on-chain", chain, ra.OWNER_ROLE_ID, "p20"),
+        _grant("b-chain-on-reach", reach, ra.OWNER_ROLE_ID, "pid-chain"),  # acts as id-reach, which holds a role in rg-in
+        _grant("b-on-chain-idle", chain_idle, ra.OWNER_ROLE_ID, "p21"),
+        _grant("b-chain-idle-on-idle", idle, ra.OWNER_ROLE_ID, "pid-chain-idle"),
+    ], principals={chain.lower(): "pid-chain", chain_idle.lower(): "pid-chain-idle"})
+    assert code == 0
+    below = {a["name"]: a for a in evidence["results"]["role_assignments_below_subscription"]}
+    assert (below["b-on-chain"]["kept_by_identity_rule"], below["b-chain-on-reach"]["kept_by_identity_rule"]) == (
+        "rg:rg-out", "rg:rg-out")
+    assert {"b-on-chain-idle", "b-chain-idle-on-idle"} <= {e[1] for e in _excluded(evidence)}
+
+
+class _RefusedAssignments:
+    """An authorization client whose role definitions read and whose role-assignment lists are refused."""
+
+    class role_definitions:
+        @staticmethod
+        def list(scope):
+            return []
+
+    class role_assignments:
+        @staticmethod
+        def list_for_subscription(filter=None):
+            raise PermissionError("(AuthorizationFailed) 403")
+
+
+def test_rbac_exclusion_counts_are_null_when_a_list_was_refused(monkeypatch, tmp_path):
+    monkeypatch.setattr(ra, "credential", lambda: object())
+    monkeypatch.setattr(ra, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(ra, "authorization_client", lambda *a: _RefusedAssignments())
+    monkeypatch.setattr(ra, "collect_pim", lambda *a: {
+        "available": None, "schedules": None, "eligible": None, "policies": None, "notes": []})
+    code, evidence = _run(ra, monkeypatch, tmp_path, "rg:rg-out", "azure_rbac_role_assignments")
+    assert code == 1
+    assert {k: v for k, v in evidence["summary"].items() if k.startswith(("excluded_", "in_scope_"))} == {
+        "excluded_role_assignments": None, "in_scope_role_assignments": None,
+        "excluded_eligible_role_assignments": None, "in_scope_eligible_role_assignments": None}
 
 
 def test_rbac_reads_no_identity_without_patterns_or_identity_grants(monkeypatch, tmp_path):
@@ -387,6 +447,21 @@ def test_a_custom_role_leaves_only_when_every_assignable_scope_is_excluded(monke
             summary["owner_equivalent_custom_roles"]) == (1, ["r-mixed"], 0)
 
 
+def test_custom_role_exclusion_counts_are_null_when_the_list_was_refused(monkeypatch, tmp_path):
+    def refused(scope):
+        raise PermissionError("(AuthorizationFailed) 403")
+
+    client = types.SimpleNamespace(role_definitions=types.SimpleNamespace(list=refused))
+    module = types.ModuleType("azure.mgmt.authorization")
+    module.AuthorizationManagementClient = lambda **kwargs: client  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "azure.mgmt.authorization", module)
+    monkeypatch.setattr(cr, "credential", lambda: object())
+    monkeypatch.setattr(cr, "provider_registration_status", lambda *a: "registered")
+    code, evidence = _run(cr, monkeypatch, tmp_path, "rg:rg-out", "azure_rbac_custom_roles")
+    assert code == 1
+    assert (evidence["summary"]["excluded_custom_roles"], evidence["summary"]["in_scope_custom_roles"]) == (None, None)
+
+
 # --- monitor_fired_alerts ---
 
 RULE_IN = f"{IN_RG}/providers/Microsoft.Insights/metricAlerts/cpu-in"
@@ -435,8 +510,21 @@ class _Alerts:
         return RAW_RULES if path.endswith("/metricAlerts") else []
 
 
-def run_fa(monkeypatch, tmp_path, patterns):
-    client = _Alerts()
+class _Refusing(_Alerts):
+    """Refuses the one list whose path ends with `refused`."""
+
+    def __init__(self, refused):
+        super().__init__()
+        self.refused = refused
+
+    def list(self, path, api_version, params=None):
+        if path.endswith(self.refused):
+            raise PermissionError("(AuthorizationFailed) 403")
+        return super().list(path, api_version, params)
+
+
+def run_fa(monkeypatch, tmp_path, patterns, client=None):
+    client = client or _Alerts()
     monkeypatch.setattr(azure_rest, "REPO_ROOT", tmp_path / "repo")
     monkeypatch.setattr(azure_rest, "resolve_subscription",
                         lambda c: {"subscription_id": "s1", "subscription_source": "env"})
@@ -496,3 +584,18 @@ def test_alerts_on_excluded_resources_leave_every_count_and_their_rules_fires(mo
     assert (summary["alerts_fired"], summary["all_alerts_listed"], summary["alerts_summary_total"]) == (3, True, None)
     assert (summary["alert_rules_listed"], summary["rules_that_fired"], summary["enabled_rules_never_fired"],
             summary["rules_fired_not_listed"]) == (2, 1, 1, 0)
+
+
+@pytest.mark.parametrize("refused, unknown, known", [
+    ("/metricAlerts", "alert_rules", {"excluded_alerts": 1, "in_scope_alerts": 4}),
+    ("/Microsoft.AlertsManagement/alerts", "alerts", {"excluded_alert_rules": 1, "in_scope_alert_rules": 2}),
+])
+def test_fired_alert_exclusion_counts_are_null_when_their_list_was_refused(monkeypatch, tmp_path, refused, unknown,
+                                                                          known):
+    code, evidence, _ = run_fa(monkeypatch, tmp_path, "rg:rg-out", _Refusing(refused))
+    summary = evidence["summary"]
+    assert code == 1
+    assert (summary[f"excluded_{unknown}"], summary[f"in_scope_{unknown}"]) == (None, None)
+    assert {k: summary[k] for k in known} == known
+    if unknown == "alert_rules":
+        assert summary["alert_rules_listed"] is None

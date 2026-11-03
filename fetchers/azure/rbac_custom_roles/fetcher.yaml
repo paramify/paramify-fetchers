@@ -1,5 +1,5 @@
 name: azure_rbac_custom_roles
-version: 0.2.0
+version: 0.2.1
 description: >
   Every custom Azure RBAC role definition in the subscription with its assignable
   scopes and its full permission set — control-plane actions and notActions, data-plane
@@ -91,4 +91,5 @@ evidence_set:
     scope of a role whose scopes are all resource groups or resources, such as a
     mistyped name), excluded_custom_roles (how many the patterns took out; no
     other count includes them) and in_scope_custom_roles (how many stayed, the
-    same as custom_role_definitions).
+    same as custom_role_definitions); both are null when the role list couldn't
+    be read.
