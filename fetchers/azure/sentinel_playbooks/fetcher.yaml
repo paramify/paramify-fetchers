@@ -1,7 +1,7 @@
 name: azure_sentinel_playbooks
-version: 0.2.0
+version: 0.3.0
 description: >-
-  Shows which Logic Apps Microsoft Sentinel runs as playbooks, whether they disable accounts, isolate devices or notify people, and whether an active automation rule runs them.
+  Shows which Logic Apps Microsoft Sentinel runs as playbooks, what they do to accounts, devices and people, whether an active automation rule runs them, and how their recent runs ended.
 category: azure
 
 supports_targets: true
@@ -37,11 +37,23 @@ target_schema:
       Comma-separated workspace names or resource ids whose automation rules are
       read. Optional — omit to read every Sentinel workspace in the subscription.
 
+config_schema:
+  run_lookback_days:
+    type: integer
+    required: false
+    default: 90
+    env: SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS
+    description: >
+      Each playbook's runs that started within this many days are read, from 1
+      to 90. Logic Apps keep 90 days of run history by default, so a larger
+      value is clamped to 90 with a warning.
+
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
 ksis:
   - KSI-IAM-SUS      # Responding to suspicious activity — automated account containment
   - KSI-MLA-RVL      # Reviewing logs — who Sentinel notifies
+  - KSI-INR-RIR      # Reviewing incident response — whether each playbook runs and how its last run ended
 
 evidence_set:
   reference_id: EVD-AZURE-SENTINEL-PLAYBOOKS
@@ -49,7 +61,7 @@ evidence_set:
   instructions: |
     Script: azure/sentinel_playbooks/fetcher.py
 
-    Access: Reader on the subscription (or Logic App Reader and Microsoft Sentinel Reader). Optional: Reader on other subscriptions whose Logic Apps an automation rule runs; without it, those playbooks are listed as unresolved and the run succeeds.
+    Access: Reader on the subscription (or Logic App Reader and Microsoft Sentinel Reader, plus Logic Apps Standard Reader for Standard workflows). Optional: Reader on other subscriptions whose Logic Apps an automation rule runs; without it, those playbooks are listed as unresolved and the run succeeds.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
@@ -57,8 +69,9 @@ evidence_set:
     - GET Microsoft.SecurityInsights/automationRules (per Sentinel workspace) — which automation rules run which Logic Apps, and whether each rule is active
     - GET Microsoft.Logic/workflows — every Consumption Logic App in the subscription with its definition
     - GET {Logic App id} (per Logic App an automation rule runs that the list didn't return, or listed without a definition) — its definition; a Standard workflow is read at Microsoft.Web/sites/{app}/workflows and its definition from workflow.json
+    - GET Microsoft.Logic/workflows/{name}/runs (per playbook) — its runs in the lookback, newest first; a Standard workflow's runs come from Microsoft.Web/sites/{app}/hostruntime/runtime/webhooks/workflow/api/management/workflows/{name}/runs
 
-    Output: azure_sentinel_playbooks_<subscription>.json — each playbook with its state, triggers, connectors, what it does to accounts, devices and incidents, whom it emails, and the automation rules that run it.
+    Output: azure_sentinel_playbooks_<subscription>.json — each playbook with its state, triggers, connectors, what it does to accounts, devices and incidents, whom it emails, the automation rules that run it, and its recent runs.
 
     Summary fields:
 
@@ -66,7 +79,7 @@ evidence_set:
     - logic_apps_scanned — Number of Consumption Logic Apps listed in the subscription
     - playbooks — Number of playbooks: Logic Apps triggered by the Sentinel connector (on an incident, alert or entity), plus any Logic App an automation rule runs, Standard (single-tenant) workflows included
     - standard_playbooks — Number of playbooks that are Standard workflows; these are found only when an automation rule runs them
-    - playbooks_without_definition — List of the resource ids of playbooks whose definition wasn't read; what each of them does reads null
+    - playbooks_without_definition — List of the resource ids of playbooks whose definition wasn't read; the triggers, connectors and capabilities of a playbook listed here read null
     - automation_rule_references_unresolved — List of the resource ids (lowercased) of Logic Apps an automation rule runs that couldn't be read: one in a subscription or resource group the credential can't read (401, 403, 404 or SubscriptionNotFound, each also given a note), or one since deleted; any other error fails the run
 
     Which playbooks are live?
@@ -78,3 +91,12 @@ evidence_set:
     - live_account_containment_playbooks — Number of live playbooks with an action that disables a user (accountEnabled false), revokes sign-in sessions, confirms a user compromised or dismisses a risky user, matched on each action's inputs, nested branches included; null when live_playbooks_without_definition is above 0
     - live_notifying_playbooks — Number of live playbooks that send email (Office 365, Outlook, SendGrid, SMTP or Gmail) or a Teams message; null when live_playbooks_without_definition is above 0
     - notification_recipients — List of the static email addresses live playbooks send to; addresses built from the incident when the playbook runs aren't included; null when live_playbooks_without_definition is above 0
+
+    Do live playbooks run, and do their runs succeed?
+    - run_lookback_days — Days of run history read for each playbook (SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS, default 90, at most 90)
+    - playbooks_run_history_unread — List of the resource ids of playbooks whose runs couldn't be read (401, 403 or 404, each also given a note; any other error fails the run); their run fields read null
+    - live_playbooks_run_history_unread — Number of live playbooks whose runs couldn't be read, so how their runs ended is unknown
+    - live_playbooks_last_run_succeeded — Number of live playbooks whose newest run in the lookback succeeded; null when live_playbooks_run_history_unread is above 0
+    - live_playbooks_last_run_failed — Number of live playbooks whose newest run in the lookback failed, timed out, was aborted or faulted; null when live_playbooks_run_history_unread is above 0
+    - live_playbooks_without_runs — Number of live playbooks with no run in the lookback; null when live_playbooks_run_history_unread is above 0
+    - live_playbook_failed_runs — Number of runs of live playbooks in the lookback that failed, timed out, were aborted or faulted; null when live_playbooks_run_history_unread is above 0
