@@ -157,6 +157,20 @@ def test_admin_without_registration_row_counts_as_admin_without_mfa():
     assert summary["admin_users_without_registration_details"] == 1
 
 
+def test_all_users_coverage_leaves_out_users_the_report_omits():
+    users = mfa_status.join_users(
+        USERS + [_user("u-gone", "disabled@contoso.test", enabled=False)], REGISTRATIONS, {}
+    )
+    summary = mfa_status.summarize(users)
+    # u-unreg and the disabled u-gone have no report row: unknown, not without MFA.
+    assert summary["users_with_registration_details"] == 2
+    assert summary["users_without_registration_details"] == 2
+    assert summary["mfa_capable_users"] == 1
+    assert summary["mfa_coverage_percentage_all_users"] == 50
+    # Enabled users without a row still count as uncovered.
+    assert summary["mfa_coverage_percentage"] == 33 and summary["enabled_users_without_mfa"] == 2
+
+
 def test_registration_report_admin_flag_still_counts():
     """A role this fetcher does not list (or a PIM-eligible one) is still an admin
     when the registration report says so."""
@@ -274,10 +288,8 @@ def test_graph_status_text_is_classified_like_arm(status, code):
     assert mfa_status.classify_failure_code(failures) == code
 
 
-def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, monkeypatch):
-    """End to end through main(): users and registrations read, directoryRoles 403s."""
+def _mfa_graph():
     graph = FakeGraph(roles=[], role_members={}, group_members={})
-    graph.directory_roles.error = DENIED
     graph.organization = Builder([ns(id="t-1", display_name="Contoso", verified_domains=[])])
     graph.users = Builder([ns(id="u-ga", user_principal_name="ga@contoso.test", account_enabled=True)])
     graph.reports = ns(
@@ -285,6 +297,11 @@ def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, 
             user_registration_details=Builder([ns(id="u-ga", is_mfa_capable=True, is_admin=True)])
         )
     )
+    return graph
+
+
+def _run_mfa_main(graph, tmp_path, monkeypatch):
+    """main() against a fake Graph client; returns its exit code and the evidence."""
 
     async def fake_with_graph_client(collector, cred, work, default=None):
         return await work(graph)
@@ -307,9 +324,17 @@ def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, 
     status_file = tmp_path / "status.json"
     monkeypatch.setenv("FETCHER_STATUS_FILE", str(status_file))
 
-    assert mfa_status.main() == 1
+    code = mfa_status.main()
+    return code, json.loads((tmp_path / "azure_entra_mfa_status_t-1.json").read_text())
 
-    evidence = json.loads((tmp_path / "azure_entra_mfa_status_t-1.json").read_text())
+
+def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, monkeypatch):
+    """End to end through main(): users and registrations read, directoryRoles 403s."""
+    graph = _mfa_graph()
+    graph.directory_roles.error = DENIED
+    code, evidence = _run_mfa_main(graph, tmp_path, monkeypatch)
+
+    assert code == 1
     summary = evidence["summary"]
     assert summary["admin_role_membership_readable"] is False
     assert summary["admin_users"] is None
@@ -318,4 +343,26 @@ def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, 
     (user,) = evidence["results"]["users"]
     assert user["is_admin"] is True  # the report's flag is still honored
     assert user["privileged_directory_roles"] is None
-    assert json.loads(status_file.read_text())["code"] == "not_authorized"
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+
+
+def test_a_failed_users_read_leaves_every_figure_null(tmp_path, monkeypatch):
+    graph = _mfa_graph()
+    graph.users.error = DENIED
+    code, evidence = _run_mfa_main(graph, tmp_path, monkeypatch)
+
+    assert code == 1
+    summary = evidence["summary"]
+    assert summary.pop("admin_role_membership_readable") is True
+    assert set(summary.values()) == {None}
+
+
+def test_a_failed_registration_read_leaves_its_figures_null(tmp_path, monkeypatch):
+    graph = _mfa_graph()
+    graph.reports.authentication_methods.user_registration_details.error = DENIED
+    code, evidence = _run_mfa_main(graph, tmp_path, monkeypatch)
+
+    assert code == 1
+    summary = evidence["summary"]
+    assert all(summary[k] is None for k in mfa_status.REGISTRATION_FIGURES)
+    assert summary["total_users"] == 1 and summary["enabled_users"] == 1 and summary["admin_users"] == 0

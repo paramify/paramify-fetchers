@@ -43,6 +43,7 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-IAM-ELP
+  - KSI-CNA-DFP   # which privileges each custom role defines, and whether any is broad or can escalate
 
 evidence_set:
   reference_id: EVD-AZURE-RBAC-CUSTOM-ROLES
