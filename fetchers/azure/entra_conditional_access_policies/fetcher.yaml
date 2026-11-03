@@ -1,5 +1,5 @@
 name: azure_entra_conditional_access_policies
-version: 0.2.0
+version: 0.2.1
 description: >-
   Lists every Conditional Access policy with whether it's enforced, who and what it covers or excludes, what it requires or blocks, and whether it requires phishing-resistant MFA.
 category: azure

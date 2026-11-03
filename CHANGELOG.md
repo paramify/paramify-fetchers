@@ -567,8 +567,7 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_entra_conditional_access_policies` reads unread policies as unknown, not
   absent.** When the policies can't be read, every summary figure except
   `authentication_strengths_readable` is null; `total_policies` read 0 and
-  `mfa_required_for_admin_portals` read false before. A failed strength read, or
-  policies that couldn't be read (the Graph client included), leave
+  `mfa_required_for_admin_portals` read false before. A failed strength read leaves
   `authentication_strengths` null rather than an empty list.
 
 - **`azure_entra_conditional_access_policies` shows MFA coverage split across
@@ -576,12 +575,9 @@ schemas and the `paramify` CLI — not the internal code.
   and another for mobile and desktop apps; no single policy then covers every
   client. The new summary list `mfa_client_app_types_for_all_users_and_apps` holds
   the client app types those policies cover together, counting only policies where
-  MFA has no alternative grant control and no sign-in, user, insider or service
-  principal risk, platform, location, device filter, authentication flow or app
+  MFA has no alternative grant control and no risk, platform, location or app
   exclusion narrows them. Each policy also carries
-  `requires_mfa_without_alternative`, and its conditions carry
-  `service_principal_risk_levels`, `insider_risk_levels`, `device_filter` and
-  `authentication_flow_transfer_methods`.
+  `requires_mfa_without_alternative`.
 
 - **`azure_entra_risky_users` 0.3.0: risk history and the alerts behind each
   risk.** Users at open risk or with a high risk level now carry their risk
@@ -920,6 +916,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_conditional_access_policies` 0.2.1: device filters,
+  authentication flows and insider and service principal risk narrow MFA
+  coverage.** In 0.2.0 a policy with any of these conditions still added its
+  client app types to `mfa_client_app_types_for_all_users_and_apps`; now it
+  doesn't, as with sign-in and user risk, platforms and locations. A transfer
+  method of `none` doesn't narrow. Each policy's conditions now carry
+  `service_principal_risk_levels`, `insider_risk_levels`, `device_filter` and
+  `authentication_flow_transfer_methods`. When the policies couldn't be read,
+  the Graph client included, `authentication_strengths` is null rather than an
+  empty list.
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
   report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`
