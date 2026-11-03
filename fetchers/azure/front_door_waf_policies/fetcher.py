@@ -30,6 +30,7 @@ from frontdoor import (  # noqa: E402
     select_front_door,
     waf_policy_record,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_front_door_waf_policies")
 
@@ -106,14 +107,20 @@ def main() -> int:
         )
 
     front_door, skipped_by_sku = select_front_door(projected)
+    # A policy linked to an excluded profile's security policy still reads associated.
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    front_door, excluded = exclusions.split(sorted(front_door, key=lambda p: (p["id"] or "").lower()), "waf_policy")
+    exclusions.warn_unmatched(logger)
     policies = sorted((waf_policy_record(p, definitions) for p in front_door), key=lambda r: (r["id"] or "").lower())
 
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"waf_policies": policies, "provider_registration_status": registration},
-        summary={**summarize(policies, skipped_by_sku), "provider_registration_status": registration},
+        results={"waf_policies": policies, "provider_registration_status": registration, "excluded": excluded},
+        summary={**summarize(policies, skipped_by_sku), "provider_registration_status": registration,
+                 **exclusions.summary(excluded, ("waf_policy",), {"waf_policies": len(policies)})},
     )
     filename = f"azure_front_door_waf_policies_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

@@ -45,6 +45,7 @@ from frontdoor import (  # noqa: E402
     rule_sets_with_rules,
     wire,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import (  # noqa: E402
     query_all,
     resource_graph_client,
@@ -66,6 +67,7 @@ PRODUCTION_TAG_ENV = "AZURE_PRODUCTION_APP_TAG"
 LOOKBACK_ENV = "AZURE_FRONT_DOOR_METRICS_LOOKBACK_DAYS"
 SCOPE_EXCLUSIONS_ENV = "AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS"
 EXCLUDED_KINDS = ("custom_domain", "endpoint", "route", "origin_group", "app")
+RESOURCE_KINDS = ("profile", "production_app")
 DEFAULT_LOOKBACK_DAYS = 7
 # "Last hour" must fall in the window's last this-many hours; older data leaves it unknown.
 LAST_HOUR_BUCKETS = 3
@@ -1155,6 +1157,15 @@ def collect_origin_metrics(subscription_id, cred, collector: Collector, profiles
     return metrics
 
 
+def split_profiles(collected: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict], list[dict]]:
+    """(in-scope profiles, excluded profiles, their excluded entries). A Front Door profile is global, so location:
+    reaches it only as location:global."""
+    _, out = exclusions.split([c["profile"] for c in collected], "profile", location=lambda p: "global")
+    out_keys = {arm_key(e["id"]) for e in out}
+    return ([c for c in collected if arm_key(c["profile"]["id"]) not in out_keys],
+            [c for c in collected if arm_key(c["profile"]["id"]) in out_keys], out)
+
+
 def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[dict], dict]:
     cdn = cdn_client(subscription_id, cred, collector)
     cdn_origins = cdn_client(subscription_id, cred, collector, api_version=ORIGIN_API_VERSION)
@@ -1208,6 +1219,8 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     collected: list[dict] = []
+    outside: list[dict] = []
+    outside_groups: list[dict] = []
     skipped_by_sku: dict = {}
     regions_by_id: dict = {}
     regions_by_host: dict = {}
@@ -1218,6 +1231,10 @@ def main() -> int:
     metrics_by_profile: dict = {}
     scoped_profiles: list[dict] = []
     days = lookback_days(collector)
+    resources = ResourceExclusions.from_env()
+    resources.record_invalid(collector)
+    boundary: list[dict] = []
+    # Scope exclusions apply to the profiles left in scope.
     exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV, kinds=("route",))
     exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
     window = metrics_window(days, datetime.now(timezone.utc))
@@ -1227,13 +1244,16 @@ def main() -> int:
         if registration == NOT_REGISTERED:
             logger.warning("Microsoft.Cdn is not registered on subscription %s", subscription_id)
         collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector)
-        origins = [o for c in collected for g in c["origin_groups"] for o in g["origins_projected"]]
+        collected, outside, boundary = split_profiles(collected, resources)
+        # Excluded profiles' origins are still looked up: in-scope apps' regional twins are worked out against them.
+        origins = [o for c in collected + outside for g in c["origin_groups"] for o in g["origins_projected"]]
         ids = sorted({arm_key(i) for o in origins for i in (o["azure_origin_id"], (o["private_link"] or {}).get("target_id")) if i})
         hosts = sorted({str(o["host_name"]).lower() for o in origins if o["host_name"]})
         graph = graph_client(cred, collector)
         regions_by_id, regions_by_host = lookup_regions(graph, collector, ids, hosts)
         # Scope first, so access restrictions are read only for apps an in-scope group reaches.
         scoped_profiles = [profile_groups(c, regions_by_id, regions_by_host, exclusions) for c in collected]
+        outside_groups = [g for c in outside for g in profile_groups(c, regions_by_id, regions_by_host, ScopeExclusions())["groups"]]
         out_of_scope = set().union(*(sp["excluded_groups"] for sp in scoped_profiles))
         in_scope_origins = [o for c in collected for g in c["origin_groups"] if arm_key(g["id"]) not in out_of_scope
                             for o in g["origins_projected"]]
@@ -1269,16 +1289,24 @@ def main() -> int:
             "origin_count": sum(g["total_origins"] for g in in_scope),
         })
 
-    profile_fdids = {arm_key(p["id"]): p.get("front_door_id") for p in profiles}
+    # An excluded profile's Front Door id is still one of the subscription's, not an unknown one.
+    profile_fdids = {arm_key(p["id"]): p.get("front_door_id") for p in profiles + [c["profile"] for c in outside]}
     # Only an in-scope group's profile has its WAF judged, so only it can vouch for admitting its Front Door id.
+    fronting = fronting_profiles(groups, profile_fdids, sites_by_host)
     all_app_origins = app_service_origin_records(all_groups, profile_fdids, sites_by_key, sites_by_host, plans_by_key,
-                                                 configs_by_key, subscription_id,
-                                                 fronting_profiles(groups, profile_fdids, sites_by_host))
+                                                 configs_by_key, subscription_id, fronting)
     app_origins = [r for r in all_app_origins if arm_key(r["origin_group_id"]) not in excluded_groups]
+    # Excluded profiles' groups still put an in-scope app behind Front Door and give it regional twins.
+    outside_app_origins = app_service_origin_records(outside_groups, profile_fdids, sites_by_key, sites_by_host,
+                                                     plans_by_key, configs_by_key, subscription_id, fronting)
     production_tag = (os.environ.get(PRODUCTION_TAG_ENV) or "").strip() or None
-    apps, excluded_apps = exclude_apps(production_apps(sites_by_key, subscription_id, production_tag, groups, app_origins,
-                                                       plans_by_key), all_app_origins, app_origins)
-    excluded += excluded_apps
+    apps, boundary_apps = resources.split(production_apps(
+        sites_by_key, subscription_id, production_tag, groups + outside_groups, app_origins + outside_app_origins,
+        plans_by_key), "production_app")
+    boundary += boundary_apps
+    resources.warn_unmatched(logger)
+    apps, excluded_apps = exclude_apps(apps, all_app_origins, app_origins + outside_app_origins)
+    excluded = boundary + excluded + excluded_apps
     # Metric series are matched against every group, so an out-of-scope group's series don't read as unmatched.
     all_health, unmatched = origin_health_records(all_groups, metrics_by_profile, window[1])
     health = [r for r in all_health if arm_key(r["origin_group_id"]) not in excluded_groups]
@@ -1295,7 +1323,9 @@ def main() -> int:
                  **summarize_health(health, unmatched, days, window),
                  **exclusions.summary(excluded, EXCLUDED_KINDS, {
                      **in_scope_totals([sp["in_scope"] for sp in scoped_profiles]),
-                     "origin_groups": len(groups), "apps": len(apps)})},
+                     "origin_groups": len(groups), "apps": len(apps)}),
+                 # in_scope_apps already counts the production apps left after both kinds of exclusion.
+                 **resources.summary(excluded, RESOURCE_KINDS, {"profiles": len(profiles)})},
     )
     exclusions.warn_unmatched(logger)
     filename = f"azure_front_door_origins_{sanitize_for_filename(subscription_id or 'unknown')}.json"

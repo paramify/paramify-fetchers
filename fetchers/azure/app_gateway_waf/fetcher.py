@@ -24,6 +24,7 @@ from azure_common import (  # noqa: E402
     model_attr,
     resource_group_from_id,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_app_gateway_waf")
 
@@ -275,6 +276,12 @@ def summarize(gateways: list[dict], listeners: list[dict], policies: list[dict])
 
 
 def build(raw_gateways: list, collector: Collector, subscription_id, cred) -> tuple[dict, dict]:
+    # The completeness check already ran against the full list; listeners follow their gateway.
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    raw_gateways, excluded = exclusions.split(
+        raw_gateways, "application_gateway", resource_id=lambda g: model_attr(g, "id"),
+        location=lambda g: model_attr(g, "location"), resource_group=lambda g: None, name=lambda g: model_attr(g, "name"))
     policy_models = index_by_id(collect_policies(subscription_id, cred, collector))
     unresolved_by_id = {}
     if cred is not None:
@@ -301,11 +308,17 @@ def build(raw_gateways: list, collector: Collector, subscription_id, cred) -> tu
         gateways.append(gateway_record(gateway, records))
     gateways.sort(key=lambda r: arm_id_key(r["id"]))
     listeners.sort(key=lambda r: arm_id_key(r["id"]))
-    policy_list = sorted(policies.values(), key=lambda p: arm_id_key(p["id"]))
-    return (
-        {"application_gateways": gateways, "listeners": listeners, "waf_policies": policy_list},
-        summarize(gateways, listeners, policy_list),
-    )
+    # Listener verdicts above used every policy; an excluded policy only leaves the list and its counts.
+    policy_list, excluded_policies = exclusions.split(
+        sorted(policies.values(), key=lambda p: arm_id_key(p["id"])), "waf_policy")
+    excluded += excluded_policies
+    exclusions.warn_unmatched(logger)
+    results = {"application_gateways": gateways, "listeners": listeners, "waf_policies": policy_list,
+               "excluded": excluded}
+    summary = {**summarize(gateways, listeners, policy_list), **exclusions.summary(
+        excluded, ("application_gateway", "waf_policy"), {
+            "application_gateways": len(gateways), "listeners": len(listeners), "waf_policies": len(policy_list)})}
+    return results, summary
 
 
 if __name__ == "__main__":

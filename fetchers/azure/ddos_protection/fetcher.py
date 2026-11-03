@@ -29,6 +29,7 @@ from azure_common import (  # noqa: E402
     vnet_id_of,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_ddos_protection")
 
@@ -272,6 +273,19 @@ def build_records(
     return by_id(plans), by_id(vnets), by_id(ips)
 
 
+def build_scoped(raw_plans, raw_vnets, raw_ips, raw_nics, raw_lbs, exclusions: ResourceExclusions):
+    """Verdicts are worked out against every plan, VNet and public IP; excluded ones then leave the lists and counts."""
+    plans, vnets, ips = build_records(raw_plans, raw_vnets, raw_ips, raw_nics, raw_lbs)
+    plans, out_plans = exclusions.split(plans, "ddos_protection_plan", resource_group=lambda r: None)
+    ips, out_ips = exclusions.split(ips, "public_ip", resource_group=lambda r: None)
+    in_vnets, out_vnets = exclusions.split(vnets, "virtual_network", resource_group=lambda r: None)
+    # A VNet's attached-IP counts cover only the in-scope IPs; each IP's own protection verdict is unchanged.
+    plan_ids = {arm_id_key(p["id"]) for p in raw_plans}
+    by_id = {arm_id_key(v["id"]): v for v in raw_vnets}
+    vnets = [virtual_network_record(by_id[arm_id_key(v["id"])], plan_ids, ips) for v in in_vnets]
+    return plans, vnets, ips, out_plans + out_vnets + out_ips
+
+
 # --- collection (lazy azure imports) ---
 
 def collect(subscription_id, cred, collector: Collector):
@@ -349,7 +363,10 @@ def main() -> int:
             ),
         )
 
-    plans, vnets, ips = build_records(*raw)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    plans, vnets, ips, excluded = build_scoped(*raw, exclusions)
+    exclusions.warn_unmatched(logger)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -359,8 +376,14 @@ def main() -> int:
             "virtual_networks": vnets,
             "public_ip_addresses": ips,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(plans, vnets, ips), "provider_registration_status": registration},
+        summary={
+            **summarize(plans, vnets, ips),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("ddos_protection_plan", "virtual_network", "public_ip"), {
+                "ddos_protection_plans": len(plans), "virtual_networks": len(vnets), "public_ips": len(ips)}),
+        },
     )
 
     filename = f"azure_ddos_protection_{sanitize_for_filename(subscription_id or 'unknown')}.json"

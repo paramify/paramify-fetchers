@@ -27,6 +27,10 @@ def _split(pattern: str) -> tuple[Optional[str], str]:
     return (kind, _key(kind, glob)) if sep else (None, _key(None, pattern))
 
 
+def plural(kind: str) -> str:
+    return kind[:-1] + "ies" if kind.endswith("y") and kind[-2:-1] not in "aeiou" else kind + "s"
+
+
 def _id_and_parents(resource_id: str) -> list[str]:
     """The id and each parent resource's id, so excluding a vault also excludes its keys."""
     parts = _key("id", resource_id).split("/")
@@ -49,9 +53,10 @@ class ResourceExclusions:
         return bool(self.patterns)
 
     def match(self, resource_id: Optional[str] = None, location: Optional[str] = None,
-              resource_group: Optional[str] = None) -> Optional[str]:
+              resource_group: Optional[str] = None, record: bool = True) -> Optional[str]:
         """The first configured pattern matching the resource, else None. The resource group comes from the id when
-        not given; a location: pattern can only match a resource that has a location. Every match counts as used."""
+        not given; a location: pattern can only match a resource that has a location. Every match counts as used,
+        unless record is False (a check about a reference, not a resource being taken out)."""
         names = {
             "rg": [_key("rg", resource_group or resource_group_from_id(resource_id))],
             "location": [_key("location", location)],
@@ -60,6 +65,19 @@ class ResourceExclusions:
         first = None
         for pattern, (kind, glob) in zip(self.patterns, self._keys):
             if kind in names and glob and any(n and fnmatchcase(n, glob) for n in names[kind]):
+                if record:
+                    self._matched.add(pattern)
+                first = first or pattern
+        return first
+
+    def match_own_id(self, resource_id: Optional[str]) -> Optional[str]:
+        """The first id: pattern naming this resource itself, else None. A pattern that also matches a parent's id
+        names the parent (* crosses /, so id:*/watchers/w* matches w's children too) and doesn't count."""
+        key, *parents = _id_and_parents(resource_id) if resource_id else [""]
+        first = None
+        for pattern, (kind, glob) in zip(self.patterns, self._keys):
+            if kind == "id" and glob and key and fnmatchcase(key, glob) \
+                    and not any(fnmatchcase(p, glob) for p in parents):
                 self._matched.add(pattern)
                 first = first or pattern
         return first
@@ -99,8 +117,8 @@ class ResourceExclusions:
         return {
             "resource_exclusion_patterns": list(self.patterns),
             "resource_exclusion_patterns_unmatched": self.unmatched(),
-            **{f"excluded_{kind}s": sum(1 for e in excluded if e["kind"] == kind) for kind in kinds},
-            **{f"in_scope_{plural}": count for plural, count in in_scope.items()},
+            **{f"excluded_{plural(kind)}": sum(1 for e in excluded if e["kind"] == kind) for kind in kinds},
+            **{f"in_scope_{name}": count for name, count in in_scope.items()},
         }
 
     def warn_unmatched(self, logger: logging.Logger) -> None:

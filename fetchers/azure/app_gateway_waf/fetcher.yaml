@@ -1,5 +1,5 @@
 name: azure_app_gateway_waf
-version: 0.1.0
+version: 0.2.0
 description: >
   Web application firewall enforcement on every Azure Application Gateway in the
   subscription: for each HTTP(S) listener, the WAF that actually applies to it
@@ -9,6 +9,33 @@ description: >
   count is checked against Resource Graph, and the collection fails on a
   mismatch.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching application gateway (its listeners leave with it) or
+      WAF policy is listed under excluded with the pattern and left out
+      of every count and verdict. A listener's WAF verdict is still
+      worked out against every policy, so an in-scope listener whose
+      policy is excluded keeps its verdict; only the policy leaves the
+      policy list and its counts. The gateway count check against
+      Resource Graph still covers every gateway.
+      A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -83,3 +110,16 @@ evidence_set:
     the service's computed_disabled_rules, exclusion_count, custom_rules, and
     rate_limit_rules (enabled RateLimitRule custom rules).
     rule_overrides_without_state counts overrides the API returned with no state.
+    Application gateways (with their listeners) and WAF policies the
+    patterns take out are listed under results.excluded, each with the
+    pattern that matched. An in-scope listener whose policy is excluded
+    keeps its WAF verdict; the policy alone leaves results.waf_policies
+    and the policy counts. results.completeness still compares the full
+    gateway list with Resource Graph. Summary fields:
+    resource_exclusion_patterns (the configured patterns, empty when none
+    are set), resource_exclusion_patterns_unmatched (patterns that matched
+    nothing, such as a mistyped name), excluded_application_gateways,
+    excluded_waf_policies (how many the patterns took out) and
+    in_scope_application_gateways, in_scope_listeners,
+    in_scope_waf_policies (how many stayed). results.excluded is always
+    present, empty when nothing is excluded.
