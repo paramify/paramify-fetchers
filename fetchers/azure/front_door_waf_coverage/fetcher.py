@@ -288,16 +288,34 @@ def coverage_for_profile(collected: dict, waf_by_key: dict, exclusions: ScopeExc
     }
 
 
+def profile_waf_in_use(host_routes: list[dict]):
+    """True when a serving host-route has a WAF applied; None when none does but one's coverage was not read
+    (unknown scope), since that host-route may have one; else False."""
+    serving = [h for h in host_routes if h["serving"]]
+    if any(h["effective_scope"] not in ("none", "unknown") for h in serving):
+        return True
+    return None if any(h["effective_scope"] == "unknown" for h in serving) else False
+
+
 def summarize(profiles, skipped_by_sku, host_routes, endpoints_without_routes, unrouted, security_policies) -> dict:
     serving = [h for h in host_routes if h["serving"]]
     waf_profiles = [p for p in profiles if p["waf_in_use"]]
     unprotected = [h for h in serving if h["protected"] is False]
     unknown = [h for h in serving if h["protected"] is None]
 
-    def reason(name: str) -> int:
-        return sum(1 for h in serving if name in h["unprotected_reasons"])
+    # While any serving host-route's coverage was not read (Azure Government), every count of protected or
+    # unprotected host-routes, and of the reasons, is only a lower bound, so each reads null rather than a number
+    # a check could pass on.
+    def known(count: int):
+        return None if unknown else count
+
+    def reason(name: str):
+        return known(sum(1 for h in serving if name in h["unprotected_reasons"]))
 
     protected = len(serving) - len(unprotected) - len(unknown)
+    # A profile whose WAF use is unknown counts as a log-export gap unless it exports its WAF log anyway.
+    unknown_waf_profiles = [p for p in profiles if p["waf_in_use"] is None]
+    unknown_log_gap = any(not p["waf_log_exported"] for p in unknown_waf_profiles)
     return {
         "total_front_door_profiles": len(profiles),
         "premium_profiles": sum(1 for p in profiles if p["sku"] == "Premium_AzureFrontDoor"),
@@ -311,20 +329,22 @@ def summarize(profiles, skipped_by_sku, host_routes, endpoints_without_routes, u
         "total_security_policies": len(security_policies),
         "total_host_routes": len(host_routes),
         "serving_host_routes": len(serving),
-        "protected_host_routes": protected,
-        "unprotected_host_routes": len(unprotected),
+        "protected_host_routes": known(protected),
+        "unprotected_host_routes": known(len(unprotected)),
         "unknown_host_routes": len(unknown),
         # A share of hosts can't be stated while some hosts' coverage was not read.
-        "protected_host_route_percentage": None if unknown else coverage_percentage(protected, len(serving)),
+        "protected_host_route_percentage": known(coverage_percentage(protected, len(serving))),
         "host_routes_without_waf": reason("no_waf"),
         "host_routes_waf_not_blocking": reason("waf_not_blocking"),
         "host_routes_waf_unresolved": reason("waf_unresolved"),
         "host_routes_partial_path_coverage": reason("partial_path_coverage"),
         "host_routes_reference_inactive": reason("host_reference_inactive"),
         **{f"host_routes_{s}_scope": sum(1 for h in serving if h["effective_scope"] == s) for s in (*SCOPES, "none", "unknown")},
-        "profiles_with_waf_in_use": len(waf_profiles),
+        "profiles_with_waf_in_use": None if unknown_waf_profiles else len(waf_profiles),
         "profiles_waf_log_exported": sum(1 for p in profiles if p["waf_log_exported"]),
-        "profiles_with_waf_in_use_without_waf_log_export": sum(1 for p in waf_profiles if not p["waf_log_exported"]),
+        "profiles_with_waf_in_use_without_waf_log_export": (
+            None if unknown_log_gap else sum(1 for p in waf_profiles if not p["waf_log_exported"])
+        ),
         "security_policies_api_version": cdn_api_version(SECURITY_POLICY_API_VERSION),
     }
 
@@ -423,7 +443,7 @@ def main() -> int:
         profiles.append({
             **c["profile"],
             **profile_log_export(c["log_categories"], c["log_settings"]),
-            "waf_in_use": any(h["serving"] and h["effective_scope"] not in ("none", "unknown") for h in cov["host_routes"]),
+            "waf_in_use": profile_waf_in_use(cov["host_routes"]),
             "endpoint_count": cov["endpoint_count"],
             "route_count": cov["route_count"],
             "custom_domain_count": cov["custom_domain_count"],

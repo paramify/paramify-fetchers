@@ -928,10 +928,14 @@ schemas and the `paramify` CLI — not the internal code.
   `isProfileLevel` or `associations[].routes`, so on Azure Government
   `azure_front_door_waf_coverage` reports a host-route that no association lists
   by host as `unknown` scope, with `protected` null, instead of as having no
-  WAF. The new `unknown_host_routes` and `host_routes_unknown_scope` count them,
-  and `protected_host_route_percentage` is null while any is unknown. The
-  public-cloud output is unchanged apart from the two new counts, which are 0
-  there.
+  WAF. The new `unknown_host_routes` and `host_routes_unknown_scope` count them.
+  While any is unknown, `protected_host_routes`, `unprotected_host_routes`,
+  `protected_host_route_percentage` and the per-reason counts are null, and a
+  profile whose only possibly covered host-routes are unknown has `waf_in_use`
+  null, so `profiles_with_waf_in_use` is null and
+  `profiles_with_waf_in_use_without_waf_log_export` is null unless that profile
+  exports its WAF log. The public-cloud output is unchanged apart from the two
+  new counts, which are 0 there.
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
   report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`

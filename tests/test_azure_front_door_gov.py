@@ -207,9 +207,48 @@ def test_summary_counts_unknown_apart() -> None:
     summary = coverage.summarize([], {}, [unknown, none], [], [], [])
     assert summary["serving_host_routes"] == 2
     assert summary["unknown_host_routes"] == 1 and summary["host_routes_unknown_scope"] == 1
-    assert summary["unprotected_host_routes"] == 1 and summary["host_routes_without_waf"] == 1
-    assert summary["protected_host_route_percentage"] is None
+    assert summary["host_routes_none_scope"] == 1
+    # Every protected/unprotected count is only a lower bound while a host-route is unknown.
+    for key in ("protected_host_routes", "unprotected_host_routes", "protected_host_route_percentage",
+                "host_routes_without_waf", "host_routes_waf_not_blocking", "host_routes_waf_unresolved",
+                "host_routes_partial_path_coverage", "host_routes_reference_inactive"):
+        assert summary[key] is None, key
 
     public = coverage.summarize([], {}, [none], [], [], [])
     assert public["unknown_host_routes"] == 0 and public["host_routes_unknown_scope"] == 0
-    assert public["protected_host_route_percentage"] == 0
+    assert public["protected_host_routes"] == 0 and public["unprotected_host_routes"] == 1
+    assert public["host_routes_without_waf"] == 1 and public["protected_host_route_percentage"] == 0
+
+
+def test_all_unknown_host_routes_give_null_counts() -> None:
+    hosts = [_record(f"/domains/other{i}", [_sp(["/domains/d1"], None, None)]) for i in range(3)]
+    summary = coverage.summarize([], {}, hosts, [], [], [])
+    assert summary["unknown_host_routes"] == 3
+    assert summary["protected_host_routes"] is None and summary["unprotected_host_routes"] is None
+    assert summary["host_routes_without_waf"] is None
+
+
+def test_profile_waf_in_use() -> None:
+    unknown = _record("/domains/other", [_sp(["/domains/d1"], None, None)])
+    none = _record("/domains/d1", [])
+    domain = _record("/domains/d1", [_sp(["/domains/d1"], None, None)])
+    assert coverage.profile_waf_in_use([unknown, unknown, unknown]) is None
+    assert coverage.profile_waf_in_use([unknown, none]) is None
+    assert coverage.profile_waf_in_use([unknown, domain]) is True
+    assert coverage.profile_waf_in_use([none]) is False
+    assert coverage.profile_waf_in_use([]) is False
+    assert coverage.profile_waf_in_use([{**domain, "serving": False}]) is False
+
+
+@pytest.mark.parametrize("profiles, in_use, without_export", [
+    pytest.param([{"waf_in_use": True, "waf_log_exported": False}], 1, 1, id="known-gap"),
+    pytest.param([{"waf_in_use": None, "waf_log_exported": False}], None, None, id="unknown-not-exported"),
+    pytest.param([{"waf_in_use": None, "waf_log_exported": True}], None, 0, id="unknown-but-exported"),
+    pytest.param([{"waf_in_use": False, "waf_log_exported": False}], 0, 0, id="no-waf"),
+])
+def test_unknown_waf_use_is_not_skipped_by_log_export_count(profiles, in_use, without_export) -> None:
+    profiles = [{"sku": "Premium_AzureFrontDoor", "endpoint_count": 0, "route_count": 0, "custom_domain_count": 0, **p}
+                for p in profiles]
+    summary = coverage.summarize(profiles, {}, [], [], [], [])
+    assert summary["profiles_with_waf_in_use"] == in_use
+    assert summary["profiles_with_waf_in_use_without_waf_log_export"] == without_export
