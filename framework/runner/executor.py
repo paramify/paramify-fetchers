@@ -35,6 +35,7 @@ from typing import (
     Tuple,
 )
 
+from framework import patterns
 from framework.contract import (
     ConfigField,
     Fetcher,
@@ -229,6 +230,7 @@ def merged_config(
     field, a malformed one, one that is only part of the value, and one reading a
     variable whose name looks like a credential's or that holds a secret (this
     fetcher's, or any in `secret_vars`, see secret_env_vars), which is never resolved.
+    A patterns field's value is checked against the prefixes it declares and takes no reference at all.
     Only this fetcher's fields and the issue-report keys the manifest
     carries undeclared are resolved; any other key (a sibling fetcher's, or a
     stale one) passes through as written. Extracted from _apply_config so callers that need a resolved value
@@ -257,7 +259,12 @@ def merged_config(
             if value is None:
                 continue
             var = env_var_name(value)
-            if resolved and is_partial_env_ref(value):
+            if resolved and fdef.type == patterns.TYPE:
+                # Written in the manifest only: a ${env:} reference is refused, never resolved.
+                problems = patterns.problems(value, fdef.prefixes, fdef.bare)
+                if problems:
+                    errors[name] = f"config '{name}': " + "; ".join(problems)
+            elif resolved and is_partial_env_ref(value):
                 errors[name] = f"config '{name}': a ${{env:}} reference must be the whole value, not part of it"
             elif resolved and var and (var in secret_vars or is_credential_env_name(var)):
                 errors[name] = (f"config '{name}' reads ${{env:{var}}}, which holds a secret; "
@@ -311,7 +318,8 @@ def _apply_config(
                     f"{fetcher.name}: required config '{name}' has no value ({config_hint(fetcher, name)})"
                 )
             continue
-        env[fdef.env] = _coerce_env(merged.values[name])
+        value = merged.values[name]
+        env[fdef.env] = patterns.to_env(value) if fdef.type == patterns.TYPE else _coerce_env(value)
     # A value read from a reference is masked out of captured output like a secret; the evidence is the fetcher's own.
     if secret_sink is not None:
         secret_sink.update(str(merged.values[name]) for name in merged.referenced)

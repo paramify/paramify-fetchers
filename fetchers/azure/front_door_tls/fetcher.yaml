@@ -1,24 +1,26 @@
 name: azure_front_door_tls
-version: 0.3.0
+version: 0.4.0
 description: >-
   Shows whether each in-scope Front Door route accepts only HTTPS, and each in-scope custom domain's TLS floor, certificate and expiry.
 category: azure
 
 config_schema:
   scope_exclusions:
-    type: string
+    type: patterns
+    prefixes: [route]
     required: false
     env: AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS
     description: >
       Parts of Front Door to leave out of scope, as case-insensitive glob patterns
-      separated by commas or spaces, matched against custom-domain and endpoint host
+      listed in the manifest, matched against custom-domain and endpoint host
       names (* matches any run of characters, dots included, ? one character, and [
       ] one character from a set, such as [0-9]). A pattern starting route:
       (route:qa-*) matches route names instead; a pattern without it never matches a
       route's name, and any other prefix fails the run. A route is out of scope when
       a route: pattern matches its name or every host it serves is out, and a
       certificate secret when only out-of-scope domains use it. Each is listed under
-      excluded and left out of every count. Can be ${env:VAR}. Empty: everything is
+      excluded and left out of every count. Each item is a pattern, or a pattern with
+      a reason. Empty: everything is
       in scope.
 
 supports_targets: true

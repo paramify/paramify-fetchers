@@ -88,7 +88,7 @@ from typing import Callable, List, NoReturn, Optional
 
 import typer
 
-from framework import api, paramify_auth
+from framework import api, paramify_auth, patterns
 from framework import cli_style as style
 from framework.issue_reports import (
     CLOSE_CYCLE_FIELD,
@@ -232,6 +232,10 @@ def _parse_kv(arg: str, path, json_out: bool):
 
 
 def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool, target: bool = False):
+    if typ == patterns.TYPE:
+        if "${env:" in value:
+            _fail(path, f"config '{key}': {patterns.ENV_REF_REFUSAL}", json_out)
+        return patterns.from_cli(value)
     # The runner resolves ${env:VAR} in string config fields only, so anywhere else
     # a reference would be saved as literal text (or coerced to false).
     if is_env_ref_attempt(value) or is_partial_env_ref(value):
@@ -746,6 +750,10 @@ def describe_cmd(
                     if fld.get("default") is not None else ""
                 )
                 var = f"  {style.dim('env=')}{style.env(fld['env'])}" if fld.get("env") else ""
+                if fld.get("type") == patterns.TYPE:
+                    # Written in the manifest only; the env var is the runner's hand-off, not a user setting.
+                    takes = api.grammar_text(fld.get("prefixes") or (), fld.get("bare", True))
+                    var = f"  {style.dim('takes=')}{style.env(takes)}"
                 typer.echo(
                     f"    - {style.env(fld['name'])} {style.dim('(' + fld['type'] + ',')} "
                     f"{req}{style.dim(')')}{extra}{var}"
@@ -1248,17 +1256,22 @@ def validate_cmd(
             _err(f"Validation failed: {e}")
         raise typer.Exit(1)
     errors = api.validate(m, root)
+    notes = api.validate_notes(m, root)
     if json_out:
-        typer.echo(json.dumps({"ok": not errors, "errors": errors}, indent=2))
+        typer.echo(json.dumps({"ok": not errors, "errors": errors, "notes": notes}, indent=2))
         raise typer.Exit(0 if not errors else 1)
     if errors:
         for err in errors:
             _err(f"  {style.fail('ERROR')}  {err}")
+        for note in notes:
+            _err(f"  {style.dim('NOTE')}   {note}")
         raise typer.Exit(1)
     n = len(m.get("run", {}).get("fetchers", []))
     typer.echo(
         f"{style.verdict(True, 'OK')}  manifest valid; {style.dim(str(n) + ' fetcher entries')}"
     )
+    for note in notes:
+        typer.echo(f"  {style.dim('NOTE')}   {note}")
 
 
 @app.command("run")
@@ -1778,8 +1791,11 @@ def manifest_set_platform_config(
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
     typ = _platform_config_type(root, category, key)
-    if is_env_ref_attempt(raw) and typ == "string":
-        typ = next((t for t in _category_fetcher_types(root, category, key) if t != "string"), typ)
+    fetcher_types = _category_fetcher_types(root, category, key)
+    if typ == "string" and patterns.TYPE in fetcher_types:
+        typ = patterns.TYPE
+    elif is_env_ref_attempt(raw) and typ == "string":
+        typ = next((t for t in fetcher_types if t != "string"), typ)
     value = _coerce_or_fail(raw, typ, key, path, json_out)
     api.set_platform_config(m, category, key, value)
     _save_and_report(m, path, root, json_out)
@@ -1798,6 +1814,71 @@ def manifest_set_passthrough(
     m = _read_for_edit(path, json_out)
     api.set_passthrough_env(m, category, env_vars)
     _save_and_report(m, path, root, json_out)
+
+
+def _pattern_target(root: Path, target: str, path, json_out: bool):
+    try:
+        return api.pattern_fields(target, api.discover_fetchers(root), api.discover_platforms(root))
+    except LookupError as e:
+        _fail(path, str(e), json_out)
+
+
+@manifest_app.command("exclude")
+def manifest_exclude(
+    target: str = typer.Argument(..., help="A category (every fetcher of it) or a fetcher name"),
+    pattern: str = typer.Argument(..., help="The pattern, such as location:eastus2 or rg:rg-sandbox-*"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Why it is out of scope, for the evidence"),
+    field: Optional[str] = typer.Option(None, "--field", help="The pattern list, when more than one takes it"),
+    file: str = typer.Option(_DEFAULT_MANIFEST, "-f", "--file", help="Manifest path"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Add a pattern to a category's or a fetcher's pattern list, such as its resource exclusions."""
+    root = api.find_repo_root()
+    path = _resolve_manifest_arg(root, file, json_out)
+    m = _read_for_edit(path, json_out)
+    scope, fields, mixed = _pattern_target(root, target, path, json_out)
+    try:
+        name = api.pick_pattern_field(fields, pattern, field)
+        outcome = api.add_pattern(m, scope, target, name, pattern, reason)
+    except ValueError as e:
+        hint = ""
+        if mixed and (field in mixed or field is None and str(e).startswith("no pattern list")):
+            hint = (f"; {', '.join(mixed)} takes different patterns in different {target} fetchers, so set it on "
+                    f"each fetcher (paramify manifest exclude <fetcher> {pattern})")
+        _fail(path, f"{e}{hint}", json_out)
+    where = f"{api.pattern_location(scope, target)}.{name}"
+    _save_and_report(m, path, root, json_out, verb=f"{outcome.capitalize()} {pattern} in {where}:",
+                     extra={"field": name, "outcome": outcome})
+
+
+@manifest_app.command("unexclude")
+def manifest_unexclude(
+    target: str = typer.Argument(..., help="A category or a fetcher name"),
+    pattern: Optional[str] = typer.Argument(None, help="The pattern to remove"),
+    field: Optional[str] = typer.Option(None, "--field", help="The pattern list, when more than one holds it"),
+    all_: bool = typer.Option(False, "--all", help="Remove every pattern from --field"),
+    file: str = typer.Option(_DEFAULT_MANIFEST, "-f", "--file", help="Manifest path"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Remove a pattern from a category's or a fetcher's pattern list."""
+    root = api.find_repo_root()
+    path = _resolve_manifest_arg(root, file, json_out)
+    m = _read_for_edit(path, json_out)
+    scope, fields, mixed = _pattern_target(root, target, path, json_out)
+    names = [field] if field else [*fields, *mixed]
+    if all_ and (pattern is not None or not field) or not all_ and pattern is None:
+        _fail(path, "give a pattern, or --all with --field", json_out)
+    if field and field not in fields and field not in mixed:
+        _fail(path, f"{field!r} is not a pattern list of {target}", json_out)
+    try:
+        removed = {n: api.remove_pattern(m, scope, target, n, None if all_ else pattern) for n in names}
+    except ValueError as e:
+        _fail(path, str(e), json_out)
+    if not any(removed.values()):
+        _fail(path, f"{pattern or field} is not in {target}'s pattern lists", json_out)
+    gone = ", ".join(f"{api.pattern_location(scope, target)}.{n}" for n, k in removed.items() if k)
+    _save_and_report(m, path, root, json_out, verb=f"Removed {pattern or 'every pattern'} from {gone}:",
+                     extra={"fields": [n for n, k in removed.items() if k]})
 
 
 @manifest_app.command("set-output-dir")

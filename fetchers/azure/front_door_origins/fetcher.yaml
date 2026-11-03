@@ -1,5 +1,5 @@
 name: azure_front_door_origins
-version: 0.5.0
+version: 0.6.0
 description: >-
   Shows whether Front Door's in-scope back ends span two healthy, serving regions, are reached securely, accept traffic only through their own profile, and have a regional twin with enough capacity.
 category: azure
@@ -15,12 +15,13 @@ config_schema:
       30; a larger value is clamped to 30 with a warning. The window ends at the
       last whole hour.
   scope_exclusions:
-    type: string
+    type: patterns
+    prefixes: [route]
     required: false
     env: AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS
     description: >
       Parts of Front Door to leave out of scope, as case-insensitive glob patterns
-      separated by commas or spaces, matched against custom-domain and endpoint host
+      listed in the manifest, matched against custom-domain and endpoint host
       names (* matches any run of characters, dots included, ? one character, and [
       ] one character from a set, such as [0-9]). A pattern starting route:
       (route:qa-*) matches route names instead; a pattern without it never matches a
@@ -28,7 +29,8 @@ config_schema:
       a route: pattern matches its name or every host it serves is out; an origin
       group when every route reaching it is out of scope; an app when only
       out-of-scope groups reach it. Each is listed under excluded and left out of
-      every verdict and count. Can be ${env:VAR}. Empty: everything is in scope.
+      every verdict and count. Each item is a pattern, or a pattern with a reason.
+      Empty: everything is in scope.
 
 supports_targets: true
 
