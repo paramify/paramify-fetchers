@@ -215,14 +215,14 @@ BOUNDARY = [{"pattern": "location:regioneast", "reason": "Region outside the bou
 
 
 def test_a_platform_list_validates_and_the_note_names_who_takes_it():
-    m = manifest("azure_key_vault_configuration", "azure_storage_encryption_status", "azure_dns_configuration",
+    m = manifest("azure_key_vault_configuration", "azure_storage_encryption_status", "azure_defender_plans",
                  platform={"resource_exclusions": BOUNDARY},
                  entries={"azure_storage_encryption_status": {"resource_exclusions": ["rg:rg-other"]}})
     assert api.validate(m, REPO_ROOT) == []
     assert api.validate_notes(m, REPO_ROOT) == [
         "platforms.azure.config.resource_exclusions (3 patterns) applies to 1 of 3 azure entries: "
         "azure_key_vault_configuration; replaced by their own list in azure_storage_encryption_status; "
-        "not a setting of azure_dns_configuration"]
+        "not a setting of azure_defender_plans"]
 
 
 def test_a_pattern_one_fetcher_refuses_fails_validate_for_that_fetcher():
@@ -276,8 +276,10 @@ def test_category_lists_exclude_fields_whose_prefixes_differ_between_fetchers():
     scope, fields, mixed = api.pattern_fields("azure", fetchers, platforms)
     assert (scope, list(fields), mixed) == ("platform", ["resource_exclusions"], ["scope_exclusions"])
     scope, fields, _ = api.pattern_fields("azure_front_door_origins", fetchers, platforms)
-    assert (scope, list(fields)) == ("entry", ["scope_exclusions"])
+    assert (scope, list(fields)) == ("entry", ["scope_exclusions", "resource_exclusions"])
+    # With two pattern lists on one entry, the prefix picks the list.
     assert api.pick_pattern_field(fields, "route:qa-*") == "scope_exclusions"
+    assert api.pick_pattern_field(fields, "rg:rg-out") == "resource_exclusions"
     with pytest.raises(LookupError):
         api.pattern_fields("nope", fetchers, platforms)
 
@@ -370,7 +372,8 @@ def test_exclude_and_unexclude_write_the_manifest(m_path):
     assert cli("manifest", "unexclude", "azure_front_door_origins", "route:qa-*", "-f", m_path)[0] == 1
     code, out = cli("validate", m_path)
     assert code == 0 and out["notes"][0].startswith("platforms.azure.config.resource_exclusions (1 pattern) applies "
-                                                    "to 1 of 2 azure entries: azure_key_vault_configuration")
+                                                    "to 2 of 2 azure entries: azure_key_vault_configuration, "
+                                                    "azure_front_door_origins")
 
 
 def test_exclude_on_a_fetcher_copies_the_platform_list_and_says_so(m_path):
