@@ -1,5 +1,5 @@
 name: azure_disk_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: >
   For every managed disk in the subscription, reports which key encrypts it at rest
   — the platform key (Microsoft-managed default), a customer-managed key held in a
@@ -11,6 +11,29 @@ description: >
   VM it was detached from. Managed disks are always encrypted at rest, so the
   evidence that varies is CMK vs platform key, not "encrypted: true/false".
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope,
+      as case-insensitive glob patterns listed in the manifest, each with
+      a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as
+      eastus2; a resource with no location never matches one) or
+      id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching
+      managed disk is listed under excluded with the pattern and left out
+      of every count and verdict. A disk encryption set in an excluded
+      group is only a reference: it does not change an in-scope disk's
+      verdict. A pattern without one of these prefixes fails the run. Set
+      it once under platforms.azure.config for every Azure fetcher that
+      has this field; fetchers without it ignore it. Each item is a pattern, or a pattern with a reason. Empty: every resource
+      is in scope.
 
 supports_targets: true
 
@@ -53,3 +76,9 @@ evidence_set:
     ComputeManagementClient.disks.list(), preceded by azure-mgmt-resource
     ResourceManagementClient.providers.get("Microsoft.Compute"). One evidence file per
     subscription.
+    Disks the resource_exclusions patterns take out are listed under results.excluded instead,
+    each with the pattern that matched; the summary gives resource_exclusion_patterns (the
+    configured patterns, empty when none are set), resource_exclusion_patterns_unmatched
+    (patterns that matched no disk, such as a mistyped name), excluded_disks (how many the
+    patterns took out, null if the list couldn't be read; no other count includes them) and in_scope_disks (how many stayed; null
+    if the list couldn't be read, and 0 means there are none or the patterns took out every disk).

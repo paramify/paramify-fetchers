@@ -118,14 +118,15 @@ each call's Microsoft Graph reference page lists them.
 | PAT scope | Needed by |
 |---|---|
 | Build, Code, Test Management, Project and Team, Release (all Read), and Environment (Read & manage, as there is no read-only Environment scope) | `azure_devops_pipelines` |
-| Read Audit Log (`vso.auditlog`), from a user with View audit log | `azure_devops_audit_streams` |
+| Read Audit Log (`vso.auditlog`), from a user with View audit log and Manage audit streams; listing streams needs Manage audit streams, as there is no read-only stream permission, and without it the stream fields are null and the run is `not_authorized` | `azure_devops_audit_streams` |
 | Graph, Member Entitlement Management (both Read) | `azure_devops_identities` |
 | Security (Manage), as there is no read-only scope for permissions (the fetcher only reads), plus Identity, Code, and Project and Team (all Read) | `azure_devops_permissions` |
 
 The PAT is optional. Without one, the fetchers sign in as the ambient Entra identity,
 which must be added to the organization: project Reader for pipelines, View audit log
-for audit streams, organization membership for identities (the least privilege that
-reads last-access dates is not yet measured), and an organization member who can view
+and Manage audit streams for audit streams, organization membership for identities
+(the least privilege that reads last-access dates is not yet measured), and an
+organization member who can view
 permissions in each namespace and read every Git repository for permissions. Only the
 Entra sign-in can read the Log Audit Events policy; with a PAT,
 `azure_devops_audit_streams` judges auditing from the audit log instead.
@@ -280,6 +281,7 @@ Backup and recovery:
 | `azure_backup_recovery_status` | Recovery Services vaults: backup policies and retention, protected items and their last backup |
 | `azure_app_service_backups` | Whether each web app is actually backed up: newest restore point, gaps, custom backup schedule and history |
 | `azure_sql_managed_instance_backups` | SQL Managed Instance backup storage redundancy, zone redundancy, retention and failover groups |
+| `azure_service_availability` | When each App Service app and SQL Managed Instance was unavailable over the last 30 days, for how long and why, against the recovery time objective; Front Door origin probe failures and each app's health-check results |
 
 Logging and monitoring:
 

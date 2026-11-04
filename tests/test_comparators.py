@@ -575,13 +575,17 @@ def test_a_comparators_required_config_points_at_its_own_entry(tmp_path):
     hint = (f"set it on this entry: paramify manifest set-config {cmp} environments=<value>; "
             "a comparator ignores platforms.testcat.config")
 
-    assert api.validate(m, tmp_path) == [f"{cmp}: required config 'environments' not set ({hint})"]
+    assert api.validate(m, tmp_path) == [
+        "platforms.testcat.config: no testcat fetcher takes 'environments' (a comparator takes it, but only on its "
+        "own entry)",
+        f"{cmp}: required config 'environments' not set ({hint})"]
     _, _, events = run(tmp_path, m)
     error = next(e["error"] for e in events if e["event"] == "fetcher_error" and e["fetcher"] == cmp)
     assert hint in error
     assert [f["value"] for f in api.effective_config(m, [cmp], tmp_path)[cmp]] == [None]
 
     m["run"]["fetchers"][1]["config"] = {"environments": "production"}
+    del m["run"]["platforms"]
     assert api.validate(m, tmp_path) == []
 
 

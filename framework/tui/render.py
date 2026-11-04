@@ -11,6 +11,7 @@ from rich.console import Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 
+from framework import patterns
 from framework.issue_reports import (
     ASSESSMENT_ID_FIELD,
     ASSESSMENT_NAME_FIELD,
@@ -244,6 +245,10 @@ def _kv_table(rows: List[tuple]) -> Table:
     return table
 
 
+def _config_value(c: dict) -> str:
+    return patterns.display(c["value"]) if c.get("type") == patterns.TYPE else str(c["value"])
+
+
 def _status(set_: bool, required: bool) -> Text:
     if set_:
         return Text("set", style=palette.OK)
@@ -315,9 +320,9 @@ def entry_detail(
                     value.append(f"  → {c['value']} ({source})", style="dim")
                 rows.append((c["name"], value))
             elif source == "entry":
-                rows.append((c["name"], Text(str(c["value"]), style=palette.FG)))
+                rows.append((c["name"], Text(_config_value(c), style=palette.FG)))
             elif source and source.startswith("platforms."):
-                value = Text(str(c["value"]), style=palette.FG)
+                value = Text(_config_value(c), style=palette.FG)
                 value.append(f"  ({source})", style="dim")
                 rows.append((c["name"], value))
             elif source == "default":
