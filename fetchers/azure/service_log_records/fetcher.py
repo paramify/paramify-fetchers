@@ -568,17 +568,17 @@ def collect(client, subscription_id: str, collector) -> tuple:
     days = int_config(LOOKBACK_ENV, DEFAULT_LOOKBACK_DAYS)
     sample = int_config(SAMPLE_ENV, DEFAULT_SAMPLE_SIZE)
     base = f"/subscriptions/{subscription_id}/providers"
-    listed = collector.guard("web.sites.list", lambda: client.list(f"{base}/Microsoft.Web/sites", WEB_API)) or []
-    sites, excluded = exclusions.split(listed, "app")
+    listed = collector.guard("web.sites.list", lambda: client.list(f"{base}/Microsoft.Web/sites", WEB_API))
+    sites, excluded = exclusions.split(listed or [], "app")
     for site in list(sites):
         slots = collector.guard(f"web.sites.slots.list({site.get('name')})",
                                 lambda site=site: client.list(f"{site['id']}/slots", WEB_API))
         kept, out = exclusions.split(slots or [], "app")
         sites.extend(kept)
         excluded += out
-    instances, out = exclusions.split(collector.guard(
-        "sql.managedInstances.list", lambda: client.list(f"{base}/Microsoft.Sql/managedInstances", SQL_API)
-    ) or [], "managed_instance")
+    listed_instances = collector.guard(
+        "sql.managedInstances.list", lambda: client.list(f"{base}/Microsoft.Sql/managedInstances", SQL_API))
+    instances, out = exclusions.split(listed_instances or [], "managed_instance")
     excluded += out
     exclusions.warn_unmatched(logger)
     databases = {
@@ -625,7 +625,13 @@ def collect(client, subscription_id: str, collector) -> tuple:
         "excluded": sorted(excluded, key=lambda e: (e["kind"], id_key(e["id"]))),
     }
     summary = summarize(apps, mis, dependencies, workspace_records, days)
-    return results, {**summary, **exclusions.summary(excluded, KINDS, {"apps": len(apps), "managed_instances": len(mis)})}
+    counts = exclusions.summary(excluded, KINDS, {"apps": len(apps), "managed_instances": len(mis)})
+    # Unknown, not none, when a list wasn't read.
+    if listed is None:
+        counts.update(excluded_apps=None, in_scope_apps=None)
+    if listed_instances is None:
+        counts.update(excluded_managed_instances=None, in_scope_managed_instances=None)
+    return results, {**summary, **counts}
 
 
 def main() -> int:

@@ -14,7 +14,8 @@ description: >
   such as a mistyped name), and counts excluded_workspaces and
   in_scope_workspaces (in-scope workspaces found, Sentinel or not; 0 when none
   was found or the patterns took out every workspace, which a check can catch by
-  requiring more than 0).
+  requiring more than 0; both are null when the workspace list couldn't be
+  read).
 category: azure
 
 supports_targets: true

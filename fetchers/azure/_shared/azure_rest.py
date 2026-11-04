@@ -477,7 +477,9 @@ def run_workspaces(
         excluded: List[Dict[str, Any]] = []
         if exclusions is not None:
             exclusions.record_invalid(collector)
-        found = discover_workspaces(client, subscription_id, collector, exclusions, excluded)
+        found = find_workspaces(client, subscription_id, collector, exclusions, excluded)
+        listed = found is not None
+        found = found or []
         workspaces: List[Dict[str, Any]] = []
         without_sentinel: List[str] = []
         for ws in found:
@@ -495,6 +497,8 @@ def run_workspaces(
             exclusions.warn_unmatched(logger)
             results["excluded"] = excluded
             summary.update(exclusions.summary(excluded, ("workspace",), {"workspaces": len(found)}))
+            if not listed:  # unknown, not none, when the workspace list wasn't read
+                summary.update(excluded_workspaces=None, in_scope_workspaces=None)
         return results, summary
 
     return run_subscription(fetcher=fetcher, logger=logger, collect=per_workspace, session=session)

@@ -17,9 +17,9 @@ description: >
   resource_exclusion_patterns_unmatched (patterns that matched no storage
   account or log container, such as a mistyped name), and counts
   excluded_storage_accounts, excluded_containers, in_scope_storage_accounts and
-  in_scope_containers (in-scope log containers; 0 accounts when none was read or
-  the patterns took out every one, which a check can catch by requiring more
-  than 0).
+  in_scope_containers (in-scope log containers; 0 accounts when none was found
+  or the patterns took out every one, which a check can catch by requiring more
+  than 0; all four are null when the account list couldn't be read).
 category: azure
 
 supports_targets: true

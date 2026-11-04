@@ -193,6 +193,7 @@ schemas and the `paramify` CLI — not the internal code.
   - `azure_log_storage_immutability` 0.2.0: storage accounts, whose containers
     are then not read; an `id:` pattern can take a single log container out of
     an in-scope account. `storage_accounts_scanned` counts in-scope accounts.
+    The four new counts read null when the account list couldn't be read.
   - `azure_sentinel_analytics_rules` 0.3.0, `azure_sentinel_automation_rules`
     0.2.0, `azure_sentinel_data_sources` 0.3.0 and `azure_sentinel_incidents`
     0.3.0: workspaces, taken out before their Sentinel onboarding is read, so
@@ -202,15 +203,15 @@ schemas and the `paramify` CLI — not the internal code.
     exclusions for this. A workspace that `SENTINEL_WORKSPACES` names and a
     pattern takes out fails the run as `bad_config`, and stays listed under
     `results.excluded`; this applies to the two Log Analytics fetchers too.
-    In `azure_sentinel_incidents`, `in_scope_workspaces`
-    and `excluded_workspaces` read null when the workspace list couldn't be
-    read.
+    In these six fetchers, `in_scope_workspaces` and `excluded_workspaces`
+    read null when the workspace list couldn't be read.
   - `azure_service_log_records` 0.2.0: App Service apps and slots, and SQL
     managed instances, which get no diagnostic-setting, slot or database reads;
     records about them count toward nothing. Workspaces are not taken out on
     their own: an in-scope app sending to a workspace in an excluded group is
     still read there. App dependency rows are keyed by Application Insights
-    component, not app, and are not split.
+    component, not app, and are not split. The app and instance counts read
+    null when their list couldn't be read.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or

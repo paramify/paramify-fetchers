@@ -16,8 +16,9 @@ description: >
   in-scope workspaces. The summary echoes resource_exclusion_patterns, lists
   resource_exclusion_patterns_unmatched (patterns that matched no workspace,
   such as a mistyped name), and counts excluded_workspaces and
-  in_scope_workspaces (0 when none was read or the patterns took out every
-  workspace, which a check can catch by requiring more than 0).
+  in_scope_workspaces (0 when none was found or the patterns took out every
+  workspace, which a check can catch by requiring more than 0; both are null
+  when the workspace list couldn't be read).
 category: azure
 
 supports_targets: true

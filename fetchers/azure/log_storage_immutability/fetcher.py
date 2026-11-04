@@ -83,7 +83,10 @@ def collect(client, subscription_id: str, collector) -> tuple:
     )
     if accounts is None:
         exclusions.warn_unmatched(logger)
-        return {"accounts": None, "excluded": []}, {}
+        # Unknown, not none: the account list wasn't read.
+        counts = exclusions.summary([], KINDS, {"storage_accounts": None, "containers": None})
+        counts.update(excluded_storage_accounts=None, excluded_containers=None)
+        return {"accounts": None, "excluded": []}, counts
     accounts, excluded = exclusions.split(accounts, "storage_account")
     out: List[Dict[str, Any]] = []
     for account in sorted(accounts, key=lambda a: (a.get("id") or "").lower()):

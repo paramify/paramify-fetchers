@@ -722,3 +722,43 @@ def test_service_logs_excluded_apps_and_instances_leave_every_count(monkeypatch,
     assert (summary["excluded_apps"], summary["excluded_managed_instances"]) == (3, 1)
     assert (summary["in_scope_apps"], summary["in_scope_managed_instances"]) == (2, 1)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
+
+
+@pytest.mark.parametrize("m", [deletion, query_audit, analytics, automation, data_sources], ids=lambda m: m.NAME)
+def test_workspace_counts_are_null_when_the_workspace_list_was_refused(monkeypatch, tmp_path, m):
+    _rest_env(monkeypatch, tmp_path, WS_PATTERNS, RefusedClient({}, {}, refused=[WS_LIST]))
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    code = m.main()
+    summary = _evidence(tmp_path, m.NAME)["summary"]
+    assert code == 1 and _status(tmp_path) == "not_authorized"
+    assert (summary["in_scope_workspaces"], summary["excluded_workspaces"]) == (None, None)
+
+
+def test_immutability_counts_are_null_when_the_account_list_was_refused(monkeypatch, tmp_path):
+    good = _storage_client()
+    _rest_env(monkeypatch, tmp_path, "rg:rg-out", RefusedClient(good.lists, good.gets, refused=[f"{SUB}/{STORAGE}"]))
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    code = immutability.main()
+    summary = _evidence(tmp_path, immutability.NAME)["summary"]
+    assert code == 1 and _status(tmp_path) == "not_authorized"
+    assert summary == {
+        "resource_exclusion_patterns": ["rg:rg-out"], "resource_exclusion_patterns_unmatched": ["rg:rg-out"],
+        "excluded_storage_accounts": None, "excluded_containers": None,
+        "in_scope_storage_accounts": None, "in_scope_containers": None,
+    }
+
+
+@pytest.mark.parametrize("refused, unknown, known", [
+    (f"{SUB}/{WEB}", "apps", {"excluded_managed_instances": 1, "in_scope_managed_instances": 1}),
+    (f"{SUB}/{MIS}", "managed_instances", {"excluded_apps": 1, "in_scope_apps": 4}),
+])
+def test_service_log_counts_are_null_when_their_list_was_refused(monkeypatch, tmp_path, refused, unknown, known):
+    good = _service_logs_client()
+    _rest_env(monkeypatch, tmp_path, f"rg:rg-out, id:{MI_OUT}",
+              RefusedClient(good.lists, good.gets, refused=[refused], rows=good.rows))
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    code = service_logs.main()
+    summary = _evidence(tmp_path, service_logs.NAME)["summary"]
+    assert code == 1 and _status(tmp_path) == "not_authorized"
+    assert (summary[f"in_scope_{unknown}"], summary[f"excluded_{unknown}"]) == (None, None)
+    assert {k: summary[k] for k in known} == known
