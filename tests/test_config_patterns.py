@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import os
+import re
 import sys
 from pathlib import Path
 
 import pytest
+from dotenv import load_dotenv
 from typer.testing import CliRunner
 
 from framework import api, patterns
 from framework.cli import app
+from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
     ConfigField,
     Fetcher,
@@ -143,6 +148,43 @@ def test_an_env_reference_is_never_resolved_even_to_a_secret(tmp_path, monkeypat
         assert merged.referenced == {} and merged.values["exclusions"] == f"${{env:{var}}}"
         with pytest.raises(RuntimeError, match="aren't read for a pattern list"):
             _apply_config({}, fetcher(tmp_path), None, None, entry)
+
+
+def test_a_list_for_a_field_that_is_not_patterns_fails_validate_and_the_run():
+    # A category-wide list reaching a fetcher that declares the key a string.
+    fetchers, platforms = discover_fetchers(REPO_ROOT), discover_platforms(REPO_ROOT)
+    f = fetchers["azure_alert_rules"]
+    string_field = dataclasses.replace(f.config_schema["resource_exclusions"], type="string", prefixes=(), bare=True)
+    fetchers["azure_alert_rules"] = dataclasses.replace(
+        f, config_schema={**f.config_schema, "resource_exclusions": string_field})
+    boundary = [{"pattern": "rg:dev-*", "reason": "Outside the boundary"}]
+    m = manifest("azure_alert_rules", "azure_key_vault_configuration", platform={"resource_exclusions": boundary})
+    problem = ("config 'resource_exclusions' is a string field of azure_alert_rules, but platforms.azure.config "
+               "gives it a list; only a `type: patterns` field takes a list")
+    assert api.validate(m, REPO_ROOT, fetchers, platforms) == [f"azure_alert_rules: {problem}"]
+    with pytest.raises(RuntimeError, match=re.escape(f"azure_alert_rules: {problem}")):
+        _apply_config({}, fetchers["azure_alert_rules"], platforms["azure"],
+                      PlatformConfig(config={"resource_exclusions": boundary}), ManifestEntry(use="azure_alert_rules"))
+
+
+def test_a_map_for_a_field_that_is_not_patterns_is_refused(tmp_path):
+    f = fetcher(tmp_path, n=ConfigField(name="n", type="integer", env="N"))
+    merged = merged_config(f, None, None, ManifestEntry(use="x", config={"n": {"a": 1}}))
+    assert merged.errors == {"n": "config 'n' is an integer field of t_fetcher, but t_fetcher.config gives it a map; "
+                                  "only a `type: patterns` field takes a list"}
+
+
+def test_an_unset_pattern_list_reaches_the_fetcher_empty_so_no_env_file_or_shell_fills_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("EXCLUSIONS", "rg:from-the-shell")
+    env: dict = {}
+    f = fetcher(tmp_path, exclusions=field(), other=ConfigField(name="other", env="OTHER"))
+    _apply_config(env, f, None, PlatformConfig(passthrough_env=["EXCLUSIONS"]), ManifestEntry(use="x"))
+    assert env == {"EXCLUSIONS": ""}
+    # What the fetcher's load_dotenv() does with it: a set variable, even an empty one, isn't overridden.
+    monkeypatch.setenv("EXCLUSIONS", env["EXCLUSIONS"])
+    (tmp_path / ".env").write_text("EXCLUSIONS=rg:prod-*\n")
+    load_dotenv(tmp_path / ".env")
+    assert os.environ["EXCLUSIONS"] == ""
 
 
 def test_a_category_declared_patterns_field_reaches_its_fetchers(tmp_path):
@@ -347,17 +389,31 @@ def test_exclude_on_a_fetcher_copies_the_platform_list_and_says_so(m_path):
     assert cli("manifest", "exclude", "azure_key_vault_configuration", "rg:y", "-f", m_path)[1]["copied"] == []
 
 
-def test_unexclude_of_a_fetchers_last_pattern_says_it_inherits_again(m_path):
+def test_unexclude_of_a_fetchers_last_pattern_keeps_it_empty_while_its_category_lists_patterns(m_path):
+    use = "azure_key_vault_configuration"
+
+    def own():
+        return next(e for e in cli("manifest", "show", "-f", m_path)[1]["run"]["fetchers"] if e["use"] == use).get(
+            "config") or {}
+
+    # The category has [rg:a]; the fetcher goes [rg:a, rg:b], [rg:b], then [], and rg:a doesn't come back.
     cli("manifest", "exclude", "azure", "rg:a", "-f", m_path)
-    cli("manifest", "set-config", "azure_key_vault_configuration", "resource_exclusions=rg:x", "-f", m_path)
-    r = runner.invoke(app, ["manifest", "unexclude", "azure_key_vault_configuration", "rg:x", "-f", m_path])
+    cli("manifest", "exclude", use, "rg:b", "-f", m_path)
+    cli("manifest", "unexclude", use, "rg:a", "-f", m_path)
+    r = runner.invoke(app, ["manifest", "unexclude", use, "rg:b", "-f", m_path])
     assert r.exit_code == 0
-    assert ("azure_key_vault_configuration has no resource_exclusions of its own now, so it takes "
-            "platforms.azure.config.resource_exclusions again: rg:a") in r.output
-    cli("manifest", "set-config", "azure_key_vault_configuration", "resource_exclusions=rg:x", "-f", m_path)
-    code, out = cli("manifest", "unexclude", "azure_key_vault_configuration", "--field", "resource_exclusions",
-                    "--all", "-f", m_path)
-    assert (code, out["removed"], out["inherits"]) == (0, 1, {"resource_exclusions": ["rg:a"]})
+    assert (f"{use} keeps resource_exclusions: [], so platforms.azure.config.resource_exclusions still doesn't apply "
+            f"to it (rg:a); to take it again, delete resource_exclusions from {use}'s config") in r.output
+    assert own() == {"resource_exclusions": []}
+    cli("manifest", "set-config", use, "resource_exclusions=rg:x", "-f", m_path)
+    code, out = cli("manifest", "unexclude", use, "--field", "resource_exclusions", "--all", "-f", m_path)
+    assert (code, out["removed"], out["kept_empty"], own()) == (0, 1, ["resource_exclusions"],
+                                                               {"resource_exclusions": []})
+    # With no category list to come back, the emptied field goes.
+    cli("manifest", "unexclude", "azure", "rg:a", "-f", m_path)
+    cli("manifest", "set-config", use, "resource_exclusions=rg:x", "-f", m_path)
+    code, out = cli("manifest", "unexclude", use, "rg:x", "-f", m_path)
+    assert (code, out["kept_empty"]) == (0, []) and "resource_exclusions" not in own()
 
 
 def test_set_platform_config_writes_a_patterns_field_as_a_list(m_path):

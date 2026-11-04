@@ -87,6 +87,7 @@ evidence_set:
     Script: azure/front_door_tls/fetcher.py
 
     Access: Reader on the subscription.
+    Azure Government: when AZURE_AUTHORITY_HOST is login.microsoftonline.us, the fetcher reads Microsoft.Cdn from management.usgovcloudapi.net with API version 2025-12-01, because Azure Government does not offer the public-cloud versions yet. The evidence records the version actually used.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set

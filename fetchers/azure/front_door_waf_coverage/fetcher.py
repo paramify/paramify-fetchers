@@ -31,11 +31,13 @@ from azure_common import (  # noqa: E402
 from frontdoor import (  # noqa: E402
     SECURITY_POLICY_API_VERSION,
     arm_key,
+    cdn_api_version,
     cdn_client,
     collect_waf_policies,
     custom_domains,
     endpoints_with_routes,
     front_door_profiles,
+    has_scope_fields,
     in_scope_totals,
     profile_scope,
     project_reference,
@@ -58,7 +60,9 @@ ACCESS_LOG_CATEGORY = "FrontDoorAccessLog"
 
 # --- projection: the only code here that touches an azure-mgmt model ---
 
-def project_security_policy(policy) -> dict:
+def project_security_policy(policy, scope_fields: bool = True) -> dict:
+    """With scope_fields False (an api-version older than 2026-04-01-preview), isProfileLevel and
+    associations[].routes are not returned, so both read None (unknown), never False or []."""
     props = model_attr(policy, "properties")
     params = model_attr(props, "parameters")
     return {
@@ -67,11 +71,11 @@ def project_security_policy(policy) -> dict:
         "type": model_attr(params, "type"),
         "waf_policy_id": model_attr(model_attr(params, "waf_policy"), "id"),
         # Recorded responses return isProfileLevel false when it was never set, and routes null.
-        "is_profile_level": wire(params, "isProfileLevel") is True,
+        "is_profile_level": (wire(params, "isProfileLevel") is True) if scope_fields else None,
         "associations": [
             {
                 "domains": [project_reference(d) for d in (model_attr(a, "domains") or [])],
-                "routes": [r.get("id") for r in (wire(a, "routes") or []) if hasattr(r, "get")],
+                "routes": [r.get("id") for r in (wire(a, "routes") or []) if hasattr(r, "get")] if scope_fields else None,
                 "patterns_to_match": list(model_attr(a, "patterns_to_match") or []),
             }
             for a in (model_attr(params, "associations") or [])
@@ -153,25 +157,31 @@ def profile_log_export(categories: list[dict], settings: list[dict]) -> dict:
 
 
 def resolve_scope(host_key: str, route_key: str, security_policies: list[dict]):
-    """Most specific WAF association for one host on one route: (scope, policy, association, other matches)."""
+    """Most specific WAF association for one host on one route: (scope, policy, association, other matches).
+
+    "unknown" when nothing matches but a WAF policy's route or profile-level attachment was not returned
+    (is_profile_level or routes None): the host may be covered, so it is not reported as "none"."""
     found = {scope: [] for scope in SCOPES}
+    unread = False
     for sp in security_policies:
         if sp["type"] != "WebApplicationFirewall":
             continue
         for assoc in sp["associations"]:
             domains = {arm_key(d["id"]) for d in assoc["domains"]}
-            routes = {arm_key(r) for r in assoc["routes"]}
+            unread = unread or assoc["routes"] is None
+            routes = {arm_key(r) for r in assoc["routes"] or []}
             if route_key in routes and (not domains or host_key in domains):
                 found["route"].append((sp, assoc))
             elif not routes and host_key in domains:
                 found["domain"].append((sp, assoc))
+        unread = unread or sp["is_profile_level"] is None
         if sp["is_profile_level"]:
             found["profile"].append((sp, None))
     for scope in SCOPES:
         if found[scope]:
             sp, assoc = found[scope][0]
             return scope, sp, assoc, len(found[scope]) - 1
-    return "none", None, None, 0
+    return ("unknown" if unread else "none"), None, None, 0
 
 
 def host_route_record(profile, endpoint, route, host, security_policies, waf_by_key) -> dict:
@@ -185,7 +195,9 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
     serving = route_serving(endpoint, route)
 
     reasons = []
-    if scope == "none":
+    if scope == "unknown":
+        pass  # not read, so neither protected nor unprotected
+    elif scope == "none":
         reasons.append("no_waf")
     else:
         if waf is None:
@@ -220,7 +232,7 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
         "waf_policy": waf["name"] if waf else None,
         "waf_mode": waf["mode"] if waf else None,
         "waf_enabled_state": waf["enabled_state"] if waf else None,
-        "waf_blocking": waf["blocking"] if waf else False,
+        "waf_blocking": waf["blocking"] if waf else (None if scope == "unknown" else False),
         "waf_not_blocking_reasons": waf["not_blocking_reasons"] if waf else [],
         "waf_disabled_managed_rules": waf["disabled_managed_rules"] if waf else None,
         "waf_default_rule_set_enabled_rules": waf["default_rule_set_enabled_rules"] if waf else None,
@@ -229,7 +241,7 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
         "waf_default_rule_set_groups_without_blocking_rules": (
             waf["default_rule_set_groups_without_blocking_rules"] if waf else None
         ),
-        "protected": serving and not reasons,
+        "protected": None if scope == "unknown" and serving else serving and not reasons,
         "unprotected_reasons": reasons,
     }
 
@@ -277,15 +289,34 @@ def coverage_for_profile(collected: dict, waf_by_key: dict, exclusions: ScopeExc
     }
 
 
+def profile_waf_in_use(host_routes: list[dict]):
+    """True when a serving host-route has a WAF applied; None when none does but one's coverage was not read
+    (unknown scope), since that host-route may have one; else False."""
+    serving = [h for h in host_routes if h["serving"]]
+    if any(h["effective_scope"] not in ("none", "unknown") for h in serving):
+        return True
+    return None if any(h["effective_scope"] == "unknown" for h in serving) else False
+
+
 def summarize(profiles, skipped_by_sku, host_routes, endpoints_without_routes, unrouted, security_policies) -> dict:
     serving = [h for h in host_routes if h["serving"]]
     waf_profiles = [p for p in profiles if p["waf_in_use"]]
-    unprotected = [h for h in serving if not h["protected"]]
+    unprotected = [h for h in serving if h["protected"] is False]
+    unknown = [h for h in serving if h["protected"] is None]
 
-    def reason(name: str) -> int:
-        return sum(1 for h in serving if name in h["unprotected_reasons"])
+    # While any serving host-route's coverage was not read (Azure Government), every count of protected or
+    # unprotected host-routes, and of the reasons, is only a lower bound, so each reads null rather than a number
+    # a check could pass on.
+    def known(count: int):
+        return None if unknown else count
 
-    protected = len(serving) - len(unprotected)
+    def reason(name: str):
+        return known(sum(1 for h in serving if name in h["unprotected_reasons"]))
+
+    protected = len(serving) - len(unprotected) - len(unknown)
+    # A profile whose WAF use is unknown counts as a log-export gap unless it exports its WAF log anyway.
+    unknown_waf_profiles = [p for p in profiles if p["waf_in_use"] is None]
+    unknown_log_gap = any(not p["waf_log_exported"] for p in unknown_waf_profiles)
     return {
         "total_front_door_profiles": len(profiles),
         "premium_profiles": sum(1 for p in profiles if p["sku"] == "Premium_AzureFrontDoor"),
@@ -299,19 +330,23 @@ def summarize(profiles, skipped_by_sku, host_routes, endpoints_without_routes, u
         "total_security_policies": len(security_policies),
         "total_host_routes": len(host_routes),
         "serving_host_routes": len(serving),
-        "protected_host_routes": protected,
-        "unprotected_host_routes": len(unprotected),
-        "protected_host_route_percentage": coverage_percentage(protected, len(serving)),
+        "protected_host_routes": known(protected),
+        "unprotected_host_routes": known(len(unprotected)),
+        "unknown_host_routes": len(unknown),
+        # A share of hosts can't be stated while some hosts' coverage was not read.
+        "protected_host_route_percentage": known(coverage_percentage(protected, len(serving))),
         "host_routes_without_waf": reason("no_waf"),
         "host_routes_waf_not_blocking": reason("waf_not_blocking"),
         "host_routes_waf_unresolved": reason("waf_unresolved"),
         "host_routes_partial_path_coverage": reason("partial_path_coverage"),
         "host_routes_reference_inactive": reason("host_reference_inactive"),
-        **{f"host_routes_{s}_scope": sum(1 for h in serving if h["effective_scope"] == s) for s in (*SCOPES, "none")},
-        "profiles_with_waf_in_use": len(waf_profiles),
+        **{f"host_routes_{s}_scope": sum(1 for h in serving if h["effective_scope"] == s) for s in (*SCOPES, "none", "unknown")},
+        "profiles_with_waf_in_use": None if unknown_waf_profiles else len(waf_profiles),
         "profiles_waf_log_exported": sum(1 for p in profiles if p["waf_log_exported"]),
-        "profiles_with_waf_in_use_without_waf_log_export": sum(1 for p in waf_profiles if not p["waf_log_exported"]),
-        "security_policies_api_version": SECURITY_POLICY_API_VERSION,
+        "profiles_with_waf_in_use_without_waf_log_export": (
+            None if unknown_log_gap else sum(1 for p in waf_profiles if not p["waf_log_exported"])
+        ),
+        "security_policies_api_version": cdn_api_version(SECURITY_POLICY_API_VERSION),
     }
 
 
@@ -324,6 +359,7 @@ def collect_profiles(subscription_id, cred, collector: Collector, exclusions: Re
 
     cdn = cdn_client(subscription_id, cred, collector)
     cdn_sp = cdn_client(subscription_id, cred, collector, api_version=SECURITY_POLICY_API_VERSION)
+    scope_fields = has_scope_fields(cdn_api_version(SECURITY_POLICY_API_VERSION))
     monitor = collector.guard(
         "monitor.MonitorManagementClient (init)",
         lambda: MonitorManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs()),
@@ -348,7 +384,7 @@ def collect_profiles(subscription_id, cred, collector: Collector, exclusions: Re
             "custom_domains": custom_domains(cdn, collector, profile),
             "security_policies": collector.guard(
                 f"cdn.security_policies.list_by_profile({name})",
-                lambda: [project_security_policy(s) for s in cdn_sp.security_policies.list_by_profile(rg, name)],
+                lambda: [project_security_policy(s, scope_fields) for s in cdn_sp.security_policies.list_by_profile(rg, name)],
                 default=[],
             ),
             "log_categories": collector.guard(
@@ -421,7 +457,7 @@ def main() -> int:
         profiles.append({
             **c["profile"],
             **profile_log_export(c["log_categories"], c["log_settings"]),
-            "waf_in_use": any(h["serving"] and h["effective_scope"] != "none" for h in cov["host_routes"]),
+            "waf_in_use": profile_waf_in_use(cov["host_routes"]),
             "endpoint_count": cov["endpoint_count"],
             "route_count": cov["route_count"],
             "custom_domain_count": cov["custom_domain_count"],
