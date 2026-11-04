@@ -1,24 +1,25 @@
 name: azure_dns_configuration
-version: 0.4.0
+version: 0.5.0
 description: >-
   Shows the targets, TTL and failover method of each in-scope public DNS record, whether each public zone uses DNSSEC, and which virtual networks each private zone is linked to.
 category: azure
 
 config_schema:
   scope_exclusions:
-    type: string
+    type: patterns
     required: false
     env: AZURE_DNS_SCOPE_EXCLUSIONS
     description: >
       Public record sets to leave out of scope, as case-insensitive glob patterns
-      separated by commas or spaces (* matches any run of characters, dots included,
+      listed in the manifest (* matches any run of characters, dots included,
       ? one character, and [ ] one character from a set, such as [0-9]). Each
       pattern is matched against a record set's relative name (www, @) and its FQDN
       (www.example.com, the trailing dot optional). A relative name applies in every
       public zone; use the FQDN to exclude one zone's record. A matching record set
       is listed under excluded with the pattern and left out of every count, though
       each zone's number_of_record_sets is Azure's own count and still includes it.
-      A prefix such as route: fails the run. Can be ${env:VAR}. Empty: every record
+      A prefix such as route: fails the run. Each item is a pattern, or a pattern with
+      a reason. Empty: every record
       set is in scope.
 
 supports_targets: true

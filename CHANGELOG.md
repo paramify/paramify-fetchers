@@ -57,15 +57,14 @@ schemas and the `paramify` CLI — not the internal code.
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
-  case-insensitive globs, comma- or space-separated, each with a prefix:
+  case-insensitive globs listed in the manifest, each with a prefix:
   `rg:` (resource group, read from the resource id when a record has no field
   for it), `location:` (region, compared without case or spaces; a record with no
   location never matches one) or `id:` (a resource id, which also covers the
   resource's children). A bare pattern or any other prefix fails the run. An
-  adopter reads them from its `resource_exclusions` config field
-  (`AZURE_RESOURCE_EXCLUSIONS`), which can be set once for every adopter with
-  `platforms.azure.config.resource_exclusions`, as a `${env:VAR}` reference if
-  wanted. Its evidence keeps every excluded item in `results.excluded` with the
+  adopter reads them from its `resource_exclusions` pattern list (see
+  "Pattern-list config fields"), which can be set once for every adopter with
+  `platforms.azure.config.resource_exclusions`. Its evidence keeps every excluded item in `results.excluded` with the
   pattern that matched, echoes the patterns, lists the ones that matched
   nothing, and counts each excluded kind and what stayed in scope
   (`in_scope_<kind>s`). Every verdict and count covers only what remains in
@@ -446,7 +445,7 @@ schemas and the `paramify` CLI — not the internal code.
   answers; an unread category list leaves `categories_not_exported` null.
 - **Scope exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/scope_exclusions.py`, takes case-insensitive glob
-  patterns (comma- or space-separated) and answers whether a name is excluded and
+  patterns (a pattern list in the manifest) and answers whether a name is excluded and
   by which pattern. A fetcher that adopts it reads them from its
   `scope_exclusions` config field, and its evidence keeps every excluded item in
   `results.excluded` with the pattern that matched (or the reason it followed),
@@ -470,6 +469,48 @@ schemas and the `paramify` CLI — not the internal code.
     route. Both fetcher.yaml texts move to the new description format.
   - `azure_dns_configuration` 0.4.0: public record-set names, relative (in every
     zone) or FQDN. A prefixed pattern fails the run.
+- **Pattern-list config fields (`type: patterns`).** A config field can hold a
+  list of glob patterns written in the manifest, each a plain pattern or a
+  `pattern` with an optional `reason`:
+
+  ```yaml
+  platforms:
+    azure:
+      config:
+        resource_exclusions:
+          - pattern: location:regioneast
+            reason: Region outside the authorization boundary
+          - rg:rg-out-of-scope
+  ```
+
+  The field declares the prefixes a pattern may start with (`prefixes:`) and
+  whether a pattern may have none (`bare:`). `validate` and the runner refuse an
+  unknown prefix, a missing one where `bare: false`, an empty glob, a space or
+  comma inside a pattern, a pattern listed twice, and any `${env:VAR}`
+  reference, since a pattern list lives in the manifest. The runner hands the
+  fetcher the patterns as one comma-separated string, so a fetcher reads them as
+  before; a comma- or space-separated string value still works. The merge order
+  is unchanged: an entry's list replaces the platform list, and an empty list
+  clears it for that entry. `paramify manifest exclude <category|fetcher>
+  <pattern> [--reason TEXT] [--field NAME]` and `unexclude` edit the lists,
+  choosing the field whose prefixes take the pattern; a category-wide write is
+  refused for a field its fetchers declare with different prefixes, such as
+  `scope_exclusions`. A fetcher's first pattern starts from a copy of its
+  category's list, which `exclude` names, so the fetcher keeps those patterns.
+  When `unexclude` removes a fetcher's last pattern and its category lists
+  patterns, the fetcher keeps an empty list, so the category's patterns don't
+  come back to it, and `unexclude` says so. `set-config` and `set-platform-config` take a
+  comma-separated list. `describe` shows what a pattern list takes instead of its
+  env var. `validate` adds a note for each category-wide list, naming the entries
+  that take it, the ones with their own list, and the ones without the field
+  (`--json` carries them as `notes`). The TUI shows a list as its patterns and
+  leaves it out of the entry editor, which would save it back as one string.
+  A list or a map given to a config field that isn't `type: patterns`, such as
+  a category-wide list reaching a fetcher that declares the key a string, fails
+  `validate` and the run instead of reaching the fetcher as Python text. A
+  pattern list the manifest leaves unset reaches the fetcher as an empty
+  variable, so a `.env` file can't fill it, and `passthrough_env` doesn't carry
+  it.
 - **A string config field can be a `${env:VAR}` reference.** The runner
   resolves it the way it resolves a secret. An unset or empty variable gives way
   to the next value down (platform config, then the default; an error for a
@@ -570,6 +611,36 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The Azure exclusion fields are pattern lists.** `resource_exclusions`
+  (`rg:`, `location:` or `id:`, never bare) and `scope_exclusions` (Front Door:
+  `route:` or a bare host name; DNS: a bare record-set name) are
+  `type: patterns`. A bad pattern now fails `validate`, and stops the entry
+  before the fetcher starts, rather than failing the run; a `${env:VAR}` value is
+  refused, so write the patterns in the manifest. A pattern listed twice, even
+  in different case (`rg:a, rg:A`), now fails `validate`; the fetchers used to
+  drop the second one silently. A platform-wide
+  `scope_exclusions` with a `route:` pattern fails `validate` for
+  `azure_dns_configuration`. Fetcher code and evidence are unchanged. Versions:
+  `azure_alert_rules`, `azure_app_service_backups`,
+  `azure_app_service_deployments`, `azure_app_service_plans`,
+  `azure_backup_recovery_status`, `azure_log_analytics_workspaces`,
+  `azure_private_endpoint_configuration`, `azure_residual_resources`,
+  `azure_sql_managed_instance_backups`, `azure_sql_managed_instance_configuration`,
+  `azure_sql_managed_instance_encryption` and `azure_vnet_egress_routing` 0.2.0 →
+  0.3.0; `azure_defender_assessments`, `azure_key_vault_configuration`,
+  `azure_key_vault_key_rotation`, `azure_policy_compliance`,
+  `azure_private_dns_zone_configuration`, `azure_resource_diagnostic_settings`,
+  `azure_resource_inventory` and `azure_storage_encryption_status` 0.3.0 → 0.4.0;
+  `azure_app_service_configuration`, `azure_dns_configuration`,
+  `azure_front_door_tls`, `azure_front_door_waf_coverage` and
+  `azure_network_security_groups` 0.4.0 → 0.5.0; `azure_front_door_origins`
+  0.6.0 → 0.7.0.
+- **`validate` refuses config keys no fetcher reads.** These were saved and
+  silently ignored: a platform key that no fetcher of the category (nor its
+  category file) declares, a `platforms:` block for no category, and an entry
+  key its fetcher doesn't declare. Each is now an error with a did-you-mean
+  hint, and a platform key only a comparator declares says the comparator reads
+  it from its own entry.
 - **`azure_sentinel_playbooks` 0.3.0: run history and last run result.** Each
   playbook now carries its runs over a lookback (`run_lookback_days`, default
   90, the default Logic Apps run-history retention; `SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS`;

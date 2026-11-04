@@ -13,6 +13,7 @@ sys.path.insert(0, str(REPO_ROOT / "fetchers" / "azure" / "_shared"))
 
 from azure_common import Collector, classify_failure_code  # noqa: E402
 from resource_exclusions import ENV, ResourceExclusions  # noqa: E402
+from scope_exclusions import parse_patterns  # noqa: E402
 
 SUB = "/subscriptions/00000000-0000-0000-0000-000000000000"
 VAULT = f"{SUB}/resourceGroups/RG-Out/providers/Microsoft.KeyVault/vaults/kv-out"
@@ -86,7 +87,7 @@ def test_no_patterns_keeps_everything():
     assert kept == items and excluded == []
 
 
-def test_platform_config_reaches_every_fetcher_that_declares_the_field(monkeypatch):
+def test_platform_config_reaches_every_fetcher_that_declares_the_field():
     from framework.config_loader import discover_fetchers, discover_platforms
     from framework.contract import ManifestEntry, PlatformConfig
     from framework.runner.executor import _apply_config
@@ -94,10 +95,12 @@ def test_platform_config_reaches_every_fetcher_that_declares_the_field(monkeypat
     fetchers, platforms = discover_fetchers(REPO_ROOT), discover_platforms(REPO_ROOT)
     adopters = [f for f in fetchers.values() if f.category == "azure" and "resource_exclusions" in f.config_schema]
     assert adopters
-    monkeypatch.setenv(ENV, "rg:rg-out, location:regioneast")
-    platform = PlatformConfig(config={"resource_exclusions": "${env:AZURE_RESOURCE_EXCLUSIONS}"})
+    platform = PlatformConfig(config={"resource_exclusions": [
+        {"pattern": "rg:rg-out", "reason": "Outside the boundary"}, "location:regioneast"]})
     for fetcher in adopters:
-        assert fetcher.config_schema["resource_exclusions"].env == ENV
+        field = fetcher.config_schema["resource_exclusions"]
+        assert (field.type, field.prefixes, field.bare, field.env) == ("patterns", ("rg", "location", "id"), False, ENV)
         env: dict = {}
         _apply_config(env, fetcher, platforms.get("azure"), platform, ManifestEntry(use=fetcher.name))
-        assert env[ENV] == "rg:rg-out, location:regioneast", fetcher.name
+        assert env[ENV] == "rg:rg-out,location:regioneast", fetcher.name
+        assert ResourceExclusions(parse_patterns(env[ENV])).patterns == ["rg:rg-out", "location:regioneast"]
