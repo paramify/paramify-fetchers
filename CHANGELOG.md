@@ -1026,6 +1026,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_privileged_roles` 0.2.0 counts service principals that hold a
+  role.** On a real tenant, Microsoft Graph v1.0 `/directoryRoles/{id}/members`
+  left out every service principal holding the role, while beta and the
+  `/members/microsoft.graph.servicePrincipal` cast listed them, so
+  `service_principals_in_privileged_roles` read 0 with service principals in
+  privileged roles. Each role's service principals are now read through the cast
+  and added to its members, once each; the assignment and principal counts include
+  them. If the cast read fails, the run fails and
+  `service_principals_in_privileged_roles` reads null; each role records
+  `service_principal_members_read`. A failed read no longer reads as 0 either: a
+  failed role list leaves every figure null, and a failed members or cast read
+  leaves null each figure over that role that it feeds (the Global Administrator
+  count when it is that role); each role records `members_read`.
 - **`azure_entra_conditional_access_policies` 0.2.2: an application filter
   narrows MFA coverage in either mode, and each policy shows its filter.** In
   0.2.1 a policy with an application filter still added its client app types to
