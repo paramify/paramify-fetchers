@@ -12,30 +12,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- **`azure_service_health_advisories`** (`EVD-AZURE-SERVICE-HEALTH`) — the
-  Microsoft Service Health events reported to the subscription: service issues,
-  planned maintenance, health advisories (retirements included) and security
-  advisories, each with its status, level, impacted services and regions, impact
-  start and end, published and last update times, recommended actions and the
-  resources it names. The event list covers a lookback window
-  (`AZURE_SERVICE_HEALTH_LOOKBACK_DAYS`, 180 by default and at most 180, because
-  a 270-day window answers 502; one that is not a whole number above 0 fails the
-  run as `bad_config`), and any older event Resource Graph still holds
-  is added, read by its tracking id from 30 days before its last update; one
-  the event API can't find is counted in `events_in_resource_graph_not_found`.
-  When Resource Graph's events or one of those older events can't be read,
-  every event count is null, since an older event can change any of them.
-  The resources each event names come from
-  Resource Graph, because the REST impactedResources list came back empty for
-  the same events. Open follows Microsoft's own active rule, and Microsoft's
-  `0001-01-01` "not set" time reads as null. A sensitive security advisory's
-  summary and updates come from `fetchEventDetails`, and its resources from
-  `listSecurityAdvisoryImpactedResources`. Reader has neither action, so without
-  them those read unknown and the run does not fail. Takes
-  `resource_exclusions`, applied to the resources an event names. Billing
-  communications are left out. `_shared/azure_rest.py` gains `post` and
-  `post_list` for ARM read actions sent as POST, and `get` takes query
-  parameters.
 - **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
   Unhealthy assessment reports `days_open` (from `status_change_date`, null when
   missing; it starts again at 0 when a finding turns Healthy and then Unhealthy
@@ -258,6 +234,30 @@ schemas and the `paramify` CLI — not the internal code.
   (`all_alerts_listed`). Counts and close times that need an alert list, a rule list
   or a history that wasn't read are null, never 0 or partial. Descriptions and
   comments are capped at 500 characters, marked when cut.
+- **`azure_service_health_advisories`** (`EVD-AZURE-SERVICE-HEALTH`) — the
+  Microsoft Service Health events reported to the subscription: service issues,
+  planned maintenance, health advisories (retirements included) and security
+  advisories, each with its status, level, impacted services and regions, impact
+  start and end, published and last update times, recommended actions and the
+  resources it names. The event list covers a lookback window
+  (`AZURE_SERVICE_HEALTH_LOOKBACK_DAYS`, 180 by default and at most 180, because
+  a 270-day window answers 502; one that is not a whole number above 0 fails the
+  run as `bad_config`), and any older event Resource Graph still holds
+  is added, read by its tracking id from 30 days before its last update; one
+  the event API can't find is counted in `events_in_resource_graph_not_found`.
+  When Resource Graph's events or one of those older events can't be read,
+  every event count is null, since an older event can change any of them.
+  The resources each event names come from
+  Resource Graph, because the REST impactedResources list came back empty for
+  the same events. Open follows Microsoft's own active rule, and Microsoft's
+  `0001-01-01` "not set" time reads as null. A sensitive security advisory's
+  summary and updates come from `fetchEventDetails`, and its resources from
+  `listSecurityAdvisoryImpactedResources`. Reader has neither action, so without
+  them those read unknown and the run does not fail. Takes
+  `resource_exclusions`, applied to the resources an event names. Billing
+  communications are left out. `_shared/azure_rest.py` gains `post` and
+  `post_list` for ARM read actions sent as POST, and `get` takes query
+  parameters.
 - **`azure_devops_work_items`** (`EVD-AZURE-DEVOPS-WORK-ITEMS`): Azure DevOps
   work items that record changes and security work. The types that record
   changes (`AZURE_DEVOPS_WORK_ITEM_TYPES`, default `Change Request`) and the
@@ -979,9 +979,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
-- **Azure: an invalid lookback or recovery time objective fails as `bad_config`.**
-  The messages matched no `bad_config` marker, so `azure_change_provenance` and
-  `azure_front_door_origins` reported an invalid lookback as `partial_failure`.
+- **`azure_entra_conditional_access_policies` 0.2.2: an application filter
+  narrows MFA coverage in either mode, and each policy shows its filter.** In
+  0.2.1 a policy with an application filter still added its client app types to
+  `mfa_client_app_types_for_all_users_and_apps`; now it doesn't. A filter in
+  exclude mode leaves apps out, and in include mode it narrows the target, so
+  both narrow. Each policy's `target_resources.application_filter` carries the
+  filter's mode and rule. The `authentication_strengths_readable` description
+  now says it stays true, with `authentication_strengths` null, when the
+  policies couldn't be read.
 - **`azure_front_door_origins` 0.6.0, `azure_front_door_tls` 0.4.0 and
   `azure_front_door_waf_coverage` 0.4.0 run on Azure Government.** Azure
   Government does not offer the Microsoft.Cdn API versions these fetchers use
@@ -1002,6 +1008,9 @@ schemas and the `paramify` CLI — not the internal code.
   `profiles_with_waf_in_use_without_waf_log_export` is null unless that profile
   exports its WAF log. The public-cloud output is unchanged apart from the two
   new counts, which are 0 there.
+- **Azure: an invalid lookback or recovery time objective fails as `bad_config`.**
+  The messages matched no `bad_config` marker, so `azure_change_provenance` and
+  `azure_front_door_origins` reported an invalid lookback as `partial_failure`.
 - **`azure_entra_conditional_access_policies` 0.2.1: device filters,
   authentication flows and insider and service principal risk narrow MFA
   coverage.** In 0.2.0 a policy with any of these conditions still added its
@@ -1015,11 +1024,12 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
   report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`
-  counted every one as without MFA. It is now taken over the users with a row,
-  and the new `users_with_registration_details` gives its denominator. The
-  figures over enabled users and admins are unchanged: there a user with no row
-  still counts as without MFA. A failed read no longer reads as 0: when the users
-  list can't be read in full every figure is null, and when the registration
+  counted every one as without MFA. It is now taken over the users with a row
+  (0.3.1 changes the denominator), and the new `users_with_registration_details`
+  counts the users with a row. The figures over enabled users and admins are
+  unchanged: there a user with no row still counts as without MFA. A failed
+  read no longer reads as 0: when the users list can't be read in full every
+  figure is null, and when the registration
   report can't be, every figure that relies on it.
 - **`azure_entra_mfa_status` 0.3.1: an enabled user with no registration row
   counts against the all-users coverage.** 0.3.0 left every user without a row
