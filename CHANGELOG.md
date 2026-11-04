@@ -216,6 +216,110 @@ schemas and the `paramify` CLI — not the internal code.
     still read there. App dependency rows are keyed by Application Insights
     component, not app, and are not split. The app and instance counts read
     null when their list couldn't be read.
+  - `azure_app_gateway_backend_tls` 0.2.0 and `azure_app_gateway_tls_listeners`
+    0.2.0: application gateways, with their backend settings or listeners. The
+    Resource Graph completeness check still compares the full gateway list.
+  - `azure_app_gateway_waf` 0.2.0: application gateways (with their listeners)
+    and WAF policies. An in-scope listener whose policy is excluded keeps its
+    WAF verdict; only the policy leaves the policy list and counts.
+  - `azure_ddos_protection` 0.2.0: public IPs, DDoS protection plans and
+    virtual networks. Protection is still worked out against every plan and
+    network, so an in-scope public IP protected through an excluded network or
+    plan keeps its verdict; a network's attached-IP counts cover in-scope IPs.
+  - `azure_network_flow_logs` 0.2.0: Network Watchers, flow logs, virtual
+    networks and subnets. A flow log leaves only on an `id:` pattern naming it
+    or with an excluded target (`target_matched`); excluding its watcher, or
+    the watcher's resource group, keeps it in scope. A subnet leaves with its
+    network, and a network whose subnets are all excluded leaves too
+    (`subnets_matched`). Coverage is still judged against every flow log. A
+    run that read nothing (no subscription, or no client) now reports the
+    virtual network figures null and `virtual_networks_read` false, as a
+    refused network list already did.
+  - `azure_virtual_wan_configuration` 0.2.0: virtual WANs, hubs, hub VPN
+    gateways (with their connections), VPN sites, point-to-site gateways and
+    VPN server configurations. A hub and a VPN site also leave with their WAN,
+    and a hub's gateways with the hub.
+  - `azure_vpn_gateway_configuration` 0.2.0: virtual network gateways,
+    connections and local network gateways. A connection also leaves with its
+    gateway (`gateway_matched`) and gets no status read; a connection to an
+    excluded second gateway or local network gateway keeps its verdict.
+  - `azure_dns_configuration` 0.6.0: public and private DNS zones (global, so
+    `rg:`, `id:` or `location:global`), with their record sets and virtual
+    network links, which are then not read. Record-set `scope_exclusions` apply
+    to the zones left in scope. An alias record or link in an in-scope zone
+    still counts when what it points at is excluded.
+  - `azure_front_door_tls` 0.6.0 and `azure_front_door_waf_coverage` 0.6.0:
+    Front Door profiles (global), with their endpoints, routes, custom domains,
+    rule sets, secrets, security policies and diagnostic settings, which are
+    then not read. `scope_exclusions` apply to the profiles left in scope, so a
+    scope pattern that matched only an excluded profile's hosts reads
+    unmatched. WAF policies are not taken out in coverage: an in-scope host
+    whose policy a pattern matches keeps its verdict.
+  - `azure_front_door_waf_policies` 0.2.0: Standard and Premium WAF policies
+    (global). A policy linked to an excluded profile still reads `associated`,
+    and `skipped_policies_by_sku` still counts every classic policy.
+  - `azure_front_door_origins` 0.8.0: Front Door profiles (global), with their
+    origin groups, origins and health; their metrics aren't read. Production
+    apps also leave by their own resource group, region or id
+    (`excluded_production_apps`). An in-scope origin whose back end is excluded
+    stays and keeps every verdict. An excluded profile's routes are still read,
+    so an in-scope app it fronts stays behind Front Door, but, as with an
+    out-of-scope route, an excluded profile can't vouch for an app that admits
+    its Front Door id.
+
+  In the application gateway, DDoS, flow log, Virtual WAN, VPN gateway, DNS and
+  Front Door fetchers, a kind's `excluded_*` and `in_scope_*` counts read null,
+  not 0, when its list couldn't be read.
+
+  - `azure_cosmosdb_configuration` 0.2.0: database accounts.
+  - `azure_databricks_workspace_configuration` 0.2.0: workspaces.
+  - `azure_managed_redis_configuration` 0.2.0: Redis Enterprise clusters; their
+    databases leave with them and are not read.
+  - `azure_redis_cache_configuration` 0.2.0: caches, which then get no firewall,
+    access-policy, patch-schedule, linked-server or diagnostic reads.
+  - `azure_mysql_configuration` 0.2.0: flexible servers, whose parameters are
+    then not read.
+  - `azure_postgresql_configuration` 0.2.0: flexible servers; their parameters,
+    firewall rules and Entra administrators are not read.
+  - `azure_sql_encryption_status` 0.2.0: logical servers, whose databases leave
+    with them; an in-scope server whose key sits in an excluded vault keeps its
+    verdict.
+  - `azure_sql_server_configuration` 0.2.0: logical servers; their firewall
+    rules and audit, alert and vulnerability settings are not read. An in-scope
+    server auditing to an excluded destination keeps its verdict.
+  - `azure_data_services_configuration` 0.2.0: Mongo vCore clusters, Data
+    Explorer clusters and Event Hubs namespaces; their firewall rules,
+    databases, principals, event hubs and authorization rules are not read.
+  - `azure_aks_cluster_configuration` 0.2.0: managed clusters, with their agent
+    pools.
+  - `azure_container_registry_configuration` 0.2.0: registries, which then get
+    no diagnostic-settings reads.
+  - `azure_container_workloads_configuration` 0.2.0: Container Apps
+    environments, apps and jobs, and container groups; an app or job also
+    leaves with its environment (`environment_matched`, with `matched_id`).
+  - `azure_function_app_configuration` 0.2.0: function apps, which then get no
+    configuration, key or app-setting reads.
+  - `azure_vm_hardening_status` 0.2.0: virtual machines and scale sets, which
+    then get no extension or instance reads. A virtual machine also leaves
+    with its scale set (`scale_set_matched`, with `matched_id`).
+  - `azure_disk_encryption_status` 0.2.0: managed disks; a disk encryption set
+    in an excluded group doesn't change an in-scope disk's verdict.
+  - `azure_api_management_configuration` 0.2.0: services, with their APIs,
+    products, backends, hostnames and certificates, none of them read.
+  - `azure_managed_identity_configuration` 0.2.0: user-assigned identities, and
+    system-assigned identities whose resource a pattern matches (the identity
+    query now also returns the resource's location). Excluded identities get no
+    federated-credential or Graph reads; an in-scope identity keeps every
+    attachment and role assignment, even at an excluded scope. An identity a
+    pattern matches stays in scope while it holds an Azure role at an in-scope
+    scope or on a user-assigned identity kept this way, as an App Service plan
+    stays while an in-scope site runs on it, and its record carries
+    `kept_by_identity_rule` with the pattern. If the role-assignment list
+    couldn't be read, every identity a pattern matches stays that way.
+
+  In the seventeen fetchers above, from `azure_cosmosdb_configuration` on, a
+  list that couldn't be read leaves the `in_scope_*` and `excluded_*` counts of
+  its kind null, not 0.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or
@@ -1063,6 +1167,28 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_privileged_roles` 0.2.0 counts service principals that hold a
+  role.** On a real tenant, Microsoft Graph v1.0 `/directoryRoles/{id}/members`
+  left out every service principal holding the role, while beta and the
+  `/members/microsoft.graph.servicePrincipal` cast listed them, so
+  `service_principals_in_privileged_roles` read 0 with service principals in
+  privileged roles. Each role's service principals are now read through the cast
+  and added to its members, once each; the assignment and principal counts include
+  them. If the cast read fails, the run fails and
+  `service_principals_in_privileged_roles` reads null; each role records
+  `service_principal_members_read`. A failed read no longer reads as 0 either: a
+  failed role list leaves every figure null, and a failed members or cast read
+  leaves null each figure over that role that it feeds (the Global Administrator
+  count when it is that role); each role records `members_read`.
+- **`azure_entra_conditional_access_policies` 0.2.2: an application filter
+  narrows MFA coverage in either mode, and each policy shows its filter.** In
+  0.2.1 a policy with an application filter still added its client app types to
+  `mfa_client_app_types_for_all_users_and_apps`; now it doesn't. A filter in
+  exclude mode leaves apps out, and in include mode it narrows the target, so
+  both narrow. Each policy's `target_resources.application_filter` carries the
+  filter's mode and rule. The `authentication_strengths_readable` description
+  now says it stays true, with `authentication_strengths` null, when the
+  policies couldn't be read.
 - **`azure_front_door_origins` 0.6.0, `azure_front_door_tls` 0.4.0 and
   `azure_front_door_waf_coverage` 0.4.0 run on Azure Government.** Azure
   Government does not offer the Microsoft.Cdn API versions these fetchers use
@@ -1096,11 +1222,12 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
   report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`
-  counted every one as without MFA. It is now taken over the users with a row,
-  and the new `users_with_registration_details` gives its denominator. The
-  figures over enabled users and admins are unchanged: there a user with no row
-  still counts as without MFA. A failed read no longer reads as 0: when the users
-  list can't be read in full every figure is null, and when the registration
+  counted every one as without MFA. It is now taken over the users with a row
+  (0.3.1 changes the denominator), and the new `users_with_registration_details`
+  counts the users with a row. The figures over enabled users and admins are
+  unchanged: there a user with no row still counts as without MFA. A failed
+  read no longer reads as 0: when the users list can't be read in full every
+  figure is null, and when the registration
   report can't be, every figure that relies on it.
 - **`azure_entra_mfa_status` 0.3.1: an enabled user with no registration row
   counts against the all-users coverage.** 0.3.0 left every user without a row
@@ -1109,6 +1236,15 @@ schemas and the `paramify` CLI — not the internal code.
   enabled one counts as without MFA, as in the enabled-user figures. The new
   `users_counted_in_all_users_coverage` is the figure's denominator, and
   `users_with_registration_details` still counts the users with a row.
+- **`azure_entra_dormant_identities` 0.2.0 finds service principals that hold a
+  directory role.** Microsoft Graph v1.0 `/directoryRoles/{id}/members` can leave
+  out every service principal holding the role, so
+  `service_principals_holding_directory_roles` could read 0 and those service
+  principals were never checked for dormancy as directory role holders. Each
+  role's service principals are now also read through the
+  `/members/microsoft.graph.servicePrincipal` cast and added once each; if that
+  read fails, `directory_roles_readable` is false and the directory counts read
+  null.
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was

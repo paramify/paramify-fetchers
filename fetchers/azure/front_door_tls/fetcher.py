@@ -42,6 +42,7 @@ from frontdoor import (  # noqa: E402
     route_serving,
     rule_sets_with_rules,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from scope_exclusions import ScopeExclusions, excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_front_door_tls")
@@ -256,11 +257,21 @@ def summarize(profiles: list[dict], skipped_by_sku: dict, routes: list[dict], do
 
 # --- collection (lazy azure imports) ---
 
-def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[dict], dict]:
+def collect_profiles(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+                     excluded: list | None = None) -> tuple[list[dict] | None, dict]:
+    """Profiles the exclusions take out are appended to `excluded` and get no further reads; None when the profile
+    list wasn't read."""
     cdn = cdn_client(subscription_id, cred, collector)
     if cdn is None:
-        return [], {}
+        return None, {}
     profiles, skipped = front_door_profiles(cdn, collector)
+    if profiles is None:
+        return None, skipped
+    if exclusions:
+        # A Front Door profile is global, so location: reaches it only as location:global.
+        profiles, out = exclusions.split(profiles, "profile", location=lambda p: "global")
+        if excluded is not None:
+            excluded += out
     collected = []
     for profile in profiles:
         rg, name = resource_group_from_id(profile["id"]), profile["name"]
@@ -294,14 +305,17 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    collected: list[dict] = []
+    collected: list[dict] | None = None
     skipped_by_sku: dict = {}
+    resources = ResourceExclusions.from_env()
+    resources.record_invalid(collector)
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Cdn")
         if registration == NOT_REGISTERED:
             logger.warning("Microsoft.Cdn is not registered on subscription %s", subscription_id)
-        collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector)
+        collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector, resources, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -311,10 +325,15 @@ def main() -> int:
             ),
         )
 
+    resources.warn_unmatched(logger)
+    listed = collected is not None
+    collected = collected or []
+
     now = datetime.now(timezone.utc)
+    # Scope exclusions apply to the profiles left in scope.
     exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV, kinds=("route",))
     exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
-    profiles, routes, domains, secrets, excluded, scopes = [], [], [], [], [], []
+    profiles, routes, domains, secrets, scopes = [], [], [], [], []
     for c in collected:
         tls = tls_for_profile(c, now, exclusions)
         scopes.append(tls["in_scope"])
@@ -345,6 +364,7 @@ def main() -> int:
             **summarize(profiles, skipped_by_sku, routes, domains, secrets),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, EXCLUDED_KINDS, {**in_scope_totals(scopes), "secrets": len(secrets)}),
+            **resources.summary(excluded, ("profile",), {"profiles": len(profiles) if listed else None}),
         },
     )
     exclusions.warn_unmatched(logger)
