@@ -6,7 +6,7 @@ documented in framework/schemas/*.json and parsed by config_loader / manifest_lo
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, TypeVar
+from typing import Any, Dict, List, Mapping, Optional, Tuple, TypeVar
 
 
 @dataclass
@@ -159,6 +159,9 @@ class ConfigField:
     env: Optional[str] = None
     default: Any = None
     description: Optional[str] = None
+    #: For type `patterns`: the prefixes a pattern may start with (rg for rg:...), and whether one may have none.
+    prefixes: Tuple[str, ...] = ()
+    bare: bool = True
 
 
 @dataclass

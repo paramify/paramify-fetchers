@@ -1,5 +1,5 @@
 name: azure_residual_resources
-version: 0.2.0
+version: 0.3.0
 description: >
   Residual elements left behind in the subscription after changes: managed disks
   attached to nothing, network interfaces with no VM or private endpoint, network
@@ -38,12 +38,14 @@ config_schema:
       A deployment slot not modified for this many days counts as stale, as does a
       slot that is not running.
   resource_exclusions:
-    type: string
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
     description: >
       Resources outside the authorization boundary, to leave out of scope, as
-      case-insensitive glob patterns separated by commas or spaces, each with a
+      case-insensitive glob patterns listed in the manifest, each with a
       prefix: rg:<resource group> (read from the resource id; an empty resource
       group matches through its own id), location:<region> (the region's name
       without spaces, such as eastus2; a resource with no location never matches
@@ -58,7 +60,8 @@ config_schema:
       excluded identity that nothing attaches and that holds no role is listed
       under excluded without its federated credentials being read. A pattern
       without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
-      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
       resource is in scope.
 
 target_schema:

@@ -16,6 +16,7 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import (  # noqa: E402
     Collector,
     arm_client_kwargs,
+    basename,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -29,7 +30,9 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from azure_rest import parse_time, pinned_credential  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import query_all, resource_graph_client  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_change_provenance")
 
@@ -223,6 +226,23 @@ def deployment_runs(deployments: list, changes: list) -> list:
     return runs
 
 
+def split_changes(changes: list, exclusions: ResourceExclusions) -> tuple[list, list]:
+    """A change follows its target resource or resource group; a change to the subscription itself never matches."""
+    kept, excluded = [], []
+    for change in changes:
+        target = change["target_resource_id"]
+        pattern = exclusions.match(target) if exclusions and target else None
+        if pattern is None:
+            kept.append(change)
+        else:
+            # Caller fields kept so azure_change_work_items can still lend an in-scope change this change's caller.
+            excluded.append(excluded_item(
+                "change", basename(change["change_id"]), pattern, "target_matched", id=change["change_id"],
+                target_id=target, timestamp=change.get("timestamp"), changed_by=change.get("changed_by"),
+                changed_by_type=change.get("changed_by_type"), deployment_id=change.get("deployment_id")))
+    return kept, excluded
+
+
 def summarize(changes: list, deployments: list, at_cap: list, groups=None) -> dict:
     """`groups` is the lower-cased resource groups that still exist, or None when they could not be listed."""
     origins = Counter(c["origin"] for c in changes)
@@ -351,6 +371,8 @@ def main() -> int:
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
     days = lookback_days(collector)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
 
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
@@ -371,21 +393,32 @@ def main() -> int:
 
     pipelines = pipeline_principals()
     attributed = attribute(changes, deployments, frozenset(pipelines))
+    # Attributed against every change and deployment first, so an in-scope change keeps an origin an excluded one gave.
+    in_scope, excluded = split_changes(attributed, exclusions)
+    exclusions.warn_unmatched(logger)
     existing = None if groups is None else {g.lower() for g in groups}
+    counts = exclusions.summary(excluded, ("change",), {"changes": len(in_scope)})
+    # Unknown, not none, when a change table wasn't read.
+    if set(sources) != set(CHANGE_TABLES):
+        counts.update(excluded_changes=None, in_scope_changes=None)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
-            "changes": attributed,
+            "changes": in_scope,
             "deployments": deployment_runs(deployments, attributed),
             "lookback_days": days,
             "pipeline_principals": sorted(pipelines),
             "window_start": iso(datetime.now(timezone.utc) - timedelta(days=days)),
             "change_sources": sources,
             "resource_groups_read": len(groups or []),
+            "excluded": excluded,
         },
-        summary=summarize(attributed, deployments, at_cap, existing),
+        summary={
+            **summarize(in_scope, deployments, at_cap, existing),
+            **counts,
+        },
     )
 
     filename = f"azure_change_provenance_{sanitize_for_filename(subscription_id or 'unknown')}.json"
@@ -394,7 +427,7 @@ def main() -> int:
     if not collector.ok:
         report_failure(failure_reason(collector.failures), classify_failure_code(collector.failures))
         return 1
-    logger.info("Evidence saved to %s (%d changes, %d deployments)", path, len(attributed), len(deployments))
+    logger.info("Evidence saved to %s (%d changes, %d deployments)", path, len(in_scope), len(deployments))
     return 0
 
 
