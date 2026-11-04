@@ -89,6 +89,12 @@ NO_TRANSFER_METHOD = "none"
 
 # --- projections: the only code here that touches a Graph model ---
 
+def project_filter(conditional_access_filter) -> dict | None:
+    if conditional_access_filter is None:
+        return None
+    return {"mode": graph_attr(conditional_access_filter, "mode"), "rule": graph_attr(conditional_access_filter, "rule")}
+
+
 def project_conditional_access_policy(policy) -> dict:
     """Read a `ConditionalAccessPolicy` model's attributes into a flat dict.
 
@@ -130,6 +136,7 @@ def project_conditional_access_policy(policy) -> dict:
         "include_applications": graph_list(applications, "include_applications"),
         "exclude_applications": graph_list(applications, "exclude_applications"),
         "include_user_actions": graph_list(applications, "include_user_actions"),
+        "application_filter": project_filter(graph_attr(applications, "application_filter")),
         # --- the rest of the conditions ---
         "client_app_types": graph_list(conditions, "client_app_types"),
         "sign_in_risk_levels": graph_list(conditions, "sign_in_risk_levels"),
@@ -137,8 +144,7 @@ def project_conditional_access_policy(policy) -> dict:
         "service_principal_risk_levels": graph_list(conditions, "service_principal_risk_levels"),
         # Flag enums: kiota reads "minor,moderate" as a list of members.
         "insider_risk_levels": graph_list(conditions, "insider_risk_levels"),
-        "device_filter": None if device_filter is None else {
-            "mode": graph_attr(device_filter, "mode"), "rule": graph_attr(device_filter, "rule")},
+        "device_filter": project_filter(device_filter),
         "authentication_flow_transfer_methods": [
             m for m in graph_list(flows, "transfer_methods") if str(m).lower() != NO_TRANSFER_METHOD],
         "include_platforms": graph_list(platforms, "include_platforms"),
@@ -268,6 +274,7 @@ def policy_record(policy: dict, strengths: dict | None = None) -> dict:
         "target_resources": {
             "include": sorted(include_apps),
             "exclude": sorted(exclude_apps),
+            "application_filter": policy.get("application_filter"),
         },
         "access_controls": {
             "grant": grant,
@@ -353,6 +360,7 @@ def _mfa_for_everyone(policy: dict) -> bool:
     c = policy["conditions"]
     return (policy["is_enforced"] and policy["requires_mfa_without_alternative"] and policy["targets_all_users"]
             and policy["targets_all_applications"] and not policy["target_resources"]["exclude"]
+            and not policy["target_resources"]["application_filter"]
             and not c["sign_in_risk_levels"] and not c["user_risk_levels"]
             and not c["service_principal_risk_levels"] and not c["insider_risk_levels"]
             and not c["device_filter"] and not c["authentication_flow_transfer_methods"]

@@ -1,5 +1,5 @@
 name: azure_sentinel_analytics_rules
-version: 0.2.0
+version: 0.3.0
 description: >-
   Lists each Sentinel workspace's detection rules with their queries,
   suppression and the log tables each reads, flagging arriving logs no enabled
@@ -64,6 +64,29 @@ config_schema:
       names or IP addresses. Every rule carries the query's SHA-256 and length
       either way.
 
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Log Analytics workspace is listed under excluded
+      with the pattern and left out of every count, workspaces_without_sentinel
+      included; its analytics rules, templates, tables, saved searches,
+      ingestion and data connectors are not read. An excluded workspace gets no reads, not even its Sentinel onboarding state;
+      a SENTINEL_WORKSPACES filter applies first, and a workspace it names that a
+      pattern takes out fails the run as bad_config. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
+
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
 ksis:
@@ -92,13 +115,19 @@ evidence_set:
     - KQL on SecurityAlert by product (per workspace) — which products sent alerts, for incident-creation rules (only when the workspace has one and SecurityAlert received data)
     - GET Microsoft.SecurityInsights/dataConnectors (per workspace; stable and preview APIs, only when an enabled incident-creation rule's product sent no alert) — which data connections have alerts enabled, so a rule whose product is wired up but sent nothing reads as quiet; only the preview returns Defender XDR's connection
 
-    Output: azure_sentinel_analytics_rules_<subscription>.json — for each Sentinel workspace, every analytics rule with its query's SHA-256 and length (and its full query text as written, including any user names, IP addresses or file paths it names, only when include_rule_query_text is on), suppression, the tables it reads and which of them got no data, plus the arriving tables no enabled rule reads, the enabled incident-creation rules that are quiet, and, per table enabled rules read, how many of those rules read it only through their template.
+    Output: azure_sentinel_analytics_rules_<subscription>.json — for each Sentinel workspace, every analytics rule with its query's SHA-256 and length (and its full query text as written, including any user names, IP addresses or file paths it names, only when include_rule_query_text is on), suppression, the tables it reads and which of them got no data, plus the arriving tables no enabled rule reads, the enabled incident-creation rules that are quiet, and, per table enabled rules read, how many of those rules read it only through their template. Workspaces the resource_exclusions patterns take out are listed under excluded instead, each with the pattern that matched.
 
     Summary fields:
 
     Which workspaces were checked?
     - workspaces_collected — Number of Sentinel workspaces read
     - workspaces_without_sentinel — Number of workspaces skipped because Sentinel isn't turned on
+
+    Which workspaces are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every workspace is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no workspace, such as a mistyped name
+    - excluded_workspaces — Number of workspaces left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern and isn't read, and no other count includes them; null if the workspace list couldn't be read
+    - in_scope_workspaces — Number of workspaces found and in scope, Sentinel or not; 0 means none was found or the patterns took out every workspace, which a check can catch by requiring more than 0; null if the workspace list couldn't be read
 
     Is threat detection turned on?
     - enabled_rules_total — Number of enabled analytics rules across all Sentinel workspaces

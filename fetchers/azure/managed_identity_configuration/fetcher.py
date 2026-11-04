@@ -40,6 +40,7 @@ from entra_graph import (  # noqa: E402
     paginate,
     with_graph_client,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_managed_identity_configuration")
@@ -195,7 +196,7 @@ def project_federated_credential(raw: dict) -> dict:
     }
 
 
-IDENTITY_HOLDERS_QUERY = "resources | where isnotnull(identity) | project id, name, type, identity | order by id asc"
+IDENTITY_HOLDERS_QUERY = "resources | where isnotnull(identity) | project id, name, type, location, identity | order by id asc"
 
 
 def resource_identities(row: dict) -> dict:
@@ -207,6 +208,7 @@ def resource_identities(row: dict) -> dict:
         "resource_id": row.get("id"),
         "resource_name": row.get("name"),
         "resource_type": row.get("type"),
+        "resource_location": row.get("location"),
         "system_assigned": "systemassigned" in kind.replace(" ", "").replace(",", ""),
         "system_principal_id": identity.get("principalId"),
         "user_assigned_ids": sorted(k.lower() for k in user_assigned),
@@ -413,7 +415,48 @@ async def read_graph_roles(collector: Collector, cred, principal_ids: list) -> t
     return outcome
 
 
-def collect(subscription_id, cred, collector: Collector) -> tuple:
+def keep_reaching(items: list, entries: list, id_of, principal_of, roles_by_principal, exclusions,
+                  kept: frozenset = frozenset()) -> tuple:
+    """(items back in scope, entries still excluded). An identity a pattern matched stays in scope while it holds an
+    Azure role at an in-scope scope (a subscription or wider, a group or resource no pattern matches, or a
+    user-assigned identity in `kept`): whoever controls it reaches into the boundary through it. With the role list
+    unread (roles_by_principal None) its reach is unknown, so every one stays."""
+    by_id = {(id_of(i) or "").lower(): i for i in items}
+    back, out = [], []
+    for entry in entries:
+        item = by_id.get((entry["id"] or "").lower())
+        roles = (roles_by_principal or {}).get(principal_of(item)) if item else None
+        if item is not None and (roles_by_principal is None or any(
+                scope_level(r["scope"]) not in ("resource_group", "resource")
+                or not exclusions.match(r["scope"], record=False)
+                or (r["scope"] or "").lower() in kept for r in roles or [])):
+            item["kept_by_identity_rule"] = entry["pattern"]
+            back.append(item)
+        else:
+            out.append(entry)
+    return back, out
+
+
+def keep_reaching_user_assigned(items: list, entries: list, roles_by_principal, exclusions) -> tuple:
+    """keep_reaching for user-assigned identities, repeated until nothing changes: a role on one already kept counts
+    as in scope, so a chain of identities reaching in stays whole. (back, out, the kept identities' ids)."""
+    kept: frozenset = frozenset()
+    back, out = [], entries
+    for _ in range(len(entries) + 1):  # each pass keeps at least one more, or stops
+        back, out = keep_reaching(items, entries, lambda i: i["id"], lambda i: i["principal_id"], roles_by_principal,
+                                  exclusions, kept)
+        grown = frozenset((i["id"] or "").lower() for i in back)
+        if grown == kept:
+            break
+        kept = grown
+    return back, out, kept
+
+
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None) -> tuple:
+    """Excluded identities get no federated-credential or Graph reads; one holding a role at an in-scope scope, or on
+    a user-assigned identity kept that way, stays in scope. Attachments and role assignments of an in-scope identity stay whole, whatever resource or scope."""
+    exclusions = exclusions or ResourceExclusions()
     def _clients():
         from azure.mgmt.authorization import AuthorizationManagementClient  # lazy
         from azure.mgmt.msi import ManagedServiceIdentityClient  # lazy
@@ -428,18 +471,14 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
 
     clients = collector.guard("managed identity clients (init)", _clients)
     if clients is None:
-        return [], [], "failed"
+        return None, None, "failed"
     msi, authorization, rest, graph = clients
 
     user_assigned = collector.guard(
         "msi.user_assigned_identities.list_by_subscription",
         lambda: [project_user_assigned(i) for i in msi.user_assigned_identities.list_by_subscription()],
-        default=[],
     )
-    holders = collector.guard(
-        "resourcegraph.resources(identity)",
-        lambda: [resource_identities(r) for r in query_all(graph, subscription_id, IDENTITY_HOLDERS_QUERY)["rows"]],
-    )
+    user_assigned_read = user_assigned is not None
 
     def _roles():
         roles = {
@@ -459,8 +498,29 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
 
     roles_by_principal = collector.guard("authorization.role_assignments.list_for_subscription", _roles)
 
+    listed_user_assigned = user_assigned or []
+    user_assigned, out_user = exclusions.split(listed_user_assigned, "user_assigned_identity")
+    back, out_user, kept = keep_reaching_user_assigned(listed_user_assigned, out_user, roles_by_principal, exclusions)
+    user_assigned += back
+    holders = collector.guard(
+        "resourcegraph.resources(identity)",
+        lambda: [resource_identities(r) for r in query_all(graph, subscription_id, IDENTITY_HOLDERS_QUERY)["rows"]],
+    )
+    # A system-assigned identity follows the resource it belongs to.
+    listed_holders = [h for h in holders or [] if h["system_assigned"] and h["system_principal_id"]]
+    system_holders, out_system = exclusions.split(
+        listed_holders, "system_assigned_identity",
+        resource_id=lambda h: h["resource_id"], location=lambda h: h["resource_location"],
+        resource_group=lambda h: resource_group_from_id(h["resource_id"]), name=lambda h: h["resource_name"])
+    back, out_system = keep_reaching(listed_holders, out_system, lambda h: h["resource_id"],
+                                     lambda h: h["system_principal_id"], roles_by_principal, exclusions, kept)
+    system_holders += back
+    if excluded is not None:
+        excluded += sorted(out_user + out_system, key=lambda e: (e["kind"], e["id"] or ""))
+    exclusions.warn_unmatched(logger)
+
     principal_ids = [i["principal_id"] for i in user_assigned if i["principal_id"]]
-    principal_ids += [h["system_principal_id"] for h in holders or [] if h["system_assigned"] and h["system_principal_id"]]
+    principal_ids += [h["system_principal_id"] for h in system_holders]
     if principal_ids:
         graph_roles, graph_access = asyncio.run(read_graph_roles(collector, cred, sorted(set(principal_ids))))
     else:
@@ -499,16 +559,17 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
                 "resource_name": h["resource_name"],
                 "resource_type": h["resource_type"],
                 "resource_group": resource_group_from_id(h["resource_id"]),
+                **({"kept_by_identity_rule": h["kept_by_identity_rule"]} if "kept_by_identity_rule" in h else {}),
             },
             roles_by_principal,
             graph_roles,
         )
-        for h in holders or []
-        if h["system_assigned"] and h["system_principal_id"]
+        for h in system_holders
     ]
+    # None for a list that wasn't read.
     return (
-        sorted(ua_records, key=lambda r: r["id"] or ""),
-        sorted(sa_records, key=lambda r: r["resource_id"] or ""),
+        sorted(ua_records, key=lambda r: r["id"] or "") if user_assigned_read else None,
+        sorted(sa_records, key=lambda r: r["resource_id"] or "") if holders is not None else None,
         graph_access,
     )
 
@@ -529,8 +590,10 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    user_assigned: list = []
-    system_assigned: list = []
+    user_assigned: list | None = None
+    system_assigned: list | None = None
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     graph_access = "not_read"
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
@@ -540,7 +603,9 @@ def main() -> int:
                 "Microsoft.ManagedIdentity is not registered on subscription %s — reporting status not_registered",
                 subscription_id,
             )
-        user_assigned, system_assigned, graph_access = collect(subscription_id, cred, collector)
+        user_assigned, system_assigned, graph_access = collect(
+            subscription_id, cred, collector, exclusions, excluded
+        )
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -550,6 +615,11 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    in_scope = {"user_assigned_identities": None if user_assigned is None else len(user_assigned),
+                "system_assigned_identities": None if system_assigned is None else len(system_assigned)}
+    user_assigned, system_assigned = user_assigned or [], system_assigned or []
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -558,10 +628,12 @@ def main() -> int:
             "user_assigned_identities": user_assigned,
             "system_assigned_identities": system_assigned,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(user_assigned, system_assigned, graph_access),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("user_assigned_identity", "system_assigned_identity"), in_scope),
         },
     )
     filename = f"azure_managed_identity_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
