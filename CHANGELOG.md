@@ -1095,6 +1095,15 @@ schemas and the `paramify` CLI — not the internal code.
   enabled one counts as without MFA, as in the enabled-user figures. The new
   `users_counted_in_all_users_coverage` is the figure's denominator, and
   `users_with_registration_details` still counts the users with a row.
+- **`azure_entra_dormant_identities` 0.2.0 finds service principals that hold a
+  directory role.** Microsoft Graph v1.0 `/directoryRoles/{id}/members` can leave
+  out every service principal holding the role, so
+  `service_principals_holding_directory_roles` could read 0 and those service
+  principals were never checked for dormancy as directory role holders. Each
+  role's service principals are now also read through the
+  `/members/microsoft.graph.servicePrincipal` cast and added once each; if that
+  read fails, `directory_roles_readable` is false and the directory counts read
+  null.
 - **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
   msgraph renders an HTTP status as `<message> (status 403)`, which matched none
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
