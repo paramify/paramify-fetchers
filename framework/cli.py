@@ -1883,30 +1883,23 @@ def manifest_unexclude(
     if field and field not in fields and field not in mixed:
         _fail(path, f"{field!r} is not a pattern list of {target}", json_out)
     try:
-        removed = {n: api.remove_pattern(m, scope, target, n, None if all_ else pattern) for n in names}
+        removed = {n: api.remove_pattern(m, scope, target, n, None if all_ else pattern, category) for n in names}
     except ValueError as e:
         _fail(path, str(e), json_out)
     hit = [n for n, k in removed.items() if k is not None]
     if not hit:
         _fail(path, f"{pattern or field} is not in {target}'s pattern lists", json_out)
-    # A fetcher whose own list is gone takes its category's again.
-    inherits = {}
-    for n in hit:
-        own = next((e.get("config") or {} for e in m["run"].get("fetchers") or [] if e.get("use") == target), {})
-        if scope == "entry" and n not in own:
-            try:
-                inherits[n] = api.inherited_patterns(m, category, n)
-            except ValueError:
-                continue
+    # An emptied fetcher list stays as [] while its category lists patterns, so they don't come back to it.
+    own = next((e.get("config") or {} for e in m["run"].get("fetchers") or [] if e.get("use") == target), {})
+    kept_empty = [n for n in hit if scope == "entry" and own.get(n) == []]
     if not json_out:
-        for n, items in inherits.items():
-            if items:
-                typer.echo(f"{target} has no {n} of its own now, so it takes platforms.{category}.config.{n} "
-                           f"again: {_pattern_names(items)}")
+        for n in kept_empty:
+            typer.echo(f"{target} keeps {n}: [], so platforms.{category}.config.{n} still doesn't apply to it "
+                       f"({_pattern_names(api.category_patterns(m, category, n))}); to take it again, delete "
+                       f"{n} from {target}'s config")
     gone = ", ".join(f"{api.pattern_location(scope, target)}.{n}" for n in hit)
     _save_and_report(m, path, root, json_out, verb=f"Removed {pattern or 'every pattern'} from {gone}:",
-                     extra={"fields": hit, "removed": sum(removed[n] or 0 for n in hit),
-                            "inherits": {n: [i.pattern for i in items] for n, items in inherits.items() if items}})
+                     extra={"fields": hit, "removed": sum(removed[n] or 0 for n in hit), "kept_empty": kept_empty})
 
 
 @manifest_app.command("set-output-dir")
