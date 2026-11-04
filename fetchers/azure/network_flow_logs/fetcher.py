@@ -332,7 +332,8 @@ def split_flow_logs(flow_logs: list[dict], excluded_targets: list[dict], exclusi
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
             excluded: list | None = None) -> tuple:
     """With exclusions, every verdict is still worked out from all watchers, flow logs and VNets; only the
-    returned lists are narrowed, and what left is appended to `excluded`."""
+    returned lists are narrowed, and what left is appended to `excluded`. A list that wasn't read is None, and the
+    flow logs are None when the watchers weren't read."""
     def _client():
         from azure.mgmt.network import NetworkManagementClient  # lazy
 
@@ -340,7 +341,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
 
     client = collector.guard("network.NetworkManagementClient (init)", _client)
     if client is None:
-        return [], [], []
+        return None, None, None
     watchers = collector.guard(
         "network.network_watchers.list_all",
         lambda: [project_watcher(w) for w in client.network_watchers.list_all()],
@@ -391,6 +392,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
         (vnet_record(v, enabled_by_target, uncertain_regions, watcher_regions) for v in narrowed),
         key=lambda r: r["id"] or "",
     )
+    listed = watchers is not None
     watchers = sorted(watchers or [], key=lambda r: r["id"] or "")
     flow_logs = sorted(flow_logs, key=lambda r: r["id"] or "")
     if exclusions:
@@ -398,7 +400,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
         flow_logs, out_logs = split_flow_logs(flow_logs, out_vnets + out_subnets, exclusions)
         if excluded is not None:
             excluded += out_watchers + out_logs + out_vnets + out_subnets
-    return watchers, flow_logs, records
+    return (watchers, flow_logs, records) if listed else (None, None, records)
 
 
 def main() -> int:
@@ -416,9 +418,9 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    watchers: list = []
-    flow_logs: list = []
-    vnets: list = []
+    watchers: list | None = None
+    flow_logs: list | None = None
+    vnets: list | None = None
     registration = REGISTRATION_UNKNOWN
     excluded: list = []
     exclusions = ResourceExclusions.from_env()
@@ -446,18 +448,20 @@ def main() -> int:
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
-            "network_watchers": watchers,
-            "flow_logs": flow_logs,
+            "network_watchers": watchers or [],
+            "flow_logs": flow_logs or [],
             "virtual_networks": vnets,
             "provider_registration_status": registration,
             "excluded": excluded,
         },
         summary={
-            **summarize(watchers, flow_logs, vnets),
+            **summarize(watchers or [], flow_logs or [], vnets),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("network_watcher", "flow_log", "virtual_network", "subnet"), {
-                "network_watchers": len(watchers), "flow_logs": len(flow_logs),
-                "virtual_networks": len(vnets or []), "subnets": sum(len(v["subnets"]) for v in vnets or [])}),
+                "network_watchers": None if watchers is None else len(watchers),
+                "flow_logs": None if flow_logs is None else len(flow_logs),
+                "virtual_networks": None if vnets is None else len(vnets),
+                "subnets": None if vnets is None else sum(len(v["subnets"]) for v in vnets)}),
         },
     )
     filename = f"azure_network_flow_logs_{sanitize_for_filename(subscription_id or 'unknown')}.json"

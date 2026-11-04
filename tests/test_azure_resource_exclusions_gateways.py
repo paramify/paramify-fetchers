@@ -652,6 +652,46 @@ def test_vpn_connections_leave_with_their_gateway_and_keep_a_verdict_toward_an_e
     assert reads == ["conn-in"]
 
 
+# --- a list that wasn't read leaves its counts null ---
+
+REFUSED = PermissionError("(AuthorizationFailed) 403")
+
+
+def _refuse(monkeypatch, module, operation):
+    """The collector records a 403 for one operation and returns its default, as a refused list does."""
+    class Refusing(module.Collector):
+        def guard(self, op, fn, default=None):
+            if op == operation:
+                self.record(op, REFUSED)
+                return default
+            return super().guard(op, fn, default)
+
+    monkeypatch.setattr(module, "Collector", Refusing)
+
+
+def _refused(m, run, operation):
+    def go(monkeypatch, tmp_path):
+        _refuse(monkeypatch, m, operation)
+        result = run(monkeypatch, tmp_path, "rg:rg-out")
+        return result[0], result[1]
+    return go
+
+
+@pytest.mark.parametrize("run, unread, read", [
+    (_refused(flow, _run_flow, "network.virtual_networks.list_all"), ("virtual_networks", "subnets"),
+     ("network_watchers", "flow_logs")),
+    (_refused(flow, _run_flow, "network.network_watchers.list_all"), ("network_watchers", "flow_logs"),
+     ("virtual_networks", "subnets")),
+], ids=["flow-vnets", "flow-watchers"])
+def test_a_list_that_wasnt_read_leaves_its_exclusion_counts_null(run, unread, read, monkeypatch, tmp_path):
+    code, evidence = run(monkeypatch, tmp_path)
+    summary = evidence["summary"]
+    assert code == 1
+    assert {k: (summary[f"in_scope_{k}"], summary[f"excluded_{k}"]) for k in unread} == dict.fromkeys(
+        unread, (None, None))
+    assert all(isinstance(summary[f"in_scope_{k}"], int) and isinstance(summary[f"excluded_{k}"], int) for k in read)
+
+
 # --- a bare pattern fails every fetcher ---
 
 def _runners():

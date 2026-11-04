@@ -136,5 +136,7 @@ evidence_set:
     excluded_flow_logs, excluded_virtual_networks, excluded_subnets (how
     many the patterns took out) and in_scope_network_watchers,
     in_scope_flow_logs, in_scope_virtual_networks, in_scope_subnets (how
-    many stayed). results.excluded is always present, empty when nothing
-    is excluded.
+    many stayed). The watcher and flow log counts are null when the
+    watcher list couldn't be read, and the virtual network and subnet
+    counts when the virtual network list couldn't. results.excluded is
+    always present, empty when nothing is excluded.
