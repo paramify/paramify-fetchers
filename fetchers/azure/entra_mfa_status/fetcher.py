@@ -252,6 +252,7 @@ REGISTRATION_FIGURES = (
     "admin_mfa_coverage_percentage",
     "admin_users_without_mfa",
     "admin_users_without_registration_details",
+    "users_counted_in_all_users_coverage",
     "users_with_registration_details",
     "users_without_registration_details",
 )
@@ -268,8 +269,9 @@ def summarize(
     A disabled account cannot sign in, so counting it as uncovered makes a well-run
     tenant with years of deprovisioned accounts look worse than a small neglected one.
     Coverage over all users is reported too, so neither reading looks cherry-picked. It
-    leaves out users with no registration-report row: the report omits disabled accounts,
-    so their MFA is unknown, not absent.
+    leaves out disabled users with no registration-report row: the report omits disabled
+    accounts, so their MFA is unknown, not absent. An enabled user with no row counts as
+    without MFA there too, as in the enabled figure.
 
     The admin figures are None when directory-role membership could not be read in
     full: the registration report alone misses every admin without a report row, which
@@ -278,7 +280,7 @@ def summarize(
     """
     enabled = [u for u in users if u["account_enabled"]]
     enabled_members = [u for u in enabled if not u["is_guest"]]
-    reported = [u for u in users if u["has_registration_details"]]
+    counted_in_all_users = [u for u in users if u["has_registration_details"] or u["account_enabled"]]
     admins = [u for u in users if u["is_admin"]]
 
     def admin_figure(value):
@@ -296,7 +298,7 @@ def summarize(
             sum(1 for u in enabled if u["is_mfa_capable"]), len(enabled)
         ),
         "mfa_coverage_percentage_all_users": coverage_percentage(
-            sum(1 for u in reported if u["is_mfa_capable"]), len(reported)
+            sum(1 for u in counted_in_all_users if u["is_mfa_capable"]), len(counted_in_all_users)
         ),
         "enabled_users_without_mfa": sum(1 for u in enabled if not u["is_mfa_capable"]),
         "mfa_registered_enabled_users": sum(1 for u in enabled if u["is_mfa_registered"]),
@@ -330,9 +332,10 @@ def summarize(
         "admin_users_without_registration_details": admin_figure(
             sum(1 for u in admins if not u["has_registration_details"])
         ),
-        # A user missing from the report counts as uncovered in the enabled and admin figures
-        # and as unknown in the all-users one; this says how many that is.
-        "users_with_registration_details": len(reported),
+        # An enabled user missing from the report counts as uncovered; a disabled one is left
+        # out of the all-users figure, whose denominator this is.
+        "users_counted_in_all_users_coverage": len(counted_in_all_users),
+        "users_with_registration_details": sum(1 for u in users if u["has_registration_details"]),
         "users_without_registration_details": sum(
             1 for u in users if not u["has_registration_details"]
         ),

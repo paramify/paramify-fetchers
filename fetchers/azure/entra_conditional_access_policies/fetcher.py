@@ -83,9 +83,17 @@ CLIENT_APP_TYPES = {t.lower(): t for t in ("browser", "mobileAppsAndDesktopClien
 # authenticationMethodModes bound to the sign-in origin, so a look-alike site can't relay them.
 PHISHING_RESISTANT_MODES = frozenset({"fido2", "windowshelloforbusiness", "x509certificatemultifactor"})
 MFA_REQUIREMENT = "mfa"
+# conditionalAccessTransferMethods member for a policy with no authentication flow condition.
+NO_TRANSFER_METHOD = "none"
 
 
 # --- projections: the only code here that touches a Graph model ---
+
+def project_filter(conditional_access_filter) -> dict | None:
+    if conditional_access_filter is None:
+        return None
+    return {"mode": graph_attr(conditional_access_filter, "mode"), "rule": graph_attr(conditional_access_filter, "rule")}
+
 
 def project_conditional_access_policy(policy) -> dict:
     """Read a `ConditionalAccessPolicy` model's attributes into a flat dict.
@@ -105,6 +113,8 @@ def project_conditional_access_policy(policy) -> dict:
     users = graph_attr(conditions, "users")
     platforms = graph_attr(conditions, "platforms")
     locations = graph_attr(conditions, "locations")
+    device_filter = graph_attr(graph_attr(conditions, "devices"), "device_filter")
+    flows = graph_attr(conditions, "authentication_flows")
     grant_controls = graph_attr(policy, "grant_controls")
     session_controls = graph_attr(policy, "session_controls")
     strength = graph_attr(grant_controls, "authentication_strength")
@@ -126,10 +136,17 @@ def project_conditional_access_policy(policy) -> dict:
         "include_applications": graph_list(applications, "include_applications"),
         "exclude_applications": graph_list(applications, "exclude_applications"),
         "include_user_actions": graph_list(applications, "include_user_actions"),
+        "application_filter": project_filter(graph_attr(applications, "application_filter")),
         # --- the rest of the conditions ---
         "client_app_types": graph_list(conditions, "client_app_types"),
         "sign_in_risk_levels": graph_list(conditions, "sign_in_risk_levels"),
         "user_risk_levels": graph_list(conditions, "user_risk_levels"),
+        "service_principal_risk_levels": graph_list(conditions, "service_principal_risk_levels"),
+        # Flag enums: kiota reads "minor,moderate" as a list of members.
+        "insider_risk_levels": graph_list(conditions, "insider_risk_levels"),
+        "device_filter": project_filter(device_filter),
+        "authentication_flow_transfer_methods": [
+            m for m in graph_list(flows, "transfer_methods") if str(m).lower() != NO_TRANSFER_METHOD],
         "include_platforms": graph_list(platforms, "include_platforms"),
         "exclude_platforms": graph_list(platforms, "exclude_platforms"),
         "include_locations": graph_list(locations, "include_locations"),
@@ -257,6 +274,7 @@ def policy_record(policy: dict, strengths: dict | None = None) -> dict:
         "target_resources": {
             "include": sorted(include_apps),
             "exclude": sorted(exclude_apps),
+            "application_filter": policy.get("application_filter"),
         },
         "access_controls": {
             "grant": grant,
@@ -271,6 +289,10 @@ def policy_record(policy: dict, strengths: dict | None = None) -> dict:
             "client_app_types": sorted(policy.get("client_app_types") or []),
             "sign_in_risk_levels": sorted(policy.get("sign_in_risk_levels") or []),
             "user_risk_levels": sorted(policy.get("user_risk_levels") or []),
+            "service_principal_risk_levels": sorted(policy.get("service_principal_risk_levels") or []),
+            "insider_risk_levels": sorted(policy.get("insider_risk_levels") or []),
+            "device_filter": policy.get("device_filter"),
+            "authentication_flow_transfer_methods": sorted(policy.get("authentication_flow_transfer_methods") or []),
             "include_platforms": sorted(policy.get("include_platforms") or []),
             "exclude_platforms": sorted(policy.get("exclude_platforms") or []),
             "include_locations": sorted(policy.get("include_locations") or []),
@@ -338,7 +360,10 @@ def _mfa_for_everyone(policy: dict) -> bool:
     c = policy["conditions"]
     return (policy["is_enforced"] and policy["requires_mfa_without_alternative"] and policy["targets_all_users"]
             and policy["targets_all_applications"] and not policy["target_resources"]["exclude"]
+            and not policy["target_resources"]["application_filter"]
             and not c["sign_in_risk_levels"] and not c["user_risk_levels"]
+            and not c["service_principal_risk_levels"] and not c["insider_risk_levels"]
+            and not c["device_filter"] and not c["authentication_flow_transfer_methods"]
             and all(str(v).lower() == "all" for v in c["include_platforms"]) and not c["exclude_platforms"]
             and all(str(v).lower() == "all" for v in c["include_locations"]) and not c["exclude_locations"])
 
@@ -474,6 +499,9 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[d
             # None, not [], when the read failed: unread is not "no strengths".
             strengths = None if raw is None else sorted(
                 (strength_record(s) for s in raw), key=lambda s: (s["display_name"] or "", s["id"] or ""))
+        elif not policies_readable:
+            # The policies not read may use strengths.
+            strengths = None
         by_id = {str(s["id"]).lower(): s for s in strengths or []} if readable else None
         policies = [policy_record(p, by_id) for p in projected]
         logger.info("Collected %d Conditional Access policy/policies", len(policies))
@@ -487,7 +515,7 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[d
         )
 
     result = await with_graph_client(collector, cred, _work, default=None)
-    return result if result is not None else ([], {"tenant_source": "unresolved"}, [], True, False)
+    return result if result is not None else ([], {"tenant_source": "unresolved"}, None, True, False)
 
 
 def main() -> int:
@@ -508,7 +536,7 @@ def main() -> int:
     if cred is None:
         policies: list[dict] = []
         tenant = {"tenant_source": "unresolved"}
-        strengths: list[dict] | None = []
+        strengths: list[dict] | None = None
         strengths_readable, policies_readable = True, False
     else:
         policies, tenant, strengths, strengths_readable, policies_readable = asyncio.run(_collect(collector, cred))
