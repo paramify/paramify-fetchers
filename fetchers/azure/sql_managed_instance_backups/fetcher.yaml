@@ -1,5 +1,5 @@
 name: azure_sql_managed_instance_backups
-version: 0.3.0
+version: 0.4.0
 description: >
   For each Azure SQL Managed Instance in the subscription, reports how its databases
   are backed up and how the instance survives a zone or region loss: the instance
@@ -27,12 +27,14 @@ config_schema:
       results.failover_history_window.days_requested (null when the value isn't a
       whole number).
   resource_exclusions:
-    type: string
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
     description: >
       Resources outside the authorization boundary, to leave out of scope, as
-      case-insensitive glob patterns separated by commas or spaces, each with a
+      case-insensitive glob patterns listed in the manifest, each with a
       prefix: rg:<resource group> (read from the resource id), location:<region>
       (the region's name without spaces, such as eastus2; a resource with no
       location never matches one) or id:<resource id> (also matches that resource's
@@ -46,7 +48,7 @@ config_schema:
       failover follows the failover group or instance it moved, and one whose
       group or instance is no longer listed leaves only when a pattern matches its
       resource id. A pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
-      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
+      fetcher that has this field; fetchers without it ignore it. Each item is a pattern, or a pattern with a reason. Empty: every
       resource is in scope.
 
 supports_targets: true

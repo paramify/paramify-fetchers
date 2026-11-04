@@ -45,12 +45,13 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_container_registry_configuration")
 
@@ -341,7 +342,8 @@ def diagnostic_settings_resource_uri(resource_id: str) -> str:
     return (resource_id or "").lstrip("/")
 
 
-def collect_registries(subscription_id, cred, collector: Collector) -> list[dict]:
+def collect_registries(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+                       excluded: list | None = None) -> list[dict] | None:
     """One subscription-wide registries.list(), then one diagnostic-settings list per registry.
 
     `registries.list()` returns an ItemPaged, so the SDK follows nextLink itself. The
@@ -363,13 +365,17 @@ def collect_registries(subscription_id, cred, collector: Collector) -> list[dict
         "containerregistry.ContainerRegistryManagementClient (init)", _client
     )
     if client is None:
-        return []
+        return None
 
     registries = collector.guard(
         "containerregistry.registries.list",
         lambda: [registry_record(project_registry(r)) for r in client.registries.list()],
-        default=[],
     )
+    if registries is None:
+        return None
+    registries, out = (exclusions or ResourceExclusions()).split(registries, "registry")
+    if excluded is not None:
+        excluded += sorted(out, key=lambda e: e["id"] or "")
     if registries:
         _attach_diagnostic_settings(subscription_id, cred, collector, registries)
 
@@ -438,7 +444,9 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    registries: list[dict] = []
+    registries: list[dict] | None = None
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list call, so a zero-registry result is legible: Azure
@@ -452,7 +460,7 @@ def main() -> int:
                 "registries in use; reporting status not_registered",
                 subscription_id,
             )
-        registries = collect_registries(subscription_id, cred, collector)
+        registries = collect_registries(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -462,6 +470,11 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    exclusions.warn_unmatched(logger)
+    listed = registries is not None
+    registries = registries or []
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -469,8 +482,13 @@ def main() -> int:
         results={
             "registries": registries,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(registries), "provider_registration_status": registration},
+        summary={
+            **summarize(registries),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("registry",), {"registries": len(registries) if listed else None}),
+        },
     )
 
     filename = (

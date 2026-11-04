@@ -1,5 +1,5 @@
 name: azure_sentinel_data_sources
-version: 0.2.0
+version: 0.3.0
 description: >-
   Shows which log sources and data connectors sent data to each Sentinel
   workspace in the ingestion window (14 days by default), with each
@@ -51,6 +51,29 @@ config_schema:
       ingesting. The default of 14 matches Sentinel's own rule for showing a
       connector as connected.
 
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Log Analytics workspace is listed under excluded
+      with the pattern and left out of every count, workspaces_without_sentinel
+      included; its data connectors, connector definitions, tables, ingestion
+      and health are not read. An excluded workspace gets no reads, not even its Sentinel onboarding state;
+      a SENTINEL_WORKSPACES filter applies first, and a workspace it names that a
+      pattern takes out fails the run as bad_config. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
+
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
 ksis:
@@ -76,13 +99,19 @@ evidence_set:
     - KQL union of each connector data type's lastDataReceivedQuery, with any that starts with let run on its own — last data received per connector data type, as the Sentinel portal measures it
     - KQL on SentinelHealth, Data fetch status change events only — each connector's latest health status, Success or Failure, which the hourly Informational failure summary written after polling errors can't hide (only when health monitoring sends data)
 
-    Output: azure_sentinel_data_sources_<subscription>.json — for each Sentinel workspace, its connectors with when each last received data and whether it sends only alerts, every table with when it last received data, and the Basic and Auxiliary tables that weren't measured.
+    Output: azure_sentinel_data_sources_<subscription>.json — for each Sentinel workspace, its connectors with when each last received data and whether it sends only alerts, every table with when it last received data, and the Basic and Auxiliary tables that weren't measured. Workspaces the resource_exclusions patterns take out are listed under excluded instead, each with the pattern that matched.
 
     Summary fields:
 
     Which workspaces were checked?
     - workspaces_collected — Number of Sentinel workspaces read
     - workspaces_without_sentinel — Number of workspaces skipped because Sentinel isn't turned on
+
+    Which workspaces are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every workspace is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no workspace, such as a mistyped name
+    - excluded_workspaces — Number of workspaces left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern and isn't read, and no other count includes them; null if the workspace list couldn't be read
+    - in_scope_workspaces — Number of workspaces found and in scope, Sentinel or not; 0 means none was found or the patterns took out every workspace, which a check can catch by requiring more than 0; null if the workspace list couldn't be read
 
     Is Sentinel receiving data from enough sources?
     - min_sources_ingesting — Number of data sources sending data to the Sentinel workspace with the fewest, in the window (default 14 days); null if no workspace's ingestion could be read. A source is a table that received data, other than workspace and Sentinel telemetry (Usage, Operation, LAQueryLogs, SentinelHealth, SentinelAudit, SecurityIncident, watchlists, UEBA tables and Heartbeat), or a product other than Sentinel sending alerts to SecurityAlert. Tables on the Basic or Auxiliary plan aren't counted

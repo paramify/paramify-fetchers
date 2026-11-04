@@ -24,6 +24,7 @@ from azure_common import (
     write_evidence,
 )
 from entra_graph import graph_host
+from resource_exclusions import ResourceExclusions
 
 SI_API = "2025-09-01"
 # NRT and other rule kinds exist only in preview specs; bump when this one retires.
@@ -156,17 +157,30 @@ class AzureRestClient:
             raise ArmError(response.status_code, *_error_parts(response))
         return response.json()
 
-    def get(self, path: str, api_version: str) -> Dict[str, Any]:
-        return self._get(f"{self.arm}{path}", {"api-version": api_version})
+    def get(self, path: str, api_version: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        return self._get(f"{self.arm}{path}", {"api-version": api_version, **(params or {})})
 
     def list(self, path: str, api_version: str, params: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
         """Every page: ARM documents no page size for these lists, so stopping early truncates silently."""
-        body = self._get(f"{self.arm}{path}", {"api-version": api_version, **(params or {})})
+        return self._follow(self._get(f"{self.arm}{path}", {"api-version": api_version, **(params or {})}))
+
+    def _follow(self, body: Dict[str, Any]) -> List[Dict[str, Any]]:
         items = list(body.get("value") or [])
         while body.get("nextLink"):
             body = self._get(body["nextLink"])
             items.extend(body.get("value") or [])
         return items
+
+    def post(self, path: str, api_version: str) -> Dict[str, Any]:
+        """An ARM read action that takes no body, such as fetchEventDetails."""
+        response = self._send("post", f"{self.arm}{path}", self.arm, params={"api-version": api_version}, timeout=HTTP_TIMEOUT)
+        if response.status_code >= 400:
+            raise ArmError(response.status_code, *_error_parts(response))
+        return response.json()
+
+    def post_list(self, path: str, api_version: str) -> List[Dict[str, Any]]:
+        """Every page of a POST list action; ARM serves the later pages at nextLink by GET."""
+        return self._follow(self.post(path, api_version))
 
     def graph_get(self, path: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         return self._get(f"{self.graph}/v1.0{path}", params, self.graph)
@@ -279,13 +293,23 @@ def sentinel_onboarded(client: AzureRestClient, workspace_id: str) -> bool:
     return any((s.get("name") or "").lower() == "default" for s in states)
 
 
-def discover_workspaces(client: AzureRestClient, subscription_id: str, collector: Collector) -> List[Dict[str, Any]]:
+def discover_workspaces(client: AzureRestClient, subscription_id: str, collector: Collector,
+                        exclusions: Optional[ResourceExclusions] = None,
+                        excluded: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """The (selected) workspaces with their Sentinel onboarding; ones `exclusions` takes out go to `excluded`, unread."""
+    return find_workspaces(client, subscription_id, collector, exclusions, excluded) or []
+
+
+def find_workspaces(client: AzureRestClient, subscription_id: str, collector: Collector,
+                    exclusions: Optional[ResourceExclusions] = None,
+                    excluded: Optional[List[Dict[str, Any]]] = None) -> Optional[List[Dict[str, Any]]]:
+    """discover_workspaces, but None when the workspace list couldn't be read."""
     listed = collector.guard(
         "operationalinsights.workspaces.list",
         lambda: client.list(f"/subscriptions/{subscription_id}/providers/Microsoft.OperationalInsights/workspaces", LAW_API),
     )
     if listed is None:
-        return []
+        return None
     wanted = requested_workspaces()
     for name in wanted:
         if not any(_matches(ws, name) for ws in listed):
@@ -294,8 +318,20 @@ def discover_workspaces(client: AzureRestClient, subscription_id: str, collector
                 LookupError(f"workspace {name!r} not found in subscription {subscription_id}"),
             )
     selected = [ws for ws in listed if not wanted or any(_matches(ws, n) for n in wanted)]
+    selected = sorted(selected, key=lambda w: (w.get("id") or "").lower())
+    if exclusions:
+        selected, out_of_scope = exclusions.split(selected, "workspace")
+        if excluded is not None:
+            excluded.extend(out_of_scope)
+        # Asked for by name but outside the boundary: the two settings disagree, so the run fails as bad config.
+        for name in wanted:
+            out = [e for e in out_of_scope if _matches(e, name)]
+            if out and not any(_matches(ws, name) for ws in selected):
+                collector.record(f"config {WORKSPACES_ENV}", ValueError(
+                    f"workspace {name!r} is named in {WORKSPACES_ENV} but resource exclusion pattern "
+                    f"{out[0]['pattern']!r} takes it out of scope"))
     out = []
-    for ws in sorted(selected, key=lambda w: (w.get("id") or "").lower()):
+    for ws in selected:
         onboarded = collector.guard(
             f"securityinsights.onboardingStates.list({ws.get('name')})",
             lambda ws=ws: sentinel_onboarded(client, ws["id"]),
@@ -463,14 +499,23 @@ def run_workspaces(
     collect: Callable[[AzureRestClient, Dict[str, Any], Collector], Dict[str, Any]],
     summarize: Callable[[List[Dict[str, Any]]], Dict[str, Any]],
     sentinel_only: bool = True,
+    resource_exclusions: bool = False,
     session: Any = None,
 ) -> int:
-    """Find the subscription's (Sentinel) workspaces and collect each into one evidence file."""
+    """Find the subscription's (Sentinel) workspaces and collect each into one evidence file. With
+    resource_exclusions, workspaces its patterns match are listed under excluded and not read."""
 
     def per_workspace(client: AzureRestClient, subscription_id: str, collector: Collector) -> tuple:
+        exclusions = ResourceExclusions.from_env() if resource_exclusions else None
+        excluded: List[Dict[str, Any]] = []
+        if exclusions is not None:
+            exclusions.record_invalid(collector)
+        found = find_workspaces(client, subscription_id, collector, exclusions, excluded)
+        listed = found is not None
+        found = found or []
         workspaces: List[Dict[str, Any]] = []
         without_sentinel: List[str] = []
-        for ws in discover_workspaces(client, subscription_id, collector):
+        for ws in found:
             if sentinel_only and not ws["sentinel_onboarded"]:
                 without_sentinel.append(ws["name"])
                 continue
@@ -481,6 +526,12 @@ def run_workspaces(
         if sentinel_only:
             results["workspaces_without_sentinel"] = without_sentinel
             summary["workspaces_without_sentinel"] = len(without_sentinel)
+        if exclusions is not None:
+            exclusions.warn_unmatched(logger)
+            results["excluded"] = excluded
+            summary.update(exclusions.summary(excluded, ("workspace",), {"workspaces": len(found)}))
+            if not listed:  # unknown, not none, when the workspace list wasn't read
+                summary.update(excluded_workspaces=None, in_scope_workspaces=None)
         return results, summary
 
     return run_subscription(fetcher=fetcher, logger=logger, collect=per_workspace, session=session)

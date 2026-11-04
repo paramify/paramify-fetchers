@@ -1,5 +1,5 @@
 name: azure_container_workloads_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   Inventories the container workloads in the subscription: Azure Container Apps environments, apps
   and jobs (Microsoft.App) and Container Instances container groups (Microsoft.ContainerInstance).
@@ -11,6 +11,30 @@ description: >
   whether ingress is internet-facing, allows insecure HTTP, restricts client IPs or requires sign-in. For every container group: public IP, VNet placement, registry credentials,
   environment variables, customer-managed key, confidential compute, Azure Files volumes and logging.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope,
+      as case-insensitive glob patterns listed in the manifest, each with
+      a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as
+      eastus2; a resource with no location never matches one) or
+      id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching
+      Container Apps environment, container app, job or Container
+      Instances container group is listed under excluded with the pattern
+      and left out of every count and verdict; an app or job also leaves
+      with its managed environment (the environment's id is in
+      matched_id). Excluded resources get no further reads. A pattern
+      without one of these prefixes fails the run. Set it once under
+      platforms.azure.config for every Azure fetcher that has this field;
+      fetchers without it ignore it. Each item is a pattern, or a pattern with a reason. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -107,3 +131,12 @@ evidence_set:
     separately, so zero resources of either kind can be told from a provider that is off. A summary
     with total_container_apps 0 proves nothing about app ingress or authentication: there are no apps
     yet.
+    Resources the resource_exclusions patterns take out are listed under results.excluded
+    instead, each with the pattern that matched; an app or job taken out with its environment
+    has reason environment_matched and names the environment in matched_id. The summary gives
+    resource_exclusion_patterns (the configured patterns, empty when none are set),
+    resource_exclusion_patterns_unmatched (patterns that matched no environment, app, job or
+    container group, such as a mistyped name), excluded_environments, excluded_container_apps,
+    excluded_jobs and excluded_container_groups (how many the patterns took out, null if the list couldn't be read; no other count
+    includes them) and in_scope_environments, in_scope_container_apps, in_scope_jobs and
+    in_scope_container_groups (how many stayed; null if that list couldn't be read).

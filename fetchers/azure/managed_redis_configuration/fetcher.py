@@ -28,6 +28,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_managed_redis_configuration")
 
@@ -173,8 +174,8 @@ def summarize(clusters: list[dict]) -> dict:
     }
 
 
-def collect_clusters(subscription_id, cred, collector: Collector) -> list[dict]:
-    """redis_enterprise.list() then databases.list_by_cluster per cluster."""
+def collect_clusters(subscription_id, cred, collector: Collector, exclusions=None, excluded=None) -> list[dict] | None:
+    """redis_enterprise.list() then databases.list_by_cluster per in-scope cluster; excluded clusters are appended to `excluded`."""
 
     def _client():
         from azure.mgmt.redisenterprise import RedisEnterpriseManagementClient  # lazy
@@ -185,13 +186,18 @@ def collect_clusters(subscription_id, cred, collector: Collector) -> list[dict]:
 
     client = collector.guard("redisenterprise.RedisEnterpriseManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     raw = collector.guard(
         "redisenterprise.redis_enterprise.list",
         lambda: [project_cluster(c) for c in client.redis_enterprise.list()],
-        default=[],
     )
+    if raw is None:
+        return None
+    if exclusions:
+        raw, out = exclusions.split(raw, "redis_cluster")
+        if excluded is not None:
+            excluded.extend(out)
     records = []
     for cluster in raw:
         rg = resource_group_from_id(cluster.get("id"))
@@ -224,7 +230,10 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    clusters: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    excluded: list[dict] = []
+    clusters: list[dict] | None = None
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(
@@ -236,7 +245,7 @@ def main() -> int:
                 "status not_registered",
                 subscription_id,
             )
-        clusters = collect_clusters(subscription_id, cred, collector)
+        clusters = collect_clusters(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -246,12 +255,20 @@ def main() -> int:
             ),
         )
 
+    exclusions.warn_unmatched(logger)
+    listed = clusters is not None
+    clusters = clusters or []
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"redis_clusters": clusters, "provider_registration_status": registration},
-        summary={**summarize(clusters), "provider_registration_status": registration},
+        results={"redis_clusters": clusters, "provider_registration_status": registration, "excluded": excluded},
+        summary={
+            **summarize(clusters),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("redis_cluster",), {"redis_clusters": len(clusters) if listed else None}),
+        },
     )
     filename = (
         "azure_managed_redis_configuration_"
