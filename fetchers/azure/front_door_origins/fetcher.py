@@ -34,6 +34,7 @@ from frontdoor import (  # noqa: E402
     DEFAULT_FORWARDING_PROTOCOL,
     arm_key,
     attached_rules,
+    cdn_api_version,
     cdn_client,
     custom_domains,
     endpoints_with_routes,
@@ -368,7 +369,7 @@ def summarize(profiles: list[dict], skipped_by_sku: dict, groups: list[dict]) ->
         "serving_groups_without_private_link_or_origin_auth": reason("no_private_link_or_origin_auth"),
         "serving_groups_all_private_link": count(serving, lambda g: g["all_enabled_origins_private_link"]),
         "serving_groups_origin_authentication": count(serving, lambda g: g["origin_authentication"]),
-        "origin_api_version": ORIGIN_API_VERSION,
+        "origin_api_version": cdn_api_version(ORIGIN_API_VERSION),
     }
 
 

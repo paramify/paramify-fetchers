@@ -1,5 +1,5 @@
 name: azure_defender_assessments
-version: 0.3.0
+version: 0.4.0
 description: >
   Every Microsoft Defender for Cloud security assessment result on the
   subscription — one record per (resource, check) pair, each with its
@@ -14,7 +14,14 @@ description: >
   exactly which resources fail which checks. A subscription that never
   registered the Microsoft.Security resource provider reports
   provider_registration_status: not_registered, which is valid evidence ("not
-  in use") rather than a collection failure. Needs Reader (or Security Reader).
+  in use") rather than a collection failure. Each Unhealthy record also
+  reports days_open, counted from status_change_date (when it last became
+  Unhealthy; null when that date is missing), and past_sla against a configurable
+  per-severity SLA (30 / 90 / 180 days for High / Medium / Low by default); the
+  summary counts the Unhealthy findings past SLA per severity and in total, each
+  null when the list, the Resource Graph severities or a needed date could not be
+  read, any Unhealthy finding's severity came from the catalogue, or that
+  severity's SLA days are invalid. Needs Reader (or Security Reader).
 category: azure
 
 supports_targets: true
@@ -50,6 +57,24 @@ config_schema:
       pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
       resource is in scope.
+  sla_days_high:
+    type: integer
+    required: false
+    default: 30
+    env: AZURE_DEFENDER_SLA_DAYS_HIGH
+    description: Days an Unhealthy High-severity assessment may stay open before it counts as past SLA.
+  sla_days_medium:
+    type: integer
+    required: false
+    default: 90
+    env: AZURE_DEFENDER_SLA_DAYS_MEDIUM
+    description: Days an Unhealthy Medium-severity assessment may stay open before it counts as past SLA.
+  sla_days_low:
+    type: integer
+    required: false
+    default: 180
+    env: AZURE_DEFENDER_SLA_DAYS_LOW
+    description: Days an Unhealthy Low-severity assessment may stay open before it counts as past SLA.
 
 target_schema:
   subscription_id:
@@ -104,3 +129,19 @@ evidence_set:
     assessment, such as a mistyped name), excluded_assessments (how many the
     patterns took out; no other count includes them) and in_scope_assessments (how
     many stayed, the same as total_assessments).
+    Each Unhealthy record carries days_open (whole days from status_change_date to
+    the run, null when that date is missing; status_change_date is when the status
+    last changed, so a finding that turns Healthy and then Unhealthy again starts
+    again at 0), sla_days (its severity's limit, null when the severity is unknown)
+    and past_sla (days_open above sla_days, null when either is null); other records
+    carry null for all three. The summary gives
+    sla_days_by_severity, unhealthy_past_sla_by_severity and unhealthy_past_sla_count
+    (every count is null when the assessment list or the Resource Graph severity
+    read failed, or any Unhealthy finding took its severity from the catalogue,
+    which can rate a check lower than its own, so the finding may belong to any
+    severity; a severity's count is also null when its SLA days are invalid or one
+    of its Unhealthy findings has no date; the total is null when any severity's
+    count is null or an Unhealthy finding has no severity) and
+    unhealthy_days_open_unknown_count (null only when the list could not be read).
+    An invalid SLA value (not a whole number above 0) fails the run as bad_config
+    and its sla_days is null, with no fallback to the default.
