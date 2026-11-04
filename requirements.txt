@@ -90,7 +90,7 @@ azure-mgmt-kusto>=4.0.0,<5
 azure-mgmt-eventhub>=12.0.0,<13
 
 # Compute and containers.
-azure-mgmt-compute>=38.2.0,<39
+azure-mgmt-compute>=38.2.0,<40
 azure-mgmt-containerservice>=41.5.0,<42
 azure-mgmt-containerregistry>=15.0.0,<16
 
