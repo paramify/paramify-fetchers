@@ -1289,6 +1289,17 @@ schemas and the `paramify` CLI — not the internal code.
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
   refused, throttled or unreachable failed as `partial_failure`. These now read
   `not_authorized`, `rate_limited` and `target_unreachable`.
+- **`azure_devops_permissions` resolves every identity in a large
+  organization** (0.1.0 → 0.1.1). Identities were looked up 50 descriptors per
+  request, and Azure DevOps answers 404 when that query string runs to several
+  thousand characters. The failed batches left their identities unresolved, so
+  every admin-group figure read null and the run failed. Batches now also stop
+  at 2,000 encoded characters, and a batch that still answers 404 is split
+  until a single descriptor that answers 404 reads as not found. A 404 that
+  hides a refusal (`TF401019`, `VS800075`) is reported as `not_authorized`, and
+  a batch whose split finds no one is a failure, so its identities read as
+  unread and the admin-group figures null, rather than every admin group read
+  as an ordinary group.
 - **`azure_devops_audit_streams` no longer reads unlisted streams as no
   streams** (0.1.0 → 0.1.1). When the audit streams can't be listed, for
   example a 403 to an identity that may read the audit log but not its streams,
