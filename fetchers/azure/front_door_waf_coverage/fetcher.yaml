@@ -66,6 +66,7 @@ evidence_set:
     Script: azure/front_door_waf_coverage/fetcher.py
 
     Access: Reader on the subscription.
+    Azure Government: when AZURE_AUTHORITY_HOST is login.microsoftonline.us, the fetcher reads Microsoft.Cdn from management.usgovcloudapi.net with API version 2025-12-01, because Azure Government does not offer the public-cloud versions yet. The evidence records the version actually used. That version does not return a security policy's routes or whether it applies to the whole profile, so: a host-route that an association lists by host still reads as domain scope, even if that association is limited to some routes or a route-scope association overrides it; and a host-route that no association lists by host reads as unknown scope (protected null, not counted as protected or unprotected) instead of none, because a route-scope or profile-level policy may cover it. While any host-route is unknown, the protected and unprotected counts and their reasons read null, since each would only be a lower bound.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
@@ -112,20 +113,22 @@ evidence_set:
     - in_scope_host_routes — Number of host-routes in scope
 
     Is every serving host protected by a blocking WAF?
-    - protected_host_routes — Number of serving host-routes protected by a blocking WAF: a WAF security policy applies to the host on that route, its WAF policy blocks, it covers every path (/*), and neither the route nor the policy marks the host inactive
-    - unprotected_host_routes — Number of serving host-routes that aren't protected by a blocking WAF
-    - protected_host_route_percentage — Percentage of serving host-routes protected by a blocking WAF = protected_host_routes / serving_host_routes × 100 (a whole number, 0–100); 0 when serving_host_routes is 0
-    - host_routes_without_waf — Number of serving host-routes that no WAF security policy applies to
-    - host_routes_waf_not_blocking — Number of serving host-routes whose WAF policy doesn't block: it is disabled, in Detection mode or has no mode, has no default rule set or one that only logs, has a rule group with no blocking rule, its rule set's definition wasn't found, or a custom rule allows every request
-    - host_routes_waf_unresolved — Number of serving host-routes whose security policy names a WAF policy that wasn't found in the subscription
-    - host_routes_partial_path_coverage — Number of serving host-routes whose WAF association covers only some paths (its patterns don't include /*)
-    - host_routes_reference_inactive — Number of serving host-routes whose host is marked inactive on the route or on the WAF association
+    - protected_host_routes — Number of serving host-routes protected by a blocking WAF: a WAF security policy applies to the host on that route, its WAF policy blocks, it covers every path (/*), and neither the route nor the policy marks the host inactive; null when unknown_host_routes is more than 0
+    - unprotected_host_routes — Number of serving host-routes that aren't protected by a blocking WAF; null when unknown_host_routes is more than 0
+    - unknown_host_routes — Number of serving host-routes whose WAF coverage couldn't be read (unknown scope); always 0 outside Azure Government
+    - protected_host_route_percentage — Percentage of serving host-routes protected by a blocking WAF = protected_host_routes / serving_host_routes × 100 (a whole number, 0–100); 0 when serving_host_routes is 0; null when unknown_host_routes is more than 0
+    - host_routes_without_waf — Number of serving host-routes that no WAF security policy applies to; null when unknown_host_routes is more than 0
+    - host_routes_waf_not_blocking — Number of serving host-routes whose WAF policy doesn't block: it is disabled, in Detection mode or has no mode, has no default rule set or one that only logs, has a rule group with no blocking rule, its rule set's definition wasn't found, or a custom rule allows every request; null when unknown_host_routes is more than 0
+    - host_routes_waf_unresolved — Number of serving host-routes whose security policy names a WAF policy that wasn't found in the subscription; null when unknown_host_routes is more than 0
+    - host_routes_partial_path_coverage — Number of serving host-routes whose WAF association covers only some paths (its patterns don't include /*); null when unknown_host_routes is more than 0
+    - host_routes_reference_inactive — Number of serving host-routes whose host is marked inactive on the route or on the WAF association; null when unknown_host_routes is more than 0
     - host_routes_route_scope — Number of serving host-routes whose WAF comes from an association that lists the route (and the host, when it lists any hosts); Front Door applies this one first
     - host_routes_domain_scope — Number of serving host-routes whose WAF comes from an association that lists the host and no routes
     - host_routes_profile_scope — Number of serving host-routes whose WAF comes from a policy applied to the whole profile
     - host_routes_none_scope — Number of serving host-routes that no WAF security policy applies to
+    - host_routes_unknown_scope — Number of serving host-routes that no association lists by host while a WAF security policy's routes or profile-level setting couldn't be read (Azure Government)
 
     Does each profile with a WAF export its WAF log?
-    - profiles_with_waf_in_use — Number of profiles where a serving in-scope host-route has a WAF applied
+    - profiles_with_waf_in_use — Number of profiles where a serving in-scope host-route has a WAF applied; null when any profile's WAF use is unknown: none of its serving host-routes has a WAF applied, but some are unknown scope
     - profiles_waf_log_exported — Number of profiles with a diagnostic setting that exports the WAF log (FrontDoorWebApplicationFirewallLog): the setting has a destination and enables that category by name, through allLogs, or through a category group it belongs to
-    - profiles_with_waf_in_use_without_waf_log_export — Number of profiles with a WAF in use whose WAF log no diagnostic setting exports
+    - profiles_with_waf_in_use_without_waf_log_export — Number of profiles with a WAF in use whose WAF log no diagnostic setting exports; null when a profile whose WAF use is unknown doesn't export its WAF log

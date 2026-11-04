@@ -12,6 +12,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
+  Unhealthy assessment reports `days_open` (from `status_change_date`, null when
+  missing; it starts again at 0 when a finding turns Healthy and then Unhealthy
+  again), its `sla_days` and `past_sla`. SLA days per severity come from
+  `sla_days_high` / `sla_days_medium` / `sla_days_low` (`AZURE_DEFENDER_SLA_DAYS_*`,
+  default 30 / 90 / 180; an invalid value fails the run as `bad_config` and has no
+  default fallback). The summary adds `sla_days_by_severity`,
+  `unhealthy_past_sla_by_severity`, `unhealthy_past_sla_count` and
+  `unhealthy_days_open_unknown_count`. The two past-SLA counts are null, never 0,
+  when the assessment list or the Resource Graph severity read failed, a severity's
+  SLA days are invalid or a needed date is missing. When any Unhealthy finding took
+  its severity from the catalogue, every severity's count and the total are null.
 - **`azure_change_work_items`** (`EVD-AZURE-CHANGE-WORK-ITEMS`), a comparator:
   matches each Azure change made outside a pipeline in `azure_change_provenance`
   (by default, direct edits and ARM deployments a person ran) to the
@@ -29,10 +41,19 @@ schemas and the `paramify` CLI — not the internal code.
   it was created or last changed. The summary counts
   each status, overall and by origin, the changes without a record, recorded
   without approval and without an approved record, the approved changes whose
-  non-emergency record was approved after the change, the changes read and the
+  non-emergency record that needs an approval was approved after the change, the
+  changes read and the
   shortest change window read (`change_lookback_days`), so a narrow window
   can't pass as no changes, and `work_items_cover_changes`, false when the work
-  items window starts too late for the earliest change.
+  items window starts too late for the earliest change. Only the record types in
+  `CHANGE_RECORD_APPROVAL_TYPES` (by default, every one) need an approval: a
+  change recorded only by items of other types counts as approved and is counted
+  in `changes_recorded_approval_not_required`, each change and work item says
+  whether it needs one (`approval_required`), and
+  `approval_types_not_record_types` lists names that match no record type. Such
+  a name fails the run with `bad_config`, since the type meant would need no
+  approval: before anything is read when `CHANGE_RECORD_TYPES` is set, and
+  otherwise after the comparison, whose file is still written.
 - **Resource exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/resource_exclusions.py`, takes whole resources out of
   scope for resources outside the authorization boundary. Patterns are
@@ -421,7 +442,9 @@ schemas and the `paramify` CLI — not the internal code.
   incomplete, are compared and the result is partial (exit 1); a missing input,
   a file that isn't a complete envelope from this run, or an inventory with
   `records_included: false` makes every summary value `null`; the file is
-  written even when the index can't be read or the comparison fails. Ships with
+  written even when the index can't be read or the comparison fails. A `check`
+  that raises `ConfigError`, a setting the inputs show is wrong, keeps its
+  results and summary and exits 1 with `bad_config`. Ships with
   `comparators/_template/`, the credential-free `demo_policy_check`
   (`EVD-DEMO-POLICY-CHECK`, `examples/demo_comparator.yaml`),
   `docs/comparators.md`, `docs/comparators_guide.md` and
@@ -500,14 +523,21 @@ schemas and the `paramify` CLI — not the internal code.
   choosing the field whose prefixes take the pattern; a category-wide write is
   refused for a field its fetchers declare with different prefixes, such as
   `scope_exclusions`. A fetcher's first pattern starts from a copy of its
-  category's list, which `exclude` names, so the fetcher keeps those patterns;
-  when `unexclude` removes a fetcher's last pattern, it names the category
-  patterns the fetcher takes again. `set-config` and `set-platform-config` take a
+  category's list, which `exclude` names, so the fetcher keeps those patterns.
+  When `unexclude` removes a fetcher's last pattern and its category lists
+  patterns, the fetcher keeps an empty list, so the category's patterns don't
+  come back to it, and `unexclude` says so. `set-config` and `set-platform-config` take a
   comma-separated list. `describe` shows what a pattern list takes instead of its
   env var. `validate` adds a note for each category-wide list, naming the entries
   that take it, the ones with their own list, and the ones without the field
   (`--json` carries them as `notes`). The TUI shows a list as its patterns and
   leaves it out of the entry editor, which would save it back as one string.
+  A list or a map given to a config field that isn't `type: patterns`, such as
+  a category-wide list reaching a fetcher that declares the key a string, fails
+  `validate` and the run instead of reaching the fetcher as Python text. A
+  pattern list the manifest leaves unset reaches the fetcher as an empty
+  variable, so a `.env` file can't fill it, and `passthrough_env` doesn't carry
+  it.
 - **A string config field can be a `${env:VAR}` reference.** The runner
   resolves it the way it resolves a secret. An unset or empty variable gives way
   to the next value down (platform config, then the default; an error for a
@@ -638,6 +668,22 @@ schemas and the `paramify` CLI — not the internal code.
   key its fetcher doesn't declare. Each is now an error with a did-you-mean
   hint, and a platform key only a comparator declares says the comparator reads
   it from its own entry.
+- **`azure_sentinel_playbooks` 0.3.0: run history and last run result.** Each
+  playbook now carries its runs over a lookback (`run_lookback_days`, default
+  90, the default Logic Apps run-history retention; `SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS`;
+  a larger value is clamped to 90 with a warning):
+  how many ran, a count per status, how many failed (failed, timed out, aborted
+  or faulted), the newest run's status and time, the last success and the last
+  failure, and its ten newest runs with status, start and end time, trigger and
+  error code. Consumption runs come from `Microsoft.Logic/workflows/{name}/runs`
+  and Standard runs through the app's workflow host runtime, both filtered on
+  start time. The summary counts live playbooks whose newest run succeeded or
+  failed, live playbooks with no run in the lookback, and failed runs of live
+  playbooks. A runs read answered 401, 403 or 404 leaves that playbook's run
+  fields null, lists it in `playbooks_run_history_unread` and adds a note; the
+  run counts read null while any live playbook's runs weren't read, with
+  `live_playbooks_run_history_unread` as the count. Any other error fails the
+  run. Maps to `KSI-INR-RIR` too.
 - **`azure_entra_conditional_access_policies` judges authentication strengths by
   their allowed sign-in methods** (0.1.0 → 0.2.0). Only a strength's name was kept,
   and any strength counted as MFA, so phishing-resistant enforcement couldn't be
@@ -1007,6 +1053,36 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_front_door_origins` 0.6.0, `azure_front_door_tls` 0.4.0 and
+  `azure_front_door_waf_coverage` 0.4.0 run on Azure Government.** Azure
+  Government does not offer the Microsoft.Cdn API versions these fetchers use
+  (the azure-mgmt-cdn default and the pinned 2026-07-01), so every call failed
+  with `InvalidResourceType`. When `AZURE_AUTHORITY_HOST` is
+  `login.microsoftonline.us`, every Microsoft.Cdn client now uses 2025-12-01,
+  the newest stable version Azure Government lists for every `profiles/*` type
+  read, and `origin_api_version` and `security_policies_api_version` report the
+  version actually used. That version does not return a security policy's
+  `isProfileLevel` or `associations[].routes`, so on Azure Government
+  `azure_front_door_waf_coverage` reports a host-route that no association lists
+  by host as `unknown` scope, with `protected` null, instead of as having no
+  WAF. The new `unknown_host_routes` and `host_routes_unknown_scope` count them.
+  While any is unknown, `protected_host_routes`, `unprotected_host_routes`,
+  `protected_host_route_percentage` and the per-reason counts are null, and a
+  profile whose only possibly covered host-routes are unknown has `waf_in_use`
+  null, so `profiles_with_waf_in_use` is null and
+  `profiles_with_waf_in_use_without_waf_log_export` is null unless that profile
+  exports its WAF log. The public-cloud output is unchanged apart from the two
+  new counts, which are 0 there.
+- **`azure_entra_conditional_access_policies` 0.2.1: device filters,
+  authentication flows and insider and service principal risk narrow MFA
+  coverage.** In 0.2.0 a policy with any of these conditions still added its
+  client app types to `mfa_client_app_types_for_all_users_and_apps`; now it
+  doesn't, as with sign-in and user risk, platforms and locations. A transfer
+  method of `none` doesn't narrow. Each policy's conditions now carry
+  `service_principal_risk_levels`, `insider_risk_levels`, `device_filter` and
+  `authentication_flow_transfer_methods`. When the policies couldn't be read,
+  the Graph client included, `authentication_strengths` is null rather than an
+  empty list.
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
   report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`
