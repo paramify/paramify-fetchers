@@ -17,7 +17,7 @@ from azure_common import dig  # noqa: E402
 from azure_rest import (  # noqa: E402
     SI_API,
     QueryError,
-    discover_workspaces,
+    find_workspaces,
     int_config,
     iso_duration_days,
     parse_time,
@@ -27,6 +27,7 @@ from azure_rest import (  # noqa: E402
     table_retention,
     workspace_identity,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 NAME = "azure_sentinel_incidents"
 LOOKBACK_ENV = "SENTINEL_INCIDENT_LOOKBACK_DAYS"
@@ -737,11 +738,18 @@ def summarize(workspaces: List[Dict[str, Any]], discovered: bool) -> Dict[str, A
 
 
 def main() -> int:
+    exclusions = ResourceExclusions.from_env()
+
     # run_workspaces, except that summarize learns whether discovery failed, so finding none isn't read as none there.
     def per_workspace(client, subscription_id: str, collector) -> tuple:
+        excluded: List[Dict[str, Any]] = []
         failures = len(collector.failures)
-        found = discover_workspaces(client, subscription_id, collector)
+        found = find_workspaces(client, subscription_id, collector, exclusions, excluded)
         discovered = len(collector.failures) == failures
+        listed = found is not None
+        found = found or []
+        exclusions.record_invalid(collector)
+        exclusions.warn_unmatched(logger)
         workspaces: List[Dict[str, Any]] = []
         without_sentinel: List[str] = []
         for ws in found:
@@ -751,9 +759,12 @@ def main() -> int:
             detail = collector.guard(f"collect({ws['name']})", lambda ws=ws: collect(client, ws, collector), default={})
             workspaces.append({**workspace_identity(ws), **(detail or {})})
         results = {"workspaces": workspaces, "workspace_filter": requested_workspaces() or None,
-                   "workspaces_without_sentinel": without_sentinel}
+                   "workspaces_without_sentinel": without_sentinel, "excluded": excluded}
         summary = {"workspaces_collected": len(workspaces), **summarize(workspaces, discovered),
-                   "workspaces_without_sentinel": len(without_sentinel)}
+                   "workspaces_without_sentinel": len(without_sentinel),
+                   **exclusions.summary(excluded, ("workspace",), {"workspaces": len(found)})}
+        if not listed:  # unknown, not none, when the workspace list wasn't read
+            summary.update(excluded_workspaces=None, in_scope_workspaces=None)
         return results, summary
 
     return run_subscription(fetcher=NAME, logger=logger, collect=per_workspace)
