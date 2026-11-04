@@ -179,6 +179,61 @@ schemas and the `paramify` CLI — not the internal code.
     route needs it. Metric and smart detector rules carry the location `global`
     and action groups and processing rules none, so `location:` reaches only log
     search rules.
+  - `azure_app_gateway_backend_tls` 0.2.0 and `azure_app_gateway_tls_listeners`
+    0.2.0: application gateways, with their backend settings or listeners. The
+    Resource Graph completeness check still compares the full gateway list.
+  - `azure_app_gateway_waf` 0.2.0: application gateways (with their listeners)
+    and WAF policies. An in-scope listener whose policy is excluded keeps its
+    WAF verdict; only the policy leaves the policy list and counts.
+  - `azure_ddos_protection` 0.2.0: public IPs, DDoS protection plans and
+    virtual networks. Protection is still worked out against every plan and
+    network, so an in-scope public IP protected through an excluded network or
+    plan keeps its verdict; a network's attached-IP counts cover in-scope IPs.
+  - `azure_network_flow_logs` 0.2.0: Network Watchers, flow logs, virtual
+    networks and subnets. A flow log leaves only on an `id:` pattern naming it
+    or with an excluded target (`target_matched`); excluding its watcher, or
+    the watcher's resource group, keeps it in scope. A subnet leaves with its
+    network, and a network whose subnets are all excluded leaves too
+    (`subnets_matched`). Coverage is still judged against every flow log. A
+    run that read nothing (no subscription, or no client) now reports the
+    virtual network figures null and `virtual_networks_read` false, as a
+    refused network list already did.
+  - `azure_virtual_wan_configuration` 0.2.0: virtual WANs, hubs, hub VPN
+    gateways (with their connections), VPN sites, point-to-site gateways and
+    VPN server configurations. A hub and a VPN site also leave with their WAN,
+    and a hub's gateways with the hub.
+  - `azure_vpn_gateway_configuration` 0.2.0: virtual network gateways,
+    connections and local network gateways. A connection also leaves with its
+    gateway (`gateway_matched`) and gets no status read; a connection to an
+    excluded second gateway or local network gateway keeps its verdict.
+  - `azure_dns_configuration` 0.6.0: public and private DNS zones (global, so
+    `rg:`, `id:` or `location:global`), with their record sets and virtual
+    network links, which are then not read. Record-set `scope_exclusions` apply
+    to the zones left in scope. An alias record or link in an in-scope zone
+    still counts when what it points at is excluded.
+  - `azure_front_door_tls` 0.6.0 and `azure_front_door_waf_coverage` 0.6.0:
+    Front Door profiles (global), with their endpoints, routes, custom domains,
+    rule sets, secrets, security policies and diagnostic settings, which are
+    then not read. `scope_exclusions` apply to the profiles left in scope, so a
+    scope pattern that matched only an excluded profile's hosts reads
+    unmatched. WAF policies are not taken out in coverage: an in-scope host
+    whose policy a pattern matches keeps its verdict.
+  - `azure_front_door_waf_policies` 0.2.0: Standard and Premium WAF policies
+    (global). A policy linked to an excluded profile still reads `associated`,
+    and `skipped_policies_by_sku` still counts every classic policy.
+  - `azure_front_door_origins` 0.8.0: Front Door profiles (global), with their
+    origin groups, origins and health; their metrics aren't read. Production
+    apps also leave by their own resource group, region or id
+    (`excluded_production_apps`). An in-scope origin whose back end is excluded
+    stays and keeps every verdict. An excluded profile's routes are still read,
+    so an in-scope app it fronts stays behind Front Door, but, as with an
+    out-of-scope route, an excluded profile can't vouch for an app that admits
+    its Front Door id.
+
+  In the application gateway, DDoS, flow log, Virtual WAN, VPN gateway, DNS and
+  Front Door fetchers, a kind's `excluded_*` and `in_scope_*` counts read null,
+  not 0, when its list couldn't be read.
+
   - `azure_cosmosdb_configuration` 0.2.0: database accounts.
   - `azure_databricks_workspace_configuration` 0.2.0: workspaces.
   - `azure_managed_redis_configuration` 0.2.0: Redis Enterprise clusters; their

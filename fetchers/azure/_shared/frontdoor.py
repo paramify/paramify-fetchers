@@ -616,9 +616,12 @@ def cdn_client(subscription_id: str, cred, collector: Collector, api_version: Op
     return collector.guard(label, lambda: CdnManagementClient(**kwargs))
 
 
-def front_door_profiles(cdn, collector: Collector) -> Tuple[List[dict], Dict[str, int]]:
-    """Standard/Premium profiles sorted by id, and a count of the other CDN SKUs skipped."""
-    projected = collector.guard("cdn.profiles.list", lambda: [project_profile(p) for p in cdn.profiles.list()], default=[])
+def front_door_profiles(cdn, collector: Collector) -> Tuple[Optional[List[dict]], Dict[str, int]]:
+    """Standard/Premium profiles sorted by id (None when the list wasn't read), and a count of the other CDN SKUs
+    skipped."""
+    projected = collector.guard("cdn.profiles.list", lambda: [project_profile(p) for p in cdn.profiles.list()])
+    if projected is None:
+        return None, {}
     kept, skipped = select_front_door(projected)
     return sorted(kept, key=lambda p: arm_key(p["id"])), skipped
 
@@ -666,8 +669,9 @@ def custom_domains(cdn, collector: Collector, profile: dict) -> List[dict]:
     )
 
 
-def collect_waf_policies(subscription_id: str, cred, collector: Collector) -> Tuple[List[dict], dict]:
-    """Every Front Door WAF policy in the subscription (all SKUs; callers filter), and the managed rule-set definitions index."""
+def collect_waf_policies(subscription_id: str, cred, collector: Collector) -> Tuple[Optional[List[dict]], dict]:
+    """Every Front Door WAF policy in the subscription (all SKUs; callers filter; None when the list wasn't read), and
+    the managed rule-set definitions index."""
     from azure.mgmt.frontdoor import FrontDoorManagementClient
 
     client = collector.guard(
@@ -677,11 +681,10 @@ def collect_waf_policies(subscription_id: str, cred, collector: Collector) -> Tu
         ),
     )
     if client is None:
-        return [], definition_index([])
+        return None, definition_index([])
     policies = collector.guard(
         "frontdoor.policies.list_by_subscription",
         lambda: [project_waf_policy(p) for p in client.policies.list_by_subscription()],
-        default=[],
     )
     definitions = collector.guard(
         "frontdoor.managed_rule_sets.list",
