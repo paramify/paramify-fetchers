@@ -252,7 +252,8 @@ _CODE_RULES = (
         (),
         ("subscriptionnotfound", "invalidsubscriptionid", "invalid subscription",
          "is not a valid subscription", "no subscription", "exclusion pattern",
-         "invalid setting", "invalid sla days"),
+         "invalid lookback", "invalid recovery time objective", "invalid setting",
+         "invalid sla days"),
     ),
     (
         # A missing azure-mgmt-* dependency is our fault, not the customer's

@@ -77,11 +77,18 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "type": { "type": "string", "enum": ["string", "integer", "boolean"] },
+          "type": { "type": "string", "enum": ["string", "integer", "boolean", "patterns"] },
           "required": { "type": "boolean", "default": false },
           "env": { "type": "string" },
           "default": {},
-          "description": { "type": "string" }
+          "description": { "type": "string" },
+          "prefixes": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "uniqueItems": true,
+            "description": "For type patterns: the prefixes a pattern may start with, such as rg for rg:<glob>. validate refuses any other prefix."
+          },
+          "bare": { "type": "boolean", "default": true, "description": "For type patterns: whether a pattern may have no prefix." }
         }
       }
     },

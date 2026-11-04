@@ -280,7 +280,7 @@ def summarize(
     """
     enabled = [u for u in users if u["account_enabled"]]
     enabled_members = [u for u in enabled if not u["is_guest"]]
-    reported = [u for u in users if u["has_registration_details"] or u["account_enabled"]]
+    counted_in_all_users = [u for u in users if u["has_registration_details"] or u["account_enabled"]]
     admins = [u for u in users if u["is_admin"]]
 
     def admin_figure(value):
@@ -298,7 +298,7 @@ def summarize(
             sum(1 for u in enabled if u["is_mfa_capable"]), len(enabled)
         ),
         "mfa_coverage_percentage_all_users": coverage_percentage(
-            sum(1 for u in reported if u["is_mfa_capable"]), len(reported)
+            sum(1 for u in counted_in_all_users if u["is_mfa_capable"]), len(counted_in_all_users)
         ),
         "enabled_users_without_mfa": sum(1 for u in enabled if not u["is_mfa_capable"]),
         "mfa_registered_enabled_users": sum(1 for u in enabled if u["is_mfa_registered"]),
@@ -334,7 +334,7 @@ def summarize(
         ),
         # An enabled user missing from the report counts as uncovered; a disabled one is left
         # out of the all-users figure, whose denominator this is.
-        "users_counted_in_all_users_coverage": len(reported),
+        "users_counted_in_all_users_coverage": len(counted_in_all_users),
         "users_with_registration_details": sum(1 for u in users if u["has_registration_details"]),
         "users_without_registration_details": sum(
             1 for u in users if not u["has_registration_details"]

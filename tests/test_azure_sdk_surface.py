@@ -238,7 +238,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "MonitorManagementClient",
         "activity_logs",
         ["list"],
-        "azure/app_service_deployments — without it no slot swap or publish-profile download is seen",
+        "azure/app_service_deployments — without it no slot swap or publish-profile download is seen; "
+        "azure/sql_managed_instance_backups — failover history",
     ),
     (
         "azure.mgmt.monitor",
@@ -2840,6 +2841,13 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/entra_conditional_access_policies — without it a device filter reads as absent",
     ),
     (
+        "msgraph.generated.models.conditional_access_applications",
+        "ConditionalAccessApplications",
+        ["application_filter"],
+        "azure/entra_conditional_access_policies — without it an application filter reads as "
+        "absent, so a policy that filters apps would count for MFA coverage",
+    ),
+    (
         "msgraph.generated.models.authentication_strength_policy",
         "AuthenticationStrengthPolicy",
         ["id", "display_name", "requirements_satisfied"],
@@ -2955,7 +2963,8 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "EventData",
         ["claims", "caller", "correlation_id", "event_data_id", "resource_id", "operation_name", "status",
          "event_timestamp"],
-        "azure/app_service_deployments — a renamed caller reads as an unattributed swap or download",
+        "azure/app_service_deployments — a renamed caller reads as an unattributed swap or download; "
+        "azure/sql_managed_instance_backups — failover history",
     ),
     (
         "azure.mgmt.monitor.models",
@@ -4164,6 +4173,10 @@ def test_graph_admin_membership_builders_present() -> None:
     assert getattr(role, "members", None) is not None, (
         "directory_roles.by_directory_role_id(...).members is gone.\n"
         "  affected fetchers: azure/entra_privileged_roles, azure/entra_mfa_status"
+    )
+    assert getattr(role.members, "graph_service_principal", None) is not None, (
+        "directory_roles.by_directory_role_id(...).members.graph_service_principal is gone.\n"
+        "  affected fetchers: azure/entra_privileged_roles — v1.0 members leaves service principals out"
     )
     assert getattr(group, "transitive_members", None) is not None, (
         "groups.by_group_id(...).transitive_members is gone.\n"
