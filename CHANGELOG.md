@@ -955,6 +955,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_conditional_access_policies` 0.2.2: an application filter
+  narrows MFA coverage in either mode, and each policy shows its filter.** In
+  0.2.1 a policy with an application filter still added its client app types to
+  `mfa_client_app_types_for_all_users_and_apps`; now it doesn't. A filter in
+  exclude mode leaves apps out, and in include mode it narrows the target, so
+  both narrow. Each policy's `target_resources.application_filter` carries the
+  filter's mode and rule. The `authentication_strengths_readable` description
+  now says it stays true, with `authentication_strengths` null, when the
+  policies couldn't be read.
 - **`azure_front_door_origins` 0.6.0, `azure_front_door_tls` 0.4.0 and
   `azure_front_door_waf_coverage` 0.4.0 run on Azure Government.** Azure
   Government does not offer the Microsoft.Cdn API versions these fetchers use
@@ -988,11 +997,12 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
   report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`
-  counted every one as without MFA. It is now taken over the users with a row,
-  and the new `users_with_registration_details` gives its denominator. The
-  figures over enabled users and admins are unchanged: there a user with no row
-  still counts as without MFA. A failed read no longer reads as 0: when the users
-  list can't be read in full every figure is null, and when the registration
+  counted every one as without MFA. It is now taken over the users with a row
+  (0.3.1 changes the denominator), and the new `users_with_registration_details`
+  counts the users with a row. The figures over enabled users and admins are
+  unchanged: there a user with no row still counts as without MFA. A failed
+  read no longer reads as 0: when the users list can't be read in full every
+  figure is null, and when the registration
   report can't be, every figure that relies on it.
 - **`azure_entra_mfa_status` 0.3.1: an enabled user with no registration row
   counts against the all-users coverage.** 0.3.0 left every user without a row
