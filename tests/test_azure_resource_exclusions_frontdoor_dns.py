@@ -408,7 +408,7 @@ def _fake_cdn(monkeypatch, module, reads: list):
         "custom_domains": per_profile("custom_domains"),
         "rule_sets_with_rules": per_profile("rule_sets"),
         "project_secret": lambda s: s,
-        "project_security_policy": lambda s: s,
+        "project_security_policy": lambda s, *a: s,
         "project_log_category": lambda c: c,
         "project_log_setting": lambda s: s,
         "collect_waf_policies": lambda *a: _blocking_waf_policies(),
