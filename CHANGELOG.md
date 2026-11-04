@@ -203,6 +203,8 @@ schemas and the `paramify` CLI — not the internal code.
     exclusions for this. A workspace that `SENTINEL_WORKSPACES` names and a
     pattern takes out fails the run as `bad_config`, and stays listed under
     `results.excluded`; this applies to the two Log Analytics fetchers too.
+    In `azure_sentinel_incidents` the incident counts then read null, as when
+    a named workspace isn't found.
     In these six fetchers, `in_scope_workspaces` and `excluded_workspaces`
     read null when the workspace list couldn't be read.
   - `azure_service_log_records` 0.2.0: App Service apps and slots, and SQL

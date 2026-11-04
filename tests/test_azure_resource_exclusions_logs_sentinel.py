@@ -518,6 +518,8 @@ def test_a_named_workspace_a_pattern_excludes_fails_the_run_as_bad_config(monkey
     assert _excluded(evidence) == [("workspace", "law-out", "rg:rg-out", "resource_matched")]
     assert read == ["law-in"] and WS_OUT not in onboarding
     assert (evidence["summary"]["excluded_workspaces"], evidence["summary"]["in_scope_workspaces"]) == (1, 1)
+    if m is incidents:  # as when a named workspace isn't found
+        assert (evidence["summary"]["incidents_in_scope"], evidence["summary"]["open_incidents"]) == (None, None)
 
 
 def test_incidents_workspace_counts_are_null_when_the_workspace_list_was_refused(monkeypatch, tmp_path):

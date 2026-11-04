@@ -69,7 +69,8 @@ config_schema:
       SecurityAlert tables are not queried. Incidents in an in-scope workspace
       are never dropped by the entities they name. An excluded workspace gets no reads, not even its Sentinel onboarding state;
       a SENTINEL_WORKSPACES filter applies first, and a workspace it names that a
-      pattern takes out fails the run as bad_config. A pattern
+      pattern takes out fails the run as bad_config, and every incident count
+      reads null, as when a named workspace isn't found. A pattern
       without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Each item is a
       pattern, or a pattern with a reason. Empty: every resource is in scope.
@@ -106,7 +107,7 @@ evidence_set:
     Summary fields:
 
     Which workspaces were checked?
-    - workspaces_collected — Number of Sentinel workspaces read. If the workspace list or a check for Sentinel fails, or a workspace named in SENTINEL_WORKSPACES isn't found, every incident count below is null rather than 0
+    - workspaces_collected — Number of Sentinel workspaces read. If the workspace list or a check for Sentinel fails, or a workspace named in SENTINEL_WORKSPACES isn't found or is taken out by a resource exclusion pattern, every incident count below is null rather than 0
     - workspaces_without_sentinel — Number of workspaces skipped because Sentinel isn't turned on
 
     Which workspaces are left out of scope?
