@@ -228,7 +228,13 @@ class DevOpsClient:
 
     def iter(self, path: str, api_version: str = API_VERSION, params: Optional[Dict[str, Any]] = None,
              service: Optional[str] = None, item_key: Union[str, Sequence[str]] = "value") -> Iterator[Dict[str, Any]]:
-        """Every item across pages (header or body continuation token, else a same-host nextLink), from the first item key a page fills."""
+        """Every item across pages."""
+        for page in self.pages(path, api_version, params, service, item_key):
+            yield from page
+
+    def pages(self, path: str, api_version: str = API_VERSION, params: Optional[Dict[str, Any]] = None,
+              service: Optional[str] = None, item_key: Union[str, Sequence[str]] = "value") -> Iterator[Any]:
+        """Each page's items (header or body continuation token, else a same-host nextLink), from the first item key a page fills."""
         keys = (item_key,) if isinstance(item_key, str) else tuple(item_key)
         url: Optional[str] = self.url(path, service)
         base_params = {**(params or {}), "api-version": api_version}
@@ -237,8 +243,7 @@ class DevOpsClient:
         while url:
             response = self._send("GET", url, params=query)
             body = self._json(response)
-            items = body if isinstance(body, list) else next((body[k] for k in keys if body.get(k)), [])
-            yield from items
+            yield body if isinstance(body, list) else next((body[k] for k in keys if body.get(k)), [])
             token = (response.headers or {}).get("x-ms-continuationtoken")
             if not token and isinstance(body, dict) and body.get("hasMore") is not False:
                 token = body.get("continuationToken")

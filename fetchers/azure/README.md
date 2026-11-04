@@ -125,15 +125,20 @@ each call's Microsoft Graph reference page lists them.
 | Read Audit Log (`vso.auditlog`), from a user with View audit log and Manage audit streams; listing streams needs Manage audit streams, as there is no read-only stream permission, and without it the stream fields are null and the run is `not_authorized` | `azure_devops_audit_streams` |
 | Graph, Member Entitlement Management (both Read) | `azure_devops_identities` |
 | Security (Manage), as there is no read-only scope for permissions (the fetcher only reads), plus Identity, Code, and Project and Team (all Read) | `azure_devops_permissions` |
+| Service Connections, Variable Groups, Secure Files, Build (for pipeline permissions), and Project and Team (all Read) | `azure_devops_service_connections` |
 
 The PAT is optional. Without one, the fetchers sign in as the ambient Entra identity,
 which must be added to the organization: project Reader for pipelines, View audit log
 and Manage audit streams for audit streams, organization membership for identities
 (the least privilege that reads last-access dates is not yet measured), and an
 organization member who can view
-permissions in each namespace and read every Git repository for permissions. Only the
-Entra sign-in can read the Log Audit Events policy; with a PAT,
-`azure_devops_audit_streams` judges auditing from the audit log instead.
+permissions in each namespace and read every Git repository for permissions, and
+Reader on the service connections and on the Library in each project for service
+connections. Azure DevOps lists only the service connections the identity holds a
+role on, without refusing the rest; by default only Endpoint Administrators, Endpoint
+Creators and each connection's creator hold one. Only the Entra sign-in can read the
+Log Audit Events policy; with a PAT, `azure_devops_audit_streams` judges auditing
+from the audit log instead.
 
 ## Wiring into a manifest
 
@@ -169,7 +174,8 @@ and still names the file after the target.
 
 `workspaces` is accepted by the five `azure_sentinel_*` fetchers,
 `azure_log_analytics_query_audit` and `azure_log_analytics_deletion_rights`, and
-`projects` by `azure_devops_pipelines` and `azure_devops_permissions`. Fetchers with lookback windows or list limits
+`projects` by `azure_devops_pipelines`, `azure_devops_permissions` and
+`azure_devops_service_connections`. Fetchers with lookback windows or list limits
 take `set-config` keys; `paramify describe <fetcher>` lists them with their defaults.
 
 Ready-to-edit manifests:
@@ -344,6 +350,7 @@ Azure DevOps:
 | `azure_devops_audit_streams` | Whether auditing is on, every audit stream and its status, and whether Azure Monitor Logs streams are receiving events |
 | `azure_devops_identities` | Every user's access level, groups and last access, inactive users, and who holds privileged Azure DevOps groups, directly or through Entra groups |
 | `azure_devops_permissions` | Who is allowed or denied what at organization, project, repository, pipeline, environment and service-connection scope, high-impact rights outside the admin groups, and who may bypass Git branch policies |
+| `azure_devops_service_connections` | How each service connection signs in (federated or a stored secret), its service principal, which pipelines may use it and which runs did, and whether variable group secrets live in Key Vault |
 
 ## Notes
 
