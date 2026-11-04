@@ -8,12 +8,17 @@ Prowler, which reads only `retention_policy.daily_schedule.retention_duration.co
 so a policy keeping weekly recovery points for twelve weeks reads as having NO
 retention. Every schedule shape is projected instead, and `max_retention_days` derived
 from all of them.
+
+Each vault's restore jobs over a window are read too, with the recovery point each one
+used, so restore duration and recovery point age can be compared with the objectives.
 """
 
 import logging
 import os
+import re
 import sys
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -33,19 +38,45 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
+    sorted_counts,
     write_evidence,
-    report_failure,
 )
+from azure_rest import bounded_int_config, parse_time  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_backup_recovery_status")
 
 # Prowler's recovery_vault_backup_policy_retention_adequate constant. Emitted in the
 # summary so the threshold the percentage is measured against is never implicit.
 MINIMUM_RETENTION_DAYS = 30
+
+RESTORE_WINDOW_ENV = "AZURE_BACKUP_RESTORE_WINDOW_DAYS"
+DEFAULT_RESTORE_WINDOW_DAYS = 365
+# A cap, so a mistyped window can't page years of 30-day slices per vault for history Azure has likely dropped.
+MAX_RESTORE_WINDOW_DAYS = 365
+# Azure PowerShell refuses job queries spanning more than 30 days, so the window is read in slices.
+JOB_QUERY_SLICE_DAYS = 30
+# The $filter date format az backup job list sends.
+JOB_FILTER_TIME_FORMAT = "%Y-%m-%d %I:%M:%S %p"
+SUCCEEDED_JOB_STATUS = "completed"
+FAILED_JOB_STATUS = "failed"
+# Property-bag keys, compared lowercased with everything but letters dropped.
+RECOVERY_POINT_TIME_KEYS = ("recoverypointtime", "recoverypointtimeinutc")
+RESTORE_TYPE_KEYS = ("jobtype", "restoretype")
+RESTORE_TARGET_KEYS = ("restoredestination",)
+# By workload type, else backup management type: SQL writes day first 24-hour, VM and Azure Files month first AM/PM.
+RECOVERY_POINT_TIME_FORMATS = {
+    "sqldatabase": ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"),
+    "azureiaasvm": ("%m/%d/%Y %I:%M:%S %p",),
+    "azurestorage": ("%m/%d/%Y %I:%M:%S %p",),
+}
+_ISO_DURATION = re.compile(r"^P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$")
+_URL_QUERY = re.compile(r"(https?://[^\s?\"'<>]+)\?[^\s\"'<>]*", re.IGNORECASE)
 
 # RetentionDurationType -> days, to make the four granularities comparable.
 # Approximate BY DESIGN (a month is not 30 days), which is why the raw
@@ -265,6 +296,46 @@ def project_vault(vault) -> dict:
     }
 
 
+def _job_time(value) -> str | None:
+    # A raw string still gets the one format, so times sort and compare as text.
+    return _timestamp(parse_time(value) or value if isinstance(value, str) else value)
+
+
+def project_job(job) -> dict:
+    """Read a backup `JobResource` (any workload subclass) into a flat dict; the list call leaves extended info out."""
+    properties = properties_bag(job)
+    errors = model_attr(properties, "error_details") or []
+    return {
+        "id": model_attr(job, "id"),
+        "name": model_attr(job, "name"),
+        "job_type": model_attr(properties, "job_type"),
+        "operation": model_attr(properties, "operation"),
+        "status": model_attr(properties, "status"),
+        "entity_friendly_name": model_attr(properties, "entity_friendly_name"),
+        "backup_management_type": model_attr(properties, "backup_management_type"),
+        "workload_type": model_attr(properties, "workload_type"),
+        "container_name": model_attr(properties, "container_name"),
+        "start_time": _job_time(model_attr(properties, "start_time")),
+        "end_time": _job_time(model_attr(properties, "end_time")),
+        "duration_seconds": duration_seconds(model_attr(properties, "duration")),
+        "is_user_triggered": model_attr(properties, "is_user_triggered"),
+        "errors": [
+            {
+                "error_code": model_attr(e, "error_code"),
+                "error_title": model_attr(e, "error_title"),
+                "error_string": model_attr(e, "error_string"),
+            }
+            for e in errors
+        ],
+    }
+
+
+def project_job_property_bag(job) -> dict:
+    """The job details' extended_info.property_bag, with any URL's query string (a SAS token) dropped."""
+    bag = model_attr(model_attr(properties_bag(job), "extended_info"), "property_bag") or {}
+    return {str(k): _URL_QUERY.sub(r"\1", v) if isinstance(v, str) else v for k, v in dict(bag).items()}
+
+
 # --- pure transforms (flat snake_case dicts in, evidence records out) ---
 
 def retention_duration_days(duration: dict | None) -> int | None:
@@ -434,15 +505,21 @@ def vault_record(vault: dict) -> dict:
         "backup_protected_items": items,
         "total_backup_policies": len(policies),
         "total_protected_items": len(items),
+        # Listed jobs, or None when unread; read_restore_job_details joins their details and counts them.
+        "restore_jobs": vault.get("restore_jobs"),
     }
 
 
-def summarize(vaults: list[dict]) -> dict:
+def summarize(vaults: list[dict], listed: bool = True) -> dict:
     """The headline is retention adequacy across PROTECTED ITEMS, not policies.
 
     A vault can define a dozen policies and protect nothing. The threshold is emitted
-    next to the percentage so the number is never bare.
+    next to the percentage so the number is never bare. When the vault list wasn't
+    read (`listed` false), every count is null rather than 0.
     """
+    if not listed:
+        return {k: (MINIMUM_RETENTION_DAYS if k == "retention_threshold_days" else None)
+                for k in summarize([])}
     policies = [p for v in vaults for p in v["backup_policies"]]
     items = [i for v in vaults for i in v["backup_protected_items"]]
     adequate_items = sum(1 for i in items if i["meets_retention_threshold"])
@@ -484,25 +561,174 @@ def summarize(vaults: list[dict]) -> dict:
     }
 
 
+def duration_seconds(value) -> float | None:
+    """A job duration in seconds, from a timedelta or ARM's ISO-8601 form ("PT3M1.8153383S")."""
+    if isinstance(value, timedelta):
+        return round(value.total_seconds(), 1)
+    match = _ISO_DURATION.match(str(value or "").strip())
+    if not value or not match or not any(match.groups()):
+        return None
+    days, hours, minutes, seconds = (float(g or 0) for g in match.groups())
+    return round(((days * 24 + hours) * 60 + minutes) * 60 + seconds, 1)
+
+
+def _bag_value(bag: dict, keys: tuple) -> str | None:
+    for key, value in bag.items():
+        if re.sub(r"[^a-z]", "", key.lower()) in keys and value not in (None, ""):
+            return str(value)
+    return None
+
+
+def parse_recovery_point_time(text: str | None, job_kind: str | None) -> datetime | None:
+    """The property bag's recovery point time in UTC: ISO-8601 or job_kind's RECOVERY_POINT_TIME_FORMATS form, else None."""
+    if not text:
+        return None
+    parsed = parse_time(text)
+    if parsed is not None:
+        return parsed
+    for fmt in RECOVERY_POINT_TIME_FORMATS.get(str(job_kind or "").strip().lower(), ()):
+        try:
+            return datetime.strptime(text.strip(), fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _hours(delta: timedelta) -> float:
+    return round(delta.total_seconds() / 3600, 2)
+
+
+def restore_job_record(job: dict, bag: dict | None) -> dict:
+    """One restore job joined to its details (`bag` None: the read failed); a recovery point after the start is null."""
+    start = parse_time(job.get("start_time"))
+    point_text = _bag_value(bag, RECOVERY_POINT_TIME_KEYS) if bag is not None else None
+    # Only workload jobs (SQL, SAP HANA) have a workload type; VM and Azure Files jobs have a backup management type.
+    point = parse_recovery_point_time(point_text, job.get("workload_type") or job.get("backup_management_type"))
+    if point is not None and start is not None and point > start:
+        point = None
+    status = str(job.get("status") or "").strip().lower()
+    duration = job.get("duration_seconds")
+    return {
+        **job,
+        "succeeded": status == SUCCEEDED_JOB_STATUS,
+        "duration_minutes": round(duration / 60, 2) if isinstance(duration, (int, float)) else None,
+        "details_read": bag is not None,
+        "restore_type": _bag_value(bag, RESTORE_TYPE_KEYS) if bag is not None else None,
+        "restore_target": None if bag is None else {
+            k: v for k, v in bag.items()
+            if re.sub(r"[^a-z]", "", k.lower()).startswith("target")
+            or re.sub(r"[^a-z]", "", k.lower()) in RESTORE_TARGET_KEYS
+        },
+        "recovery_point_time_text": point_text,
+        "recovery_point_time": _timestamp(point),
+        "recovery_point_age_hours": _hours(start - point) if point is not None and start is not None else None,
+        "job_properties": bag,
+    }
+
+
+def vault_restore_fields(jobs: list[dict] | None) -> dict:
+    """A vault's restore jobs and their counts; `jobs` is None when the job list wasn't read, so every count is null."""
+    read = jobs is not None
+    jobs = sorted(jobs or [], key=lambda j: j.get("start_time") or "", reverse=True)
+    succeeded = [j for j in jobs if j.get("succeeded")]
+    return {
+        "restore_jobs": jobs,
+        "restore_jobs_read": read,
+        "total_restore_jobs": len(jobs) if read else None,
+        "succeeded_restore_jobs": len(succeeded) if read else None,
+        "latest_succeeded_restore_time": max((j["end_time"] for j in succeeded if j.get("end_time")), default=None)
+        if read else None,
+    }
+
+
+def summarize_restores(vaults: list[dict], window_days: int, now: datetime, listed: bool = True) -> dict:
+    """Restore counts across vaults; all but the window and `restore_jobs_read` are null if the vault list or any
+    vault's jobs are unread."""
+    read = listed and all(v.get("restore_jobs_read") for v in vaults)
+    jobs = [j for v in vaults for j in v.get("restore_jobs") or []]
+    succeeded = [j for j in jobs if j.get("succeeded")]
+    latest = max((j["end_time"] for j in succeeded if j.get("end_time")), default=None)
+    durations = [j["duration_minutes"] for j in succeeded if j.get("duration_minutes") is not None]
+    ages = [j["recovery_point_age_hours"] for j in succeeded if j.get("recovery_point_age_hours") is not None]
+    details_read = all(j.get("details_read") for j in succeeded)
+    latest_time = parse_time(latest)
+    fields = {
+        "total_restore_jobs": len(jobs),
+        "succeeded_restore_jobs": len(succeeded),
+        "failed_restore_jobs": sum(
+            1 for j in jobs if str(j.get("status") or "").strip().lower() == FAILED_JOB_STATUS
+        ),
+        "restore_jobs_by_status": sorted_counts(Counter(str(j.get("status") or "unknown") for j in jobs)),
+        "vaults_with_succeeded_restore": sum(1 for v in vaults if v.get("succeeded_restore_jobs")),
+        "latest_succeeded_restore_time": latest,
+        "days_since_latest_succeeded_restore": round((now - latest_time).total_seconds() / 86400, 1)
+        if latest_time else None,
+        "longest_succeeded_restore_minutes": max(durations) if durations else None,
+        "max_recovery_point_age_hours": max(ages) if ages and details_read else None,
+        "succeeded_restores_without_recovery_point_time": sum(
+            1 for j in succeeded if j.get("recovery_point_time") is None
+        ),
+    }
+    return {
+        "restore_job_window_days": window_days,
+        "restore_jobs_read": read,
+        **{k: (v if read else None) for k, v in fields.items()},
+    }
+
+
+def _job_key(name) -> str:
+    return re.sub(r"\s+", " ", str(name or "")).strip().lower()
+
+
 def exclude_protected_items(exclusions: ResourceExclusions, vaults: list[dict]) -> tuple[list[dict], list[dict]]:
     """(in-scope vaults holding only their in-scope protected items, excluded entries). An item leaves when a pattern
     matches its id or the resource it protects, whose id its entry then carries; a vault whose items all leave stays
-    in scope. An excluded vault's items are never listed."""
-    items = [(vault, item) for vault in vaults for item in vault["backup_protected_items"]]
-    items, by_vault = exclusions.split(
-        items, "protected_item", resource_id=lambda p: p[1].get("id") or p[0].get("id"),
-        location=lambda p: p[0].get("location"), resource_group=lambda p: p[0].get("resource_group"),
-        name=lambda p: p[1].get("name"))
-    items, by_source = exclusions.split(
-        items, "protected_item", resource_id=lambda p: p[1].get("source_resource_id"), location=lambda p: None,
-        resource_group=lambda p: None, name=lambda p: p[1].get("name"))
+    in scope. An excluded vault's items are never listed. A restore job leaves with the item it restored, matched by
+    friendly name in the same vault, because a job names its item only that way; a name an in-scope item of the vault
+    shares keeps the job in scope."""
+    all_items = [(vault, item) for vault in vaults for item in vault["backup_protected_items"]]
+    by_item = {"resource_id": lambda p: p[1].get("id") or p[0].get("id"), "location": lambda p: p[0].get("location"),
+               "resource_group": lambda p: p[0].get("resource_group")}
+    by_resource = {"resource_id": lambda p: p[1].get("source_resource_id"), "location": lambda p: None,
+                   "resource_group": lambda p: None}
+    items, by_vault = exclusions.split(all_items, "protected_item", name=lambda p: p[1].get("name"), **by_item)
+    first = list(items)
+    items, by_source = exclusions.split(items, "protected_item", name=lambda p: p[1].get("name"), **by_resource)
+    first_ids, kept_ids = {id(i) for _, i in first}, {id(i) for _, i in items}
+    removed = ([(p, by_item) for p in all_items if id(p[1]) not in first_ids]
+               + [(p, by_resource) for p in first if id(p[1]) not in kept_ids])
+    patterns: dict = {}
+    for pair, keys in removed:
+        vault, item = pair
+        if _job_key(item.get("friendly_name")):
+            # The same keys the split matched on, so the pattern doesn't depend on the order of its entries.
+            pattern = exclusions.match(*(keys[k](pair) for k in ("resource_id", "location", "resource_group")))
+            patterns.setdefault((id(vault), _job_key(item.get("friendly_name"))), pattern)
     in_scope: dict = {id(vault): [] for vault in vaults}
     for vault, item in items:
         in_scope[id(vault)].append(item)
-    copies = [
-        {**v, "backup_protected_items": in_scope[id(v)], "total_protected_items": len(in_scope[id(v)])} for v in vaults
-    ]
-    return copies, by_vault + by_source
+        patterns.pop((id(vault), _job_key(item.get("friendly_name"))), None)
+    by_job: list[dict] = []
+    copies = []
+    for v in vaults:
+        copy = {**v, "backup_protected_items": in_scope[id(v)], "total_protected_items": len(in_scope[id(v)])}
+        if v.get("restore_jobs"):
+            jobs = []
+            for job in v["restore_jobs"]:
+                pattern = patterns.get((id(v), _job_key(job.get("entity_friendly_name"))))
+                if pattern is None:
+                    jobs.append(job)
+                else:
+                    by_job.append(excluded_item(
+                        "restore_job", job.get("entity_friendly_name"), pattern, "protected_item_excluded",
+                        id=job.get("id"), resource_group=v.get("resource_group"), location=v.get("location")))
+            copy["restore_jobs"] = jobs
+        copies.append(copy)
+    return copies, by_vault + by_source + by_job
 
 
 # --- collection (lazy azure imports) ---
@@ -525,10 +751,73 @@ def _backup_client(cred, subscription_id):
     return RecoveryServicesBackupClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
 
+def job_windows(now: datetime, days: int):
+    """(start, end) slices of at most JOB_QUERY_SLICE_DAYS covering the `days` before `now`, newest first."""
+    start, end = now - timedelta(days=days), now
+    while end > start:
+        begin = max(start, end - timedelta(days=JOB_QUERY_SLICE_DAYS))
+        yield begin, end
+        end = begin
+
+
+def restore_job_filter(start: datetime, end: datetime) -> str:
+    return (f"operation eq 'Restore' and startTime eq '{start.strftime(JOB_FILTER_TIME_FORMAT)}'"
+            f" and endTime eq '{end.strftime(JOB_FILTER_TIME_FORMAT)}'")
+
+
+def list_restore_jobs(backup, group: str, name: str, window_days: int, now: datetime,
+                      collector: Collector) -> list[dict] | None:
+    """backup_jobs.list per window slice, deduplicated by id; None once a slice fails, since the list is then partial."""
+    jobs: dict = {}
+    for start, end in job_windows(now, window_days):
+        page = collector.guard(
+            f"recoveryservicesbackup.backup_jobs.list ({name})",
+            lambda start=start, end=end: [
+                project_job(j) for j in backup.backup_jobs.list(
+                    vault_name=name, resource_group_name=group, filter=restore_job_filter(start, end))
+            ],
+        )
+        if page is None:
+            return None
+        for job in page:
+            if "restore" in str(job.get("operation") or "").lower():
+                jobs.setdefault(job.get("id") or job.get("name"), job)
+    return list(jobs.values())
+
+
+def read_restore_job_details(subscription_id, cred, collector: Collector, vaults: list[dict]) -> list[dict]:
+    """job_details.get per in-scope restore job (the list leaves the property bag out), then each vault's counts."""
+    backup = None
+    if any(v.get("restore_jobs") for v in vaults):
+        backup = collector.guard(
+            "recoveryservicesbackup.RecoveryServicesBackupClient (init)",
+            lambda: _backup_client(cred, subscription_id),
+        )
+
+    def bag(vault, job):
+        if backup is None or not job.get("name"):
+            return None
+        return collector.guard(
+            f"recoveryservicesbackup.job_details.get ({vault.get('name')})",
+            lambda: project_job_property_bag(backup.job_details.get(
+                vault_name=vault.get("name"), resource_group_name=vault.get("resource_group"), job_name=job["name"])),
+        )
+
+    finished = []
+    for vault in vaults:
+        jobs = vault.get("restore_jobs")
+        if jobs is not None:
+            jobs = [restore_job_record(job, bag(vault, job)) for job in jobs]
+        finished.append({**vault, **vault_restore_fields(jobs)})
+    return finished
+
+
 def collect_vaults(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-                   excluded: list | None = None) -> list[dict]:
-    """vaults.list_by_subscription_id(), then policies + protected items per vault; vaults the exclusions take out go
-    to `excluded` unread."""
+                   excluded: list | None = None, restore_window_days: int = DEFAULT_RESTORE_WINDOW_DAYS,
+                   now: datetime | None = None) -> list[dict] | None:
+    """vaults.list_by_subscription_id(), then policies, protected items and restore jobs per vault; vaults the
+    exclusions take out go to `excluded` unread. None when the vault list couldn't be read."""
+    now = now or utc_now()
     from azure.mgmt.recoveryservices import RecoveryServicesClient
 
     def _client():
@@ -536,15 +825,15 @@ def collect_vaults(subscription_id, cred, collector: Collector, exclusions: Reso
 
     client = collector.guard("recoveryservices.RecoveryServicesClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself.
         return [project_vault(v) for v in client.vaults.list_by_subscription_id()]
 
-    vaults = collector.guard(
-        "recoveryservices.vaults.list_by_subscription_id", _list, default=[]
-    )
+    vaults = collector.guard("recoveryservices.vaults.list_by_subscription_id", _list)
+    if vaults is None:
+        return None
     if exclusions:
         vaults, out = exclusions.split(vaults, "recovery_services_vault")
         if excluded is not None:
@@ -560,6 +849,7 @@ def collect_vaults(subscription_id, cred, collector: Collector, exclusions: Reso
     for vault in vaults:
         vault["backup_policies"] = []
         vault["backup_protected_items"] = []
+        vault["restore_jobs"] = None
         group, name = resource_group_from_id(vault.get("id")), vault.get("name")
         if backup is None:
             continue
@@ -594,6 +884,7 @@ def collect_vaults(subscription_id, cred, collector: Collector, exclusions: Reso
             default=[],
         )
         vault["backup_protected_items"] = sorted(items, key=lambda r: r.get("id") or "")
+        vault["restore_jobs"] = list_restore_jobs(backup, group, name, restore_window_days, now, collector)
 
     return sorted((vault_record(v) for v in vaults), key=lambda r: r.get("id") or "")
 
@@ -615,8 +906,13 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     vaults: list[dict] = []
+    # False until the vault list is read, so a missing subscription or credential, or a refused list, reads null.
+    listed = False
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
+    restore_window_days, restore_window_requested = bounded_int_config(
+        collector, RESTORE_WINDOW_ENV, DEFAULT_RESTORE_WINDOW_DAYS, MAX_RESTORE_WINDOW_DAYS)
+    now = utc_now()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # ARM returns an empty list, not an error, for an unregistered provider.
@@ -629,7 +925,8 @@ def main() -> int:
                 "no Recovery Services vaults in use; reporting status not_registered",
                 subscription_id,
             )
-        vaults = collect_vaults(subscription_id, cred, collector, exclusions, excluded)
+        collected = collect_vaults(subscription_id, cred, collector, exclusions, excluded, restore_window_days, now)
+        listed, vaults = collected is not None, collected or []
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -643,6 +940,8 @@ def main() -> int:
     vaults, out = exclude_protected_items(exclusions, vaults)
     excluded += out
     exclusions.warn_unmatched(logger)
+    vaults = read_restore_job_details(subscription_id, cred, collector, vaults)
+    restores_read = listed and all(v["restore_jobs_read"] for v in vaults)
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -651,14 +950,17 @@ def main() -> int:
         results={
             "recovery_services_vaults": vaults,
             "provider_registration_status": registration,
+            "restore_job_window_days_requested": restore_window_requested,
             "excluded": excluded,
         },
         summary={
-            **summarize(vaults),
+            **summarize(vaults, listed),
+            **summarize_restores(vaults, restore_window_days, now, listed),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("recovery_services_vault", "protected_item"), {
-                "recovery_services_vaults": len(vaults),
-                "protected_items": sum(v["total_protected_items"] for v in vaults),
+            **exclusions.summary(excluded, ("recovery_services_vault", "protected_item", "restore_job"), {
+                "recovery_services_vaults": len(vaults) if listed else None,
+                "protected_items": sum(v["total_protected_items"] for v in vaults) if listed else None,
+                "restore_jobs": sum(v["total_restore_jobs"] for v in vaults) if restores_read else None,
             }),
         },
     )

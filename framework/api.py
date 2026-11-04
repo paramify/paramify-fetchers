@@ -17,6 +17,7 @@ the same shape as the on-disk YAML and the manifest schema. Manifest is only
 materialized internally (parse_manifest) for semantic validation and execution.
 """
 
+import difflib
 import importlib.util
 import json
 import os
@@ -36,8 +37,8 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 
+from framework import patterns, yaml_io
 from framework import samples as _samples
-from framework import yaml_io
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
     ConfigField,
@@ -110,7 +111,7 @@ def find_repo_root(start: Optional[Path] = None) -> Path:
 # --------------------------------------------------------------------------- #
 
 def _config_descriptor(f: ConfigField) -> dict:
-    return {
+    d = {
         "name": f.name,
         "kind": "config",
         "type": f.type,
@@ -119,6 +120,9 @@ def _config_descriptor(f: ConfigField) -> dict:
         "description": f.description,
         "env": f.env,
     }
+    if f.type == patterns.TYPE:
+        d.update(prefixes=list(f.prefixes), bare=f.bare)
+    return d
 
 
 def _secret_descriptor(s: Secret) -> dict:
@@ -917,10 +921,228 @@ def set_passthrough_env(m: dict, category: str, env_vars: List[str]) -> dict:
     return m
 
 
+def pattern_fields(target: str, fetchers: Mapping, platforms: Mapping) -> Tuple[str, Dict[str, ConfigField], List[str]]:
+    """Where `target` keeps pattern lists ("entry" for a fetcher, "platform" for a category), the patterns fields it
+    takes, and, for a category, the ones its fetchers declare with different prefixes, which can't be set category-wide."""
+    if target in fetchers:
+        f = fetchers[target]
+        spec = platform_for(f, platforms)
+        schema = {**(spec.config_schema if spec else {}), **f.config_schema}
+        return "entry", {n: d for n, d in schema.items() if d.type == patterns.TYPE}, []
+    members = [f for f in fetchers.values() if platform_category(f) == target]
+    if not members and target not in platforms:
+        raise LookupError(f"{target!r} is neither a fetcher nor a category")
+    spec = platforms.get(target)
+    declared = [*(spec.config_schema.values() if spec else ()), *(d for f in members for d in f.config_schema.values())]
+    grammars: Dict[str, set] = {}
+    fields: Dict[str, ConfigField] = {}
+    for d in declared:
+        if d.type == patterns.TYPE:
+            grammars.setdefault(d.name, set()).add((frozenset(d.prefixes), d.bare))
+            fields.setdefault(d.name, d)
+    mixed = sorted(n for n, g in grammars.items() if len(g) > 1)
+    return "platform", {n: d for n, d in fields.items() if n not in mixed}, mixed
+
+
+def pick_pattern_field(fields: Mapping[str, ConfigField], pattern: str, field: Optional[str] = None) -> str:
+    """The field `pattern` goes in: `field` when given, else the only one whose prefixes take it."""
+    if field is not None:
+        if field not in fields:
+            raise ValueError(f"{field!r} is not a pattern list here; pattern lists: {', '.join(fields) or 'none'}")
+        problem = patterns.check([patterns.Item(pattern)], fields[field].prefixes, fields[field].bare)
+        if problem:
+            raise ValueError(f"{field}: {problem[0]}")
+        return field
+    fits = [n for n, d in fields.items() if not patterns.check([patterns.Item(pattern)], d.prefixes, d.bare)]
+    if len(fits) == 1:
+        return fits[0]
+    if fits:
+        raise ValueError(f"{pattern!r} fits {', '.join(fits)}; say which with --field")
+    kind, sep, _ = pattern.partition(":")
+    owner = next((n for n, d in fields.items() if sep and kind.lower() in d.prefixes), None)
+    if owner:
+        raise ValueError(f"{owner}: {patterns.check([patterns.Item(pattern)], fields[owner].prefixes, fields[owner].bare)[0]}")
+    takes = "; ".join(f"{n} takes {grammar_text(d.prefixes, d.bare)}" for n, d in fields.items())
+    raise ValueError(f"no pattern list here takes {pattern!r} ({takes or 'none declared'})")
+
+
+def grammar_text(prefixes, bare: bool = True) -> str:
+    """What a patterns field takes, in words: "rg:, location: or id: patterns", "route: or unprefixed patterns"."""
+    named = [f"{p}:" for p in prefixes] + (["unprefixed"] if bare else [])
+    if not named:
+        return "no patterns"
+    return (", ".join(named[:-1]) + " or " + named[-1] if len(named) > 1 else named[0]) + " patterns"
+
+
+def _pattern_holder(m: dict, scope: str, target: str) -> dict:
+    block = _ensure_entry(m, target) if scope == "entry" else _platform(m, target)
+    return block.setdefault("config", {})
+
+
+def _existing_pattern_holder(m: dict, scope: str, target: str) -> Optional[dict]:
+    block = _find_entry(m, target) if scope == "entry" else (_run(m).get("platforms") or {}).get(target)
+    return (block or {}).get("config")
+
+
+def _pattern_items(holder: Optional[dict], field: str, where: str) -> List[patterns.Item]:
+    value = (holder or {}).get(field)
+    if patterns.is_reference(value):
+        raise ValueError(f"{where}.{field} is {value!r}; {patterns.ENV_REF_REFUSAL} "
+                         f"(clear it first: paramify manifest unexclude ... --field {field} --all)")
+    items, problems = patterns.parse(value)
+    if problems:
+        raise ValueError(f"{where}.{field}: {problems[0]}")
+    return items
+
+
+def pattern_location(scope: str, target: str) -> str:
+    return f"platforms.{target}.config" if scope == "platform" else f"{target}.config"
+
+
+def inherited_patterns(m: dict, category: Optional[str], field: str) -> List[patterns.Item]:
+    """The patterns a fetcher with no list of its own takes from platforms.<category>.config."""
+    if not category:
+        return []
+    return _pattern_items(_existing_pattern_holder(m, "platform", category), field, f"platforms.{category}.config")
+
+
+def add_pattern(m: dict, scope: str, target: str, field: str, pattern: str, reason: Optional[str] = None,
+                category: Optional[str] = None) -> Tuple[str, List[patterns.Item]]:
+    """Add a pattern (or give a listed one this reason) to a fetcher's or a category's pattern list, and say "added",
+    "updated" or "unchanged". A string value becomes a list. A fetcher's own list replaces its category's, so when it
+    has none yet the category's patterns are copied in first, and returned, so it keeps them."""
+    held = _existing_pattern_holder(m, scope, target)
+    where = pattern_location(scope, target)
+    own = held is not None and field in held
+    copied = [] if own or scope != "entry" else inherited_patterns(m, category, field)
+    items = _pattern_items(held, field, where) if own else list(copied)
+    pattern, reason = pattern.strip(), (reason or "").strip() or None
+    outcome = "added"
+    for i, item in enumerate(items):
+        if item.pattern.lower() == pattern.lower():
+            if reason is None or reason == item.reason:
+                return "unchanged", []
+            items[i], outcome = patterns.Item(item.pattern, reason), "updated"
+            break
+    else:
+        items.append(patterns.Item(pattern, reason))
+    _pattern_holder(m, scope, target)[field] = [it.as_manifest() for it in items]
+    return outcome, copied
+
+
+def remove_pattern(m: dict, scope: str, target: str, field: str, pattern: Optional[str] = None,
+                   category: Optional[str] = None) -> Optional[int]:
+    """Remove a pattern (every pattern when None) from a pattern list: how many went, or None when the field or the
+    pattern isn't there. An emptied list is dropped, except a fetcher's whose category lists patterns: that one stays
+    as [], so the category's patterns don't come back to it."""
+    holder = _existing_pattern_holder(m, scope, target)
+    if not holder or field not in holder:
+        return None
+    if pattern is None:
+        gone = patterns.count(holder[field])
+        kept: List[patterns.Item] = []
+    else:
+        items = _pattern_items(holder, field, pattern_location(scope, target))
+        kept = [it for it in items if it.pattern.lower() != pattern.strip().lower()]
+        if len(kept) == len(items):
+            return None
+        gone = len(items) - len(kept)
+    if kept or scope == "entry" and category_patterns(m, category, field):
+        holder[field] = [it.as_manifest() for it in kept]
+    else:
+        del holder[field]
+    return gone
+
+
+def category_patterns(m: dict, category: Optional[str], field: str) -> List[patterns.Item]:
+    """The patterns platforms.<category>.config.<field> holds; none for a reference, which is never read."""
+    value = ((_existing_pattern_holder(m, "platform", category) if category else None) or {}).get(field)
+    return [] if patterns.is_reference(value) else patterns.parse(value)[0]
+
+
 # --------------------------------------------------------------------------- #
 # Validation — schema + semantic, returns readable error strings (never raises
 # on a merely-incomplete manifest)
 # --------------------------------------------------------------------------- #
+
+#: A config key no fetcher or category declares is a validate error; False makes it a validate_notes() line instead.
+UNKNOWN_CONFIG_KEYS_ARE_ERRORS = True
+
+
+def _did_you_mean(name: str, names) -> str:
+    close = difflib.get_close_matches(name, sorted(names), n=1, cutoff=0.75)
+    return f" (did you mean {close[0]!r}?)" if close else ""
+
+
+def unknown_config_keys(parsed, fetchers: Mapping, platforms: Mapping) -> List[str]:
+    """Config keys the runner would carry but no fetcher reads: a platform key no fetcher of that category (nor its
+    category file) declares, a platform block for no category, and an entry key its fetcher doesn't declare."""
+    from framework.runner.executor import UNDECLARED_KEYS  # lazy: import cycle
+
+    by_category: Dict[str, set] = {cat: set(spec.config_schema) for cat, spec in platforms.items()}
+    comparator_keys: Dict[str, set] = {}
+    for f in fetchers.values():
+        category = platform_category(f)
+        if category:
+            by_category.setdefault(category, set()).update(f.config_schema)
+        elif f.category:
+            comparator_keys.setdefault(f.category, set()).update(f.config_schema)
+    out = []
+    for cat, block in parsed.platforms.items():
+        if cat not in by_category:
+            out.append(f"platforms.{cat}: no fetcher category is named {cat}{_did_you_mean(cat, by_category)}")
+            continue
+        for key in block.config:
+            if key in by_category[cat] or key in UNDECLARED_KEYS:
+                continue
+            why = (" (a comparator takes it, but only on its own entry)" if key in comparator_keys.get(cat, ())
+                   else _did_you_mean(key, by_category[cat]))
+            out.append(f"platforms.{cat}.config: no {cat} fetcher takes {key!r}{why}")
+    for entry in parsed.entries:
+        f = fetchers.get(entry.use)
+        if f is None:
+            continue
+        spec = platform_for(f, platforms)
+        declared = set(f.config_schema) | set(spec.config_schema if spec else ())
+        out += [f"{entry.use}: config {key!r} is not a setting of this fetcher{_did_you_mean(key, declared)}"
+                for key in entry.config if key not in declared and key not in UNDECLARED_KEYS]
+    return out
+
+
+def validate_notes(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[str]:
+    """What a reader of a valid manifest should still know: which entries take each category-wide pattern list, and
+    the unknown config keys when UNKNOWN_CONFIG_KEYS_ARE_ERRORS is False."""
+    if manifest_loader.schema_errors(manifest, root):
+        return []
+    fetchers = discover_fetchers(root) if fetchers is None else fetchers
+    platforms = discover_platforms(root) if platforms is None else platforms
+    parsed = manifest_loader.parse_manifest(manifest)
+    notes = []
+    for cat, block in parsed.platforms.items():
+        entries = [(e, fetchers[e.use]) for e in parsed.entries
+                   if e.use in fetchers and platform_category(fetchers[e.use]) == cat]
+        schemas = {e.use: {**(platforms[cat].config_schema if cat in platforms else {}), **f.config_schema}
+                   for e, f in entries}
+        for key, value in block.config.items():
+            if not any(key in sc and sc[key].type == patterns.TYPE for sc in schemas.values()):
+                continue
+            taking = [e.use for e, _ in entries if key in schemas[e.use] and key not in e.config]
+            own = [e.use for e, _ in entries if key in schemas[e.use] and key in e.config]
+            ignoring = [e.use for e, _ in entries if key not in schemas[e.use]]
+            n = patterns.count(value)
+            held = "a ${env:} reference, refused" if patterns.is_reference(value) else \
+                f"{n} pattern{'' if n == 1 else 's'}"
+            note = (f"platforms.{cat}.config.{key} ({held}) applies to {len(taking)} of "
+                    f"{len(entries)} {cat} entries: {', '.join(taking) or 'none'}")
+            if own:
+                note += f"; replaced by their own list in {', '.join(own)}"
+            if ignoring:
+                note += f"; not a setting of {', '.join(ignoring)}"
+            notes.append(note)
+    if not UNKNOWN_CONFIG_KEYS_ARE_ERRORS:
+        notes += unknown_config_keys(parsed, fetchers, platforms)
+    return notes
+
 
 def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[str]:
     """Validate a manifest dict against the schema and the discovered fetchers.
@@ -947,6 +1169,10 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     in_manifest = {e.use for e in parsed.entries}
     problems = dependency_graph.problems(fetchers)
     secret_vars = secret_env_vars(fetchers.values(), platforms.values(), parsed.entries)
+    if UNKNOWN_CONFIG_KEYS_ARE_ERRORS:
+        errors += unknown_config_keys(parsed, fetchers, platforms)
+    # A bad category-wide pattern list is one mistake, reported once with the entries it reaches.
+    shared: Dict[Tuple[Optional[str], str], List[str]] = {}
 
     for i, entry in enumerate(parsed.entries):
         if entry.use not in fetchers:
@@ -991,7 +1217,12 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
 
         # The references the runner would refuse, so a hand edit fails here rather than at run time.
         merged = merged_config(fetcher, spec, platform_cfg, entry, secret_vars)
-        errors += [f"{entry.use}: {problem}" for problem in merged.errors.values()]
+        for name, problem in merged.errors.items():
+            fdef = merged.schema.get(name)
+            if merged.sources.get(name) == "platform" and fdef is not None and fdef.type == patterns.TYPE:
+                shared.setdefault((platform_category(fetcher), problem), []).append(entry.use)
+            else:
+                errors.append(f"{entry.use}: {problem}")
         for j, t in enumerate(entry.targets):
             errors += [f"{entry.use} target[{j}]: {k} is {v!r}, but target fields aren't resolved, so ${{env:}} "
                        f"references don't work there" for k, v in t.values.items() if is_env_ref_attempt(v) or is_partial_env_ref(v)]
@@ -1049,6 +1280,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                 if secret.name not in entry.secrets:
                     errors.append(f"{entry.use}: missing secret '{secret.name}'")
 
+    errors += [f"platforms.{cat}.config: {problem} (for {', '.join(uses)})" for (cat, problem), uses in shared.items()]
     return errors
 
 

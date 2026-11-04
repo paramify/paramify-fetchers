@@ -130,7 +130,9 @@ def _tenant():
             {"@odata.type": "#microsoft.graph.user", "id": "u-stale-admin"},
             {"@odata.type": "#microsoft.graph.group", "id": "g-admins"},
         ],
-        "/directoryRoles/r-dr/members": [{"@odata.type": "#microsoft.graph.servicePrincipal", "id": "sp-busy"}],
+        # v1.0 /members leaves service principals out; only the servicePrincipal cast lists them.
+        "/directoryRoles/r-dr/members": [],
+        "/directoryRoles/r-dr/members/microsoft.graph.servicePrincipal": [{"id": "sp-busy"}],
         "/groups/g-admins/transitiveMembers": [{"@odata.type": "#microsoft.graph.user", "id": "u-group-member"}],
         "/groups/g-ops/transitiveMembers": [
             {"@odata.type": "#microsoft.graph.user", "id": "u-guest"},
@@ -284,7 +286,7 @@ def test_refused_app_registrations_leave_own_apps_without_a_creation_date_unknow
 def test_refused_app_registrations_make_the_all_clear_unknown_not_false(monkeypatch):
     graph, arm, objects = _tenant()
     graph["/directoryRoles/r-ga/members"] = []
-    graph["/directoryRoles/r-dr/members"] = []
+    graph["/directoryRoles/r-dr/members"] = graph["/directoryRoles/r-dr/members/microsoft.graph.servicePrincipal"] = []
     arm["roleAssignments"] = [_assignment("a1", "u-active"), _assignment("a10", "sp-new", ptype="ServicePrincipal")]
     _, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects))
     assert s["applications_readable"] is True and s["no_dormant_guest_or_deleted_identity_holds_a_role"] is True
@@ -306,7 +308,7 @@ def test_an_app_with_no_owner_organization_is_unknown(monkeypatch):
 def test_a_refused_subscription_read_leaves_every_missing_principal_unknown(monkeypatch):
     graph, arm, objects = _tenant()
     graph["/directoryRoles/r-ga/members"] = []
-    graph["/directoryRoles/r-dr/members"] = []
+    graph["/directoryRoles/r-dr/members"] = graph["/directoryRoles/r-dr/members/microsoft.graph.servicePrincipal"] = []
     arm["roleAssignments"] = [_assignment("a1", "u-active"), _assignment("a10", "sp-unused", ptype="ServicePrincipal")]
     results, s, collector = _collect(monkeypatch, FakeClient(graph, arm, objects, errors={f"/subscriptions/{SUB}": DENIED}))
 
@@ -346,7 +348,7 @@ def test_an_assignment_to_a_deleted_group_is_listed_not_a_failure(monkeypatch):
     azure_rest = sys.modules["azure_rest"]
     graph, arm, objects = _tenant()
     graph["/directoryRoles/r-ga/members"] = []
-    graph["/directoryRoles/r-dr/members"] = []
+    graph["/directoryRoles/r-dr/members"] = graph["/directoryRoles/r-dr/members/microsoft.graph.servicePrincipal"] = []
     arm["roleAssignments"] = [_assignment("a1", "u-active"), _assignment("a2", "g-gone", ptype="Group")]
     gone = azure_rest.ArmError(404, "Request_ResourceNotFound", "Resource 'g-gone' does not exist.")
     results, s, collector = _collect(
@@ -406,7 +408,7 @@ def test_other_tenants_apps_listed_only_as_a_resource_are_unknown(monkeypatch):
 def test_a_disabled_other_tenants_app_is_not_dormant_and_leaves_the_all_clear_standing(monkeypatch):
     graph, arm, objects = _tenant()
     graph["/directoryRoles/r-ga/members"] = []
-    graph["/directoryRoles/r-dr/members"] = []
+    graph["/directoryRoles/r-dr/members"] = graph["/directoryRoles/r-dr/members/microsoft.graph.servicePrincipal"] = []
     arm["roleAssignments"] = [_assignment("a1", "u-active"), _assignment("a14", "sp-vendor", ptype="ServicePrincipal")]
     results, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects))
 
@@ -507,6 +509,25 @@ def test_refused_directory_roles_null_the_directory_counts(monkeypatch):
     assert users["u-stale-admin"]["holds_role"] is None
 
 
+def test_a_service_principal_both_member_lists_name_holds_the_role_once(monkeypatch):
+    graph, arm, objects = _tenant()
+    graph["/directoryRoles/r-dr/members"] = [{"@odata.type": "#microsoft.graph.servicePrincipal", "id": "SP-BUSY"}]
+    results, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects))
+
+    sps = {sp["id"]: sp for sp in results["service_principals"]}
+    assert sps["sp-busy"]["directory_roles"] == [{"role": "Directory Readers", "privileged": False, "via_group_id": None}]
+    assert s["service_principals_holding_directory_roles"] == 1
+
+
+def test_a_refused_service_principal_cast_nulls_the_directory_counts(monkeypatch):
+    graph, arm, objects = _tenant()
+    cast = "/directoryRoles/r-dr/members/microsoft.graph.servicePrincipal"
+    _, s, collector = _collect(monkeypatch, FakeClient(graph, arm, objects, errors={cast: DENIED}))
+
+    assert s["directory_roles_readable"] is False and s["service_principals_holding_directory_roles"] is None
+    assert collector.failures[0]["operation"] == "graph.directoryRoles(Directory Readers).members.servicePrincipal.get"
+
+
 def test_a_failed_role_read_lists_the_users_whose_roles_are_unknown(monkeypatch):
     graph, arm, objects = _tenant()
     graph["/users"] += [_user("u-plain", last=2)]
@@ -555,7 +576,7 @@ def test_unlicensed_tenant_reads_not_licensed(monkeypatch):
 def test_no_flag_is_true_only_when_everything_was_read(monkeypatch):
     graph, arm, objects = _tenant()
     graph["/directoryRoles/r-ga/members"] = []
-    graph["/directoryRoles/r-dr/members"] = []
+    graph["/directoryRoles/r-dr/members"] = graph["/directoryRoles/r-dr/members/microsoft.graph.servicePrincipal"] = []
     arm["roleAssignments"] = [_assignment("a1", "u-active")]
     _, s, collector = _collect(monkeypatch, FakeClient(graph, arm, objects))
     assert collector.failures == []
@@ -579,6 +600,7 @@ def test_reads_page_sizes_and_beta_endpoints(monkeypatch):
     _collect(monkeypatch, client)
     assert ("v1.0", f"{SIGN_IN_PATH}&$top=500") in client.calls
     assert ("beta", "/groups/g-admins/transitiveMembers?$select=id") in client.calls
+    assert ("v1.0", "/directoryRoles/r-ga/members/microsoft.graph.servicePrincipal?$select=id") in client.calls
     assert ("beta", "/reports/servicePrincipalSignInActivities") in client.calls
     assert ("v1.0", "/applications?$select=appId,createdDateTime&$top=999") in client.calls
 
