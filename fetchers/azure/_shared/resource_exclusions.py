@@ -113,11 +113,13 @@ class ResourceExclusions:
 
     def summary(self, excluded: list[dict], kinds: Iterable[str], in_scope: dict) -> dict:
         """The patterns as given, the ones that matched nothing, how many items of each kind were excluded, and how
-        many of each stayed in scope (in_scope maps a plural name to a count)."""
+        many of each stayed in scope (in_scope maps a plural name to a count, or to None when that list wasn't read,
+        which leaves its excluded count None too)."""
         return {
             "resource_exclusion_patterns": list(self.patterns),
             "resource_exclusion_patterns_unmatched": self.unmatched(),
-            **{f"excluded_{plural(kind)}": sum(1 for e in excluded if e["kind"] == kind) for kind in kinds},
+            **{f"excluded_{plural(kind)}": None if plural(kind) in in_scope and in_scope[plural(kind)] is None
+               else sum(1 for e in excluded if e["kind"] == kind) for kind in kinds},
             **{f"in_scope_{name}": count for name, count in in_scope.items()},
         }
 
