@@ -1,5 +1,5 @@
 name: azure_front_door_origins
-version: 0.6.0
+version: 0.7.0
 description: >-
   Shows whether Front Door's in-scope back ends span two healthy, serving regions, are reached securely, accept traffic only through their own profile, and have a regional twin with enough capacity.
 category: azure

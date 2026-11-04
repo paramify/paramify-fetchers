@@ -1,5 +1,5 @@
 name: azure_front_door_waf_coverage
-version: 0.4.0
+version: 0.5.0
 description: >-
   Shows whether every in-scope Front Door host and route is protected by a blocking WAF, and whether each profile exports its WAF log.
 category: azure
