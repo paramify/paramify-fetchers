@@ -675,6 +675,24 @@ schemas and the `paramify` CLI — not the internal code.
   the risky-user privileged figures null. `azure_entra_diagnostic_settings`
   reads the category list at api-version 2017-04-01-preview, the only one it
   answers; an unread category list leaves `categories_not_exported` null.
+- **`azure_waf_ddos_activity`** (`EVD-AZURE-WAF-DDOS-ACTIVITY`): whether DoS protection is
+  watched, not only switched on, over a window (default 30 days).
+  - WAF: each Front Door profile with a WAF policy and each WAF-tier App Gateway
+    with a policy on the gateway, a listener or a path rule, or the legacy WAF
+    configuration, with its WAF log export and, from Log Analytics, requests
+    blocked, logged only and allowed per policy, the most-matched rules and the
+    last event. A request that
+    matched several rules counts once. Detection-mode policies are flagged, and a
+    request one would have blocked in Prevention mode counts as would-block: a
+    Front Door blocking action, or an App Gateway's `Detected` (rule 949110).
+  - Alerts: rules on WAF metrics or logs and on `IfUnderDDoSAttack` or DDoS logs,
+    resolved to their receivers through `_shared/alert_routing.py`.
+  - DDoS: each internet-facing public IP's own protection mode, DDoS log export,
+    attack alert, hours under attack and mitigations. Without known DDoS Protection
+    the attack and mitigation figures read null, not 0.
+  - Basic and Auxiliary plan tables are queried only when
+    `WAF_DDOS_QUERY_BASIC_TABLES` is on. Request URIs, client addresses and match
+    details are never read into the evidence.
 - **Scope exclusions for Azure fetchers.** A shared helper,
   `fetchers/azure/_shared/scope_exclusions.py`, takes case-insensitive glob
   patterns (a pattern list in the manifest) and answers whether a name is excluded and
