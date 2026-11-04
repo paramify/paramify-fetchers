@@ -1,5 +1,5 @@
 name: azure_vpn_gateway_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   For every Azure VPN Gateway (Microsoft.Network/virtualNetworkGateways) in the subscription,
   reports its type, SKU, generation, active-active and BGP settings and its point-to-site
@@ -9,6 +9,32 @@ description: >
   for every local network gateway its peer address and address space. Pre-shared keys, RADIUS
   secrets and authorization keys are never requested or recorded.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching virtual network gateway, connection or local network
+      gateway is listed under excluded with the pattern and left out of
+      every count and verdict. A connection also leaves with the gateway
+      it belongs to (reason gateway_matched); a connection to an
+      excluded second gateway or local network gateway stays in scope
+      with its verdict unchanged.
+      A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -66,3 +92,17 @@ evidence_set:
     returns a placeholder point-to-site block on gateways that never configured it.
     summary.ikev2_connections over summary.ipsec_connections is the IKEv2 coverage.
     provider_registration_status is for Microsoft.Network.
+    Virtual network gateways, connections and local network gateways the
+    patterns take out are listed under results.excluded, each with the
+    pattern that matched; a connection removed with its gateway also names
+    matched_id. A connection to an excluded local network gateway keeps
+    its verdict. Summary fields: resource_exclusion_patterns (the
+    configured patterns, empty when none are set),
+    resource_exclusion_patterns_unmatched (patterns that matched nothing,
+    such as a mistyped name), excluded_virtual_network_gateways,
+    excluded_connections, excluded_local_network_gateways (how many the
+    patterns took out) and in_scope_virtual_network_gateways,
+    in_scope_connections, in_scope_local_network_gateways (how many
+    stayed); all of them are null when the resource group list couldn't be
+    read. results.excluded is always present, empty when nothing is
+    excluded.

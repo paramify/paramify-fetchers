@@ -1,5 +1,5 @@
 name: azure_virtual_wan_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   For every Azure Virtual WAN in the subscription, reports its type, whether VPN encryption is
   disabled and whether branch-to-branch / VNet-to-VNet transit is allowed; for every virtual hub,
@@ -9,6 +9,33 @@ description: >
   device and address space; and for every point-to-site gateway, the server configuration's tunnel
   protocols and authentication types. Pre-shared keys, site keys and RADIUS secrets are never recorded.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching virtual WAN, virtual hub, hub VPN gateway (its
+      connections leave with it), VPN site, point-to-site gateway or VPN
+      server configuration is listed under excluded with the pattern and
+      left out of every count and verdict. A hub also leaves with its
+      virtual WAN (reason virtual_wan_matched), a VPN site with its
+      virtual WAN, and a hub's VPN or point-to-site gateway with its hub
+      (reason virtual_hub_matched).
+      A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -63,3 +90,20 @@ evidence_set:
     ipsec_policy_source is "azure_default". summary.ikev2_link_connections over
     summary.total_vpn_link_connections is the IKEv2 coverage; summary.vpn_encryption_disabled_wans must be 0. provider_registration_status is for
     Microsoft.Network.
+    Virtual WANs, hubs, hub VPN gateways, VPN sites, point-to-site
+    gateways and server configurations the patterns take out are listed
+    under results.excluded, each with the pattern that matched; a record
+    removed with its WAN or hub also names matched_id and gives the parent
+    in its reason. Summary fields: resource_exclusion_patterns (the
+    configured patterns, empty when none are set),
+    resource_exclusion_patterns_unmatched (patterns that matched nothing,
+    such as a mistyped name), excluded_virtual_wans,
+    excluded_virtual_hubs, excluded_vpn_gateways, excluded_vpn_sites,
+    excluded_p2s_vpn_gateways, excluded_vpn_server_configurations (how
+    many the patterns took out) and in_scope_virtual_wans,
+    in_scope_virtual_hubs, in_scope_vpn_gateways, in_scope_vpn_sites,
+    in_scope_p2s_vpn_gateways, in_scope_vpn_server_configurations (how
+    many stayed). A kind's two counts are null when its list couldn't be
+    read; with patterns set, both are also null when its WAN's or hub's
+    list couldn't be read, since a record leaves with its excluded parent.
+    results.excluded is always present, empty when nothing is excluded.
