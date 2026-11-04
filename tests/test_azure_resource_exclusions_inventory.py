@@ -307,7 +307,9 @@ def test_defender_without_patterns_adds_only_empty_exclusion_fields(monkeypatch,
     code, evidence = run_defender(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
-    new = NEW_KEYS | {"excluded_assessments", "in_scope_assessments"}
+    sla = {"sla_days_by_severity", "unhealthy_past_sla_by_severity", "unhealthy_past_sla_count",
+           "unhealthy_days_open_unknown_count"}
+    new = NEW_KEYS | {"excluded_assessments", "in_scope_assessments"} | sla
     assert {k: v for k, v in summary.items() if k not in new} == da.summarize(DEFENDER_RECORDS, da.REGISTERED)
     assert summary["resource_exclusion_patterns"] == summary["resource_exclusion_patterns_unmatched"] == []
     assert (summary["excluded_assessments"], summary["in_scope_assessments"], summary["total_assessments"]) == (0, 4, 4)
