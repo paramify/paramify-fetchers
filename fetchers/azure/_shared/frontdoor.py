@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from azure_common import (
     Collector,
     arm_client_kwargs,
+    arm_endpoint,
     model_attr,
     resource_group_from_id,
 )
@@ -22,6 +23,12 @@ BLOCKING_RULE_ACTIONS = ("Block", "Redirect", "AnomalyScoring")
 ALL_ADDRESSES = ("0.0.0.0/0", "::/0")
 # First GA api-version whose security policies carry isProfileLevel and associations[].routes.
 SECURITY_POLICY_API_VERSION = "2026-07-01"
+# First api-version of any kind (2026-04-01-preview) with those two fields; older versions do not return them.
+SCOPE_FIELDS_SINCE = "2026-04-01"
+# Azure Government does not offer the public-cloud Microsoft.Cdn versions yet. This is the newest stable version
+# it lists for every profiles/* type these fetchers read. The cloud comes from AZURE_AUTHORITY_HOST (arm_endpoint).
+GOVERNMENT_CDN_API_VERSION = "2025-12-01"
+GOVERNMENT_ARM_ENDPOINT = "https://management.usgovcloudapi.net"
 # Documented API defaults when a route omits them.
 DEFAULT_SUPPORTED_PROTOCOLS = ["Http", "Https"]
 DEFAULT_HTTPS_REDIRECT = "Disabled"
@@ -580,9 +587,27 @@ def route_https(route: dict, rule_sets_by_key: dict) -> dict:
 
 # --- Front Door topology collection (lazy azure imports) ---
 
+def is_government_cloud() -> bool:
+    """True when AZURE_AUTHORITY_HOST points at Azure Government, the same rule arm_endpoint() uses."""
+    return arm_endpoint() == GOVERNMENT_ARM_ENDPOINT
+
+
+def cdn_api_version(preferred: Optional[str] = None) -> Optional[str]:
+    """The Microsoft.Cdn api-version a client uses: Azure Government's when the authority is Government, else
+    `preferred` (None means the SDK default)."""
+    return GOVERNMENT_CDN_API_VERSION if is_government_cloud() else preferred
+
+
+def has_scope_fields(api_version: Optional[str]) -> bool:
+    """Whether security policies read with this api-version return isProfileLevel and associations[].routes.
+    None is the SDK default, which is newer than both."""
+    return api_version is None or api_version[:10] >= SCOPE_FIELDS_SINCE
+
+
 def cdn_client(subscription_id: str, cred, collector: Collector, api_version: Optional[str] = None):
     from azure.mgmt.cdn import CdnManagementClient
 
+    api_version = cdn_api_version(api_version)
     kwargs = {"credential": cred, "subscription_id": subscription_id, **arm_client_kwargs()}
     if api_version:
         # Pinned per client: a per-call api_version kwarg is silently ignored by azure-mgmt-cdn 14.

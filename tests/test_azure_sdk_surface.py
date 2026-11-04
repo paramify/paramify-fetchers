@@ -2813,6 +2813,33 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "groups_with_only_disabled_owners reads unknown",
     ),
     (
+        "msgraph.generated.models.conditional_access_condition_set",
+        "ConditionalAccessConditionSet",
+        ["devices", "authentication_flows", "insider_risk_levels", "service_principal_risk_levels"],
+        "azure/entra_conditional_access_policies — a missing field reads as no condition, so a "
+        "device filter, flow or risk condition would not stop a policy counting for MFA coverage",
+    ),
+    (
+        "msgraph.generated.models.conditional_access_devices",
+        "ConditionalAccessDevices",
+        ["device_filter"],
+        "azure/entra_conditional_access_policies — without it a device filter reads as absent",
+    ),
+    (
+        "msgraph.generated.models.conditional_access_applications",
+        "ConditionalAccessApplications",
+        ["application_filter"],
+        "azure/entra_conditional_access_policies — without it an application filter reads as "
+        "absent, so a policy that filters apps would count for MFA coverage",
+    ),
+    (
+        "msgraph.generated.models.authentication_strength_policy",
+        "AuthenticationStrengthPolicy",
+        ["id", "display_name", "requirements_satisfied"],
+        "azure/entra_conditional_access_policies — without id a policy's strength can't be "
+        "matched to its combinations; without requirements_satisfied a strength never counts as MFA",
+    ),
+    (
         "msgraph.generated.models.authentication_methods_policy",
         "AuthenticationMethodsPolicy",
         ["authentication_method_configurations", "policy_migration_state", "registration_enforcement"],
@@ -4075,6 +4102,20 @@ def test_graph_request_builders_present(builder: str, affects: str) -> None:
         f"GraphServiceClient.{builder} is gone.\n"
         f"  affected fetchers: {affects}\n"
         f"  msgraph-sdk is pinned <2; a major bump restructures the builders."
+    )
+
+
+def test_graph_authentication_strength_builder_present() -> None:
+    """azure/entra_conditional_access_policies reads the strengths raw through this builder."""
+    client = _build("msgraph", "GraphServiceClient")
+    builder = getattr(client.policies, "authentication_strength_policies", None)
+    assert builder is not None and callable(getattr(builder, "to_get_request_information", None)), (
+        "policies.authentication_strength_policies (or its to_get_request_information) is gone.\n"
+        "  affected fetchers: azure/entra_conditional_access_policies — phishing-resistant MFA reads null"
+    )
+    assert callable(getattr(builder.request_adapter, "send_primitive_async", None)), (
+        "the request adapter's send_primitive_async is gone.\n"
+        "  affected fetchers: azure/entra_conditional_access_policies — the raw strength read fails"
     )
 
 
