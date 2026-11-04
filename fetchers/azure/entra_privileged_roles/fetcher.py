@@ -54,6 +54,7 @@ logger = logging.getLogger("azure_entra_privileged_roles")
 # only in @odata.type. It matters: a role-assignable GROUP moves the real access
 # decision elsewhere, and a SERVICE PRINCIPAL has no interactive sign-in for MFA or
 # Conditional Access to gate.
+SERVICE_PRINCIPAL_ODATA_TYPE = "#microsoft.graph.servicePrincipal"
 _MEMBER_TYPES = {
     "#microsoft.graph.user": "User",
     "#microsoft.graph.group": "Group",
@@ -128,7 +129,20 @@ def member_record(member: dict) -> dict:
     }
 
 
-def directory_role_record(role: dict, members: list[dict]) -> dict:
+def merge_service_principals(members: list[dict], service_principals: list[dict] | None) -> list[dict]:
+    """Add the role's service principals that the members list left out, each once."""
+    seen = {m.get("id") for m in members}
+    extra = []
+    for sp in service_principals or []:
+        if sp.get("id") not in seen:
+            seen.add(sp.get("id"))
+            extra.append({**sp, "odata_type": sp.get("odata_type") or SERVICE_PRINCIPAL_ODATA_TYPE})
+    return members + extra
+
+
+def directory_role_record(
+    role: dict, members: list[dict], service_principals_read: bool = True, members_read: bool = True
+) -> dict:
     """Normalize one projected role plus its projected members into a record.
 
     Members are sorted by principal name (id breaking ties) so a re-run against an
@@ -158,16 +172,19 @@ def directory_role_record(role: dict, members: list[dict]) -> dict:
         "service_principal_member_count": sum(
             1 for r in records if r["principal_type"] == "ServicePrincipal"
         ),
+        "members_read": members_read,
+        "service_principal_members_read": service_principals_read,
     }
 
 
-def summarize(roles: list[dict]) -> dict:
+def summarize(roles: list[dict], roles_read: bool = True) -> dict:
     """The Global Administrator count is the headline.
 
     It is the number CIS Azure 1.1.3 and Prowler's
     entra_global_admin_in_less_than_five_users are written against.
     `distinct_privileged_principals` sits alongside the raw assignment count because one
-    person holding six privileged roles is one human to review, not six.
+    person holding six privileged roles is one human to review, not six. A figure is None,
+    not 0, when the role list or a members or servicePrincipal-cast read it depends on failed.
     """
     privileged = [r for r in roles if r["is_privileged"]]
     global_admin_roles = [r for r in roles if r["is_global_administrator"]]
@@ -175,49 +192,71 @@ def summarize(roles: list[dict]) -> dict:
         m["id"] for r in privileged for m in r["members"] if m.get("id")
     }
     all_principals = {m["id"] for r in roles for m in r["members"] if m.get("id")}
+
+    # Counts of all holders take service principals from the cast, so they need both reads.
+    def known(value, rows=(), reads=("members_read", "service_principal_members_read")):
+        return value if roles_read and all(r[read] for r in rows for read in reads) else None
+
     return {
         # Activated roles only — see the module docstring on why that is complete.
-        "total_directory_roles_activated": len(roles),
-        "total_role_assignments": sum(r["member_count"] for r in roles),
-        "distinct_principals_with_a_directory_role": len(all_principals),
+        "total_directory_roles_activated": known(len(roles)),
+        "total_role_assignments": known(sum(r["member_count"] for r in roles), roles),
+        "distinct_principals_with_a_directory_role": known(len(all_principals), roles),
         # --- the headline ---
-        "global_administrator_count": sum(r["member_count"] for r in global_admin_roles),
-        "global_administrator_role_activated": bool(global_admin_roles),
+        "global_administrator_count": known(
+            sum(r["member_count"] for r in global_admin_roles), global_admin_roles
+        ),
+        "global_administrator_role_activated": known(bool(global_admin_roles)),
         # --- privileged breadth ---
-        "privileged_roles_activated": len(privileged),
-        "privileged_roles_with_members": sum(1 for r in privileged if r["member_count"]),
-        "privileged_role_names_assigned": sorted(
-            r["display_name"] or "" for r in privileged if r["member_count"]
+        "privileged_roles_activated": known(len(privileged)),
+        "privileged_roles_with_members": known(
+            sum(1 for r in privileged if r["member_count"]), privileged
         ),
-        "privileged_role_assignments": sum(r["member_count"] for r in privileged),
-        "distinct_privileged_principals": len(privileged_principals),
+        "privileged_role_names_assigned": known(
+            sorted(r["display_name"] or "" for r in privileged if r["member_count"]), privileged
+        ),
+        "privileged_role_assignments": known(sum(r["member_count"] for r in privileged), privileged),
+        "distinct_privileged_principals": known(len(privileged_principals), privileged),
         # --- what kind of principal holds the power ---
-        "users_in_privileged_roles": sum(r["user_member_count"] for r in privileged),
-        "groups_in_privileged_roles": sum(r["group_member_count"] for r in privileged),
-        "service_principals_in_privileged_roles": sum(
-            r["service_principal_member_count"] for r in privileged
+        "users_in_privileged_roles": known(
+            sum(r["user_member_count"] for r in privileged), privileged, ("members_read",)
         ),
-        "privileged_assignment_percentage": coverage_percentage(
-            sum(r["member_count"] for r in privileged), sum(r["member_count"] for r in roles)
+        "groups_in_privileged_roles": known(
+            sum(r["group_member_count"] for r in privileged), privileged, ("members_read",)
+        ),
+        # Only the servicePrincipal cast lists every service principal, so only it must be read.
+        "service_principals_in_privileged_roles": known(
+            sum(r["service_principal_member_count"] for r in privileged),
+            privileged,
+            ("service_principal_members_read",),
+        ),
+        "privileged_assignment_percentage": known(
+            coverage_percentage(
+                sum(r["member_count"] for r in privileged), sum(r["member_count"] for r in roles)
+            ),
+            roles,
         ),
         # An activated role with no members was assigned once and revoked.
-        "roles_with_no_members": sum(1 for r in roles if not r["member_count"]),
+        "roles_with_no_members": known(sum(1 for r in roles if not r["member_count"]), roles),
     }
 
 
 # --- collection (lazy msgraph imports) ---
 
-async def _collect(collector: Collector, cred) -> tuple[list[dict], dict]:
-    """One directory_roles.get(), then one members.get() per role.
+async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, bool]:
+    """One directory_roles.get(), then members.get() and the servicePrincipal cast per role.
 
-    The per-role call cannot be avoided: Graph does not return members on the collection
+    The per-role calls cannot be avoided: Graph does not return members on the collection
     response and `$expand=members` is not supported on /directoryRoles. The call count
-    is bounded by the ACTIVATED roles, not by the ~100 role templates.
+    is bounded by the ACTIVATED roles, not by the ~100 role templates. On a real tenant,
+    v1.0 members.get() left out every service principal holding the role, which beta and
+    the /members/microsoft.graph.servicePrincipal cast both listed, so the cast is read too.
     """
 
     async def _work(client):
         tenant = await resolve_tenant(collector, client)
 
+        before = len(collector.failures)
         projected = [
             project_directory_role(r)
             for r in await paginate(
@@ -225,6 +264,8 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict]:
             )
         ]
 
+        # A role left out below would read as one with no members, so the list counts as unread.
+        roles_read = len(collector.failures) == before and all(r.get("id") for r in projected)
         records = []
         for role in projected:
             role_id = role.get("id")
@@ -234,13 +275,31 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict]:
                     RuntimeError(f"directory role {role.get('display_name')!r} has no id"),
                 )
                 continue
-            members = await paginate(
-                collector,
-                f"graph.directoryRoles({role.get('display_name')}).members.get",
-                client.directory_roles.by_directory_role_id(role_id).members,
-            )
+            name = role.get("display_name")
+            members_builder = client.directory_roles.by_directory_role_id(role_id).members
+            before = len(collector.failures)
+            members = await paginate(collector, f"graph.directoryRoles({name}).members.get", members_builder)
+            members_read = len(collector.failures) == before
+            try:
+                service_principals = await paginate(
+                    collector,
+                    f"graph.directoryRoles({name}).members.graphServicePrincipal.get",
+                    members_builder.graph_service_principal,
+                    raise_on_error=True,
+                )
+            except Exception as exc:  # noqa: BLE001 — boundary: record it, and the count reads unknown
+                collector.record(f"graph.directoryRoles({name}).members.graphServicePrincipal.get", exc)
+                service_principals = None
             records.append(
-                directory_role_record(role, [project_member(m) for m in members])
+                directory_role_record(
+                    role,
+                    merge_service_principals(
+                        [project_member(m) for m in members],
+                        None if service_principals is None else [project_member(m) for m in service_principals],
+                    ),
+                    service_principals_read=service_principals is not None,
+                    members_read=members_read,
+                )
             )
 
         logger.info(
@@ -250,10 +309,11 @@ async def _collect(collector: Collector, cred) -> tuple[list[dict], dict]:
         )
         # Sorted by display name so a re-run against an unchanged directory is
         # byte-stable; Graph does not promise a stable role order.
-        return sorted(records, key=lambda r: (r.get("display_name") or "", r.get("id") or "")), tenant
+        records = sorted(records, key=lambda r: (r.get("display_name") or "", r.get("id") or ""))
+        return records, tenant, roles_read
 
     result = await with_graph_client(collector, cred, _work, default=None)
-    return result if result is not None else ([], {"tenant_source": "unresolved"})
+    return result if result is not None else ([], {"tenant_source": "unresolved"}, False)
 
 
 def main() -> int:
@@ -274,8 +334,9 @@ def main() -> int:
     if cred is None:
         roles: list[dict] = []
         tenant = {"tenant_source": "unresolved"}
+        roles_read = False
     else:
-        roles, tenant = asyncio.run(_collect(collector, cred))
+        roles, tenant, roles_read = asyncio.run(_collect(collector, cred))
 
     # No `provider_registration_status()` call, deliberately: Graph is not an ARM
     # resource provider, and the "empty vs. not in use" ambiguity it resolves cannot
@@ -291,7 +352,7 @@ def main() -> int:
             "directory_roles": roles,
             "privileged_role_names_checked": sorted(PRIVILEGED_ROLE_NAMES),
         },
-        summary=summarize(roles),
+        summary=summarize(roles, roles_read),
     )
 
     filename = f"azure_entra_privileged_roles_{tenant_filename_key(tenant)}.json"

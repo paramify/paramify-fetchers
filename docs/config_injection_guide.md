@@ -49,8 +49,8 @@ paramify manifest set-secret rippling_all_employees api_token RIPPLING_API_TOKEN
 ```
 </details>
 
-**Key names aren't checked.** A misspelled key is saved, passes `validate`,
-and never reaches the fetcher.
+**`validate` checks key names.** A key no fetcher takes fails it, with a
+did-you-mean hint.
 
 A string config field can also be `${env:VAR}`, read from the environment at
 run time. If `VAR` is unset or empty, the next value down applies (platform
@@ -66,8 +66,8 @@ reference to a variable whose name looks like a credential's (it contains
 reference to any variable that holds a secret: one a fetcher or category in the
 catalog declares, or one a `secrets:` reference anywhere in the manifest reads.
 The run masks the value it reads out of the fetcher's logs and the run metadata,
-but a fetcher may still write it into its evidence, as the Azure scope
-exclusions do with their patterns.
+but a fetcher may still write it into its evidence. A pattern list, such as the
+Azure exclusions, takes no `${env:VAR}`: its patterns go in the manifest.
 
 ## 3. Check it
 

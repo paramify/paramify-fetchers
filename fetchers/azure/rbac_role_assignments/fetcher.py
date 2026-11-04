@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from arm_rest import arm_rest_client, get_json  # noqa: E402
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
@@ -51,6 +52,8 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_rbac_role_assignments")
 
@@ -414,6 +417,79 @@ def summarize_all_scopes(at_scope: list[dict], below: list[dict]) -> dict:
     }
 
 
+MSI_API = "2023-01-31"
+IDENTITY_SCOPE = re.compile(
+    r"^/subscriptions/[^/]+/resourcegroups/[^/]+/providers/microsoft\.managedidentity/userassignedidentities/[^/]+$", re.I)
+
+
+def scope_excluded(record: dict, exclusions: ResourceExclusions) -> bool:
+    """Whether a pattern takes out the group or resource a grant is made on, without counting the pattern as used."""
+    below = record.get("scope_level") in (SCOPE_RESOURCE_GROUP, SCOPE_RESOURCE)
+    return below and bool(exclusions.match(record.get("scope"), record=False))
+
+
+def identity_scopes(records: list[dict], exclusions: ResourceExclusions) -> list[str]:
+    """Excluded grant scopes that are user-assigned identities."""
+    return sorted({r["scope"] for r in records if IDENTITY_SCOPE.match(r.get("scope") or "")
+                   and scope_excluded(r, exclusions)}, key=str.lower)
+
+
+def identity_principal_ids(cred, scopes: list[str]) -> dict[str, str | None]:
+    """Each user-assigned identity's principal id by its lower-cased resource id: None when it no longer exists, left
+    out when it couldn't be read."""
+    from azure.core.exceptions import HttpResponseError  # lazy
+
+    rest = arm_rest_client(cred)
+    found: dict[str, str | None] = {}
+    for scope in scopes:
+        try:
+            body = get_json(rest, f"{scope}?api-version={MSI_API}")
+            found[scope.lower()] = (body.get("properties") or {}).get("principalId")
+        except HttpResponseError as exc:
+            if exc.status_code == 404:
+                found[scope.lower()] = None
+            else:
+                logger.warning("could not read managed identity %s (HTTP %s); grants on it stay in scope",
+                               scope, exc.status_code)
+    return found
+
+
+def reaching_identity_scopes(scopes: list[str], grants: list[dict], exclusions: ResourceExclusions,
+                             principals: dict) -> frozenset:
+    """Excluded identity scopes whose identity holds an active grant at an in-scope scope, or on an identity already
+    kept, or couldn't be read: a grant on such an identity controls access into the boundary, so it stays in scope.
+    Repeated until nothing changes, so a chain of identities reaching in stays whole."""
+    held = [(g["principal_id"], (g.get("scope") or "").lower(), scope_excluded(g, exclusions))
+            for g in grants if g.get("principal_id")]
+    keep: frozenset = frozenset()
+    while True:
+        reaching = {principal for principal, scope, excluded in held if not excluded or scope in keep}
+        grown = frozenset(s.lower() for s in scopes if s.lower() not in principals or principals[s.lower()] in reaching)
+        if grown == keep:
+            return keep
+        keep = grown
+
+
+def split_by_scope(records: list[dict], kind: str, exclusions: ResourceExclusions,
+                   keep: frozenset = frozenset()) -> tuple[list[dict], list[dict]]:
+    """A grant leaves with the resource group or resource it is made on, unless that is an identity in `keep` (then it
+    stays, marked with the pattern, which still counts as matched); wider scopes never leave."""
+    kept, excluded = [], []
+    for record in records:
+        below = record.get("scope_level") in (SCOPE_RESOURCE_GROUP, SCOPE_RESOURCE)
+        pattern = exclusions.match(record.get("scope")) if exclusions and below else None
+        if pattern is not None and (record.get("scope") or "").lower() in keep:
+            record["kept_by_identity_rule"] = pattern
+            pattern = None
+        if pattern is None:
+            kept.append(record)
+        else:
+            excluded.append(excluded_item(
+                kind, record.get("name") or basename(record.get("id")), pattern, "scope_matched", id=record.get("id"),
+                scope=record.get("scope"), principal_id=record.get("principal_id"), role_name=record.get("role_name")))
+    return kept, excluded
+
+
 # --- PIM: eligibility, standing and activation rules ---
 
 STANDING_PERMANENT = "permanent"
@@ -647,7 +723,7 @@ def authorization_client(subscription_id, cred, collector: Collector):
 
 def collect_role_assignments(
     subscription_id, client, collector: Collector
-) -> tuple[list[dict], list[dict], dict]:
+) -> tuple[list[dict] | None, list[dict] | None, dict]:
     """One role_definitions.list() to name the roles, two role_assignments lists.
 
     The definitions call comes first because an assignment references its role only by
@@ -664,7 +740,7 @@ def collect_role_assignments(
     second set is what it returns minus the first, by assignment id, rather than a
     re-classification by scope string, so the two sets partition the listing exactly
     whatever a scope string looks like. Returns (at_scope, below_subscription,
-    role_names).
+    role_names); a list that couldn't be read is None.
     """
     scope = f"/subscriptions/{subscription_id}"
 
@@ -691,10 +767,10 @@ def collect_role_assignments(
         ]
 
     assignments = collector.guard(
-        "authorization.role_assignments.list_for_subscription", _list_assignments, default=[]
+        "authorization.role_assignments.list_for_subscription", _list_assignments
     )
 
-    at_scope_ids = {str(a.get("id") or "").lower() for a in assignments}
+    at_scope_ids = {str(a.get("id") or "").lower() for a in assignments or []}
 
     def _list_below_subscription():
         # ItemPaged, like the call above. No filter: every assignment in the
@@ -711,19 +787,18 @@ def collect_role_assignments(
     below = collector.guard(
         "authorization.role_assignments.list_for_subscription(unfiltered)",
         _list_below_subscription,
-        default=[],
     )
     logger.info(
         "Collected %d role assignment(s) at subscription scope or above and %d below it, "
         "against %d role definition(s)",
-        len(assignments),
-        len(below),
+        len(assignments or []),
+        len(below or []),
         len(role_names),
     )
     # Sorted by ARM id so a re-run against unchanged access is byte-stable.
     return (
-        sorted(assignments, key=lambda a: a.get("id") or ""),
-        sorted(below, key=lambda a: a.get("id") or ""),
+        None if assignments is None else sorted(assignments, key=lambda a: a.get("id") or ""),
+        None if below is None else sorted(below, key=lambda a: a.get("id") or ""),
         role_names,
     )
 
@@ -806,13 +881,15 @@ def main() -> int:
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
 
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    assignments: list[dict] = []
-    below_subscription: list[dict] = []
+    assignments: list[dict] | None = None
+    below_subscription: list[dict] | None = None
     pim: dict = {"available": None, "schedules": None, "eligible": None, "policies": None, "notes": []}
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
@@ -842,8 +919,32 @@ def main() -> int:
             ),
         )
 
+    listed = assignments is not None and below_subscription is not None
+    assignments, below_subscription = assignments or [], below_subscription or []
+    # Each grant takes its PIM schedule from the full schedule list before grants at excluded scopes leave.
+    add_pim_fields(assignments + below_subscription, pim["schedules"])
+    keep: frozenset = frozenset()
+    candidates = identity_scopes(assignments + below_subscription + (pim["eligible"] or []), exclusions)
+    if candidates and cred is not None:
+        principals = collector.guard("managed identity reads (excluded grant scopes)",
+                                     lambda: identity_principal_ids(cred, candidates), default={})
+        keep = reaching_identity_scopes(candidates, assignments + below_subscription, exclusions, principals or {})
+    assignments, excluded = split_by_scope(assignments, "role_assignment", exclusions, keep)
+    below_subscription, excluded_below = split_by_scope(below_subscription, "role_assignment", exclusions, keep)
+    excluded += excluded_below
+    if pim["eligible"] is not None:
+        pim["eligible"], excluded_eligible = split_by_scope(
+            pim["eligible"], "eligible_role_assignment", exclusions, keep)
+        excluded += excluded_eligible
+    exclusions.warn_unmatched(logger)
     everything = assignments + below_subscription
-    add_pim_fields(everything, pim["schedules"])
+    counts = exclusions.summary(excluded, ("role_assignment", "eligible_role_assignment"), {
+        "role_assignments": len(everything), "eligible_role_assignments": len(pim["eligible"] or [])})
+    # Unknown, not none, when a list wasn't read.
+    if not listed:
+        counts.update(excluded_role_assignments=None, in_scope_role_assignments=None)
+    if pim["eligible"] is None:
+        counts.update(excluded_eligible_role_assignments=None, in_scope_eligible_role_assignments=None)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -861,6 +962,7 @@ def main() -> int:
             "eligible_role_assignments": pim["eligible"],
             "pim_role_policies": pim["policies"],
             "pim_notes": pim["notes"],
+            "excluded": excluded,
         },
         summary={
             **summarize(assignments),
@@ -873,6 +975,7 @@ def main() -> int:
                 pim["policies"],
                 pim["available"],
             ),
+            **counts,
         },
     )
 

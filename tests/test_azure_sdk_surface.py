@@ -238,7 +238,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "MonitorManagementClient",
         "activity_logs",
         ["list"],
-        "azure/app_service_deployments — without it no slot swap or publish-profile download is seen",
+        "azure/app_service_deployments — without it no slot swap or publish-profile download is seen; "
+        "azure/sql_managed_instance_backups — failover history",
     ),
     (
         "azure.mgmt.monitor",
@@ -283,6 +284,27 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "route_tables",
         ["list_all"],
         "azure/vnet_egress_routing",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "subnets",
+        ["get"],
+        "azure/sql_managed_instance_configuration — the instance's subnet, NSG and route table",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "network_security_groups",
+        ["get"],
+        "azure/sql_managed_instance_configuration — the instance subnet's NSG rules",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "route_tables",
+        ["get"],
+        "azure/sql_managed_instance_configuration — the instance subnet's routes",
     ),
     (
         "azure.mgmt.network",
@@ -748,6 +770,20 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list"],
         "azure/backup_recovery_status",
     ),
+    (
+        "azure.mgmt.recoveryservicesbackup",
+        "RecoveryServicesBackupClient",
+        "backup_jobs",
+        ["list"],
+        "azure/backup_recovery_status — restore jobs, with a $filter",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup",
+        "RecoveryServicesBackupClient",
+        "job_details",
+        ["get"],
+        "azure/backup_recovery_status — the property bag the job list leaves out",
+    ),
     # --- storage -------------------------------------------------------------
     (
         "azure.mgmt.storage",
@@ -1029,6 +1065,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "managed_database_transparent_data_encryption",
         ["get"],
         "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_database_sensitivity_labels",
+        ["list_current_by_database"],
+        "azure/sql_managed_instance_configuration — classified columns per user database",
     ),
     # --- MySQL / PostgreSQL --------------------------------------------------
     (
@@ -1625,6 +1668,39 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ],
         "azure/sql_managed_instance_backups — a lost redundancy field reads as "
         "'not zone-redundant'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceProperties",
+        ["subnet_id", "maintenance_configuration_id"],
+        "azure/sql_managed_instance_configuration — a lost field reads the subnet and "
+        "maintenance window as unknown",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "SensitivityLabelProperties",
+        ["label_name", "information_type"],
+        "azure/sql_managed_instance_configuration — a lost field drops a column's "
+        "label from the counts",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "SubnetPropertiesFormat",
+        ["route_table", "delegations"],
+        "azure/sql_managed_instance_configuration — a renamed field reads the instance "
+        "subnet as having no route table",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RouteTablePropertiesFormat",
+        ["routes", "disable_bgp_route_propagation"],
+        "azure/sql_managed_instance_configuration — the instance subnet's routes",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RoutePropertiesFormat",
+        ["address_prefix", "next_hop_type", "next_hop_ip_address"],
+        "azure/sql_managed_instance_configuration — each route's destination and next hop",
     ),
     (
         "azure.mgmt.sql.models",
@@ -2948,7 +3024,8 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "EventData",
         ["claims", "caller", "correlation_id", "event_data_id", "resource_id", "operation_name", "status",
          "event_timestamp"],
-        "azure/app_service_deployments — a renamed caller reads as an unattributed swap or download",
+        "azure/app_service_deployments — a renamed caller reads as an unattributed swap or download; "
+        "azure/sql_managed_instance_backups — failover history",
     ),
     (
         "azure.mgmt.monitor.models",
@@ -3814,6 +3891,36 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["message_retention_in_days", "retention_description", "capture_description", "status", "partition_count"],
         "azure/data_services_configuration",
     ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "Job",
+        ["entity_friendly_name", "backup_management_type", "operation", "status", "start_time", "end_time"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureWorkloadJob",
+        ["workload_type", "duration", "error_details", "extended_info"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureIaaSVMJob",
+        ["duration", "error_details", "extended_info", "container_name", "is_user_triggered"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureWorkloadJobExtendedInfo",
+        ["property_bag"],
+        "azure/backup_recovery_status — the recovery point time and restore target",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureIaaSVMJobExtendedInfo",
+        ["property_bag"],
+        "azure/backup_recovery_status — the recovery point time and restore target",
+    ),
 ]
 
 
@@ -4127,6 +4234,10 @@ def test_graph_admin_membership_builders_present() -> None:
     assert getattr(role, "members", None) is not None, (
         "directory_roles.by_directory_role_id(...).members is gone.\n"
         "  affected fetchers: azure/entra_privileged_roles, azure/entra_mfa_status"
+    )
+    assert getattr(role.members, "graph_service_principal", None) is not None, (
+        "directory_roles.by_directory_role_id(...).members.graph_service_principal is gone.\n"
+        "  affected fetchers: azure/entra_privileged_roles — v1.0 members leaves service principals out"
     )
     assert getattr(group, "transitive_members", None) is not None, (
         "groups.by_group_id(...).transitive_members is gone.\n"

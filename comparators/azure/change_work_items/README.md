@@ -26,7 +26,7 @@ Each gets one status:
 |---|---|
 | `excluded` | Its caller is in `excluded_callers`, such as a Microsoft service that manages resources for you. |
 | `application` | Its caller's type is given and isn't a user: an application or another identity. A named caller with no type is matched like a person. Reported apart, with the application id; it needs no record, since a work item can't name it. |
-| `no_caller` | Azure recorded no caller, and neither a named change to the same resource within 10 minutes (the rule `azure_change_provenance` uses to give such a row its origin) nor a named change in the same deployment gives one. |
+| `no_caller` | Azure recorded no caller, and neither a named change to the same resource within 10 minutes (the rule `azure_change_provenance` uses to give such a row its origin) nor a named change in the same deployment gives one. A change `resource_exclusions` left out of `azure_change_provenance` can still give one. |
 | `matched` | Exactly one record work item names the caller and covers the change's time. |
 | `ambiguous` | Several do; none is picked. |
 | `unmatched` | None does. |
