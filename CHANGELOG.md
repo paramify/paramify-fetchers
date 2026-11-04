@@ -179,6 +179,45 @@ schemas and the `paramify` CLI — not the internal code.
     route needs it. Metric and smart detector rules carry the location `global`
     and action groups and processing rules none, so `location:` reaches only log
     search rules.
+
+  Fetchers whose records point at resources rather than list them drop the
+  records whose subject is excluded. These records carry no region, so only
+  `rg:` and `id:` reach them:
+  - `azure_change_provenance` 0.2.1: changes by their target resource or its
+    resource group; changes to the subscription itself stay. Every change is
+    attributed against every change and deployment first, so an in-scope change
+    keeps an origin it took from an excluded one; then every count and
+    breakdown covers in-scope changes. `deployments_in_history`,
+    `resource_groups_at_deployment_history_cap` and `results.deployments` still
+    describe everything read. An excluded change keeps its caller, time and
+    deployment in `results.excluded`, and `azure_change_work_items` 0.2.1 still
+    lends that caller to a callerless in-scope change. `excluded_changes` and
+    `in_scope_changes` read null when a change table couldn't be read.
+  - `azure_rbac_role_assignments` 0.4.1: role assignments and PIM-eligible
+    assignments by their scope when it is a resource group or a resource;
+    grants on the subscription, a management group or the root stay. A grant on
+    a user-assigned identity a pattern matches stays while that identity holds
+    an active grant at an in-scope scope or on another identity kept this way,
+    or couldn't be read (one ARM read per such identity, only when patterns set
+    aside a grant on one), marked `kept_by_identity_rule` with the pattern,
+    which counts as matched; a grant on the whole resource group still leaves. Each grant still takes its
+    standing from the full PIM schedule list. The new `excluded_*` and
+    `in_scope_*` counts read null when their list couldn't be read.
+  - `azure_rbac_custom_roles` 0.2.1: a custom role leaves only when every
+    assignable scope is a resource group or resource a pattern matches, listed
+    with each scope and its pattern. `total_role_definitions` and
+    `builtin_role_definitions` still count every role read.
+    `excluded_custom_roles` and `in_scope_custom_roles` read null when the role
+    list couldn't be read.
+  - `azure_monitor_fired_alerts` 0.2.1: alert rules by their own resource group
+    or id, and fired alerts by their target resource; alerts on the
+    subscription stay. An excluded alert's history is not read, and it leaves
+    every count and each rule's `fire_count`, `last_fired_at` and
+    `open_alerts`; an in-scope alert fired by an excluded rule still counts.
+    `all_alerts_listed` still compares every alert listed with Azure's own
+    total, and `alerts_summary_total` reads null with patterns set. Like the
+    other rule and alert counts, the new rule counts read null when a rule list
+    couldn't be read, and the alert counts when the alert list couldn't.
   - `azure_activity_log_alerts` 0.3.0: activity log alert rules, action groups
     and alert processing rules. Rules carry the location Global, so
     `location:` reaches a rule only as `location:global`. Both coverage maps
