@@ -415,17 +415,19 @@ async def read_graph_roles(collector: Collector, cred, principal_ids: list) -> t
     return outcome
 
 
-def keep_reaching(items: list, entries: list, id_of, principal_of, roles_by_principal, exclusions) -> tuple:
+def keep_reaching(items: list, entries: list, id_of, principal_of, roles_by_principal, exclusions,
+                  kept: frozenset = frozenset()) -> tuple:
     """(items back in scope, entries still excluded). An identity a pattern matched stays in scope while it holds an
-    Azure role at an in-scope scope (a subscription or wider, or a group or resource no pattern matches): whoever
-    controls it reaches into the boundary through it."""
+    Azure role at an in-scope scope (a subscription or wider, a group or resource no pattern matches, or a
+    user-assigned identity in `kept`): whoever controls it reaches into the boundary through it."""
     by_id = {(id_of(i) or "").lower(): i for i in items}
     back, out = [], []
     for entry in entries:
         item = by_id.get((entry["id"] or "").lower())
         roles = (roles_by_principal or {}).get(principal_of(item)) if item else None
         if item is not None and any(scope_level(r["scope"]) not in ("resource_group", "resource")
-                                    or not exclusions.match(r["scope"], record=False) for r in roles or []):
+                                    or not exclusions.match(r["scope"], record=False)
+                                    or (r["scope"] or "").lower() in kept for r in roles or []):
             item["kept_by_identity_rule"] = entry["pattern"]
             back.append(item)
         else:
@@ -433,10 +435,25 @@ def keep_reaching(items: list, entries: list, id_of, principal_of, roles_by_prin
     return back, out
 
 
+def keep_reaching_user_assigned(items: list, entries: list, roles_by_principal, exclusions) -> tuple:
+    """keep_reaching for user-assigned identities, repeated until nothing changes: a role on one already kept counts
+    as in scope, so a chain of identities reaching in stays whole. (back, out, the kept identities' ids)."""
+    kept: frozenset = frozenset()
+    back, out = [], entries
+    for _ in range(len(entries) + 1):  # each pass keeps at least one more, or stops
+        back, out = keep_reaching(items, entries, lambda i: i["id"], lambda i: i["principal_id"], roles_by_principal,
+                                  exclusions, kept)
+        grown = frozenset((i["id"] or "").lower() for i in back)
+        if grown == kept:
+            break
+        kept = grown
+    return back, out, kept
+
+
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
             excluded: list | None = None) -> tuple:
-    """Excluded identities get no federated-credential or Graph reads; one holding a role at an in-scope scope stays
-    in scope. Attachments and role assignments of an in-scope identity stay whole, whatever resource or scope."""
+    """Excluded identities get no federated-credential or Graph reads; one holding a role at an in-scope scope, or on
+    a user-assigned identity kept that way, stays in scope. Attachments and role assignments of an in-scope identity stay whole, whatever resource or scope."""
     exclusions = exclusions or ResourceExclusions()
     def _clients():
         from azure.mgmt.authorization import AuthorizationManagementClient  # lazy
@@ -481,8 +498,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
 
     listed_user_assigned = user_assigned
     user_assigned, out_user = exclusions.split(user_assigned, "user_assigned_identity")
-    back, out_user = keep_reaching(listed_user_assigned, out_user, lambda i: i["id"], lambda i: i["principal_id"],
-                                   roles_by_principal, exclusions)
+    back, out_user, kept = keep_reaching_user_assigned(listed_user_assigned, out_user, roles_by_principal, exclusions)
     user_assigned += back
     holders = collector.guard(
         "resourcegraph.resources(identity)",
@@ -495,7 +511,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
         resource_id=lambda h: h["resource_id"], location=lambda h: h["resource_location"],
         resource_group=lambda h: resource_group_from_id(h["resource_id"]), name=lambda h: h["resource_name"])
     back, out_system = keep_reaching(listed_holders, out_system, lambda h: h["resource_id"],
-                                     lambda h: h["system_principal_id"], roles_by_principal, exclusions)
+                                     lambda h: h["system_principal_id"], roles_by_principal, exclusions, kept)
     system_holders += back
     if excluded is not None:
         excluded += sorted(out_user + out_system, key=lambda e: (e["kind"], e["id"] or ""))

@@ -220,8 +220,9 @@ schemas and the `paramify` CLI — not the internal code.
     federated-credential or Graph reads; an in-scope identity keeps every
     attachment and role assignment, even at an excluded scope. An identity a
     pattern matches stays in scope while it holds an Azure role at an in-scope
-    scope, as an App Service plan stays while an in-scope site runs on it, and
-    its record carries `kept_by_identity_rule` with the pattern.
+    scope or on a user-assigned identity kept this way, as an App Service plan
+    stays while an in-scope site runs on it, and its record carries
+    `kept_by_identity_rule` with the pattern.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or

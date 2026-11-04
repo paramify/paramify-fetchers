@@ -531,8 +531,8 @@ def _holder(resource_id, principal, location="regionwest", uai=()):
             "identity": {"type": kind, "principalId": principal, "userAssignedIdentities": {u: {} for u in uai}}}
 
 
-def run_identities(monkeypatch, tmp_path, patterns, extra_assignments=()):
-    users = [_uai("rg-in", "id-in"), _uai("rg-out", "id-out"), _uai("rg-in", "id-east", "regioneast")]
+def run_identities(monkeypatch, tmp_path, patterns, extra_assignments=(), extra_users=()):
+    users = [_uai("rg-in", "id-in"), _uai("rg-out", "id-out"), _uai("rg-in", "id-east", "regioneast"), *extra_users]
     rows = [_holder(VM_IN, "ps-in", uai=[users[0].id.lower()]), _holder(VM_OUT, "ps-out", uai=[users[0].id.lower()]),
             _holder(VM_EAST, "ps-east", "regioneast")]
     msi = NS(user_assigned_identities=NS(list_by_subscription=lambda: users))
@@ -631,6 +631,42 @@ def test_identities_a_matched_identity_holding_an_in_scope_role_stays_in_scope(m
     assert marks == {"id-in": None, "id-out": "rg:rg-out"}
     marks = {i["resource_name"]: i.get("kept_by_identity_rule") for i in results["system_assigned_identities"]}
     assert marks == {"vm-in": None, "vm-out": "rg:rg-out"}
+
+
+def test_identities_a_chain_of_identities_reaching_in_stays_whole(monkeypatch, tmp_path):
+    def grant(principal, scope):
+        return NS(principal_id=principal, role_definition_id="/x/roles/r1", scope=scope, condition=None)
+
+    out, out2, idle = (_uai("rg-out", n) for n in ("id-out", "id-out2", "id-idle"))
+    # id-out reaches rg-in, id-out2 can act as id-out, and vm-out's identity as id-out2. id-east can act only as
+    # id-idle, which reaches nothing, so both of them leave.
+    extra = [grant("p-id-out", IN_RG), grant("p-id-out2", out.id), grant("ps-out", out2.id), grant("p-id-east", idle.id)]
+    code, evidence, _, _ = run_identities(monkeypatch, tmp_path, "rg:rg-out, location:regioneast", extra, [out2, idle])
+    results = evidence["results"]
+    assert code == 0
+    marks = {i["name"]: i.get("kept_by_identity_rule") for i in results["user_assigned_identities"]}
+    assert marks == {"id-in": None, "id-out": "rg:rg-out", "id-out2": "rg:rg-out"}
+    marks = {i["resource_name"]: i.get("kept_by_identity_rule") for i in results["system_assigned_identities"]}
+    assert marks == {"vm-in": None, "vm-out": "rg:rg-out"}
+    assert _excluded(evidence) == [
+        ("system_assigned_identity", "vm-east", "location:regioneast", "resource_matched"),
+        ("user_assigned_identity", "id-east", "location:regioneast", "resource_matched"),
+        ("user_assigned_identity", "id-idle", "rg:rg-out", "resource_matched")]
+
+
+def test_identities_in_a_loop_stay_only_when_one_of_them_reaches_in(monkeypatch, tmp_path):
+    def grant(principal, scope):
+        return NS(principal_id=principal, role_definition_id="/x/roles/r1", scope=scope, condition=None)
+
+    a, b, c, d = (_uai("rg-out", n) for n in ("id-a", "id-b", "id-c", "id-d"))
+    # id-a and id-b can act as each other, and id-b reaches rg-in; id-c and id-d can act only as each other.
+    extra = [grant("p-id-a", b.id), grant("p-id-b", a.id), grant("p-id-b", IN_RG),
+             grant("p-id-c", d.id), grant("p-id-d", c.id)]
+    code, evidence, _, _ = run_identities(monkeypatch, tmp_path, "rg:rg-out", extra, [a, b, c, d])
+    assert code == 0
+    marks = {i["name"]: i.get("kept_by_identity_rule") for i in evidence["results"]["user_assigned_identities"]}
+    assert marks == {"id-in": None, "id-east": None, "id-a": "rg:rg-out", "id-b": "rg:rg-out"}
+    assert sorted(e["name"] for e in evidence["results"]["excluded"]) == ["id-c", "id-d", "id-out", "vm-out"]
 
 
 # --- a bare pattern fails the run ---

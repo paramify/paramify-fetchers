@@ -32,10 +32,11 @@ config_schema:
       identity keeps every role assignment and attached resource, even at
       an excluded scope or on an excluded resource; they are its own
       access. An identity a pattern matches stays in scope while it holds an
-      Azure role at an in-scope scope (the subscription or wider, or a group or
-      resource no pattern matches), since whoever controls it reaches into the
-      boundary through it; it carries kept_by_identity_rule, the pattern it was
-      kept despite. Excluded identities get no federated-credential or
+      Azure role at an in-scope scope (the subscription or wider, a group or
+      resource no pattern matches, or a user-assigned identity kept this way),
+      since whoever controls it reaches into the boundary through it; it
+      carries kept_by_identity_rule, the pattern it was kept despite.
+      Excluded identities get no federated-credential or
       Microsoft Graph reads. A pattern without one of these prefixes fails the
       run.
       Set it once under platforms.azure.config for every Azure fetcher
@@ -140,5 +141,5 @@ evidence_set:
     excluded_user_assigned_identities and excluded_system_assigned_identities (how many the
     patterns took out; no other count includes them) and in_scope_user_assigned_identities and
     in_scope_system_assigned_identities (how many stayed). An identity a pattern matches stays
-    in scope, and counts in in_scope_*, while it holds an Azure role at an in-scope scope; its
-    record carries kept_by_identity_rule, the pattern it was kept despite.
+    in scope, and counts in in_scope_*, while it holds an Azure role at an in-scope scope or on
+    a user-assigned identity kept this way; its record carries kept_by_identity_rule, the pattern it was kept despite.
