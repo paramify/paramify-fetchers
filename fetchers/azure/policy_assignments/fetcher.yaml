@@ -55,12 +55,14 @@ target_schema:
 
 config_schema:
   resource_exclusions:
-    type: string
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
     description: >
       Resources outside the authorization boundary, to leave out of scope, as
-      case-insensitive glob patterns separated by commas or spaces, each with a
+      case-insensitive glob patterns listed in the manifest, each with a
       prefix: rg:<resource group>, location:<region> or id:<resource id> (also
       matches that resource's child resources). * matches any run of characters and
       ? one character. Only policy exemptions follow them: an exemption follows the
@@ -71,7 +73,7 @@ config_schema:
       and they stay in scope. Each match is listed under excluded with the pattern
       and left out of every exemption count and each assignment's exemption_count.
       Policy assignments are not affected. A pattern without one of these prefixes
-      fails the run.
+      fails the run. Each item is a pattern, or a pattern with a reason.
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
