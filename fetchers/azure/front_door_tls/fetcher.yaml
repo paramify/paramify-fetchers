@@ -1,5 +1,5 @@
 name: azure_front_door_tls
-version: 0.5.0
+version: 0.6.0
 description: >-
   Shows whether each in-scope Front Door route accepts only HTTPS, and each in-scope custom domain's TLS floor, certificate and expiry.
 category: azure

@@ -208,7 +208,7 @@ schemas and the `paramify` CLI — not the internal code.
     network links, which are then not read. Record-set `scope_exclusions` apply
     to the zones left in scope. An alias record or link in an in-scope zone
     still counts when what it points at is excluded.
-  - `azure_front_door_tls` 0.5.0 and `azure_front_door_waf_coverage` 0.5.0:
+  - `azure_front_door_tls` 0.6.0 and `azure_front_door_waf_coverage` 0.6.0:
     Front Door profiles (global), with their endpoints, routes, custom domains,
     rule sets, secrets, security policies and diagnostic settings, which are
     then not read. `scope_exclusions` apply to the profiles left in scope, so a
@@ -218,7 +218,7 @@ schemas and the `paramify` CLI — not the internal code.
   - `azure_front_door_waf_policies` 0.2.0: Standard and Premium WAF policies
     (global). A policy linked to an excluded profile still reads `associated`,
     and `skipped_policies_by_sku` still counts every classic policy.
-  - `azure_front_door_origins` 0.7.0: Front Door profiles (global), with their
+  - `azure_front_door_origins` 0.8.0: Front Door profiles (global), with their
     origin groups, origins and health; their metrics aren't read. Production
     apps also leave by their own resource group, region or id
     (`excluded_production_apps`). An in-scope origin whose back end is excluded
