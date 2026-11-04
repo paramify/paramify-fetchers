@@ -56,7 +56,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-17.3`, `cm-2`, `pl-10`
 
-*6 fetchers:* [`aws_config_conformance_packs`](../fetchers/aws/config_conformance_packs), [`aws_securityhub_status`](../fetchers/aws/securityhub_status), [`azure_defender_regulatory_compliance`](../fetchers/azure/defender_regulatory_compliance), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`crowdstrike_zero_trust_assessment`](../fetchers/crowdstrike/zero_trust_assessment), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration)
+*7 fetchers:* [`aws_config_conformance_packs`](../fetchers/aws/config_conformance_packs), [`aws_securityhub_status`](../fetchers/aws/securityhub_status), [`azure_defender_regulatory_compliance`](../fetchers/azure/defender_regulatory_compliance), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories), [`crowdstrike_zero_trust_assessment`](../fetchers/crowdstrike/zero_trust_assessment), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration)
 
 #### `KSI-CNA-MAT` — Minimizing Attack Surface
 
@@ -128,7 +128,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `sc-4`
 
-*2 fetchers:* [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_residual_resources`](../fetchers/azure/residual_resources)
+*3 fetchers:* [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_residual_resources`](../fetchers/azure/residual_resources), [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories)
 
 #### ⬜ `KSI-SVC-RUD` — Removing Unwanted Data *(optional at Low)*
 
@@ -378,7 +378,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-20`, `ca-3`, `ir-6.3`, `ps-7`, `ra-5`, `sa-9`, `si-5`, `sr-5`, `sr-6`, `sr-8`
 
-*5 fetchers:* [`aws_ecr_image_scanning`](../fetchers/aws/ecr_image_scanning), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), `fedramp_marketplace_vendor_certification_status`, `fedramp_marketplace_workspace_vendor_certification_status`, [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities)
+*6 fetchers:* [`aws_ecr_image_scanning`](../fetchers/aws/ecr_image_scanning), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories), `fedramp_marketplace_vendor_certification_status`, `fedramp_marketplace_workspace_vendor_certification_status`, [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities)
 
 ### CED — Cybersecurity Education  (1/1)
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-289 of 301 fetchers carry a mapping.
+290 of 302 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -505,7 +505,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (91)
+### azure  (92)
 
 | Fetcher | Indicators |
 |---|---|
@@ -589,6 +589,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents) | `KSI-CNA-ULN`, `KSI-IAM-SUS`, `KSI-INR-AAR`, `KSI-INR-RPI`, `KSI-MLA-RVL` |
 | [`azure_sentinel_playbooks`](../fetchers/azure/sentinel_playbooks) | `KSI-IAM-SUS`, `KSI-INR-RIR`, `KSI-MLA-RVL` |
 | [`azure_service_availability`](../fetchers/azure/service_availability) | `KSI-RPL-RRO`, `KSI-RPL-TRC` |
+| [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories) | `KSI-CNA-IBP`, `KSI-SCR-MON`, `KSI-SVC-PRR` |
 | [`azure_service_log_records`](../fetchers/azure/service_log_records) | `KSI-IAM-SNU`, `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_sql_encryption_status`](../fetchers/azure/sql_encryption_status) | `KSI-SVC-SIN` |
 | [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups) | `KSI-CNA-OFA`, `KSI-RPL-ABO` |

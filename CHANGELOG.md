@@ -441,6 +441,30 @@ schemas and the `paramify` CLI — not the internal code.
   (`all_alerts_listed`). Counts and close times that need an alert list, a rule list
   or a history that wasn't read are null, never 0 or partial. Descriptions and
   comments are capped at 500 characters, marked when cut.
+- **`azure_service_health_advisories`** (`EVD-AZURE-SERVICE-HEALTH`) — the
+  Microsoft Service Health events reported to the subscription: service issues,
+  planned maintenance, health advisories (retirements included) and security
+  advisories, each with its status, level, impacted services and regions, impact
+  start and end, published and last update times, recommended actions and the
+  resources it names. The event list covers a lookback window
+  (`AZURE_SERVICE_HEALTH_LOOKBACK_DAYS`, 180 by default and at most 180, because
+  a 270-day window answers 502; one that is not a whole number above 0 fails the
+  run as `bad_config`), and any older event Resource Graph still holds
+  is added, read by its tracking id from 30 days before its last update; one
+  the event API can't find is counted in `events_in_resource_graph_not_found`.
+  When Resource Graph's events or one of those older events can't be read,
+  every event count is null, since an older event can change any of them.
+  The resources each event names come from
+  Resource Graph, because the REST impactedResources list came back empty for
+  the same events. Open follows Microsoft's own active rule, and Microsoft's
+  `0001-01-01` "not set" time reads as null. A sensitive security advisory's
+  summary and updates come from `fetchEventDetails`, and its resources from
+  `listSecurityAdvisoryImpactedResources`. Reader has neither action, so without
+  them those read unknown and the run does not fail. Takes
+  `resource_exclusions`, applied to the resources an event names. Billing
+  communications are left out. `_shared/azure_rest.py` gains `post` and
+  `post_list` for ARM read actions sent as POST, and `get` takes query
+  parameters.
 - **`azure_devops_work_items`** (`EVD-AZURE-DEVOPS-WORK-ITEMS`): Azure DevOps
   work items that record changes and security work. The types that record
   changes (`AZURE_DEVOPS_WORK_ITEM_TYPES`, default `Change Request`) and the

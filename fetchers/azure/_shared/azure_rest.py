@@ -157,17 +157,30 @@ class AzureRestClient:
             raise ArmError(response.status_code, *_error_parts(response))
         return response.json()
 
-    def get(self, path: str, api_version: str) -> Dict[str, Any]:
-        return self._get(f"{self.arm}{path}", {"api-version": api_version})
+    def get(self, path: str, api_version: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        return self._get(f"{self.arm}{path}", {"api-version": api_version, **(params or {})})
 
     def list(self, path: str, api_version: str, params: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
         """Every page: ARM documents no page size for these lists, so stopping early truncates silently."""
-        body = self._get(f"{self.arm}{path}", {"api-version": api_version, **(params or {})})
+        return self._follow(self._get(f"{self.arm}{path}", {"api-version": api_version, **(params or {})}))
+
+    def _follow(self, body: Dict[str, Any]) -> List[Dict[str, Any]]:
         items = list(body.get("value") or [])
         while body.get("nextLink"):
             body = self._get(body["nextLink"])
             items.extend(body.get("value") or [])
         return items
+
+    def post(self, path: str, api_version: str) -> Dict[str, Any]:
+        """An ARM read action that takes no body, such as fetchEventDetails."""
+        response = self._send("post", f"{self.arm}{path}", self.arm, params={"api-version": api_version}, timeout=HTTP_TIMEOUT)
+        if response.status_code >= 400:
+            raise ArmError(response.status_code, *_error_parts(response))
+        return response.json()
+
+    def post_list(self, path: str, api_version: str) -> List[Dict[str, Any]]:
+        """Every page of a POST list action; ARM serves the later pages at nextLink by GET."""
+        return self._follow(self.post(path, api_version))
 
     def graph_get(self, path: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         return self._get(f"{self.graph}/v1.0{path}", params, self.graph)
