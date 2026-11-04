@@ -104,6 +104,6 @@ evidence_set:
     in_scope_virtual_hubs, in_scope_vpn_gateways, in_scope_vpn_sites,
     in_scope_p2s_vpn_gateways, in_scope_vpn_server_configurations (how
     many stayed). A kind's two counts are null when its list couldn't be
-    read; with patterns set, in_scope is also null when its WAN's or hub's
+    read; with patterns set, both are also null when its WAN's or hub's
     list couldn't be read, since a record leaves with its excluded parent.
     results.excluded is always present, empty when nothing is excluded.

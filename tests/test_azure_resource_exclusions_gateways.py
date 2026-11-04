@@ -721,13 +721,19 @@ def _refused(m, run, operation):
      ("network_watchers", "flow_logs")),
     (_refused(flow, _run_flow, "network.network_watchers.list_all"), ("network_watchers", "flow_logs"),
      ("virtual_networks", "subnets")),
-    # A hub's gateways leave with an excluded hub, so with the hub list unread their in-scope counts are unknown too.
+    # A hub's gateways leave with an excluded hub, so with the hub list unread both their counts are unknown too.
     (_refused(vwan, _run_wan, "network.virtual_hubs.list"), ("virtual_hubs", "vpn_gateways", "p2s_vpn_gateways"),
      ("virtual_wans", "vpn_sites", "vpn_server_configurations")),
+    (_refused(vwan, _run_wan, "network.virtual_wans.list"),
+     ("virtual_wans", "virtual_hubs", "vpn_sites", "vpn_gateways", "p2s_vpn_gateways"), ("vpn_server_configurations",)),
+    (_refused(vwan, _run_wan, "network.vpn_server_configurations.list"), ("vpn_server_configurations",),
+     ("virtual_wans", "virtual_hubs", "vpn_sites", "vpn_gateways", "p2s_vpn_gateways")),
+    (_refused(flow, _run_flow, "network.NetworkManagementClient (init)"),
+     ("network_watchers", "flow_logs", "virtual_networks", "subnets"), ()),
     (_refused(vpn, _run_vpn, "resource.resource_groups.list"),
      ("virtual_network_gateways", "connections", "local_network_gateways"), ()),
 ], ids=["backend", "listeners", "waf-gateways", "waf-policies", "ddos-plans", "ddos-vnets", "ddos-ips", "flow-vnets",
-        "flow-watchers", "wan-hubs", "vpn-groups"])
+        "flow-watchers", "wan-hubs", "wan-wans", "wan-server-configurations", "flow-client", "vpn-groups"])
 def test_a_list_that_wasnt_read_leaves_its_exclusion_counts_null(run, unread, read, monkeypatch, tmp_path):
     code, evidence = run(monkeypatch, tmp_path)
     summary = evidence["summary"]
@@ -736,6 +742,13 @@ def test_a_list_that_wasnt_read_leaves_its_exclusion_counts_null(run, unread, re
     assert {k: (summary[f"in_scope_{k}"], summary.get(f"excluded_{k}")) for k in unread} == dict.fromkeys(
         unread, (None, None))
     assert all(isinstance(summary[f"in_scope_{k}"], int) and isinstance(summary[f"excluded_{k}"], int) for k in read)
+
+
+def test_a_flow_log_run_that_read_nothing_reports_the_network_figures_null(monkeypatch, tmp_path):
+    code, evidence = _refused(flow, _run_flow, "network.NetworkManagementClient (init)")(monkeypatch, tmp_path)
+    summary = evidence["summary"]
+    assert code == 1
+    assert (summary["virtual_networks_read"], summary["total_virtual_networks"]) == (False, None)
 
 
 # --- a bare pattern fails every fetcher ---

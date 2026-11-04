@@ -194,7 +194,10 @@ schemas and the `paramify` CLI — not the internal code.
     or with an excluded target (`target_matched`); excluding its watcher, or
     the watcher's resource group, keeps it in scope. A subnet leaves with its
     network, and a network whose subnets are all excluded leaves too
-    (`subnets_matched`). Coverage is still judged against every flow log.
+    (`subnets_matched`). Coverage is still judged against every flow log. A
+    run that read nothing (no subscription, or no client) now reports the
+    virtual network figures null and `virtual_networks_read` false, as a
+    refused network list already did.
   - `azure_virtual_wan_configuration` 0.2.0: virtual WANs, hubs, hub VPN
     gateways (with their connections), VPN sites, point-to-site gateways and
     VPN server configurations. A hub and a VPN site also leave with their WAN,
