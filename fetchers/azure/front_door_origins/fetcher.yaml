@@ -1,5 +1,5 @@
 name: azure_front_door_origins
-version: 0.5.0
+version: 0.6.0
 description: >-
   Shows whether Front Door's in-scope back ends span two healthy, serving regions, are reached securely, accept traffic only through their own profile, and have a regional twin with enough capacity.
 category: azure
@@ -82,6 +82,7 @@ evidence_set:
     Script: azure/front_door_origins/fetcher.py
 
     Access: Reader on the subscription. Optional: Reader on other subscriptions holding origin apps; without it, those origins read as not visible and not locked.
+    Azure Government: when AZURE_AUTHORITY_HOST is login.microsoftonline.us, the fetcher reads Microsoft.Cdn from management.usgovcloudapi.net with API version 2025-12-01, because Azure Government does not offer the public-cloud versions yet. The evidence records the version actually used. That version does not return an origin's certificate_name_check_validation_mode or token_destination_header, so both read null there; no summary field uses them.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
