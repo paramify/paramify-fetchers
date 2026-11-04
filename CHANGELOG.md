@@ -552,6 +552,35 @@ schemas and the `paramify` CLI — not the internal code.
   with them: certified, certified-or-in-process, not delisted, not in
   remediation, package ID resolves, and feed fresh.
 
+- **`azure_entra_emergency_accounts`** (`EVD-AZURE-ENTRA-EMERGENCY-ACCOUNTS`) —
+  whether the only enabled users an MFA exclusion leaves without MFA are approved,
+  monitored emergency (break-glass) accounts. Reads the enforced Conditional Access
+  policies that require MFA or an authentication strength and resolves who each
+  includes and excludes: directly, through a group (nested included), through a
+  directory role or as a guest. A user an exclusion names counts as left without
+  MFA unless browsers and mobile and desktop apps are each covered by a policy that
+  makes MFA mandatory (no compliant device, terms of use or password-only strength
+  as an alternative), targets all cloud apps with none excluded, has no other
+  narrowing condition (risk, platforms, locations, device filter), includes them
+  and doesn't exclude them; one policy can cover both client types, or two
+  policies one each. Each
+  policy records its client app types, and
+  `legacy_authentication_blocked_for_all_users` says whether an enforced policy
+  blocks legacy clients for all users. For each account named in
+  `ENTRA_EMERGENCY_ACCOUNTS` it records its exclusions and coverage, its last successful sign-in, its registered methods
+  (phishing-resistant flagged) and the enabled Microsoft Sentinel analytics rules
+  and Azure Monitor log search alert rules in the subscription whose query names
+  it by whole sign-in name or object id. A multi-factor certificate counts as
+  phishing-resistant, as in `azure_entra_authentication_policy`, when the X.509
+  method is enabled, multi-factor by default and applies to the account, and the
+  account has certificate user ids. Every other excluded user is listed too.
+  With no accounts named, the users excluded from every enforced MFA policy for
+  all users are reported as candidates and none counts as approved. A summary
+  field whose read failed is null, not 0; a failed preview listing of Sentinel
+  rules, which holds near-real-time rules, doesn't fail the run but sets
+  `preview_alert_rules_readable` false and adds a note. Microsoft Graph
+  Policy.Read.All, Directory.Read.All and AuditLog.Read.All, and Reader on the
+  subscription that holds the Sentinel workspace and the log search alert rules.
 - **`azure_entra_groups`** (`EVD-AZURE-ENTRA-GROUPS`) — every Entra ID group with
   its members and owners, its kind, whether it can hold directory roles, and
   whether membership is set by a rule (dynamic, with paused rules flagged), by hand
