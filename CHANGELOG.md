@@ -988,11 +988,12 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
   report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`
-  counted every one as without MFA. It is now taken over the users with a row,
-  and the new `users_with_registration_details` gives its denominator. The
-  figures over enabled users and admins are unchanged: there a user with no row
-  still counts as without MFA. A failed read no longer reads as 0: when the users
-  list can't be read in full every figure is null, and when the registration
+  counted every one as without MFA. It is now taken over the users with a row
+  (0.3.1 changes the denominator), and the new `users_with_registration_details`
+  counts the users with a row. The figures over enabled users and admins are
+  unchanged: there a user with no row still counts as without MFA. A failed
+  read no longer reads as 0: when the users list can't be read in full every
+  figure is null, and when the registration
   report can't be, every figure that relies on it.
 - **`azure_entra_mfa_status` 0.3.1: an enabled user with no registration row
   counts against the all-users coverage.** 0.3.0 left every user without a row
