@@ -235,7 +235,7 @@ def test_mfa_client_types_skip_alternatives_narrowing_and_partial_scope(monkeypa
     assert by_id["p-and"]["requires_mfa_without_alternative"] is True
 
 
-def test_mfa_client_types_skip_device_filters_flows_and_other_risks(monkeypatch):
+def test_mfa_client_types_skip_app_and_device_filters_flows_and_other_risks(monkeypatch):
     def narrowed(pid, **conditions):
         policy = _with(_policy(pid, pid, controls=("mfa",)), client_apps=("browser",))
         policy["conditions"].update(conditions)
@@ -244,6 +244,8 @@ def test_mfa_client_types_skip_device_filters_flows_and_other_risks(monkeypatch)
     types, by_id = _client_types(
         monkeypatch,
         narrowed("p-device", devices={"deviceFilter": {"mode": "exclude", "rule": "device.isCompliant -eq True"}}),
+        narrowed("p-app-filter", applications={"includeApplications": ["All"], "applicationFilter": {
+            "mode": "exclude", "rule": 'CustomSecurityAttribute.Tier -eq "Legacy"'}}),
         narrowed("p-flows", authenticationFlows={"transferMethods": "deviceCodeFlow,authenticationTransfer"}),
         narrowed("p-insider", insiderRiskLevels="minor,moderate"),
         narrowed("p-sp-risk", servicePrincipalRiskLevels=["high"]),
@@ -252,6 +254,10 @@ def test_mfa_client_types_skip_device_filters_flows_and_other_risks(monkeypatch)
     )
     assert types == ["browser", "mobileAppsAndDesktopClients"]
     assert sorted(pid for pid in by_id if ca._mfa_for_everyone(by_id[pid])) == ["p-apps", "p-no-flow"]
+    assert by_id["p-app-filter"]["target_resources"] == {
+        "include": ["All"], "exclude": [],
+        "application_filter": {"mode": "exclude", "rule": 'CustomSecurityAttribute.Tier -eq "Legacy"'}}
+    assert by_id["p-no-flow"]["target_resources"]["application_filter"] is None
     conditions = {pid: by_id[pid]["conditions"] for pid in by_id}
     assert conditions["p-device"]["device_filter"] == {"mode": "exclude", "rule": "device.isCompliant -eq True"}
     assert conditions["p-flows"]["authentication_flow_transfer_methods"] == ["authenticationTransfer", "deviceCodeFlow"]
