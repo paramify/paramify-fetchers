@@ -179,6 +179,8 @@ schemas and the `paramify` CLI — not the internal code.
     route needs it. Metric and smart detector rules carry the location `global`
     and action groups and processing rules none, so `location:` reaches only log
     search rules.
+  - `azure_policy_assignments` 0.4.0: policy exemptions, by the scope they were
+    made at (`rg:` and `id:` only; exemptions carry no region). Assignments stay.
 
   Fetchers whose records point at resources rather than list them drop the
   records whose subject is excluded. These records carry no region, so only
@@ -791,6 +793,34 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_policy_assignments` 0.4.0: policy exemptions.** Every exemption in
+  effect on the subscription (`results.policy_exemptions`): its own, those
+  inherited from a management group, and those on resource groups and resources
+  inside it, expired ones and Defender for Cloud recommendation exemptions
+  included. Each names the assignment and initiative members it exempts (joined
+  to their resolved effects), its scope, category (Waiver or Mitigated),
+  description, metadata, creator and expiry, with `expired`, `no_expiry`,
+  `days_until_expiry`, `on_defender_benchmark_assignment` and
+  `lifts_enforcement` (an exempted enforcing effect on an enforced assignment).
+  `lifts_enforcement` is null, with `lifts_enforcement_unknown_reason`, when the
+  assignment isn't listed (usually deleted, its exemptions left behind), the
+  initiative's members or an exempted member's effect can't be read, or an
+  exempted reference id isn't in the initiative's current definition
+  (`in_initiative: false` on that member). The category is matched without regard
+  to case and written as Waiver or Mitigated. Each assignment gains
+  `exemption_count`. The summary adds exemption counts by category, expiry, scope
+  and enforcement, and `exemptions_read_status`. Exemptions exist only in preview
+  api-versions, which the stable SDK leaves out, so they are read by a raw ARM GET
+  pinned to 2024-12-01-preview. A failed read fails the run with every exemption
+  count null; `exemptions_read_status` says `api_version_unavailable` when ARM
+  refused that version (InvalidApiVersionParameter, NoRegisteredProviderFound or
+  InvalidResourceType) and `failed` otherwise. When the assignment list fails,
+  `active_exemptions_lifting_enforcement` and the counts that join exemptions to
+  assignments read null, not 0. Adopts `resource_exclusions` for exemptions only: rg: and id: patterns
+  match an exemption through the scope it was made at, location: never matches
+  one, and assignments are not affected. One change to the 0.3.0 fields: when the
+  assignment list fails, every assignment summary count reads null instead of 0
+  (the run still fails); otherwise they are unchanged.
 - **The Azure exclusion fields are pattern lists.** `resource_exclusions`
   (`rg:`, `location:` or `id:`, never bare) and `scope_exclusions` (Front Door:
   `route:` or a bare host name; DNS: a bare record-set name) are
