@@ -29,6 +29,8 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_network_flow_logs")
 
@@ -305,7 +307,33 @@ def summarize(watchers, flow_logs, vnet_records) -> dict:
     return summary
 
 
-def collect(subscription_id, cred, collector: Collector) -> tuple:
+def split_flow_logs(flow_logs: list[dict], excluded_targets: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
+    """A flow log leaves on an id: pattern naming it, or with its target (a VNet, subnet, NIC or NSG). Its Network
+    Watcher leaving, or a pattern on the watcher's resource group, never takes it: it still logs an in-scope target."""
+    gone = {(e["id"] or "").lower(): e["pattern"] for e in excluded_targets if e["id"]}
+    kept, excluded = [], []
+    for log in flow_logs:
+        pattern = exclusions.match_own_id(log["id"])
+        target = log["target_resource_id"]
+        # A flow log sits in its target's region, so the log's location is the target's.
+        target_pattern = None if pattern or not target else (
+            exclusions.match(target, log["location"]) or gone.get(target.lower()))
+        if pattern or target_pattern:
+            excluded.append(excluded_item(
+                "flow_log", log["name"], pattern or target_pattern,
+                "resource_matched" if pattern else "target_matched", id=log["id"],
+                resource_group=resource_group_from_id(log["id"]), location=log["location"],
+                **({} if pattern else {"matched_id": target})))
+        else:
+            kept.append(log)
+    return kept, excluded
+
+
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None) -> tuple:
+    """With exclusions, every verdict is still worked out from all watchers, flow logs and VNets; only the
+    returned lists are narrowed, and what left is appended to `excluded`. A list that wasn't read is None, and the
+    flow logs are None when the watchers weren't read."""
     def _client():
         from azure.mgmt.network import NetworkManagementClient  # lazy
 
@@ -313,7 +341,7 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
 
     client = collector.guard("network.NetworkManagementClient (init)", _client)
     if client is None:
-        return [], [], []
+        return None, None, None
     watchers = collector.guard(
         "network.network_watchers.list_all",
         lambda: [project_watcher(w) for w in client.network_watchers.list_all()],
@@ -346,15 +374,33 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
     for f in flow_logs:
         f["target_attached"] = target_attached(f, nsgs, vnets)
     enabled_by_target = {(f["target_resource_id"] or "").lower(): f for f in flow_logs if f["enabled"]}
-    records = None if vnets is None else sorted(
-        (vnet_record(v, enabled_by_target, uncertain_regions, watcher_regions) for v in vnets),
+    out_vnets, out_subnets, narrowed = [], [], vnets
+    if exclusions and vnets is not None:
+        narrowed = []
+        in_scope, out_vnets = exclusions.split(vnets, "virtual_network")
+        for v in in_scope:
+            subnets, gone = exclusions.split(v["subnets"], "subnet", location=lambda r: None)
+            out_subnets += gone
+            if gone and not subnets:
+                # Nothing of it is left in scope to judge, so the network leaves with its last subnet.
+                out_vnets.append(excluded_item(
+                    "virtual_network", v["name"], gone[-1]["pattern"], "subnets_matched", id=v["id"],
+                    resource_group=resource_group_from_id(v["id"]), location=v["location"]))
+            else:
+                narrowed.append({**v, "subnets": subnets})
+    records = None if narrowed is None else sorted(
+        (vnet_record(v, enabled_by_target, uncertain_regions, watcher_regions) for v in narrowed),
         key=lambda r: r["id"] or "",
     )
-    return (
-        sorted(watchers or [], key=lambda r: r["id"] or ""),
-        sorted(flow_logs, key=lambda r: r["id"] or ""),
-        records,
-    )
+    listed = watchers is not None
+    watchers = sorted(watchers or [], key=lambda r: r["id"] or "")
+    flow_logs = sorted(flow_logs, key=lambda r: r["id"] or "")
+    if exclusions:
+        watchers, out_watchers = exclusions.split(watchers, "network_watcher")
+        flow_logs, out_logs = split_flow_logs(flow_logs, out_vnets + out_subnets, exclusions)
+        if excluded is not None:
+            excluded += out_watchers + out_logs + out_vnets + out_subnets
+    return (watchers, flow_logs, records) if listed else (None, None, records)
 
 
 def main() -> int:
@@ -372,10 +418,13 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    watchers: list = []
-    flow_logs: list = []
-    vnets: list = []
+    watchers: list | None = None
+    flow_logs: list | None = None
+    vnets: list | None = None
     registration = REGISTRATION_UNKNOWN
+    excluded: list = []
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Network")
         if registration == NOT_REGISTERED:
@@ -383,7 +432,7 @@ def main() -> int:
                 "Microsoft.Network is not registered on subscription %s — reporting status not_registered",
                 subscription_id,
             )
-        watchers, flow_logs, vnets = collect(subscription_id, cred, collector)
+        watchers, flow_logs, vnets = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -393,17 +442,27 @@ def main() -> int:
             ),
         )
 
+    exclusions.warn_unmatched(logger)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
-            "network_watchers": watchers,
-            "flow_logs": flow_logs,
+            "network_watchers": watchers or [],
+            "flow_logs": flow_logs or [],
             "virtual_networks": vnets,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(watchers, flow_logs, vnets), "provider_registration_status": registration},
+        summary={
+            **summarize(watchers or [], flow_logs or [], vnets),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("network_watcher", "flow_log", "virtual_network", "subnet"), {
+                "network_watchers": None if watchers is None else len(watchers),
+                "flow_logs": None if flow_logs is None else len(flow_logs),
+                "virtual_networks": None if vnets is None else len(vnets),
+                "subnets": None if vnets is None else sum(len(v["subnets"]) for v in vnets)}),
+        },
     )
     filename = f"azure_network_flow_logs_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

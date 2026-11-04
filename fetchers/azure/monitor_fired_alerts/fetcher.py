@@ -20,6 +20,8 @@ from azure_common import (  # noqa: E402
     sorted_counts,
 )
 from azure_rest import parse_time, run_subscription  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 NAME = "azure_monitor_fired_alerts"
 logger = logging.getLogger(NAME)
@@ -236,10 +238,24 @@ def max_open_age_hours(open_alerts: list[dict], now: datetime):
     return _hours(min(fired), now) if fired else 0
 
 
+def split_alerts(alerts: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
+    """A fired alert follows its target resource; one on the subscription itself never matches."""
+    kept, excluded = [], []
+    for a in alerts:
+        target = a["target_resource"]
+        pattern = exclusions.match(target) if exclusions and target else None
+        if pattern is None:
+            kept.append(a)
+        else:
+            excluded.append(excluded_item("alert", a["name"], pattern, "target_matched", id=a["id"], target_id=target))
+    return kept, excluded
+
+
 def summarize(
     alerts: list[dict], rules: list[dict], summary_total, alerts_read: bool = True, rules_read: bool = True,
-    now: datetime | None = None,
+    now: datetime | None = None, alerts_listed: int | None = None,
 ) -> dict:
+    """`alerts_listed` is how many alerts the list returned before exclusions, which the summary total is checked against."""
     closed = [a for a in alerts if (a["alert_state"] or "").lower() == STATE_CLOSED]
     # A count over histories is unknown, never a partial number, while any history is unread.
     histories_read = all(a["history_status"] == HISTORY_READ for a in alerts)
@@ -254,7 +270,9 @@ def summarize(
         "window_days": WINDOW_DAYS,
         "alerts_fired": len(alerts),
         "alerts_summary_total": summary_total,
-        "all_alerts_listed": (len(alerts) >= summary_total) if summary_total is not None else None,
+        "all_alerts_listed": (
+            (len(alerts) if alerts_listed is None else alerts_listed) >= summary_total if summary_total is not None else None
+        ),
         "alerts_by_state": sorted_counts(Counter(a["alert_state"] or "unknown" for a in alerts)),
         "alerts_by_monitor_condition": sorted_counts(Counter(a["monitor_condition"] or "unknown" for a in alerts)),
         "alerts_by_severity": sorted_counts(Counter(a["severity"] or "unknown" for a in alerts)),
@@ -317,7 +335,9 @@ def read_history(client, alert: dict, collector: Collector) -> dict:
     return with_history(alert, HISTORY_READ, (body.get("properties") or {}).get("modifications"))
 
 
-def collect_alerts(client, subscription_id: str, collector: Collector) -> tuple:
+def collect_alerts(client, subscription_id: str, collector: Collector, exclusions: ResourceExclusions | None = None,
+                   excluded: list | None = None) -> tuple:
+    """Alerts on an excluded target are appended to `excluded` and get no history read."""
     base = f"/subscriptions/{subscription_id}/providers/Microsoft.AlertsManagement"
     summary = collector.guard(
         "alertsManagement.alertsSummary",
@@ -329,6 +349,10 @@ def collect_alerts(client, subscription_id: str, collector: Collector) -> tuple:
         lambda: client.list(f"{base}/alerts", ALERTS_API, {"timeRange": TIME_RANGE, "pageCount": PAGE_COUNT}),
     )
     alerts = [alert_record(a) for a in raw or []]
+    if exclusions:
+        alerts, out = split_alerts(alerts, exclusions)
+        if excluded is not None:
+            excluded += out
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         alerts = list(pool.map(lambda a: read_history(client, a, collector), alerts))
     # One refused history is a warning; all of them refused is a missing permission.
@@ -353,20 +377,29 @@ def collect_rules(client, subscription_id: str, registration: dict, collector: C
     return rules, read
 
 
-def collect(client, subscription_id: str, registration: dict, collector: Collector) -> tuple:
+def collect(client, subscription_id: str, registration: dict, collector: Collector,
+            exclusions: ResourceExclusions | None = None, excluded: list | None = None) -> tuple:
     """(alerts, rules, summary total, whether the alert list was read, whether every rule list was read)."""
     alerts: list[dict] = []
     total, alerts_read = None, False
     if registration["Microsoft.AlertsManagement"] != NOT_REGISTERED:
-        alerts, total, alerts_read = collect_alerts(client, subscription_id, collector)
+        alerts, total, alerts_read = collect_alerts(client, subscription_id, collector, exclusions, excluded)
     listed, rules_read = collect_rules(client, subscription_id, registration, collector)
     return alerts, rule_activity(listed, alerts, alerts_read), total, alerts_read, rules_read
 
 
 def collect_subscription(client, subscription_id: str, collector: Collector) -> tuple:
     """(results, summary) for run_subscription."""
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
     registration = {ns: provider_registration_status(collector, subscription_id, client.cred, ns) for ns in NAMESPACES}
-    alerts, rules, total, alerts_read, rules_read = collect(client, subscription_id, registration, collector)
+    excluded: list[dict] = []
+    alerts, rules, total, alerts_read, rules_read = collect(
+        client, subscription_id, registration, collector, exclusions, excluded)
+    # Fires were counted against every rule, so an in-scope alert of an excluded rule doesn't read as an unlisted rule.
+    rules, excluded_rules = exclusions.split(rules, "alert_rule")
+    excluded += excluded_rules
+    exclusions.warn_unmatched(logger)
     alerts.sort(key=lambda a: (a["fired_at"] or "", arm_id_key(a["id"])))
     logger.info("%d alerts, %d alert rules", len(alerts), len(rules))
     results = {
@@ -374,8 +407,23 @@ def collect_subscription(client, subscription_id: str, collector: Collector) -> 
         "alert_rules": rules,
         "time_range": TIME_RANGE,
         "provider_registration_status": registration,
+        "excluded": excluded,
     }
-    summary = {**summarize(alerts, rules, total, alerts_read, rules_read), "provider_registration_status": registration}
+    alerts_listed = len(alerts) + sum(1 for e in excluded if e["kind"] == "alert")
+    counts = exclusions.summary(excluded, ("alert_rule", "alert"), {"alert_rules": len(rules), "alerts": len(alerts)})
+    # Unknown, like the other rule and alert counts, when a list wasn't read.
+    if not rules_read:
+        counts.update(excluded_alert_rules=None, in_scope_alert_rules=None)
+    if not alerts_read:
+        counts.update(excluded_alerts=None, in_scope_alerts=None)
+    summary = {
+        **summarize(alerts, rules, total, alerts_read, rules_read, alerts_listed=alerts_listed),
+        "provider_registration_status": registration,
+        **counts,
+    }
+    if exclusions:
+        # Azure's total also counts alerts on excluded resources and can't be split by resource.
+        summary["alerts_summary_total"] = None
     return results, summary
 
 

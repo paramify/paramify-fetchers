@@ -2813,6 +2813,26 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "groups_with_only_disabled_owners reads unknown",
     ),
     (
+        "msgraph.generated.models.conditional_access_condition_set",
+        "ConditionalAccessConditionSet",
+        ["devices", "authentication_flows", "insider_risk_levels", "service_principal_risk_levels"],
+        "azure/entra_conditional_access_policies — a missing field reads as no condition, so a "
+        "device filter, flow or risk condition would not stop a policy counting for MFA coverage",
+    ),
+    (
+        "msgraph.generated.models.conditional_access_devices",
+        "ConditionalAccessDevices",
+        ["device_filter"],
+        "azure/entra_conditional_access_policies — without it a device filter reads as absent",
+    ),
+    (
+        "msgraph.generated.models.conditional_access_applications",
+        "ConditionalAccessApplications",
+        ["application_filter"],
+        "azure/entra_conditional_access_policies — without it an application filter reads as "
+        "absent, so a policy that filters apps would count for MFA coverage",
+    ),
+    (
         "msgraph.generated.models.authentication_strength_policy",
         "AuthenticationStrengthPolicy",
         ["id", "display_name", "requirements_satisfied"],
@@ -4107,6 +4127,10 @@ def test_graph_admin_membership_builders_present() -> None:
     assert getattr(role, "members", None) is not None, (
         "directory_roles.by_directory_role_id(...).members is gone.\n"
         "  affected fetchers: azure/entra_privileged_roles, azure/entra_mfa_status"
+    )
+    assert getattr(role.members, "graph_service_principal", None) is not None, (
+        "directory_roles.by_directory_role_id(...).members.graph_service_principal is gone.\n"
+        "  affected fetchers: azure/entra_privileged_roles — v1.0 members leaves service principals out"
     )
     assert getattr(group, "transitive_members", None) is not None, (
         "groups.by_group_id(...).transitive_members is gone.\n"

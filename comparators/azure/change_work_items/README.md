@@ -26,7 +26,7 @@ Each gets one status:
 |---|---|
 | `excluded` | Its caller is in `excluded_callers`, such as a Microsoft service that manages resources for you. |
 | `application` | Its caller's type is given and isn't a user: an application or another identity. A named caller with no type is matched like a person. Reported apart, with the application id; it needs no record, since a work item can't name it. |
-| `no_caller` | Azure recorded no caller, and neither a named change to the same resource within 10 minutes (the rule `azure_change_provenance` uses to give such a row its origin) nor a named change in the same deployment gives one. |
+| `no_caller` | Azure recorded no caller, and neither a named change to the same resource within 10 minutes (the rule `azure_change_provenance` uses to give such a row its origin) nor a named change in the same deployment gives one. A change `resource_exclusions` left out of `azure_change_provenance` can still give one. |
 | `matched` | Exactly one record work item names the caller and covers the change's time. |
 | `ambiguous` | Several do; none is picked. |
 | `unmatched` | None does. |
@@ -49,6 +49,14 @@ since); a record whose approval couldn't be read is not approved.
 An approval may come after the change: such a change still counts as approved,
 and `changes_approved_after_change` counts it unless the late record is one of
 `emergency_types`, which are approved after the fact.
+Only `approval_types` need an approval (every record type when it's empty): a
+record of another type counts as approved, and a change recorded only by such
+records is counted in `changes_recorded_approval_not_required`. A name in
+`approval_types` that matches no record type, such as a misspelling, fails the
+run with `bad_config`, since the type meant would need no approval. With
+`record_types` set, it fails before anything is read. Otherwise the record
+types come from the work items, so the file is written first, with the name in
+`approval_types_not_record_types`.
 
 `work_items_cover_changes` is false when a work items file's collection window
 starts too late to hold every record a change could have: its start plus
@@ -59,11 +67,16 @@ fetcher's `lookback_days` if so.
 
 Writes `azure_change_work_items.json` to `EVIDENCE_DIR`: `results` holds one
 verdict per checked change, naming the work items that record it, and `summary`
-counts each status and carries `inputs_complete`. If an input is missing, every
-summary value is `null`. If an input failed or is partial, the comparison still
-runs, and the comparator exits 1 with `input_failed`. If the comparison itself
-raises, the file is still written with every summary value `null`, and the
-comparator exits 1 with `internal_error`. A bad setting exits 1 with
-`bad_config` before anything is read.
+counts each status and carries `inputs_complete`. Each change and each of its
+work items says whether it needs an approval (`approval_required`). If an input
+is missing, every summary value is `null`. If an input failed or is partial, the
+comparison still runs, and the comparator exits 1 with `input_failed`. If the
+comparison itself raises, the file is still written with every summary value
+`null`, and the comparator exits 1 with `internal_error`. A bad setting exits 1
+with `bad_config` before anything is read, except an approval type checked
+against the record types the work items selected, which exits 1 with
+`bad_config` after the file is written. When several apply, `internal_error`
+comes first, then `bad_config`, then `input_failed`: a partial input and a bad
+approval type exit `bad_config`, and `api_failures` holds both entries.
 
 See [`docs/comparators_guide.md`](../../../docs/comparators_guide.md).

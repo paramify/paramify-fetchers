@@ -1,5 +1,5 @@
 name: azure_resource_diagnostic_settings
-version: 0.3.0
+version: 0.4.0
 description: >-
   Shows which resources export their logs through a diagnostic setting, where those logs go, whether they actually arrive in Log Analytics, and which log categories nothing captures.
 category: azure
@@ -71,12 +71,14 @@ config_schema:
       blob), and a resource whose settings are all in AzureDiagnostics mode only
       by AzureDiagnostics.
   resource_exclusions:
-    type: string
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
     description: >
       Resources outside the authorization boundary, to leave out of scope, as
-      case-insensitive glob patterns separated by commas or spaces, each with a
+      case-insensitive glob patterns listed in the manifest, each with a
       prefix: rg:<resource group> (read from the resource id), location:<region>
       (the region's name without spaces, such as eastus2; a resource with no
       location never matches one) or id:<resource id> (also matches that resource's
@@ -87,8 +89,9 @@ config_schema:
       group) matches only an id: pattern. An in-scope resource's logs are still
       checked at every destination it sends to, an excluded workspace included, so
       its verdict doesn't change. A pattern without one of these prefixes fails the
-      run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it. Can be
-      ${env:VAR}. Empty: every resource is in scope.
+      run. Set it once under platforms.azure.config for every Azure fetcher that has
+      this field; fetchers without it ignore it. Each item is a pattern, or a pattern
+      with a reason. Empty: every resource is in scope.
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
