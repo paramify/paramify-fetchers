@@ -382,6 +382,32 @@ schemas and the `paramify` CLI — not the internal code.
   privileged role with no policy (`privileged_roles_without_policy`) makes the
   matching user count or role lists null rather than clean. Needs
   `RoleManagement.Read.Directory`.
+- **`azure_service_availability`** (`EVD-AZURE-SERVICE-AVAILABILITY`) — when each
+  App Service app (web and function apps) and SQL Managed Instance was
+  unavailable, from its Resource Health history over a lookback of up to 30 days:
+  every Unavailable, Degraded and Unknown period with start, end, length, cause
+  and the Azure incident Resource Health links to it, availability over the hours
+  Resource Health knew about (with counts of resources it leaves out or only
+  partly covers), and a rollup per region. A resource with no known hours has
+  no outage figures. Periods the customer started (stop, restart, scale) are
+  listed but are not outages; one with an outage directly on both sides, such as
+  a restart during an outage, is part of that outage, and one at an outage's
+  start or end is its own period. With
+  `recovery_time_objective_hours` set, each resource's longest outage is checked
+  against it; an Unknown period longer than the objective, or an outage that runs
+  past it with the Unknown time touching it, leaves the verdict unknown. An
+  objective or lookback that is not a number above 0 (nan and inf included)
+  fails the run as `bad_config`; a lookback past 30 is read as 30, and the value asked for is
+  kept as `settings.lookback_days_requested`.
+  Front Door Standard/Premium profiles are read too, but Resource Health judges a
+  profile by whether its origins answer health probes, so their periods are
+  reported as origin probe failures and never as outages. For apps, the health
+  check path and hourly `HealthCheckStatus` results; stopped apps get no verdict.
+  A failed or refused read leaves availability unknown, never available, and fails
+  the run; a failed list leaves every count over that resource type null. Takes
+  `resource_exclusions`. Front Door origin health per region stays
+  in `azure_front_door_origins`, and Service Health events in
+  `azure_service_health_advisories`.
 - **`azure_service_log_records`** (`EVD-AZURE-SERVICE-LOG-RECORDS`) — whether App
   Service HTTP logs and SQL Managed Instance audit events actually reach Log
   Analytics, read from the records: per app and slot, its state, the
@@ -1278,6 +1304,9 @@ schemas and the `paramify` CLI — not the internal code.
   `profiles_with_waf_in_use_without_waf_log_export` is null unless that profile
   exports its WAF log. The public-cloud output is unchanged apart from the two
   new counts, which are 0 there.
+- **Azure: an invalid lookback or recovery time objective fails as `bad_config`.**
+  The messages matched no `bad_config` marker, so `azure_change_provenance` and
+  `azure_front_door_origins` reported an invalid lookback as `partial_failure`.
 - **`azure_entra_conditional_access_policies` 0.2.1: device filters,
   authentication flows and insider and service principal risk narrow MFA
   coverage.** In 0.2.0 a policy with any of these conditions still added its

@@ -215,7 +215,7 @@ def test_instructions_open_with_the_entry_path() -> None:
 # --------------------------------------------------------------------------- #
 
 TEXT_FORMAT_FETCHERS = ("azure/alert_rules", "azure/change_work_items", "azure/entra_risky_users",
-                        "azure/sentinel_playbooks", "oci")
+                        "azure/sentinel_playbooks", "azure/service_availability", "oci")
 MAX_DESCRIPTION_WORDS = 30
 FIELD_LINE = re.compile(r"^- (\S+) — \S")
 BREAKDOWN_LINE = re.compile(r"^  - \S+ \(\S.*\)$")
