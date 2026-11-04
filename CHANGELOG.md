@@ -604,6 +604,28 @@ schemas and the `paramify` CLI — not the internal code.
   (`tools/oci_fault_sweep.py`) and a read-only collector policy in
   `fetchers/oci/README.md`. Contributed by Stewart Clawson
   (paramify/paramify-fetchers#87).
+- **`azure_network_traffic_activity`** (`EVD-AZURE-NETWORK-TRAFFIC-ACTIVITY`): the
+  network traffic actually seen over a window, read from Log Analytics.
+  - Traffic Analytics flows (`AzureNetworkAnalytics_CL` for NSG flow logs,
+    `NTANetAnalytics` for VNet flow logs): flows allowed and denied per day and flow
+    type, allowed inbound internet flows on ports outside
+    `NETWORK_TRAFFIC_EXPECTED_INBOUND_PORTS`, ports and outbound destinations new
+    against the prior window, and days whose denied flows spike past
+    `NETWORK_TRAFFIC_DENIED_SPIKE_FACTOR` times the prior daily average. Each table
+    is judged against its own prior window, so one without flows there (a VNet
+    flow log just turned on) adds no new port, destination or spike and is
+    counted apart. The traffic figures read null unless every table was read or
+    doesn't exist yet.
+  - Front Door access logs: requests, status classes, top hosts, origins and client
+    IPs per profile.
+  - Front Door's App Service origins: requests from public addresses outside the
+    `AzureFrontDoor.Backend` ranges, which reached the origin without Front Door.
+    Those ranges are shared by every Front Door, so a request through another
+    tenant's profile counts as through Front Door; `azure_front_door_origins`
+    checks that each origin requires its own profile's `X-Azure-FDID`.
+  - Tables on the Basic or Auxiliary plan are queried only when
+    `NETWORK_TRAFFIC_QUERY_BASIC_TABLES` is on. A workspace that refuses the read
+    reads unknown and doesn't fail the run.
 - **A shared engine for ServiceNow Scripted REST endpoints.**
   `fetchers/servicenow/_shared/scripted_rest.py` does the request, the retries,
   the response checks and the write for every ServiceNow fetcher. A fetcher now
