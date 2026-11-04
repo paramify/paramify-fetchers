@@ -443,20 +443,21 @@ def collect(subscription_id, cred, collector: Collector, exclusions=None, exclud
 
     clients = collector.guard("data services clients (init)", _clients)
     if clients is None:
-        return [], [], []
+        return None, None, None
     mongo_client, kusto_client, eh_client = clients
 
     mongo = collector.guard(
         "mongocluster.mongo_clusters.list",
         lambda: [project_mongo_cluster(m) for m in mongo_client.mongo_clusters.list()],
-        default=[],
     )
     kusto = collector.guard(
-        "kusto.clusters.list", lambda: [project_kusto_cluster(c) for c in kusto_client.clusters.list()], default=[]
+        "kusto.clusters.list", lambda: [project_kusto_cluster(c) for c in kusto_client.clusters.list()]
     )
     eventhub = collector.guard(
-        "eventhub.namespaces.list", lambda: [project_namespace(n) for n in eh_client.namespaces.list()], default=[]
+        "eventhub.namespaces.list", lambda: [project_namespace(n) for n in eh_client.namespaces.list()]
     )
+    read = (mongo is not None, kusto is not None, eventhub is not None)
+    mongo, kusto, eventhub = mongo or [], kusto or [], eventhub or []
     if exclusions:
         mongo, out_mongo = exclusions.split(mongo, "mongo_cluster")
         kusto, out_kusto = exclusions.split(kusto, "data_explorer_cluster")
@@ -563,7 +564,9 @@ def collect(subscription_id, cred, collector: Collector, exclusions=None, exclud
             }
         )
     key = lambda r: r["id"] or ""  # noqa: E731
-    return sorted(mongo_records, key=key), sorted(kusto_records, key=key), sorted(eh_records, key=key)
+    # None for a list that wasn't read.
+    return tuple(sorted(records, key=key) if ok else None
+                 for records, ok in zip((mongo_records, kusto_records, eh_records), read))
 
 
 def main() -> int:
@@ -584,9 +587,9 @@ def main() -> int:
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
     excluded: list[dict] = []
-    mongo: list = []
-    kusto: list = []
-    eventhub: list = []
+    mongo: list | None = None
+    kusto: list | None = None
+    eventhub: list | None = None
     registration = {f"provider_registration_status_{key}": REGISTRATION_UNKNOWN for key in PROVIDERS}
     if subscription_id and cred is not None:
         for key, namespace in PROVIDERS.items():
@@ -610,6 +613,9 @@ def main() -> int:
         )
 
     exclusions.warn_unmatched(logger)
+    in_scope = {name: None if records is None else len(records) for name, records in (
+        ("mongo_clusters", mongo), ("data_explorer_clusters", kusto), ("event_hub_namespaces", eventhub))}
+    mongo, kusto, eventhub = mongo or [], kusto or [], eventhub or []
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -625,9 +631,7 @@ def main() -> int:
         summary={
             **summarize(mongo, kusto, eventhub),
             **registration,
-            **exclusions.summary(excluded, ("mongo_cluster", "data_explorer_cluster", "event_hub_namespace"), {
-                "mongo_clusters": len(mongo), "data_explorer_clusters": len(kusto),
-                "event_hub_namespaces": len(eventhub)}),
+            **exclusions.summary(excluded, ("mongo_cluster", "data_explorer_cluster", "event_hub_namespace"), in_scope),
         },
     )
     filename = f"azure_data_services_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"

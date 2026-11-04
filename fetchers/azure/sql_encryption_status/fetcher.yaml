@@ -86,5 +86,5 @@ evidence_set:
     Which resources are left out of scope?
       - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every server is in scope
       - resource_exclusion_patterns_unmatched — List of configured patterns that matched no SQL server, such as a mistyped name
-      - excluded_sql_servers — Number of SQL servers left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their databases
-      - in_scope_sql_servers — Number of SQL servers read and in scope; 0 means none was read or the patterns took out every server, which a check can catch by requiring more than 0
+      - excluded_sql_servers — Number of SQL servers left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their databases; null if the list couldn't be read
+      - in_scope_sql_servers — Number of SQL servers read and in scope; null if the list couldn't be read, and 0 means there are none or the patterns took out every server, which a check can catch by requiring more than 0

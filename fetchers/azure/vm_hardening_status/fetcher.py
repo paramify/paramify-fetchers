@@ -524,8 +524,8 @@ KINDS = ("virtual_machine", "scale_set")
 def collect_compute(
     subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
     excluded: list | None = None,
-) -> tuple[list[dict], list[dict]]:
-    """Two subscription-wide list calls plus two per-resource enrichments.
+) -> tuple[list[dict] | None, list[dict] | None]:
+    """Two subscription-wide list calls plus two per-resource enrichments; a list that wasn't read is None.
 
     Both `list_all()` calls return ItemPaged (the SDK follows nextLink itself).
     `virtual_machine_extensions.list()` returns a `VirtualMachineExtensionsListResult`,
@@ -542,7 +542,7 @@ def collect_compute(
 
     client = collector.guard("compute.ComputeManagementClient (init)", _client)
     if client is None:
-        return [], []
+        return None, None
 
     virtual_machines = collector.guard(
         "compute.virtual_machines.list_all",
@@ -550,8 +550,9 @@ def collect_compute(
             virtual_machine_record(project_virtual_machine(vm))
             for vm in client.virtual_machines.list_all()
         ],
-        default=[],
     )
+    vms_read = virtual_machines is not None
+    virtual_machines = virtual_machines or []
     exclusions = exclusions or ResourceExclusions()
     virtual_machines, out_vms = exclusions.split(virtual_machines, "virtual_machine")
     virtual_machines, out_members = follow_scale_sets(virtual_machines, exclusions)
@@ -587,8 +588,9 @@ def collect_compute(
             scale_set_record(project_scale_set(s))
             for s in client.virtual_machine_scale_sets.list_all()
         ],
-        default=[],
     )
+    sets_read = scale_sets is not None
+    scale_sets = scale_sets or []
     scale_sets, out_sets = exclusions.split(scale_sets, "scale_set")
     if excluded is not None:
         excluded += sorted(out_vms + out_sets, key=lambda e: (e["kind"], e["id"] or ""))
@@ -617,8 +619,8 @@ def collect_compute(
         scale_set["instance_count"] = len(scale_set["instance_ids"])
 
     return (
-        sorted(virtual_machines, key=lambda r: r.get("id") or ""),
-        sorted(scale_sets, key=lambda r: r.get("id") or ""),
+        sorted(virtual_machines, key=lambda r: r.get("id") or "") if vms_read else None,
+        sorted(scale_sets, key=lambda r: r.get("id") or "") if sets_read else None,
     )
 
 
@@ -639,8 +641,8 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    virtual_machines: list[dict] = []
-    scale_sets: list[dict] = []
+    virtual_machines: list[dict] | None = None
+    scale_sets: list[dict] | None = None
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
@@ -670,6 +672,9 @@ def main() -> int:
 
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
+    in_scope = {"virtual_machines": None if virtual_machines is None else len(virtual_machines),
+                "scale_sets": None if scale_sets is None else len(scale_sets)}
+    virtual_machines, scale_sets = virtual_machines or [], scale_sets or []
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -684,8 +689,7 @@ def main() -> int:
         summary={
             **summarize(virtual_machines, scale_sets),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, KINDS, {
-                "virtual_machines": len(virtual_machines), "scale_sets": len(scale_sets)}),
+            **exclusions.summary(excluded, KINDS, in_scope),
         },
     )
 

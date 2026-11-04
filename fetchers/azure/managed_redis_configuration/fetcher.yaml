@@ -94,5 +94,5 @@ evidence_set:
     Which resources are left out of scope?
       - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every cluster is in scope
       - resource_exclusion_patterns_unmatched — List of configured patterns that matched no cluster, such as a mistyped name
-      - excluded_redis_clusters — Number of clusters left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their databases
-      - in_scope_redis_clusters — Number of clusters read and in scope; 0 means none was read or the patterns took out every cluster, which a check can catch by requiring more than 0
+      - excluded_redis_clusters — Number of clusters left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their databases; null if the list couldn't be read
+      - in_scope_redis_clusters — Number of clusters read and in scope; null if the list couldn't be read, and 0 means there are none or the patterns took out every cluster, which a check can catch by requiring more than 0

@@ -416,7 +416,7 @@ def _collect_entra_admins(client, collector: Collector, group, server_name) -> l
         return []
 
 
-def collect_postgresql_servers(subscription_id, cred, collector: Collector, exclusions=None, excluded=None) -> list[dict]:
+def collect_postgresql_servers(subscription_id, cred, collector: Collector, exclusions=None, excluded=None) -> list[dict] | None:
     """One servers list, then per in-scope server: 6 parameter GETs + firewall + Entra admins; excluded servers are appended to `excluded`."""
 
     def _client():
@@ -429,7 +429,7 @@ def collect_postgresql_servers(subscription_id, cred, collector: Collector, excl
     # Guarded: a missing SDK becomes internal_error, evidence still written.
     client = collector.guard("postgresql.PostgreSQLManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         servers_group = client.servers
@@ -448,9 +448,9 @@ def collect_postgresql_servers(subscription_id, cred, collector: Collector, excl
         # ItemPaged: the SDK follows nextLink itself, so pagination is handled.
         return [project_postgresql_server(s) for s in lister()]
 
-    projected_servers = collector.guard(
-        "postgresql.servers.list_by_subscription", _list, default=[]
-    )
+    projected_servers = collector.guard("postgresql.servers.list_by_subscription", _list)
+    if projected_servers is None:
+        return None
 
     if exclusions:
         projected_servers, out = exclusions.split(projected_servers, "postgresql_server")
@@ -505,7 +505,7 @@ def main() -> int:
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
     excluded: list[dict] = []
-    servers: list[dict] = []
+    servers: list[dict] | None = None
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked first: an unregistered provider returns an empty list, not an error.
@@ -529,6 +529,8 @@ def main() -> int:
         )
 
     exclusions.warn_unmatched(logger)
+    listed = servers is not None
+    servers = servers or []
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -542,7 +544,7 @@ def main() -> int:
         summary={
             **summarize(servers),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("postgresql_server",), {"postgresql_servers": len(servers)}),
+            **exclusions.summary(excluded, ("postgresql_server",), {"postgresql_servers": len(servers) if listed else None}),
         },
     )
 

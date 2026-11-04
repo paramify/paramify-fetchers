@@ -85,5 +85,5 @@ evidence_set:
     instead, each with the pattern that matched; the summary gives resource_exclusion_patterns
     (the configured patterns, empty when none are set), resource_exclusion_patterns_unmatched
     (patterns that matched no registry, such as a mistyped name), excluded_registries (how many
-    the patterns took out; no other count includes them) and in_scope_registries (how many
-    stayed; 0 means none was read or the patterns took out every registry).
+    the patterns took out, null if the list couldn't be read; no other count includes them) and in_scope_registries (how many
+    stayed; null if the list couldn't be read, and 0 means there are none or the patterns took out every registry).

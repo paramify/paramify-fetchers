@@ -343,7 +343,7 @@ def diagnostic_settings_resource_uri(resource_id: str) -> str:
 
 
 def collect_registries(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-                       excluded: list | None = None) -> list[dict]:
+                       excluded: list | None = None) -> list[dict] | None:
     """One subscription-wide registries.list(), then one diagnostic-settings list per registry.
 
     `registries.list()` returns an ItemPaged, so the SDK follows nextLink itself. The
@@ -365,13 +365,14 @@ def collect_registries(subscription_id, cred, collector: Collector, exclusions: 
         "containerregistry.ContainerRegistryManagementClient (init)", _client
     )
     if client is None:
-        return []
+        return None
 
     registries = collector.guard(
         "containerregistry.registries.list",
         lambda: [registry_record(project_registry(r)) for r in client.registries.list()],
-        default=[],
     )
+    if registries is None:
+        return None
     registries, out = (exclusions or ResourceExclusions()).split(registries, "registry")
     if excluded is not None:
         excluded += sorted(out, key=lambda e: e["id"] or "")
@@ -443,7 +444,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    registries: list[dict] = []
+    registries: list[dict] | None = None
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
@@ -471,6 +472,8 @@ def main() -> int:
 
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
+    listed = registries is not None
+    registries = registries or []
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -484,7 +487,7 @@ def main() -> int:
         summary={
             **summarize(registries),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("registry",), {"registries": len(registries)}),
+            **exclusions.summary(excluded, ("registry",), {"registries": len(registries) if listed else None}),
         },
     )
 

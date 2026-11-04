@@ -258,7 +258,7 @@ def summarize(clusters: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_clusters(subscription_id, cred, collector: Collector) -> list[dict]:
+def collect_clusters(subscription_id, cred, collector: Collector) -> list[dict] | None:
     """One subscription-wide managed_clusters.list().
 
     The list response carries the whole projection (no per-cluster GET needed) and is an
@@ -274,16 +274,15 @@ def collect_clusters(subscription_id, cred, collector: Collector) -> list[dict]:
 
     client = collector.guard("containerservice.ContainerServiceClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     clusters = collector.guard(
         "containerservice.managed_clusters.list",
         lambda: [
             cluster_record(project_managed_cluster(c)) for c in client.managed_clusters.list()
         ],
-        default=[],
     )
-    return sorted(clusters, key=lambda r: r.get("id") or "")
+    return None if clusters is None else sorted(clusters, key=lambda r: r.get("id") or "")
 
 
 def main() -> int:
@@ -303,7 +302,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    clusters: list[dict] = []
+    clusters: list[dict] | None = None
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
@@ -320,7 +319,8 @@ def main() -> int:
                 subscription_id,
             )
         clusters = collect_clusters(subscription_id, cred, collector)
-        clusters, excluded = exclusions.split(clusters, "cluster")
+        if clusters is not None:
+            clusters, excluded = exclusions.split(clusters, "cluster")
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -332,6 +332,8 @@ def main() -> int:
 
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
+    listed = clusters is not None
+    clusters = clusters or []
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -345,7 +347,7 @@ def main() -> int:
         summary={
             **summarize(clusters),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, KINDS, {"clusters": len(clusters)}),
+            **exclusions.summary(excluded, KINDS, {"clusters": len(clusters) if listed else None}),
         },
     )
 

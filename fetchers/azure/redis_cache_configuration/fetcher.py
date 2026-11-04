@@ -308,7 +308,7 @@ def _patch_schedule(client, rg, name):
         return []
 
 
-def collect_caches(subscription_id, cred, collector: Collector, exclusions=None, excluded=None) -> list[dict]:
+def collect_caches(subscription_id, cred, collector: Collector, exclusions=None, excluded=None) -> list[dict] | None:
     """Per-cache reads are skipped for excluded caches, which are appended to `excluded`."""
     def _clients():
         from azure.mgmt.monitor import MonitorManagementClient  # lazy
@@ -321,14 +321,15 @@ def collect_caches(subscription_id, cred, collector: Collector, exclusions=None,
 
     clients = collector.guard("redis.RedisManagementClient (init)", _clients)
     if clients is None:
-        return []
+        return None
     client, monitor = clients
 
     caches = collector.guard(
         "redis.redis.list_by_subscription",
         lambda: [project_cache(c) for c in client.redis.list_by_subscription()],
-        default=[],
     )
+    if caches is None:
+        return None
     if exclusions:
         caches, out = exclusions.split(caches, "redis_cache")
         if excluded is not None:
@@ -369,7 +370,7 @@ def main() -> int:
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
     excluded: list[dict] = []
-    caches: list[dict] = []
+    caches: list[dict] | None = None
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Cache")
@@ -389,6 +390,8 @@ def main() -> int:
         )
 
     exclusions.warn_unmatched(logger)
+    listed = caches is not None
+    caches = caches or []
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -398,7 +401,7 @@ def main() -> int:
         summary={
             **summarize(caches),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("redis_cache",), {"redis_caches": len(caches)}),
+            **exclusions.summary(excluded, ("redis_cache",), {"redis_caches": len(caches) if listed else None}),
         },
     )
     filename = f"azure_redis_cache_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"

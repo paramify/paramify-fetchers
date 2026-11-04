@@ -449,29 +449,27 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
 
     clients = collector.guard("container clients (init)", _clients)
     if clients is None:
-        return [], [], [], []
+        return None, None, None, None
     apps_client, aci_client = clients
 
     environments = collector.guard(
         "appcontainers.managed_environments.list_by_subscription",
         lambda: [project_environment(e) for e in apps_client.managed_environments.list_by_subscription()],
-        default=[],
     )
     apps = collector.guard(
         "appcontainers.container_apps.list_by_subscription",
         lambda: [project_workload("container_app", a) for a in apps_client.container_apps.list_by_subscription()],
-        default=[],
     )
     jobs = collector.guard(
         "appcontainers.jobs.list_by_subscription",
         lambda: [project_workload("job", j) for j in apps_client.jobs.list_by_subscription()],
-        default=[],
     )
     groups = collector.guard(
         "containerinstance.container_groups.list",
         lambda: [project_container_group(g) for g in aci_client.container_groups.list()],
-        default=[],
     )
+    read = tuple(listed is not None for listed in (environments, apps, jobs, groups))
+    environments, apps, jobs, groups = environments or [], apps or [], jobs or [], groups or []
     all_environments = environments
     environments, out = exclusions.split(environments, "environment")
     excluded_envs = {e["id"].lower(): e for e in out if e["id"]}
@@ -520,7 +518,8 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
         )["audit_logging_enabled"]
         group["logs_exported"] = True if group["log_analytics_configured"] else via_settings
     key = lambda r: r["id"] or ""  # noqa: E731
-    return sorted(environments, key=key), sorted(apps, key=key), sorted(jobs, key=key), sorted(groups, key=key)
+    # None for a list that wasn't read.
+    return tuple(sorted(records, key=key) if ok else None for records, ok in zip((environments, apps, jobs, groups), read))
 
 
 def main() -> int:
@@ -538,10 +537,10 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    environments: list = []
-    apps: list = []
-    jobs: list = []
-    groups: list = []
+    environments: list | None = None
+    apps: list | None = None
+    jobs: list | None = None
+    groups: list | None = None
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     registration = {}
@@ -571,6 +570,9 @@ def main() -> int:
     }
 
     exclusions.record_invalid(collector)
+    in_scope = {name: None if records is None else len(records) for name, records in (
+        ("environments", environments), ("container_apps", apps), ("jobs", jobs), ("container_groups", groups))}
+    environments, apps, jobs, groups = environments or [], apps or [], jobs or [], groups or []
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -587,9 +589,7 @@ def main() -> int:
         summary={
             **summarize(environments, apps, jobs, groups),
             **registration,
-            **exclusions.summary(excluded, KINDS, {
-                "environments": len(environments), "container_apps": len(apps), "jobs": len(jobs),
-                "container_groups": len(groups)}),
+            **exclusions.summary(excluded, KINDS, in_scope),
         },
     )
     filename = f"azure_container_workloads_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"

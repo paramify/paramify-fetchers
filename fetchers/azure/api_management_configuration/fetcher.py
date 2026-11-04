@@ -589,7 +589,7 @@ KINDS = ("service",)
 
 
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-            excluded: list | None = None) -> list[dict]:
+            excluded: list | None = None) -> list[dict] | None:
     """An excluded service gets no per-service reads; its APIs, products, backends and hostnames leave with it."""
     def _client():
         from azure.mgmt.apimanagement import ApiManagementClient  # lazy
@@ -598,13 +598,14 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
 
     client = collector.guard("apimanagement.ApiManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
     now = datetime.now(timezone.utc)
     services = collector.guard(
         "apimanagement.api_management_service.list",
         lambda: [project_service(s, now) for s in client.api_management_service.list()],
-        default=[],
     )
+    if services is None:
+        return None
     services, out = (exclusions or ResourceExclusions()).split(services, "service")
     if excluded is not None:
         excluded += sorted(out, key=lambda e: e["id"] or "")
@@ -633,7 +634,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    services: list = []
+    services: list | None = None
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
@@ -656,6 +657,8 @@ def main() -> int:
 
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
+    listed = services is not None
+    services = services or []
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -665,7 +668,7 @@ def main() -> int:
         summary={
             **summarize(services),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, KINDS, {"services": len(services)}),
+            **exclusions.summary(excluded, KINDS, {"services": len(services) if listed else None}),
         },
     )
     filename = f"azure_api_management_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"

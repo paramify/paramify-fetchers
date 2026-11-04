@@ -234,7 +234,7 @@ def _count_by_kind(accounts: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_database_accounts(subscription_id, cred, collector: Collector) -> list[dict]:
+def collect_database_accounts(subscription_id, cred, collector: Collector) -> list[dict] | None:
     """One database_accounts.list() — the whole projection is in that response."""
 
     def _client():
@@ -245,7 +245,7 @@ def collect_database_accounts(subscription_id, cred, collector: Collector) -> li
     # Guarded: a missing azure-mgmt-cosmosdb becomes internal_error, evidence still written.
     client = collector.guard("cosmosdb.CosmosDBManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself, so pagination is handled.
@@ -254,8 +254,8 @@ def collect_database_accounts(subscription_id, cred, collector: Collector) -> li
             for a in client.database_accounts.list()
         ]
 
-    accounts = collector.guard("cosmosdb.database_accounts.list", _list, default=[])
-    return sorted(accounts, key=lambda r: r.get("id") or "")
+    accounts = collector.guard("cosmosdb.database_accounts.list", _list)
+    return None if accounts is None else sorted(accounts, key=lambda r: r.get("id") or "")
 
 
 def main() -> int:
@@ -274,7 +274,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    accounts: list[dict] = []
+    accounts: list[dict] | None = None
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked first: an unregistered provider returns an empty list, not an error.
@@ -299,7 +299,8 @@ def main() -> int:
 
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
-    accounts, excluded = exclusions.split(accounts, "cosmosdb_account")
+    listed = accounts is not None
+    accounts, excluded = exclusions.split(accounts or [], "cosmosdb_account")
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(
@@ -314,7 +315,7 @@ def main() -> int:
         summary={
             **summarize(accounts),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("cosmosdb_account",), {"cosmosdb_accounts": len(accounts)}),
+            **exclusions.summary(excluded, ("cosmosdb_account",), {"cosmosdb_accounts": len(accounts) if listed else None}),
         },
     )
 

@@ -240,7 +240,7 @@ KINDS = ("disk",)
 
 
 def collect_disks(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-                  excluded: list | None = None) -> list[dict]:
+                  excluded: list | None = None) -> list[dict] | None:
     """One subscription-wide disks.list().
 
     The list response carries the whole projection (no per-disk GET needed) and is an
@@ -256,13 +256,14 @@ def collect_disks(subscription_id, cred, collector: Collector, exclusions: Resou
 
     client = collector.guard("compute.ComputeManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     disks = collector.guard(
         "compute.disks.list",
         lambda: [disk_record(project_disk(d)) for d in client.disks.list()],
-        default=[],
     )
+    if disks is None:
+        return None
     disks, out = (exclusions or ResourceExclusions()).split(disks, "disk")
     if excluded is not None:
         excluded += sorted(out, key=lambda e: e["id"] or "")
@@ -286,7 +287,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    disks: list[dict] = []
+    disks: list[dict] | None = None
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
@@ -314,6 +315,8 @@ def main() -> int:
 
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
+    listed = disks is not None
+    disks = disks or []
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -327,7 +330,7 @@ def main() -> int:
         summary={
             **summarize(disks),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, KINDS, {"disks": len(disks)}),
+            **exclusions.summary(excluded, KINDS, {"disks": len(disks) if listed else None}),
         },
     )
 

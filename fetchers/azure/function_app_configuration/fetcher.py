@@ -386,7 +386,7 @@ def _privileged_call(collector: Collector, operation: str, app_name: str, fn):
 
 
 def collect_function_apps(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-                          excluded: list | None = None) -> list[dict]:
+                          excluded: list | None = None) -> list[dict] | None:
     """One web_apps.list(), then three per-app calls: `config/web` (GET, Reader) for the
     runtime and FTPS state, `host/listkeys` and `config/appsettings/list` (POST /action,
     beyond Reader) for the key and settings posture.
@@ -398,7 +398,7 @@ def collect_function_apps(subscription_id, cred, collector: Collector, exclusion
 
     client = collector.guard("web.WebSiteManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself, so pagination is handled.
@@ -408,7 +408,9 @@ def collect_function_apps(subscription_id, cred, collector: Collector, exclusion
             if is_function_app(model_attr(site, "kind"))
         ]
 
-    apps = collector.guard("web.web_apps.list", _list, default=[])
+    apps = collector.guard("web.web_apps.list", _list)
+    if apps is None:
+        return None
     apps, out = (exclusions or ResourceExclusions()).split(apps, "function_app")
     if excluded is not None:
         excluded += sorted(out, key=lambda e: e["id"] or "")
@@ -481,7 +483,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    apps: list[dict] = []
+    apps: list[dict] | None = None
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
@@ -509,6 +511,8 @@ def main() -> int:
 
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
+    listed = apps is not None
+    apps = apps or []
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -522,7 +526,7 @@ def main() -> int:
         summary={
             **summarize(apps),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, KINDS, {"function_apps": len(apps)}),
+            **exclusions.summary(excluded, KINDS, {"function_apps": len(apps) if listed else None}),
         },
     )
 

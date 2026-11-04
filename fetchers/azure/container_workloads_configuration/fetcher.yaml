@@ -137,6 +137,6 @@ evidence_set:
     resource_exclusion_patterns (the configured patterns, empty when none are set),
     resource_exclusion_patterns_unmatched (patterns that matched no environment, app, job or
     container group, such as a mistyped name), excluded_environments, excluded_container_apps,
-    excluded_jobs and excluded_container_groups (how many the patterns took out; no other count
+    excluded_jobs and excluded_container_groups (how many the patterns took out, null if the list couldn't be read; no other count
     includes them) and in_scope_environments, in_scope_container_apps, in_scope_jobs and
-    in_scope_container_groups (how many stayed).
+    in_scope_container_groups (how many stayed; null if that list couldn't be read).

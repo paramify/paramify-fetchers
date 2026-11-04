@@ -9,6 +9,8 @@ import types
 from pathlib import Path
 from types import SimpleNamespace as NS
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
 sys.path.insert(0, str(AZURE / "_shared"))
@@ -69,6 +71,18 @@ def _rest(summary: dict) -> dict:
 
 def _excluded(evidence) -> list:
     return sorted((e["kind"], e["name"], e["pattern"], e["reason"]) for e in evidence["results"]["excluded"])
+
+
+def _refuse(monkeypatch, m, operation):
+    """Answers one guarded call with a 403, as Azure does for a list the identity may not read."""
+    class Refusing(m.Collector):
+        def guard(self, op, fn, default=None):
+            if op == operation:
+                self.record(op, PermissionError("(AuthorizationFailed) 403"))
+                return default
+            return super().guard(op, fn, default)
+
+    monkeypatch.setattr(m, "Collector", Refusing)
 
 
 def _empty(*kinds_and_totals) -> dict:
@@ -667,6 +681,44 @@ def test_identities_in_a_loop_stay_only_when_one_of_them_reaches_in(monkeypatch,
     marks = {i["name"]: i.get("kept_by_identity_rule") for i in evidence["results"]["user_assigned_identities"]}
     assert marks == {"id-in": None, "id-east": None, "id-a": "rg:rg-out", "id-b": "rg:rg-out"}
     assert sorted(e["name"] for e in evidence["results"]["excluded"]) == ["id-c", "id-d", "id-out", "vm-out"]
+
+
+def test_identities_a_refused_role_list_keeps_every_matched_identity(monkeypatch, tmp_path):
+    _refuse(monkeypatch, identities, "authorization.role_assignments.list_for_subscription")
+    code, evidence, fic_reads, graph_reads = run_identities(monkeypatch, tmp_path, "rg:rg-out")
+    results = evidence["results"]
+    # Which identities reach in is unknown, so none leaves; the run still fails.
+    assert code == 1 and results["excluded"] == []
+    marks = {i["name"]: i.get("kept_by_identity_rule") for i in results["user_assigned_identities"]}
+    assert marks == {"id-in": None, "id-out": "rg:rg-out", "id-east": None}
+    marks = {i["resource_name"]: i.get("kept_by_identity_rule") for i in results["system_assigned_identities"]}
+    assert marks == {"vm-in": None, "vm-out": "rg:rg-out", "vm-east": None}
+    assert _uai("rg-out", "id-out").id in fic_reads and {"p-id-out", "ps-out"} <= set(graph_reads)
+
+
+# --- a list that wasn't read ---
+
+@pytest.mark.parametrize("runner, module, operation, plural", [
+    (run_aks, aks, "containerservice.managed_clusters.list", "clusters"),
+    (run_acr, acr, "containerregistry.registries.list", "registries"),
+    (run_workloads, workloads, "appcontainers.jobs.list_by_subscription", "jobs"),
+    (run_functions, functions, "web.web_apps.list", "function_apps"),
+    (run_vms, vms, "compute.virtual_machine_scale_sets.list_all", "scale_sets"),
+    (run_disks, disks, "compute.disks.list", "disks"),
+    (run_apim, apim, "apimanagement.api_management_service.list", "services"),
+    (run_identities, identities, "msi.user_assigned_identities.list_by_subscription", "user_assigned_identities"),
+    (run_identities, identities, "resourcegraph.resources(identity)", "system_assigned_identities"),
+], ids=["clusters", "registries", "jobs", "function_apps", "scale_sets", "disks", "services", "user_assigned",
+        "system_assigned"])
+def test_a_refused_list_leaves_its_exclusion_counts_null(runner, module, operation, plural, monkeypatch, tmp_path):
+    _refuse(monkeypatch, module, operation)
+    code, evidence = runner(monkeypatch, tmp_path, "rg:rg-out")[:2]
+    summary = evidence["summary"]
+    assert code == 1
+    assert (summary[f"in_scope_{plural}"], summary[f"excluded_{plural}"]) == (None, None)
+    # The other lists were read, so their counts stay numbers.
+    assert all(v is not None for k, v in summary.items() if k.startswith(("in_scope_", "excluded_")) and
+               not k.endswith(f"_{plural}"))
 
 
 # --- a bare pattern fails the run ---

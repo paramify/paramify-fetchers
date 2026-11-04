@@ -222,7 +222,12 @@ schemas and the `paramify` CLI — not the internal code.
     pattern matches stays in scope while it holds an Azure role at an in-scope
     scope or on a user-assigned identity kept this way, as an App Service plan
     stays while an in-scope site runs on it, and its record carries
-    `kept_by_identity_rule` with the pattern.
+    `kept_by_identity_rule` with the pattern. If the role-assignment list
+    couldn't be read, every identity a pattern matches stays that way.
+
+  In the seventeen fetchers above, from `azure_cosmosdb_configuration` on, a
+  list that couldn't be read leaves the `in_scope_*` and `excluded_*` counts of
+  its kind null, not 0.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or

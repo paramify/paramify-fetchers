@@ -90,6 +90,18 @@ def _excluded(evidence) -> list:
     return sorted((e["kind"], e["name"], e["pattern"], e["reason"]) for e in evidence["results"]["excluded"])
 
 
+def _refuse(monkeypatch, m, operation):
+    """Answers one guarded call with a 403, as Azure does for a list the identity may not read."""
+    class Refusing(m.Collector):
+        def guard(self, op, fn, default=None):
+            if op == operation:
+                self.record(op, PermissionError("(AuthorizationFailed) 403"))
+                return default
+            return super().guard(op, fn, default)
+
+    monkeypatch.setattr(m, "Collector", Refusing)
+
+
 def _names(records) -> list:
     return sorted(r["name"] for r in records)
 
@@ -344,3 +356,32 @@ def test_a_bare_pattern_fails_the_redis_cache_and_data_services_runs(monkeypatch
     assert code == 1
     code, _evidence, _ = _data_services("rg-out", monkeypatch, tmp_path)
     assert code == 1
+
+
+LISTS = {cosmos: "cosmosdb.database_accounts.list", databricks: "databricks.workspaces.list_by_subscription",
+         managed_redis: "redisenterprise.redis_enterprise.list", mysql: "mysql.servers.list",
+         postgres: "postgresql.servers.list_by_subscription", sql_enc: "sql.servers.list", sql_cfg: "sql.servers.list"}
+
+
+@pytest.mark.parametrize("case", SIMPLE, ids=IDS)
+def test_a_refused_list_leaves_its_exclusion_counts_null(case, monkeypatch, tmp_path):
+    m, filename, _, kind, plural, _, modules, _ = case
+    _refuse(monkeypatch, m, LISTS[m])
+    _, modules_ = modules()
+    code, evidence = _run(m, monkeypatch, tmp_path, PATTERNS, filename, modules_)
+    assert code == 1
+    assert (evidence["summary"][f"in_scope_{plural}"], evidence["summary"][f"excluded_{kind}s"]) == (None, None)
+
+
+def test_a_refused_list_leaves_the_redis_cache_and_data_services_counts_null(monkeypatch, tmp_path):
+    _refuse(monkeypatch, redis_cache, "redis.redis.list_by_subscription")
+    _, modules = _redis_cache_modules()
+    code, evidence = _run(redis_cache, monkeypatch, tmp_path, PATTERNS, "azure_redis_cache_configuration", modules)
+    assert code == 1
+    assert (evidence["summary"]["in_scope_redis_caches"], evidence["summary"]["excluded_redis_caches"]) == (None, None)
+    _refuse(monkeypatch, data_services, "eventhub.namespaces.list")
+    code, evidence, _ = _data_services(PATTERNS, monkeypatch, tmp_path)
+    s = evidence["summary"]
+    assert code == 1
+    assert (s["in_scope_event_hub_namespaces"], s["excluded_event_hub_namespaces"]) == (None, None)
+    assert (s["in_scope_mongo_clusters"], s["excluded_mongo_clusters"]) == (1, 1)
