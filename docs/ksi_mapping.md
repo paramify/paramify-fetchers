@@ -400,13 +400,13 @@ python tools/gen_ksi_mapping.py
 
 *3 fetchers:* [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`datadog_incident_timelines`](../fetchers/datadog/incident_timelines), [`jira_incident_postmortems`](../fetchers/jira/incident_postmortems)
 
-#### ⬜ `KSI-INR-RIR` — Reviewing Incident Response Procedures
+#### `KSI-INR-RIR` — Reviewing Incident Response Procedures
 
 > The effectiveness of documented incident response procedures is persistently reviewed.
 
 *Controls:* `ir-4`, `ir-4.1`, `ir-6`, `ir-6.1`, `ir-6.3`, `ir-7`, `ir-7.1`, `ir-8`, `ir-8.1`, `si-4.5`
 
-*Organizational — evidenced by HR, training or process, not cloud config.*
+*1 fetcher:* [`azure_sentinel_playbooks`](../fetchers/azure/sentinel_playbooks)
 
 #### `KSI-INR-RPI` — Reviewing Past Incidents
 
@@ -587,7 +587,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules) | `KSI-IAM-SUS`, `KSI-MLA-RVL` |
 | [`azure_sentinel_data_sources`](../fetchers/azure/sentinel_data_sources) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents) | `KSI-CNA-ULN`, `KSI-IAM-SUS`, `KSI-INR-AAR`, `KSI-INR-RPI`, `KSI-MLA-RVL` |
-| [`azure_sentinel_playbooks`](../fetchers/azure/sentinel_playbooks) | `KSI-IAM-SUS`, `KSI-MLA-RVL` |
+| [`azure_sentinel_playbooks`](../fetchers/azure/sentinel_playbooks) | `KSI-IAM-SUS`, `KSI-INR-RIR`, `KSI-MLA-RVL` |
 | [`azure_service_availability`](../fetchers/azure/service_availability) | `KSI-RPL-RRO`, `KSI-RPL-TRC` |
 | [`azure_service_log_records`](../fetchers/azure/service_log_records) | `KSI-IAM-SNU`, `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_sql_encryption_status`](../fetchers/azure/sql_encryption_status) | `KSI-SVC-SIN` |

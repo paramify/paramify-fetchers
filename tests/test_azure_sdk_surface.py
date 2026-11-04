@@ -2813,6 +2813,19 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "groups_with_only_disabled_owners reads unknown",
     ),
     (
+        "msgraph.generated.models.conditional_access_condition_set",
+        "ConditionalAccessConditionSet",
+        ["devices", "authentication_flows", "insider_risk_levels", "service_principal_risk_levels"],
+        "azure/entra_conditional_access_policies — a missing field reads as no condition, so a "
+        "device filter, flow or risk condition would not stop a policy counting for MFA coverage",
+    ),
+    (
+        "msgraph.generated.models.conditional_access_devices",
+        "ConditionalAccessDevices",
+        ["device_filter"],
+        "azure/entra_conditional_access_policies — without it a device filter reads as absent",
+    ),
+    (
         "msgraph.generated.models.authentication_strength_policy",
         "AuthenticationStrengthPolicy",
         ["id", "display_name", "requirements_satisfied"],
