@@ -331,8 +331,9 @@ def fetch_dnssec(arm, zone_id: str):
 
 
 def collect_public_zones(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-                         excluded: list | None = None) -> list[dict]:
-    """Zones the exclusions take out are appended to `excluded` and get no DNSSEC or record-set reads."""
+                         excluded: list | None = None) -> list[dict] | None:
+    """Zones the exclusions take out are appended to `excluded` and get no DNSSEC or record-set reads; None when the
+    zone list wasn't read."""
     def _clients():
         from azure.mgmt.dns import DnsManagementClient  # lazy
         from azure.mgmt.privatedns import PrivateDnsManagementClient  # lazy
@@ -345,11 +346,11 @@ def collect_public_zones(subscription_id, cred, collector: Collector, exclusions
 
     clients = collector.guard("dns.DnsManagementClient (init)", _clients)
     if clients is None:
-        return []
+        return None
     dns, arm = clients
-    zones = collector.guard(
-        "dns.zones.list", lambda: [project_public_zone(z) for z in dns.zones.list()], default=[]
-    )
+    zones = collector.guard("dns.zones.list", lambda: [project_public_zone(z) for z in dns.zones.list()])
+    if zones is None:
+        return None
     zones = split_zones(zones, "public_dns_zone", exclusions, excluded)
     records = []
     for zone in zones:
@@ -371,8 +372,9 @@ def collect_public_zones(subscription_id, cred, collector: Collector, exclusions
 
 
 def collect_private_zones(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-                          excluded: list | None = None) -> list[dict]:
-    """Zones the exclusions take out are appended to `excluded` and get no virtual network link reads."""
+                          excluded: list | None = None) -> list[dict] | None:
+    """Zones the exclusions take out are appended to `excluded` and get no virtual network link reads; None when the
+    zone list wasn't read."""
     def _client():
         from azure.mgmt.privatedns import PrivateDnsManagementClient  # lazy
 
@@ -382,12 +384,13 @@ def collect_private_zones(subscription_id, cred, collector: Collector, exclusion
 
     client = collector.guard("privatedns.PrivateDnsManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
     zones = collector.guard(
         "privatedns.private_zones.list",
         lambda: [project_private_zone(z) for z in client.private_zones.list()],
-        default=[],
     )
+    if zones is None:
+        return None
     zones = split_zones(zones, "private_dns_zone", exclusions, excluded)
     records = []
     for zone in zones:
@@ -419,8 +422,8 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    public: list[dict] = []
-    private: list[dict] = []
+    public: list[dict] | None = None
+    private: list[dict] | None = None
     resources = ResourceExclusions.from_env()
     resources.record_invalid(collector)
     excluded: list[dict] = []
@@ -443,6 +446,9 @@ def main() -> int:
         )
 
     resources.warn_unmatched(logger)
+    zone_counts = {"public_dns_zones": None if public is None else len(public),
+                   "private_dns_zones": None if private is None else len(private)}
+    public, private = public or [], private or []
     # Scope exclusions apply to the record sets of the zones left in scope.
     exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
     exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
@@ -463,8 +469,7 @@ def main() -> int:
         summary={**summarize(public, private), "provider_registration_status": registration,
                  **exclusions.summary(excluded, ("record_set",), {
                      "record_sets": sum(len(z["record_sets"] or []) for z in public)}),
-                 **resources.summary(excluded, RESOURCE_KINDS, {
-                     "public_dns_zones": len(public), "private_dns_zones": len(private)})},
+                 **resources.summary(excluded, RESOURCE_KINDS, zone_counts)},
     )
     filename = f"azure_dns_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

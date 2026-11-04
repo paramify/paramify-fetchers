@@ -669,6 +669,38 @@ def _refuse(monkeypatch, module, operation):
     monkeypatch.setattr(module, "Collector", Refusing)
 
 
+def _refused_gateways(m, name):
+    def run(monkeypatch, tmp_path):
+        _environment(ag, monkeypatch, tmp_path, "rg:rg-out")
+        monkeypatch.setattr(ag, "list_gateways", lambda s, c, collector: collector.record(
+            "network.application_gateways.list_all", REFUSED))
+        monkeypatch.setattr(ag, "resource_graph_gateway_count", lambda *a: 3)
+        if m is waf:
+            monkeypatch.setattr(waf, "collect_policies", lambda *a: [_policy("pol-in", NET_IN, "Enabled", "Prevention")])
+        return m.run_fetcher(name, m.logger, m.build), _read(tmp_path, name)
+    return run
+
+
+def _refused_waf_policies(monkeypatch, tmp_path):
+    _fake_azure(monkeypatch, NS(web_application_firewall_policies=NS(list_all=lambda: [])))
+    _refuse(monkeypatch, ag, "network.web_application_firewall_policies.list_all")
+    _environment(ag, monkeypatch, tmp_path, "rg:rg-out")
+    monkeypatch.setattr(ag, "list_gateways", lambda *a: _gateways())
+    monkeypatch.setattr(ag, "resource_graph_gateway_count", lambda *a: 3)
+    monkeypatch.setattr(waf, "fetch_policy", lambda pid, cred, collector: (None, waf.unresolved_policy(pid)))
+    return waf.run_fetcher("azure_app_gateway_waf", waf.logger, waf.build), _read(tmp_path, "azure_app_gateway_waf")
+
+
+def _refused_ddos(operation):
+    def run(monkeypatch, tmp_path):
+        _fake_azure(monkeypatch, NS(**{name: NS(list=lambda: [], list_all=lambda: []) for name in (
+            "ddos_protection_plans", "virtual_networks", "public_ip_addresses", "network_interfaces", "load_balancers")}))
+        _refuse(monkeypatch, ddos, operation)
+        _environment(ddos, monkeypatch, tmp_path, "rg:rg-out")
+        return ddos.main(), _read(tmp_path, "azure_ddos_protection")
+    return run
+
+
 def _refused(m, run, operation):
     def go(monkeypatch, tmp_path):
         _refuse(monkeypatch, m, operation)
@@ -678,16 +710,30 @@ def _refused(m, run, operation):
 
 
 @pytest.mark.parametrize("run, unread, read", [
+    (_refused_gateways(backend, "azure_app_gateway_backend_tls"), ("application_gateways", "backend_settings"), ()),
+    (_refused_gateways(listeners, "azure_app_gateway_tls_listeners"), ("application_gateways", "listeners"), ()),
+    (_refused_gateways(waf, "azure_app_gateway_waf"), ("application_gateways", "listeners"), ("waf_policies",)),
+    (_refused_waf_policies, ("waf_policies",), ("application_gateways",)),
+    (_refused_ddos("network.ddos_protection_plans.list"), ("ddos_protection_plans",), ("virtual_networks", "public_ips")),
+    (_refused_ddos("network.virtual_networks.list_all"), ("virtual_networks",), ("ddos_protection_plans", "public_ips")),
+    (_refused_ddos("network.public_ip_addresses.list_all"), ("public_ips",), ("ddos_protection_plans", "virtual_networks")),
     (_refused(flow, _run_flow, "network.virtual_networks.list_all"), ("virtual_networks", "subnets"),
      ("network_watchers", "flow_logs")),
     (_refused(flow, _run_flow, "network.network_watchers.list_all"), ("network_watchers", "flow_logs"),
      ("virtual_networks", "subnets")),
-], ids=["flow-vnets", "flow-watchers"])
+    # A hub's gateways leave with an excluded hub, so with the hub list unread their in-scope counts are unknown too.
+    (_refused(vwan, _run_wan, "network.virtual_hubs.list"), ("virtual_hubs", "vpn_gateways", "p2s_vpn_gateways"),
+     ("virtual_wans", "vpn_sites", "vpn_server_configurations")),
+    (_refused(vpn, _run_vpn, "resource.resource_groups.list"),
+     ("virtual_network_gateways", "connections", "local_network_gateways"), ()),
+], ids=["backend", "listeners", "waf-gateways", "waf-policies", "ddos-plans", "ddos-vnets", "ddos-ips", "flow-vnets",
+        "flow-watchers", "wan-hubs", "vpn-groups"])
 def test_a_list_that_wasnt_read_leaves_its_exclusion_counts_null(run, unread, read, monkeypatch, tmp_path):
     code, evidence = run(monkeypatch, tmp_path)
     summary = evidence["summary"]
     assert code == 1
-    assert {k: (summary[f"in_scope_{k}"], summary[f"excluded_{k}"]) for k in unread} == dict.fromkeys(
+    # Listeners and backend settings have no excluded count of their own: they leave with their gateway.
+    assert {k: (summary[f"in_scope_{k}"], summary.get(f"excluded_{k}")) for k in unread} == dict.fromkeys(
         unread, (None, None))
     assert all(isinstance(summary[f"in_scope_{k}"], int) and isinstance(summary[f"excluded_{k}"], int) for k in read)
 

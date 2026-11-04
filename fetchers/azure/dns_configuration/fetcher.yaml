@@ -111,10 +111,10 @@ evidence_set:
     Which zones are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every zone is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no public or private DNS zone, such as a mistyped name
-    - excluded_public_dns_zones — Number of public DNS zones left out of scope because a pattern matched their resource group or id (or location:global); each is listed under excluded with the pattern, and no other count includes them or their record sets
-    - excluded_private_dns_zones — Number of private DNS zones left out of scope the same way; their virtual network links leave with them
-    - in_scope_public_dns_zones — Number of public DNS zones read and in scope; 0 means none was read or the patterns took out every one, which a check can catch by requiring more than 0
-    - in_scope_private_dns_zones — Number of private DNS zones read and in scope
+    - excluded_public_dns_zones — Number of public DNS zones left out of scope because a pattern matched their resource group or id (or location:global); each is listed under excluded with the pattern, and no other count includes them or their record sets; null if the public zone list couldn't be read
+    - excluded_private_dns_zones — Number of private DNS zones left out of scope the same way; their virtual network links leave with them; null if the private zone list couldn't be read
+    - in_scope_public_dns_zones — Number of public DNS zones read and in scope; 0 means there are none or the patterns took out every one, which a check can catch by requiring more than 0; null if the public zone list couldn't be read
+    - in_scope_private_dns_zones — Number of private DNS zones read and in scope; null if the private zone list couldn't be read
 
     Which record sets are left out of scope?
     - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against each public record set's relative name and FQDN. A relative name such as www matches that name in every public zone. A record set is in scope unless one matches it; empty when none are set, so every record set is in scope

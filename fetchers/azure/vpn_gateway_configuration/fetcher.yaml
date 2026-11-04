@@ -103,5 +103,6 @@ evidence_set:
     excluded_connections, excluded_local_network_gateways (how many the
     patterns took out) and in_scope_virtual_network_gateways,
     in_scope_connections, in_scope_local_network_gateways (how many
-    stayed). results.excluded is always present, empty when nothing is
+    stayed); all of them are null when the resource group list couldn't be
+    read. results.excluded is always present, empty when nothing is
     excluded.

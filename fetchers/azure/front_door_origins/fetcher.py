@@ -1051,13 +1051,16 @@ def plan_queries(plan_ids: list[str]) -> list[str]:
     return queries
 
 
+SITES_QUERY = "resourcegraph.resources (sites"
+
+
 def lookup_sites(client, collector: Collector, subscription_id: str, site_ids: list[str], host_names: list[str]) -> tuple[dict, dict]:
     """App Service apps from Resource Graph keyed by lower-cased id, and the app owning each looked-up host name."""
     if client is None:
         return {}, {}
     sites, by_host = {}, {}
     for n, query in enumerate(site_queries(subscription_id, site_ids, host_names)):
-        for row in collector.guard(f"resourcegraph.resources (sites {n + 1})", lambda: graph_rows(client, query), default=[]):
+        for row in collector.guard(f"{SITES_QUERY} {n + 1})", lambda: graph_rows(client, query), default=[]):
             if not row.get("key"):
                 continue
             key = row["key"].rstrip("/")
@@ -1167,12 +1170,15 @@ def split_profiles(collected: list[dict], exclusions: ResourceExclusions) -> tup
             [c for c in collected if arm_key(c["profile"]["id"]) in out_keys], out)
 
 
-def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[dict], dict]:
+def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[dict] | None, dict]:
+    """None when the profile list wasn't read."""
     cdn = cdn_client(subscription_id, cred, collector)
     cdn_origins = cdn_client(subscription_id, cred, collector, api_version=ORIGIN_API_VERSION)
     if cdn is None or cdn_origins is None:
-        return [], {}
+        return None, {}
     profiles, skipped = front_door_profiles(cdn, collector)
+    if profiles is None:
+        return None, skipped
     collected = []
     for profile in profiles:
         rg, name = resource_group_from_id(profile["id"]), profile["name"]
@@ -1231,6 +1237,7 @@ def main() -> int:
     configs_by_key: dict = {}
     metrics_by_profile: dict = {}
     scoped_profiles: list[dict] = []
+    listed = apps_listed = False
     days = lookback_days(collector)
     resources = ResourceExclusions.from_env()
     resources.record_invalid(collector)
@@ -1244,8 +1251,9 @@ def main() -> int:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Cdn")
         if registration == NOT_REGISTERED:
             logger.warning("Microsoft.Cdn is not registered on subscription %s", subscription_id)
-        collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector)
-        collected, outside, boundary = split_profiles(collected, resources)
+        read, skipped_by_sku = collect_profiles(subscription_id, cred, collector)
+        listed = read is not None
+        collected, outside, boundary = split_profiles(read or [], resources)
         # Excluded profiles' origins are still looked up: in-scope apps' regional twins are worked out against them.
         origins = [o for c in collected + outside for g in c["origin_groups"] for o in g["origins_projected"]]
         ids = sorted({arm_key(i) for o in origins for i in (o["azure_origin_id"], (o["private_link"] or {}).get("target_id")) if i})
@@ -1263,6 +1271,8 @@ def main() -> int:
             graph, collector, subscription_id, sorted({k for _, k in known_sites if k}),
             sorted({str(o["host_name"]).lower() for o, k in known_sites if o["host_name"] and not k}),
         )
+        # The first site query lists every app in the subscription, which the production apps come from.
+        apps_listed = graph is not None and all(f["operation"] != f"{SITES_QUERY} 1)" for f in collector.failures)
         origin_sites = {origin_site_id(o, sites_by_host)[0] for o in in_scope_origins} & set(sites_by_key)
         plans_by_key = lookup_plans(graph, collector, sorted({
             arm_key(s["server_farm_id"]) for s in sites_by_key.values() if s.get("server_farm_id")}))
@@ -1326,7 +1336,8 @@ def main() -> int:
                      **in_scope_totals([sp["in_scope"] for sp in scoped_profiles]),
                      "origin_groups": len(groups), "apps": len(apps)}),
                  # in_scope_apps already counts the production apps left after both kinds of exclusion.
-                 **resources.summary(excluded, RESOURCE_KINDS, {"profiles": len(profiles)})},
+                 **resources.summary(excluded, RESOURCE_KINDS, {"profiles": len(profiles) if listed else None}),
+                 **({} if apps_listed else {"excluded_production_apps": None})},
     )
     exclusions.warn_unmatched(logger)
     filename = f"azure_front_door_origins_{sanitize_for_filename(subscription_id or 'unknown')}.json"

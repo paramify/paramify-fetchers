@@ -210,7 +210,8 @@ def split_connections(connections: list[dict], owner_ids: dict, out_gateways: li
 
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
             excluded: list | None = None):
-    """With exclusions, connection status is not read for excluded connections and they are appended to `excluded`."""
+    """With exclusions, connection status is not read for excluded connections and they are appended to `excluded`.
+    All three are None when the resource group list wasn't read."""
     def _clients():
         from azure.mgmt.network import NetworkManagementClient  # lazy
 
@@ -225,13 +226,14 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
 
     clients = collector.guard("network.NetworkManagementClient (init)", _clients)
     if clients is None:
-        return [], [], []
+        return None, None, None
     rm, net = clients
     groups = collector.guard(
         "resource.resource_groups.list",
         lambda: sorted(model_attr(g, "name") for g in rm.resource_groups.list()),
-        default=[],
     )
+    if groups is None:
+        return None, None, None
     gateways, connections, local_gateways = [], [], []
     owner_ids: dict = {}
     for rg in groups:
@@ -289,7 +291,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    gateways, connections, local_gateways = [], [], []
+    gateways = connections = local_gateways = None
     registration = REGISTRATION_UNKNOWN
     excluded: list = []
     exclusions = ResourceExclusions.from_env()
@@ -311,6 +313,8 @@ def main() -> int:
         )
 
     exclusions.warn_unmatched(logger)
+    listed = gateways is not None
+    gateways, connections, local_gateways = gateways or [], connections or [], local_gateways or []
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -326,8 +330,9 @@ def main() -> int:
             **summarize(gateways, connections, local_gateways),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("virtual_network_gateway", "connection", "local_network_gateway"), {
-                "virtual_network_gateways": len(gateways), "connections": len(connections),
-                "local_network_gateways": len(local_gateways)}),
+                "virtual_network_gateways": len(gateways) if listed else None,
+                "connections": len(connections) if listed else None,
+                "local_network_gateways": len(local_gateways) if listed else None}),
         },
     )
     filename = (

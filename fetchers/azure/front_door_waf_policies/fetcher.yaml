@@ -123,4 +123,5 @@ evidence_set:
     resource_exclusion_patterns_unmatched (patterns that matched no Standard or
     Premium WAF policy, such as a mistyped name), excluded_waf_policies (how many
     the patterns took out; no other count includes them) and in_scope_waf_policies
-    (how many stayed; 0 means none was read or the patterns took out every policy).
+    (how many stayed; 0 means there are none or the patterns took out every policy).
+    Both are null when the policy list couldn't be read.

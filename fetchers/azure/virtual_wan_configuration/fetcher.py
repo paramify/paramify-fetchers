@@ -282,6 +282,7 @@ def scope(key: str, rows: list, gone: dict, exclusions: ResourceExclusions) -> t
 
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
             excluded: list | None = None) -> dict:
+    """Each collection's records; None for a list that wasn't read."""
     def _client():
         from azure.mgmt.network import NetworkManagementClient  # lazy
 
@@ -290,7 +291,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
         )
 
     client = collector.guard("network.NetworkManagementClient (init)", _client)
-    results = {key: [] for key, _, _ in COLLECTIONS}
+    results: dict = {key: None for key, _, _ in COLLECTIONS}
     if client is None:
         return results
     gone: dict = {}
@@ -300,8 +301,9 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
             f"network.{operation}.list",
             lambda: [(with_common(project(r)), model_attr(model_attr(r, parent_attr), "id") if parent_attr else None)
                      for r in getattr(client, operation).list()],
-            default=[],
         )
+        if rows is None:
+            continue
         rows = sorted(rows, key=lambda r: r[0].get("id") or "")
         if exclusions:
             records, out = scope(key, rows, gone, exclusions)
@@ -311,6 +313,13 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
             records = [r for r, _ in rows]
         results[key] = records
     return results
+
+
+def counted(key: str, listed: set, exclusions: ResourceExclusions) -> bool:
+    """Whether a collection's in-scope count is known: its list was read and, with patterns set, so were its
+    ancestors', since a record leaves with its excluded parent."""
+    parent = PARENTS.get(key)
+    return key in listed and (not (exclusions and parent) or counted(parent[1], listed, exclusions))
 
 
 def main() -> int:
@@ -328,7 +337,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    results = {key: [] for key, _, _ in COLLECTIONS}
+    results: dict = {key: None for key, _, _ in COLLECTIONS}
     registration = REGISTRATION_UNKNOWN
     excluded: list = []
     exclusions = ResourceExclusions.from_env()
@@ -350,6 +359,8 @@ def main() -> int:
         )
 
     exclusions.warn_unmatched(logger)
+    listed = {key for key, rows in results.items() if rows is not None}
+    results = {key: rows or [] for key, rows in results.items()}
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -358,7 +369,8 @@ def main() -> int:
         summary={
             **summarize(results),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, tuple(KINDS.values()), {key: len(rows) for key, rows in results.items()}),
+            **exclusions.summary(excluded, tuple(KINDS.values()), {
+                key: len(rows) if counted(key, listed, exclusions) else None for key, rows in results.items()}),
         },
     )
     filename = (

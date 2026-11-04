@@ -289,7 +289,8 @@ def build_scoped(raw_plans, raw_vnets, raw_ips, raw_nics, raw_lbs, exclusions: R
 # --- collection (lazy azure imports) ---
 
 def collect(subscription_id, cred, collector: Collector):
-    """DDoS protection plans, VNets with their subnets' back-references, public IPs, NICs and load balancers."""
+    """DDoS protection plans, VNets with their subnets' back-references, public IPs, NICs and load balancers; the
+    first three are None when their list wasn't read."""
     from azure.mgmt.network import NetworkManagementClient
 
     client = collector.guard(
@@ -299,22 +300,19 @@ def collect(subscription_id, cred, collector: Collector):
         ),
     )
     if client is None:
-        return [], [], [], [], []
+        return None, None, None, [], []
 
     plans = collector.guard(
         "network.ddos_protection_plans.list",
         lambda: [project_plan(p) for p in client.ddos_protection_plans.list()],
-        default=[],
     )
     vnets = collector.guard(
         "network.virtual_networks.list_all",
         lambda: [project_virtual_network(v) for v in client.virtual_networks.list_all()],
-        default=[],
     )
     ips = collector.guard(
         "network.public_ip_addresses.list_all",
         lambda: [project_public_ip(i) for i in client.public_ip_addresses.list_all()],
-        default=[],
     )
     nics = collector.guard(
         "network.network_interfaces.list_all",
@@ -344,7 +342,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    raw = ([], [], [], [], [])
+    raw: tuple = (None, None, None, [], [])
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Network")
@@ -365,7 +363,9 @@ def main() -> int:
 
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
-    plans, vnets, ips, excluded = build_scoped(*raw, exclusions)
+    read = {"ddos_protection_plans": raw[0] is not None, "virtual_networks": raw[1] is not None,
+            "public_ips": raw[2] is not None}
+    plans, vnets, ips, excluded = build_scoped(*(r or [] for r in raw), exclusions)
     exclusions.warn_unmatched(logger)
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -382,7 +382,8 @@ def main() -> int:
             **summarize(plans, vnets, ips),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("ddos_protection_plan", "virtual_network", "public_ip"), {
-                "ddos_protection_plans": len(plans), "virtual_networks": len(vnets), "public_ips": len(ips)}),
+                name: len(rows) if read[name] else None for name, rows in
+                (("ddos_protection_plans", plans), ("virtual_networks", vnets), ("public_ips", ips))}),
         },
     )
 

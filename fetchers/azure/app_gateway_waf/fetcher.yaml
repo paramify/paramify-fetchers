@@ -121,5 +121,7 @@ evidence_set:
     nothing, such as a mistyped name), excluded_application_gateways,
     excluded_waf_policies (how many the patterns took out) and
     in_scope_application_gateways, in_scope_listeners,
-    in_scope_waf_policies (how many stayed). results.excluded is always
+    in_scope_waf_policies (how many stayed). The gateway and listener
+    counts are null when the gateway list couldn't be read, and the WAF
+    policy counts when the policy list couldn't. results.excluded is always
     present, empty when nothing is excluded.

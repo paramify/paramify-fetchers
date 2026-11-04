@@ -353,8 +353,9 @@ def summarize(profiles, skipped_by_sku, host_routes, endpoints_without_routes, u
 # --- collection (lazy azure imports) ---
 
 def collect_profiles(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-                     excluded: list | None = None) -> tuple[list[dict], dict]:
-    """Profiles the exclusions take out are appended to `excluded` and get no further reads."""
+                     excluded: list | None = None) -> tuple[list[dict] | None, dict]:
+    """Profiles the exclusions take out are appended to `excluded` and get no further reads; None when the profile
+    list wasn't read."""
     from azure.mgmt.monitor import MonitorManagementClient
 
     cdn = cdn_client(subscription_id, cred, collector)
@@ -365,9 +366,11 @@ def collect_profiles(subscription_id, cred, collector: Collector, exclusions: Re
         lambda: MonitorManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs()),
     )
     if cdn is None or cdn_sp is None or monitor is None:
-        return [], {}
+        return None, {}
 
     profiles, skipped = front_door_profiles(cdn, collector)
+    if profiles is None:
+        return None, skipped
     if exclusions:
         # A Front Door profile is global, so location: reaches it only as location:global.
         profiles, out = exclusions.split(profiles, "profile", location=lambda p: "global")
@@ -417,7 +420,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    collected: list[dict] = []
+    collected: list[dict] | None = None
     skipped_by_sku: dict = {}
     waf_by_key: dict = {}
     resources = ResourceExclusions.from_env()
@@ -431,7 +434,7 @@ def main() -> int:
         collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector, resources, excluded)
         # Every WAF policy, excluded ones too, so an in-scope host's verdict holds when its policy is excluded.
         waf_policies, definitions = collect_waf_policies(subscription_id, cred, collector)
-        waf_by_key = {arm_key(p["id"]): waf_policy_record(p, definitions) for p in waf_policies}
+        waf_by_key = {arm_key(p["id"]): waf_policy_record(p, definitions) for p in waf_policies or []}
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -442,6 +445,8 @@ def main() -> int:
         )
 
     resources.warn_unmatched(logger)
+    listed = collected is not None
+    collected = collected or []
     # Scope exclusions apply to the profiles left in scope.
     exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV, kinds=("route",))
     exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
@@ -481,7 +486,7 @@ def main() -> int:
             **summarize(profiles, skipped_by_sku, host_routes, no_routes, unrouted, security_policies),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, EXCLUDED_KINDS, {**in_scope_totals(scopes), "host_routes": len(host_routes)}),
-            **resources.summary(excluded, ("profile",), {"profiles": len(profiles)}),
+            **resources.summary(excluded, ("profile",), {"profiles": len(profiles) if listed else None}),
         },
     )
     exclusions.warn_unmatched(logger)

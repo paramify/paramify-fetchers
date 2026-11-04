@@ -203,10 +203,10 @@ def gateway_record(gateway, listeners: list[dict]) -> dict:
     }
 
 
-def collect_policies(subscription_id, cred, collector: Collector) -> list:
-    """Every WAF policy in the subscription."""
+def collect_policies(subscription_id, cred, collector: Collector) -> list | None:
+    """Every WAF policy in the subscription; None when the list wasn't read."""
     if cred is None:
-        return []
+        return None
 
     def _client():
         from azure.mgmt.network import NetworkManagementClient  # lazy
@@ -215,11 +215,10 @@ def collect_policies(subscription_id, cred, collector: Collector) -> list:
 
     client = collector.guard("network.NetworkManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
     return collector.guard(
         "network.web_application_firewall_policies.list_all",
         lambda: list(client.web_application_firewall_policies.list_all()),
-        default=[],
     )
 
 
@@ -275,14 +274,16 @@ def summarize(gateways: list[dict], listeners: list[dict], policies: list[dict])
     }
 
 
-def build(raw_gateways: list, collector: Collector, subscription_id, cred) -> tuple[dict, dict]:
+def build(raw_gateways: list | None, collector: Collector, subscription_id, cred) -> tuple[dict, dict]:
     # The completeness check already ran against the full list; listeners follow their gateway.
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
+    listed = raw_gateways is not None
     raw_gateways, excluded = exclusions.split(
-        raw_gateways, "application_gateway", resource_id=lambda g: model_attr(g, "id"),
+        raw_gateways or [], "application_gateway", resource_id=lambda g: model_attr(g, "id"),
         location=lambda g: model_attr(g, "location"), resource_group=lambda g: None, name=lambda g: model_attr(g, "name"))
-    policy_models = index_by_id(collect_policies(subscription_id, cred, collector))
+    listed_policies = collect_policies(subscription_id, cred, collector)
+    policy_models = index_by_id(listed_policies or [])
     unresolved_by_id = {}
     if cred is not None:
         for policy_id in sorted(set().union(*(referenced_policy_ids(g) for g in raw_gateways)) if raw_gateways else []):
@@ -317,7 +318,8 @@ def build(raw_gateways: list, collector: Collector, subscription_id, cred) -> tu
                "excluded": excluded}
     summary = {**summarize(gateways, listeners, policy_list), **exclusions.summary(
         excluded, ("application_gateway", "waf_policy"), {
-            "application_gateways": len(gateways), "listeners": len(listeners), "waf_policies": len(policy_list)})}
+            "application_gateways": len(gateways) if listed else None, "listeners": len(listeners) if listed else None,
+            "waf_policies": None if listed_policies is None else len(policy_list)})}
     return results, summary
 
 

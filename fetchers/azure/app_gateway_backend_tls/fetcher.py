@@ -142,11 +142,12 @@ def split_gateways(raw_gateways: list, exclusions: ResourceExclusions) -> tuple[
         location=lambda g: model_attr(g, "location"), resource_group=lambda g: None, name=lambda g: model_attr(g, "name"))
 
 
-def build(raw_gateways: list, collector: Collector, subscription_id, cred) -> tuple[dict, dict]:
+def build(raw_gateways: list | None, collector: Collector, subscription_id, cred) -> tuple[dict, dict]:
     # The completeness check already ran against the full list; backend settings follow their gateway.
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
-    raw_gateways, excluded = split_gateways(raw_gateways, exclusions)
+    listed = raw_gateways is not None
+    raw_gateways, excluded = split_gateways(raw_gateways or [], exclusions)
     exclusions.warn_unmatched(logger)
     gateways, settings = [], []
     for gateway in raw_gateways:
@@ -161,7 +162,8 @@ def build(raw_gateways: list, collector: Collector, subscription_id, cred) -> tu
     settings.sort(key=lambda r: arm_id_key(r["id"]))
     results = {"application_gateways": gateways, "backend_settings": settings, "excluded": excluded}
     summary = {**summarize(gateways, settings), **exclusions.summary(excluded, ("application_gateway",), {
-        "application_gateways": len(gateways), "backend_settings": len(settings)})}
+        "application_gateways": len(gateways) if listed else None,
+        "backend_settings": len(settings) if listed else None})}
     return results, summary
 
 

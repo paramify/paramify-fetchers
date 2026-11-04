@@ -539,13 +539,13 @@ APP_EAST_CONFIG = {
 }
 
 
-def run_origins(monkeypatch, tmp_path, patterns, reads=None, scope=None):
+def run_origins(monkeypatch, tmp_path, patterns, reads=None, scope=None, collect_profiles=None, lookup_sites=None):
     reads = [] if reads is None else reads
     for attr, fake in {
-        "collect_profiles": lambda subscription_id, cred, collector: (_topologies(), {}),
+        "collect_profiles": collect_profiles or (lambda subscription_id, cred, collector: (_topologies(), {})),
         "graph_client": lambda *a: object(),
         "lookup_regions": lambda *a: ({}, REGIONS),
-        "lookup_sites": lambda *a: (copy.deepcopy(SITES), SITES_BY_HOST),
+        "lookup_sites": lookup_sites or (lambda *a: (copy.deepcopy(SITES), SITES_BY_HOST)),
         "lookup_plans": lambda *a: PLANS,
         "read_site_configs": lambda cred, collector, sites: reads.extend(("config", s["name"]) for s in sites) or {
             fd.arm_key(_site_id("app-east")): APP_EAST_CONFIG},
@@ -649,3 +649,81 @@ def test_a_bare_pattern_fails_the_run(monkeypatch, tmp_path, run):
     assert code == 1
     assert evidence["results"]["excluded"] == [] and evidence["summary"]["resource_exclusion_patterns_unmatched"] == ["rg-out"]
     assert "rg:, location: or id:" in json.dumps(evidence["metadata"]["api_failures"])
+
+
+# --- a list that wasn't read leaves its counts null ---
+
+REFUSED = PermissionError("(AuthorizationFailed) 403")
+
+
+def _refuse(monkeypatch, module, operation):
+    """The collector records a 403 for one operation and returns its default, as a refused list does."""
+    class Refusing(module.Collector):
+        def guard(self, op, fn, default=None):
+            if op == operation:
+                self.record(op, REFUSED)
+                return default
+            return super().guard(op, fn, default)
+
+    monkeypatch.setattr(module, "Collector", Refusing)
+
+
+def _refused_dns(operation):
+    def run(monkeypatch, tmp_path):
+        _fake_dns_sdk(monkeypatch, [])
+        _refuse(monkeypatch, dns, operation)
+        return _run(dns, monkeypatch, tmp_path, "rg:rg-out", "azure_dns_configuration")
+    return run
+
+
+def _refused_waf_policies(monkeypatch, tmp_path):
+    client = NS(policies=NS(list_by_subscription=lambda: []), managed_rule_sets=NS(list=lambda: []))
+    monkeypatch.setitem(sys.modules, "azure.mgmt.frontdoor", NS(FrontDoorManagementClient=lambda **kw: client))
+    _refuse(monkeypatch, waf, "frontdoor.policies.list_by_subscription")
+    return _run(waf, monkeypatch, tmp_path, "rg:rg-out", "azure_front_door_waf_policies")
+
+
+def _refused_profiles(m, filename):
+    def run(monkeypatch, tmp_path):
+        _fake_cdn(monkeypatch, m, [])
+        # The shared profile list, so the refusal goes through its real guard.
+        monkeypatch.setattr(m, "front_door_profiles", fd.front_door_profiles)
+        _refuse(monkeypatch, m, "cdn.profiles.list")
+        return _run(m, monkeypatch, tmp_path, "rg:rg-out", filename)
+    return run
+
+
+def _refused_origin_profiles(monkeypatch, tmp_path):
+    monkeypatch.setattr(origins, "cdn_client", lambda *a, **k: NS(profiles=NS(list=lambda: [])))
+    _refuse(monkeypatch, origins, "cdn.profiles.list")
+    return run_origins(monkeypatch, tmp_path, "rg:rg-out", collect_profiles=REAL_ORIGIN_PROFILES)
+
+
+def _refused_apps(monkeypatch, tmp_path):
+    monkeypatch.setattr(origins, "graph_rows", lambda client, query: [])
+    _refuse(monkeypatch, origins, "resourcegraph.resources (sites 1)")
+    return run_origins(monkeypatch, tmp_path, "rg:rg-out", lookup_sites=REAL_LOOKUP_SITES)
+
+
+REAL_ORIGIN_PROFILES = origins.collect_profiles
+REAL_LOOKUP_SITES = origins.lookup_sites
+
+
+@pytest.mark.parametrize("run, unread, read", [
+    (_refused_dns("dns.zones.list"), ("public_dns_zones",), ("private_dns_zones",)),
+    (_refused_dns("privatedns.private_zones.list"), ("private_dns_zones",), ("public_dns_zones",)),
+    (_refused_waf_policies, ("waf_policies",), ()),
+    (_refused_profiles(tls, "azure_front_door_tls"), ("profiles",), ()),
+    (_refused_profiles(coverage, "azure_front_door_waf_coverage"), ("profiles",), ()),
+    (_refused_origin_profiles, ("profiles",), ()),
+    # Production apps come from the subscription's app list, not through the profiles.
+    (_refused_apps, ("production_apps",), ("profiles",)),
+], ids=["dns-public", "dns-private", "waf-policies", "tls", "coverage", "origins-profiles", "origins-apps"])
+def test_a_list_that_wasnt_read_leaves_its_exclusion_counts_null(run, unread, read, monkeypatch, tmp_path):
+    code, evidence = run(monkeypatch, tmp_path)
+    summary = evidence["summary"]
+    assert code == 1
+    # in_scope_production_apps doesn't exist: in_scope_apps counts the apps left after both kinds of exclusion.
+    assert {k: (summary.get(f"in_scope_{k}"), summary[f"excluded_{k}"]) for k in unread} == dict.fromkeys(
+        unread, (None, None))
+    assert all(isinstance(summary[f"in_scope_{k}"], int) and isinstance(summary[f"excluded_{k}"], int) for k in read)

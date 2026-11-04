@@ -226,6 +226,10 @@ schemas and the `paramify` CLI — not the internal code.
     so an in-scope app it fronts stays behind Front Door, but, as with an
     out-of-scope route, an excluded profile can't vouch for an app that admits
     its Front Door id.
+
+  In the application gateway, DDoS, flow log, Virtual WAN, VPN gateway, DNS and
+  Front Door fetchers, a kind's `excluded_*` and `in_scope_*` counts read null,
+  not 0, when its list couldn't be read.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or

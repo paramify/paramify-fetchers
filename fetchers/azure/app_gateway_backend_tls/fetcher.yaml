@@ -107,5 +107,6 @@ evidence_set:
     are set), resource_exclusion_patterns_unmatched (patterns that matched
     nothing, such as a mistyped name), excluded_application_gateways (how
     many the patterns took out) and in_scope_application_gateways,
-    in_scope_backend_settings (how many stayed). results.excluded is
-    always present, empty when nothing is excluded.
+    in_scope_backend_settings (how many stayed); all three are null when
+    the gateway list couldn't be read. results.excluded is always present,
+    empty when nothing is excluded.

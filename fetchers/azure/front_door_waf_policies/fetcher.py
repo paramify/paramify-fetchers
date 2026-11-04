@@ -89,7 +89,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    projected: list[dict] = []
+    projected: list[dict] | None = None
     definitions = definition_index([])
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
@@ -106,7 +106,8 @@ def main() -> int:
             ),
         )
 
-    front_door, skipped_by_sku = select_front_door(projected)
+    listed = projected is not None
+    front_door, skipped_by_sku = select_front_door(projected or [])
     # A policy linked to an excluded profile's security policy still reads associated.
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
@@ -120,7 +121,7 @@ def main() -> int:
         collector=collector,
         results={"waf_policies": policies, "provider_registration_status": registration, "excluded": excluded},
         summary={**summarize(policies, skipped_by_sku), "provider_registration_status": registration,
-                 **exclusions.summary(excluded, ("waf_policy",), {"waf_policies": len(policies)})},
+                 **exclusions.summary(excluded, ("waf_policy",), {"waf_policies": len(policies) if listed else None})},
     )
     filename = f"azure_front_door_waf_policies_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)
