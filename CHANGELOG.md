@@ -843,6 +843,26 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_sql_managed_instance_backups` 0.4.0: failover history.** Reads the
+  Activity Log (resource provider Microsoft.Sql) over `failover_history_days`
+  (90 by default and at most, `AZURE_SQL_MI_FAILOVER_HISTORY_DAYS`; a value
+  that isn't a whole number from 1 up fails the run as `bad_config`, and the
+  number asked for is kept as `failover_history_window.days_requested`) and lists
+  each failover request in `results.failovers`: a failover group's planned
+  failover, its forced failover allowing data loss, or a failover between one
+  managed instance's replicas, with start and end, duration, final status,
+  caller, the region that took over, and the failover group it moved
+  (`failover_group_id`, matched by resource group and name) with its policy.
+  Each failover group gains its failover count and newest succeeded failover. The
+  summary adds total, group, forced, instance, succeeded and failed failovers,
+  groups with a succeeded failover (by group id, so groups sharing a name in
+  different resource groups count apart), the newest succeeded failover and days since
+  it, and the longest succeeded failover in minutes; each is null, not 0, when
+  the Activity Log wasn't read in full, and a read that failed or stopped at
+  200,000 events fails the run. A failover follows its failover group or
+  instance out of scope under `resource_exclusions` (`excluded_failovers` is
+  null, too, when the history wasn't read in full). Also maps to KSI-RPL-RRO
+  and KSI-RPL-TRC. The 0.2.0 fields are unchanged.
 - **`azure_policy_assignments` 0.4.0: policy exemptions.** Every exemption in
   effect on the subscription (`results.policy_exemptions`): its own, those
   inherited from a management group, and those on resource groups and resources

@@ -1,5 +1,5 @@
 name: azure_sql_managed_instance_backups
-version: 0.3.0
+version: 0.4.0
 description: >
   For each Azure SQL Managed Instance in the subscription, reports how its databases
   are backed up and how the instance survives a zone or region loss: the instance
@@ -8,10 +8,24 @@ description: >
   flagged separately, compute zone redundancy, and the instance failover groups it
   belongs to with their failover policy; and for every database on it, its status,
   earliest restore point, point-in-time-restore (short-term) retention in days, and
-  long-term retention policy (weekly, monthly, yearly).
+  long-term retention policy (weekly, monthly, yearly). Also every failover in the
+  Activity Log's last 90 days, of a failover group or of one instance: when it ran,
+  how long it took, the region that took over, and whether data loss was allowed.
 category: azure
 
 config_schema:
+  failover_history_days:
+    type: integer
+    required: false
+    default: 90
+    env: AZURE_SQL_MI_FAILOVER_HISTORY_DAYS
+    description: >
+      How many days back failovers are read from the Activity Log, ending at the
+      run; 1 to 90, the days the Activity Log keeps. A value above 90 is capped
+      with a warning; one that isn't a whole number from 1 up fails the run as
+      bad_config, and 90 is read. The number asked for is kept in the evidence as
+      results.failover_history_window.days_requested (null when the value isn't a
+      whole number).
   resource_exclusions:
     type: patterns
     prefixes: [rg, location, id]
@@ -31,9 +45,10 @@ config_schema:
       leaves scope only when every instance it pairs in this subscription is
       excluded; failover groups are still matched against every instance, so an
       in-scope instance's verdict doesn't change when its partner is excluded. A
-      pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
-      fetcher that has this field; fetchers without it ignore it. Each item is a
-      pattern, or a pattern with a reason. Empty: every
+      failover follows the failover group or instance it moved, and one whose
+      group or instance is no longer listed leaves only when a pattern matches its
+      resource id. A pattern without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a pattern, or a pattern with a reason. Empty: every
       resource is in scope.
 
 supports_targets: true
@@ -69,6 +84,8 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 ksis:
   - KSI-RPL-ABO   # short- and long-term backup retention, backup storage redundancy
   - KSI-CNA-OFA   # compute zone redundancy, instance failover groups
+  - KSI-RPL-RRO   # failover duration, to compare with the recovery time objective
+  - KSI-RPL-TRC   # failovers run, test failovers included
 
 evidence_set:
   reference_id: EVD-AZURE-SQLMI-BACKUPS
@@ -80,7 +97,40 @@ evidence_set:
     managed_backup_short_term_retention_policies.get(..., "default"),
     managed_instance_long_term_retention_policies.get(..., "default"), and
     instance_failover_groups.list_by_location() once per resource group and region
-    holding an instance. Every list follows nextLink, so counts are complete.
+    holding an instance; and azure-mgmt-monitor activity_logs.list() for
+    resource provider Microsoft.Sql over `failover_history_days`. Every list
+    follows nextLink, so counts are complete.
+    Failover history: `results.failovers` has one record per failover request,
+    from the Activity Log events sharing its correlation id and target, for
+    instanceFailoverGroups/failover/action (`allows_data_loss` false),
+    instanceFailoverGroups/forceFailoverAllowDataLoss/action (true) and
+    managedInstances/failover/action (a failover between one instance's own
+    replicas; null). Each has `start_time` (first event), `end_time` (the event
+    with the final status: Succeeded, Failed or Canceled; null while it hasn't
+    finished), `duration_minutes`, `status`, `succeeded`, the caller and its
+    identity type, `new_primary_location` (a group failover is sent to the region
+    that takes over, read from the event's resource id), `target_found` (the
+    group or instance is still listed), `failover_group_id` (the group it
+    moved, matched by resource group and name against every region the group
+    is listed from, or by name alone when only one group has that name) and
+    the group's `failover_policy`. Each
+    failover group gains `failovers_in_window`, `succeeded_failovers_in_window`
+    and `latest_succeeded_failover_time`. A failover Azure starts itself under an
+    Automatic policy may leave no Activity Log entry. `results.failover_history_window`
+    gives the window read (`days`, and `days_requested`, the number configured or
+    null if it wasn't one) and
+    whether it was read in full; when the read failed
+    or stopped at 200,000 events, `results.failovers` and every failover count
+    are null, never 0, and the run fails (partial_failure). Summary: `failover_history_days`, `failover_history_read`,
+    `total_failovers`, `failover_group_failovers`,
+    `forced_failovers_allowing_data_loss`, `managed_instance_failovers`,
+    `succeeded_failovers`, `failed_failovers`,
+    `failover_groups_with_succeeded_failover` (distinct `failover_group_id`s, or
+    resource group and name for a group no longer listed, since two groups in
+    different resource groups can share a name), `latest_succeeded_failover_time`,
+    `days_since_latest_succeeded_failover` and
+    `longest_succeeded_failover_minutes` (compare with the recovery time
+    objective).
     Per instance: `state` (Ready, Stopped, ...; Azure takes no backups while an
     instance is stopped, so read retention together with state);
     `requested_backup_storage_redundancy` and `current_backup_storage_redundancy`
@@ -127,7 +177,11 @@ evidence_set:
     `resource_exclusion_patterns`, lists `resource_exclusion_patterns_unmatched`
     (patterns that matched no instance or failover group, such as a mistyped name),
     and counts `excluded_managed_instances` and `excluded_instance_failover_groups`
-    (a group excluded with its instances names the instance in `matched_id`), and
+    (a group excluded with its instances names the instance in `matched_id`),
+    `excluded_failovers` (failovers of an excluded group or instance; null when
+    the Activity Log wasn't read in full, since no failover was tested against
+    the patterns), and
     `in_scope_managed_instances` and `in_scope_instance_failover_groups` (0 when
     none was read or the patterns took out every one, which a check can catch by
-    requiring more than 0).
+    requiring more than 0) and `in_scope_failovers` (null when the Activity Log
+    wasn't read in full).
