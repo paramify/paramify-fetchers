@@ -955,6 +955,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_conditional_access_policies` 0.2.2: an application filter
+  narrows MFA coverage in either mode, and each policy shows its filter.** In
+  0.2.1 a policy with an application filter still added its client app types to
+  `mfa_client_app_types_for_all_users_and_apps`; now it doesn't. A filter in
+  exclude mode leaves apps out, and in include mode it narrows the target, so
+  both narrow. Each policy's `target_resources.application_filter` carries the
+  filter's mode and rule. The `authentication_strengths_readable` description
+  now says it stays true, with `authentication_strengths` null, when the
+  policies couldn't be read.
 - **`azure_front_door_origins` 0.6.0, `azure_front_door_tls` 0.4.0 and
   `azure_front_door_waf_coverage` 0.4.0 run on Azure Government.** Azure
   Government does not offer the Microsoft.Cdn API versions these fetchers use
