@@ -843,6 +843,30 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_backup_recovery_status` 0.4.0: restore jobs.** Each vault now lists
+  its restore jobs (`restore_jobs`) over `restore_window_days` (365 by default
+  and at most, `AZURE_BACKUP_RESTORE_WINDOW_DAYS`; a value that isn't a whole
+  number from 1 up fails the run as `bad_config`, and the number asked for is
+  kept as `restore_job_window_days_requested`), read with `backup_jobs.list` filtered to
+  operation Restore in slices of 30 days, test restores included. Each job has
+  its status, start and end, duration, protected item, and from
+  `job_details.get` its restore type, restore target and the recovery point it
+  used, with `recovery_point_age_hours` (the restore's start minus the recovery
+  point's time). The recovery point time's form is chosen by the job's
+  workload type, or its backup management type when it has none: ISO 8601 for
+  any, day first in 24-hour form for SQL in a VM, month first with AM/PM for
+  Azure VM and Azure Files; other jobs' times stay null, with the text kept,
+  until a real sample confirms their form. The summary adds total, succeeded and failed restores, counts
+  by status, vaults with a succeeded restore, the newest succeeded restore and
+  days since it, the longest succeeded restore in minutes and the largest
+  recovery point age, each null when the vault list or a vault's jobs weren't
+  read. A restore job of an excluded protected item, matched by friendly name,
+  is listed under `excluded` and gets no details read, unless an in-scope item
+  in the same vault shares that name. Also maps to KSI-RPL-RRO and
+  KSI-RPL-TRC. **Fixed:** when the vault list couldn't be read (client set-up
+  or the list call failed, or no subscription or credential), the 0.2.0
+  summary counts (`total_recovery_services_vaults`, `total_protected_items`,
+  `retention_threshold_percentage` and the rest) read null instead of 0.
 - **`azure_sql_managed_instance_backups` 0.4.0: failover history.** Reads the
   Activity Log (resource provider Microsoft.Sql) over `failover_history_days`
   (90 by default and at most, `AZURE_SQL_MI_FAILOVER_HISTORY_DAYS`; a value

@@ -749,6 +749,20 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list"],
         "azure/backup_recovery_status",
     ),
+    (
+        "azure.mgmt.recoveryservicesbackup",
+        "RecoveryServicesBackupClient",
+        "backup_jobs",
+        ["list"],
+        "azure/backup_recovery_status — restore jobs, with a $filter",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup",
+        "RecoveryServicesBackupClient",
+        "job_details",
+        ["get"],
+        "azure/backup_recovery_status — the property bag the job list leaves out",
+    ),
     # --- storage -------------------------------------------------------------
     (
         "azure.mgmt.storage",
@@ -3815,6 +3829,36 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "EventhubProperties",
         ["message_retention_in_days", "retention_description", "capture_description", "status", "partition_count"],
         "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "Job",
+        ["entity_friendly_name", "backup_management_type", "operation", "status", "start_time", "end_time"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureWorkloadJob",
+        ["workload_type", "duration", "error_details", "extended_info"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureIaaSVMJob",
+        ["duration", "error_details", "extended_info", "container_name", "is_user_triggered"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureWorkloadJobExtendedInfo",
+        ["property_bag"],
+        "azure/backup_recovery_status — the recovery point time and restore target",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureIaaSVMJobExtendedInfo",
+        ["property_bag"],
+        "azure/backup_recovery_status — the recovery point time and restore target",
     ),
 ]
 

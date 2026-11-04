@@ -312,7 +312,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cp-2.3`, `cp-10`
 
-*2 fetchers:* [`azure_service_availability`](../fetchers/azure/service_availability), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups)
+*3 fetchers:* [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status), [`azure_service_availability`](../fetchers/azure/service_availability), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups)
 
 #### `KSI-RPL-TRC` — Testing Recovery Capabilities
 
@@ -320,7 +320,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cp-2.1`, `cp-2.3`, `cp-4`, `cp-4.1`, `cp-6`, `cp-6.1`, `cp-9.1`, `cp-10`, `ir-3`, `ir-3.2`
 
-*5 fetchers:* [`azure_dns_configuration`](../fetchers/azure/dns_configuration), [`azure_front_door_origins`](../fetchers/azure/front_door_origins), [`azure_service_availability`](../fetchers/azure/service_availability), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`jira_remediation_items`](../fetchers/jira/remediation_items)
+*6 fetchers:* [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status), [`azure_dns_configuration`](../fetchers/azure/dns_configuration), [`azure_front_door_origins`](../fetchers/azure/front_door_origins), [`azure_service_availability`](../fetchers/azure/service_availability), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`jira_remediation_items`](../fetchers/jira/remediation_items)
 
 ### PIY — Policy and Inventory  (1/1)
 
@@ -522,7 +522,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration) | `KSI-CNA-DFP`, `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-ULN`, `KSI-IAM-SNU`, `KSI-MLA-LET`, `KSI-SVC-ASM`, `KSI-SVC-EIS`, `KSI-SVC-PRR`, `KSI-SVC-SIN`, `KSI-SVC-VCM` |
 | [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments) | `KSI-CMT-RMV` |
 | [`azure_app_service_plans`](../fetchers/azure/app_service_plans) | `KSI-CNA-OFA` |
-| [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status) | `KSI-RPL-ABO` |
+| [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status) | `KSI-RPL-ABO`, `KSI-RPL-RRO`, `KSI-RPL-TRC` |
 | [`azure_change_provenance`](../fetchers/azure/change_provenance) | `KSI-CMT-RMV` |
 | [`azure_change_work_items`](../comparators/azure/change_work_items) | `KSI-CMT-LMC`, `KSI-CMT-RMV`, `KSI-SVC-ACM` |
 | [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration) | `KSI-CNA-MAT`, `KSI-IAM-ELP`, `KSI-SVC-SIN`, `KSI-SVC-VRI` |
