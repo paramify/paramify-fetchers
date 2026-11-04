@@ -701,15 +701,19 @@ def test_identities_a_refused_role_list_keeps_every_matched_identity(monkeypatch
 @pytest.mark.parametrize("runner, module, operation, plural", [
     (run_aks, aks, "containerservice.managed_clusters.list", "clusters"),
     (run_acr, acr, "containerregistry.registries.list", "registries"),
+    (run_workloads, workloads, "appcontainers.managed_environments.list_by_subscription", "environments"),
+    (run_workloads, workloads, "appcontainers.container_apps.list_by_subscription", "container_apps"),
     (run_workloads, workloads, "appcontainers.jobs.list_by_subscription", "jobs"),
+    (run_workloads, workloads, "containerinstance.container_groups.list", "container_groups"),
     (run_functions, functions, "web.web_apps.list", "function_apps"),
+    (run_vms, vms, "compute.virtual_machines.list_all", "virtual_machines"),
     (run_vms, vms, "compute.virtual_machine_scale_sets.list_all", "scale_sets"),
     (run_disks, disks, "compute.disks.list", "disks"),
     (run_apim, apim, "apimanagement.api_management_service.list", "services"),
     (run_identities, identities, "msi.user_assigned_identities.list_by_subscription", "user_assigned_identities"),
     (run_identities, identities, "resourcegraph.resources(identity)", "system_assigned_identities"),
-], ids=["clusters", "registries", "jobs", "function_apps", "scale_sets", "disks", "services", "user_assigned",
-        "system_assigned"])
+], ids=["clusters", "registries", "environments", "container_apps", "jobs", "container_groups", "function_apps",
+        "virtual_machines", "scale_sets", "disks", "services", "user_assigned", "system_assigned"])
 def test_a_refused_list_leaves_its_exclusion_counts_null(runner, module, operation, plural, monkeypatch, tmp_path):
     _refuse(monkeypatch, module, operation)
     code, evidence = runner(monkeypatch, tmp_path, "rg:rg-out")[:2]
@@ -719,6 +723,24 @@ def test_a_refused_list_leaves_its_exclusion_counts_null(runner, module, operati
     # The other lists were read, so their counts stay numbers.
     assert all(v is not None for k, v in summary.items() if k.startswith(("in_scope_", "excluded_")) and
                not k.endswith(f"_{plural}"))
+
+
+@pytest.mark.parametrize("runner, module, operation", [
+    (run_aks, aks, "containerservice.ContainerServiceClient (init)"),
+    (run_acr, acr, "containerregistry.ContainerRegistryManagementClient (init)"),
+    (run_workloads, workloads, "container clients (init)"),
+    (run_functions, functions, "web.WebSiteManagementClient (init)"),
+    (run_vms, vms, "compute.ComputeManagementClient (init)"),
+    (run_disks, disks, "compute.ComputeManagementClient (init)"),
+    (run_apim, apim, "apimanagement.ApiManagementClient (init)"),
+    (run_identities, identities, "managed identity clients (init)"),
+], ids=["aks", "acr", "workloads", "functions", "vms", "disks", "apim", "identities"])
+def test_a_client_that_couldnt_be_built_leaves_every_exclusion_count_null(runner, module, operation, monkeypatch,
+                                                                          tmp_path):
+    _refuse(monkeypatch, module, operation)
+    code, evidence = runner(monkeypatch, tmp_path, "rg:rg-out")[:2]
+    counts = {k: v for k, v in evidence["summary"].items() if k.startswith(("in_scope_", "excluded_"))}
+    assert code == 1 and counts and set(counts.values()) == {None}
 
 
 # --- a bare pattern fails the run ---

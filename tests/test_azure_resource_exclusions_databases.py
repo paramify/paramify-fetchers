@@ -385,3 +385,44 @@ def test_a_refused_list_leaves_the_redis_cache_and_data_services_counts_null(mon
     assert code == 1
     assert (s["in_scope_event_hub_namespaces"], s["excluded_event_hub_namespaces"]) == (None, None)
     assert (s["in_scope_mongo_clusters"], s["excluded_mongo_clusters"]) == (1, 1)
+
+
+@pytest.mark.parametrize("refused, unknown", [
+    ("mongocluster.mongo_clusters.list", "mongo_clusters"),
+    ("kusto.clusters.list", "data_explorer_clusters"),
+], ids=["mongo", "kusto"])
+def test_a_refused_data_services_list_leaves_only_its_counts_null(refused, unknown, monkeypatch, tmp_path):
+    _refuse(monkeypatch, data_services, refused)
+    code, evidence, _ = _data_services(PATTERNS, monkeypatch, tmp_path)
+    counts = {k: v for k, v in evidence["summary"].items() if k.startswith(("in_scope_", "excluded_"))}
+    assert code == 1
+    assert {k for k, v in counts.items() if v is None} == {f"in_scope_{unknown}", f"excluded_{unknown}"}
+
+
+INITS = {cosmos: "cosmosdb.CosmosDBManagementClient (init)",
+         databricks: "databricks.AzureDatabricksManagementClient (init)",
+         managed_redis: "redisenterprise.RedisEnterpriseManagementClient (init)",
+         mysql: "mysql.MySQLManagementClient (init)", postgres: "postgresql.PostgreSQLManagementClient (init)",
+         sql_enc: "sql.SqlManagementClient (init)", sql_cfg: "sql.SqlManagementClient (init)"}
+
+
+@pytest.mark.parametrize("case", SIMPLE, ids=IDS)
+def test_a_client_that_couldnt_be_built_leaves_the_exclusion_counts_null(case, monkeypatch, tmp_path):
+    m, filename, _, kind, plural, _, modules, _ = case
+    _refuse(monkeypatch, m, INITS[m])
+    _, modules_ = modules()
+    code, evidence = _run(m, monkeypatch, tmp_path, PATTERNS, filename, modules_)
+    assert code == 1
+    assert (evidence["summary"][f"in_scope_{plural}"], evidence["summary"][f"excluded_{kind}s"]) == (None, None)
+
+
+def test_a_client_that_couldnt_be_built_leaves_the_redis_cache_and_data_services_counts_null(monkeypatch, tmp_path):
+    _refuse(monkeypatch, redis_cache, "redis.RedisManagementClient (init)")
+    _, modules = _redis_cache_modules()
+    code, evidence = _run(redis_cache, monkeypatch, tmp_path, PATTERNS, "azure_redis_cache_configuration", modules)
+    assert code == 1
+    assert (evidence["summary"]["in_scope_redis_caches"], evidence["summary"]["excluded_redis_caches"]) == (None, None)
+    _refuse(monkeypatch, data_services, "data services clients (init)")
+    code, evidence, _ = _data_services(PATTERNS, monkeypatch, tmp_path)
+    counts = {k: v for k, v in evidence["summary"].items() if k.startswith(("in_scope_", "excluded_"))}
+    assert code == 1 and len(counts) == 6 and set(counts.values()) == {None}
