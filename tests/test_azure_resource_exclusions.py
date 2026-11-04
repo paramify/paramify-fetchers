@@ -97,6 +97,17 @@ def test_split_keeps_in_scope_items_and_lists_the_excluded_with_their_pattern():
     }
 
 
+def test_a_list_that_wasnt_read_leaves_both_its_counts_null():
+    exclusions = ResourceExclusions(["rg:rg-out"])
+    excluded = [{"kind": "key", "name": "k"}]
+    assert exclusions.summary(excluded, ("vault", "key"), {"vaults": None, "keys": 3}) == {
+        "resource_exclusion_patterns": ["rg:rg-out"],
+        "resource_exclusion_patterns_unmatched": ["rg:rg-out"],
+        "excluded_vaults": None, "excluded_keys": 1,
+        "in_scope_vaults": None, "in_scope_keys": 3,
+    }
+
+
 def test_no_patterns_keeps_everything():
     items = [{"id": VAULT, "name": "kv-out", "location": "regioneast"}]
     kept, excluded = ResourceExclusions().split(items, "vault")
