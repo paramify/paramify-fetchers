@@ -7,6 +7,7 @@ import importlib.util
 import json
 import logging
 import sys
+import types
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -92,8 +93,13 @@ def _adds_far_group(rg: str, name: str) -> dict:
         datetime.now(timezone.utc))
 
 
-def run_activity_alerts(monkeypatch, tmp_path, patterns):
-    """The excluded rule routes to a group in another subscription; referenced collects the ids handed over for reading."""
+def _refused(*args, **kwargs):
+    raise PermissionError("(AuthorizationFailed) 403")
+
+
+def run_activity_alerts(monkeypatch, tmp_path, patterns, refuse=None):
+    """The excluded rule routes to a group in another subscription; referenced collects the ids handed over for reading.
+    refuse names one list Azure answers with a 403: alerts, groups or rules."""
     ag_in, ag_out = _group(IN_RG, "ag-in"), _group(OUT_RG, "ag-out")
     alerts = [
         # An in-scope rule routing through an action group in the excluded resource group.
@@ -115,10 +121,16 @@ def run_activity_alerts(monkeypatch, tmp_path, patterns):
     monkeypatch.setattr(m, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
     monkeypatch.setattr(m, "credential", lambda: object())
     monkeypatch.setattr(m, "provider_registration_status", lambda *a: "registered")
-    monkeypatch.setattr(m, "collect_activity_log_alerts", lambda sub, cred, collector: [dict(a) for a in alerts])
+    if refuse == "alerts":  # through the real list call
+        client = types.SimpleNamespace(activity_log_alerts=types.SimpleNamespace(list_by_subscription_id=_refused))
+        monkeypatch.setitem(sys.modules, "azure.mgmt.monitor",
+                            types.SimpleNamespace(MonitorManagementClient=lambda **kwargs: client))
+    else:
+        monkeypatch.setattr(m, "collect_activity_log_alerts", lambda sub, cred, collector: [dict(a) for a in alerts])
     monkeypatch.setattr(m, "arm_rest_client", lambda cred: object())
-    monkeypatch.setattr(m, "collect_action_groups", lambda rest, sub: {"groups": [ag_in, ag_out]})
-    monkeypatch.setattr(m, "collect_processing_rules",
+    monkeypatch.setattr(m, "collect_action_groups",
+                        _refused if refuse == "groups" else lambda rest, sub: {"groups": [ag_in, ag_out]})
+    monkeypatch.setattr(m, "collect_processing_rules", _refused if refuse == "rules" else
                         lambda rest, sub, now: {"rules": [_adds_far_group(OUT_RG, "pr-out")]})
     monkeypatch.setattr(m, "add_referenced_groups", add_referenced)
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
@@ -136,6 +148,16 @@ def test_activity_alerts_without_patterns_adds_only_empty_exclusion_fields(monke
         **_added_fields({"activity_log_alert": 3, "action_group": 2, "processing_rule": 1}),
     }
     assert f"{FAR}/ag-only-out" in referenced
+
+
+@pytest.mark.parametrize("refuse, unknown", [
+    ("alerts", "activity_log_alerts"), ("groups", "action_groups"), ("rules", "processing_rules"),
+], ids=["alerts", "groups", "rules"])
+def test_activity_alerts_counts_are_null_when_their_list_was_refused(monkeypatch, tmp_path, refuse, unknown):
+    code, evidence, _ = run_activity_alerts(monkeypatch, tmp_path, "rg:rg-out", refuse)
+    counts = {k: v for k, v in evidence["summary"].items() if k.startswith(("in_scope_", "excluded_"))}
+    assert code == 1
+    assert {k for k, v in counts.items() if v is None} == {f"in_scope_{unknown}", f"excluded_{unknown}"}
 
 
 def test_activity_alerts_exclude_by_group_and_id_but_keep_routing_through_excluded_records(monkeypatch, tmp_path):

@@ -105,6 +105,6 @@ evidence_set:
     rule, such as a mistyped name), and counts excluded_activity_log_alerts,
     excluded_action_groups and excluded_processing_rules, and
     in_scope_activity_log_alerts, in_scope_action_groups and
-    in_scope_processing_rules (0 alerts in scope when none was read or the
-    patterns took out every one, which a check can catch by requiring more than
-    0). The rest of the summary counts in-scope rules only.
+    in_scope_processing_rules (a kind's two counts are null when its list
+    couldn't be read; 0 alerts in scope means there are none or the patterns
+    took out every one, which a check can catch by requiring more than 0). The rest of the summary counts in-scope rules only.

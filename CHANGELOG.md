@@ -185,6 +185,8 @@ schemas and the `paramify` CLI — not the internal code.
     and the routing counts cover in-scope rules; routing is still worked out
     against every action group and processing rule, and another
     subscription's action group is read only when an in-scope route needs it.
+    A kind's `in_scope_*` and `excluded_*` counts read null when its list
+    couldn't be read.
   - `azure_log_analytics_deletion_rights` 0.2.0 and
     `azure_log_analytics_query_audit` 0.2.0: workspaces, which then get no
     role-assignment, diagnostic-setting or LAQueryLogs reads. An in-scope

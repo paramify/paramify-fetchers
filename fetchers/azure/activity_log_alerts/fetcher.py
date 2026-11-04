@@ -308,8 +308,8 @@ def routing_summary(alerts: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_activity_log_alerts(subscription_id, cred, collector: Collector) -> list[dict]:
-    """One activity_log_alerts.list_by_subscription_id() call."""
+def collect_activity_log_alerts(subscription_id, cred, collector: Collector) -> list[dict] | None:
+    """One activity_log_alerts.list_by_subscription_id() call; None when it couldn't be read."""
     from azure.mgmt.monitor import MonitorManagementClient
 
     def _client():
@@ -317,7 +317,7 @@ def collect_activity_log_alerts(subscription_id, cred, collector: Collector) -> 
 
     client = collector.guard("monitor.MonitorManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself.
@@ -326,10 +326,8 @@ def collect_activity_log_alerts(subscription_id, cred, collector: Collector) -> 
             for a in client.activity_log_alerts.list_by_subscription_id()
         ]
 
-    alerts = collector.guard(
-        "monitor.activity_log_alerts.list_by_subscription_id", _list, default=[]
-    )
-    return sorted(alerts, key=lambda r: r.get("id") or "")
+    alerts = collector.guard("monitor.activity_log_alerts.list_by_subscription_id", _list)
+    return None if alerts is None else sorted(alerts, key=lambda r: r.get("id") or "")
 
 
 def main() -> int:
@@ -356,6 +354,7 @@ def main() -> int:
     excluded_processing: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     alerts_mgmt = REGISTRATION_UNKNOWN
+    read = {"activity_log_alerts": False, "action_groups": False, "processing_rules": False}
     if subscription_id and cred is not None:
         # ARM returns an empty list, not an error, for an unregistered provider.
         registration = provider_registration_status(
@@ -367,22 +366,28 @@ def main() -> int:
                 "activity log alerts can exist; reporting status not_registered",
                 subscription_id,
             )
-        alerts, excluded = exclusions.split(collect_activity_log_alerts(subscription_id, cred, collector),
-                                            "activity_log_alert")
+        listed = collect_activity_log_alerts(subscription_id, cred, collector)
+        read["activity_log_alerts"] = listed is not None
+        alerts, excluded = exclusions.split(listed or [], "activity_log_alert")
         alerts_mgmt = provider_registration_status(collector, subscription_id, cred, "Microsoft.AlertsManagement")
         rest = collector.guard("arm_rest.ARMPipelineClient (init)", lambda: arm_rest_client(cred))
         if rest is not None:
+            # An unregistered provider has none to read.
+            read["action_groups"] = registration == NOT_REGISTERED
+            read["processing_rules"] = alerts_mgmt == NOT_REGISTERED
             if registration != NOT_REGISTERED:
                 groups = collector.guard(
                     "Microsoft.Insights/actionGroups list", lambda: collect_action_groups(rest, subscription_id)
                 )
                 group_records = groups["groups"] if groups else []
+                read["action_groups"] = groups is not None
             if alerts_mgmt != NOT_REGISTERED:
                 apr = collector.guard(
                     "Microsoft.AlertsManagement/actionRules list",
                     lambda: collect_processing_rules(rest, subscription_id, datetime.now(timezone.utc)),
                 )
                 processing_rules = apr["rules"] if apr else []
+                read["processing_rules"] = apr is not None
             by_id = {(g["id"] or "").lower(): g for g in group_records}
             # Other subscriptions' groups are read only for in-scope alerts' routes and in-scope processing rules.
             in_scope_processing, excluded_processing = exclusions.split(processing_rules, "processing_rule")
@@ -407,6 +412,11 @@ def main() -> int:
     group_records, excluded_groups = exclusions.split(group_records, "action_group")
     excluded += excluded_groups + excluded_processing
     exclusions.warn_unmatched(logger)
+    counts = exclusions.summary(excluded, KINDS, {"activity_log_alerts": len(alerts), "action_groups": len(group_records),
+                                                  "processing_rules": len(processing_rules)})
+    for name, ok in read.items():  # unknown, not none, when that list wasn't read
+        if not ok:
+            counts.update({f"excluded_{name}": None, f"in_scope_{name}": None})
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -430,8 +440,7 @@ def main() -> int:
         summary={
             **summarize(alerts),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, KINDS, {"activity_log_alerts": len(alerts), "action_groups": len(group_records),
-                                                   "processing_rules": len(processing_rules)}),
+            **counts,
         },
     )
 
