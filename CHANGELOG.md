@@ -179,6 +179,55 @@ schemas and the `paramify` CLI — not the internal code.
     route needs it. Metric and smart detector rules carry the location `global`
     and action groups and processing rules none, so `location:` reaches only log
     search rules.
+  - `azure_cosmosdb_configuration` 0.2.0: database accounts.
+  - `azure_databricks_workspace_configuration` 0.2.0: workspaces.
+  - `azure_managed_redis_configuration` 0.2.0: Redis Enterprise clusters; their
+    databases leave with them and are not read.
+  - `azure_redis_cache_configuration` 0.2.0: caches, which then get no firewall,
+    access-policy, patch-schedule, linked-server or diagnostic reads.
+  - `azure_mysql_configuration` 0.2.0: flexible servers, whose parameters are
+    then not read.
+  - `azure_postgresql_configuration` 0.2.0: flexible servers; their parameters,
+    firewall rules and Entra administrators are not read.
+  - `azure_sql_encryption_status` 0.2.0: logical servers, whose databases leave
+    with them; an in-scope server whose key sits in an excluded vault keeps its
+    verdict.
+  - `azure_sql_server_configuration` 0.2.0: logical servers; their firewall
+    rules and audit, alert and vulnerability settings are not read. An in-scope
+    server auditing to an excluded destination keeps its verdict.
+  - `azure_data_services_configuration` 0.2.0: Mongo vCore clusters, Data
+    Explorer clusters and Event Hubs namespaces; their firewall rules,
+    databases, principals, event hubs and authorization rules are not read.
+  - `azure_aks_cluster_configuration` 0.2.0: managed clusters, with their agent
+    pools.
+  - `azure_container_registry_configuration` 0.2.0: registries, which then get
+    no diagnostic-settings reads.
+  - `azure_container_workloads_configuration` 0.2.0: Container Apps
+    environments, apps and jobs, and container groups; an app or job also
+    leaves with its environment (`environment_matched`, with `matched_id`).
+  - `azure_function_app_configuration` 0.2.0: function apps, which then get no
+    configuration, key or app-setting reads.
+  - `azure_vm_hardening_status` 0.2.0: virtual machines and scale sets, which
+    then get no extension or instance reads. A virtual machine also leaves
+    with its scale set (`scale_set_matched`, with `matched_id`).
+  - `azure_disk_encryption_status` 0.2.0: managed disks; a disk encryption set
+    in an excluded group doesn't change an in-scope disk's verdict.
+  - `azure_api_management_configuration` 0.2.0: services, with their APIs,
+    products, backends, hostnames and certificates, none of them read.
+  - `azure_managed_identity_configuration` 0.2.0: user-assigned identities, and
+    system-assigned identities whose resource a pattern matches (the identity
+    query now also returns the resource's location). Excluded identities get no
+    federated-credential or Graph reads; an in-scope identity keeps every
+    attachment and role assignment, even at an excluded scope. An identity a
+    pattern matches stays in scope while it holds an Azure role at an in-scope
+    scope or on a user-assigned identity kept this way, as an App Service plan
+    stays while an in-scope site runs on it, and its record carries
+    `kept_by_identity_rule` with the pattern. If the role-assignment list
+    couldn't be read, every identity a pattern matches stays that way.
+
+  In the seventeen fetchers above, from `azure_cosmosdb_configuration` on, a
+  list that couldn't be read leaves the `in_scope_*` and `excluded_*` counts of
+  its kind null, not 0.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or
