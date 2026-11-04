@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))  # comparators/_lib
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "fetchers" / "_lib"))
 
-from comparator_inputs import run  # noqa: E402
+from comparator_inputs import ConfigError, run  # noqa: E402
 from fetcher_status import report_failure  # noqa: E402
 
 CHANGES = "azure_change_provenance"
@@ -31,10 +31,12 @@ SUMMARY_KEYS = (
     "changes_checked", "changes_excluded", "changes_by_application", "changes_needing_record",
     "changes_matched", "changes_ambiguous", "changes_unmatched", "changes_without_caller",
     "changes_recorded", "changes_without_record", "changes_recorded_without_approval",
+    "changes_recorded_approval_not_required",
     "changes_without_approved_record", "changes_approved_after_change", "percent_recorded",
     "changes_needing_record_by_origin", "changes_without_record_by_origin", "changes_without_approved_record_by_origin",
     "changes_without_record_by_caller", "changes_by_application_by_caller", "changes_excluded_by_caller",
-    "record_types", "record_types_not_selected", "record_work_items", "work_items_cover_changes",
+    "record_types", "record_types_not_selected", "approval_types", "approval_types_not_record_types",
+    "record_work_items", "work_items_cover_changes",
 )
 
 
@@ -57,13 +59,25 @@ def span_env(env, default, unit="hours"):
     return timedelta(**{unit: int(raw)})
 
 
+def not_record_types(names, types):
+    return (f"CHANGE_RECORD_APPROVAL_TYPES names {sorted(names)}, which match no record type, so the type meant would "
+            f"need no approval; record types are {', '.join(sorted(types)) or 'none'}")
+
+
 def settings():
+    types = [t.lower() for t in csv_env("CHANGE_RECORD_TYPES")]
+    # Empty: every record type needs an approval.
+    approval_types = {t.lower() for t in csv_env("CHANGE_RECORD_APPROVAL_TYPES")}
+    # Unset record types come from the work items, so check() tests the names against those.
+    if types and approval_types - set(types):
+        raise ValueError(not_record_types(approval_types - set(types), types))
     return {
         "origins": set(listed_env("CHANGE_RECORD_ORIGINS", "direct,manual_deployment", ORIGINS)),
         "excluded": {c.lower() for c in csv_env("CHANGE_RECORD_EXCLUDED_CALLERS")},
         "environments": {e.lower() for e in csv_env("CHANGE_RECORD_ENVIRONMENTS")},
-        "types": [t.lower() for t in csv_env("CHANGE_RECORD_TYPES")],
+        "types": types,
         "emergency_types": {t.lower() for t in csv_env("CHANGE_RECORD_EMERGENCY_TYPES", "Hotfix")},
+        "approval_types": approval_types,
         "people": listed_env("CHANGE_RECORD_PEOPLE", DEFAULT_PEOPLE, PEOPLE),
         "before": span_env("CHANGE_RECORD_HOURS_BEFORE", 24),
         "emergency_before": span_env("CHANGE_RECORD_EMERGENCY_HOURS_BEFORE", 72),
@@ -167,15 +181,21 @@ def records(files, cfg):
                     "type": item.get("type"), "state": item.get("state"),
                     "approved": bool(approval) if item.get("approval_read") else None,
                     "approved_at": (approval or {}).get("at"),
+                    "approval_required": not cfg["approval_types"] or kind in cfg["approval_types"],
                 },
             })
     return out, sorted(types), sorted(unselected), cover_from
 
 
+def selection_read(files):
+    return all(isinstance(((f.payload.get("results") or {}).get("selection") or {}).get("work_item_types"), list)
+               for f in files)
+
+
 def approved_after(found, at, emergency_types):
-    """Whether a record approved after the change isn't an emergency type, which may be approved after the fact."""
-    return any(str(w["type"]).lower() not in emergency_types and when(w["approved_at"]) and at
-               and when(w["approved_at"]) > at for w in found)
+    """Whether a record that needs approval, and isn't an emergency type, was approved after the change."""
+    return any(w["approval_required"] and str(w["type"]).lower() not in emergency_types and when(w["approved_at"])
+               and at and when(w["approved_at"]) > at for w in found)
 
 
 def check_with(cfg):
@@ -213,15 +233,17 @@ def check_with(cfg):
             else:
                 found = [i["ref"] for i in items if caller.lower() in i["logins"] and at and i["from"] <= at <= i["to"]]
                 status = "unmatched" if not found else "matched" if len(found) == 1 else "ambiguous"
-            # Several candidates count as approved only when every one of them is.
-            approved = all(w["approved"] for w in found) if found else None
+            # Several candidates count as approved only when every one of them is, or needs no approval.
+            approved = all(w["approved"] or not w["approval_required"] for w in found) if found else None
+            required = any(w["approval_required"] for w in found) if found else None
             results.append({
                 "change_id": c.get("change_id"), "timestamp": c.get("timestamp"),
                 "target_resource_id": c.get("target_resource_id"), "operation": c.get("operation"),
                 "client_type": c.get("client_type"), "origin": c.get("origin"), "deployment_id": c.get("deployment_id"),
                 "caller": caller, "caller_type": caller_type, "caller_from": source,
-                "status": status, "work_items": found, "approved": approved,
-                "approved_after_change": approved_after(found, at, cfg["emergency_types"]) if approved else None,
+                "status": status, "work_items": found, "approved": approved, "approval_required": required,
+                "approved_after_change": approved_after(found, at, cfg["emergency_types"]) if approved and required
+                else None,
             })
         results.sort(key=lambda r: (str(r["timestamp"]), str(r["change_id"])))
         read = {
@@ -231,7 +253,17 @@ def check_with(cfg):
             else None,
             "origins": sorted(cfg["origins"]),
         }
-        return results, {**read, **summarize(results, items, types, unselected, cover_from, cfg["origins"])}
+        # Unknown when a work items file doesn't say which types it selected, as a failed one doesn't.
+        known = cfg["types"] or selection_read(inputs[WORK_ITEMS].files)
+        unknown = sorted(cfg["approval_types"] - set(types)) if known else None
+        approval = {
+            "approval_types": sorted(t for t in types if not cfg["approval_types"] or t in cfg["approval_types"]),
+            "approval_types_not_record_types": unknown,
+        }
+        summary = {**read, **summarize(results, items, types, unselected, cover_from, cfg["origins"]), **approval}
+        if unknown:
+            raise ConfigError(not_record_types(unknown, types), results, summary)
+        return results, summary
     return check
 
 
@@ -270,6 +302,8 @@ def summarize(results, items, types, unselected, cover_from, origins):
         "changes_recorded": recorded,
         "changes_without_record": count["unmatched"] + count["no_caller"],
         "changes_recorded_without_approval": recorded - approved,
+        "changes_recorded_approval_not_required": sum(
+            1 for r in needing if r["status"] in RECORDED and r["approval_required"] is False),
         "changes_without_approved_record": len(needing) - approved,
         "changes_approved_after_change": sum(1 for r in needing if r["approved_after_change"]),
         "percent_recorded": recorded * 100 // len(needing) if needing else 0,

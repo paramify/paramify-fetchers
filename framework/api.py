@@ -1030,23 +1030,34 @@ def add_pattern(m: dict, scope: str, target: str, field: str, pattern: str, reas
     return outcome, copied
 
 
-def remove_pattern(m: dict, scope: str, target: str, field: str, pattern: Optional[str] = None) -> Optional[int]:
-    """Remove a pattern (every pattern when None) from a pattern list, dropping the field once it is empty: how many
-    went, or None when the field or the pattern isn't there."""
+def remove_pattern(m: dict, scope: str, target: str, field: str, pattern: Optional[str] = None,
+                   category: Optional[str] = None) -> Optional[int]:
+    """Remove a pattern (every pattern when None) from a pattern list: how many went, or None when the field or the
+    pattern isn't there. An emptied list is dropped, except a fetcher's whose category lists patterns: that one stays
+    as [], so the category's patterns don't come back to it."""
     holder = _existing_pattern_holder(m, scope, target)
     if not holder or field not in holder:
         return None
     if pattern is None:
-        return patterns.count(holder.pop(field))
-    items = _pattern_items(holder, field, pattern_location(scope, target))
-    kept = [it for it in items if it.pattern.lower() != pattern.strip().lower()]
-    if len(kept) == len(items):
-        return None
-    if kept:
+        gone = patterns.count(holder[field])
+        kept: List[patterns.Item] = []
+    else:
+        items = _pattern_items(holder, field, pattern_location(scope, target))
+        kept = [it for it in items if it.pattern.lower() != pattern.strip().lower()]
+        if len(kept) == len(items):
+            return None
+        gone = len(items) - len(kept)
+    if kept or scope == "entry" and category_patterns(m, category, field):
         holder[field] = [it.as_manifest() for it in kept]
     else:
         del holder[field]
-    return len(items) - len(kept)
+    return gone
+
+
+def category_patterns(m: dict, category: Optional[str], field: str) -> List[patterns.Item]:
+    """The patterns platforms.<category>.config.<field> holds; none for a reference, which is never read."""
+    value = ((_existing_pattern_holder(m, "platform", category) if category else None) or {}).get(field)
+    return [] if patterns.is_reference(value) else patterns.parse(value)[0]
 
 
 # --------------------------------------------------------------------------- #
