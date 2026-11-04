@@ -18,7 +18,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, DataTable, Input, Static
 
-from framework import api
+from framework import api, patterns
 from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
 from framework.tui import kinds, palette, render
 from framework.tui.components.forms import env_name_from_ref
@@ -415,7 +415,10 @@ class ManifestPage(ButtonRowNav, Vertical):
         entry = self._entry(use)
         cfg = entry.get("config") or {}
         secs = entry.get("secrets") or {}
-        config_specs = [self._config_spec(c, cfg.get(c["name"])) for c in d.get("config", [])]
+        # A text box would save a pattern list back as one string and drop its reasons; the CLI edits those.
+        config_specs = [self._config_spec(c, cfg.get(c["name"])) for c in d.get("config", [])
+                        if c.get("type") != patterns.TYPE]
+        lists = [c["name"] for c in d.get("config", []) if c.get("type") == patterns.TYPE]
         secret_specs = [
             {
                 "key": s["name"], "label": s["name"], "kind": "secret",
@@ -428,6 +431,8 @@ class ManifestPage(ButtonRowNav, Vertical):
         ]
         if not config_specs and not secret_specs:
             hint = " — press 't' to edit its targets" if d.get("supports_targets") else ""
+            if lists:
+                hint += f" — edit {', '.join(lists)} with: paramify manifest exclude {use} <pattern>"
             self.notify(f"{use} has no entry-level config or secrets to edit{hint}.")
             return
         groups = {"config": config_specs, "secrets": secret_specs}

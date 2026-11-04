@@ -1,25 +1,50 @@
 name: azure_dns_configuration
-version: 0.4.0
+version: 0.6.0
 description: >-
   Shows the targets, TTL and failover method of each in-scope public DNS record, whether each public zone uses DNSSEC, and which virtual networks each private zone is linked to.
 category: azure
 
 config_schema:
   scope_exclusions:
-    type: string
+    type: patterns
     required: false
     env: AZURE_DNS_SCOPE_EXCLUSIONS
     description: >
       Public record sets to leave out of scope, as case-insensitive glob patterns
-      separated by commas or spaces (* matches any run of characters, dots included,
+      listed in the manifest (* matches any run of characters, dots included,
       ? one character, and [ ] one character from a set, such as [0-9]). Each
       pattern is matched against a record set's relative name (www, @) and its FQDN
       (www.example.com, the trailing dot optional). A relative name applies in every
       public zone; use the FQDN to exclude one zone's record. A matching record set
       is listed under excluded with the pattern and left out of every count, though
       each zone's number_of_record_sets is Azure's own count and still includes it.
-      A prefix such as route: fails the run. Can be ${env:VAR}. Empty: every record
+      A prefix such as route: fails the run. Each item is a pattern, or a pattern with
+      a reason. Empty: every record
       set is in scope.
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching public or private DNS zone is listed under excluded
+      with the pattern and left out of every count and verdict, with its record
+      sets and virtual network links, which are then not read. A DNS zone is
+      global, so location: matches one only as location:global. An alias record
+      or virtual network link in an in-scope zone still counts when the resource
+      or virtual network it points at is excluded. Record-set scope_exclusions
+      then apply to the zones left in scope. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -69,25 +94,33 @@ evidence_set:
     - subscriptions.list() — picks a subscription when none is set
     - providers.get() for Microsoft.Network — tells "no zones because the provider isn't registered" apart from "no zones"
     - zones.list() — every public DNS zone
-    - GET {zone id}/dnssecConfigs/default (per public zone) — the zone's DNSSEC state and signing keys, through the DNSSEC preview API because the SDK has no DNSSEC call
-    - record_sets.list_all_by_dns_zone() (per public zone) — every record set with its type, TTL and values, and for an alias record its alias target (the Azure resource or record set in the zone it follows)
+    - GET {zone id}/dnssecConfigs/default (per in-scope public zone) — the zone's DNSSEC state and signing keys, through the DNSSEC preview API because the SDK has no DNSSEC call
+    - record_sets.list_all_by_dns_zone() (per in-scope public zone) — every record set with its type, TTL and values, and for an alias record its alias target (the Azure resource or record set in the zone it follows)
     - private_zones.list() — every private DNS zone
-    - virtual_network_links.list() (per private zone) — the virtual networks linked to the zone and whether they auto-register records
+    - virtual_network_links.list() (per in-scope private zone) — the virtual networks linked to the zone and whether they auto-register records
 
-    Output: azure_dns_configuration_<subscription>.json — each public zone with its DNSSEC state, signing keys and in-scope record sets, each private zone with its virtual network links, and the record sets left out of scope with the pattern each matched.
+    Output: azure_dns_configuration_<subscription>.json — each public zone with its DNSSEC state, signing keys and in-scope record sets, each private zone with its virtual network links, and the zones and record sets left out of scope with the pattern each matched.
 
     Summary fields:
 
     What was checked?
-    - total_public_zones — Number of public DNS zones in the subscription
-    - total_private_zones — Number of private DNS zones in the subscription
+    - total_public_zones — Number of in-scope public DNS zones in the subscription
+    - total_private_zones — Number of in-scope private DNS zones in the subscription
     - provider_registration_status — Whether Microsoft.Network is registered on the subscription: registered, not_registered or unknown
+
+    Which zones are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every zone is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no public or private DNS zone, such as a mistyped name
+    - excluded_public_dns_zones — Number of public DNS zones left out of scope because a pattern matched their resource group or id (or location:global); each is listed under excluded with the pattern, and no other count includes them or their record sets; null if the public zone list couldn't be read
+    - excluded_private_dns_zones — Number of private DNS zones left out of scope the same way; their virtual network links leave with them; null if the private zone list couldn't be read
+    - in_scope_public_dns_zones — Number of public DNS zones read and in scope; 0 means there are none or the patterns took out every one, which a check can catch by requiring more than 0; null if the public zone list couldn't be read
+    - in_scope_private_dns_zones — Number of private DNS zones read and in scope; null if the private zone list couldn't be read
 
     Which record sets are left out of scope?
     - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against each public record set's relative name and FQDN. A relative name such as www matches that name in every public zone. A record set is in scope unless one matches it; empty when none are set, so every record set is in scope
     - scope_exclusion_patterns_unmatched — List of configured patterns that matched no public record set, such as a mistyped name
     - excluded_record_sets — Number of public record sets left out of scope because a pattern matched their name; each is listed under excluded with the pattern, and no other count includes them
-    - in_scope_record_sets — Number of public record sets read and in scope; 0 means the patterns took out every record set, which a check can catch by requiring more than 0
+    - in_scope_record_sets — Number of public record sets read in in-scope zones and in scope; 0 means the patterns took out every record set, which a check can catch by requiring more than 0
 
     Are public zones signed with DNSSEC?
     - dnssec_enabled_public_zones — Number of public zones with DNSSEC enabled: a DNSSEC configuration exists, its provisioning state is Succeeded and it has at least one signing key
