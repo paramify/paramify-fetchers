@@ -72,7 +72,7 @@ otherwise.
 | `Microsoft.Web/sites/config/list/action` (optional) | `azure_app_service_backups` | The custom backup configuration reads `not_authorized`; the run succeeds |
 | Key Vault Reader (RBAC vaults), or an access policy with key List and Get Rotation Policy (optional) | `azure_key_vault_key_rotation` | The vault reports `data_plane_status: inaccessible`; rotation policies still come from the management plane |
 | Log Analytics Reader on the workspaces they query | `azure_log_analytics_query_audit`, `azure_sentinel_analytics_rules`, `azure_sentinel_data_sources`, `azure_sentinel_incidents`, `azure_devops_audit_streams` (Azure Monitor Logs streams) | The KQL query fails |
-| Reader on other subscriptions (optional) | `azure_alert_rules` and `azure_activity_log_alerts` (action groups), `azure_app_gateway_waf` (WAF policies), `azure_vnet_egress_routing` (Virtual WAN hubs), `azure_sentinel_playbooks` (Logic Apps an automation rule runs) | That reference reads unresolved; the run succeeds |
+| Reader on other subscriptions (optional) | `azure_alert_rules` and `azure_activity_log_alerts` (action groups), `azure_app_gateway_waf` (WAF policies), `azure_vnet_egress_routing` (Virtual WAN hubs), `azure_sentinel_playbooks` (Logic Apps an automation rule runs), `azure_private_endpoint_configuration` (target resources), `azure_private_dns_zone_configuration` (linked virtual networks and record IPs) | That reference reads unresolved; the run succeeds |
 | Reader or Microsoft Sentinel Reader on the workspaces Entra logs are sent to (optional) | `azure_entra_diagnostic_settings` | That category's `to_sentinel_workspace` reads null, with a note; the run succeeds |
 | Reader on the management group (optional) | `azure_policy_assignments` | Management-group custom definitions read `unavailable`; the run succeeds |
 
@@ -228,6 +228,8 @@ Network and edge:
 | `azure_vnet_egress_routing` | Where each subnet's internet-bound traffic goes: a firewall or appliance, a gateway, a NAT gateway, a black hole, or Azure's default outbound access |
 | `azure_ddos_protection` | Whether every public IP is covered by DDoS Network or IP Protection, and every DDoS protection plan |
 | `azure_dns_configuration` | Public zones with DNSSEC state and signing keys; private zones and their virtual network links |
+| `azure_private_dns_zone_configuration` | Private DNS zones and their virtual network links, whether each privatelink record resolves to a live private endpoint or is stale, and zone names that exist more than once |
+| `azure_private_endpoint_configuration` | Private endpoints: target resource, approval status, subnet, private IPs and DNS zone groups, and whether each target's public network access is disabled |
 | `azure_vpn_gateway_configuration` | VPN gateways (SKU, active-active, BGP, point-to-site) and each connection's IKE version and IPsec/IKE policy |
 | `azure_virtual_wan_configuration` | Virtual WANs and hubs: VPN encryption, transit settings, secured hubs, and each hub VPN connection's IKE and IPsec settings |
 | `azure_app_gateway_tls_listeners` | Application Gateway listeners: protocol, public or private frontend, HTTP-to-HTTPS redirects, and the TLS policy in effect |
@@ -305,7 +307,7 @@ Microsoft Sentinel:
 | `azure_sentinel_automation_rules` | Automation rules per workspace: triggers, conditions, state and actions |
 | `azure_sentinel_data_sources` | Data connectors per workspace with each one's last data received and health, and which tables received data in the ingestion window. An alert-only connector (Defender for Endpoint, Office 365, Identity, Cloud, Cloud Apps or IoT, Entra ID Protection, Insider Risk Management) with no alert but a linked connection sending alerts reads quiet, not not connected, and still `connected: false`. `connectors_configured_without_data` counts connectors with a connection but no data that aren't quiet |
 | `azure_sentinel_incidents` | Incidents in the lookback plus every open one: severity, status, classification, owner and time to close |
-| `azure_sentinel_playbooks` | Logic Apps Sentinel runs as playbooks: whether each disables accounts, isolates devices, updates incidents or sends email or Teams messages, its static recipients, and whether an active automation rule runs it |
+| `azure_sentinel_playbooks` | Logic Apps Sentinel runs as playbooks: whether each disables accounts, isolates devices, updates incidents or sends email or Teams messages, its static recipients, whether an active automation rule runs it, and how its recent runs ended |
 
 Defender for Cloud and Azure Policy:
 

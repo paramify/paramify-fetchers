@@ -157,18 +157,34 @@ def test_admin_without_registration_row_counts_as_admin_without_mfa():
     assert summary["admin_users_without_registration_details"] == 1
 
 
-def test_all_users_coverage_leaves_out_users_the_report_omits():
+def test_all_users_coverage_leaves_out_disabled_users_the_report_omits():
     users = mfa_status.join_users(
         USERS + [_user("u-gone", "disabled@contoso.test", enabled=False)], REGISTRATIONS, {}
     )
     summary = mfa_status.summarize(users)
-    # u-unreg and the disabled u-gone have no report row: unknown, not without MFA.
+    # The disabled u-gone has no report row: unknown, left out. The enabled u-unreg counts as without MFA.
+    assert summary["users_counted_in_all_users_coverage"] == 3
     assert summary["users_with_registration_details"] == 2
     assert summary["users_without_registration_details"] == 2
     assert summary["mfa_capable_users"] == 1
-    assert summary["mfa_coverage_percentage_all_users"] == 50
-    # Enabled users without a row still count as uncovered.
+    assert summary["mfa_coverage_percentage_all_users"] == 33
     assert summary["mfa_coverage_percentage"] == 33 and summary["enabled_users_without_mfa"] == 2
+
+
+def test_all_users_coverage_is_never_above_enabled_coverage_from_missing_rows():
+    users = mfa_status.join_users(
+        [_user(f"u-mfa-{i}", f"mfa{i}@contoso.test") for i in range(90)]
+        + [_user(f"u-norow-{i}", f"norow{i}@contoso.test") for i in range(10)]
+        + [_user(f"u-off-{i}", f"off{i}@contoso.test", enabled=False) for i in range(50)]
+        + [_user("u-off-reg", "offreg@contoso.test", enabled=False)],
+        [_reg(f"u-mfa-{i}", True) for i in range(90)] + [_reg("u-off-reg", False)],
+        {},
+    )
+    summary = mfa_status.summarize(users)
+    assert summary["mfa_coverage_percentage"] == 90
+    # A disabled user with a row is still counted; the 50 without one are not.
+    assert summary["users_counted_in_all_users_coverage"] == 101
+    assert summary["mfa_coverage_percentage_all_users"] == 89
 
 
 def test_registration_report_admin_flag_still_counts():
