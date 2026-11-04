@@ -1049,7 +1049,7 @@ def test_origins_without_patterns_adds_only_empty_scope_fields_and_in_scope_tota
     assert reads == [["app-core", "app-qa"]]
     assert {k: v for k, v in summary.items() if k.startswith("in_scope_")} == {
         "in_scope_hosts": 6, "in_scope_custom_domains": 5, "in_scope_endpoints": 1, "in_scope_routes": 9,
-        "in_scope_origin_groups": 7, "in_scope_apps": 2}
+        "in_scope_origin_groups": 7, "in_scope_apps": 2, "in_scope_profiles": 1}
     assert evidence["results"]["excluded"] == []
     assert (summary["scope_exclusion_patterns"], summary["scope_exclusion_patterns_unmatched"]) == ([], [])
     assert all(summary[f"excluded_{k}s"] == 0 for k in origins.EXCLUDED_KINDS)
@@ -1206,7 +1206,7 @@ def test_tls_main(monkeypatch, tmp_path, patterns):
         assert summary["scope_exclusion_patterns_unmatched"] == ["nothing.example.com"]
         assert {k: v for k, v in summary.items() if k.startswith("in_scope_")} == {
             "in_scope_hosts": 3, "in_scope_custom_domains": 2, "in_scope_endpoints": 1, "in_scope_routes": 5,
-            "in_scope_secrets": 3}
+            "in_scope_secrets": 3, "in_scope_profiles": 1}
     assert (profile["custom_domain_count"], profile["route_count"], profile["secret_count"]) == (
         summary["total_custom_domains"], summary["total_routes"], summary["certificate_secrets"])
 

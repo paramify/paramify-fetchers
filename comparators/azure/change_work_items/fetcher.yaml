@@ -1,5 +1,5 @@
 name: azure_change_work_items
-version: 0.2.0
+version: 0.2.1
 description: >-
   Shows whether each direct edit or manual deployment in Azure is recorded by an Azure DevOps work item, and whether
   that record is approved where its type needs an approval.

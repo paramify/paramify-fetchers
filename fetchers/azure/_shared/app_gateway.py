@@ -161,7 +161,8 @@ def collect_gateways(
     return raw, completeness(None if raw is None else len(raw), true_count, collector, recounted)
 
 
-Build = Callable[[List[Any], Collector, Optional[str], Any], Tuple[Dict[str, Any], Dict[str, Any]]]
+# The gateways are None when the list wasn't read.
+Build = Callable[[Optional[List[Any]], Collector, Optional[str], Any], Tuple[Dict[str, Any], Dict[str, Any]]]
 
 
 def run_fetcher(name: str, logger: logging.Logger, build: Build) -> int:
@@ -179,7 +180,7 @@ def run_fetcher(name: str, logger: logging.Logger, build: Build) -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    gateways: List[Any] = []
+    gateways: Optional[List[Any]] = None
     coverage: Dict[str, Any] = {"listed": None, "resource_graph_count": None, "match": None, "recounted": False}
     registration = REGISTRATION_UNKNOWN
     live = bool(subscription_id and cred is not None)
@@ -188,7 +189,7 @@ def run_fetcher(name: str, logger: logging.Logger, build: Build) -> int:
         if registration == NOT_REGISTERED:
             logger.warning("Microsoft.Network is not registered on subscription %s", subscription_id)
         raw, coverage = collect_gateways(subscription_id, cred, collector, logger)
-        gateways = raw or []
+        gateways = raw
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
