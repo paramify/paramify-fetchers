@@ -671,14 +671,14 @@ schemas and the `paramify` CLI — not the internal code.
   `azure_private_endpoint_configuration`, `azure_residual_resources`,
   `azure_sql_managed_instance_backups`, `azure_sql_managed_instance_configuration`,
   `azure_sql_managed_instance_encryption` and `azure_vnet_egress_routing` 0.2.0 →
-  0.3.0; `azure_defender_assessments`, `azure_front_door_tls`,
-  `azure_front_door_waf_coverage`, `azure_key_vault_configuration`,
+  0.3.0; `azure_defender_assessments`, `azure_key_vault_configuration`,
   `azure_key_vault_key_rotation`, `azure_policy_compliance`,
   `azure_private_dns_zone_configuration`, `azure_resource_diagnostic_settings`,
   `azure_resource_inventory` and `azure_storage_encryption_status` 0.3.0 → 0.4.0;
-  `azure_app_service_configuration`, `azure_dns_configuration` and
+  `azure_app_service_configuration`, `azure_dns_configuration`,
+  `azure_front_door_tls`, `azure_front_door_waf_coverage` and
   `azure_network_security_groups` 0.4.0 → 0.5.0; `azure_front_door_origins`
-  0.5.0 → 0.6.0.
+  0.6.0 → 0.7.0.
 - **`validate` refuses config keys no fetcher reads.** These were saved and
   silently ignored: a platform key that no fetcher of the category (nor its
   category file) declares, a `platforms:` block for no category, and an entry
