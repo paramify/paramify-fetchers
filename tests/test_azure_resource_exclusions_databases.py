@@ -161,7 +161,8 @@ def _redis_cache_modules():
     client = _Client({("redis", "list_by_subscription"): items})
     monitor = _Client({})
     return client, {"azure.mgmt.redis": {"RedisManagementClient": lambda **k: client},
-                    "azure.mgmt.monitor": {"MonitorManagementClient": lambda **k: monitor}}
+                    "azure.mgmt.monitor": {"MonitorManagementClient": lambda **k: monitor},
+                    "azure.core.exceptions": {"ResourceNotFoundError": type("ResourceNotFoundError", (Exception,), {})}}
 
 
 def _mysql_modules():
