@@ -304,7 +304,7 @@ Microsoft Sentinel:
 | `azure_sentinel_automation_rules` | Automation rules per workspace: triggers, conditions, state and actions |
 | `azure_sentinel_data_sources` | Data connectors per workspace with each one's last data received and health, and which tables received data in the ingestion window. An alert-only connector (Defender for Endpoint, Office 365, Identity, Cloud, Cloud Apps or IoT, Entra ID Protection, Insider Risk Management) with no alert but a linked connection sending alerts reads quiet, not not connected, and still `connected: false`. `connectors_configured_without_data` counts connectors with a connection but no data that aren't quiet |
 | `azure_sentinel_incidents` | Incidents in the lookback plus every open one: severity, status, classification, owner and time to close |
-| `azure_sentinel_playbooks` | Logic Apps Sentinel runs as playbooks: whether each disables accounts, isolates devices, updates incidents or sends email or Teams messages, its static recipients, and whether an active automation rule runs it |
+| `azure_sentinel_playbooks` | Logic Apps Sentinel runs as playbooks: whether each disables accounts, isolates devices, updates incidents or sends email or Teams messages, its static recipients, whether an active automation rule runs it, and how its recent runs ended |
 
 Defender for Cloud and Azure Policy:
 
