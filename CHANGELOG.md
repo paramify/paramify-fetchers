@@ -955,6 +955,26 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_front_door_origins` 0.6.0, `azure_front_door_tls` 0.4.0 and
+  `azure_front_door_waf_coverage` 0.4.0 run on Azure Government.** Azure
+  Government does not offer the Microsoft.Cdn API versions these fetchers use
+  (the azure-mgmt-cdn default and the pinned 2026-07-01), so every call failed
+  with `InvalidResourceType`. When `AZURE_AUTHORITY_HOST` is
+  `login.microsoftonline.us`, every Microsoft.Cdn client now uses 2025-12-01,
+  the newest stable version Azure Government lists for every `profiles/*` type
+  read, and `origin_api_version` and `security_policies_api_version` report the
+  version actually used. That version does not return a security policy's
+  `isProfileLevel` or `associations[].routes`, so on Azure Government
+  `azure_front_door_waf_coverage` reports a host-route that no association lists
+  by host as `unknown` scope, with `protected` null, instead of as having no
+  WAF. The new `unknown_host_routes` and `host_routes_unknown_scope` count them.
+  While any is unknown, `protected_host_routes`, `unprotected_host_routes`,
+  `protected_host_route_percentage` and the per-reason counts are null, and a
+  profile whose only possibly covered host-routes are unknown has `waf_in_use`
+  null, so `profiles_with_waf_in_use` is null and
+  `profiles_with_waf_in_use_without_waf_log_export` is null unless that profile
+  exports its WAF log. The public-cloud output is unchanged apart from the two
+  new counts, which are 0 there.
 - **`azure_entra_conditional_access_policies` 0.2.1: device filters,
   authentication flows and insider and service principal risk narrow MFA
   coverage.** In 0.2.0 a policy with any of these conditions still added its
