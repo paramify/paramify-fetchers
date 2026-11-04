@@ -10,6 +10,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
 sys.path.insert(0, str(AZURE / "_shared"))
@@ -500,6 +502,22 @@ class RefusedClient(FakeClient):
 
 def _status(tmp_path) -> str:
     return json.loads((tmp_path / "status.json").read_text())["code"]
+
+
+@pytest.mark.parametrize("m", [deletion, incidents], ids=lambda m: m.NAME)
+def test_a_named_workspace_a_pattern_excludes_fails_the_run_as_bad_config(monkeypatch, tmp_path, m):
+    _rest_env(monkeypatch, tmp_path, "rg:rg-out", FakeClient(lists={WS_LIST: _listed(WORKSPACES)}, gets={}))
+    monkeypatch.setenv("SENTINEL_WORKSPACES", "law-out, law-in")
+    onboarding = _onboarding(monkeypatch, WORKSPACES)
+    read: list = []
+    monkeypatch.setattr(m, "collect", lambda client, ws, collector: read.append(ws["name"]) or {})
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    code = m.main()
+    evidence = _evidence(tmp_path, m.NAME)
+    assert code == 1 and _status(tmp_path) == "bad_config"
+    assert _excluded(evidence) == [("workspace", "law-out", "rg:rg-out", "resource_matched")]
+    assert read == ["law-in"] and WS_OUT not in onboarding
+    assert (evidence["summary"]["excluded_workspaces"], evidence["summary"]["in_scope_workspaces"]) == (1, 1)
 
 
 def test_incidents_workspace_counts_are_null_when_the_workspace_list_was_refused(monkeypatch, tmp_path):

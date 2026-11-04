@@ -72,7 +72,8 @@ config_schema:
       assignments and role definitions are not read. An in-scope workspace keeps
       every role assignment that applies at it, wherever it was made (resource
       group, subscription, management group or root), and a SENTINEL_WORKSPACES
-      filter applies first. A pattern
+      filter applies first, and a workspace it names that a
+      pattern takes out fails the run as bad_config. A pattern
       without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Each item is a
       pattern, or a pattern with a reason. Empty: every resource is in scope.

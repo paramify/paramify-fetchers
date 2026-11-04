@@ -310,6 +310,13 @@ def find_workspaces(client: AzureRestClient, subscription_id: str, collector: Co
         selected, out_of_scope = exclusions.split(selected, "workspace")
         if excluded is not None:
             excluded.extend(out_of_scope)
+        # Asked for by name but outside the boundary: the two settings disagree, so the run fails as bad config.
+        for name in wanted:
+            out = [e for e in out_of_scope if _matches(e, name)]
+            if out and not any(_matches(ws, name) for ws in selected):
+                collector.record(f"config {WORKSPACES_ENV}", ValueError(
+                    f"workspace {name!r} is named in {WORKSPACES_ENV} but resource exclusion pattern "
+                    f"{out[0]['pattern']!r} takes it out of scope"))
     out = []
     for ws in selected:
         onboarded = collector.guard(

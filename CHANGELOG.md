@@ -199,7 +199,10 @@ schemas and the `paramify` CLI — not the internal code.
     an excluded workspace gets no reads and isn't counted in
     `workspaces_without_sentinel`. Incidents are never dropped by the entities
     they name. The shared `run_workspaces` and `discover_workspaces` take the
-    exclusions for this. In `azure_sentinel_incidents`, `in_scope_workspaces`
+    exclusions for this. A workspace that `SENTINEL_WORKSPACES` names and a
+    pattern takes out fails the run as `bad_config`, and stays listed under
+    `results.excluded`; this applies to the two Log Analytics fetchers too.
+    In `azure_sentinel_incidents`, `in_scope_workspaces`
     and `excluded_workspaces` read null when the workspace list couldn't be
     read.
   - `azure_service_log_records` 0.2.0: App Service apps and slots, and SQL

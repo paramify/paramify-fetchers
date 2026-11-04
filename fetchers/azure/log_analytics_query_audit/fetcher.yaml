@@ -75,7 +75,8 @@ config_schema:
       pattern and left out of every count; its diagnostic settings are not read
       and LAQueryLogs is not queried for it. An in-scope workspace whose audit
       goes to an excluded workspace is still queried there, so it keeps its
-      verdict. A SENTINEL_WORKSPACES filter applies first. A pattern
+      verdict. A SENTINEL_WORKSPACES filter applies first, and a workspace it names that a
+      pattern takes out fails the run as bad_config. A pattern
       without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Each item is a
       pattern, or a pattern with a reason. Empty: every resource is in scope.

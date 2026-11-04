@@ -68,7 +68,8 @@ config_schema:
       included; its incidents are not listed and its SecurityIncident and
       SecurityAlert tables are not queried. Incidents in an in-scope workspace
       are never dropped by the entities they name. An excluded workspace gets no reads, not even its Sentinel onboarding state;
-      a SENTINEL_WORKSPACES filter applies first. A pattern
+      a SENTINEL_WORKSPACES filter applies first, and a workspace it names that a
+      pattern takes out fails the run as bad_config. A pattern
       without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
       fetcher that has this field; fetchers without it ignore it. Each item is a
       pattern, or a pattern with a reason. Empty: every resource is in scope.
