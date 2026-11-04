@@ -111,8 +111,8 @@ evidence_set:
     Which workspaces are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every workspace is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no workspace, such as a mistyped name
-    - excluded_workspaces — Number of workspaces left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern and isn't read, and no other count includes them
-    - in_scope_workspaces — Number of workspaces found and in scope, Sentinel or not; 0 means none was found or the patterns took out every workspace, which a check can catch by requiring more than 0
+    - excluded_workspaces — Number of workspaces left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern and isn't read, and no other count includes them; null if the workspace list couldn't be read
+    - in_scope_workspaces — Number of workspaces found and in scope, Sentinel or not; 0 means none was found or the patterns took out every workspace, which a check can catch by requiring more than 0; null if the workspace list couldn't be read
 
     Are incidents being worked and closed?
     - incidents_in_scope — Number of incidents created in the lookback, plus older incidents still open; null if any workspace's incidents couldn't be read

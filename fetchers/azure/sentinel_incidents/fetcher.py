@@ -17,7 +17,7 @@ from azure_common import dig  # noqa: E402
 from azure_rest import (  # noqa: E402
     SI_API,
     QueryError,
-    discover_workspaces,
+    find_workspaces,
     int_config,
     iso_duration_days,
     parse_time,
@@ -744,8 +744,10 @@ def main() -> int:
     def per_workspace(client, subscription_id: str, collector) -> tuple:
         excluded: List[Dict[str, Any]] = []
         failures = len(collector.failures)
-        found = discover_workspaces(client, subscription_id, collector, exclusions, excluded)
+        found = find_workspaces(client, subscription_id, collector, exclusions, excluded)
         discovered = len(collector.failures) == failures
+        listed = found is not None
+        found = found or []
         exclusions.record_invalid(collector)
         exclusions.warn_unmatched(logger)
         workspaces: List[Dict[str, Any]] = []
@@ -761,6 +763,8 @@ def main() -> int:
         summary = {"workspaces_collected": len(workspaces), **summarize(workspaces, discovered),
                    "workspaces_without_sentinel": len(without_sentinel),
                    **exclusions.summary(excluded, ("workspace",), {"workspaces": len(found)})}
+        if not listed:  # unknown, not none, when the workspace list wasn't read
+            summary.update(excluded_workspaces=None, in_scope_workspaces=None)
         return results, summary
 
     return run_subscription(fetcher=NAME, logger=logger, collect=per_workspace)

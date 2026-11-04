@@ -484,6 +484,34 @@ def test_incidents_excluded_workspaces_are_not_read(monkeypatch, tmp_path):
     assert all(evidence["summary"][field] == 4 for field in INCIDENT_FIELDS)
 
 
+class RefusedClient(FakeClient):
+    """Refuses (403) the lists whose paths are in `refused`."""
+
+    def __init__(self, lists: dict, gets: dict, refused=(), rows=()):
+        super().__init__(lists, gets, rows)
+        self.refused = set(refused)
+
+    def list(self, path, api_version, params=None):
+        if path in self.refused:
+            self.reads.append(path)
+            raise azure_rest.ArmError(403, "AuthorizationFailed", "The client does not have authorization")
+        return super().list(path, api_version, params)
+
+
+def _status(tmp_path) -> str:
+    return json.loads((tmp_path / "status.json").read_text())["code"]
+
+
+def test_incidents_workspace_counts_are_null_when_the_workspace_list_was_refused(monkeypatch, tmp_path):
+    _rest_env(monkeypatch, tmp_path, WS_PATTERNS, RefusedClient({}, {}, refused=[WS_LIST]))
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    code = incidents.main()
+    summary = _evidence(tmp_path, incidents.NAME)["summary"]
+    assert code == 1 and _status(tmp_path) == "not_authorized"
+    assert (summary["in_scope_workspaces"], summary["excluded_workspaces"]) == (None, None)
+    assert summary["incidents_in_scope"] is None
+
+
 # --- log_storage_immutability ---
 
 STORAGE = "providers/Microsoft.Storage/storageAccounts"

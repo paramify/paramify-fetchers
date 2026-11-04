@@ -284,12 +284,19 @@ def discover_workspaces(client: AzureRestClient, subscription_id: str, collector
                         exclusions: Optional[ResourceExclusions] = None,
                         excluded: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     """The (selected) workspaces with their Sentinel onboarding; ones `exclusions` takes out go to `excluded`, unread."""
+    return find_workspaces(client, subscription_id, collector, exclusions, excluded) or []
+
+
+def find_workspaces(client: AzureRestClient, subscription_id: str, collector: Collector,
+                    exclusions: Optional[ResourceExclusions] = None,
+                    excluded: Optional[List[Dict[str, Any]]] = None) -> Optional[List[Dict[str, Any]]]:
+    """discover_workspaces, but None when the workspace list couldn't be read."""
     listed = collector.guard(
         "operationalinsights.workspaces.list",
         lambda: client.list(f"/subscriptions/{subscription_id}/providers/Microsoft.OperationalInsights/workspaces", LAW_API),
     )
     if listed is None:
-        return []
+        return None
     wanted = requested_workspaces()
     for name in wanted:
         if not any(_matches(ws, name) for ws in listed):
