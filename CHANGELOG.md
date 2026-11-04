@@ -1289,6 +1289,15 @@ schemas and the `paramify` CLI — not the internal code.
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
   refused, throttled or unreachable failed as `partial_failure`. These now read
   `not_authorized`, `rate_limited` and `target_unreachable`.
+- **`azure_devops_audit_streams` no longer reads unlisted streams as no
+  streams** (0.1.0 → 0.1.1). When the audit streams can't be listed, for
+  example a 403 to an identity that may read the audit log but not its streams,
+  `streams_delivering`, `streams_not_delivering`, `streams_by_target` and the
+  two Azure Monitor counts are now null, as `streams` already was. Before, they
+  read 0, an empty list and an empty map. The Azure Monitor counts are also
+  null when any Azure Monitor stream's workspace couldn't be checked. The
+  access text and the Azure README now say listing streams needs Manage audit
+  streams, as Azure DevOps has no read-only permission for it.
 - **Azure DevOps: a TFVC "Access Denied" is `not_authorized`.** Azure DevOps
   answers 500 TF14098 when the caller can't read an item in a changeset. The
   shared client now reports it as `not_authorized` and doesn't retry it.
