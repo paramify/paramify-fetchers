@@ -66,8 +66,9 @@ reference to a variable whose name looks like a credential's (it contains
 reference to any variable that holds a secret: one a fetcher or category in the
 catalog declares, or one a `secrets:` reference anywhere in the manifest reads.
 The run masks the value it reads out of the fetcher's logs and the run metadata,
-but a fetcher may still write it into its evidence. A pattern list, such as the
-Azure exclusions, takes no `${env:VAR}`: its patterns go in the manifest.
+but a fetcher may still write it into its evidence. A
+[pattern list](#5-leave-resources-out-of-scope) takes no `${env:VAR}`, and the
+runner never reads one from `.env` or the shell.
 
 ## 3. Check it
 
@@ -98,6 +99,31 @@ paramify evidence evidence/run-<timestamp>/rippling_all_employees.json
 ```
 </details>
 
+## 5. Leave resources out of scope
+
+Some fields are pattern lists, such as Azure's `resource_exclusions`.
+`manifest exclude` adds a pattern, with a reason if you give one, to the list
+whose prefixes take it. A category list reaches every entry that declares the
+field, and `validate` names them. An entry's own list replaces it.
+
+![manifest exclude adds two patterns with reasons to platforms.azure; validate notes the list applies to azure_key_vault_configuration and is not a setting of azure_defender_plans](img/config_injection/05-exclude.png)
+
+<details><summary>Copy the commands</summary>
+
+```bash
+paramify manifest exclude azure location:regioneast --reason "Region outside the authorization boundary" -f scope.yaml
+paramify manifest exclude azure "rg:rg-sandbox-*" --reason "Developer sandboxes" -f scope.yaml
+paramify validate scope.yaml
+```
+</details>
+
+Front Door and DNS `scope_exclusions` take different patterns, so set them on
+each fetcher. The TUI edits an entry's lists too (`e`), one
+`pattern  # reason` per line. Each evidence file records the patterns and
+reasons its fetcher received in
+[`metadata.config_patterns`](envelope_guide.md#2-read-its-envelope).
+Full sample: [`azure_scope_exclusions.yaml`](../examples/azure_scope_exclusions.yaml).
+
 ---
 
 ## Troubleshooting
@@ -106,6 +132,8 @@ paramify evidence evidence/run-<timestamp>/rippling_all_employees.json
 |---|---|
 | `Secret reference ${env:…} could not be resolved` | Export that variable in the shell that runs `paramify`. |
 | `NOTE target selects AWS_PROFILE; ignored ambient credentials …` | Expected: a target's `profile:` overrides static AWS keys. Remove it to use them. |
+| `has the unknown prefix …` or `needs one of the prefixes …` | That list doesn't take the pattern. `paramify describe <fetcher>` shows what each list takes. |
+| `${env:} references aren't read for a pattern list` | Write the patterns in the manifest with `paramify manifest exclude`. |
 | `a comparator ignores platforms.<category>.config` | A [comparator](comparators.md#how-the-runner-runs-one) gets none of its category's config, secrets or passthrough env. Set its own config on its entry with `paramify manifest set-config`. |
 
 **More detail:** [shared platform config](run_manifest_guide.md#4-set-shared-config-once)
