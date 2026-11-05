@@ -12,6 +12,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
+  secret and certificate gets `lifetime_days` (end date minus start date, null when
+  either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.
+  A credential counts as beyond the interval when its lifetime, less any 29 February in
+  its span, exceeds it; one with a start date and no end date counts too, as it never
+  expires. The summary adds `credentials_issued_beyond_approved_lifetime`,
+  `credentials_without_lifetime` and `approved_lifetime_days`; both counts read null
+  after a failed or partial applications read, and the first also while any verdict is
+  unknown. The interval is the new `approved_lifetime_days` config field
+  (`AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS`), default 365 (a convention: FedRAMP KSI-SVC-ASM
+  asks for regular rotation and sets no number), capped at 3650; a value that isn't a whole
+  number from 1 up fails the run as `bad_config`. No new calls.
+
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
   a passkey (synced or device-bound), Windows Hello for Business or a macOS platform
@@ -1083,6 +1096,33 @@ schemas and the `paramify` CLI — not the internal code.
   Identity (Read), Code (Read) and Project and Team (Read).
 
 ### Changed
+
+- **`azure_waf_ddos_activity` 0.2.0: DDoS figures include IPs protected by a network-level DDoS plan.**
+  The existing figures `protected_ips_with_attack_alert_reaching_receiver`,
+  `protected_ips_without_attack_alert`, `public_ips_attacked` and
+  `ddos_mitigations_started` now include public IPs that a virtual network's DDoS
+  protection plan (Network Protection) covers. So do the per-IP `attack_alert_can_fire`,
+  `attack_hours` and `mitigations_*`. Before, all of these counted only IPs with IP
+  Protection.
+  - An attached public IP that inherits its protection is now placed in its virtual
+    network, the same way `azure_ddos_protection` places it: the network of its NIC,
+    gateway, firewall or Bastion host, or of a load balancer's backend pool.
+  - Both SKUs give a public IP the same `IfUnderDDoSAttack` metric, the same DDoS
+    log categories and the same mitigations
+    (https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-sku-comparison,
+    https://learn.microsoft.com/en-us/azure/ddos-protection/monitor-ddos-protection-reference).
+  - Each IP gets `effective_protection`, plus `virtual_network_id` and
+    `virtual_network_ddos_protection_plan_id` when it inherits.
+  - The summary adds `public_ips_with_network_protection`, `protected_public_ips`
+    and `public_ips_protection_unknown`. The first two are null when the virtual
+    network, NIC or load balancer list can't be read.
+  - `protected_ips_without_attack_alert`, `public_ips_attacked` and
+    `ddos_mitigations_started` are null when any attached IP's protection is
+    unknown, because that IP may be protected, attacked or mitigated.
+  - An IP on a NAT gateway no longer counts in `public_ips_with_ip_protection`,
+    because neither SKU covers it.
+  - The virtual network, NIC and load balancer lists are read only when some
+    attached IP inherits its protection. They need no access beyond Reader.
 
 - **`azure_policy_compliance` 0.5.0: in-scope compliant counts under
   resource_exclusions.** With patterns set, the fetcher reads every latest
