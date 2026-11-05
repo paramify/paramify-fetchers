@@ -23,6 +23,7 @@ from sentinel_ingestion import (  # noqa: E402
     ALERT_PRODUCTS_QUERY,
     ALERTS_TABLE,
     DEFAULT_WINDOW_DAYS,
+    DEFENDER_XDR_CARRIES,
     INGESTION_QUERY,
     NON_SOURCE_TABLES,
     WINDOW_ENV,
@@ -46,12 +47,8 @@ ALERT_PRODUCT_KINDS = {
     "microsoft defender advanced threat protection": "MicrosoftDefenderAdvancedThreatProtection",
     "office 365 advanced threat protection": "OfficeATP",
 }
-# Defender XDR's connection (only the preview listing returns it) carries these kinds' alerts, not Defender for Cloud's or IoT's.
+# Defender XDR's connection (only the preview listing returns it) carries the alerts of the kinds in DEFENDER_XDR_CARRIES.
 DEFENDER_XDR = "MicrosoftThreatProtection"
-DEFENDER_XDR_CARRIES = frozenset({
-    "AzureActiveDirectory", "AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity",
-    "MicrosoftDefenderAdvancedThreatProtection", "OfficeATP",
-})
 
 # Verbatim strings (@"…") escape only a doubled quote, so a trailing backslash still closes them.
 _KQL_TOKEN = re.compile(
@@ -363,9 +360,15 @@ def rule_summary(rules: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def coverage(rules: List[Dict[str, Any]], ingested: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def coverage(
+    rules: List[Dict[str, Any]], ingested: Optional[Dict[str, Any]], alert_products_read: bool = True
+) -> Dict[str, Any]:
     """Which ingesting tables enabled rules read, which they don't, and which enabled rules read tables with no data."""
     enabled = [r for r in rules if r.get("enabled") is True]
+    # An enabled incident-creation rule's data is its product's alerts, unknown when they couldn't be read.
+    missing_known = ingested is not None and (
+        alert_products_read or not any(r.get("kind") == INCIDENT_CREATION for r in enabled)
+    )
     readers: Dict[str, int] = {}
     # A template's data types are the sources a rule may read, not ones its query is known to read.
     by_template: Dict[str, int] = {}
@@ -394,7 +397,7 @@ def coverage(rules: List[Dict[str, Any]], ingested: Optional[Dict[str, Any]]) ->
                 {"name": r["name"], "display_name": r["display_name"], "tables_without_data": r["tables_without_data"]}
                 for r in enabled if r.get("tables_without_data")
             ]
-            if ingested is not None else None
+            if missing_known else None
         ),
     }
 
@@ -461,6 +464,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     ingested = {r["ParamifySourceTable"]: r.get("LastIngested") for r in rows if r.get("ParamifySourceTable")} if rows is not None else None
 
     rules = merge_rules(stable, preview) if stable is not None else None
+    products: Optional[Dict[str, Any]] = {}
     if rules is not None and templates is not None:
         templates = templates + preview_templates(client, path, rules, templates, notes)
     if rules is not None:
@@ -470,7 +474,6 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             r["tables_read"], r["tables_from"] = (
                 rule_tables(r, names, columns, by_template, workspace_functions) if names is not None else (None, None)
             )
-        products: Optional[Dict[str, Any]] = {}
         if ingested and ALERTS_TABLE in ingested and any(r["kind"] == INCIDENT_CREATION for r in rules):
             alert_rows = collector.guard(
                 f"loganalytics.query(SecurityAlert products, {ws['name']})",
@@ -479,8 +482,9 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             products = {(p.get("ProductName") or "").lower(): p.get("LastIngested") for p in alert_rows} if alert_rows is not None else None
         for r in rules:
             r["tables_without_data"] = tables_without_data(r, ingested, products)
+    covered = coverage(rules, ingested, products is not None) if rules is not None and listed_tables is not None else {}
     quiet = None
-    if rules is not None and listed_tables is not None and ingested is not None:
+    if covered.get("enabled_rules_missing_data") is not None:
         quiet = quiet_rules(client, path, ws, rules, collector, notes)
 
     with_text = include_query_text()
@@ -495,7 +499,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         "query_text_included": with_text,
         "rules": rules,
         **(rule_summary(rules) if rules is not None else {}),
-        **(coverage(rules, ingested) if rules is not None and listed_tables is not None else {}),
+        **covered,
         **({"enabled_rules_quiet": quiet} if rules is not None and listed_tables is not None else {}),
         "workspace_tables_listed": len(listed_tables) if listed_tables is not None else None,
         "templates_available": len(template_names) if templates is not None else None,

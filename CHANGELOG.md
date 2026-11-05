@@ -1618,6 +1618,18 @@ schemas and the `paramify` CLI — not the internal code.
   failed role list leaves every figure null, and a failed members or cast read
   leaves null each figure over that role that it feeds (the Global Administrator
   count when it is that role); each role records `members_read`.
+- **`azure_rbac_role_assignments` 0.4.2: a failed read is null, not 0.** When the
+  subscription-and-above role-assignment list couldn't be read, every count over
+  it read 0, so an unread scope looked like no assignments. Each count is now
+  null when a list it counts couldn't be read: the subscription-and-above counts
+  when that list fails, the `below_subscription_*` and `all_scopes_*` counts when
+  either list fails (the below-subscription set is told apart from the other, so
+  it isn't read when the other fails), the PIM standing counts when either list
+  or the PIM schedules fail, and the custom, built-in and unresolved role counts
+  when the role definitions fail. `results.role_assignments` and
+  `results.role_assignments_below_subscription` are null when unread, and with
+  patterns set `resource_exclusion_patterns_unmatched` is null when a list the
+  patterns apply to wasn't read.
 - **`azure_entra_conditional_access_policies` 0.2.2: an application filter
   narrows MFA coverage in either mode, and each policy shows its filter.** In
   0.2.1 a policy with an application filter still added its client app types to
@@ -1647,6 +1659,17 @@ schemas and the `paramify` CLI — not the internal code.
   `profiles_with_waf_in_use_without_waf_log_export` is null unless that profile
   exports its WAF log. The public-cloud output is unchanged apart from the two
   new counts, which are 0 there.
+- **`azure_sentinel_analytics_rules` 0.3.1: a failed SecurityAlert products
+  read is null, and the KSI-IAM-SUS mapping is dropped.** When the SecurityAlert
+  products query failed, enabled incident-creation rules dropped out of
+  `enabled_rules_missing_data` instead of making it unknown. The workspace's
+  `enabled_rules_missing_data` and `enabled_rules_quiet` are now null when that
+  query fails and the workspace has an enabled incident-creation rule. The
+  fetcher no longer maps to KSI-IAM-SUS: a detection rule shows the trigger, not
+  the response to suspicious activity, which `azure_sentinel_automation_rules`
+  covers. The Defender XDR list of products whose alerts it carries now lives in
+  `_shared/sentinel_ingestion.py`, shared with `azure_sentinel_data_sources`;
+  neither fetcher's output changes from the move.
 - **Azure: an invalid lookback or recovery time objective fails as `bad_config`.**
   The messages matched no `bad_config` marker, so `azure_change_provenance` and
   `azure_front_door_origins` reported an invalid lookback as `partial_failure`.
@@ -1691,6 +1714,15 @@ schemas and the `paramify` CLI — not the internal code.
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
   refused, throttled or unreachable failed as `partial_failure`. These now read
   `not_authorized`, `rate_limited` and `target_unreachable`.
+- **A Microsoft Graph 403 reads `not_authorized` with older msgraph
+  dependencies too.** `classify_failure_code` in `_shared/azure_common.py`
+  read msgraph's `(status 403)` but not the `Code: 403` that
+  microsoft-kiota-abstractions before 1.13 prints, which the msgraph-sdk floor
+  still allows. A Graph permission denial whose message named no other marker,
+  such as `accessDenied` or an empty `UnknownError`, was reported as
+  `partial_failure`. `Code: NNN` now classifies like `(NNN)`, and
+  `accessDenied` and `Authorization_RequestDenied` read `not_authorized`. With
+  kiota-abstractions 1.13 or later nothing changes.
 - **`azure_devops_permissions` resolves every identity in a large
   organization** (0.1.0 → 0.1.1). Identities were looked up 50 descriptors per
   request, and Azure DevOps answers 404 when that query string runs to several
