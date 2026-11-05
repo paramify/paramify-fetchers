@@ -12,8 +12,9 @@ statement: >
   sentinel_connectors_listed_every_workspace must pass alongside it, because it proves there were
   connectors to judge and that every workspace's connectors were listed. Supports KSI-MLA-OSM. Does
   not prove which connectors are required, connector health (connectors_unhealthy), or connectors
-  whose data couldn't be measured (a filtered query on a Basic or Auxiliary table that received
-  data, which would need another billed search) or that define no data types.
+  whose data couldn't be measured (a table on the Basic or Auxiliary plan, which is searched only when
+  basic_logs_lookback_hours is above 0, or a filtered query on one that received data) or that define
+  no data types.
 
 regex: '"partial_failure":\s*false\b[\s\S]*?"summary":\s*\{[^{}]*?"connectors_configured_without_data":\s*0\b'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
