@@ -236,6 +236,7 @@ TEXT_FORMAT_FETCHERS = (
     "azure/service_health_advisories",
     "azure/sql_managed_instance_configuration",
     "oci",
+    "qualys",
 )
 # Fetchers whose instructions listed summary fields before their tests checked them; each leaves once its tests
 # call assert_summary_documented, and SUMMARY_DOCS_PENDING_MAX drops with it. A new fetcher calls the fixture instead.

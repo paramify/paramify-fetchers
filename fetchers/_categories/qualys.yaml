@@ -1,0 +1,49 @@
+display_name: Qualys
+description: >-
+  Qualys VMDR vulnerability management. Scan coverage per host, scan schedules
+  and runs, open findings against remediation timeframes, and fixed findings.
+  One read-only API user per subscription.
+
+# Python (requests) against the Qualys VM/PC XML API, parsed with defusedxml.
+# Basic auth with one API user per subscription; no ambient identity.
+requires:
+  python_packages:
+    - defusedxml
+
+secrets:
+  - name: username
+    env: QUALYS_USERNAME
+    description: >-
+      Login of a local (not SSO) Qualys user with the Reader role and API access
+      turned on, assigned the All asset group so it can see every host.
+  - name: password
+    env: QUALYS_PASSWORD
+    description: Password of the same Qualys user.
+
+config_schema:
+  api_url:
+    type: string
+    required: true
+    env: QUALYS_API_URL
+    description: >-
+      API server URL of the Qualys platform the subscription is on, shown in the
+      Qualys UI under Help > About, e.g. https://qualysapi.qualys.com (US1) or
+      https://qualysapi.gov1.qualys.us (GOV1). Not the qualysguard web UI URL.
+  scan_window_days:
+    type: integer
+    required: false
+    env: QUALYS_SCAN_WINDOW_DAYS
+    default: 30
+    description: >-
+      How recent a scan must be to count as within the window, and how far back
+      the scan list reads. Set it to the scan frequency your policy states.
+  remediation_days:
+    type: string
+    required: false
+    env: QUALYS_REMEDIATION_DAYS
+    default: "5:30,4:30,3:90,2:180,1:180"
+    description: >-
+      Days allowed to fix a finding, per Qualys severity 5 to 1. The default
+      follows FedRAMP's historical continuous-monitoring convention (high 30,
+      moderate 90, low 180 days, reading severity 5 and 4 as high); set your
+      policy's own values.

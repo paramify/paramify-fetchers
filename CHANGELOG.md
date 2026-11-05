@@ -12,6 +12,36 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Qualys VMDR fetchers, a new `qualys` category.** Four evidence fetchers read
+  the Qualys VM/PC XML API with one read-only API user (Basic auth, the
+  `X-Requested-With` header Qualys requires):
+  - `qualys_scan_coverage`: each host's last vulnerability scan and last
+    authenticated scan against `scan_window_days`, the subscription IPs that have
+    no host record, and excluded IPs.
+  - `qualys_scan_schedules`: active scan schedules and their longest gap between
+    runs, whether each option profile enables authentication, and how the scans
+    launched in the window ended.
+  - `qualys_vulnerability_findings`: open detections (New, Active, Re-Opened) by
+    severity and type, with each one's age against `remediation_days`. Ignored and
+    disabled detections are counted, not dropped.
+  - `qualys_vulnerability_remediation`: detections fixed within the lookback,
+    fixed within or after their timeframe, and reopened ones.
+
+  `QUALYS_API_URL` is required with no default, because subscriptions live on
+  different platforms (US1–US4, GOV1, EU and others). A Reader sees only the hosts
+  in its asset groups, so every fetcher records whether the API user sees the
+  built-in All group (`scope_all`). The shared client branches on the Qualys
+  error code rather than the HTTP status, because 409 covers rate and concurrency
+  limits, an unfinished registration and SecureID. It retries only the limits.
+  Each next page re-sends the original filters with the `id_min` from Qualys's
+  next-page URL, and refuses a URL on another host. A page that fails means the
+  run writes no summary. Responses are parsed with `defusedxml`. It is a new
+  dependency, in the new `qualys` extra and in `dev`. The `remediation_days`
+  default (`5:30,4:30,3:90,2:180,1:180`) follows FedRAMP's historical
+  continuous-monitoring timeframes as a convention; set your own policy's values.
+  Raw scan output (`RESULTS`) is never requested, and option profiles keep only
+  their title and authentication types.
+
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
   a passkey (synced or device-bound), Windows Hello for Business or a macOS platform

@@ -31,7 +31,8 @@ dependencies = [
 # same app on 1.x.
 tui = ["textual>=8,<9"]
 checkov = ["checkov"]
-dev = ["pytest", "pytest-xdist", "ruff", "mypy"]
+# defusedxml is here so the qualys tests run in CI's `.[dev,tui]` job rather than skip.
+dev = ["pytest", "pytest-xdist", "ruff", "mypy", "defusedxml"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every
 # one producing wrong or empty evidence rather than an error. Keep the two files
@@ -115,8 +116,10 @@ gcp = [
 # opens with pytest.importorskip("oci"), so without it installed they SKIP rather
 # than fail. Out of `all` for the same reason as Azure and GCP.
 oci = ["oci"]
+# Qualys returns XML that names an external DTD; the fetchers parse it with defusedxml.
+qualys = ["defusedxml"]
 # Convenience: every front-end + dev tooling in one install.
-all = ["textual>=8,<9", "checkov", "pytest", "ruff", "mypy"]
+all = ["textual>=8,<9", "checkov", "pytest", "ruff", "mypy", "defusedxml"]
 
 # The single entry point. `paramify` steers every front-end: the headless
 # commands, plus `paramify tui`. (Renaming later is a one-line change here; add
