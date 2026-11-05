@@ -12,6 +12,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
+  `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
+  a passkey (synced or device-bound), Windows Hello for Business or a macOS platform
+  credential (the same set `azure_entra_emergency_accounts` uses). Synced passkeys
+  count because Microsoft treats them as phishing-resistant credentials
+  (https://learn.microsoft.com/en-us/entra/identity/authentication/how-to-authentication-passkeys-fido2). Certificate-based authentication
+  isn't visible in the registration report, so a certificate-only user counts as without.
+  The summary adds
+  `phishing_resistant_enabled_users`, `phishing_resistant_coverage_percentage`,
+  `phishing_resistant_admin_users`, `phishing_resistant_admin_coverage_percentage`
+  and `admin_users_without_phishing_resistant`. They read null when the
+  registration report can't be read, the admin ones also when role membership
+  can't. `is_passwordless_capable` is unchanged and still counts Authenticator phone
+  sign-in, which isn't phishing-resistant; the description no longer calls it that.
+
 - **`aws_organizations_scp` can record the SCPs that apply to each account.**
   Set `effective_scp_accounts` (env `SCP_EFFECTIVE_ACCOUNTS`) to comma-separated
   account IDs, or `all`. For each account the fetcher records
@@ -65,6 +80,58 @@ schemas and the `paramify` CLI — not the internal code.
   a name fails the run with `bad_config`, since the type meant would need no
   approval: before anything is read when `CHANGE_RECORD_TYPES` is set, and
   otherwise after the comparison, whose file is still written.
+- **`azure_change_provenance` 0.3.0: before and after values for direct edits
+  and manual deployments.** Each such change carries `property_changes`, one
+  entry per changed property from Resource Graph's `changes`. A shown entry has
+  `path`, `previous_value`, `new_value` and `truncated`. A withheld one has only
+  `path` and `withheld`, the reason, and never the value or anything derived
+  from it.
+  - Values are shown only for an allowlist of security settings and tags. The
+    new `value_paths` setting adds to it: a pattern list (`type: patterns`) set
+    in the manifest as `path:<glob>` items, such as `path:properties.siteConfig.*`
+    or `path:*`, with `paramify manifest set-config`. Like the exclusion lists,
+    it takes no `${env:}`. It is marked `exclusion: false`, so
+    `paramify manifest exclude` and `unexclude` never edit it, and an exclude
+    can't widen what's shown. A pattern without `path:` fails the run as
+    `bad_config` and keeps no values. Any other path is
+    withheld as `not_allowlisted`.
+  - The secret check runs first, on every path, whatever the allowlist says. A
+    value is withheld as `secret` when a path segment names a secret or
+    free-form content (password, pass, passphrase, passcode, secret, token, any
+    name ending in key or key<n>, pwd, pw, pin, uri or url, key data, key value,
+    pfx, psk, connection string, authorization, headers, queries, body, env, app
+    settings, args, custom data), compared without case, `_` or `-`. It is also
+    withheld when the value, as written or URL-decoded (repeatedly, up to four
+    times), looks like one: a secret word anywhere in its text
+    (`name: DB_PASSWORD`, `Password123!`),
+    `NAME_PASSWORD=`, `pin=`, `pw=`, `--password x`, `Basic`/`Bearer`
+    credentials, a URL with a user, a JWT, a PEM private key, a short
+    random-looking string, or a long key-like string. The built-in allowlist
+    names specific paths, so a setting name such as `status` is shown only on its
+    own resource path.
+  - Two things can't be caught: a short password with nothing marking it, such
+    as one alone in a tag, and, under `path:*`, free-form content whose names
+    don't mark a secret (a generic parameter, setting or variable value, or a
+    script). `path:*` shows whatever such content holds, so it is the
+    operator's risk.
+  - Values are cut at 200 characters, and a change lists at most 25 entries
+    (`property_changes_truncated`). `property_value_counts` counts its values
+    shown, not allowlisted and secret, over every changed property. Values that
+    can't be read are null (unknown), not empty.
+  - Only the newest `max_value_changes` such changes keep values
+    (`AZURE_CHANGE_MAX_VALUE_CHANGES`, default 500, 0 for none). An invalid
+    setting fails the run as `bad_config` and keeps none.
+  - The summary adds `changes_with_property_values`,
+    `changes_property_values_capped`, `changes_property_values_unknown`,
+    `property_values_shown` and `property_values_withheld_by_reason`. Shown and
+    withheld are null when any change's values couldn't be read, and all five are
+    null when a change table couldn't be read. Changes with any other origin, and excluded changes, carry no
+    values.
+- **Pattern-list fields take `exclusion: false`.** It marks a `type: patterns`
+  field that shows more as it grows, such as an allowlist.
+  `paramify manifest exclude` and `unexclude` never pick it, even with
+  `--field`, so an exclude can't widen it. Set it with `set-config` or in the
+  manifest. Every existing pattern list keeps the default, `true`.
 - **`azure_devops_service_connections`** (`EVD-AZURE-DEVOPS-SERVICE-CONNECTIONS`):
   how an Azure DevOps organization's pipelines hold their secrets, and which runs
   used each service connection. Per connection, once however many projects share
@@ -867,14 +934,26 @@ schemas and the `paramify` CLI — not the internal code.
   comma-separated list. `describe` shows what a pattern list takes instead of its
   env var. `validate` adds a note for each category-wide list, naming the entries
   that take it, the ones with their own list, and the ones without the field
-  (`--json` carries them as `notes`). The TUI shows a list as its patterns and
-  leaves it out of the entry editor, which would save it back as one string.
+  (`--json` carries them as `notes`). The TUI shows a list as its patterns, and
+  its entry editor (`e`) edits one as text, one `pattern  # reason` per line:
+  the box opens on the category's list while the entry inherits it, saving it
+  unchanged writes nothing, an edit gives the entry its own list, and an edit
+  holding a pattern the field doesn't take keeps the form open with the reason.
+  A reason written on several lines shows on one, so its later lines can't
+  become patterns.
   A list or a map given to a config field that isn't `type: patterns`, such as
   a category-wide list reaching a fetcher that declares the key a string, fails
   `validate` and the run instead of reaching the fetcher as Python text. A
   pattern list the manifest leaves unset reaches the fetcher as an empty
   variable, so a `.env` file can't fill it, and `passthrough_env` doesn't carry
   it.
+- **The evidence names the patterns a fetcher received.** The envelope of a
+  fetcher that received a pattern list gains `metadata.config_patterns`: per
+  field, each pattern in manifest order, its reason (null when the manifest
+  gives none) and the layer that set the list (`entry`, `platform` or
+  `default`). A run that passes no pattern writes the envelope it always has,
+  with no new key. `examples/azure_scope_exclusions.yaml` sets both Azure lists
+  with synthetic patterns and reasons.
 - **A string config field can be a `${env:VAR}` reference.** The runner
   resolves it the way it resolves a secret. An unset or empty variable gives way
   to the next value down (platform config, then the default; an error for a
@@ -974,6 +1053,32 @@ schemas and the `paramify` CLI — not the internal code.
   Identity (Read), Code (Read) and Project and Team (Read).
 
 ### Changed
+
+- **`azure_policy_compliance` 0.5.0: in-scope compliant counts under
+  resource_exclusions.** With patterns set, the fetcher reads every latest
+  (resource, policy) state grouped on the server (`groupby((ResourceId,
+  ResourceLocation, PolicyAssignmentId, PolicyDefinitionId,
+  PolicyDefinitionReferenceId, ComplianceState))`, after a count of those groups,
+  up to 50,000), keeps the in-scope ones by resource id, group and region, and
+  recounts both sides from them: `compliant_resources`, `resources_evaluated`,
+  `resource_compliance_percentage` and every entry of
+  `resources_by_compliance_state` and `policies_by_compliance_state` (Compliant,
+  Exempt, Unknown and the rest), each assignment's `compliant_resources`,
+  `compliance_percentage` and `resource_details`, and the non-compliant counts.
+  A resource counts once under its highest-ranked state (NonCompliant, Compliant,
+  Error, Conflict, Protected, Exempt, Unknown), and a policy the same way. At
+  subscription scope a policy is an assignment, an initiative counting once, as
+  the service counts them; 0.4.0's recount of `non_compliant_policies` counted
+  each member policy of each assignment instead. The compliant side was null
+  before, and the non-compliant counts no longer go null when the itemized list
+  is truncated or skipped. All of them read null, map
+  values included, unless the grouped read came back whole, and the new
+  `in_scope_states_status` says how it went (`read`, `truncated`, `uncounted` or
+  `failed`; null without patterns). A count over the 50,000 cap skips the read, and
+  an empty count with no groups reads as nothing evaluated. A pattern that matches
+  only compliant resources now counts as matched. Without patterns the read is not
+  made and the counts are the service's, as before; the only change is one more
+  summary line, `"in_scope_states_status": null`.
 
 - **`azure_backup_recovery_status` 0.4.0: restore jobs.** Each vault now lists
   its restore jobs (`restore_jobs`) over `restore_window_days` (365 by default
@@ -1544,6 +1649,56 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_emergency_accounts` 0.1.1: a synced passkey counts as a phishing-resistant
+  method.** `phishing_resistant_method_registered` and
+  `emergency_accounts_with_phishing_resistant_method` now count `passKeySynced`
+  alongside device-bound passkeys, as Microsoft treats synced passkeys as
+  phishing-resistant credentials. The set is shared with `azure_entra_mfa_status`.
+
+- **Paramify VER fetchers use the PAIN rating and report open N0 issues as
+  `Fully Mitigated`.** `currentRating` now comes from the issue's Potential
+  Agency Impact N-rating (`painRating`) when one is set, and falls back to the
+  risk level only when it is not; an issue with a PAIN rating but no risk level
+  previously had no `currentRating`. An issue that is still open and rated N0 is
+  reported as `finalDisposition: "Fully Mitigated"`, FedRAMP's term for a
+  vulnerability that is still detected at negligible impact. N1 still has
+  minimal customer effects, so it is not Fully Mitigated. Closed issues remain
+  `Remediated`, and an accepted `FALSE_POSITIVE` deviation still takes
+  precedence.
+- **Paramify VER fetchers no longer accept Fully Mitigated or False Positive
+  issues after 192 days.** VER-TFR-MAV accepts a vulnerability that "is not or
+  will not be fully mitigated or remediated within 192 days of evaluation". An
+  open issue reported as `Fully Mitigated` already is, and one with an accepted
+  `FALSE_POSITIVE` deviation is not actually present, so neither moves to the
+  Accepted Vulnerability Info report by age. Both now stay in the Vulnerability
+  Detail Report (and the active list of Historical VER Activity) with their
+  disposition, instead of appearing as accepted with the rationale "without full
+  mitigation". Partially mitigated and unrated open issues are still accepted
+  after 192 days, and accepted deviations still make an issue accepted.
+- **Paramify VER fetchers no longer mark Fully Mitigated or False Positive
+  issues overdue, except Fully Mitigated KEVs.** An overdue vulnerability is one
+  the provider "intends to fully mitigate or remediate but has not" (FedRAMP
+  definition). An open issue reported as `Fully Mitigated` past its `dueDate`
+  now reads `overdueStatus.isOverdue: false` instead of `true` with "not yet
+  fully mitigated or remediated", and so does an issue with an accepted
+  `FALSE_POSITIVE` deviation. VDR-TFR-KEV says a Known Exploited
+  Vulnerability should still be remediated "even if the vulnerability has been
+  fully mitigated", so a Fully Mitigated issue whose CVE IDs are in the CISA KEV
+  catalog stays overdue, with an explanation that says why. When a project has
+  a Fully Mitigated issue, the fetchers make one extra `GET /issues?kev=true`
+  call to find them; if that call fails it is recorded in `apiFailures` and
+  Fully Mitigated issues stay overdue, so no KEV is hidden. The `overdue`
+  counts in the Vulnerability Detail Report and Historical VER Activity
+  summaries change to match.
+- **Paramify VER fetchers report closed issues as `Remediated`.** A closed
+  issue is no longer detected, which FedRAMP defines as a remediated
+  vulnerability; "Fully Mitigated" means still detected at negligible impact.
+  Closed issues were reported as `finalDisposition: "Fully Mitigated"` and now
+  report `"Remediated"`. An accepted `FALSE_POSITIVE` deviation still takes
+  precedence. The `_summary` dispositions in the Vulnerability Detail Report
+  and Historical VER Activity gain a `remediated` count; `fullyMitigated` is
+  kept for compatibility.
+
 - **`aws_organizations_scp` no longer reports a denied read as "no SCPs"**
   (0.2.0 → 0.3.0). From a member account that is neither the management
   account nor a delegated administrator, `describe-organization` succeeds
@@ -1574,6 +1729,18 @@ schemas and the `paramify` CLI — not the internal code.
   failed role list leaves every figure null, and a failed members or cast read
   leaves null each figure over that role that it feeds (the Global Administrator
   count when it is that role); each role records `members_read`.
+- **`azure_rbac_role_assignments` 0.4.2: a failed read is null, not 0.** When the
+  subscription-and-above role-assignment list couldn't be read, every count over
+  it read 0, so an unread scope looked like no assignments. Each count is now
+  null when a list it counts couldn't be read: the subscription-and-above counts
+  when that list fails, the `below_subscription_*` and `all_scopes_*` counts when
+  either list fails (the below-subscription set is told apart from the other, so
+  it isn't read when the other fails), the PIM standing counts when either list
+  or the PIM schedules fail, and the custom, built-in and unresolved role counts
+  when the role definitions fail. `results.role_assignments` and
+  `results.role_assignments_below_subscription` are null when unread, and with
+  patterns set `resource_exclusion_patterns_unmatched` is null when a list the
+  patterns apply to wasn't read.
 - **`azure_entra_conditional_access_policies` 0.2.2: an application filter
   narrows MFA coverage in either mode, and each policy shows its filter.** In
   0.2.1 a policy with an application filter still added its client app types to
@@ -1603,6 +1770,17 @@ schemas and the `paramify` CLI — not the internal code.
   `profiles_with_waf_in_use_without_waf_log_export` is null unless that profile
   exports its WAF log. The public-cloud output is unchanged apart from the two
   new counts, which are 0 there.
+- **`azure_sentinel_analytics_rules` 0.3.1: a failed SecurityAlert products
+  read is null, and the KSI-IAM-SUS mapping is dropped.** When the SecurityAlert
+  products query failed, enabled incident-creation rules dropped out of
+  `enabled_rules_missing_data` instead of making it unknown. The workspace's
+  `enabled_rules_missing_data` and `enabled_rules_quiet` are now null when that
+  query fails and the workspace has an enabled incident-creation rule. The
+  fetcher no longer maps to KSI-IAM-SUS: a detection rule shows the trigger, not
+  the response to suspicious activity, which `azure_sentinel_automation_rules`
+  covers. The Defender XDR list of products whose alerts it carries now lives in
+  `_shared/sentinel_ingestion.py`, shared with `azure_sentinel_data_sources`;
+  neither fetcher's output changes from the move.
 - **Azure: an invalid lookback or recovery time objective fails as `bad_config`.**
   The messages matched no `bad_config` marker, so `azure_change_provenance` and
   `azure_front_door_origins` reported an invalid lookback as `partial_failure`.
@@ -1647,6 +1825,15 @@ schemas and the `paramify` CLI — not the internal code.
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
   refused, throttled or unreachable failed as `partial_failure`. These now read
   `not_authorized`, `rate_limited` and `target_unreachable`.
+- **A Microsoft Graph 403 reads `not_authorized` with older msgraph
+  dependencies too.** `classify_failure_code` in `_shared/azure_common.py`
+  read msgraph's `(status 403)` but not the `Code: 403` that
+  microsoft-kiota-abstractions before 1.13 prints, which the msgraph-sdk floor
+  still allows. A Graph permission denial whose message named no other marker,
+  such as `accessDenied` or an empty `UnknownError`, was reported as
+  `partial_failure`. `Code: NNN` now classifies like `(NNN)`, and
+  `accessDenied` and `Authorization_RequestDenied` read `not_authorized`. With
+  kiota-abstractions 1.13 or later nothing changes.
 - **`azure_devops_permissions` resolves every identity in a large
   organization** (0.1.0 → 0.1.1). Identities were looked up 50 descriptors per
   request, and Azure DevOps answers 404 when that query string runs to several

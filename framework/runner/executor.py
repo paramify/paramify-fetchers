@@ -294,6 +294,21 @@ def merged_config(
     return MergedConfig(schema, values, sources, unset, errors, referenced)
 
 
+def config_patterns(merged: MergedConfig) -> Optional[Dict[str, List[dict]]]:
+    """Each pattern list the fetcher receives, item by item with its reason and the layer that set it ("entry",
+    "platform" or "default"), for `metadata.config_patterns`. None when it receives no pattern, so that envelope
+    stays as it was."""
+    out: Dict[str, List[dict]] = {}
+    for name, fdef in merged.schema.items():
+        if fdef.type != patterns.TYPE or not fdef.env or name in merged.errors or name not in merged.values:
+            continue
+        source = merged.sources[name]
+        items = patterns.parse(merged.values[name])[0]
+        if items:
+            out[name] = [{"pattern": i.pattern, "reason": i.reason, "source": source} for i in items]
+    return out or None
+
+
 def _apply_config(
     env: Dict[str, str],
     fetcher: Fetcher,
@@ -582,6 +597,7 @@ def _invoke(
     secret_values=None,
     run_dir: Optional[Path] = None,
     inputs_index: Optional[dict] = None,
+    patterns_meta: Optional[Dict[str, List[dict]]] = None,
 ) -> InvocationResult:
     """Run one fetcher invocation.
 
@@ -697,6 +713,7 @@ def _invoke(
         outputs=outputs,
         error=error,
         error_code=error_code,
+        config_patterns=patterns_meta,
     )
 
 
@@ -775,6 +792,7 @@ def run_entry(
     # Config is per entry: merged once, and its notes given once, whatever the number of targets.
     merged = merged_config(fetcher, platform_spec, platform_cfg, entry, secret_vars)
     _emit_config_notes(merged, on_note)
+    patterns_meta = config_patterns(merged)
 
     if not fetcher.supports_targets:
         secrets_seen: set = set()
@@ -783,7 +801,7 @@ def run_entry(
                          secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir,
-                        inputs_index)]
+                        inputs_index, patterns_meta)]
 
     if not entry.targets:
         # No targets[] given. If every target field is optional, run once with the
@@ -799,7 +817,8 @@ def run_entry(
         env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
                          secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
-        return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
+        return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir,
+                        patterns_meta=patterns_meta)]
 
     results = []
     for target in entry.targets:
@@ -811,7 +830,8 @@ def run_entry(
                              secrets_seen, notes, shadowed, merged)
             _emit_notes(notes, on_note)
             _emit_shadowed(shadowed, on_note)
-            results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir))
+            results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir,
+                                   patterns_meta=patterns_meta))
         except (RuntimeError, SecretResolutionError) as e:
             now = _utc_now()
             # The fetcher never ran, so it had no chance to report anything. The

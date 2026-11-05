@@ -549,6 +549,16 @@ def _methods(monkeypatch, graph, arm, errors=None):
     return {a["id"]: a for a in results["emergency_accounts"]}, s, results, collector
 
 
+def test_synced_and_device_bound_passkeys_count_as_phishing_resistant(monkeypatch):
+    for method, expected in (("passKeySynced", True), ("PASSKEYSYNCED", True), ("passKeyDeviceBound", True),
+                             ("microsoftAuthenticatorPasswordless", False)):
+        graph, arm = _tenant()
+        graph[f"/reports/authenticationMethods/userRegistrationDetails/{BG2}"]["methodsRegistered"] = [method]
+        by_id, s, _results, _collector = _methods(monkeypatch, graph, arm)
+        assert by_id[BG2]["phishing_resistant_method_registered"] is expected, method
+        assert s["emergency_accounts_with_phishing_resistant_method"] == (2 if expected else 1)
+
+
 def test_multi_factor_certificate_counts_as_phishing_resistant(monkeypatch):
     graph, arm = _tenant()
     by_id, s, results, collector = _methods(monkeypatch, _with_certificate(graph), arm)

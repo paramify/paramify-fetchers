@@ -1,12 +1,15 @@
 name: azure_entra_mfa_status
-version: 0.3.1
+version: 0.4.0
 description: >
   For every user in the Microsoft Entra ID tenant, reports whether the account is
   enabled, when it last signed in, and whether it is MFA-capable — joining the
   directory's user list against the authentication-methods registration report.
   Coverage is reported over ENABLED users (the accounts that can actually sign in)
   as well as over all users, and broken out for administrators, members and guests,
-  with passwordless (phishing-resistant) capability alongside plain MFA.
+  with passwordless capability (which includes Authenticator phone sign-in) and a
+  phishing-resistant count (FIDO2 security key, a passkey synced or device-bound, Windows Hello for
+  Business or macOS platform credential methods) alongside plain MFA. Certificate-based authentication
+  isn't visible in the registration report, so a certificate-only user counts as without.
   Administrators are the holders of privileged directory roles (directly or through
   a role-assignable group), so an administrator with no registration record counts
   as an administrator without MFA.

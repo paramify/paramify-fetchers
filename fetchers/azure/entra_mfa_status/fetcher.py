@@ -43,6 +43,7 @@ from azure_common import (  # noqa: E402
     report_failure,
 )
 from entra_graph import (  # noqa: E402
+    PHISHING_RESISTANT_METHODS,
     graph_attr,
     graph_list,
     is_privileged_role,
@@ -77,7 +78,6 @@ GUEST_USER_TYPE = "guest"
 # every user in it.
 ODATA_USER = "#microsoft.graph.user"
 ODATA_GROUP = "#microsoft.graph.group"
-
 
 # --- projections: the only code here that touches a Graph model ---
 
@@ -195,6 +195,11 @@ def user_record(
         "is_mfa_capable": bool(details.get("is_mfa_capable") or False),
         "is_mfa_registered": bool(details.get("is_mfa_registered") or False),
         "is_passwordless_capable": bool(details.get("is_passwordless_capable") or False),
+        # Certificate-based authentication isn't in the registration report, so a certificate-only user reads false.
+        "is_phishing_resistant": any(
+            str(m).lower() in PHISHING_RESISTANT_METHODS
+            for m in details.get("methods_registered") or []
+        ),
         "is_sspr_capable": bool(details.get("is_sspr_capable") or False),
         "is_sspr_registered": bool(details.get("is_sspr_registered") or False),
         "is_admin": bool(admin_roles) or report_admin,
@@ -245,6 +250,11 @@ REGISTRATION_FIGURES = (
     "mfa_registered_enabled_users",
     "passwordless_capable_enabled_users",
     "passwordless_coverage_percentage",
+    "phishing_resistant_enabled_users",
+    "phishing_resistant_coverage_percentage",
+    "phishing_resistant_admin_users",
+    "phishing_resistant_admin_coverage_percentage",
+    "admin_users_without_phishing_resistant",
     "sspr_registered_enabled_users",
     "mfa_capable_enabled_member_users",
     "member_mfa_coverage_percentage",
@@ -308,6 +318,12 @@ def summarize(
         "passwordless_coverage_percentage": coverage_percentage(
             sum(1 for u in enabled if u["is_passwordless_capable"]), len(enabled)
         ),
+        "phishing_resistant_enabled_users": sum(
+            1 for u in enabled if u["is_phishing_resistant"]
+        ),
+        "phishing_resistant_coverage_percentage": coverage_percentage(
+            sum(1 for u in enabled if u["is_phishing_resistant"]), len(enabled)
+        ),
         "sspr_registered_enabled_users": sum(1 for u in enabled if u["is_sspr_registered"]),
         # Guests split out: an unenforced guest is often the inviting tenant's to fix.
         "enabled_member_users": len(enabled_members),
@@ -328,6 +344,17 @@ def summarize(
         ),
         "admin_users_without_mfa": admin_figure(
             sum(1 for u in admins if not u["is_mfa_capable"])
+        ),
+        "phishing_resistant_admin_users": admin_figure(
+            sum(1 for u in admins if u["is_phishing_resistant"])
+        ),
+        "phishing_resistant_admin_coverage_percentage": admin_figure(
+            coverage_percentage(
+                sum(1 for u in admins if u["is_phishing_resistant"]), len(admins)
+            )
+        ),
+        "admin_users_without_phishing_resistant": admin_figure(
+            sum(1 for u in admins if not u["is_phishing_resistant"])
         ),
         "admin_users_without_registration_details": admin_figure(
             sum(1 for u in admins if not u["has_registration_details"])
