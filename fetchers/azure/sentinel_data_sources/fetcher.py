@@ -64,6 +64,10 @@ QUERY_BATCH = 100
 _LET = re.compile(r"\s*let\b")
 # Basic and Auxiliary tables answer only /search: union * on /query skips them, and naming one fails to resolve.
 QUERYABLE_PLAN = "Analytics"
+# /search bills per GB scanned over the time range, so each table is asked for nothing more than this.
+SEARCH_QUERY = "['{table}'] | where TimeGenerated > ago({days}d) | summarize LastIngested = max(TimeGenerated), Records = count()"
+# How far back /search reads a Basic table; older data needs a search job.
+SEARCH_MAX_DAYS = 30
 
 # Connection kinds whose Content Hub definition has another id: this kind is Entra ID Protection, not the Entra ID logs connector.
 KIND_DEFINITION = {"AzureActiveDirectory": "AzureActiveDirectoryIdentityProtection"}
@@ -124,18 +128,41 @@ def project_connector(connector: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def project_tables(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def project_tables(
+    rows: List[Dict[str, Any]], plans: Optional[Dict[str, str]] = None, searched: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    """Tables that received data in the window: from union * on /query, and the Basic or Auxiliary ones from /search."""
+    found = {row["ParamifySourceTable"]: row for row in rows if row.get("ParamifySourceTable")}
+    found.update({name: s for name, s in (searched or {}).items() if s and s["Records"]})
     tables = [
         {
-            "table": row.get("ParamifySourceTable"),
+            "table": name,
+            "plan": (plans or {}).get(name),
             "last_ingested": row.get("LastIngested"),
             "records": row.get("Records"),
-            "counts_as_source": row.get("ParamifySourceTable") not in NON_SOURCE_TABLES | {ALERTS_TABLE},
+            "counts_as_source": name not in NON_SOURCE_TABLES | {ALERTS_TABLE},
         }
-        for row in rows
-        if row.get("ParamifySourceTable")
+        for name, row in found.items()
     ]
     return sorted(tables, key=lambda t: t["table"].lower())
+
+
+def search_tables(client, ws: Dict[str, Any], names: List[str], days: int, collector) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Each Basic or Auxiliary table's last ingestion and count; None when its search failed, or found nothing but couldn't cover the window."""
+    span = min(days, SEARCH_MAX_DAYS)
+    out: Dict[str, Optional[Dict[str, Any]]] = {}
+    for name in names:
+        rows = collector.guard(
+            f"loganalytics.search({name}, {ws['name']})",
+            lambda name=name: client.search(ws["customer_id"], SEARCH_QUERY.format(table=name, days=span), iso_duration_days(span)),
+        )
+        if rows is None:
+            out[name] = None
+            continue
+        row = rows[0] if rows else {}
+        records = row.get("Records") or 0
+        out[name] = {"LastIngested": row.get("LastIngested"), "Records": records} if records or span == days else None
+    return out
 
 
 def project_alert_products(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -246,9 +273,9 @@ Pending = List[Tuple[Tuple[int, int], str, str]]
 
 
 def last_data_queries(
-    catalog: List[Dict[str, Any]], ingested: Dict[str, Any], plans: Optional[Dict[str, str]]
+    catalog: List[Dict[str, Any]], ingested: Dict[str, Any], plans: Optional[Dict[str, str]], searched: frozenset = frozenset()
 ) -> Tuple[Dict[Tuple[int, int], Any], Pending]:
-    """Answers taken straight from table ingestion, and the queries still to run; a table on a plan /query can't read is left unmeasured."""
+    """Answers taken from table ingestion, and the queries still to run; a filtered query on a Basic or Auxiliary table with data stays unmeasured, since /search would bill another scan."""
     known: Dict[Tuple[int, int], Any] = {}
     pending = []
     for ci, c in enumerate(catalog):
@@ -257,7 +284,7 @@ def last_data_queries(
             plan = (plans or {}).get(table or "")
             if table in ingested and _BARE_TABLE.match(query):
                 known[(ci, di)] = ingested[table]
-            elif plan == QUERYABLE_PLAN and table not in ingested:
+            elif (plan == QUERYABLE_PLAN or table in searched) and table not in ingested:
                 known[(ci, di)] = None
             elif plan in (None, QUERYABLE_PLAN):  # parser functions, union and let queries run as written
                 pending.append(((ci, di), query, f"{c['id']}: {name}"))
@@ -387,7 +414,9 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     else:
         collector.record(f"workspace customerId ({ws['name']})", LookupError("workspace has no customerId to query"))
 
-    tables = project_tables(rows) if rows is not None else None
+    other_plans = sorted(n for n, p in (plans or {}).items() if p != QUERYABLE_PLAN)
+    searched = search_tables(client, ws, other_plans, days, collector) if rows is not None else {}
+    tables = project_tables(rows, plans, searched) if rows is not None else None
     alert_rows = None
     if any(t["table"] == ALERTS_TABLE for t in tables or []):
         alert_rows = collector.guard(
@@ -408,7 +437,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     found: Optional[Dict[Tuple[int, int], Any]] = {}
     if tables is not None:
         ingested = {t["table"]: t["last_ingested"] for t in tables}
-        known, pending = last_data_queries(catalog, ingested, plans)
+        known, pending = last_data_queries(catalog, ingested, plans, frozenset(n for n, s in searched.items() if s))
         found = collector.guard(
             f"loganalytics.query(connector last data, {ws['name']})",
             lambda: run_last_data(client, ws["customer_id"], pending, days, notes),
@@ -452,9 +481,13 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             sum(1 for h in health if health_rank(h["status"]) >= HEALTH_RANK["warning"]) if health is not None else None
         ),
         "tables": tables,
-        "tables_not_measured": sorted(n for n, p in plans.items() if p != QUERYABLE_PLAN) if plans is not None else None,
+        "tables_searched": sorted(n for n, s in searched.items() if s) if plans is not None else None,
+        "tables_not_measured": [n for n in other_plans if not searched.get(n)] if plans is not None else None,
         "source_tables": sources if tables is not None else None,
-        "sources_ingesting": len(sources) if tables is not None else None,
+        # A source on an unread plan or an unsearched table could be missing.
+        "sources_ingesting": (
+            len(sources) if tables is not None and plans is not None and all(searched.get(n) for n in other_plans) else None
+        ),
         "alert_products": products if tables is not None else None,
         "non_source_tables": [t["table"] for t in tables or [] if not t["counts_as_source"] and t["table"] != ALERTS_TABLE],
         "notes": notes,

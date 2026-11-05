@@ -190,8 +190,11 @@ class FakeAzure:
             ("by Week", table(["Week", "Actor", "Queries", "Users"], [
                 [iso(sunday), "human", 4, 2], [iso(sunday), "application", 9, 0]])),
             ("by User", table(["User", "Queries", "LastQuery"], [["alice@contoso.com", 4, iso(NOW)]])),
+            # Basic and Auxiliary tables, read through /search: none received data.
+            ("/search", table(["LastIngested", "Records"], [[None, 0]])),
         ]
         self.calls = []
+        self.params = []
         self.graph_post_response = Resp(200, {"value": [
             {"id": "u-purger", "displayName": "Pat Purger", "userPrincipalName": "pat@contoso.com"},
             {"id": "sp-la", "displayName": "la-automation", "appId": "app-1"}]})
@@ -215,11 +218,13 @@ class FakeAzure:
             return body
         return Resp(200, body)
 
-    def post(self, url, json=None, headers=None, timeout=None):
+    def post(self, url, json=None, headers=None, timeout=None, params=None):
         if url.endswith("/directoryObjects/getByIds"):
             self.calls.append(("POST", url, ",".join(json["ids"])))
             return self.graph_post_response
         self.calls.append(("POST", url, json["query"]))
+        if params:
+            self.params.append((url, params))
         assert headers["x-ms-app"] == "paramify-fetchers"
         for fragment, body in self.queries:  # a fragment matches the query text or the workspace's query URL
             if fragment in json["query"] or fragment in url:
@@ -525,10 +530,12 @@ def test_data_sources_defender_xdr_link_needs_every_mtp_alerts_value_carried(azu
 
 def test_data_sources_configured_without_data_leaves_out_unconnected_and_quiet(azure, tmp_path):
     alert_only_workspace(azure, "Disabled")
-    # Installed from Content Hub with no connection, and not alert-only; and one connected to a Basic-plan table.
+    # Installed from Content Hub with no connection, and not alert-only; and one connected to a filtered query on a
+    # Basic-plan table with data, which only another /search scan could answer.
     azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"] += [
         ui_connector("AzureActiveDirectory", [("AuditLogs", "AuditLogs")]),
-        ui_connector("AzureStorage", [("StorageBlobLogs", "StorageBlobLogs")])]
+        ui_connector("AzureStorage", [("StorageBlobLogs (reads)", 'StorageBlobLogs | where Category == "StorageRead"')])]
+    azure.queries.insert(0, ("['StorageBlobLogs']", table(["LastIngested", "Records"], [[iso(NOW), 7]])))
     azure.arm[(f"{SI_A}/dataConnectors", "2025-09-01")]["value"].append(
         {"id": f"{SI_A}/dataConnectors/storage", "name": "storage", "kind": "AzureStorage", "properties": {}})
     code, ev = run("sentinel_data_sources", tmp_path)
@@ -639,10 +646,73 @@ def test_data_sources_parser_union_and_basic_table_queries(azure, tmp_path):
     assert code == 0 and "SophosXGFirewall" in union and "WizIssues_CL" in union and "StorageBlobLogs" not in union
     assert by_id["SophosXGFirewall"]["connected"] is True and by_id["Wiz"]["connected"] is True
     assert by_id["Wiz"]["data_types"][0]["table"] is None
-    # A Basic-plan table can't be read with /query, so it is unmeasured rather than empty.
-    assert by_id["AzureStorage"]["connected"] is None and ws["tables_not_measured"] == ["StorageBlobLogs"]
+    # A Basic-plan table is read through /search, never /query; this one received nothing.
+    assert by_id["AzureStorage"]["connected"] is False and ws["tables_searched"] == ["StorageBlobLogs"]
     assert by_id["Broken"]["connected"] is None and any("connector Broken" in n for n in ws["notes"])
-    assert "Broken" not in ws["connectors_not_connected"] and "AzureStorage" not in ws["connectors_not_connected"]
+    assert "Broken" not in ws["connectors_not_connected"] and "AzureStorage" in ws["connectors_not_connected"]
+
+
+def basic_tables_workspace(azure):
+    """Connectors on a Basic table, bare and filtered, and on an Auxiliary one; only the Basic table has data."""
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [
+        ui_connector("AzureStorage", [("StorageBlobLogs", "StorageBlobLogs")]),
+        ui_connector("StorageReads", [("StorageBlobLogs (reads)", 'StorageBlobLogs | where Category == "StorageRead"')]),
+        ui_connector("AppLogs", [("AppLogs_CL", "AppLogs_CL")])]}
+    azure.arm[(f"{WS_A}/tables", "2023-09-01")]["value"].append({"name": "AppLogs_CL", "properties": {"plan": "Auxiliary"}})
+    azure.queries.insert(0, ("['StorageBlobLogs']", table(["LastIngested", "Records"], [[iso(NOW - timedelta(hours=2)), 7]])))
+
+
+def search_calls(azure):
+    return [q for _, url, q in azure.calls if url.endswith("/search")]
+
+
+def test_data_sources_measures_basic_and_auxiliary_tables_through_search(azure, tmp_path):
+    basic_tables_workspace(azure)
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    # One table per search, asking only for the newest record and a count over the window, timespan in the URL.
+    query = MODS["sentinel_data_sources"].SEARCH_QUERY
+    assert search_calls(azure) == [query.format(table=t, days=14) for t in ("AppLogs_CL", "StorageBlobLogs")]
+    assert [(url.split("/")[-2:], params) for url, params in azure.params] == [(["cust-a", "search"], {"timespan": "P14D"})] * 2
+    assert not any("StorageBlobLogs" in q or "AppLogs_CL" in q for _, url, q in azure.calls if url.endswith("/query"))
+    assert ws["tables_searched"] == ["AppLogs_CL", "StorageBlobLogs"] and ws["tables_not_measured"] == []
+    tables = {t["table"]: t for t in ws["tables"]}
+    assert (tables["StorageBlobLogs"]["plan"], tables["StorageBlobLogs"]["records"]) == ("Basic", 7)
+    assert tables["AzureActivity"]["plan"] == "Analytics" and "AppLogs_CL" not in tables
+    assert "StorageBlobLogs" in ws["source_tables"] and ws["sources_ingesting"] == 3
+    assert by_id["AzureStorage"]["connected"] is True
+    assert by_id["AzureStorage"]["last_data_received"] == iso(NOW - timedelta(hours=2))
+    # A filtered query on a Basic table with data would need another billed scan, so it stays unmeasured.
+    assert by_id["StorageReads"]["connected"] is None and "StorageReads" not in ws["connectors_not_connected"]
+    assert by_id["AppLogs"]["connected"] is False and "AppLogs" in ws["connectors_not_connected"]
+
+
+def test_data_sources_failed_search_is_unknown(azure, tmp_path):
+    basic_tables_workspace(azure)
+    azure.queries.insert(0, ("['StorageBlobLogs']", Resp(403, {"error": {"code": "Forbidden", "message": "no"}})))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert ws["tables_not_measured"] == ["StorageBlobLogs"] and ws["tables_searched"] == ["AppLogs_CL"]
+    assert by_id["AzureStorage"]["connected"] is None and by_id["StorageReads"]["connected"] is None
+    # The table could be a source, so the count is unknown, not 2.
+    assert ws["sources_ingesting"] is None and ev["summary"]["min_sources_ingesting"] is None
+    assert ev["summary"]["workspaces_with_no_sources"] == 0
+
+
+@pytest.mark.parametrize("records, measured", [(0, False), (5, True)])
+def test_data_sources_search_reaches_back_30_days(azure, tmp_path, monkeypatch, records, measured):
+    monkeypatch.setenv("SENTINEL_INGESTION_WINDOW_DAYS", "45")
+    azure.queries.insert(0, ("/search", table(["LastIngested", "Records"], [[iso(NOW) if records else None, records]])))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and azure.params[0][1] == {"timespan": "P30D"} and "ago(30d)" in search_calls(azure)[0]
+    # Nothing in 30 days says nothing about days 31 to 45.
+    assert ws["tables_not_measured"] == ([] if measured else ["StorageBlobLogs"])
+    assert ws["sources_ingesting"] == (3 if measured else None)
 
 
 def test_data_sources_entra_id_protection_and_grouped_built_ins(azure, tmp_path):
@@ -722,7 +792,9 @@ def test_data_sources_incomplete_listings_read_null(azure, tmp_path):
     assert code == 1 and ws["notes"][0].startswith("preview listing")
     assert (ws["connectors_total"], ws["connectors_connected"], ws["connectors_not_connected"], ws["connectors_quiet"],
             ws["connectors_configured_without_data"]) == (None, None, None, None, None)
-    assert ws["data_connectors_total"] is None and ws["tables_not_measured"] is None
+    assert ws["data_connectors_total"] is None and ws["tables_not_measured"] is None and ws["tables_searched"] is None
+    # Without the plans, a Basic or Auxiliary source could be missing from the count.
+    assert ws["sources_ingesting"] is None and ws["source_tables"] == ["AzureActivity", "SecurityAlert (Microsoft Defender Advanced Threat Protection)"]
     # Without the table plans, no data can't be told from a Basic table.
     assert all(c["connected"] is None for c in ws["connectors"])
     assert {k: ev["summary"][k] for k in ("data_connectors_total", "connectors_connected", "connectors_not_connected",
@@ -735,6 +807,8 @@ def test_data_sources_unknown_ingestion_reads_null(azure, tmp_path):
     azure.queries[0] = ("union withsource=ParamifySourceTable", Resp(403, {"error": {"code": "Forbidden", "message": "no"}}))
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
+    # No /search scan is billed for a workspace whose ingestion couldn't be read.
+    assert not azure.params and ws["tables_not_measured"] == ["StorageBlobLogs"]
     assert code == 1 and ws["health_monitoring"] is None and ws["connectors_unhealthy"] is None
     assert {k: ev["summary"][k] for k in ("connectors_connected", "connectors_not_connected", "connectors_quiet",
                                           "connectors_configured_without_data", "connectors_unhealthy")} == {

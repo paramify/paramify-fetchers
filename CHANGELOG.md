@@ -12,6 +12,23 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables are measured.**
+  The query API refuses these tables, so each one is now read through the
+  Log Analytics `/search` endpoint (`AzureRestClient.search()`), one table at a
+  time, for its newest record time and record count over the ingestion window.
+  `/search` bills per GB scanned in that window, so the query asks for nothing
+  else, and it reaches back at most 30 days: with a longer window, a table with
+  no record in 30 days reads unmeasured. A table with data joins `tables`, with
+  a new `plan` field on every table, and counts as a source, so
+  `sources_ingesting` and `min_sources_ingesting` can rise. A connector whose
+  data type is the whole table now reads connected or not connected instead of
+  unmeasured; one that filters a Basic or Auxiliary table with data stays
+  unmeasured, since answering it would bill another scan. Each workspace gains
+  `tables_searched`, and `tables_not_measured` now lists only the tables that
+  couldn't be searched. A failed search leaves its table unmeasured and fails
+  the run. `sources_ingesting` reads null when any table couldn't be searched
+  or the table plans couldn't be read, since a source could be missing.
+
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
   a passkey (synced or device-bound), Windows Hello for Business or a macOS platform
