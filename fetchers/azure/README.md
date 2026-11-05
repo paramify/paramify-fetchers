@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 90 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 95 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -126,6 +126,7 @@ each call's Microsoft Graph reference page lists them.
 | Graph, Member Entitlement Management (both Read) | `azure_devops_identities` |
 | Security (Manage), as there is no read-only scope for permissions (the fetcher only reads), plus Identity, Code, and Project and Team (all Read) | `azure_devops_permissions` |
 | Service Connections, Variable Groups, Secure Files, Build (for pipeline permissions), and Project and Team (all Read) | `azure_devops_service_connections` |
+| Work Items (Read), Code (Read; for the TFVC changesets linked to work items), and Project and Team (Read; to list projects). Linked Git commits and pull requests are not read | `azure_devops_work_items` |
 
 The PAT is optional. Without one, the fetchers sign in as the ambient Entra identity,
 which must be added to the organization: project Reader for pipelines, View audit log
@@ -305,6 +306,7 @@ Logging and monitoring:
 | `azure_log_analytics_workspaces` | Log Analytics workspaces: retention, daily cap, network access, access control mode |
 | `azure_log_analytics_query_audit` | Whether each workspace audits queries, and who queried the logs in which weeks |
 | `azure_log_analytics_deletion_rights` | Who can purge, delete or shorten the retention of each workspace's log data, active or PIM-eligible |
+| `azure_service_log_records` | Whether App Service HTTP logs and SQL Managed Instance audit events reach Log Analytics, with their retention, the principals that connect and the services each app calls |
 | `azure_log_storage_immutability` | Immutability policies, legal holds and soft delete on the blob containers Azure Monitor writes logs to |
 | `azure_network_flow_logs` | Network Watchers and flow logs (target, state, storage, retention, Traffic Analytics), and which virtual networks and subnets an enabled flow log covers |
 | `azure_network_traffic_activity` | The traffic actually seen: Traffic Analytics flows with new destinations, unexpected inbound ports and denied-flow spikes, Front Door requests, and requests that reached Front Door's App Service origins directly |
@@ -351,6 +353,7 @@ Azure DevOps:
 | `azure_devops_identities` | Every user's access level, groups and last access, inactive users, and who holds privileged Azure DevOps groups, directly or through Entra groups |
 | `azure_devops_permissions` | Who is allowed or denied what at organization, project, repository, pipeline, environment and service-connection scope, high-impact rights outside the admin groups, and who may bypass Git branch policies |
 | `azure_devops_service_connections` | How each service connection signs in (federated or a stored secret), its service principal, which pipelines may use it and which runs did, and whether variable group secrets live in Key Vault |
+| `azure_devops_work_items` | Change and security work items with state, owner, planned date and approval, whether the requester or author approved them, linked changesets, commits and pull requests, and open, overdue or unassigned security work |
 
 ## Notes
 

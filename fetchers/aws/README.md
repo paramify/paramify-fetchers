@@ -1,6 +1,6 @@
 # AWS
 
-AWS fetchers pull evidence from your AWS accounts using the AWS CLI. All 79 fetchers are read-only and authenticate with the standard AWS credential chain — no static API token is needed.
+AWS fetchers pull evidence from your AWS accounts using the AWS CLI. All 81 fetchers are read-only and authenticate with the standard AWS credential chain — no static API token is needed.
 
 ## Credential setup
 
