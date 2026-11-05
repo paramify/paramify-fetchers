@@ -84,3 +84,8 @@ def test_cluster_summary_carries_node_security_keys():
                "agent_pool_profiles": recs, "kubernetes_version": "1.31.2"}
     s = aks.summarize([cluster])
     assert s["fips_enabled_agent_pools"] == 1 and s["total_agent_pools"] == 1 and s["all_agent_pools_fips"] is True
+
+
+def test_tri_state_reads_strings_by_text_not_truthiness():
+    assert aks._tri_state("false") is False and aks._tri_state("True") is True
+    assert aks._tri_state("") is None and aks._tri_state("maybe") is None and aks._tri_state(None) is None

@@ -175,9 +175,17 @@ def agent_pool_record(profile: dict) -> dict:
 
 
 def _tri_state(value):
-    """A boolean Azure returned, or None when it returned nothing: never coerce unknown to False."""
+    """A boolean Azure returned, or None when it returned nothing: never coerce unknown to False.
+
+    A string is read by its text ("true"/"false"), never by truthiness: bool("false") is True.
+    """
     if value is None:
         return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        return True if text in ("true", "1", "yes") else False if text in ("false", "0", "no") else None
     return bool(value)
 
 
