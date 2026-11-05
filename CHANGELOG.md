@@ -22,8 +22,8 @@ schemas and the `paramify` CLI — not the internal code.
   after a failed or partial applications read, and the first also while any verdict is
   unknown. The interval is the new `approved_lifetime_days` config field
   (`AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS`), default 365 (a convention: FedRAMP KSI-SVC-ASM
-  asks for regular rotation and sets no number), from 1 to 3650; anything else fails the run
-  as `bad_config`. No new calls.
+  asks for regular rotation and sets no number), capped at 3650; a value that isn't a whole
+  number from 1 up fails the run as `bad_config`. No new calls.
 
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,

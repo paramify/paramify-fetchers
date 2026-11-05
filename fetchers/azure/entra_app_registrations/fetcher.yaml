@@ -30,8 +30,8 @@ config_schema:
     env: AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS
     description: >
       A credential issued for more than this many days counts as beyond the approved
-      lifetime, from 1 to 3650; anything else fails the run as bad_config and 365
-      is used. 365 is a convention: FedRAMP KSI-SVC-ASM asks for regular rotation and
+      lifetime. A value that isn't a whole number from 1 up fails the run as
+      bad_config and 365 is used; one above 3650 is capped at 3650. 365 is a convention: FedRAMP KSI-SVC-ASM asks for regular rotation and
       sets no number. Set it to the tenant's own rotation interval. A 29 February
       inside a credential's span isn't counted, so a one-year credential issued across
       one isn't flagged.
@@ -112,4 +112,4 @@ evidence_set:
     How long were credentials issued for?
     - credentials_issued_beyond_approved_lifetime — Number of secrets and certificates issued for more than approved_lifetime_days days, not counting any 29 February in the span; a credential with a start date and no end date counts, because it never expires; null if the applications read failed or stopped part-way, or if any credential has no start date or ends before it starts, because the count could be short
     - credentials_without_lifetime — Number of credentials whose issued lifetime can't be computed: no start date, no end date, or an end before the start; null if the applications read failed or stopped part-way
-    - approved_lifetime_days — Number of days a credential can be issued for and still count as within the approved interval (365 unless configured, from 1 to 3650; 365 is a convention, as FedRAMP KSI-SVC-ASM asks for regular rotation and sets no number)
+    - approved_lifetime_days — Number of days a credential can be issued for and still count as within the approved interval (365 unless configured, at most 3650; 365 is a convention, as FedRAMP KSI-SVC-ASM asks for regular rotation and sets no number)
