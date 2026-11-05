@@ -1,0 +1,25 @@
+key: sentinel_automation_incident_owner_or_playbook_on_create
+name: Sentinel Automation Assigns an Owner or Runs a Playbook on New Incidents
+type: AUTOMATED
+role: configuration
+statement: >-
+  The automation rules were read with no partial failure, and at least one active automation rule
+  that triggers when an incident is created either assigns the incident an owner or runs a playbook
+  (a Logic App), so a new incident gets an owned investigation or an automated response. Supports the
+  automation part of KSI-IAM-SUS. Does not prove: that the rule applies to every incident, since its
+  conditions are counted, not copied, so a rule limited to some incidents passes; that every
+  workspace has such a rule when the subscription has several
+  (sentinel_automation_every_workspace_has_active_rule checks every workspace has an active rule);
+  what the playbook does or that it succeeds (azure_sentinel_playbooks); or that incidents are
+  assigned, worked or closed in time (azure_sentinel_incidents).
+
+# One rule object: its actions list holds a RunPlaybook with a Logic App or a ModifyProperties that sets an owner.
+regex: '"partial_failure":\s*false\b[\s\S]*?\{\s*"actions":\s*\[\s*(?:\{(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*\}\s*,\s*)*\{\s*"order":\s*[^,{}]*,\s*(?:"playbook_id":\s*"(?:[^"\\]|\\.)+",\s*"type":\s*"RunPlaybook"|"sets":\s*\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"owner":\s*"(?:[^"\\]|\\.)+"(?:"(?:[^"\\]|\\.)*"|[^{}"])*\},\s*"type":\s*"ModifyProperties")\s*\}(?:\s*,\s*\{(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*\})*\s*\],\s*"active":\s*true,\s*"conditions":\s*\[[^\]]*\],(?:"(?:[^"\\]|\\.)*"|[^"{}\[\]])*?"triggers_on":\s*"Incidents",\s*"triggers_when":\s*"Created"\s*\}'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-AUTOMATION-RULES

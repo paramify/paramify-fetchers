@@ -1,0 +1,25 @@
+key: sentinel_automation_every_workspace_has_active_rule
+name: Sentinel Every Workspace Has an Active Automation Rule
+type: AUTOMATED
+role: configuration
+statement: >-
+  The subscription's Sentinel workspaces and their automation rules were read with no partial
+  failure, at least one in-scope Sentinel workspace was collected, and every one has at least one
+  active automation rule (enabled and not expired): workspaces_with_no_active_rules is 0. Supports
+  KSI-IAM-SUS. Does not prove: what the rules do or which incidents they apply to
+  (sentinel_automation_incident_owner_or_playbook_on_create checks for an owner or a playbook); that
+  a playbook run succeeds (azure_sentinel_playbooks); that incidents are assigned or closed in time
+  (azure_sentinel_incidents); or workspaces left out of scope by resource exclusions.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"workspaces_collected":\s*[1-9]\d*,[\s\S]*?"workspaces_with_no_active_rules":\s*(?<workspaces_with_no_active_rules>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # workspaces_with_no_active_rules
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-AUTOMATION-RULES
