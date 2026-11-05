@@ -14,7 +14,7 @@ description: >
   and whether SSH to the nodes is disabled. Each node-security field is null,
   not false, when Azure did not return it, and the summary counts unknown pools
   apart from FIPS-disabled ones; all_agent_pools_fips is null until every pool
-  has answered.
+  has answered, and null when there are no pools to judge.
 category: azure
 
 config_schema:
