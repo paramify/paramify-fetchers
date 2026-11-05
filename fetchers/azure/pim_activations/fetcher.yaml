@@ -1,0 +1,69 @@
+name: azure_pim_activations
+version: 0.1.0
+description: >
+  Azure resource PIM activity on the subscription: every role assignment
+  schedule request Azure still holds at the subscription and the scopes under
+  it (self-activations, admin assignments, extensions, renewals and removals)
+  with the requester, role, scope, requested duration, justification, ticket,
+  whether it went through approval, and its outcome, plus the PIM activations
+  in force right now. The summary counts self-activations by role, scope
+  level and outcome, those made without a justification, ticket or approval,
+  activations of the four over-broad built-in roles (Owner, Contributor, User
+  Access Administrator, RBAC Administrator), admin assignments that grant
+  standing access, and the oldest and newest request seen, since Azure keeps
+  these requests for a limited window. Complements azure_rbac_role_assignments,
+  which shows the PIM configuration (eligible vs permanent grants and the
+  activation rules); this shows the activity those rules produced. A tenant
+  without PIM reports pim_available false rather than failing.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_pim_activations.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional: omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional: set per target for multi-subscription runs.
+
+# Ambient identity (DefaultAzureCredential); no per-fetcher secret.
+secrets: []
+
+ksis:
+  - KSI-IAM-JIT
+  - KSI-CMT-LMC
+  - KSI-IAM-ELP
+
+evidence_set:
+  reference_id: EVD-AZURE-PIM-ACTIVATIONS
+  name: Azure PIM Role Activations
+  instructions: >
+    Script: azure/pim_activations/fetcher.py. ARM REST at the subscription scope with no
+    $filter (the subscription and every scope below it; management-group and
+    root requests are not included), api-version 2020-10-01: roleAssignmentScheduleRequests
+    (every request Azure still holds, with expandedProperties for the
+    principal, role and scope names) and roleAssignmentScheduleInstances
+    (filtered to assignmentType Activated for the activations in force).
+    Read-only; Reader on the subscription is enough, no Microsoft Graph
+    permission is needed. A 400 carrying a licence marker means the tenant has
+    no PIM and is reported as pim_available false; any other failed list
+    leaves its summary keys null and fails the run.
