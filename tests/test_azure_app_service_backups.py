@@ -431,7 +431,7 @@ def test_settings_defaults_and_overrides(monkeypatch, caplog):
     assert "thinned" in caplog.text
 
 
-def test_main_under_reader_exits_zero_and_explains_the_unknown(monkeypatch, tmp_path):
+def test_main_under_reader_exits_zero_and_explains_the_unknown(monkeypatch, tmp_path, assert_summary_documented):
     client = web_client(config={("rg-web", "web-std"): DENIED})
     monkeypatch.setattr(backups, "web_client", lambda *a: client)
     monkeypatch.setattr(backups, "resource_graph_client", lambda cred: object())
@@ -450,6 +450,7 @@ def test_main_under_reader_exits_zero_and_explains_the_unknown(monkeypatch, tmp_
     evidence = json.loads((tmp_path / f"azure_app_service_backups_{SUB}.json").read_text())
     assert evidence["metadata"]["partial_failure"] is False
     results, summary = evidence["results"], evidence["summary"]
+    assert_summary_documented("azure/app_service_backups", summary)
     assert results["evaluated_at"] == "2026-10-03T08:00:00Z"
     assert results["settings"]["recovery_point_objective_hours"] == 24
     assert results["custom_backup_configuration_access"]["apps_not_authorized"] == 1
