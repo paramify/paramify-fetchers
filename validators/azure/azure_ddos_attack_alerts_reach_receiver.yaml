@@ -1,0 +1,27 @@
+key: azure_ddos_attack_alerts_reach_receiver
+name: Azure DDoS Attack Alerts Reach an Enabled Receiver
+type: AUTOMATED
+role: configuration
+statement: >-
+  The subscription was read with no partial failure, at least one attached public IP has DDoS IP
+  Protection, and every such IP has an attack alert (an enabled alert rule on IfUnderDDoSAttack or a
+  DDoS log category) that routes to an enabled receiver
+  (protected_ips_with_attack_alert_reaching_receiver equals public_ips_with_ip_protection; null when
+  no attached IP has IP Protection or the alert rules can't be read). Supports KSI-CNA-RVP. Fails
+  when no attached IP has IP Protection, including IPs protected only through their virtual network's
+  DDoS plan, which this evidence reads as inherited (azure_ddos_protection shows the plan). Does not
+  prove: unprotected or inherited IPs; WAF alerts (azure_waf_alerts_reach_person_every_waf); that an
+  attack happened or was mitigated; or that the DDoS protection was tested.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"protected_ips_with_attack_alert_reaching_receiver":\s*(?<protected_ips_with_attack_alert_reaching_receiver>\d+)[\s\S]*?"public_ips_with_ip_protection":\s*(?<public_ips_with_ip_protection>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # protected_ips_with_attack_alert_reaching_receiver
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+
+evidence_sets:
+  - EVD-AZURE-WAF-DDOS-ACTIVITY
