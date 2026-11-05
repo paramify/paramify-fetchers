@@ -99,6 +99,11 @@ HISTORY = "default"
 RECURRENCE_WINDOW_DAYS = 30
 # Grouped rows read before stopping: one per (resource, policy, state).
 MAX_GROUP_ROWS = 50000
+# How the grouped latest-states read behind the in-scope counts went; anything but read nulls those counts.
+LATEST_READ = "read"
+LATEST_TRUNCATED = "truncated"
+LATEST_UNCOUNTED = "uncounted"
+LATEST_FAILED = "failed"
 # ResourceLocation adds no groups (a resource has one region); it lets location: patterns reach the groups.
 PAIR_GROUP_KEYS = ("ResourceId, ResourceLocation, PolicyAssignmentId, PolicyDefinitionId, "
                    "PolicyDefinitionReferenceId, ComplianceState")
@@ -894,6 +899,7 @@ def empty_collection() -> dict:
         "deployments_truncated": False,
         "deployments_complete": False,
         "latest_pairs": None,
+        "latest_pairs_status": None,
         "excluded": [],
     }
 
@@ -950,9 +956,12 @@ def collect_evaluation_details(client, states: list[dict], limit: int, collector
             "truncated": limit > 0 and len(eligible) > limit, "not_authorized": len(refused)}
 
 
-def read_groups(client, resource, subscription_id, collector, label: str, apply: str, **options) -> tuple:
+def read_groups(client, resource, subscription_id, collector, label: str, apply: str, need_all: bool = False,
+                **options) -> tuple:
     """(rows, truncated, counted): grouped rows up to MAX_GROUP_ROWS, None when the read failed; truncated when cut
-    off or fewer came back than the service counted, and counted False when that count wasn't read."""
+    off or fewer came back than the service counted. counted is True when the count was read (an empty count with
+    no groups is 0), False when it came back empty while groups did, None when it failed. With need_all, a count
+    over the cap skips the read."""
     from azure.mgmt.policyinsights.models import QueryOptions  # lazy
 
     truncated = False
@@ -980,25 +989,33 @@ def read_groups(client, resource, subscription_id, collector, label: str, apply:
             return project_group_count(row)
         return None
 
+    before = len(collector.failures)
     expected = collector.guard(f"{operation} group count)", _group_count)
+    count_failed = len(collector.failures) > before
+    if need_all and expected is not None and expected > MAX_GROUP_ROWS:
+        logger.warning("%s query counted %d groups, over the %d cap; not read", label, expected, MAX_GROUP_ROWS)
+        return [], True, True
     rows = collector.guard(f"{operation})", _groups)
     if not truncated and expected is not None and len(rows or []) < expected:
         logger.warning("%s query returned %d of %d groups", label, len(rows or []), expected)
         truncated = True
-    return rows, truncated, expected is not None
+    counted = None if count_failed else True if expected is not None else rows == []
+    return rows, truncated, counted
 
 
-def collect_latest_pairs(client, subscription_id, collector: Collector, exclusions: ResourceExclusions) -> list | None:
-    """Every in-scope (resource, policy) pair's latest state, matched against the patterns client-side; None unless
-    every group was read."""
+def collect_latest_pairs(client, subscription_id, collector: Collector, exclusions: ResourceExclusions) -> tuple:
+    """(every in-scope (resource, policy) pair's latest state, matched against the patterns client-side, or None
+    unless every group was read; how the read went: read, truncated, uncounted or failed)."""
     rows, truncated, counted = read_groups(client, LATEST, subscription_id, collector, "latest",
-                                           f"groupby(({PAIR_GROUP_KEYS}))")
-    if rows is None or truncated or not counted:
-        logger.warning("latest states not read in full; the in-scope counts are null")
-        return None
+                                           f"groupby(({PAIR_GROUP_KEYS}))", need_all=True)
+    status = (LATEST_FAILED if rows is None or counted is None else LATEST_TRUNCATED if truncated
+              else LATEST_UNCOUNTED if not counted else LATEST_READ)
+    if status != LATEST_READ:
+        logger.warning("latest states not read in full (%s); the in-scope counts are null", status)
+        return None, status
     pairs = [r for r in rows if not exclusions.match(r.get("resource_id"), r.get("resource_location"))]
     logger.info("Recounting over %d of %d latest (resource, policy) pair(s) in scope", len(pairs), len(rows))
-    return pairs
+    return pairs, status
 
 
 def collect_recurrence(client, subscription_id, limit: int, collector: Collector, now=None,
@@ -1225,7 +1242,8 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
     )
     remediations, excluded_tasks = exclusions.split(listed_tasks or [], "remediation_task")
     # The service's counts can't be split by resource, so with patterns they are recounted from every latest pair.
-    latest_pairs = collect_latest_pairs(client, subscription_id, collector, exclusions) if exclusions else None
+    latest_pairs, latest_status = (collect_latest_pairs(client, subscription_id, collector, exclusions)
+                                   if exclusions else (None, None))
     details = collect_evaluation_details(client, states, limits["detail_resources"], collector)
     recurrence = collect_recurrence(client, subscription_id, limits["recurrence_pairs"], collector,
                                     exclusions=exclusions)
@@ -1267,6 +1285,7 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
         "deployments_truncated": deployments_truncated,
         "deployments_complete": listed_tasks is not None and not unread_tasks,
         "latest_pairs": latest_pairs,
+        "latest_pairs_status": latest_status,
         "excluded": excluded + excluded_states + excluded_tasks + excluded_deployments,
     }
 
@@ -1347,6 +1366,7 @@ def main() -> int:
                              and not collected["deployments_truncated"])
         summary.update(in_scope_summary(subscription_results, assignments,
                                         collected["deployments"] if deployments_known else None))
+    summary["in_scope_states_status"] = collected["latest_pairs_status"]
     recurrence = collected["recurrence"]
     evidence = build_payload(
         subscription_id=subscription_id,

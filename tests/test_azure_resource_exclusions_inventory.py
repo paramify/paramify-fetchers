@@ -475,9 +475,14 @@ def _policy_client(calls, refuse=(), fail=()):
             calls.append(("latest", apply))
             if "latest" in fail:
                 raise RuntimeError("request timed out")
+            groups = [] if "latest_empty" in fail else [_latest(*g) for g in LATEST_GROUPS]
             if apply.endswith("/aggregate($count as n)"):
-                return [NS(additional_properties={"n": len(LATEST_GROUPS) + ("latest_short" in fail)})]
-            return [_latest(*g) for g in LATEST_GROUPS]
+                if "latest_uncounted" in fail or "latest_empty" in fail:
+                    return []
+                if "latest_over_cap" in fail:
+                    return [NS(additional_properties={"n": pc.MAX_GROUP_ROWS + 1})]
+                return [NS(additional_properties={"n": len(groups) + ("latest_short" in fail)})]
+            return groups
         if apply.endswith("/aggregate($count as n)"):
             return [NS(additional_properties={"n": len(HISTORY_GROUPS)})]
         if apply:
@@ -562,6 +567,7 @@ def test_policy_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, t
     assert "service_counts_include_excluded_resources" not in summary
     # Without patterns the service's counts stand, so the latest pairs are not read.
     assert [c for c in calls if c[0] == "latest"] == []
+    assert summary["in_scope_states_status"] is None
     assert (summary["assignments_evaluated"], summary["listed_non_compliant_states"], summary["remediation_tasks"],
             summary["remediation_deployments_listed"], summary["history_non_compliant_pairs"],
             summary["recurrence_pairs_read"]) == (3, 5, 2, 4, 3, 2)
@@ -619,6 +625,7 @@ def test_policy_counts_are_recounted_over_the_in_scope_latest_pairs(monkeypatch,
     _, evidence, calls = run_policy(monkeypatch, tmp_path, PATTERNS)
     summary, results = evidence["summary"], evidence["results"]
     assert "service_counts_include_excluded_resources" not in summary
+    assert summary["in_scope_states_status"] == "read"
     # With patterns set the service can't cap the list, which counts in-scope states only.
     assert [c for c in calls if c[0] == "states"] == [("states", None)]
     # Every latest pair is read grouped, after a count of the groups.
@@ -692,10 +699,14 @@ def test_policy_recount_survives_a_states_read_that_fails_partway(monkeypatch, t
 
 
 def test_policy_recounts_are_null_when_the_latest_pairs_are_not_read_in_full(monkeypatch, tmp_path):
-    for fail, exit_code in (("latest", 1), ("latest_short", 0)):
-        code, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, fail=(fail,))
+    for fail, exit_code, status in (("latest", 1, "failed"), ("latest_short", 0, "truncated"),
+                                    ("latest_over_cap", 0, "truncated"), ("latest_uncounted", 0, "uncounted")):
+        code, evidence, calls = run_policy(monkeypatch, tmp_path, PATTERNS, fail=(fail,))
         summary, results = evidence["summary"], evidence["results"]
-        assert code == exit_code, fail
+        assert (code, summary["in_scope_states_status"]) == (exit_code, status), fail
+        if fail == "latest_over_cap":
+            # The count is over the cap, so the groups aren't read at all.
+            assert len([c for c in calls if c[0] == "latest"]) == 1
         for key in ("non_compliant_resources", "non_compliant_policies", "compliant_resources", "resources_evaluated",
                     "resource_compliance_percentage", "non_compliant_assignments", "compliant_assignments"):
             assert summary[key] is None, (fail, key)
@@ -709,6 +720,13 @@ def test_policy_recounts_are_null_when_the_latest_pairs_are_not_read_in_full(mon
         assert results["subscription_compliance"]["non_compliant_resources"] is None, fail
         # The itemized list and the deployment totals don't depend on that read.
         assert (summary["listed_non_compliant_states"], summary["remediation_failed_deployments"]) == (2, 0), fail
+
+
+def test_policy_recount_reads_an_empty_count_with_no_groups_as_none_evaluated(monkeypatch, tmp_path):
+    code, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, fail=("latest_empty",))
+    summary = evidence["summary"]
+    assert (code, summary["in_scope_states_status"]) == (0, "read")
+    assert (summary["non_compliant_resources"], summary["resources_evaluated"]) == (0, 0)
 
 
 def test_policy_remediation_totals_are_null_when_a_task_or_deployment_list_fails(monkeypatch, tmp_path):

@@ -163,7 +163,8 @@ evidence_set:
     With resource_exclusions set, also policy_states.list_query_results_for_subscription("latest",
     <subscription_id>, query_options=QueryOptions(apply="groupby((ResourceId, ResourceLocation,
     PolicyAssignmentId, PolicyDefinitionId, PolicyDefinitionReferenceId, ComplianceState))"))
-    after the same query counting those groups, up to 50,000 groups.
+    after the same query counting those groups, up to 50,000 groups (a count over that
+    skips the read).
     Reader on the subscription. A per-resource details read refused with a 403 or an
     AuthorizationFailed error code is retried once (at most 3 retries a run), then
     marks that resource's states not_authorized instead of failing the run.
@@ -190,8 +191,12 @@ evidence_set:
     an initiative counting once, as the service counts them; within an assignment
     a member policy), and a by-state map
     keeps the service's states, at 0 when none is in scope. They are null (each
-    map's values too) when the grouped read fails or returns fewer groups than the
-    service counted. remediation_failed_deployments and
+    map's values too) unless the grouped read came back whole, and
+    in_scope_states_status says how it went: read (every group, so the recount
+    stands; an empty count with no groups means nothing was evaluated), truncated
+    (fewer groups than the service counted, or more than 50,000), uncounted (groups
+    came back but the count didn't, so they can't be shown whole) or failed (the read
+    or its count failed, and the run exits non-zero); null without patterns. remediation_failed_deployments and
     remediation_successful_deployments are recounted over the in-scope listed
     deployments, null when that list is truncated, skipped or not read in full. A
     failing member the service did not list takes the effect a listed state of it

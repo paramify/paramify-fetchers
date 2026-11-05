@@ -965,9 +965,11 @@ schemas and the `paramify` CLI — not the internal code.
   each member policy of each assignment instead. The compliant side was null
   before, and the non-compliant counts no longer go null when the itemized list
   is truncated or skipped. All of them read null, map
-  values included, when the grouped read fails or returns fewer groups than the
-  service counted. A pattern that matches only compliant resources now counts as
-  matched. Without patterns nothing changes and the read is not made.
+  values included, unless the grouped read came back whole, and the new
+  `in_scope_states_status` says how it went (`read`, `truncated`, `uncounted` or
+  `failed`; null without patterns). A count over the 50,000 cap skips the read, and
+  an empty count with no groups reads as nothing evaluated. A pattern that matches
+  only compliant resources now counts as matched. Without patterns nothing changes and the read is not made.
 
 - **`azure_backup_recovery_status` 0.4.0: restore jobs.** Each vault now lists
   its restore jobs (`restore_jobs`) over `restore_window_days` (365 by default
