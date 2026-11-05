@@ -71,7 +71,7 @@ evidence_set:
     - subscriptions.list() — picks a subscription when none is set
     - GET /subscriptions/{id} — the subscription's tenant, to tell this tenant's own apps from other tenants'
     - Microsoft Graph GET /organization — the tenant Microsoft Graph is signed in to, which must be the subscription's
-    - Microsoft Graph GET /users with sign-in activity — every user, when it was created and when it last signed in (read again without sign-in activity if that is refused)
+    - Microsoft Graph GET /users with sign-in activity — every user, when it was created and when it last signed in (read again without sign-in activity if that read fails)
     - Microsoft Graph GET /applications — when each of this tenant's app registrations was created, for the grace period of a service principal with no creation date of its own
     - Microsoft Graph GET /reports/servicePrincipalSignInActivities on the beta endpoint — when each app or managed identity last signed in
     - Microsoft Graph GET /directoryRoles and GET /directoryRoles/{id}/members (per role) — who holds each directory role now, tenant-wide; eligible (PIM) assignments and roles scoped to an administrative unit aren't read

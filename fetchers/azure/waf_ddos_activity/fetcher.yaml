@@ -110,7 +110,7 @@ evidence_set:
     - waf_requests_matched — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id (a record without one counts as its own request); null when any workspace a WAF resource exports its WAF log to couldn't be read
     - waf_requests_blocked — Number of requests the WAF blocked: Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records, from a policy in Prevention mode; null when any workspace a WAF resource exports its WAF log to couldn't be read
     - waf_requests_would_block — Number of requests that Prevention mode would have blocked but Detection mode only logged: on Front Door, a policy in Detection mode logged a blocking action (Block, Redirect or a failed JavaScript challenge); on an App Gateway, a mandatory rule, such as the anomaly-score rule 949110, logged Detected, which Prevention mode logs as Blocked; null when any workspace a WAF resource exports its WAF log to couldn't be read
-    - waf_requests_logged_only — Number of requests that matched a rule but were only logged (Log, AnomalyScoring or Matched, and not blocked, would-block or allowed); null when any workspace a WAF resource exports its WAF log to couldn't be read
+    - waf_requests_logged_only — Number of requests that matched a rule but were only logged (Log, AnomalyScoring, LogAndScore or Matched, and not blocked, would-block or allowed); null when any workspace a WAF resource exports its WAF log to couldn't be read
     - last_waf_event — Time of the latest WAF log record across all WAF resources (UTC); null when no record was read
 
     Do WAF alerts reach someone?
