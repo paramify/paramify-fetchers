@@ -37,7 +37,7 @@ evidence_set:
     - GET /api/2.0/fo/asset/ip/?action=list — the IPs and ranges in the subscription, to find addresses with no host record
     - GET /api/2.0/fo/asset/excluded_ip/?action=list — the IPs and ranges Qualys is set never to scan
 
-    Output: qualys_scan_coverage.json — one item per host with its address, DNS name, operating system, tracking method, last scan dates and days since each; the subscription IP ranges holding no host record; and the excluded ranges. Assumed from the API guide, not seen on a live subscription: tracking methods read IP, DNS, NETBIOS, an agent value or a cloud instance value (EC2, Azure, GCP, OCI); any other value lands in other in hosts_by_tracking_method and changes no other count. Also assumed: Qualys records a Cloud Agent scan as the host's authenticated scan date; if it does not, hosts_never_auth_scanned overstates the gap. A read that failed leaves its fields null and the run exits non-zero.
+    Output: qualys_scan_coverage.json — one item per host with its IPv4 and IPv6 address, DNS name, operating system, tracking method, last scan dates and days since each; the subscription's IPv4 ranges holding no host record, and its IPv6 ranges with no host record anywhere in them, both leaving out the excluded addresses; and the excluded ranges. Assumed from the API guide, not seen on a live subscription: tracking methods read IP, DNS, NETBIOS, an agent value or a cloud instance value (EC2, Azure, GCP, OCI); any other value lands in other in hosts_by_tracking_method and changes no other count. Also assumed: Qualys records a Cloud Agent scan as the host's authenticated scan date; if it does not, hosts_never_auth_scanned overstates the gap. A read that failed leaves its fields null and the run exits non-zero.
 
     Summary fields:
 
@@ -67,9 +67,12 @@ evidence_set:
     - hosts_auth_date_unreadable — Number of hosts whose authenticated scan date could not be read
 
     Which subscription IPs have no host record?
-    - subscription_ips — Number of addresses in the subscription's IP list the API user can see; null if the list could not be read
-    - subscription_ips_without_host_record — Number of those addresses with no host in the host list, either never scanned or with nothing found there; null if a list could not be read
-    - excluded_ips — Number of addresses Qualys is set never to scan; null if the list could not be read
+    - subscription_ipv4_addresses — Number of IPv4 addresses in the subscription's IP list the API user can see; null if the list could not be read
+    - subscription_ipv4_addresses_without_host_record — Number of those IPv4 addresses with no host in the host list, either never scanned or with nothing found there; addresses on the excluded list are left out, since Qualys never scans them; null if the IP list or the excluded list could not be read
+    - subscription_ipv6_ranges — Number of IPv6 entries (one address or a range) in the subscription's IP list; IPv6 is counted by range, not by address, because one /64 range alone holds 2^64 addresses; null if the list could not be read
+    - subscription_ipv6_ranges_without_host_record — Number of those IPv6 entries with no host in the host list anywhere in them; addresses on the excluded list are left out, and an entry that is wholly excluded is not counted; null if the IP list or the excluded list could not be read
+    - excluded_ipv4_addresses — Number of IPv4 addresses Qualys is set never to scan; null if the list could not be read
+    - excluded_ipv6_ranges — Number of IPv6 entries Qualys is set never to scan; null if the list could not be read
 
     Does the API user see every asset?
     - scope_all — True if the built-in All asset group is among the groups the API user sees; false if not; null if the groups could not be read

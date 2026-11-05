@@ -204,7 +204,10 @@ def _host_list(h: QualysDouble, path: str, q: dict) -> str:
 
 
 def _ip_set(values: list[str]) -> str:
-    rows = "".join(f"<IP_RANGE>{v}</IP_RANGE>" if "-" in v else f"<IP>{v}</IP>" for v in values)
+    def row(v: str) -> str:
+        tag = ("IPV6" if ":" in v else "IP") + ("_RANGE" if "-" in v else "")
+        return f"<{tag}>{v}</{tag}>"
+    rows = "".join(row(v) for v in values)
     return f"<IP_SET>{rows}</IP_SET>" if values else ""
 
 
@@ -480,8 +483,12 @@ def test_scan_coverage_happy_path(qualys: str, tmp_path: Path, assert_summary_do
     assert s["max_days_since_vm_scan"] == 45.0
     assert (s["hosts_auth_scanned_within_window"], s["hosts_auth_scan_older_than_window"],
             s["hosts_never_auth_scanned"]) == (1, 1, 3)
-    assert (s["subscription_ips"], s["subscription_ips_without_host_record"], s["excluded_ips"]) == (15, 11, 1)
-    assert ev["ips_without_host_record"] == ["10.0.0.3-10.0.0.8", "10.0.0.10", "10.0.2.0-10.0.2.3"]
+    assert (s["subscription_ipv4_addresses"], s["subscription_ipv4_addresses_without_host_record"],
+            s["excluded_ipv4_addresses"]) == (15, 10, 1)
+    assert (s["subscription_ipv6_ranges"], s["subscription_ipv6_ranges_without_host_record"],
+            s["excluded_ipv6_ranges"]) == (0, 0, 0)
+    assert ev["ipv4_ranges_without_host_record"] == ["10.0.0.3-10.0.0.8", "10.0.2.0-10.0.2.3"]
+    assert ev["ipv6_ranges_without_host_record"] == [] and ev["excluded_ip_ranges"] == ["10.0.0.10"]
     assert (s["scope_all"], s["visible_asset_groups"]) == (True, 3)
     assert ev["metadata"]["population"] == {"collected": 5, "pages": 6, "complete": True}
     assert ev["metadata"]["platform"] == "private_or_unlisted"
@@ -509,11 +516,53 @@ def test_scan_coverage_forbidden_ip_list_is_null_not_zero(qualys: str, tmp_path:
     assert code == 1
     assert status["code"] == "not_authorized"
     s = ev["summary"]
-    assert s["subscription_ips"] is None and s["subscription_ips_without_host_record"] is None
-    assert s["total_hosts"] == 5 and s["excluded_ips"] == 1
+    assert s["subscription_ipv4_addresses"] is None and s["subscription_ipv4_addresses_without_host_record"] is None
+    assert s["subscription_ipv6_ranges"] is None and s["subscription_ipv6_ranges_without_host_record"] is None
+    assert s["total_hosts"] == 5 and s["excluded_ipv4_addresses"] == 1
     assert ev["metadata"]["partial_failure"] is True
     assert ev["metadata"]["population"]["complete"] is False
     assert ev["metadata"]["api_failures"][0]["operation"] == "list_ips"
+
+
+def test_scan_coverage_failed_excluded_list_leaves_the_gaps_null(qualys: str, tmp_path: Path) -> None:
+    STATE["fail"]["/api/2.0/fo/asset/excluded_ip/"] = (403, "2012", "no")
+    code, ev, _ = run_fetcher("scan_coverage", qualys, tmp_path)
+    assert code == 1
+    s = ev["summary"]
+    assert (s["subscription_ipv4_addresses"], s["subscription_ipv6_ranges"]) == (15, 0)
+    assert s["subscription_ipv4_addresses_without_host_record"] is None
+    assert s["subscription_ipv6_ranges_without_host_record"] is None
+    assert s["excluded_ipv4_addresses"] is None and s["excluded_ipv6_ranges"] is None
+    assert ev["ipv4_ranges_without_host_record"] is None and ev["excluded_ip_ranges"] is None
+
+
+def test_scan_coverage_counts_ipv4_by_address_and_ipv6_by_range(qualys: str, tmp_path: Path) -> None:
+    STATE["hosts"] = [
+        {"ID": "201", "IP": "10.0.0.5", "TRACKING_METHOD": "IP", "LAST_VM_SCANNED_DATE": _iso(1)},
+        {"ID": "202", "IPV6": "2001:db8::5", "TRACKING_METHOD": "IP", "LAST_VM_SCANNED_DATE": _iso(1)},
+    ]
+    STATE["ips"] = ["10.0.0.0-10.0.0.255", "2001:db8::-2001:db8::ffff:ffff:ffff:ffff",
+                    "2001:db8:1::-2001:db8:1::ff", "2001:db8:2::-2001:db8:2::ff"]
+    STATE["excluded"] = ["2001:db8:2::-2001:db8:2::ff"]
+    code, ev, _ = run_fetcher("scan_coverage", qualys, tmp_path)
+    assert code == 0
+    s = ev["summary"]
+    assert (s["subscription_ipv4_addresses"], s["subscription_ipv4_addresses_without_host_record"]) == (256, 255)
+    assert (s["subscription_ipv6_ranges"], s["subscription_ipv6_ranges_without_host_record"]) == (3, 1)
+    assert (s["excluded_ipv4_addresses"], s["excluded_ipv6_ranges"]) == (0, 1)
+    assert all(abs(v) < 2 ** 53 for v in s.values() if isinstance(v, int))
+    assert ev["ipv4_ranges_without_host_record"] == ["10.0.0.0-10.0.0.4", "10.0.0.6-10.0.0.255"]
+    assert ev["ipv6_ranges_without_host_record"] == ["2001:db8:1::-2001:db8:1::ff"]
+    assert next(h for h in ev["hosts"] if h["host_id"] == "202")["ipv6"] == "2001:db8::5"
+
+
+def test_scan_coverage_low_ipv6_range_stays_ipv6(qualys: str, tmp_path: Path) -> None:
+    STATE["ips"], STATE["excluded"] = ["::1-::3"], []
+    code, ev, _ = run_fetcher("scan_coverage", qualys, tmp_path)
+    assert code == 0
+    assert ev["ipv6_ranges_without_host_record"] == ["::1-::3"]
+    assert ev["ipv4_ranges_without_host_record"] == []
+    assert ev["summary"]["subscription_ipv4_addresses"] == 0
 
 
 def test_scan_coverage_failed_scope_read_is_null(qualys: str, tmp_path: Path) -> None:

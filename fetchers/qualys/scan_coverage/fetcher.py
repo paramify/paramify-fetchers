@@ -51,6 +51,7 @@ def host_item(host, now, window):
     vm_days, auth_days = days_between(vm_at, now), days_between(auth_at, now)
     return {
         **host_identity(host),
+        "ipv6": text(host, "IPV6"),
         "last_vm_scanned_date": vm_raw[0],
         "last_vuln_scan_datetime": vm_raw[1],
         "last_vm_auth_scanned_date": auth_raw,
@@ -82,29 +83,71 @@ def ip_ranges(client, path, operation):
     return ranges
 
 
-def size(ranges):
-    return sum(int(last) - int(first) + 1 for first, last in ranges)
-
-
 def render(first, last):
     return str(first) if first == last else f"{first}-{last}"
 
 
-def uncovered(ranges, host_ips):
-    """Parts of `ranges` holding no host IP, as 'a-b' strings, and how many addresses that is."""
-    gaps, count = [], 0
-    sorted_ips = {v: sorted(int(ip) for ip in host_ips if ip.version == v) for v in (4, 6)}
-    for first, last in sorted(ranges, key=lambda r: (r[0].version, int(r[0]))):
-        ips = sorted_ips[first.version]
-        inside = ips[bisect.bisect_left(ips, int(first)):bisect.bisect_right(ips, int(last))]
-        cursor = int(first)
-        for value in inside + [int(last) + 1]:
+def intervals(ranges, version):
+    """Sorted, merged (lo, hi) integer intervals of one IP version."""
+    merged = []
+    for lo, hi in sorted((int(a), int(b)) for a, b in ranges if a.version == version):
+        if merged and lo <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
+def subtract(spans, removed):
+    """Parts of `spans` outside `removed`; both sorted and merged."""
+    out = []
+    for lo, hi in spans:
+        cursor = lo
+        for rlo, rhi in removed:
+            if rhi < cursor or rlo > hi:
+                continue
+            if rlo > cursor:
+                out.append((cursor, rlo - 1))
+            cursor = max(cursor, rhi + 1)
+        if cursor <= hi:
+            out.append((cursor, hi))
+    return out
+
+
+def without_host(spans, host_values):
+    """Parts of `spans` holding none of the sorted `host_values`."""
+    out = []
+    for lo, hi in spans:
+        cursor = lo
+        for value in host_values[bisect.bisect_left(host_values, lo):bisect.bisect_right(host_values, hi)] + [hi + 1]:
             if value > cursor:
-                lo, hi = ipaddress.ip_address(cursor), ipaddress.ip_address(value - 1)
-                gaps.append(render(lo, hi))
-                count += value - cursor
+                out.append((cursor, value - 1))
             cursor = max(cursor, value + 1)
-    return gaps, count
+    return out
+
+
+def ip_coverage(ranges, excluded, host_ips):
+    """IPv4 counted by address, IPv6 by range, so no count can exceed 2^53; excluded ranges are not gaps."""
+    hosts = {v: sorted(int(ip) for ip in host_ips if ip.version == v) for v in (4, 6)}
+    v4 = intervals(ranges, 4)
+    v6 = sorted({(a, b) for a, b in ranges if a.version == 6})
+    result = {
+        "subscription_ipv4_addresses": sum(hi - lo + 1 for lo, hi in v4),
+        "subscription_ipv6_ranges": len(v6),
+        "ipv4_without_host": None,
+        "ipv6_without_host": None,
+    }
+    if excluded is not None:
+        open_v4 = subtract(v4, intervals(excluded, 4))
+        result["ipv4_without_host"] = [(ipaddress.IPv4Address(lo), ipaddress.IPv4Address(hi))
+                                       for lo, hi in without_host(open_v4, hosts[4])]
+        excluded_v6, v6_gaps = intervals(excluded, 6), []
+        for a, b in v6:
+            open_v6 = subtract([(int(a), int(b))], excluded_v6)
+            if open_v6 and without_host(open_v6, hosts[6]) == open_v6:
+                v6_gaps.append((a, b))
+        result["ipv6_without_host"] = v6_gaps
+    return result
 
 
 def collect(client, ledger, now):
@@ -114,24 +157,27 @@ def collect(client, ledger, now):
         "HOST", "list_hosts")]
     host_ips = set()
     for h in hosts:
-        try:
-            host_ips.add(ipaddress.ip_address(h["ip"]))
-        except (TypeError, ValueError):
-            pass
+        for value in (h["ip"], h["ipv6"]):
+            try:
+                host_ips.add(ipaddress.ip_address(value))
+            except (TypeError, ValueError):
+                pass
 
-    gaps, gap_count, subscription_ips = None, None, None
+    ranges = None
     try:
         ranges = ip_ranges(client, IP_PATH, "list_ips")
-        gaps, gap_count = uncovered(ranges, host_ips)
-        subscription_ips = size(ranges)
     except QualysError as e:
         ledger.add(e)
-    excluded, excluded_count = None, None
+    excluded_ranges = None
     try:
         excluded_ranges = ip_ranges(client, EXCLUDED_PATH, "list_excluded_ips")
-        excluded, excluded_count = [render(a, b) for a, b in excluded_ranges], size(excluded_ranges)
     except QualysError as e:
         ledger.add(e)
+    ips = {"subscription_ipv4_addresses": None, "subscription_ipv6_ranges": None,
+           "ipv4_without_host": None, "ipv6_without_host": None}
+    if ranges is not None:
+        ips = ip_coverage(ranges, excluded_ranges, host_ips)
+    v4_gaps, v6_gaps = ips["ipv4_without_host"], ips["ipv6_without_host"]
 
     by_method = {key: 0 for key in TRACKING_KEYS}
     for h in hosts:
@@ -151,11 +197,22 @@ def collect(client, ledger, now):
             1 for h in hosts if h["has_auth_scan_date"] and h["auth_scanned_within_window"] is False),
         "hosts_never_auth_scanned": sum(1 for h in hosts if not h["has_auth_scan_date"]),
         "hosts_auth_date_unreadable": sum(1 for h in hosts if not h["auth_date_readable"]),
-        "subscription_ips": subscription_ips,
-        "subscription_ips_without_host_record": gap_count,
-        "excluded_ips": excluded_count,
+        "subscription_ipv4_addresses": ips["subscription_ipv4_addresses"],
+        "subscription_ipv4_addresses_without_host_record":
+            None if v4_gaps is None else sum(int(b) - int(a) + 1 for a, b in v4_gaps),
+        "subscription_ipv6_ranges": ips["subscription_ipv6_ranges"],
+        "subscription_ipv6_ranges_without_host_record": None if v6_gaps is None else len(v6_gaps),
+        "excluded_ipv4_addresses": None if excluded_ranges is None else sum(
+            hi - lo + 1 for lo, hi in intervals(excluded_ranges, 4)),
+        "excluded_ipv6_ranges": None if excluded_ranges is None else len(
+            {(a, b) for a, b in excluded_ranges if a.version == 6}),
     }
-    body = {"hosts": hosts, "ips_without_host_record": gaps, "excluded_ip_ranges": excluded}
+    body = {
+        "hosts": hosts,
+        "ipv4_ranges_without_host_record": None if v4_gaps is None else [render(a, b) for a, b in v4_gaps],
+        "ipv6_ranges_without_host_record": None if v6_gaps is None else [render(a, b) for a, b in v6_gaps],
+        "excluded_ip_ranges": None if excluded_ranges is None else [render(a, b) for a, b in excluded_ranges],
+    }
     return body, summary, len(hosts)
 
 

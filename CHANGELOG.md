@@ -18,7 +18,8 @@ schemas and the `paramify` CLI — not the internal code.
   - `qualys_scan_coverage`: each host's last vulnerability scan and last
     authenticated scan against `scan_window_days` (default 31, so a monthly scan
     counts as within it), the subscription IPs that have no host record, and
-    excluded IPs.
+    excluded IPs. IPv4 is counted by address and IPv6 by range, so one IPv6 /64
+    can't swamp the count, and excluded addresses are not counted as gaps.
   - `qualys_scan_schedules`: active scan schedules and their longest gap between
     runs, whether each option profile enables authentication, and how the scans
     launched in the window ended.

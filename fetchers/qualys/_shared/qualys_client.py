@@ -7,18 +7,21 @@ import ipaddress
 import os
 import random
 import time
-from typing import Any, Callable, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional
 from urllib.parse import parse_qs, urlsplit
-from xml.etree.ElementTree import Element, ParseError
 
 import requests
+
+if TYPE_CHECKING:
+    from xml.etree.ElementTree import Element
 
 try:
     from defusedxml import DefusedXmlException
     from defusedxml import ElementTree as SafeET
+    from defusedxml.ElementTree import ParseError
 except ImportError:  # reported as bad_config when the client is built
     SafeET = None
-    DefusedXmlException = Exception  # type: ignore[assignment,misc]
+    DefusedXmlException = ParseError = Exception  # type: ignore[assignment,misc]
 
 TIMEOUT = (30, 600)
 MAX_ATTEMPTS = 5

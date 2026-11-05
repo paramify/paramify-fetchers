@@ -10,14 +10,16 @@ import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Optional
-from xml.etree.ElementTree import Element
+from typing import TYPE_CHECKING, Callable, Iterable, Optional
 
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 from fetcher_status import report_failure  # noqa: E402
 from qualys_client import QualysClient, QualysError, text  # noqa: E402
+
+if TYPE_CHECKING:
+    from xml.etree.ElementTree import Element
 
 SEVERITIES = ("5", "4", "3", "2", "1")
 NOT_RETURNED = "not_returned"
@@ -154,7 +156,9 @@ def detection_record(identity: dict, det: Element, now: datetime, timeframes: di
     ended = parse_time(last_fixed) if status == "Fixed" else now
     age = days_between(started, ended)
     timeframe = timeframes.get(severity or "")
-    within = None if age is None or timeframe is None else age <= timeframe
+    within, over = None, None
+    if age is not None and timeframe is not None:
+        within, over = age <= timeframe, round(max(age - timeframe, 0), 1)
     return {
         "host_id": identity["host_id"],
         "ip": identity["ip"],
@@ -175,7 +179,7 @@ def detection_record(identity: dict, det: Element, now: datetime, timeframes: di
         "age_days": age,
         "timeframe_days": timeframe,
         "within_timeframe": within,
-        "days_over_timeframe": None if within is None else round(max(age - timeframe, 0), 1),
+        "days_over_timeframe": over,
     }
 
 
