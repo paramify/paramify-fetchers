@@ -83,7 +83,7 @@ evidence_set:
       - aad (Entra ID)
       - msa (Microsoft account)
       - unknown (no identity source recorded)
-    - users_with_sign_in_disabled — Number of people who can't sign in because their access is disabled or deleted; null if the user entitlements couldn't be read
+    - users_with_sign_in_disabled — Number of people who can't sign in because their entitlement's status is disabled, pending disable or deleted; null if the user entitlements couldn't be read
     - users_deleted_in_origin — List of people deleted in Entra ID or their Microsoft account who are still in the organization; null if the users couldn't be read
     - service_principals_total — Number of service principals and managed identities added to the organization; null if they couldn't be read
     - service_identities_total — Number of Azure DevOps service identities, such as the build service; null if the users couldn't be read
@@ -92,14 +92,14 @@ evidence_set:
     - groups_not_read — List of groups whose members couldn't be read (the computed Project Collection Valid Users and Project Valid Users groups, and Azure DevOps enterprise-level groups, are never read and aren't listed); null if the groups couldn't be read
 
     Are unused accounts removed?
-    - inactivity_threshold_days — Number of days without access after which a person counts as inactive
+    - inactivity_threshold_days — Number of days without access after which a person counts as inactive (90 unless inactive_days sets it)
     - last_access_collected — True if the user entitlements, which hold access levels and last access, were read; false if not
     - inactive_users — List of inactive people: people who can still sign in but whose last access, or the day they were added if they never signed in, is older than inactivity_threshold_days; null if the user entitlements couldn't be read
     - users_never_accessed — List of people who have never signed in to the organization (Azure DevOps records their last access as 0001-01-01); null if the user entitlements couldn't be read
 
     Who holds privileged access?
     - privileged_groups — Number of privileged groups found, meaning the Azure DevOps groups named Project Collection Administrators, Project Collection Service Accounts, Project Collection Build Administrators, and each project's Project Administrators, Build Administrators, Release Administrators and Endpoint Administrators; null if the groups couldn't be read
-    - privileged_groups_not_fully_read — List of privileged groups where a nested group's members couldn't be read, so the member list may be short; null if the groups couldn't be read
+    - privileged_groups_not_fully_read — List of privileged groups whose own members, or a nested group's members, couldn't be read, so the member list may be short; null if the groups couldn't be read
     - privileged_members_by_group — Number of effective members for each privileged group, meaning the identities in it directly or through nested Azure DevOps or Entra groups; null if the groups couldn't be read
     - privileged_identities — Number of distinct identities (people, service principals, service identities and Azure DevOps system identities) that are effective members of at least one privileged group; null if the groups couldn't be read
     - privileged_users — List of people who are effective members of at least one privileged group; null if the groups couldn't be read
@@ -110,7 +110,7 @@ evidence_set:
     - guest_privileged_users — List of guests who are effective members of at least one privileged group; null if the groups or the users couldn't be read
 
     What isn't collected?
-    - not_collected — List of what the fetcher deliberately doesn't collect, for each area:
+    - not_collected — What the fetcher deliberately doesn't collect, with a note for each area:
       - time_bound_access (Azure DevOps memberships never expire; only a PIM-managed Entra group makes access time-bound)
       - entra_group_members (an Entra group's full membership; Azure DevOps records only the members it has seen)
       - permissions (what each group may do; see the permissions evidence)
