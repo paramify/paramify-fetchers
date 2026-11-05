@@ -20,9 +20,10 @@ schemas and the `paramify` CLI — not the internal code.
   and record count over that many hours. The hours are capped at the ingestion
   window and at the 720 `/search` reaches. The setting is off (0) by default,
   because `/search` bills per GB scanned, so the query asks for nothing else. A
-  value that isn't a whole number leaves it off, with a warning. Off, nothing
-  changes from 0.3.0: these tables are not measured (which is not unknown),
-  aren't counted as sources, and leave their connectors unmeasured. On:
+  value of 0 or less leaves it off, and so does one that isn't a whole number,
+  with a warning. Off, nothing changes from 0.3.0: these tables are not
+  measured (which is not unknown), aren't counted as sources, and leave their
+  connectors unmeasured. On:
   - **A table with data** joins `tables` and counts as a source, so
     `sources_ingesting` and `min_sources_ingesting` can rise.
   - **Connectors.** A connector whose data type is the whole table reads
@@ -30,15 +31,17 @@ schemas and the `paramify` CLI — not the internal code.
     unmeasured, since answering it would bill another scan.
   - **An empty table** is measured only when the search covers the whole
     window. With fewer hours, it stays not measured.
-  - **A failed search** leaves its table unmeasured, lists it in
-    `tables_search_failed` and fails the run. `sources_ingesting` then reads
-    null, as it does when the table plans couldn't be read.
+  - **A failed search**, or one that returns no result row, leaves its table
+    unmeasured, lists it in `tables_search_failed` and fails the run.
+    `sources_ingesting` then reads null, as it does when the table plans
+    couldn't be read.
 
   Every table gains a `plan` field. Each workspace gains `tables_searched` and
   `tables_search_failed`. `tables_not_measured` lists the Basic and Auxiliary
   tables that weren't measured, for whatever reason. The summary gains
-  `basic_logs_lookback_hours`, the hours actually searched, and the fetcher's
-  tests now check every summary field against its instructions.
+  `basic_logs_lookback_hours`, the hours each table is searched over (0 when
+  off), and the fetcher's tests now check every summary field against its
+  instructions.
 
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,

@@ -23,6 +23,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
+import requests
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -230,6 +231,8 @@ class FakeAzure:
             if fragment in json["query"] or fragment in url:
                 if isinstance(body, list):
                     body = body.pop(0) if len(body) > 1 else body[0]
+                if isinstance(body, Exception):
+                    raise body
                 return body if isinstance(body, Resp) else Resp(200, body)
         return Resp(400, {"error": {"code": "BadArgumentError", "message": "unrouted query"}})
 
@@ -693,9 +696,11 @@ def test_data_sources_measures_basic_and_auxiliary_tables_through_search(azure, 
     ws = ws_a(ev)
     by_id = {c["id"]: c for c in ws["connectors"]}
     assert code == 0 and ev["metadata"]["partial_failure"] is False
-    # One table per search, asking only for the newest record and a count over the window, timespan in the URL.
-    query = MODS["sentinel_data_sources"].SEARCH_QUERY
-    assert search_calls(azure) == [query.format(table=t, hours=336) for t in ("AppLogs_CL", "StorageBlobLogs")]
+    # One table per search, asking only for the newest record and a count over the window, timespan in the URL;
+    # /search bills per GB scanned, so the text is pinned.
+    assert search_calls(azure) == [
+        f"['{t}'] | where TimeGenerated > ago(336h) | summarize LastIngested = max(TimeGenerated), Records = count()"
+        for t in ("AppLogs_CL", "StorageBlobLogs")]
     assert [(url.split("/")[-2:], params) for url, params in azure.params] == [(["cust-a", "search"], {"timespan": "PT336H"})] * 2
     assert not any("StorageBlobLogs" in q or "AppLogs_CL" in q for _, url, q in azure.calls if url.endswith("/query"))
     assert ws["tables_searched"] == ["AppLogs_CL", "StorageBlobLogs"]
@@ -726,6 +731,23 @@ def test_data_sources_failed_search_is_unknown(azure, tmp_path, monkeypatch):
     # The table could be a source, so the count is unknown, not 2.
     assert ws["sources_ingesting"] is None and ev["summary"]["min_sources_ingesting"] is None
     assert ev["summary"]["workspaces_with_no_sources"] == 0
+
+
+@pytest.mark.parametrize("answer, tries", [
+    (Resp(429, {"error": {"code": "TooManyRequests", "message": "slow down"}}), 5),  # retried, then recorded
+    (requests.Timeout("read timed out"), 1),  # a POST isn't resent: the server may already have scanned
+    (Resp(200, {"tables": [{"name": "PrimaryResult", "columns": [], "rows": []}],
+                "error": {"code": "PartialError", "message": "partial"}}), 1),
+    (table(["LastIngested", "Records"], []), 1),  # summarize without by always answers one row
+])
+def test_data_sources_every_kind_of_failed_search_is_unknown(azure, tmp_path, monkeypatch, answer, tries):
+    basic_tables_workspace(azure, monkeypatch)
+    azure.queries.insert(0, ("['StorageBlobLogs']", answer))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert sum("StorageBlobLogs" in q for q in search_calls(azure)) == tries
+    assert ws["tables_search_failed"] == ["StorageBlobLogs"] and ws["sources_ingesting"] is None
 
 
 def test_data_sources_search_without_table_plans_is_unknown(azure, tmp_path, monkeypatch):

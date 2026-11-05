@@ -161,6 +161,9 @@ def search_tables(client, ws: Dict[str, Any], names: List[str], hours: int, days
             f"loganalytics.search({name}, {ws['name']})",
             lambda name=name: client.search(ws["customer_id"], SEARCH_QUERY.format(table=name, hours=hours), f"PT{hours}H"),
         )
+        if rows == []:  # summarize without by always answers one row, so none is a broken answer, not an empty table
+            collector.record(f"loganalytics.search({name}, {ws['name']})", LookupError("the search returned no result row"))
+            rows = None
         row = rows[0] if rows else {}
         records = row.get("Records") or 0
         if rows is None:
