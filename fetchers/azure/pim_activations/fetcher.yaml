@@ -49,9 +49,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-IAM-JIT
-  - KSI-CMT-LMC
-  - KSI-IAM-ELP
+  - KSI-IAM-JIT      # activations are the JIT model in use, with their justification and approval
+  - KSI-CMT-LMC      # who held an activated privileged role when changes were made, and under what request
 
 evidence_set:
   reference_id: EVD-AZURE-PIM-ACTIVATIONS

@@ -113,7 +113,8 @@ def test_duration_hours(value, hours):
 
 
 @pytest.mark.parametrize("status,out", [("Provisioned", "granted"), ("Denied", "denied_or_failed"), ("PendingApproval", "pending"),
-                                        ("Revoked", "denied_or_failed"), ("Mystery", "unknown"), (None, "unknown")])
+                                        ("Revoked", "revoked"), ("Accepted", "pending"), ("ScheduleCreated", "granted"),
+                                        ("Mystery", "unknown"), (None, "unknown")])
 def test_outcome(status, out):
     assert pa.outcome(status) == out
 
@@ -187,3 +188,43 @@ def test_empty_window_is_zero_not_null():
     results, summary, collector = run(FakeClient())
     assert collector.ok and summary["requests_total"] == 0 and summary["oldest_request_created_on"] is None
     assert summary["activation_duration_hours_max"] is None and summary["principals_who_activated"] == 0
+
+
+def test_revoked_activation_still_counts_as_activated():
+    client = FakeClient(requests=[req(1, status="Revoked"), req(2, status="Denied", principal="u2")])
+    _, summary, collector = run(client)
+    assert collector.ok
+    assert summary["self_activations_granted"] == 1 and summary["self_activations_revoked_early"] == 1
+    assert summary["self_activations_denied_or_failed"] == 1 and summary["principals_who_activated"] == 1
+    assert summary["requests_by_outcome"] == {"denied_or_failed": 1, "revoked": 1}
+
+
+def test_one_list_failed_and_the_other_unlicensed_keeps_the_failure_visible():
+    client = FakeClient(fail={"roleAssignmentScheduleRequests": ArmError(500, "InternalServerError", "boom"),
+                              "roleAssignmentScheduleInstances": ArmError(400, "AadPremiumLicenseRequired", "P2 required")})
+    results, summary, collector = run(client)
+    assert not collector.ok and summary["pim_available"] is False
+    assert summary["requests_total"] is None, "a failed read must not be masked as an empty list"
+    assert summary["currently_active_activations"] == 0
+
+
+def test_admin_assign_without_expiration_is_counted():
+    raw = req(1, kind="AdminAssign", duration=None)
+    raw["properties"]["scheduleInfo"]["expiration"] = {"type": "NoExpiration"}
+    _, summary, _ = run(FakeClient(requests=[raw, req(2, kind="AdminAssign")]))
+    assert summary["admin_assign_requests"] == 2 and summary["admin_assign_requests_without_expiration"] == 1
+
+
+def test_justification_is_bounded_and_control_characters_dropped():
+    raw = req(1, justification="line one\x00\x07 \n" + "x" * 5000)
+    r = pa.request_record(raw, SUB)
+    assert "\x00" not in r["justification"] and "\x07" not in r["justification"]
+    assert r["justification"].startswith("line one") and len(r["justification"]) == pa.JUSTIFICATION_MAX_CHARS
+
+
+def test_no_secret_like_fields_are_copied():
+    raw = req(1)
+    raw["properties"]["secretValue"] = "should-not-appear"
+    raw["properties"]["expandedProperties"]["principal"]["password"] = "nope"
+    r = pa.request_record(raw, SUB)
+    assert "should-not-appear" not in str(r) and "nope" not in str(r)

@@ -18,9 +18,9 @@ below it (resource groups and resources). Requests made on a management group
 or the tenant root are not included; atScope() would return those instead of
 the child scopes, and the activity inside the subscription is what this
 evidence is for. Both come back with expandedProperties (principal, role
-definition, scope names), so no Microsoft Graph call is needed. Azure keeps schedule requests for a limited
-window (about a month); the evidence records the oldest and newest request it saw
-rather than assuming the window.
+definition, scope names), so no Microsoft Graph call is needed. Azure keeps schedule requests for a limited,
+non-configurable window; the evidence records the oldest and newest request it
+saw rather than assuming what the window is.
 
 A tenant without Entra ID P2 or ID Governance has no PIM: the lists answer 400
 with a licence marker, which is reported as pim_available: false, a state rather
@@ -53,12 +53,18 @@ OVER_BROAD_BUILTIN_ROLES = {
 PIM_UNAVAILABLE_MARKERS = ("aadpremiumlicenserequired", "tenantnotonboarded", "licens", "premium")
 SELF_ACTIVATION = "SelfActivate"
 ADMIN_ASSIGN = "AdminAssign"
-# Outcomes a request can end in; anything else is reported as it came back.
-GRANTED_STATUSES = {"provisioned", "accepted", "granted", "adminapproved", "scheduled", "schedulecreated"}
-DENIED_STATUSES = {"denied", "admindenied", "canceled", "cancelled", "revoked", "failed", "timedout", "invalid",
+# Outcomes a request can end in (the Status enum of the 2020-10-01 API); anything else is reported as it came back.
+GRANTED_STATUSES = {"provisioned", "granted", "adminapproved", "schedulecreated"}
+# Revoked is a request that WAS granted and then ended early (a deactivation or an admin removal): it still
+# counts as an activation that happened, so it is kept apart from the denials.
+REVOKED_STATUSES = {"revoked", "pendingrevocation"}
+DENIED_STATUSES = {"denied", "admindenied", "canceled", "cancelled", "failed", "timedout", "invalid",
                    "failedasresourceislocked"}
-PENDING_STATUSES = {"pendingapproval", "pendingapprovalprovisioning", "pendingadmindecision", "pendingevaluation",
-                    "pendingprovisioning", "pendingschedulecreation", "pendingrevocation", "provisioningstarted"}
+# Accepted is the initial state before evaluation, not a grant.
+PENDING_STATUSES = {"accepted", "pendingapproval", "pendingapprovalprovisioning", "pendingadmindecision",
+                    "pendingevaluation", "pendingprovisioning", "pendingschedulecreation", "provisioningstarted"}
+ACTIVATED_OUTCOMES = {"granted", "revoked"}
+JUSTIFICATION_MAX_CHARS = 1000
 
 logger = logging.getLogger(NAME)
 
@@ -97,6 +103,8 @@ def outcome(status: Optional[str]) -> str:
     s = (status or "").lower()
     if s in GRANTED_STATUSES:
         return "granted"
+    if s in REVOKED_STATUSES:
+        return "revoked"
     if s in DENIED_STATUSES:
         return "denied_or_failed"
     if s in PENDING_STATUSES:
@@ -130,7 +138,9 @@ def request_record(item: Dict[str, Any], subscription_id: str) -> Dict[str, Any]
     schedule = props.get("scheduleInfo") or {}
     expiration = schedule.get("expiration") or {}
     ticket = props.get("ticketInfo") or {}
-    justification = (props.get("justification") or "").strip()
+    # Free text typed by the requester: kept as evidence, bounded, with control characters removed.
+    justification = "".join(ch for ch in str(props.get("justification") or "") if ch >= " " or ch == "\n").strip()
+    justification = justification[:JUSTIFICATION_MAX_CHARS]
     end = _iso(expiration.get("endDateTime"))
     start = _iso(schedule.get("startDateTime"))
     hours = duration_hours(expiration.get("duration"))
@@ -202,7 +212,9 @@ def summarize(requests: Optional[List[Dict[str, Any]]], activations: Optional[Li
 
     reqs = requests or []
     self_acts = [r for r in reqs if r["request_type"] == SELF_ACTIVATION]
-    granted_acts = [r for r in self_acts if r["outcome"] == "granted"]
+    # An activation that happened: granted, or granted and later revoked.
+    granted_acts = [r for r in self_acts if r["outcome"] in ACTIVATED_OUTCOMES]
+    admin_assigns = [r for r in reqs if r["request_type"] == ADMIN_ASSIGN]
     over_broad_acts = [r for r in self_acts if r["is_over_broad_builtin"]]
     hours = [r["requested_duration_hours"] for r in self_acts if r["requested_duration_hours"] is not None]
     created = [r["created_on"] for r in reqs if r["created_on"]]
@@ -217,6 +229,7 @@ def summarize(requests: Optional[List[Dict[str, Any]]], activations: Optional[Li
         "newest_request_created_on": figure(requests, max(created) if created else None),
         "self_activations": figure(requests, len(self_acts)),
         "self_activations_granted": figure(requests, len(granted_acts)),
+        "self_activations_revoked_early": figure(requests, sum(1 for r in self_acts if r["outcome"] == "revoked")),
         "self_activations_denied_or_failed": figure(requests, sum(1 for r in self_acts if r["outcome"] == "denied_or_failed")),
         "self_activations_pending": figure(requests, sum(1 for r in self_acts if r["outcome"] == "pending")),
         "self_activations_without_justification": figure(requests, sum(1 for r in self_acts if not r["has_justification"])),
@@ -235,9 +248,12 @@ def summarize(requests: Optional[List[Dict[str, Any]]], activations: Optional[Li
         "activation_duration_hours_max": figure(requests, max(hours) if hours else None),
         "activation_duration_hours_median": figure(requests, sorted(hours)[len(hours) // 2] if hours else None),
         # Direct (non-JIT) admin assignments made through PIM in the window: standing access being granted.
-        "admin_assign_requests": figure(requests, sum(1 for r in reqs if r["request_type"] == ADMIN_ASSIGN)),
+        "admin_assign_requests": figure(requests, len(admin_assigns)),
         "admin_assign_requests_of_over_broad_roles": figure(
-            requests, sum(1 for r in reqs if r["request_type"] == ADMIN_ASSIGN and r["is_over_broad_builtin"])),
+            requests, sum(1 for r in admin_assigns if r["is_over_broad_builtin"])),
+        # A direct assignment with no expiry is permanent access granted through PIM.
+        "admin_assign_requests_without_expiration": figure(
+            requests, sum(1 for r in admin_assigns if not r["end_date_time"] and not r["requested_duration"])),
         "admin_remove_requests": figure(requests, sum(1 for r in reqs if r["request_type"] == "AdminRemove")),
         "currently_active_activations": figure(activations, len(acts)),
         "currently_active_over_broad_activations": figure(activations, sum(1 for a in acts if a["is_over_broad_builtin"])),
@@ -277,9 +293,12 @@ def collect(client, subscription_id: str, collector) -> tuple:
         activations = [active_activation_record(i, subscription_id) for i in raw_instances
                        if ((i.get("properties") or {}).get("assignmentType") or "").lower() == "activated"]
         activations.sort(key=lambda a: (a["role_name"] or "", a["principal_name"] or a["principal_id"] or ""))
-    if pim_available is False:
-        requests = [] if requests is None else requests
-        activations = [] if activations is None else activations
+    # A list PIM refused for want of a licence is empty by definition; a list that failed for any
+    # other reason stays None so its summary keys read null and the recorded failure exits non-zero.
+    if raw_requests == "unavailable":
+        requests = []
+    if raw_instances == "unavailable":
+        activations = []
 
     now = datetime.now(timezone.utc)
     results = {
