@@ -25,6 +25,12 @@ NOW = datetime(2026, 11, 5, tzinfo=timezone.utc)
 DENIED = Exception("Insufficient privileges to complete the operation. (403)")
 
 
+def _status_error(status):
+    error = Exception(f"Resource not found for the segment 'publicKeyInfrastructure'. ({status})")
+    error.response_status_code = status
+    return error
+
+
 class Mode(Enum):
     MULTI = "x509CertificateMultiFactor"
 
@@ -55,14 +61,14 @@ def _cert(days_left: int) -> bytes:
 
 
 def _authority(days_left, root=True, crl="http://crl.example/ca.crl", cert=None):
-    return ns(issuer=f"CN=Example CA {days_left}", issuer_ski="ab", is_root_authority=root,
+    return ns(issuer=f"CN=Example CA {days_left}", issuer_ski=f"ab{days_left}", is_root_authority=root,
               certificate_revocation_list_url=crl, delta_certificate_revocation_list_url=None,
               certificate=cert if cert is not None else _cert(days_left))
 
 
 def _pki_authority(days_left, kind=Kind.ROOT, crl="http://crl.example/pki.crl", cert=None, expires=None,
                    thumbprint=None):
-    return ns(display_name=f"PKI CA {days_left}", issuer=f"CN=PKI CA {days_left}", issuer_subject_key_identifier="cd",
+    return ns(display_name=f"PKI CA {days_left}", issuer=f"CN=PKI CA {days_left}", issuer_subject_key_identifier=f"cd{days_left}",
               certificate_authority_type=kind, certificate_revocation_list_url=crl,
               delta_certificate_revocation_list_url=None, certificate=cert if cert is not None else _cert(days_left),
               expiration_date_time=expires, thumbprint=thumbprint)
@@ -145,7 +151,7 @@ def _async(value):
     return get
 
 
-def _client(calls, configs, authorities, fail=(), pki=None):
+def _client(calls, configs, authorities, fail=(), pki=None, pki_error=None):
     policy = ns(id="authenticationMethodsPolicy", policy_migration_state="migrationComplete",
                 authentication_method_configurations=configs)
     organization = ns(
@@ -169,13 +175,13 @@ def _client(calls, configs, authorities, fail=(), pki=None):
         groups=ns(by_group_id=group),
         directory=ns(public_key_infrastructure=ns(certificate_based_auth_configurations=PkiStore(
             pki or {}, calls, error=DENIED if "pki" in fail else RuntimeError("timed out") if "pki_error" in fail
-            else None, ca_error=DENIED if "pki_authorities" in fail else None))),
+            else pki_error, ca_error=DENIED if "pki_authorities" in fail else None))),
     )
 
 
-def run(monkeypatch, tmp_path, configs, authorities=(), fail=(), pki=None):
+def run(monkeypatch, tmp_path, configs, authorities=(), fail=(), pki=None, pki_error=None):
     calls: list = []
-    client = _client(calls, list(configs), list(authorities), fail, pki)
+    client = _client(calls, list(configs), list(authorities), fail, pki, pki_error)
 
     async def with_client(collector, cred, work, default=None):
         return await work(client)
@@ -254,8 +260,8 @@ def test_failed_reads_are_null_never_zero(monkeypatch, tmp_path):
     code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=("authorities", "g3"))
     summary, results = evidence["summary"], evidence["results"]
     assert code == 1
-    # Only the PKI store was read, so the list holds its CAs (none) and every count is null.
-    assert results["trusted_certificate_authorities"] == []
+    # The classic store failed, so the list and every count are null even though the PKI store read empty.
+    assert results["trusted_certificate_authorities"] is None
     assert results["certificate_authority_stores"]["certificate_based_auth_configuration"] == {
         "status": "failed", "certificate_authorities": None}
     for key in ("trusted_certificate_authorities", "expired_certificate_authorities",
@@ -373,9 +379,33 @@ def test_a_refused_pki_store_reads_null_and_names_the_grant(monkeypatch, tmp_pat
 def test_a_failed_pki_read_fails_the_run(monkeypatch, tmp_path):
     code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=("pki_error",))
     summary = evidence["summary"]
-    assert code == 1
+    assert code == 1 and evidence["results"]["trusted_certificate_authorities"] is None
     assert (summary["pki_store_status"], summary["pki_store_missing_permission"],
             summary["trusted_certificate_authorities"]) == ("failed", None, None)
+
+
+@pytest.mark.parametrize("status", [400, 404])
+def test_a_cloud_without_the_pki_store_reads_not_available_and_still_succeeds(monkeypatch, tmp_path, status):
+    code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], pki_error=_status_error(status))
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0 and evidence["metadata"].get("partial_failure") is not True
+    assert (summary["pki_store_status"], summary["pki_store_missing_permission"],
+            summary["pki_store_certificate_authorities"], summary["classic_store_certificate_authorities"],
+            summary["trusted_certificate_authorities"]) == ("not_available", None, None, 1, None)
+    assert [r["trust_store"] for r in results["trusted_certificate_authorities"]] == [
+        "certificate_based_auth_configuration"]
+
+
+def test_an_unreadable_classic_certificate_matches_its_pki_entry_by_key_identifier(monkeypatch, tmp_path):
+    classic = _authority(300, cert=b"unreadable")
+    classic.issuer_ski = "AB:12:CD"
+    pki = _pki_authority(300)
+    pki.issuer_subject_key_identifier = "ab12cd"
+    _, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [classic], pki={"p1": [pki]})
+    summary = evidence["summary"]
+    # Counted once, with the expiry its PKI entry could read.
+    assert (summary["trusted_certificate_authorities"], summary["certificate_authorities_expiry_unknown"],
+            summary["expired_certificate_authorities"]) == (1, 0, 0)
 
 
 def test_mapping_is_unknown_without_reported_bindings():

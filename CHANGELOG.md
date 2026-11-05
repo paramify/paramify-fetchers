@@ -1478,7 +1478,9 @@ schemas and the `paramify` CLI — not the internal code.
   `expired` and `has_crl`. The PKI store needs the optional
   `PublicKeyInfrastructure.Read.All`: refused, it reads `not_authorized` in
   `certificate_authority_stores` and `pki_store_status`,
-  `pki_store_missing_permission` names the grant, and the run still succeeds. With the X.509 method enabled it also reads users with
+  `pki_store_missing_permission` names the grant, and the run still succeeds; a
+  cloud without the API (400 or 404) reads `not_available` the same way. The CA list
+  is null when either store's read failed. With the X.509 method enabled it also reads users with
   their `authorizationInfo` (from the target groups, or from the directory only when
   X.509 targets all users) and the groups the enabled methods target. It counts every
   enabled member account X.509 targets, and lists in `x509_certificate_users` the
@@ -1493,8 +1495,9 @@ schemas and the `paramify` CLI — not the internal code.
   still reach it. The X.509 settings list each `certificate_user_bindings` entry.
   The summary adds `trusted_certificate_authorities`,
   `expired_certificate_authorities`, `certificate_authorities_expiry_unknown`,
-  `certificate_authorities_without_crl` (a CA in both stores counted once; null
-  unless both stores were read), `classic_store_certificate_authorities`,
+  `certificate_authorities_without_crl` (a CA in both stores counted once, by
+  thumbprint or, when a certificate can't be read, key identifier; null unless both
+  stores were read), `classic_store_certificate_authorities`,
   `pki_store_certificate_authorities`, `pki_store_status`,
   `pki_store_missing_permission`, `x509_targeted_users`,
   `x509_targeted_users_unmapped`, `x509_targeted_users_mapping_unverified`,

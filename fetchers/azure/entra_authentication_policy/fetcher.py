@@ -120,6 +120,7 @@ STORE_CLASSIC = "certificate_based_auth_configuration"
 STORE_PKI = "public_key_infrastructure"
 STORE_READ = "read"
 STORE_NOT_AUTHORIZED = "not_authorized"
+STORE_NOT_AVAILABLE = "not_available"
 STORE_FAILED = "failed"
 # Optional: without it the PKI store reads null and names this grant, and the run still succeeds.
 PKI_PERMISSION = "PublicKeyInfrastructure.Read.All"
@@ -689,15 +690,29 @@ def _count(records: list[dict] | None, test) -> int | None:
     return None if None in answers else sum(1 for a in answers if a)
 
 
+def _ski(authority: dict) -> str:
+    return "".join(ch for ch in str(authority.get("issuer_ski") or "") if ch.isalnum()).lower()
+
+
 def distinct_authorities(authorities: list[dict]) -> list[dict]:
-    """One record per CA; a CA in both stores (same thumbprint) is expired or CRL-less if either entry is."""
-    groups: dict[str, list[dict]] = {}
-    for index, authority in enumerate(authorities):
-        groups.setdefault(authority.get("thumbprint") or f"#{index}", []).append(authority)
-    return [
-        {"expired": _any([a["expired"] for a in entries]), "has_crl": all(a["has_crl"] for a in entries)}
-        for entries in groups.values()
-    ]
+    """One record per CA. A CA in both stores (same thumbprint, or the same key identifier when a certificate
+    can't be read) is expired or CRL-less if either entry is."""
+    groups: list[list[dict]] = []
+    for authority in sorted(authorities, key=lambda a: not a.get("thumbprint")):
+        thumbprint, ski = authority.get("thumbprint"), _ski(authority)
+        same = next((g for g in groups if (thumbprint and any(a.get("thumbprint") == thumbprint for a in g))
+                     or (not thumbprint and ski and any(_ski(a) == ski for a in g))), None)
+        if same is None:
+            groups.append([authority])
+        else:
+            same.append(authority)
+    return [{"expired": _known_any([a["expired"] for a in entries]), "has_crl": all(a["has_crl"] for a in entries)}
+            for entries in groups]
+
+
+def _known_any(values: list) -> bool | None:
+    """Readings of one certificate: True if any is True, else False if any is known, else None."""
+    return True if True in values else False if False in values else None
 
 
 def summarize_certificates(authorities: list[dict] | None, users: list[dict] | None,
@@ -860,7 +875,7 @@ async def _collect(collector: Collector, cred):
 
 
 async def _certificate_authorities(collector: Collector, client, tenant_id) -> tuple:
-    """(the CAs of the stores that were read, None if neither was; {store: its status and CA count or None})."""
+    """(the CAs of the stores that were read, None if a store failed; {store: its status and CA count or None})."""
     classic = await _classic_store(collector, client, tenant_id)
     pki, status = await _pki_store(collector, client)
     stores = {
@@ -869,7 +884,8 @@ async def _certificate_authorities(collector: Collector, client, tenant_id) -> t
         STORE_PKI: {"status": status, "certificate_authorities": len(pki) if pki is not None else None,
                     "missing_permission": PKI_PERMISSION if status == STORE_NOT_AUTHORIZED else None},
     }
-    read = None if classic is None and pki is None else (classic or []) + (pki or [])
+    failed = any(store["status"] == STORE_FAILED for store in stores.values())
+    read = None if failed else (classic or []) + (pki or [])
     return read, stores
 
 
@@ -889,7 +905,8 @@ async def _classic_store(collector: Collector, client, tenant_id) -> list[dict] 
 
 
 async def _pki_store(collector: Collector, client) -> tuple:
-    """(the PKI-based trust store's CAs, read status); a refused read is not_authorized and doesn't fail the run."""
+    """(the PKI-based trust store's CAs, read status); a refused read, or a cloud without the API, doesn't fail
+    the run."""
     operation = "graph.directory.publicKeyInfrastructure.certificateBasedAuthConfigurations"
     authorities: list[dict] = []
     try:
@@ -903,6 +920,9 @@ async def _pki_store(collector: Collector, client) -> tuple:
         if is_denied(exc):
             logger.warning("the PKI-based trust store was refused (needs %s); its CAs read null", PKI_PERMISSION)
             return None, STORE_NOT_AUTHORIZED
+        if getattr(exc, "response_status_code", None) in (400, 404):
+            logger.warning("the PKI-based trust store isn't available here; its CAs read null")
+            return None, STORE_NOT_AVAILABLE
         collector.record(operation, exc)
         return None, STORE_FAILED
     return authorities, STORE_READ

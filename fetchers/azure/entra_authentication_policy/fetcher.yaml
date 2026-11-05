@@ -99,9 +99,11 @@ evidence_set:
     copied into the evidence), and GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations
     with each one's /certificateAuthorities (the PKI-based trust store; optional
     PublicKeyInfrastructure.Read.All: refused, it reads not_authorized and null, names
-    the missing grant in pki_store_missing_permission, and doesn't fail the run). Each
-    CA records its trust store; the CA counts take a CA listed in both stores (same
-    thumbprint) once, and are null unless both stores were read. With the X.509 method enabled, also GET
+    the missing grant in pki_store_missing_permission, and doesn't fail the run; a cloud
+    without the API (400 or 404) reads not_available the same way). Each CA records its
+    trust store; the CA counts take a CA listed in both stores (same thumbprint, or the
+    same key identifier when a certificate can't be read) once, and are null unless both
+    stores were read. The CA list is null when either store's read failed. With the X.509 method enabled, also GET
     /groups/{id}/transitiveMembers/microsoft.graph.user for each group an enabled
     method includes or excludes, and GET /users only when X.509 targets all users or
     a user directly (both $select id, userPrincipalName, userType, accountEnabled,

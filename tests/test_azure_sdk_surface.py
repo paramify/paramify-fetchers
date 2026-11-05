@@ -4395,6 +4395,12 @@ def test_graph_certificate_sign_in_builders_present() -> None:
         "groups.by_group_id(...).transitive_members.graph_user is gone.\n"
         "  affected fetchers: azure/entra_authentication_policy — X.509 targets read null"
     )
+    builder = type(group.transitive_members.graph_user)
+    params = getattr(builder, "GraphUserRequestBuilderGetQueryParameters", None)
+    assert params is not None and {"select", "top"} <= set(vars(params()).keys()) | set(dir(params)), (
+        "GraphUserRequestBuilder.GraphUserRequestBuilderGetQueryParameters (select, top) is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — X.509 target groups read without their users"
+    )
 
 
 def test_graph_group_member_builders_present() -> None:
