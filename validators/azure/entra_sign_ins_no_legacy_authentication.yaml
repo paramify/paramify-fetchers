@@ -1,0 +1,27 @@
+key: entra_sign_ins_no_legacy_authentication
+name: Entra No Successful Legacy-Authentication Sign-Ins
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every interactive sign-in in the lookback was read (sign_in_logs read, sign_ins_complete true, the
+  collection had no partial failure), at least one sign-in happened, and none succeeded from a legacy
+  client that can't do MFA (IMAP, POP, SMTP, Exchange ActiveSync and other non-modern clients), so
+  legacy authentication isn't in use. Supports KSI-IAM-APM. Fails when the tenant has no Entra ID P1
+  or P2, since the logs can't be read. Does not prove: non-interactive, service principal or managed
+  identity sign-ins (not read); clients Graph reports as Unknown; sign-ins outside the lookback; that
+  Conditional Access blocks legacy clients (entra_ca_legacy_auth_blocked); or that an exception is
+  documented and current, so a documented exception still fails.
+
+# Every figure is null when the logs weren't read, so \d+ fails rather than reading unknown as 0.
+regex: '"partial_failure":\s*false\b[\s\S]*?"sign_in_logs":\s*"read",[\s\S]*?"sign_ins_complete":\s*true\b[\s\S]*?"successful_legacy_authentication_sign_ins":\s*(?<successful_legacy_authentication_sign_ins>\d+)[\s\S]*?"total_sign_ins":\s*(?<total_sign_ins>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # successful_legacy_authentication_sign_ins
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-SIGN-INS

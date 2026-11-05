@@ -1,0 +1,31 @@
+key: entra_sign_ins_all_app_sign_ins_mfa
+name: Entra Every Successful App Sign-In Passed MFA
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every interactive sign-in in the lookback was read (sign_ins_complete true, the collection had no
+  partial failure) and every successful sign-in to an app required and passed MFA
+  (multi_factor_percentage is 100), so no sign-in fell back to a single factor. A sign-in whose MFA
+  requirement Graph didn't report counts as not MFA, and the figure is null when no app sign-in
+  succeeded, so an empty lookback fails. Supports KSI-IAM-APM. Fails when the tenant has no Entra ID
+  P1 or P2. Does not prove: which MFA method was used, so SMS or voice still passes
+  (entra_auth_methods_weak_disabled covers those); that methods are phishing-resistant; Windows device
+  logons, non-interactive, service principal or managed identity sign-ins; or that an exception is
+  documented and current, so a documented exception still fails.
+
+# multi_factor_percentage is null when the logs weren't read or no app sign-in succeeded.
+regex: '"partial_failure":\s*false\b[\s\S]*?"multi_factor_percentage":\s*(?<multi_factor_percentage>\d+)[\s\S]*?"sign_ins_complete":\s*(?<sign_ins_complete>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100; MATCH_GROUP[2] EQUALS true
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # multi_factor_percentage
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # sign_ins_complete
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-SIGN-INS
