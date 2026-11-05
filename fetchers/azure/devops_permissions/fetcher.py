@@ -53,6 +53,10 @@ HIGH_IMPACT = {name.lower(): actions for name, actions in NAMESPACES.items()}
 BYPASS_ACTIONS = {("git repositories", "policyexempt"), ("git repositories", "pullrequestbypasspolicy")}
 CHECKIN_OVERRIDE = "overridebuildcheckinvalidation"
 BUILD_SERVICE_GROUP = "project collection build service accounts"
+# ACLs name each organization group by this template SID plus a well-known -0-0-0-x-y ending; custom groups never have one.
+TEMPLATE_SID = "microsoft.teamfoundation.identity;s-1-9-1551374245-1204400969-2402986413-2179408616-0-0-0-"
+BUILD_SERVICE_GROUP_SID = "-0-0-0-1-1"
+_WELL_KNOWN = re.compile(r"-0-0-0-\d+-\d+$")
 ADMIN_GROUPS = {
     "project collection administrators", "project collection service accounts",
     "project collection build administrators", "project administrators", "build administrators",
@@ -216,6 +220,23 @@ def read_identities(client, batch: List[str], split: bool = False) -> List[Any]:
         return rows
 
 
+def row_descriptor(row: Dict[str, Any]) -> str:
+    descriptor = row.get("descriptor")
+    if isinstance(descriptor, dict):
+        descriptor = f"{descriptor.get('identityType')};{descriptor.get('identifier')}"
+    return str(descriptor or "")
+
+
+def answers(requested: str, got: str, wanted: Set[str]) -> bool:
+    """Whether a row answers the descriptor requested in its place; a template SID answers with the group's own SID."""
+    requested, got = requested.lower(), got.lower()
+    if got == requested:
+        return True
+    ending = _WELL_KNOWN.search(requested)
+    return bool(ending) and requested.startswith(TEMPLATE_SID) and got not in wanted \
+        and got.startswith("microsoft.teamfoundation.identity;") and got.endswith(ending.group(0))
+
+
 def resolve(client, collector, descriptors: List[str]) -> Tuple[Dict[str, Dict[str, Any]], Set[str]]:
     """(lowercased descriptor -> identity, lowercased descriptors whose batch failed); unresolved ones are left out."""
     found: Dict[str, Dict[str, Any]] = {}
@@ -227,14 +248,18 @@ def resolve(client, collector, descriptors: List[str]) -> Tuple[Dict[str, Dict[s
             unread |= {d.lower() for d in batch}
         # Rows keep request order, and an organization group's template SID answers with its own, so match by position.
         if rows and len(rows) == len(batch):
-            found.update((d.lower(), row) for d, row in zip(batch, rows) if isinstance(row, dict))
+            wanted = {d.lower() for d in batch}
+            misplaced = [d for d, row in zip(batch, rows) if isinstance(row, dict)
+                         and not answers(d, row_descriptor(row), wanted)]
+            found.update((d.lower(), row) for d, row in zip(batch, rows) if isinstance(row, dict) and d not in misplaced)
+            if misplaced:
+                unread |= {d.lower() for d in misplaced}
+                collector.record(f"identities.read({number})", RuntimeError(
+                    f"{len(misplaced)} identity rows didn't answer the descriptor requested in their place"))
             continue
         for row in rows or []:
-            if isinstance(row, dict) and row.get("descriptor"):
-                descriptor = row["descriptor"]
-                if isinstance(descriptor, dict):
-                    descriptor = f"{descriptor.get('identityType')};{descriptor.get('identifier')}"
-                found[str(descriptor).lower()] = row
+            if isinstance(row, dict) and row_descriptor(row):
+                found[row_descriptor(row).lower()] = row
     return found, unread
 
 
@@ -373,20 +398,22 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         git_repositories=git_repositories,
         git_read=bool(git) and all(n["acls_read"] for n in git),
         build_read=bool(build) and all(n["acls_read"] for n in build) and bool(projects or not narrowed),
-        org=client.org,
     )
 
 
-def build_service(identity: Optional[Dict[str, Any]], org: str) -> bool:
+def build_service(identity: Optional[Dict[str, Any]]) -> bool:
     """A build service account (the organization's or a project's), or the organization's group that holds them."""
     identity = identity or {}
+    descriptor = str(identity.get("descriptor") or "").lower()
     if identity.get("kind") == "group":
-        return str(identity.get("name") or "").lower() == f"[{org}]\\{BUILD_SERVICE_GROUP}".lower()
-    return identity.get("kind") == "service_identity" and ":build:" in str(identity.get("descriptor") or "").lower()
+        # By SID as well as name, since a project named like the organization can name a group the same way.
+        return descriptor.startswith("microsoft.teamfoundation.identity;") and descriptor.endswith(BUILD_SERVICE_GROUP_SID) \
+            and str(identity.get("name") or "").rsplit("\\", 1)[-1].lower() == BUILD_SERVICE_GROUP
+    return identity.get("kind") == "service_identity" and ":build:" in descriptor
 
 
 def summarize(entries, identities, namespaces, acls_off: int, not_found: Optional[List[str]], *, complete: bool,
-              git_repositories: Optional[int], git_read: bool, build_read: bool, org: str) -> Dict[str, Any]:
+              git_repositories: Optional[int], git_read: bool, build_read: bool) -> Dict[str, Any]:
     """Counts read null when a namespace (or, for the admin-group split, an identity) couldn't be read."""
     def name(identity):
         return (identity or {}).get("name") or (identity or {}).get("descriptor")
@@ -406,10 +433,10 @@ def summarize(entries, identities, namespaces, acls_off: int, not_found: Optiona
     bypass = [e for e in entries
               if any((str(e["namespace"]).lower(), a.lower()) in BYPASS_ACTIONS for a in e["high_impact_allowed"])]
     override = [e for e in entries if e["checkin_validation_override"]]
-    override_services = [e for e in override if build_service(e["identity"], org)]
-    override_others = [e for e in override if not build_service(e["identity"], org)]
-    override_known = build_read and all((e["identity"] or {}).get("admin_group") is not None for e in override_others)
-    override_outside = [e for e in override_others if not (e["identity"] or {}).get("admin_group")]
+    override_services = [e for e in override if build_service(e["identity"])]
+    override_known = build_read and all((e["identity"] or {}).get("admin_group") is not None for e in override)
+    override_outside = [e for e in override if not build_service(e["identity"])
+                        and not (e["identity"] or {}).get("admin_group")]
     return {
         "namespaces_collected": sum(1 for n in namespaces if n["acls_read"]),
         "namespaces_not_found": not_found,
@@ -432,7 +459,7 @@ def summarize(entries, identities, namespaces, acls_off: int, not_found: Optiona
         "branch_policy_bypass_holders": names(bypass) if git_read and git_repositories else None,
         "checkin_validation_override_grants": len(override) if build_read else None,
         "checkin_validation_override_holders": names(override) if build_read else None,
-        "checkin_validation_override_build_services": names(override_services) if build_read else None,
+        "checkin_validation_override_build_services": names(override_services) if override_known else None,
         "checkin_validation_override_grants_outside_admin_groups": len(override_outside) if override_known else None,
         "checkin_validation_override_holders_outside_admin_groups": names(override_outside) if override_known else None,
         "not_collected": dict(NOT_COLLECTED),

@@ -1062,9 +1062,12 @@ schemas and the `paramify` CLI — not the internal code.
   Service Accounts group, which hold it by default), and
   `checkin_validation_override_grants_outside_admin_groups` and
   `checkin_validation_override_holders_outside_admin_groups`, which leave out the
-  admin groups and those build services. They read null when the Build
-  permissions can't be read, or under a project filter the project list can't;
-  the outside-admin pair also when an identity can't be looked up.
+  admin groups and those build services. The Project Collection Build Service
+  Accounts group is recognised by its built-in security ID as well as its name, so
+  a project group that takes the name still counts outside. They read null when
+  the Build permissions can't be read, or under a project filter the project list
+  can't; the build-service list and the outside-admin pair also when an identity
+  can't be looked up.
 
 ### Changed
 
@@ -1820,7 +1823,9 @@ schemas and the `paramify` CLI — not the internal code.
   ordinary groups, and their high-impact rights counted outside the admin groups.
   Rows come back in request order, null where a descriptor isn't found, so they
   are now matched by position; `unresolved_identities` and the outside-admin
-  figures can fall.
+  figures can fall. A row that answers a different descriptor from the one
+  requested in its place leaves that identity unread and is reported as a
+  failure, so a reordered answer can't put one identity's rights on another.
 - **`azure_devops_audit_streams` no longer reads unlisted streams as no
   streams** (0.1.0 → 0.1.1). When the audit streams can't be listed, for
   example a 403 to an identity that may read the audit log but not its streams,

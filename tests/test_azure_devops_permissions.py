@@ -31,7 +31,8 @@ NOW = datetime.now(timezone.utc)
 WEB = "11111111-1111-1111-1111-111111111111"
 OPS = "22222222-2222-2222-2222-222222222222"
 
-PCA = "Microsoft.TeamFoundation.Identity;S-1-9-1-0-0-0-0-1"
+# Organization groups appear in ACLs under this template SID, whatever the organization.
+PCA = "Microsoft.TeamFoundation.Identity;S-1-9-1551374245-1204400969-2402986413-2179408616-0-0-0-0-1"
 WPA = "Microsoft.TeamFoundation.Identity;S-1-9-2-0-0-0-0-1"
 CONTRIB = "Microsoft.TeamFoundation.Identity;S-1-9-2-1-1"
 ALICE = "Microsoft.IdentityModel.Claims.ClaimsIdentity;tenant\\alice@example.com"
@@ -135,7 +136,7 @@ def err(status, message, type_key="Exception"):
 
 
 # An organization-level group appears in ACLs under a template SID; the identities API answers with its own.
-ANSWERED_AS = {PCA: "Microsoft.TeamFoundation.Identity;S-1-9-1-4242-0-0-0-0-1"}
+ANSWERED_AS = {PCA: "Microsoft.TeamFoundation.Identity;S-1-9-1551374245-1111111111-2222222222-3333333333-4444444444-0-0-0-0-1"}
 
 
 def identities(params, nulls=True):
@@ -524,12 +525,12 @@ PROJECT_BUILD_SERVICE = f"Microsoft.TeamFoundation.ServiceIdentity;f0e1d2c3-0000
 BUILD_SERVICE_ACCOUNTS = "Microsoft.TeamFoundation.Identity;S-1-9-1-0-0-0-1-1"
 OVERRIDERS = "Microsoft.TeamFoundation.Identity;S-1-9-2-7-7"
 GATED_LEADS = "Microsoft.TeamFoundation.Identity;S-1-9-2-8-8"
-LOOKALIKE = "Microsoft.TeamFoundation.Identity;S-1-9-2-9-9"
+LOOKALIKE = "Microsoft.TeamFoundation.Identity;S-1-9-2-1-424242"  # a custom group: no well-known ending
 
 
-def override_ace(descriptor, allow=0, deny=0, inherited=0):
+def override_ace(descriptor, allow=0, deny=0, inherited=0, inherited_deny=0):
     a = ace(descriptor, allow, deny)
-    a["extendedInfo"]["inheritedAllow"] = inherited
+    a["extendedInfo"].update(inheritedAllow=inherited, inheritedDeny=inherited_deny)
     return a
 
 
@@ -540,7 +541,7 @@ def override_acls(monkeypatch):
                         ("[contoso]\\Project Collection Build Service Accounts", "vssgp.pcbsa", True))
     monkeypatch.setitem(IDENTITIES, OVERRIDERS, ("[Web]\\Release Engineers", "vssgp.re", True))
     monkeypatch.setitem(IDENTITIES, GATED_LEADS, ("[Web]\\Gated Leads", "vssgp.gl", True))
-    monkeypatch.setitem(IDENTITIES, LOOKALIKE, ("[Web]\\Project Collection Build Service Accounts", "vssgp.la", True))
+    monkeypatch.setitem(IDENTITIES, LOOKALIKE, ("[contoso]\\Project Collection Build Service Accounts", "vssgp.la", True))
     override, view = bit("Build", "OverrideBuildCheckInValidation"), bit("Build", "ViewBuilds")
     fake = FakeADO()
     fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = Resp(body={"value": [
@@ -567,14 +568,14 @@ def test_check_in_validation_override_holders(tmp_path, override_acls):
     assert s["checkin_validation_override_grants"] == 7
     assert s["checkin_validation_override_holders"] == [
         "[contoso]\\Project Collection Administrators", "[contoso]\\Project Collection Build Service Accounts",
-        "[Web]\\Gated Leads", "[Web]\\Project Collection Build Service Accounts", "[Web]\\Release Engineers",
+        "[contoso]\\Project Collection Build Service Accounts", "[Web]\\Gated Leads", "[Web]\\Release Engineers",
         "Web Build Service (contoso)"]
     assert s["checkin_validation_override_build_services"] == [
         "[contoso]\\Project Collection Build Service Accounts", "Web Build Service (contoso)"]
-    # The admin groups and build services are left out; a project group named like the organization's is not.
+    # The admin groups and build services are left out; a custom group that takes the build services' name is not.
     assert s["checkin_validation_override_grants_outside_admin_groups"] == 4
     assert s["checkin_validation_override_holders_outside_admin_groups"] == [
-        "[Web]\\Gated Leads", "[Web]\\Project Collection Build Service Accounts", "[Web]\\Release Engineers"]
+        "[contoso]\\Project Collection Build Service Accounts", "[Web]\\Gated Leads", "[Web]\\Release Engineers"]
 
 
 def test_an_unread_identity_leaves_the_override_split_unknown(tmp_path, override_acls):
@@ -582,9 +583,53 @@ def test_an_unread_identity_leaves_the_override_split_unknown(tmp_path, override
     code, evidence, _, _ = run(tmp_path, override_acls)
     s = evidence["summary"]
     assert code == 1 and s["checkin_validation_override_grants"] == 7
-    assert s["checkin_validation_override_build_services"] == [PROJECT_BUILD_SERVICE]
+    assert s["checkin_validation_override_build_services"] is None  # an unnamed group can't be recognised
     assert s["checkin_validation_override_grants_outside_admin_groups"] is None
     assert s["checkin_validation_override_holders_outside_admin_groups"] is None
+
+
+def test_an_allow_on_a_pipeline_beats_an_inherited_deny(tmp_path, monkeypatch):
+    monkeypatch.setitem(IDENTITIES, OVERRIDERS, ("[Web]\\Release Engineers", "vssgp.re", True))
+    override = bit("Build", "OverrideBuildCheckInValidation")
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = Resp(body={"value": [
+        acl(WEB, override_ace(OVERRIDERS, deny=override)),
+        acl(f"{WEB}/Infra/12", override_ace(OVERRIDERS, override, inherited_deny=override))]})
+    _, evidence, _, _ = run(tmp_path, fake)
+    assert entry(evidence, "Build", WEB, OVERRIDERS)["checkin_validation_override"] is False
+    pipeline = entry(evidence, "Build", f"{WEB}/Infra/12", OVERRIDERS)
+    assert pipeline["scope"] == "pipeline" and pipeline["checkin_validation_override"] is True
+    s = evidence["summary"]
+    assert s["checkin_validation_override_grants"] == 1
+    assert s["checkin_validation_override_holders_outside_admin_groups"] == ["[Web]\\Release Engineers"]
+
+
+def test_identity_rows_out_of_order_are_unread_not_misattributed(tmp_path):
+    fake = FakeADO()
+
+    def reversed_rows(params):
+        resp = identities(params)
+        resp._body["value"].reverse()
+        return resp
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = reversed_rows
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 1 and [f["operation"] for f in evidence["metadata"]["api_failures"]] == ["identities.read(1)"]
+    assert evidence["metadata"]["partial_failure"] is True
+    for e in evidence["results"]["entries"]:
+        who = e["identity"]
+        assert who["name"] in (None, IDENTITIES.get(who["descriptor"], (None,))[0])
+    assert evidence["summary"]["high_impact_grants_outside_admin_groups"] is None
+
+
+@pytest.mark.parametrize("requested, got, expected", [
+    (ALICE, ALICE.upper(), True),
+    (PCA, ANSWERED_AS[PCA], True),  # a template SID answers with the group's own SID
+    (PCA, WPA, False),  # a requested descriptor in the template's place
+    (PCA, "Microsoft.TeamFoundation.Identity;S-1-9-1551374245-1-2-3-4-0-0-0-1-1", False),  # another ending
+    (WPA, "Microsoft.TeamFoundation.Identity;S-1-9-1551374245-1-2-3-4-0-0-0-0-1", False),  # not a template SID
+])
+def test_a_row_answers_only_its_own_descriptor(requested, got, expected):
+    assert mod.answers(requested, got, {d.lower() for d in (ALICE, PCA, WPA)}) is expected
 
 
 def test_a_failed_build_acl_read_leaves_the_override_fields_unknown(tmp_path, override_acls):
