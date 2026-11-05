@@ -878,19 +878,19 @@ async def _collect(collector: Collector, cred):
 
 
 async def _certificate_authorities(collector: Collector, client, tenant_id) -> tuple:
-    """(the CAs of the stores that were read, None if a store failed or none was read; {store: its status, CA count
-    or None, and the grant it lacks})."""
+    """(both stores' CAs, None unless both were read; {store: its status, CA count, the grant it lacks, and its own
+    CAs, None when unread})."""
     classic, classic_status = await _classic_store(collector, client, tenant_id)
     pki, pki_status = await _pki_store(collector, client)
     stores = {
         store: {"status": status, "certificate_authorities": len(cas) if cas is not None else None,
-                "missing_permission": permission if status == STORE_NOT_AUTHORIZED else None}
+                "missing_permission": permission if status == STORE_NOT_AUTHORIZED else None, "authorities": cas}
         for store, cas, status, permission in ((STORE_CLASSIC, classic, classic_status, CLASSIC_PERMISSION),
                                                (STORE_PKI, pki, pki_status, PKI_PERMISSION))
     }
-    failed = any(store["status"] == STORE_FAILED for store in stores.values())
-    read = None if failed or (classic is None and pki is None) else (classic or []) + (pki or [])
-    return read, stores
+    # An unread store is unknown, never empty, so the combined list needs both.
+    both = classic_status == STORE_READ and pki_status == STORE_READ
+    return (classic + pki if both else None), stores
 
 
 async def _classic_store(collector: Collector, client, tenant_id) -> tuple:
@@ -1010,12 +1010,16 @@ def main() -> int:
     )
     tenant = collected["tenant"]
     now = datetime.now(timezone.utc)
-    raw_authorities = collected.get("authorities")
-    authorities = (None if raw_authorities is None else sorted(
-        (authority_record(a, now) for a in raw_authorities),
-        key=lambda a: (a["trust_store"], str(a.get("subject") or a.get("issuer") or ""),
-                       str(a.get("issuer_ski") or ""))))
+    def records(raw):
+        return None if raw is None else sorted(
+            (authority_record(a, now) for a in raw),
+            key=lambda a: (a["trust_store"], str(a.get("subject") or a.get("issuer") or ""),
+                           str(a.get("issuer_ski") or "")))
+
+    authorities = records(collected.get("authorities"))
     stores = collected.get("certificate_authority_stores")
+    for store in (stores or {}).values():
+        store["authorities"] = records(store.get("authorities"))
     users = certificate_users(policy, methods, collected.get("users"), collected.get("members") or {})
 
     # No `provider_registration_status()` call, deliberately: Graph is not an ARM

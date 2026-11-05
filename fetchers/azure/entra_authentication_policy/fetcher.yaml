@@ -107,8 +107,9 @@ evidence_set:
     without the API (400 or 404) reads not_available the same way). Each CA records its
     trust store; the CA counts take a CA listed in both stores (same thumbprint, or the
     same key identifier when a certificate can't be read) once, and are null unless both
-    stores were read. The CA list is null when either store's read failed or neither
-    was read. With the X.509 method enabled, also GET
+    stores were read. The combined list, trusted_certificate_authorities, is null too
+    unless both stores were read; each store's own CAs are listed under
+    certificate_authority_stores, null when that store wasn't read. With the X.509 method enabled, also GET
     /groups/{id}/transitiveMembers/microsoft.graph.user for each group an enabled
     method includes or excludes, and GET /users only when X.509 targets all users or
     a user directly (both $select id, userPrincipalName, userType, accountEnabled,

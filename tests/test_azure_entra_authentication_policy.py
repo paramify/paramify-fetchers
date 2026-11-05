@@ -264,7 +264,7 @@ def test_failed_reads_are_null_never_zero(monkeypatch, tmp_path):
     # The classic store failed, so the list and every count are null even though the PKI store read empty.
     assert results["trusted_certificate_authorities"] is None
     assert results["certificate_authority_stores"]["certificate_based_auth_configuration"] == {
-        "status": "failed", "certificate_authorities": None, "missing_permission": None}
+        "status": "failed", "certificate_authorities": None, "missing_permission": None, "authorities": None}
     assert (summary["classic_store_status"], summary["classic_store_missing_permission"]) == ("failed", None)
     for key in ("trusted_certificate_authorities", "expired_certificate_authorities",
                 "certificate_authorities_expiry_unknown", "certificate_authorities_without_crl"):
@@ -348,8 +348,10 @@ def test_pki_store_cas_are_read_with_the_classic_ones_and_counted_once(monkeypat
     # The unreadable certificate takes the service's expiry and thumbprint.
     assert (records[2]["not_after"], records[2]["thumbprint"]) == ("2026-01-01T00:00:00Z", "AB12")
     assert records[0]["thumbprint"] == records[1]["thumbprint"]
-    assert results["certificate_authority_stores"]["public_key_infrastructure"] == {
+    pki_store = results["certificate_authority_stores"]["public_key_infrastructure"]
+    assert {k: v for k, v in pki_store.items() if k != "authorities"} == {
         "status": "read", "certificate_authorities": 2, "missing_permission": None}
+    assert pki_store["authorities"] == records[1:]
     # The CA in both stores counts once, and without a CRL because its PKI entry has none.
     assert (summary["trusted_certificate_authorities"], summary["expired_certificate_authorities"],
             summary["certificate_authorities_expiry_unknown"], summary["certificate_authorities_without_crl"]) == (
@@ -368,15 +370,17 @@ def test_a_refused_pki_store_reads_null_and_names_the_grant(monkeypatch, tmp_pat
     assert code == 0 and evidence["metadata"].get("partial_failure") is not True
     assert results["certificate_authority_stores"]["public_key_infrastructure"] == {
         "status": "not_authorized", "certificate_authorities": None,
-        "missing_permission": "PublicKeyInfrastructure.Read.All"}
+        "missing_permission": "PublicKeyInfrastructure.Read.All", "authorities": None}
     assert (summary["pki_store_status"], summary["pki_store_missing_permission"],
             summary["pki_store_certificate_authorities"], summary["classic_store_certificate_authorities"]) == (
         "not_authorized", "PublicKeyInfrastructure.Read.All", None, 1)
     for key in ("trusted_certificate_authorities", "expired_certificate_authorities",
                 "certificate_authorities_expiry_unknown", "certificate_authorities_without_crl"):
         assert summary[key] is None, key
-    assert [r["trust_store"] for r in results["trusted_certificate_authorities"]] == [
-        "certificate_based_auth_configuration"]
+    # The combined list needs both stores; the classic store's own CAs are still listed under it.
+    assert results["trusted_certificate_authorities"] is None
+    assert [r["trust_store"] for r in results["certificate_authority_stores"][
+        "certificate_based_auth_configuration"]["authorities"]] == ["certificate_based_auth_configuration"]
 
 
 def test_a_refused_classic_store_reads_null_and_names_the_grant(monkeypatch, tmp_path):
@@ -386,14 +390,21 @@ def test_a_refused_classic_store_reads_null_and_names_the_grant(monkeypatch, tmp
     # The grant is optional: the run succeeds, and the store is unknown rather than empty.
     assert code == 0 and evidence["metadata"].get("partial_failure") is not True
     assert results["certificate_authority_stores"]["certificate_based_auth_configuration"] == {
-        "status": "not_authorized", "certificate_authorities": None, "missing_permission": "Organization.Read.All"}
+        "status": "not_authorized", "certificate_authorities": None, "missing_permission": "Organization.Read.All",
+        "authorities": None}
     assert (summary["classic_store_status"], summary["classic_store_missing_permission"],
             summary["classic_store_certificate_authorities"], summary["pki_store_certificate_authorities"]) == (
         "not_authorized", "Organization.Read.All", None, 1)
     for key in ("trusted_certificate_authorities", "expired_certificate_authorities",
                 "certificate_authorities_expiry_unknown", "certificate_authorities_without_crl"):
         assert summary[key] is None, key
-    assert [r["trust_store"] for r in results["trusted_certificate_authorities"]] == ["public_key_infrastructure"]
+    assert results["trusted_certificate_authorities"] is None
+    assert len(results["certificate_authority_stores"]["public_key_infrastructure"]["authorities"]) == 1
+
+    # The likely shape without the grant: the other store reads empty, which is still no proof of "no CAs".
+    code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, fail=("authorities",))
+    assert code == 0 and evidence["results"]["trusted_certificate_authorities"] is None
+    assert evidence["results"]["certificate_authority_stores"]["public_key_infrastructure"]["authorities"] == []
 
     # With neither store read, there is no list at all.
     code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=("authorities", "pki"))
@@ -410,8 +421,10 @@ def test_a_failed_classic_read_fails_the_run(monkeypatch, tmp_path):
         "failed", None, None, None)
 
 
-def test_a_failed_pki_read_fails_the_run(monkeypatch, tmp_path):
-    code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=("pki_error",))
+@pytest.mark.parametrize("error", ["timeout", 503])
+def test_a_failed_pki_read_fails_the_run(monkeypatch, tmp_path, error):
+    fail, pki_error = (("pki_error",), None) if error == "timeout" else ((), _status_error(error))
+    code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=fail, pki_error=pki_error)
     summary = evidence["summary"]
     assert code == 1 and evidence["results"]["trusted_certificate_authorities"] is None
     assert (summary["pki_store_status"], summary["pki_store_missing_permission"],
@@ -426,8 +439,8 @@ def test_a_cloud_without_the_pki_store_reads_not_available_and_still_succeeds(mo
     assert (summary["pki_store_status"], summary["pki_store_missing_permission"],
             summary["pki_store_certificate_authorities"], summary["classic_store_certificate_authorities"],
             summary["trusted_certificate_authorities"]) == ("not_available", None, None, 1, None)
-    assert [r["trust_store"] for r in results["trusted_certificate_authorities"]] == [
-        "certificate_based_auth_configuration"]
+    assert results["trusted_certificate_authorities"] is None
+    assert len(results["certificate_authority_stores"]["certificate_based_auth_configuration"]["authorities"]) == 1
 
 
 def test_an_unreadable_classic_certificate_matches_its_pki_entry_by_key_identifier(monkeypatch, tmp_path):

@@ -1482,7 +1482,9 @@ schemas and the `paramify` CLI — not the internal code.
   or `pki_store_missing_permission` names the grant, and the run still succeeds; any
   other failure fails it. For the PKI store, a
   cloud without the API (400 or 404) reads `not_available` the same way. The CA list
-  is null when either store's read failed or neither was read. With the X.509 method enabled it also reads users with
+  (`trusted_certificate_authorities`) is null unless both stores were read; each
+  store's own CAs are listed under `certificate_authority_stores`, null when that
+  store wasn't read. With the X.509 method enabled it also reads users with
   their `authorizationInfo` (from the target groups, or from the directory only when
   X.509 targets all users) and the groups the enabled methods target. It counts every
   enabled member account X.509 targets, and lists in `x509_certificate_users` the
