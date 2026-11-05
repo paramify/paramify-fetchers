@@ -1,5 +1,5 @@
 name: azure_vm_hardening_status
-version: 0.2.0
+version: 0.3.0
 description: >
   For every virtual machine and virtual machine scale set in the subscription,
   reports the hardening configuration: Trusted Launch (security type plus the UEFI
@@ -7,8 +7,13 @@ description: >
   (page-blob) OS and data disks, whether Linux VMs enforce SSH-key authentication
   (disable_password_authentication), the source image the VM was built from
   (marketplace publisher/offer/sku or gallery image id), the guest extensions
-  installed on it, and each scale set's load balancer backend pools and instance
-  ids. Scale-set members are cross-referenced to their scale set.
+  installed on it, each scale set's load balancer backend pools and instance
+  ids, and the OS patch settings of every VM and scale set: patch mode
+  (AutomaticByPlatform, AutomaticByOS, Manual or ImageDefault), assessment mode,
+  and whether platform safety checks are bypassed on a user schedule, read as
+  platform_managed_patching and assessment_automatic. A VM whose OS returns no
+  patch settings reads null (unknown), never Manual, and the summary counts
+  unknown apart. Scale-set members are cross-referenced to their scale set.
 category: azure
 
 config_schema:

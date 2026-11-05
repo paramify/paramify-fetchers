@@ -12,6 +12,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_vm_hardening_status` 0.3.0: OS patch settings.** Every VM and scale set
+  reports `patch_settings` (OS, patch mode, assessment mode, bypass of platform safety
+  checks on a user schedule) with the derived `platform_managed_patching` and
+  `assessment_automatic`, both null when Azure returned no patch mode (never read as
+  Manual). The summary counts platform-managed, manual-or-image-default and unknown
+  for VMs and scale sets.
 - **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
   secret and certificate gets `lifetime_days` (end date minus start date, null when
   either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.
