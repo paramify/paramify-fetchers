@@ -532,7 +532,7 @@ Summary fields:
 
 
 ### azure_entra_mfa_status
-Short Description: Shows which users can sign in with MFA or passwordless methods, with coverage for enabled users, members and admins, and when each account last signed in.
+Short Description: Shows which users can sign in with MFA, passwordless or phishing-resistant methods, with coverage for enabled users, members and admins, and when each account last signed in.
 
 Script: fetchers/azure/entra_mfa_status/fetcher.py (uses the shared Graph helpers fetchers/azure/_shared/entra_graph.py)
 
@@ -546,7 +546,7 @@ Commands Executed:
 - Microsoft Graph `GET /directoryRoles/{id}/members` (per privileged role) — who holds each admin role
 - Microsoft Graph `GET /groups/{id}/transitiveMembers` (per group holding a privileged role) — the users who hold the role through the group, including nested groups
 
-Output: `azure_entra_mfa_status_<tenant>.json` — every user with whether the account is enabled, member or guest, when it last signed in, the methods it has registered, whether it can do MFA and passwordless sign-in, and the admin roles it holds.
+Output: `azure_entra_mfa_status_<tenant>.json` — every user with whether the account is enabled, member or guest, when it last signed in, the methods it has registered, whether it can do MFA and passwordless sign-in, whether it holds a phishing-resistant method, and the admin roles it holds.
 
 Summary fields:
 
@@ -573,6 +573,10 @@ Summary fields:
 - `passwordless_capable_enabled_users` — Number of enabled users who are passwordless-capable: the registration report says they've registered a passwordless method the policy allows (a FIDO2 security key or passkey, Windows Hello for Business, or Microsoft Authenticator phone sign-in); null if the users list or the registration report couldn't be read in full
 - `passwordless_coverage_percentage` — Percentage of enabled users who are passwordless-capable = `passwordless_capable_enabled_users` / `enabled_users` × 100 (a whole number, 0–100); 0 when `enabled_users` is 0; null if the users list or the registration report couldn't be read in full
 
+**Can enabled users sign in with a phishing-resistant method?**
+- `phishing_resistant_enabled_users` — Number of enabled users whose registered methods include a phishing-resistant one: a FIDO2 security key, a device-bound passkey, Windows Hello for Business or multifactor certificate-based authentication. Microsoft Authenticator phone sign-in is passwordless but doesn't count; null if the users list or the registration report couldn't be read in full
+- `phishing_resistant_coverage_percentage` — Percentage of enabled users who hold a phishing-resistant method = `phishing_resistant_enabled_users` / `enabled_users` × 100 (a whole number, 0–100); 0 when `enabled_users` is 0; null if the users list or the registration report couldn't be read in full
+
 **Are enabled members covered, leaving guests aside?**
 - `enabled_member_users` — Number of enabled users who aren't guests; null if the users list couldn't be read in full
 - `mfa_capable_enabled_member_users` — Number of enabled non-guest users who are MFA-capable; null if the users list or the registration report couldn't be read in full
@@ -585,6 +589,10 @@ Summary fields:
 - `admin_users_without_mfa` — Number of admins who aren't MFA-capable, including admins with no row in the registration report; null if role membership, the users list or the registration report couldn't be read in full
 - `admin_users_without_registration_details` — Number of admins with no row in the registration report; null if role membership, the users list or the registration report couldn't be read in full
 - `admin_mfa_coverage_percentage` — Percentage of admins who are MFA-capable = `mfa_capable_admin_users` / `admin_users` × 100 (a whole number, 0–100); 0 when `admin_users` is 0; null if role membership, the users list or the registration report couldn't be read in full. Disabled admin accounts count in the total
+
+- `phishing_resistant_admin_users` — Number of admins who hold a phishing-resistant method; null if role membership, the users list or the registration report couldn't be read in full
+- `admin_users_without_phishing_resistant` — Number of admins with no phishing-resistant method, including admins with no row in the registration report; null if role membership, the users list or the registration report couldn't be read in full
+- `phishing_resistant_admin_coverage_percentage` — Percentage of admins who hold a phishing-resistant method = `phishing_resistant_admin_users` / `admin_users` × 100 (a whole number, 0–100); 0 when `admin_users` is 0; null if role membership, the users list or the registration report couldn't be read in full
 
 
 ### azure_entra_pim_assignments
