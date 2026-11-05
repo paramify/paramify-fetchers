@@ -36,7 +36,7 @@ COMPUTE = f"{SUB}/resourceGroups/rg-app/providers/Microsoft.Compute"
 
 
 def raw_host(hid=HOST, vnet=VNET_A, *, sku="Standard", developer=False, **features):
-    props = {"sku": {"name": sku}, "scaleUnits": 2, "provisioningState": "Succeeded", "dnsName": "bst.bastion.azure.us",
+    props = {"scaleUnits": 2, "provisioningState": "Succeeded", "dnsName": "bst.bastion.azure.us",
              "enableShareableLink": False, "enableIpConnect": False, "enableTunneling": True, "enableFileCopy": False,
              "enableKerberos": False, "enableSessionRecording": False, "enablePrivateOnlyBastion": False,
              "disableCopyPaste": False, "networkAcls": {"ipRules": []}}
@@ -47,8 +47,9 @@ def raw_host(hid=HOST, vnet=VNET_A, *, sku="Standard", developer=False, **featur
         props["ipConfigurations"] = [{"name": "ipc", "properties": {
             "subnet": {"id": f"{vnet}/subnets/AzureBastionSubnet"},
             "publicIPAddress": {"id": f"{NET}/publicIPAddresses/pip-bas"}}}]
+    # As ARM returns it: sku beside properties, not inside.
     return {"id": hid, "name": hid.rsplit("/", 1)[-1], "location": "usgovvirginia", "zones": ["1", "2", "3"],
-            "properties": props}
+            "sku": {"name": sku}, "properties": props}
 
 
 def raw_vm(name, nic_ids):
@@ -399,3 +400,10 @@ def test_foreign_developer_host_does_not_reach_across_a_peering() -> None:
     hub_peerings = bs.peering_map([raw_vnet(VNET_B, [(HUB_VNET, "Connected")])])
     dev = {HUB_SUB: {bs.arm_id_key(HUB_VNET): [{"name": "d", "sku": "developer", "state": "succeeded"}]}}
     assert _vm("vm2", "n2", VNET_B, {}, hub_peerings, dev)["bastion_path"] == bs.NONE
+
+
+def test_the_sku_is_read_from_the_top_of_the_resource() -> None:
+    raw = raw_host(sku="Basic")
+    assert "sku" not in raw["properties"] and bs.host_record(raw, None, False, [])["sku"] == "basic"
+    del raw["sku"]
+    assert bs.host_record(raw, None, False, [])["sku"] == "unknown"

@@ -75,7 +75,8 @@ def host_record(raw: Dict[str, Any], subnet: Optional[Dict[str, Any]], subnet_re
     # The Developer SKU attaches to a virtual network without a subnet of its own.
     vnet_id = arm_id_key(dig(props, "virtualNetwork", "id")) or vnet_id_of(subnet_id) or None
     nsg_id = dig(subnet or {}, "properties", "networkSecurityGroup", "id") if subnet_read else None
-    sku = _lower(dig(props, "sku", "name")) or "unknown"
+    # sku sits at the top of a bastionHosts resource, beside properties, not inside it.
+    sku = _lower(dig(raw, "sku", "name") or dig(props, "sku", "name")) or "unknown"
 
     def flag(key: str) -> Optional[bool]:
         """None when the API version in use does not report the feature at all."""
@@ -269,7 +270,7 @@ def _foreign_bastion_vnets(client, subscription: str) -> Optional[Dict[str, List
         vnet = dig(host, "properties", "virtualNetwork", "id") or (vnet_id_of(subnet_id) if subnet_id else "")
         if vnet:
             out.setdefault(arm_id_key(vnet), []).append({"name": f"{host.get('name')} (subscription {subscription})",
-                                                        "sku": _lower(dig(host, "properties", "sku", "name")) or "unknown",
+                                                        "sku": _lower(dig(host, "sku", "name") or dig(host, "properties", "sku", "name")) or "unknown",
                                                         "state": _lower(dig(host, "properties", "provisioningState"))})
     return out
 
