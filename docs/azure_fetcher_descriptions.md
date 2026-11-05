@@ -2193,7 +2193,7 @@ Commands Executed:
 - `assessments_metadata.list_by_subscription()` — each check's categories, threats, type and remediation effort, which the result list doesn't include, and a fallback severity
 - Resource Graph `SecurityResources | where type =~ 'microsoft.security/assessments'` — each result's own severity, which the check catalogue can rate lower
 
-Output: `azure_defender_assessments_<subscription>.json` — one record per resource and check, with its Healthy, Unhealthy or NotApplicable status, why, when it last changed, its severity and where that came from, and the check's remediation effort.
+Output: `azure_defender_assessments_<subscription>.json` — one record per resource and check, with its Healthy, Unhealthy or NotApplicable status, why, when it last changed, its severity and where that came from, how long a failing one has been open and whether that is past its severity's SLA, and the check's remediation effort.
 
 Summary fields:
 
@@ -2220,6 +2220,18 @@ Summary fields:
   - Low
 - `unhealthy_severity_from_catalogue_count` — Number of failing check results whose severity comes from the check catalogue because Resource Graph had none for them, so it may be lower than the result's own
 - `unhealthy_severity_unknown_count` — Number of failing check results with no severity from Resource Graph or the check catalogue
+
+**Are failures fixed within their SLA?**
+- `sla_days_by_severity` — Days a failing (Unhealthy) check result may stay open before it counts as past SLA, for each severity, from the sla_days_high, sla_days_medium and sla_days_low settings; null for a severity whose setting is not a whole number above 0, which also fails the run:
+  - High (30 by default)
+  - Medium (90 by default)
+  - Low (180 by default)
+- `unhealthy_past_sla_by_severity` — Number of failing check results open longer than their severity's SLA days, for each severity. Days open run in whole days from when the result last became Unhealthy (its status change date) to the run, so a result that passes and then fails again starts again at 0. Every severity reads null when the result list or the Resource Graph severities couldn't be read, or any failing result's severity came from the check catalogue (which can rate a check lower, so the result could belong under any severity); one severity also reads null when its SLA days are null or one of its failing results has no status change date:
+  - High
+  - Medium
+  - Low
+- `unhealthy_past_sla_count` — Number of failing check results of any severity open longer than their severity's SLA days = the sum of `unhealthy_past_sla_by_severity`; null when any severity in `unhealthy_past_sla_by_severity` is null or a failing result has no severity
+- `unhealthy_days_open_unknown_count` — Number of failing check results with no status change date, so how long they have been open is unknown; null only when the result list couldn't be read
 
 **Does each result carry its own severity?**
 - `severity_from_catalogue_count` — Number of check results of any status whose severity comes from the check catalogue because Resource Graph had none for them (its index lags, or the identity can't read that row)
