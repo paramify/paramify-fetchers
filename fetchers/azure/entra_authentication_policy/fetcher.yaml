@@ -106,10 +106,15 @@ evidence_set:
     onPremisesUserPrincipalName, authorizationInfo) and GET
     /groups/{id}/transitiveMembers/microsoft.graph.user for each group an enabled
     method includes or excludes. A targeted user is an enabled member account (not a
-    guest) the X.509 method includes and doesn't exclude; it counts as mapped when a
-    certificate user binding's user property (userPrincipalName,
-    onPremisesUserPrincipalName, or certificateUserIds, counted only) has a value for
-    it, and as having weaker methods when an enabled method other than X.509, FIDO2
-    and email one-time passcodes (guests only) reaches it. Only the count of a user's
-    certificateUserIds is kept. A failed read leaves the counts it feeds null.
+    guest) the X.509 method includes and doesn't exclude. It counts as mapped when a
+    certificateUserIds binding's certificate field matches the type of one of the
+    user's certificate user ids (X509:<SKI>... for SubjectKeyIdentifier, and so on),
+    and with high affinity when that binding is high affinity. A userPrincipalName or
+    onPremisesUserPrincipalName binding depends on the name the certificate carries,
+    which only the certificate shows, so a user only such a binding (or one on a field
+    the fetcher doesn't know) could match reads unverified, never mapped; a user no
+    binding can match is unmapped. It has weaker methods when an enabled method other
+    than X.509, FIDO2 and email one-time passcodes (guests only) reaches it. Only the
+    count and the types of a user's certificateUserIds are kept. A failed read leaves
+    the counts it feeds null.
     Collections paged via @odata.nextLink.

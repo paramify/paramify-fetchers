@@ -72,16 +72,23 @@ def _target(tid, kind="group"):
     return ns(id=tid, target_type=kind, is_registration_required=False)
 
 
+def _binding(field, prop, priority, affinity=Affinity.LOW):
+    return ns(x509_certificate_field=field, user_property=prop, priority=priority, trust_affinity_level=affinity)
+
+
+# Entra's default bindings: the certificate's names against the UPN, its SKI against the certificate user ids.
+DEFAULT_BINDINGS = [_binding("PrincipalName", "userPrincipalName", 1), _binding("RFC822Name", "userPrincipalName", 2),
+                    _binding("SubjectKeyIdentifier", "certificateUserIds", 3, Affinity.HIGH)]
+
+
 def _x509(state="enabled", include=("g1",), exclude=("g2",), bindings=True):
     return ns(
         id="X509Certificate", state=state,
         include_targets=[_target(t) for t in include], exclude_targets=[_target(t) for t in exclude],
         authentication_mode_configuration=ns(x509_certificate_authentication_default_mode=Mode.MULTI),
-        certificate_user_bindings=[
-            ns(x509_certificate_field="SubjectKeyIdentifier", user_property="certificateUserIds", priority=2,
-               trust_affinity_level=Affinity.HIGH),
-            ns(x509_certificate_field="PrincipalName", user_property="onPremisesUserPrincipalName", priority=1,
-               trust_affinity_level=Affinity.LOW),
+        certificate_user_bindings=bindings if isinstance(bindings, list) else [
+            _binding("SubjectKeyIdentifier", "certificateUserIds", 2, Affinity.HIGH),
+            _binding("PrincipalName", "onPremisesUserPrincipalName", 1),
         ] if bindings else [],
     )
 
@@ -90,10 +97,10 @@ def _method(mid, include=("all_users",), state="enabled"):
     return ns(id=mid, state=state, include_targets=[_target(t) for t in include], exclude_targets=[])
 
 
-def _user(uid, cert_ids=0, on_prem=None, user_type="Member", enabled=True):
+def _user(uid, cert_ids=0, on_prem=None, user_type="Member", enabled=True, ids=()):
     return ns(id=uid, user_principal_name=f"{uid}@example.com", user_type=user_type, account_enabled=enabled,
               on_premises_user_principal_name=on_prem,
-              authorization_info=ns(certificate_user_ids=[f"X509:<SKI>{i}" for i in range(cert_ids)]))
+              authorization_info=ns(certificate_user_ids=[f"X509:<SKI>{i}" for i in range(cert_ids)] + list(ids)))
 
 
 USERS = [_user("u1", cert_ids=1), _user("u2", on_prem="u2@corp.example"), _user("u3", cert_ids=1),
@@ -195,18 +202,21 @@ def test_targeted_users_are_matched_to_certificates_and_their_weaker_methods_lis
     # Guests, disabled accounts, excluded members and users outside the target groups are not targeted.
     users = {u["id"]: u for u in results["x509_certificate_users"]}
     assert sorted(users) == ["u1", "u2", "u7"]
-    assert (users["u1"]["mapped"], users["u1"]["mapped_high_affinity"], users["u1"]["mapping_user_properties"]) == (
-        True, True, ["certificateUserIds"])
-    assert (users["u2"]["mapped"], users["u2"]["mapped_high_affinity"], users["u2"]["mapping_user_properties"]) == (
-        True, False, ["onPremisesUserPrincipalName"])
-    assert (users["u7"]["mapped"], users["u7"]["mapping_user_properties"]) == (False, [])
+    def mapping(uid):
+        u = users[uid]
+        return u["mapping"], u["mapped"], u["mapped_high_affinity"], u["certificate_user_id_types"]
+    assert mapping("u1") == ("certificate_user_id", True, True, ["SubjectKeyIdentifier"])
+    # Only the certificate shows whether it carries u2's on-premises name.
+    assert mapping("u2") == ("unverified", None, False, [])
+    assert mapping("u7") == ("none", False, False, [])
     # Email signs in guests only, FIDO2 is phishing-resistant and Voice is off.
     assert users["u2"]["weaker_methods_enabled"] == ["MicrosoftAuthenticator", "Sms"]
     assert users["u7"]["weaker_methods_enabled"] == ["Sms"]
     assert (summary["x509_targeted_users"], summary["x509_targeted_users_unmapped"],
+            summary["x509_targeted_users_mapping_unverified"],
             summary["x509_targeted_users_without_certificate_user_ids"],
             summary["x509_targeted_users_with_weaker_methods"], summary["x509_targeted_users_with_weak_methods"]) == (
-        3, 1, 2, 3, 3)
+        3, 1, 1, 2, 3, 3)
     # The users are read with their certificate user ids, and only the groups the enabled methods name.
     (users_call,) = [c for c in calls if c[0] == "users"]
     assert "authorizationInfo" in users_call[1].query_parameters.select
@@ -348,8 +358,41 @@ def test_mapping_is_unknown_without_reported_bindings():
     methods = ap.method_records(ap.project_methods_policy(ns(authentication_method_configurations=[
         _x509(include=("all_users",), exclude=(), bindings=False)])))
     users = ap.certificate_users({"policy": True}, methods, [ap.project_user(_user("u1", cert_ids=1))], {})
-    assert (users[0]["mapped"], users[0]["mapped_high_affinity"]) == (None, None)
-    assert ap.summarize_certificates([], users)["x509_targeted_users_unmapped"] is None
+    assert (users[0]["mapping"], users[0]["mapped"], users[0]["mapped_high_affinity"]) == (None, None, None)
+    summary = ap.summarize_certificates([], users)
+    assert (summary["x509_targeted_users_unmapped"], summary["x509_targeted_users_mapping_unverified"]) == (None, None)
+
+
+def _mapped(bindings, *users):
+    methods = ap.method_records(ap.project_methods_policy(ns(authentication_method_configurations=[
+        _x509(include=("all_users",), exclude=(), bindings=bindings)])))
+    records = ap.certificate_users({"policy": True}, methods, [ap.project_user(u) for u in users], {})
+    return {r["id"]: (r["mapping"], r["mapped"], r["mapped_high_affinity"]) for r in records}
+
+
+def test_each_binding_matches_only_its_own_certificate_user_id_type():
+    # A PrincipalName id doesn't satisfy the SKI binding, and the UPN bindings depend on the certificate.
+    assert _mapped(DEFAULT_BINDINGS, _user("pn", ids=["X509:<PN>pn@example.com"]), _user("ski", cert_ids=1)) == {
+        "pn": ("unverified", None, False), "ski": ("certificate_user_id", True, True)}
+    bindings = [_binding("PrincipalName", "certificateUserIds", 1),
+                _binding("IssuerAndSerialNumber", "certificateUserIds", 2, Affinity.HIGH)]
+    assert _mapped(bindings, _user("pn", ids=["X509:<PN>pn@example.com"]),
+                   _user("sr", ids=["X509:<I>DC=example,CN=CA<SR>0a1b"]), _user("ski", cert_ids=1)) == {
+        "pn": ("certificate_user_id", True, False), "sr": ("certificate_user_id", True, True),
+        "ski": ("none", False, False)}
+    # A field this fetcher doesn't know is never counted as a match or a miss.
+    assert _mapped([_binding("SHA256PublicKey", "certificateUserIds", 1, Affinity.HIGH)], _user("ski", cert_ids=1)) == {
+        "ski": ("unverified", None, None)}
+
+
+@pytest.mark.parametrize("value,field", [
+    ("X509:<PN>bob@example.com", "PrincipalName"), ("X509:<RFC822>bob@example.com", "RFC822Name"),
+    ("X509:<SKI>aB1c", "SubjectKeyIdentifier"), ("x509:<SHA1-PUKEY>cD2e", "SHA1PublicKey"),
+    ("X509:<S>DC=example,CN=bob", "Subject"), ("X509:<I>DC=example,CN=CA<S>DC=example,CN=bob", "IssuerAndSubject"),
+    ("X509:<I>DC=example,CN=CA<SR>0a1b", "IssuerAndSerialNumber"), ("X509:<OTHER>x", None), ("bob", None),
+])
+def test_certificate_id_field(value, field):
+    assert ap.certificate_id_field(value) == field
 
 
 @pytest.mark.parametrize("include,exclude,members,expected", [

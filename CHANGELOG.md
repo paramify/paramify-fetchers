@@ -1481,8 +1481,11 @@ schemas and the `paramify` CLI — not the internal code.
   `pki_store_missing_permission` names the grant, and the run still succeeds. With the X.509 method enabled it also reads users with
   their `authorizationInfo` and the groups the enabled methods target, and lists in
   `x509_certificate_users` each enabled member account X.509 targets: whether a
-  certificate user binding can match it (`mapped`, `mapped_high_affinity`, the
-  user properties that match), its count of certificate user ids, and the weaker
+  certificate user binding matches it (`mapping`: `certificate_user_id` when a
+  certificateUserIds binding's field matches the type of one of its ids,
+  `unverified` when only a name binding could, which depends on the certificate, or
+  `none`; `mapped`, `mapped_high_affinity`), the count and types of its
+  certificate user ids (never the values), and the weaker
   methods (enabled, not phishing-resistant, not X.509 or guest-only email) that
   still reach it. The X.509 settings list each `certificate_user_bindings` entry.
   The summary adds `trusted_certificate_authorities`,
@@ -1491,7 +1494,8 @@ schemas and the `paramify` CLI — not the internal code.
   unless both stores were read), `classic_store_certificate_authorities`,
   `pki_store_certificate_authorities`, `pki_store_status`,
   `pki_store_missing_permission`, `x509_targeted_users`,
-  `x509_targeted_users_unmapped`, `x509_targeted_users_without_certificate_user_ids`,
+  `x509_targeted_users_unmapped`, `x509_targeted_users_mapping_unverified`,
+  `x509_targeted_users_without_certificate_user_ids`,
   `x509_targeted_users_with_weaker_methods` and
   `x509_targeted_users_with_weak_methods` (SMS or Voice). The user counts are 0 when
   X.509 is off, and null when the policy, the users or a needed group can't be read;

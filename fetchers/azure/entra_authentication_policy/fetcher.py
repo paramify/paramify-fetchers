@@ -123,6 +123,16 @@ STORE_NOT_AUTHORIZED = "not_authorized"
 STORE_FAILED = "failed"
 # Optional: without it the PKI store reads null and names this grant, and the run still succeeds.
 PKI_PERMISSION = "PublicKeyInfrastructure.Read.All"
+# The certificate field each certificate user id type names (X509:<SKI>… is a SubjectKeyIdentifier id).
+CERTIFICATE_ID_FIELDS = {"pn": "PrincipalName", "rfc822": "RFC822Name", "ski": "SubjectKeyIdentifier",
+                         "sha1-pukey": "SHA1PublicKey", "s": "Subject"}
+ISSUER_ID_FIELDS = ("IssuerAndSerialNumber", "IssuerAndSubject")
+# User properties holding a name: only the certificate shows whether it carries that name.
+NAME_PROPERTIES = {"userprincipalname": "user_principal_name",
+                   "onpremisesuserprincipalname": "on_premises_user_principal_name"}
+MAPPING_ID = "certificate_user_id"
+MAPPING_UNVERIFIED = "unverified"
+MAPPING_NONE = "none"
 USER_SELECT = ("id", "userPrincipalName", "userType", "accountEnabled", "onPremisesUserPrincipalName",
                "authorizationInfo")
 
@@ -375,16 +385,30 @@ def project_pki_authority(authority) -> dict:
     }
 
 
+def certificate_id_field(value) -> str | None:
+    """The certificate field a certificate user id is for; None when its format isn't one Entra documents."""
+    text = str(value or "")
+    if not text.lower().startswith("x509:<"):
+        return None
+    tag, _, rest = text[6:].partition(">")
+    if tag.lower() == "i":
+        rest = rest.upper()
+        return ISSUER_ID_FIELDS[0] if "<SR>" in rest else ISSUER_ID_FIELDS[1] if "<S>" in rest else None
+    return CERTIFICATE_ID_FIELDS.get(tag.lower())
+
+
 def project_user(user) -> dict:
-    """A user's sign-in identifiers; only the count of its certificate user ids is kept."""
+    """A user's sign-in identifiers; of its certificate user ids only the count and the types are kept."""
     info = getattr(user, "authorization_info", None)
+    ids = getattr(info, "certificate_user_ids", None) or []
     return {
         "id": graph_attr(user, "id"),
         "user_principal_name": graph_attr(user, "user_principal_name"),
         "user_type": graph_attr(user, "user_type"),
         "account_enabled": graph_attr(user, "account_enabled"),
         "on_premises_user_principal_name": graph_attr(user, "on_premises_user_principal_name"),
-        "certificate_user_ids_count": len(getattr(info, "certificate_user_ids", None) or []),
+        "certificate_user_ids_count": len(ids),
+        "certificate_user_id_types": sorted({certificate_id_field(i) for i in ids} - {None}),
     }
 
 
@@ -580,14 +604,16 @@ def is_weaker_method(method: dict) -> bool:
 
 
 def _binding_matches(binding: dict, user: dict) -> bool | None:
-    """Whether the user has a value in the binding's user property; None for a property this fetcher doesn't know."""
+    """Whether the binding can match the user to a certificate; None when only the certificate could tell."""
     prop = str(binding.get("user_property") or "").lower()
+    field = str(binding.get("x509_certificate_field") or "").lower()
     if prop == "certificateuserids":
-        return user.get("certificate_user_ids_count", 0) > 0
-    if prop == "userprincipalname":
-        return bool(user.get("user_principal_name"))
-    if prop == "onpremisesuserprincipalname":
-        return bool(user.get("on_premises_user_principal_name"))
+        known = {f.lower() for f in (*CERTIFICATE_ID_FIELDS.values(), *ISSUER_ID_FIELDS)}
+        if field not in known:
+            return None
+        return field in {t.lower() for t in user.get("certificate_user_id_types") or []}
+    if prop in NAME_PROPERTIES:
+        return None if user.get(NAME_PROPERTIES[prop]) else False
     return None
 
 
@@ -597,19 +623,21 @@ def _any(values: list) -> bool | None:
 
 
 def certificate_user_record(user: dict, bindings: list[dict], methods: list[dict], members: dict) -> dict:
-    """A user the X.509 method targets: which bindings can match them to a certificate, and the weaker methods
+    """A user the X.509 method targets: whether a binding matches them to a certificate, and the weaker methods
     that still reach them."""
     matches = {i: _binding_matches(b, user) for i, b in enumerate(bindings)}
     high = [matches[i] for i, b in enumerate(bindings) if str(b.get("trust_affinity_level") or "").lower() == "high"]
     reach = {m["id"]: method_applies(m, user["id"], members) for m in methods if m["enabled"] and is_weaker_method(m)}
+    mapped = _any(list(matches.values())) if bindings else None
     return {
         "id": user["id"],
         "user_principal_name": user.get("user_principal_name"),
         "certificate_user_ids_count": user.get("certificate_user_ids_count"),
+        "certificate_user_id_types": user.get("certificate_user_id_types") or [],
         # None when the policy reports no bindings: the rules that would match the user are unknown.
-        "mapped": _any(list(matches.values())) if bindings else None,
+        "mapping": None if not bindings else {True: MAPPING_ID, None: MAPPING_UNVERIFIED, False: MAPPING_NONE}[mapped],
+        "mapped": mapped,
         "mapped_high_affinity": _any(high) if bindings else None,
-        "mapping_user_properties": sorted({str(bindings[i].get("user_property")) for i, m in matches.items() if m}),
         "weaker_methods_enabled": sorted(mid for mid, applies in reach.items() if applies),
         "weaker_methods_unknown": sorted(mid for mid, applies in reach.items() if applies is None),
         "weaker_method_enabled": _any(list(reach.values())),
@@ -678,7 +706,10 @@ def summarize_certificates(authorities: list[dict] | None, users: list[dict] | N
         "pki_store_status": pki.get("status"),
         "pki_store_missing_permission": pki.get("missing_permission"),
         "x509_targeted_users": len(users) if users is not None else None,
-        "x509_targeted_users_unmapped": _count(users, lambda u: None if u["mapped"] is None else not u["mapped"]),
+        "x509_targeted_users_unmapped": _count(
+            users, lambda u: None if u["mapping"] is None else u["mapping"] == MAPPING_NONE),
+        "x509_targeted_users_mapping_unverified": _count(
+            users, lambda u: None if u["mapping"] is None else u["mapping"] == MAPPING_UNVERIFIED),
         "x509_targeted_users_without_certificate_user_ids": _count(
             users, lambda u: not u["certificate_user_ids_count"]),
         "x509_targeted_users_with_weaker_methods": _count(users, lambda u: u["weaker_method_enabled"]),
