@@ -261,12 +261,11 @@ def connection(evidence, name):
     return next(c for c in evidence["results"]["service_connections"] if c["name"] == name)
 
 
-def test_collects_the_organization_and_exits_zero(tmp_path, assert_summary_documented):
+def test_collects_the_organization_and_exits_zero(tmp_path):
     code, evidence, status, _, _ = run(tmp_path)
     assert code == 0 and status is None
     assert evidence["metadata"]["partial_failure"] is False
     s = evidence["summary"]
-    assert_summary_documented("azure/devops_service_connections", s)
     assert s["projects_collected"] == 2 and s["projects_with_no_service_connections_listed"] == []
     assert s["service_connections_total"] == 7  # the shared connection once
     assert s["service_connections_by_auth_method"] == {
@@ -285,6 +284,17 @@ def test_collects_the_organization_and_exits_zero(tmp_path, assert_summary_docum
         "aks-deployer", "artifact-feed", "legacy-spn", "nuget-feed", "signing-spn", "web-deploy"]
     assert s["service_principals"] == 3
     assert s["pipeline_runs_using_service_connections"] == 3
+
+
+def test_the_summary_matches_the_instructions(assert_summary_documented):
+    methods = ("workload_identity_federation managed_identity github_app service_principal_secret "
+               "service_principal_certificate service_principal username_password token personal_access_token oauth "
+               "certificate publish_profile kubernetes none unknown").split()
+    connections = [{"name": m, "type": "azurerm", "auth_method": None if m == "unknown" else m, "azure": {},
+                    "stored_credential": False, "open_to_all_pipelines": False, "is_ready": True,
+                    "pipeline_runs_in_window": 0, "executions_collected": True, "executions": []} for m in methods]
+    summary = mod.summarize(connections, [], [], [], 30)
+    assert_summary_documented("azure/devops_service_connections", summary)
 
 
 def test_no_credential_or_variable_value_is_written(tmp_path):
