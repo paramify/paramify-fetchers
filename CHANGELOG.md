@@ -1497,6 +1497,49 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Paramify VER fetchers use the PAIN rating and report open N0 issues as
+  `Fully Mitigated`.** `currentRating` now comes from the issue's Potential
+  Agency Impact N-rating (`painRating`) when one is set, and falls back to the
+  risk level only when it is not; an issue with a PAIN rating but no risk level
+  previously had no `currentRating`. An issue that is still open and rated N0 is
+  reported as `finalDisposition: "Fully Mitigated"`, FedRAMP's term for a
+  vulnerability that is still detected at negligible impact. N1 still has
+  minimal customer effects, so it is not Fully Mitigated. Closed issues remain
+  `Remediated`, and an accepted `FALSE_POSITIVE` deviation still takes
+  precedence.
+- **Paramify VER fetchers no longer accept Fully Mitigated or False Positive
+  issues after 192 days.** VER-TFR-MAV accepts a vulnerability that "is not or
+  will not be fully mitigated or remediated within 192 days of evaluation". An
+  open issue reported as `Fully Mitigated` already is, and one with an accepted
+  `FALSE_POSITIVE` deviation is not actually present, so neither moves to the
+  Accepted Vulnerability Info report by age. Both now stay in the Vulnerability
+  Detail Report (and the active list of Historical VER Activity) with their
+  disposition, instead of appearing as accepted with the rationale "without full
+  mitigation". Partially mitigated and unrated open issues are still accepted
+  after 192 days, and accepted deviations still make an issue accepted.
+- **Paramify VER fetchers no longer mark Fully Mitigated or False Positive
+  issues overdue, except Fully Mitigated KEVs.** An overdue vulnerability is one
+  the provider "intends to fully mitigate or remediate but has not" (FedRAMP
+  definition). An open issue reported as `Fully Mitigated` past its `dueDate`
+  now reads `overdueStatus.isOverdue: false` instead of `true` with "not yet
+  fully mitigated or remediated", and so does an issue with an accepted
+  `FALSE_POSITIVE` deviation. VDR-TFR-KEV says a Known Exploited
+  Vulnerability should still be remediated "even if the vulnerability has been
+  fully mitigated", so a Fully Mitigated issue whose CVE IDs are in the CISA KEV
+  catalog stays overdue, with an explanation that says why. When a project has
+  a Fully Mitigated issue, the fetchers make one extra `GET /issues?kev=true`
+  call to find them; if that call fails it is recorded in `apiFailures` and
+  Fully Mitigated issues stay overdue, so no KEV is hidden. The `overdue`
+  counts in the Vulnerability Detail Report and Historical VER Activity
+  summaries change to match.
+- **Paramify VER fetchers report closed issues as `Remediated`.** A closed
+  issue is no longer detected, which FedRAMP defines as a remediated
+  vulnerability; "Fully Mitigated" means still detected at negligible impact.
+  Closed issues were reported as `finalDisposition: "Fully Mitigated"` and now
+  report `"Remediated"`. An accepted `FALSE_POSITIVE` deviation still takes
+  precedence. The `_summary` dispositions in the Vulnerability Detail Report
+  and Historical VER Activity gain a `remediated` count; `fullyMitigated` is
+  kept for compatibility.
 - **`aws_organizations_scp` no longer reports a denied read as "no SCPs"**
   (0.2.0 → 0.3.0). From a member account that is neither the management
   account nor a delegated administrator, `describe-organization` succeeds
