@@ -32,6 +32,7 @@ def _load(name):
 
 
 auth_policy = _load("entra_authentication_policy")
+emergency_accounts = _load("entra_emergency_accounts")
 mfa_status = _load("entra_mfa_status")
 privileged_roles = _load("entra_privileged_roles")
 
@@ -212,6 +213,58 @@ def test_admin_figures_are_null_when_role_membership_is_unreadable():
         assert summary[key] is None, key
     # The tenant-wide figures do not depend on role membership.
     assert summary["mfa_coverage_percentage"] == 33
+
+
+def _methods_user(uid, methods, admin=False):
+    reg = _reg(uid, True, is_admin=admin)
+    reg["methods_registered"] = methods
+    reg["is_passwordless_capable"] = True
+    return reg
+
+
+def test_phishing_resistant_counts_only_resistant_methods():
+    cases = {
+        "p0": (["fido2SecurityKey"], True),
+        "p1": (["windowsHelloForBusiness", "mobilePhone"], True),
+        "p2": (["microsoftAuthenticatorPasswordless", "microsoftAuthenticatorPush"], False),
+        "p3": (["mobilePhone", "email"], False),
+        "p4": (["passKeyDeviceBound"], True),
+        "p5": (["passKeyDeviceBoundAuthenticator"], True),
+        "p6": (["passKeySynced"], True),
+        "p7": (["macOsSecureEnclaveKey"], True),
+        "p8": (["PASSKEYDEVICEBOUND"], True),
+    }
+    users = [_user(k, f"{k}@contoso.test") for k in cases] + [_user("p-none", "none@contoso.test")]
+    regs = [_methods_user(k, m, admin=(k == "p0")) for k, (m, _) in cases.items()]
+    records = mfa_status.join_users(users, regs, {"p0": ["Global Administrator"]})
+    by_id = {r["id"]: r for r in records}
+    for k, (_, want) in cases.items():
+        assert by_id[k]["is_phishing_resistant"] is want, k
+    assert by_id["p-none"]["is_phishing_resistant"] is False
+    assert by_id["p2"]["is_passwordless_capable"] is True
+    summary = mfa_status.summarize(records)
+    assert summary["phishing_resistant_enabled_users"] == 7
+    assert summary["phishing_resistant_coverage_percentage"] == 70
+    assert summary["passwordless_capable_enabled_users"] == 9
+    assert summary["phishing_resistant_admin_users"] == 1
+    assert summary["phishing_resistant_admin_coverage_percentage"] == 100
+    assert summary["admin_users_without_phishing_resistant"] == 0
+
+
+def test_mfa_status_and_emergency_accounts_share_one_phishing_resistant_set():
+    assert mfa_status.PHISHING_RESISTANT_METHODS is emergency_accounts.PHISHING_RESISTANT_METHODS
+
+
+def test_phishing_resistant_figures_are_null_when_unreadable():
+    records = mfa_status.join_users(USERS, REGISTRATIONS, None)
+    summary = mfa_status.summarize(records, admin_roles_readable=False)
+    assert summary["phishing_resistant_admin_users"] is None
+    assert summary["admin_users_without_phishing_resistant"] is None
+    assert summary["phishing_resistant_enabled_users"] == 0
+    summary = mfa_status.summarize(records, registrations_read=False)
+    assert summary["phishing_resistant_enabled_users"] is None
+    assert summary["phishing_resistant_coverage_percentage"] is None
+    assert summary["admin_users_without_phishing_resistant"] is None
 
 
 def test_mfa_status_and_privileged_roles_share_one_admin_definition():

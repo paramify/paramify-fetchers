@@ -12,6 +12,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
+  `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
+  a passkey (synced or device-bound), Windows Hello for Business or a macOS platform
+  credential (the same set `azure_entra_emergency_accounts` uses). Synced passkeys
+  count because Microsoft treats them as phishing-resistant credentials
+  (https://learn.microsoft.com/en-us/entra/identity/authentication/how-to-authentication-passkeys-fido2). Certificate-based authentication
+  isn't visible in the registration report, so a certificate-only user counts as without.
+  The summary adds
+  `phishing_resistant_enabled_users`, `phishing_resistant_coverage_percentage`,
+  `phishing_resistant_admin_users`, `phishing_resistant_admin_coverage_percentage`
+  and `admin_users_without_phishing_resistant`. They read null when the
+  registration report can't be read, the admin ones also when role membership
+  can't. `is_passwordless_capable` is unchanged and still counts Authenticator phone
+  sign-in, which isn't phishing-resistant; the description no longer calls it that.
+
 - **`aws_organizations_scp` can record the SCPs that apply to each account.**
   Set `effective_scp_accounts` (env `SCP_EFFECTIVE_ACCOUNTS`) to comma-separated
   account IDs, or `all`. For each account the fetcher records
@@ -1535,6 +1550,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_emergency_accounts` 0.1.1: a synced passkey counts as a phishing-resistant
+  method.** `phishing_resistant_method_registered` and
+  `emergency_accounts_with_phishing_resistant_method` now count `passKeySynced`
+  alongside device-bound passkeys, as Microsoft treats synced passkeys as
+  phishing-resistant credentials. The set is shared with `azure_entra_mfa_status`.
+
 - **Paramify VER fetchers use the PAIN rating and report open N0 issues as
   `Fully Mitigated`.** `currentRating` now comes from the issue's Potential
   Agency Impact N-rating (`painRating`) when one is set, and falls back to the
@@ -1578,6 +1599,7 @@ schemas and the `paramify` CLI — not the internal code.
   precedence. The `_summary` dispositions in the Vulnerability Detail Report
   and Historical VER Activity gain a `remediated` count; `fullyMitigated` is
   kept for compatibility.
+
 - **`aws_organizations_scp` no longer reports a denied read as "no SCPs"**
   (0.2.0 → 0.3.0). From a member account that is neither the management
   account nor a delegated administrator, `describe-organization` succeeds
