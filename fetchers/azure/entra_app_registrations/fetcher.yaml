@@ -1,5 +1,5 @@
 name: azure_entra_app_registrations
-version: 0.1.0
+version: 0.2.0
 description: >
   Every Microsoft Entra ID app registration with each of its client secrets and
   certificate credentials and that credential's expiry date, so credential rotation
@@ -20,6 +20,16 @@ output:
   type: json
   path: azure_entra_app_registrations.json
   aggregation: per_target
+
+config_schema:
+  approved_lifetime_days:
+    type: integer
+    required: false
+    default: 365
+    env: AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS
+    description: >
+      A credential issued for more than this many days counts as beyond the approved
+      lifetime. Set it to the tenant's own rotation interval.
 
 target_schema:
   # Microsoft Graph data is TENANT-scoped, so the fanout unit here is the tenant,
@@ -60,7 +70,41 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-ENTRA-APP-CREDS
   name: Microsoft Entra ID App Registration Credentials
-  instructions: >
-    Script: azure/entra_app_registrations/fetcher.py. Microsoft Graph calls: GET /applications with
-    $select=id,appId,displayName,createdDateTime,signInAudience,passwordCredentials,keyCredentials;
-    GET /organization. Paged via @odata.nextLink.
+  instructions: |
+    Script: azure/entra_app_registrations/fetcher.py
+
+    Access: Microsoft Graph Application.Read.All. Optional: Organization.Read.All; without it, the tenant's name and domain read null.
+
+    Commands Executed:
+    - Microsoft Graph GET /organization — the tenant's name and domain
+    - Microsoft Graph GET /applications (selecting id, appId, displayName, createdDateTime, signInAudience, passwordCredentials and keyCredentials, paged) — every app registration with each secret and certificate, its start and end dates and the lifetime it was issued for
+
+    Output: azure_entra_app_registrations_<tenant>.json — each app registration with its credentials: when each starts and ends, how long it was issued for, and whether it is expired, expiring soon or has no end date.
+
+    Summary fields:
+
+    What is in the tenant?
+    - total_app_registrations — Number of app registrations in the tenant
+    - apps_with_credentials — Number of app registrations holding at least one secret or certificate
+    - apps_without_credentials — Number of app registrations holding none, left out of the rotation percentage
+    - multi_tenant_apps — Number of app registrations that accept sign-in from outside this tenant
+
+    Do credentials expire and get rotated?
+    - total_credentials — Number of secrets and certificates across all app registrations
+    - password_credentials — Number of those that are client secrets
+    - certificate_credentials — Number of those that are certificates
+    - expired_credentials — Number of credentials whose end date has passed
+    - credentials_expiring_soon — Number of credentials that expire within rotation_threshold_days days and haven't expired
+    - credentials_without_expiry — Number of credentials with no end date
+    - healthy_credentials — Number of credentials that have an end date, haven't expired and don't expire within rotation_threshold_days days
+    - rotation_threshold_days — Days before expiry at which a credential counts as expiring soon (30)
+    - credential_rotation_compliance_percentage — Percentage of credentials that are healthy; 0 when there are none
+    - apps_with_expired_credentials — Number of app registrations holding an expired credential
+    - apps_with_credentials_expiring_soon — Number of app registrations holding a credential expiring soon
+    - apps_with_credentials_without_expiry — Number of app registrations holding a credential with no end date
+    - apps_with_all_credentials_healthy — Number of app registrations whose credentials are all healthy
+
+    How long were credentials issued for?
+    - credentials_issued_beyond_approved_lifetime — Number of secrets and certificates whose end date is more than approved_lifetime_days after their start date; null if any credential has no start or end date, because the count could be short
+    - credentials_without_lifetime — Number of credentials with no start date or no end date, whose issued lifetime can't be computed
+    - approved_lifetime_days — The longest issued lifetime counted as within the approved interval (365 unless configured)

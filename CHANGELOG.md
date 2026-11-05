@@ -12,6 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
+  secret and certificate gets `lifetime_days` (end date minus start date) and
+  `issued_beyond_approved_lifetime`, both null when either date is missing. The summary
+  adds `credentials_issued_beyond_approved_lifetime`, `credentials_without_lifetime` and
+  `approved_lifetime_days`; the count reads null while any lifetime is unknown. The
+  interval is the new `approved_lifetime_days` config field (`AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS`),
+  default 365. No new calls.
+
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
   a passkey (synced or device-bound), Windows Hello for Business or a macOS platform
