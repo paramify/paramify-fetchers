@@ -750,6 +750,128 @@ def test_data_sources_every_kind_of_failed_search_is_unknown(azure, tmp_path, mo
     assert ws["tables_search_failed"] == ["StorageBlobLogs"] and ws["sources_ingesting"] is None
 
 
+LAKE_START = iso(NOW - timedelta(days=2))[:-4] + "Z"  # milliseconds, as the warning writes it
+
+
+def lake_warning(rows, table_name="AppLogs_CL", start=LAKE_START, extra=()):
+    """HTTP 200 with a result and a PartialError whose details say the window spans the table's lake data start."""
+    return Resp(200, {**table(["LastIngested", "Records"], rows), "error": {
+        "code": "PartialError", "message": "There were some errors when processing your query.",
+        "details": [{"code": "PartialLakeDataWarning", "message": (
+            f"Table '{table_name}' has Auxiliary / Lake data starting from {start}. A query spanning this date might "
+            "return partial results. Please adjust your query time range to either before or after this date.")},
+            *extra]}})
+
+
+def test_query_error_carries_details_and_the_partial_result(azure):
+    azure.queries.insert(0, ("['AppLogs_CL']", lake_warning([[None, 0]])))
+    client = azure_rest.AzureRestClient(FakeCred(), session=azure)
+    with pytest.raises(azure_rest.QueryError) as caught:
+        client.search("cust-a", "['AppLogs_CL'] | count", "PT1H")
+    exc = caught.value
+    assert exc.code == "PartialError" and exc.rows == [{"LastIngested": None, "Records": 0}]
+    assert [c for c, _ in exc.details] == ["PartialLakeDataWarning"] and LAKE_START in exc.details[0][1]
+    # The generic top message no longer hides the cause.
+    assert "PartialLakeDataWarning: Table 'AppLogs_CL' has Auxiliary / Lake data starting from" in str(exc)
+
+
+@pytest.mark.parametrize("details, warning_only, start", [
+    ([("PartialLakeDataWarning", f"Table 'T' has Auxiliary / Lake data starting from {LAKE_START}. A query …")], True, LAKE_START),
+    ([("PartialLakeDataWarning", "Table 'T' has Auxiliary / Lake data. A query …")], True, None),
+    ([("PartialLakeDataWarning", f"… starting from {LAKE_START}. …"), ("EngineError", "boom")], False, None),
+    ([], False, None),
+])
+def test_data_sources_reads_the_lake_warning(details, warning_only, start):
+    m = MODS["sentinel_data_sources"]
+    exc = azure_rest.QueryError("PartialError", "There were some errors", details)
+    assert m.lake_warning_only(exc) is warning_only
+    assert (m.lake_start(exc) if warning_only else None) == start
+    assert not m.lake_warning_only(azure_rest.QueryError("(400) BadArgumentError", "x", details))
+
+
+def split_spans(azure, name):
+    return [p["timespan"] for (_, p), q in zip(azure.params, search_calls(azure)) if f"['{name}']" in q]
+
+
+@pytest.mark.parametrize("before, after, records, last", [
+    ([[None, 0]], [[None, 0]], 0, None),  # created at the lake start: nothing before it, and nothing since
+    ([[iso(NOW - timedelta(days=3)), 2]], [[iso(NOW - timedelta(hours=1)), 3]], 5, iso(NOW - timedelta(hours=1))),
+])
+def test_data_sources_splits_a_search_at_the_lake_data_start(azure, tmp_path, monkeypatch, before, after, records, last):
+    basic_tables_workspace(azure, monkeypatch)
+    azure.queries.insert(0, ("['AppLogs_CL']", [lake_warning([[None, 0]]), table(["LastIngested", "Records"], before),
+                                                table(["LastIngested", "Records"], after)]))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    # The window once more, cut at the exact warning date so the halves leave no gap; other tables search once.
+    spans = split_spans(azure, "AppLogs_CL")
+    assert len(spans) == 3 and spans[0] == "PT336H"
+    assert spans[1].endswith(f"/{LAKE_START}") and spans[2].startswith(f"{LAKE_START}/")
+    begin, end = (azure_rest.parse_time(t) for t in (spans[1].split("/")[0], spans[2].split("/")[1]))
+    assert end - begin == timedelta(hours=336)
+    assert len(split_spans(azure, "StorageBlobLogs")) == 1
+    assert "AppLogs_CL" in ws["tables_searched"] and ws["tables_search_failed"] == []
+    tables = {t["table"]: t for t in ws["tables"]}
+    if records:
+        assert (tables["AppLogs_CL"]["records"], tables["AppLogs_CL"]["last_ingested"]) == (records, last)
+        assert tables["AppLogs_CL"]["lake_data_start"] == LAKE_START and ws["sources_ingesting"] == 4
+    else:
+        # Measured and empty: the connector reads not connected, not unknown.
+        assert "AppLogs_CL" not in tables and ws["sources_ingesting"] == 3
+        assert next(c for c in ws["connectors"] if c["id"] == "AppLogs")["connected"] is False
+    assert any("AppLogs_CL: searched in two parts" in n for n in ws["notes"])
+
+
+@pytest.mark.parametrize("spanning, measured", [([[iso(NOW - timedelta(hours=1)), 4]], True), ([[None, 0]], False)])
+def test_data_sources_split_that_still_warns_keeps_only_what_is_certain(azure, tmp_path, monkeypatch, spanning, measured):
+    basic_tables_workspace(azure, monkeypatch)
+    azure.queries.insert(0, ("['AppLogs_CL']", [lake_warning(spanning), lake_warning([[None, 0]]), table(["LastIngested", "Records"], [[None, 0]])]))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    # A warning is not a failure, and the second half isn't searched once the first still warns.
+    assert code == 0 and ev["metadata"]["partial_failure"] is False and len(split_spans(azure, "AppLogs_CL")) == 2
+    assert ws["tables_search_failed"] == []
+    tables = {t["table"]: t for t in ws["tables"]}
+    if measured:
+        # Its newest record is real; its count may be short, so it is unknown.
+        assert tables["AppLogs_CL"]["records"] is None and tables["AppLogs_CL"]["last_ingested"] == spanning[0][0]
+        assert "AppLogs_CL" in ws["tables_searched"] and ws["sources_ingesting"] == 4
+    else:
+        # Nothing found in a partial answer proves nothing: not measured, and the count stands without it.
+        assert "AppLogs_CL" in ws["tables_not_measured"] and "AppLogs_CL" not in ws["tables_searched"]
+        assert ws["sources_ingesting"] == 3
+        assert next(c for c in ws["connectors"] if c["id"] == "AppLogs")["connected"] is None
+    assert any("AppLogs_CL: a search spanning its lake data start" in n for n in ws["notes"])
+
+
+@pytest.mark.parametrize("answers, tries", [
+    ([lake_warning([[None, 0]], extra=[{"code": "EngineError", "message": "boom"}])], 1),  # not warning-only
+    ([Resp(200, {**table(["LastIngested", "Records"], [[None, 0]]),
+                 "error": {"code": "PartialError", "message": "x", "details": [{"code": "QueryThrottled", "message": "y"}]}})], 1),
+    ([lake_warning([[None, 0]]), Resp(403, {"error": {"code": "Forbidden", "message": "no"}})], 2),  # a half fails
+])
+def test_data_sources_other_partial_errors_still_fail_the_search(azure, tmp_path, monkeypatch, answers, tries):
+    basic_tables_workspace(azure, monkeypatch)
+    azure.queries.insert(0, ("['AppLogs_CL']", answers if len(answers) > 1 else answers[0]))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and len(split_spans(azure, "AppLogs_CL")) == tries
+    assert ws["tables_search_failed"] == ["AppLogs_CL"] and ws["sources_ingesting"] is None
+
+
+@pytest.mark.parametrize("start", [None, iso(NOW - timedelta(days=30))[:-4] + "Z"])
+def test_data_sources_lake_warning_without_a_date_in_the_window_is_not_split(azure, tmp_path, monkeypatch, start):
+    basic_tables_workspace(azure, monkeypatch)
+    warning = lake_warning([[None, 0]], start=start or "")
+    if start is None:
+        warning._body["error"]["details"][0]["message"] = "Table 'AppLogs_CL' has Auxiliary / Lake data. It may be partial."
+    azure.queries.insert(0, ("['AppLogs_CL']", warning))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and len(split_spans(azure, "AppLogs_CL")) == 1 and "AppLogs_CL" in ws["tables_not_measured"]
+
+
 def test_data_sources_search_without_table_plans_is_unknown(azure, tmp_path, monkeypatch):
     monkeypatch.setenv("BASIC_LOGS_LOOKBACK_HOURS", "336")
     azure.arm[(f"{WS_A}/tables", "2023-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})

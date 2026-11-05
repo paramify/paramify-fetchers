@@ -66,7 +66,11 @@ config_schema:
       table with no record in them stays not measured, since it may have
       received data earlier in the window; set ingestion_window_days × 24 to
       measure every such table. A value of 0 or less leaves the search off, and
-      so does one that isn't a whole number, with a warning.
+      so does one that isn't a whole number, with a warning. For a few days
+      after a table is created on, or switched to, the Auxiliary plan, a search
+      spanning the date its lake data starts may be partial; such a table is
+      searched again in two parts, before and from that date, at the cost of one
+      more search over the window.
 
   resource_exclusions:
     type: patterns
@@ -112,12 +116,12 @@ evidence_set:
     - GET Microsoft.SecurityInsights/dataConnectorDefinitions — codeless connector definitions
     - GET Microsoft.OperationalInsights/workspaces/tables — each table's plan, since the query API can't read tables on the Basic or Auxiliary plan
     - KQL union * summarized by table — each table's last ingestion time and record count
-    - KQL through the /search endpoint, one Basic or Auxiliary table at a time, only when basic_logs_lookback_hours is above 0 — the table's last ingestion time and record count over that many hours, the only way to read these tables. Off by default because Log Analytics bills these searches per GB scanned, so the query asks for nothing else, and a connector query filtering a Basic or Auxiliary table that received data isn't run. A failed search fails the run
+    - KQL through the /search endpoint, one Basic or Auxiliary table at a time, only when basic_logs_lookback_hours is above 0 — the table's last ingestion time and record count over that many hours, the only way to read these tables. Off by default because Log Analytics bills these searches per GB scanned, so the query asks for nothing else, and a connector query filtering a Basic or Auxiliary table that received data isn't run. When Log Analytics warns that the window spans the date the table's Auxiliary (lake) data starts, which it does for a time after the table is created on or switched to that plan, the table is searched again in two parts cut exactly at that date, and the two answers are combined (newest record time, summed count). If a part still warns, the first answer's newest record time stands, its count is unknown, and a table with nothing found isn't measured. Any other error fails the search, and a failed search fails the run
     - KQL on SecurityAlert by product — which alert products feed the workspace
     - KQL union of each connector data type's lastDataReceivedQuery, with any that starts with let run on its own — last data received per connector data type, as the Sentinel portal measures it
     - KQL on SentinelHealth, Data fetch status change events only — each connector's latest health status, Success or Failure, which the hourly Informational failure summary written after polling errors can't hide (only when health monitoring sends data)
 
-    Output: azure_sentinel_data_sources_<subscription>.json — for each Sentinel workspace, its connectors with when each last received data and whether it sends only alerts, every table with its plan and when it last received data, the Basic and Auxiliary tables read through /search (tables_searched), those whose search failed (tables_search_failed), and those not measured (tables_not_measured). Workspaces the resource_exclusions patterns take out are listed under excluded instead, each with the pattern that matched.
+    Output: azure_sentinel_data_sources_<subscription>.json — for each Sentinel workspace, its connectors with when each last received data and whether it sends only alerts, every table with its plan, when it last received data and, when its search was split, the date its lake data starts, the Basic and Auxiliary tables read through /search (tables_searched), those whose search failed (tables_search_failed), and those not measured (tables_not_measured). Workspaces the resource_exclusions patterns take out are listed under excluded instead, each with the pattern that matched.
 
     Summary fields:
 

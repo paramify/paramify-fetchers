@@ -4,6 +4,7 @@
 import logging
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -16,6 +17,7 @@ from azure_rest import (  # noqa: E402
     QueryError,
     int_config,
     iso_duration_days,
+    parse_time,
     run_workspaces,
 )
 from sentinel_ingestion import (  # noqa: E402
@@ -69,6 +71,9 @@ BASIC_LOOKBACK_ENV = "BASIC_LOGS_LOOKBACK_HOURS"
 SEARCH_QUERY = "['{table}'] | where TimeGenerated > ago({hours}h) | summarize LastIngested = max(TimeGenerated), Records = count()"
 # How far back /search reads a Basic table; older data needs a search job.
 SEARCH_MAX_HOURS = 30 * 24
+# A search spanning the date a table's Auxiliary (lake) data starts, after a create or a switch, warns that it may be partial.
+LAKE_WARNING = "PartialLakeDataWarning"
+_LAKE_START = re.compile(r"starting from (\d{4}-\d{2}-\d{2}T[\d:.]+Z)")
 
 # Connection kinds whose Content Hub definition has another id: this kind is Entra ID Protection, not the Entra ID logs connector.
 KIND_DEFINITION = {"AzureActiveDirectory": "AzureActiveDirectoryIdentityProtection"}
@@ -134,13 +139,14 @@ def project_tables(
 ) -> List[Dict[str, Any]]:
     """Tables that received data in the window: from union * on /query, and the Basic or Auxiliary ones from /search."""
     found = {row["ParamifySourceTable"]: row for row in rows if row.get("ParamifySourceTable")}
-    found.update({name: s for name, s in (searched or {}).items() if s and s["Records"]})
+    found.update({name: s for name, s in (searched or {}).items() if s and (s["Records"] or s["LastIngested"])})
     tables = [
         {
             "table": name,
             "plan": (plans or {}).get(name),
             "last_ingested": row.get("LastIngested"),
             "records": row.get("Records"),
+            "lake_data_start": row.get("lake_data_start"),
             "counts_as_source": name not in NON_SOURCE_TABLES | {ALERTS_TABLE},
         }
         for name, row in found.items()
@@ -153,23 +159,71 @@ def search_hours(days: int) -> int:
     return min(int_config(BASIC_LOOKBACK_ENV, 0), days * 24, SEARCH_MAX_HOURS)
 
 
-def search_tables(client, ws: Dict[str, Any], names: List[str], hours: int, days: int, collector) -> Dict[str, Optional[Dict[str, Any]]]:
-    """Each Basic or Auxiliary table's last ingestion and count, None when its search failed; one with nothing in less than the window is left out, not measured."""
+def lake_warning_only(exc: BaseException) -> bool:
+    return isinstance(exc, QueryError) and exc.code == "PartialError" and bool(exc.details) and all(
+        code == LAKE_WARNING for code, _ in exc.details)
+
+
+def lake_start(exc: QueryError) -> Optional[str]:
+    """The one lake start date a warning names, exactly as written, so the split leaves no gap."""
+    dates = {m.group(1) for _, message in exc.details if (m := _LAKE_START.search(message or ""))}
+    return dates.pop() if len(dates) == 1 else None
+
+
+def first_row(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not rows:  # summarize without by always answers one row, so none is a broken answer, not an empty table
+        raise LookupError("the search returned no result row")
+    return rows[0]
+
+
+def search_table(client, customer_id: str, name: str, hours: int, end: datetime, notes: List[str]) -> Dict[str, Any]:
+    """{} when not measured; a warning that the window spans the lake start is answered by searching each side of it."""
+    query = SEARCH_QUERY.format(table=name, hours=hours)
+    try:
+        row = first_row(client.search(customer_id, query, f"PT{hours}H"))
+        return {"LastIngested": row.get("LastIngested"), "Records": row.get("Records") or 0, "lake_data_start": None}
+    except QueryError as exc:
+        if not lake_warning_only(exc):
+            raise
+        warned = exc
+    start, cut = end - timedelta(hours=hours), lake_start(warned)
+    cut_time = parse_time(cut)
+    halves: List[Dict[str, Any]] = []
+    if cut and cut_time and start < cut_time < end:
+        for span in (f"{start:%Y-%m-%dT%H:%M:%SZ}/{cut}", f"{cut}/{end:%Y-%m-%dT%H:%M:%SZ}"):
+            try:
+                halves.append(first_row(client.search(customer_id, query, span)))
+            except QueryError as exc:
+                if not lake_warning_only(exc):
+                    raise
+                break
+    if len(halves) == 2:
+        times = [h.get("LastIngested") for h in halves if h.get("LastIngested")]
+        notes.append(f"{name}: searched in two parts, before and from its lake data start {cut}, since one search spanning it may be partial")
+        return {"LastIngested": max(times, key=parse_time) if times else None,
+                "Records": sum(h.get("Records") or 0 for h in halves), "lake_data_start": cut}
+    # The spanning answer is all there is: its newest record is real, its count may be short, and nothing found proves nothing.
+    last = (warned.rows or [{}])[0].get("LastIngested")
+    notes.append(f"{name}: a search spanning its lake data start {cut or 'date'} may be partial and couldn't be split cleanly, so "
+                 + ("its record count is unknown" if last else "it isn't measured"))
+    return {"LastIngested": last, "Records": None, "lake_data_start": cut} if last else {}
+
+
+def search_tables(client, ws: Dict[str, Any], names: List[str], hours: int, days: int, collector,
+                  notes: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Each Basic or Auxiliary table's last ingestion and count, None when its search failed; one not measured is left out."""
+    end = datetime.now(timezone.utc).replace(microsecond=0)
     out: Dict[str, Optional[Dict[str, Any]]] = {}
     for name in names:
-        rows = collector.guard(
+        result = collector.guard(
             f"loganalytics.search({name}, {ws['name']})",
-            lambda name=name: client.search(ws["customer_id"], SEARCH_QUERY.format(table=name, hours=hours), f"PT{hours}H"),
+            lambda name=name: search_table(client, ws["customer_id"], name, hours, end, notes),
         )
-        if rows == []:  # summarize without by always answers one row, so none is a broken answer, not an empty table
-            collector.record(f"loganalytics.search({name}, {ws['name']})", LookupError("the search returned no result row"))
-            rows = None
-        row = rows[0] if rows else {}
-        records = row.get("Records") or 0
-        if rows is None:
+        if result is None:
             out[name] = None
-        elif records or hours == days * 24:
-            out[name] = {"LastIngested": row.get("LastIngested"), "Records": records}
+        # An empty answer over less than the window doesn't prove the table had nothing in it.
+        elif result and (result["Records"] is None or result["Records"] or hours == days * 24):
+            out[name] = result
     return out
 
 
@@ -424,7 +478,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
 
     hours = search_hours(days)
     other_plans = sorted(n for n, p in (plans or {}).items() if p != QUERYABLE_PLAN)
-    searched = search_tables(client, ws, other_plans, hours, days, collector) if rows is not None and hours else {}
+    searched = search_tables(client, ws, other_plans, hours, days, collector, notes) if rows is not None and hours else {}
     searched_ok = frozenset(n for n, s in searched.items() if s)
     search_failed = sorted(n for n, s in searched.items() if s is None)
     tables = project_tables(rows, plans, searched) if rows is not None else None
