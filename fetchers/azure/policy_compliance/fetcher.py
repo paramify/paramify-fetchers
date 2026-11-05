@@ -711,9 +711,12 @@ def _resource_key(pair: dict) -> str:
     return arm_id_key(pair.get("resource_id"))
 
 
-def _policy_key(pair: dict) -> tuple:
-    # A policy per assignment, as the service counts them.
-    return arm_id_key(pair.get("policy_assignment_id")), *_member_key(pair)
+def _assignment_key(pair: dict) -> str:
+    return arm_id_key(pair.get("policy_assignment_id"))
+
+
+def _assigned_member_key(pair: dict) -> tuple:
+    return _assignment_key(pair), *_member_key(pair)
 
 
 def in_scope_assignment(record: dict, pairs: list[dict], known: bool, effects: dict) -> dict:
@@ -736,7 +739,7 @@ def in_scope_assignment(record: dict, pairs: list[dict], known: bool, effects: d
             "policy_definition_name": basename(pair.get("policy_definition_id")),
             "policy_definition_reference_id": pair.get("policy_definition_reference_id"),
             # A member the service didn't list as failing: the effect a listed state of it ran under.
-            "effect": effects.get(_policy_key(pair)),
+            "effect": effects.get(_assigned_member_key(pair)),
         }), "non_compliant_resources": len(ids)}
         for key, (pair, ids) in by_member.items()
     ]
@@ -754,11 +757,12 @@ def in_scope_compliance(results: dict, assignments: list[dict], pairs: list[dict
     known = pairs is not None
     by_assignment: dict[str, list[dict]] = {}
     for pair in pairs or []:
-        by_assignment.setdefault(arm_id_key(pair.get("policy_assignment_id")), []).append(pair)
-    effects = {_policy_key(s): s.get("policy_definition_action") for s in states}
+        by_assignment.setdefault(_assignment_key(pair), []).append(pair)
+    effects = {_assigned_member_key(s): s.get("policy_definition_action") for s in states}
     if known:
         resource_details = rolled_up(pairs, _resource_key, results.get("resource_details"))
-        policy_details = rolled_up(pairs, _policy_key, results.get("policy_details"))
+        # At subscription scope the service's policies are its assignments, an initiative counting once.
+        policy_details = rolled_up(pairs, _assignment_key, results.get("policy_details"))
     else:
         resource_details = dict.fromkeys(results.get("resource_details") or {})
         policy_details = dict.fromkeys(results.get("policy_details") or {})

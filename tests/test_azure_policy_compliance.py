@@ -787,10 +787,10 @@ def test_in_scope_compliance_recounts_initiative_members_and_falls_back_to_the_e
         2, 2, False, 2, 1, 33)
     # kv1 is compliant with r2 and unknown to r1: compliant ranks higher.
     assert rebuilt["resource_details"] == {"Compliant": 1, "NonCompliant": 2}
+    # At subscription scope a policy is an assignment, as the service counts them: the initiative once.
     assert (results["non_compliant_resources"], results["non_compliant_policies"], results["resource_details"]) == (
-        2, 2, {"compliant": 1, "noncompliant": 2})
-    # Policies per assignment: r1 and r3 fail, r2 is compliant on what is in scope.
-    assert results["policy_details"] == {"compliant": 1, "noncompliant": 2}
+        2, 1, {"compliant": 1, "noncompliant": 2})
+    assert results["policy_details"] == {"noncompliant": 1}
     results, (unknown,) = fx.in_scope_compliance(service, [record], None, listed)
     assert (results["non_compliant_resources"], unknown["is_compliant"], unknown["non_compliant_member_policies"]) == (
         None, None, None)

@@ -959,9 +959,12 @@ schemas and the `paramify` CLI — not the internal code.
   Exempt, Unknown and the rest), each assignment's `compliant_resources`,
   `compliance_percentage` and `resource_details`, and the non-compliant counts.
   A resource counts once under its highest-ranked state (NonCompliant, Compliant,
-  Error, Conflict, Protected, Exempt, Unknown), a policy once per assignment the
-  same way. These were null before; the non-compliant counts no longer go null
-  when the itemized list is truncated or skipped. All of them read null, map
+  Error, Conflict, Protected, Exempt, Unknown), and a policy the same way. At
+  subscription scope a policy is an assignment, an initiative counting once, as
+  the service counts them; 0.4.0's recount of `non_compliant_policies` counted
+  each member policy of each assignment instead. The compliant side was null
+  before, and the non-compliant counts no longer go null when the itemized list
+  is truncated or skipped. All of them read null, map
   values included, when the grouped read fails or returns fewer groups than the
   service counted. A pattern that matches only compliant resources now counts as
   matched. Without patterns nothing changes and the read is not made.

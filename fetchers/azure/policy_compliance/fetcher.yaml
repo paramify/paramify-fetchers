@@ -103,8 +103,10 @@ config_schema:
       assignment's counts (non-compliant and compliant resources, policies,
       resources evaluated, compliance percentages, every by-state map,
       is_compliant and failing members) are recounted from them, each resource
-      or policy once under its highest-ranked state as Azure ranks them; they are
-      null when that read fails or is cut short. The failed and successful
+      or policy once under its highest-ranked state as Azure ranks them (at
+      subscription scope a policy is an assignment, an initiative counting once,
+      as the service counts them); they are null when that read fails or is cut
+      short. The failed and successful
       deployment totals are recounted from the in-scope listed deployments, null
       when that list is truncated or a read for it fails. policy_group_details
       and remediation_tasks_by_provisioning_state still come from the service and
@@ -184,7 +186,9 @@ evidence_set:
     compliance_percentage, is_compliant and failing members) are recounted over the
     in-scope latest (resource, policy) states: a resource counts once under its
     highest-ranked state (NonCompliant, Compliant, Error, Conflict, Protected,
-    Exempt, Unknown), a policy once per assignment the same way, and a by-state map
+    Exempt, Unknown), a policy the same way (at subscription scope an assignment,
+    an initiative counting once, as the service counts them; within an assignment
+    a member policy), and a by-state map
     keeps the service's states, at 0 when none is in scope. They are null (each
     map's values too) when the grouped read fails or returns fewer groups than the
     service counted. remediation_failed_deployments and
