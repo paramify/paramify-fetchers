@@ -330,3 +330,5 @@ class InvocationResult:
     error_code: Optional[str] = None
     # A comparator's inputs, as the runner records them in `metadata.inputs`.
     inputs: Optional[List[Dict[str, Any]]] = None
+    # The pattern lists the fetcher received, per field, for `metadata.config_patterns`; None when it got none.
+    config_patterns: Optional[Dict[str, List[Dict[str, Any]]]] = None

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
+from jsonschema import Draft202012Validator
 from typer.testing import CliRunner
 
 from framework import api, patterns
@@ -22,8 +23,16 @@ from framework.contract import (
     ManifestEntry,
     PlatformConfig,
     PlatformSpec,
+    TargetField,
+    TargetInstance,
 )
-from framework.runner.executor import _apply_config, merged_config
+from framework.envelope import wrap_outputs
+from framework.runner.executor import (
+    _apply_config,
+    config_patterns,
+    merged_config,
+    run_entry,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "fetchers" / "azure" / "_shared"))
@@ -193,6 +202,65 @@ def test_a_category_declared_patterns_field_reaches_its_fetchers(tmp_path):
     env: dict = {}
     _apply_config(env, f, spec, PlatformConfig(config={"exclusions": ["rg:a"]}), ManifestEntry(use="x"))
     assert env["EXCLUSIONS"] == "rg:a"
+
+
+# --------------------------------------------------------------------------- #
+# metadata.config_patterns
+# --------------------------------------------------------------------------- #
+
+ENVELOPE_VALIDATOR = Draft202012Validator(json.loads((REPO_ROOT / "framework/schemas/envelope_schema.json").read_text()))
+WRITES_ONE_FILE = "import os, json\njson.dump({'ok': True}, open(os.path.join(os.environ['EVIDENCE_DIR'], 'ev.json'), 'w'))\n"
+
+
+def run_and_wrap(tmp_path, f, entry, platform=None) -> dict:
+    (tmp_path / "fetcher.py").write_text(WRITES_ONE_FILE)
+    out = tmp_path / f"out-{len(list(tmp_path.glob('out-*')))}"
+    [result] = run_entry(f, entry, out, None, platform)
+    assert result.exit_code == 0, result.stderr
+    wrap_outputs(result, f, "run-1", out)
+    envelope = json.loads((out / "ev.json").read_text())
+    assert not list(ENVELOPE_VALIDATOR.iter_errors(envelope))
+    return envelope
+
+
+def test_each_pattern_reaches_the_envelope_with_its_reason_and_the_layer_that_set_it(tmp_path):
+    f = fetcher(tmp_path)
+    platform = PlatformConfig(config={"exclusions": [{"pattern": "location:a", "reason": "boundary"}, "rg:b"]})
+    meta = run_and_wrap(tmp_path, f, ManifestEntry(use="x"), platform)["metadata"]
+    assert meta["config_patterns"] == {"exclusions": [
+        {"pattern": "location:a", "reason": "boundary", "source": "platform"},
+        {"pattern": "rg:b", "reason": None, "source": "platform"}]}
+    entry = ManifestEntry(use="x", config={"exclusions": "rg:c id:/d"})
+    meta = run_and_wrap(tmp_path, f, entry, platform)["metadata"]
+    assert meta["config_patterns"] == {"exclusions": [{"pattern": "rg:c", "reason": None, "source": "entry"},
+                                                      {"pattern": "id:/d", "reason": None, "source": "entry"}]}
+
+
+def test_a_run_with_no_patterns_writes_the_envelope_it_always_has(tmp_path):
+    f = fetcher(tmp_path, exclusions=field(), other=ConfigField(name="other", env="OTHER"))
+    platform = PlatformConfig(config={"exclusions": ["rg:b"], "other": "x"})
+    for entry, plat in ((ManifestEntry(use="x"), None), (ManifestEntry(use="x", config={"exclusions": []}), platform)):
+        meta = run_and_wrap(tmp_path, f, entry, plat)["metadata"]
+        assert list(meta) == ["fetcher_name", "fetcher_version", "category", "run_id", "target", "collected_at",
+                              "status", "exit_code"]
+
+
+def test_only_pattern_lists_the_fetcher_receives_are_recorded(tmp_path):
+    f = fetcher(tmp_path, exclusions=field(), unwired=field(name="unwired", env=None), other=ConfigField(name="other"))
+    merged = merged_config(f, None, PlatformConfig(config={"unwired": ["rg:a"], "other": "rg:z"}),
+                           ManifestEntry(use="x", config={"exclusions": ["route:a"]}))
+    assert "exclusions" in merged.errors and config_patterns(merged) is None
+
+
+def test_every_target_of_a_fanout_entry_carries_the_patterns(tmp_path):
+    f = dataclasses.replace(fetcher(tmp_path), supports_targets=True,
+                            target_schema={"sub": TargetField(name="sub", type="string", env="SUB")})
+    (tmp_path / "fetcher.py").write_text(WRITES_ONE_FILE)
+    entry = ManifestEntry(use="x", config={"exclusions": [{"pattern": "rg:a", "reason": "r"}]},
+                          targets=[TargetInstance({"sub": "1"}, {}), TargetInstance({"sub": "2"}, {})])
+    results = run_entry(f, entry, tmp_path / "out")
+    assert [r.config_patterns for r in results] == [{"exclusions": [
+        {"pattern": "rg:a", "reason": "r", "source": "entry"}]}] * 2
 
 
 # --------------------------------------------------------------------------- #
