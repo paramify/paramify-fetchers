@@ -1,0 +1,27 @@
+key: azure_frontdoor_waf_coverage_all_host_routes_protected
+name: Azure Front Door Every Serving Host-Route Protected by a Blocking WAF
+type: AUTOMATED
+role: configuration
+statement: >-
+  The Front Door profiles were read with no partial failure, at least one in-scope host-route is
+  serving (route and endpoint enabled), and every serving host-route is protected by a blocking WAF
+  (protected_host_route_percentage is 100): a WAF security policy applies to the host on that route,
+  covers every path, doesn't mark the host inactive, and its WAF policy is enabled in Prevention mode
+  with a default rule set that blocks. The figure is null when any host-route's coverage is unknown,
+  so that fails too. Supports KSI-CNA-RVP. Does not prove: that the managed rule sets are current or
+  that rate-limit rules exist (the Front Door WAF policy validators); that WAF logs are exported or
+  watched; App Gateway WAFs; or hosts and routes left out of scope by exclusions.
+
+# protected_host_route_percentage is 0 with no serving host-route and null when coverage is unknown.
+regex: '"partial_failure":\s*false\b[\s\S]*?"protected_host_route_percentage":\s*(?<protected_host_route_percentage>\d+)[\s\S]*?"serving_host_routes":\s*[1-9]\d*'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # protected_host_route_percentage
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-AZURE-FRONTDOOR-WAF-COVERAGE
