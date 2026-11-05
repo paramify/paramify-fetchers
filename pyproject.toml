@@ -33,7 +33,9 @@ tui = ["textual>=8,<9"]
 checkov = ["checkov"]
 # python-dotenv 1.2.0 is the first to honour PYTHON_DOTENV_DISABLED, which the TUI and
 # CLI regression tests set so a developer's .env never reaches the commands they run.
-dev = ["pytest", "pytest-xdist", "ruff", "mypy", "python-dotenv>=1.2.0"]
+# cryptography: tests/test_azure_entra_authentication_policy.py builds test
+# certificates with it, and the `test` job installs dev but not the azure extra.
+dev = ["pytest", "pytest-xdist", "ruff", "mypy", "python-dotenv>=1.2.0", "cryptography>=42.0.0,<51"]
 # TUI SVG snapshots; not in dev because its syrupy 4.8.0 pin caps pytest below 9.
 snapshots = ["pytest-textual-snapshot==1.1.0"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
@@ -54,6 +56,8 @@ azure = [
     "azure-mgmt-security>=7.0.0,<8",
     "azure-mgmt-authorization>=4.0.0,<5",
     "msgraph-sdk>=1.61.0,<2",
+    # Reads the subject and expiry of the CAs trusted for certificate sign-in.
+    "cryptography>=42.0.0,<51",
     "azure-mgmt-sql>=4.0.0,<5",
     "azure-mgmt-rdbms>=10.1.1,<11",
     "azure-mgmt-postgresqlflexibleservers>=2.0.0,<3",
@@ -70,7 +74,7 @@ azure = [
     "azure-mgmt-mongocluster>=1.2.0,<2",
     "azure-mgmt-kusto>=4.0.0,<5",
     "azure-mgmt-eventhub>=12.0.0,<13",
-    "azure-mgmt-compute>=38.2.0,<39",
+    "azure-mgmt-compute>=38.2.0,<40",
     "azure-mgmt-containerservice>=41.5.0,<42",
     "azure-mgmt-containerregistry>=15.0.0,<16",
     "azure-mgmt-keyvault>=14.0.1,<15",

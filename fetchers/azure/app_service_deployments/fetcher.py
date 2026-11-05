@@ -36,6 +36,7 @@ from azure_common import (  # noqa: E402
     sorted_counts,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_app_service_deployments")
 
@@ -109,6 +110,7 @@ DEFAULT_ACTION_RULES = {
     "scm_ip_security_restrictions_default_action": "scm_ip_security_restrictions",
 }
 ALL_ADDRESSES = ("any", "*", "0.0.0.0/0", "::/0", "internet")
+WEB_APP_KIND, FUNCTION_APP_KIND, SLOT_KIND = "web_app", "function_app", "deployment_slot"
 
 LIMITATIONS = [
     "Kudu deployment records (GET sites/{name}/deployments) exist for zip deploy, OneDeploy, local Git "
@@ -412,20 +414,26 @@ def activity_summary(records_by_category: dict) -> dict:
     return out
 
 
-def attach_activity(apps: list[dict], events: list[dict] | None) -> dict | None:
+def _request_counts(by_site: dict) -> dict:
+    return {c: sum(len(records.get(c, [])) for records in by_site.values()) for c in ACTIVITY_CATEGORIES}
+
+
+def attach_activity(apps: list[dict], events: list[dict] | None, out_of_scope=None) -> tuple[dict | None, dict | None]:
     """Fill each app's and slot's `activity` (None when the Activity Log could not be read).
 
-    Returns the requests on sites not listed (deleted apps or slots, function apps), by category.
+    Returns the requests on sites not listed (deleted apps or slots, function apps), by category, and apart from them
+    those whose requester's (site key, slot) `out_of_scope` names. Each request is first put on its requester's site.
     """
     if events is None:
-        return None
+        return None, None
     by_site = activity_records(events)
     for app in apps:
         key = arm_id_key(app["id"])
         app["activity"] = activity_summary(by_site.pop((key, None), {}))
         for slot in app.get("slots") or []:
             slot["activity"] = activity_summary(by_site.pop((key, str(slot["name"]).lower()), {}))
-    return {c: sum(len(records.get(c, [])) for records in by_site.values()) for c in ACTIVITY_CATEGORIES}
+    excluded = {where: by_site.pop(where) for where in list(by_site) if out_of_scope and out_of_scope(*where)}
+    return _request_counts(by_site), _request_counts(excluded)
 
 
 def slot_name(site: dict):
@@ -557,7 +565,9 @@ def _source_control(collector, operation, fn):
     return source_control_record(source, found)
 
 
-def collect_app(client, collector: Collector, app_site: dict) -> dict:
+def collect_app(client, collector: Collector, app_site: dict, scope: ResourceExclusions | None = None,
+                excluded: list | None = None) -> dict:
+    """Slots the scope takes out are appended to `excluded` and get none of the per-slot reads."""
     group, name = resource_group_from_id(app_site["id"]), app_site["name"]
     web_apps = client.web_apps
     record = {
@@ -584,6 +594,12 @@ def collect_app(client, collector: Collector, app_site: dict) -> dict:
     )
     if slot_sites is None:
         return record
+    if scope:
+        # A slot without a region takes its app's, so it follows its app.
+        slot_sites, out = scope.split(slot_sites, SLOT_KIND,
+                                      location=lambda s: s.get("location") or app_site.get("location"))
+        if excluded is not None:
+            excluded += out
     prod_config = None
     if slot_sites:
         prod_config = collector.guard(
@@ -621,19 +637,56 @@ def collect_app(client, collector: Collector, app_site: dict) -> dict:
     return record
 
 
-def collect_web_apps(subscription_id, cred, collector: Collector) -> tuple[list[dict], int]:
+def collect_web_apps(subscription_id, cred, collector: Collector, scope: ResourceExclusions | None = None,
+                     excluded: list | None = None) -> tuple[list[dict], int]:
+    """(in-scope web apps, in-scope sites that aren't web apps). Web apps, function apps and slots the scope takes out
+    are appended to `excluded` before any per-app read."""
     client = web_client(subscription_id, cred, collector)
     if client is None:
         return [], 0
     sites = collector.guard("web.web_apps.list", lambda: [project_site(s) for s in client.web_apps.list()], default=[])
     web_apps = [s for s in sites if is_web_app(s.get("kind"))]
+    others = [s for s in sites if not is_web_app(s.get("kind"))]
+    out: list[dict] = []
+    if scope:
+        web_apps, apps_out = scope.split(web_apps, WEB_APP_KIND)
+        others, others_out = scope.split(others, FUNCTION_APP_KIND)
+        out += apps_out + others_out
     apps = []
     for site in web_apps:
         if not resource_group_from_id(site.get("id")) or not site.get("name"):
             collector.record("web.web_apps.list", RuntimeError(f"web app {site.get('name')!r} has no resource group in its id"))
             continue
-        apps.append(collect_app(client, collector, site))
-    return sorted(apps, key=lambda a: a.get("id") or ""), len(sites) - len(web_apps)
+        apps.append(collect_app(client, collector, site, scope, out))
+    if excluded is not None:
+        excluded += sorted(out, key=lambda e: arm_id_key(e["id"]))
+    return sorted(apps, key=lambda a: a.get("id") or ""), len(others)
+
+
+def excluded_site(scope: ResourceExclusions, excluded: list[dict]):
+    """(site key, slot) -> whether it is an excluded app or slot, a slot of one, or a site an rg: or id: pattern matches."""
+    out = {arm_id_key(e["id"]) for e in excluded}
+
+    def test(site, slot) -> bool:
+        key = site if slot is None else f"{site}/slots/{slot}"
+        return bool(site) and (site in out or key in out or scope.match(key) is not None)
+
+    return test
+
+
+def boundary_summary(scope: ResourceExclusions, excluded: list[dict], apps: list[dict]) -> dict:
+    """Scope fields named boundary_excluded_*, since excluded_function_apps counts in-scope sites this fetcher does
+    not assess."""
+    def count(kind):
+        return sum(1 for e in excluded if e["kind"] == kind)
+
+    return {
+        **scope.summary(excluded, (), {}),
+        "boundary_excluded_web_apps": count(WEB_APP_KIND),
+        "boundary_excluded_function_apps": count(FUNCTION_APP_KIND),
+        "boundary_excluded_deployment_slots": count(SLOT_KIND),
+        "in_scope_web_apps": len(apps),
+    }
 
 
 def activity_log_days() -> int:
@@ -704,6 +757,9 @@ def main() -> int:
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
+    scope = ResourceExclusions.from_env()
+    scope.record_invalid(collector)
+    boundary: list[dict] = []
 
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
@@ -717,15 +773,17 @@ def main() -> int:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Web")
         if registration == NOT_REGISTERED:
             logger.warning("Microsoft.Web is not registered on subscription %s — no App Service in use", subscription_id)
-        apps, excluded = collect_web_apps(subscription_id, cred, collector)
+        apps, excluded = collect_web_apps(subscription_id, cred, collector, scope, boundary)
         events, window = read_activity_log(subscription_id, cred, collector, window["days"], datetime.now(timezone.utc))
-        window["requests_on_unlisted_sites"] = attach_activity(apps, events)
+        window["requests_on_unlisted_sites"], window["requests_on_excluded_sites"] = attach_activity(
+            apps, events, excluded_site(scope, boundary))
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
             RuntimeError("no subscription id (set AZURE_SUBSCRIPTION_ID or configure an ambient Azure "
                          "credential that can list subscriptions)"),
         )
+    scope.warn_unmatched(logger)
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -736,8 +794,13 @@ def main() -> int:
             "activity_log": window,
             "limitations": LIMITATIONS,
             "provider_registration_status": registration,
+            "excluded": boundary,
         },
-        summary={**summarize(apps, excluded, window), "provider_registration_status": registration},
+        summary={
+            **summarize(apps, excluded, window),
+            "provider_registration_status": registration,
+            **boundary_summary(scope, boundary, apps),
+        },
     )
     filename = f"azure_app_service_deployments_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

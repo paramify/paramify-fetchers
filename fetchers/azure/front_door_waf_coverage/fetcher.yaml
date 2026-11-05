@@ -1,25 +1,51 @@
 name: azure_front_door_waf_coverage
-version: 0.3.0
+version: 0.6.0
 description: >-
   Shows whether every in-scope Front Door host and route is protected by a blocking WAF, and whether each profile exports its WAF log.
 category: azure
 
 config_schema:
   scope_exclusions:
-    type: string
+    type: patterns
+    prefixes: [route]
     required: false
     env: AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS
     description: >
       Parts of Front Door to leave out of scope, as case-insensitive glob patterns
-      separated by commas or spaces, matched against custom-domain and endpoint host
+      listed in the manifest, matched against custom-domain and endpoint host
       names (* matches any run of characters, dots included, ? one character, and [
       ] one character from a set, such as [0-9]). A pattern starting route:
       (route:qa-*) matches route names instead; a pattern without it never matches a
       route's name, and any other prefix fails the run. A route is out of scope when
       a route: pattern matches its name or every host it serves is out, and a
       host-route when its host matches or its route is out. Each is listed under
-      excluded and left out of every verdict and count. Can be ${env:VAR}. Empty:
+      excluded and left out of every verdict and count. Each item is a pattern, or a
+      pattern with a reason. Empty:
       everything is in scope.
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Front Door profile is listed under excluded
+      with the pattern and left out of every count and verdict, with its
+      endpoints, routes, custom domains, security policies and diagnostic
+      settings, which are then not read. A profile is global, so location:
+      matches one only as location:global. WAF policies are not taken out here:
+      an in-scope host whose WAF policy a pattern matches keeps its verdict. The
+      scope_exclusions patterns then apply to the profiles left in scope. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -64,37 +90,44 @@ evidence_set:
     Script: azure/front_door_waf_coverage/fetcher.py
 
     Access: Reader on the subscription.
+    Azure Government: when AZURE_AUTHORITY_HOST is login.microsoftonline.us, the fetcher reads Microsoft.Cdn from management.usgovcloudapi.net with API version 2025-12-01, because Azure Government does not offer the public-cloud versions yet. The evidence records the version actually used. That version does not return a security policy's routes or whether it applies to the whole profile, so: a host-route that an association lists by host still reads as domain scope, even if that association is limited to some routes or a route-scope association overrides it; and a host-route that no association lists by host reads as unknown scope (protected null, not counted as protected or unprotected) instead of none, because a route-scope or profile-level policy may cover it. While any host-route is unknown, the protected and unprotected counts and their reasons read null, since each would only be a lower bound.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
     - providers.get() for Microsoft.Cdn — notes an unregistered provider
     - profiles.list() — Front Door Standard and Premium profiles
-    - afd_endpoints.list_by_profile() and routes.list_by_endpoint() — each route and the hosts it serves
+    - afd_endpoints.list_by_profile() and routes.list_by_endpoint() (per in-scope profile, as are the calls below up to security policies) — each route and the hosts it serves
     - afd_custom_domains.list_by_profile() — each custom domain's host name
     - security_policies.list_by_profile() — which WAF policy applies to which routes and domains, or to the whole profile
     - policies.list_by_subscription() — every Front Door WAF policy with its mode, managed rule sets and custom rules
     - managed_rule_sets.list() — the rules in each managed rule set version, to tell which ones block
-    - diagnostic_settings_category.list() and diagnostic_settings.list() (per profile) — the profile's log categories and where each is exported
+    - diagnostic_settings_category.list() and diagnostic_settings.list() (per in-scope profile) — the profile's log categories and where each is exported
 
-    Output: azure_front_door_waf_coverage_<subscription>.json — each in-scope host and route with the WAF policy that applies to it and whether it blocks, endpoints without routes, custom domains no route serves, each profile's WAF log export, and the hosts and routes left out of scope with the pattern that took each out.
+    Output: azure_front_door_waf_coverage_<subscription>.json — each in-scope host and route with the WAF policy that applies to it and whether it blocks, endpoints without routes, custom domains no route serves, each profile's WAF log export, and the profiles, hosts and routes left out of scope with the pattern that took each out.
 
     Summary fields:
 
     What was checked?
-    - total_front_door_profiles — Number of Front Door Standard and Premium profiles
-    - premium_profiles — Number of Front Door Premium profiles
-    - standard_profiles — Number of Front Door Standard profiles
-    - skipped_profiles_by_sku — Number of classic CDN profiles skipped, for each SKU
+    - total_front_door_profiles — Number of in-scope Front Door Standard and Premium profiles
+    - premium_profiles — Number of in-scope Front Door Premium profiles
+    - standard_profiles — Number of in-scope Front Door Standard profiles
+    - skipped_profiles_by_sku — Number of classic CDN profiles skipped, for each SKU, whatever the patterns
     - total_endpoints — Number of endpoints across all profiles whose own host name is in scope or that carry an in-scope route
     - endpoints_without_routes — Number of in-scope endpoints with no routes
     - total_routes — Number of in-scope routes across all profiles
     - total_custom_domains — Number of in-scope custom domains across all profiles
     - unrouted_custom_domains — Number of in-scope custom domains that no route lists
-    - total_security_policies — Number of security policies across all profiles, of every type
+    - total_security_policies — Number of security policies across all in-scope profiles, of every type
     - total_host_routes — Number of in-scope host-routes: each host a route serves (its custom domains, plus the endpoint's own host name when the route links it), paired with that route
     - serving_host_routes — Number of in-scope host-routes whose route and endpoint are both enabled
     - security_policies_api_version — What the fetcher reads security policies with: the Front Door API version
     - provider_registration_status — Whether Microsoft.Cdn is registered on the subscription: registered, not_registered or unknown
+
+    Which profiles are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every profile is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no Front Door profile, such as a mistyped name
+    - excluded_profiles — Number of Front Door profiles left out of scope because a pattern matched their resource group or id (or location:global); each is listed under excluded with the pattern, and no other count includes them or their hosts, routes and security policies; null if the profile list couldn't be read
+    - in_scope_profiles — Number of Front Door profiles read and in scope; 0 means there are none or the patterns took out every one, which a check can catch by requiring more than 0; null if the profile list couldn't be read
 
     Which parts of Front Door are left out of scope?
     - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against custom-domain and endpoint host names (azurefd.net), or against route names when they start route:. A custom domain or endpoint host is in scope unless its host name matches one; a route is in scope unless a route: pattern matches its name or every host it serves matches; a host-route is in scope unless its host or its route is out. Empty when none are set, so everything is in scope
@@ -110,20 +143,22 @@ evidence_set:
     - in_scope_host_routes — Number of host-routes in scope
 
     Is every serving host protected by a blocking WAF?
-    - protected_host_routes — Number of serving host-routes protected by a blocking WAF: a WAF security policy applies to the host on that route, its WAF policy blocks, it covers every path (/*), and neither the route nor the policy marks the host inactive
-    - unprotected_host_routes — Number of serving host-routes that aren't protected by a blocking WAF
-    - protected_host_route_percentage — Percentage of serving host-routes protected by a blocking WAF = protected_host_routes / serving_host_routes × 100 (a whole number, 0–100); 0 when serving_host_routes is 0
-    - host_routes_without_waf — Number of serving host-routes that no WAF security policy applies to
-    - host_routes_waf_not_blocking — Number of serving host-routes whose WAF policy doesn't block: it is disabled, in Detection mode or has no mode, has no default rule set or one that only logs, has a rule group with no blocking rule, its rule set's definition wasn't found, or a custom rule allows every request
-    - host_routes_waf_unresolved — Number of serving host-routes whose security policy names a WAF policy that wasn't found in the subscription
-    - host_routes_partial_path_coverage — Number of serving host-routes whose WAF association covers only some paths (its patterns don't include /*)
-    - host_routes_reference_inactive — Number of serving host-routes whose host is marked inactive on the route or on the WAF association
+    - protected_host_routes — Number of serving host-routes protected by a blocking WAF: a WAF security policy applies to the host on that route, its WAF policy blocks, it covers every path (/*), and neither the route nor the policy marks the host inactive; null when unknown_host_routes is more than 0
+    - unprotected_host_routes — Number of serving host-routes that aren't protected by a blocking WAF; null when unknown_host_routes is more than 0
+    - unknown_host_routes — Number of serving host-routes whose WAF coverage couldn't be read (unknown scope); always 0 outside Azure Government
+    - protected_host_route_percentage — Percentage of serving host-routes protected by a blocking WAF = protected_host_routes / serving_host_routes × 100 (a whole number, 0–100); 0 when serving_host_routes is 0; null when unknown_host_routes is more than 0
+    - host_routes_without_waf — Number of serving host-routes that no WAF security policy applies to; null when unknown_host_routes is more than 0
+    - host_routes_waf_not_blocking — Number of serving host-routes whose WAF policy doesn't block: it is disabled, in Detection mode or has no mode, has no default rule set or one that only logs, has a rule group with no blocking rule, its rule set's definition wasn't found, or a custom rule allows every request; null when unknown_host_routes is more than 0
+    - host_routes_waf_unresolved — Number of serving host-routes whose security policy names a WAF policy that wasn't found in the subscription; null when unknown_host_routes is more than 0
+    - host_routes_partial_path_coverage — Number of serving host-routes whose WAF association covers only some paths (its patterns don't include /*); null when unknown_host_routes is more than 0
+    - host_routes_reference_inactive — Number of serving host-routes whose host is marked inactive on the route or on the WAF association; null when unknown_host_routes is more than 0
     - host_routes_route_scope — Number of serving host-routes whose WAF comes from an association that lists the route (and the host, when it lists any hosts); Front Door applies this one first
     - host_routes_domain_scope — Number of serving host-routes whose WAF comes from an association that lists the host and no routes
     - host_routes_profile_scope — Number of serving host-routes whose WAF comes from a policy applied to the whole profile
     - host_routes_none_scope — Number of serving host-routes that no WAF security policy applies to
+    - host_routes_unknown_scope — Number of serving host-routes that no association lists by host while a WAF security policy's routes or profile-level setting couldn't be read (Azure Government)
 
     Does each profile with a WAF export its WAF log?
-    - profiles_with_waf_in_use — Number of profiles where a serving in-scope host-route has a WAF applied
+    - profiles_with_waf_in_use — Number of profiles where a serving in-scope host-route has a WAF applied; null when any profile's WAF use is unknown: none of its serving host-routes has a WAF applied, but some are unknown scope
     - profiles_waf_log_exported — Number of profiles with a diagnostic setting that exports the WAF log (FrontDoorWebApplicationFirewallLog): the setting has a destination and enables that category by name, through allLogs, or through a category group it belongs to
-    - profiles_with_waf_in_use_without_waf_log_export — Number of profiles with a WAF in use whose WAF log no diagnostic setting exports
+    - profiles_with_waf_in_use_without_waf_log_export — Number of profiles with a WAF in use whose WAF log no diagnostic setting exports; null when a profile whose WAF use is unknown doesn't export its WAF log

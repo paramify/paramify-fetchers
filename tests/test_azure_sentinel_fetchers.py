@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import logging
 import os
 import sys
 from collections import namedtuple
@@ -1175,6 +1176,36 @@ def test_analytics_rules_without_alert_only_rules_missing_data_skip_the_connecto
     assert not any(c[1] == f"{SI_A}/dataConnectors" for c in azure.calls)
 
 
+def test_analytics_rules_failed_alert_products_query_leaves_missing_data_unknown(azure, tmp_path):
+    incident_rules_workspace(azure, [incident_rule("ipc", "Azure Active Directory Identity Protection")],
+                             stable=[connection("aad", "AzureActiveDirectory")])
+    azure.queries.insert(0, ("by ProductName", Resp(403, {"error": {"code": "InsufficientAccessError", "message": "no"}})))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["rules"][0]["tables_without_data"] is None
+    assert ws["enabled_rules_missing_data"] is None and ws["enabled_rules_quiet"] is None
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (None, None)
+    assert ws["ingesting_tables_not_read"] == ["AzureActivity"]
+    assert not any(c[1] == f"{SI_A}/dataConnectors" for c in azure.calls)
+
+
+def test_analytics_rules_failed_alert_products_query_spares_workspaces_without_enabled_incident_rules(azure, tmp_path):
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
+        incident_rule("off", "Azure Advanced Threat Protection", enabled=False),
+        rule("act", "Scheduled", True, query="AzureActivity | take 1")]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    azure.queries.insert(0, ("by ProductName", Resp(403, {"error": {"code": "InsufficientAccessError", "message": "no"}})))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["enabled_rules_missing_data"] == [] and ws["enabled_rules_quiet"] == []
+
+
+def test_both_sentinel_fetchers_share_one_defender_xdr_list():
+    shared = MODS["sentinel_analytics_rules"].DEFENDER_XDR_CARRIES
+    assert MODS["sentinel_data_sources"].DEFENDER_XDR_CARRIES is shared
+    assert {"OfficeIRM", "MicrosoftThreatProtection"} <= shared and not {"AzureSecurityCenter", "IOT"} & shared
+
+
 def test_analytics_rules_quiet_total_is_null_if_any_measured_workspace_is_unknown():
     summarize = MODS["sentinel_analytics_rules"].summarize
     quiet = [{"name": "mdi"}]
@@ -2148,6 +2179,24 @@ PLAYBOOK = {"id": PB, "name": "pb", "properties": {
                     "host": {"connection": {"name": "@parameters('$connections')['azuread']['connectionId']"}},
                     "method": "patch", "path": "/v1.0/users/@{encodeURIComponent('x')}",
                     "body": {"accountEnabled": False}}}}}}}}}}
+
+
+def wf_run(name, status, started, trigger="Microsoft_Sentinel_incident", error=None):
+    props = {"status": status, "startTime": iso(started), "endTime": iso(started + timedelta(seconds=40)),
+             "trigger": {"name": trigger, "status": "Succeeded"}}
+    if error:
+        props["code"], props["error"] = error, {"code": error, "message": "An action failed."}
+    return {"id": f"{PB}/runs/{name}", "name": name, "type": "Microsoft.Logic/workflows/runs", "properties": props}
+
+
+PB_RUNS = [
+    {"value": [wf_run("r-new", "Failed", NOW - timedelta(days=2), error="ActionFailed"),
+               wf_run("r-mid", "Succeeded", NOW - timedelta(days=5))],
+     "nextLink": f"https://management.azure.com{PB}/runs?api-version=2019-05-01&$skiptoken=p2"},
+    # The service filters on StartTime; a run outside the lookback still has to be left out if one comes back.
+    {"value": [wf_run("r-old", "Succeeded", NOW - timedelta(days=20)),
+               wf_run("r-stale", "Succeeded", NOW - timedelta(days=120))]},
+]
 NOT_A_PLAYBOOK = {"id": f"{RG}/providers/Microsoft.Logic/workflows/etl", "name": "etl",
                   "properties": {"state": "Enabled", "definition": {"triggers": {"Recurrence": {"type": "Recurrence"}},
                                                                      "actions": {"Compose": {"type": "Compose", "inputs": "noop"}}}}}
@@ -2212,6 +2261,8 @@ EXTRA_ARM = {
         "deleteRetentionPolicy": {"enabled": True, "days": 14}, "isVersioningEnabled": True}},
     (f"{SA}/stapp/blobServices/default/containers", "2023-05-01"): {"value": [container("images")]},
     (f"/subscriptions/{SUB}/providers/Microsoft.Logic/workflows", "2019-05-01"): {"value": [PLAYBOOK, NOT_A_PLAYBOOK]},
+    (f"{PB}/runs", "2019-05-01"): PB_RUNS[0],
+    (f"{PB}/runs", "2019-05-01", "p2"): PB_RUNS[1],
     ("/v1.0/identityProtection/riskyUsers", None): {"value": [
         {"id": "u-admin", "userPrincipalName": "admin@contoso.com", "riskLevel": "high", "riskState": "atRisk",
          "riskLastUpdatedDateTime": iso(NOW - timedelta(days=10))}],
@@ -2331,7 +2382,9 @@ def test_log_storage_immutability(azure, tmp_path):
     assert accounts[0]["blob_soft_delete_days"] == 14
     assert ev["summary"] == {"storage_accounts_scanned": 3, "accounts_with_log_containers": 1, "log_containers": 3,
                              "locked_policy": 1, "unlocked_policy_only": 1, "legal_hold": 0, "unprotected": 2,
-                             "min_retention_days": 30}
+                             "min_retention_days": 30, "resource_exclusion_patterns": [],
+                             "resource_exclusion_patterns_unmatched": [], "excluded_storage_accounts": 0,
+                             "excluded_containers": 0, "in_scope_storage_accounts": 3, "in_scope_containers": 3}
     assert not any("stfiles" in c[1] for c in azure.calls)
 
 
@@ -2348,6 +2401,118 @@ def test_sentinel_playbooks(azure, tmp_path):
     assert s["run_by_active_automation_rule"] == 1 and s["live_account_containment_playbooks"] == 1
     assert s["notification_recipients"] == ["secops@contoso.com"] and s["logic_apps_scanned"] == 2
     assert s["live_playbooks_without_definition"] == 0 and ev["results"]["notes"] == []
+
+
+def test_sentinel_playbooks_run_history(azure, tmp_path):
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    assert code == 0 and pb["run_history_read"] is True
+    assert pb["runs_in_lookback"] == 3 and pb["runs_by_status"] == {"Failed": 1, "Succeeded": 2}
+    assert pb["failed_runs"] == 1 and pb["last_run_status"] == "Failed"
+    assert [r["name"] for r in pb["recent_runs"]] == ["r-new", "r-mid", "r-old"]
+    assert pb["recent_runs"][0]["error_code"] == "ActionFailed" and pb["recent_runs"][1]["error_code"] is None
+    assert pb["recent_runs"][0]["trigger"] == "Microsoft_Sentinel_incident" and pb["recent_runs"][0]["end_time"]
+    assert pb["last_run_time"] == pb["recent_runs"][0]["start_time"]
+    assert pb["last_success_time"] == pb["recent_runs"][1]["start_time"]
+    assert pb["last_failure_time"] == pb["recent_runs"][0]["start_time"]
+    assert {k: ev["summary"][k] for k in RUN_SUMMARY} == {
+        "run_lookback_days": 90, "playbooks_run_history_unread": [], "live_playbooks_run_history_unread": 0,
+        "live_playbooks_last_run_succeeded": 0, "live_playbooks_last_run_failed": 1,
+        "live_playbooks_without_runs": 0, "live_playbook_failed_runs": 1}
+    assert not any(c[1].endswith("/etl/runs") for c in azure.calls)
+
+
+RUN_SUMMARY = ("run_lookback_days", "playbooks_run_history_unread", "live_playbooks_run_history_unread",
+               "live_playbooks_last_run_succeeded", "live_playbooks_last_run_failed", "live_playbooks_without_runs",
+               "live_playbook_failed_runs")
+
+
+def test_sentinel_playbooks_runs_are_filtered_on_the_lookback(azure, tmp_path, monkeypatch):
+    monkeypatch.setenv("SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS", "3")
+    filters = []
+    get = azure.get
+    azure.get = lambda url, params=None, **kw: (filters.append((params or {}).get("$filter")), get(url, params, **kw))[1]
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    since = (NOW - timedelta(days=3)).strftime("%Y-%m-%dT")
+    assert any(f and f.startswith(f"StartTime ge {since}") and f.endswith("Z") for f in filters)
+    assert code == 0 and ev["summary"]["run_lookback_days"] == 3
+    assert pb["runs_in_lookback"] == 1 and pb["last_success_time"] is None and pb["failed_runs"] == 1
+
+
+@pytest.mark.parametrize("raw, days, warned", [("30", 30, False), ("90", 90, False), ("365", 90, True), ("0", 90, False)])
+def test_sentinel_playbooks_lookback_is_capped_at_the_run_history_retention(monkeypatch, caplog, raw, days, warned):
+    monkeypatch.setenv("SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS", raw)
+    with caplog.at_level(logging.WARNING):
+        assert MODS["sentinel_playbooks"].lookback_days() == days
+    assert ("outside 1-90" in caplog.text) is warned
+
+
+def test_sentinel_playbooks_capped_lookback_is_what_the_evidence_reports(azure, tmp_path, monkeypatch):
+    monkeypatch.setenv("SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS", "365")
+    filters = []
+    get = azure.get
+    azure.get = lambda url, params=None, **kw: (filters.append((params or {}).get("$filter")), get(url, params, **kw))[1]
+    code, ev = run("sentinel_playbooks", tmp_path)
+    since = (NOW - timedelta(days=90)).strftime("%Y-%m-%dT")
+    assert code == 0 and ev["summary"]["run_lookback_days"] == 90
+    assert any(f and f.startswith(f"StartTime ge {since}") for f in filters)
+
+
+def test_sentinel_playbooks_live_playbook_without_runs(azure, tmp_path):
+    azure.arm[(f"{PB}/runs", "2019-05-01")] = {"value": []}
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    s = ev["summary"]
+    assert code == 0 and pb["runs_in_lookback"] == 0 and pb["runs_by_status"] == {} and pb["recent_runs"] == []
+    assert pb["last_run_status"] is None and pb["last_success_time"] is None and pb["failed_runs"] == 0
+    assert s["live_playbooks_without_runs"] == 1 and s["live_playbooks_last_run_failed"] == 0
+    assert s["live_playbook_failed_runs"] == 0 and s["live_playbooks_last_run_succeeded"] == 0
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_sentinel_playbooks_unreadable_runs_read_null(azure, tmp_path, status):
+    azure.arm[(f"{PB}/runs", "2019-05-01")] = Resp(status, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    s = ev["summary"]
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    assert pb["run_history_read"] is False and pb["runs_in_lookback"] is None and pb["failed_runs"] is None
+    assert pb["recent_runs"] is None and pb["last_run_status"] is None and pb["runs_by_status"] is None
+    assert s["playbooks_run_history_unread"] == [PB] and s["live_playbooks_run_history_unread"] == 1
+    assert s["live_playbooks_last_run_failed"] is None and s["live_playbooks_last_run_succeeded"] is None
+    assert s["live_playbooks_without_runs"] is None and s["live_playbook_failed_runs"] is None
+    assert PB in ev["results"]["notes"][0] and "run history" in ev["results"]["notes"][0]
+    # What the playbook does is still reported.
+    assert s["live_account_containment_playbooks"] == 1
+
+
+def test_sentinel_playbooks_other_run_read_errors_fail(azure, tmp_path):
+    azure.arm[(f"{PB}/runs", "2019-05-01")] = Resp(400, {"error": {"code": "BadRequest", "message": "bad filter"}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and ev["results"]["notes"] == []
+    assert pb["run_history_read"] is False and ev["summary"]["live_playbook_failed_runs"] is None
+
+
+def test_sentinel_playbooks_disabled_playbook_runs_are_not_live(azure, tmp_path):
+    PLAYBOOK["properties"]["state"] = "Disabled"
+    try:
+        code, ev = run("sentinel_playbooks", tmp_path)
+    finally:
+        PLAYBOOK["properties"]["state"] = "Enabled"
+    (pb,) = ev["results"]["playbooks"]
+    s = ev["summary"]
+    assert code == 0 and pb["failed_runs"] == 1 and s["run_by_active_automation_rule"] == 0
+    assert s["live_playbook_failed_runs"] == 0 and s["live_playbooks_last_run_failed"] == 0
+
+
+def test_sentinel_playbooks_runs_path():
+    mod = MODS["sentinel_playbooks"]
+    assert mod.runs_path(PB) == (f"{PB}/runs", "2019-05-01")
+    assert mod.runs_path(STD) == (
+        f"{RG}/providers/Microsoft.Web/sites/la-std/hostruntime/runtime/webhooks/workflow/api/management/workflows/contain/runs",
+        "2024-04-01")
 
 
 def test_entra_risky_users(azure, tmp_path):
@@ -2603,9 +2768,15 @@ def _rule_runs(azure, playbook_id):
         {"order": 2, "actionType": "RunPlaybook", "actionConfiguration": {"logicAppResourceId": playbook_id}})
 
 
+STD_RUNS = f"{RG}/providers/Microsoft.Web/sites/la-std/hostruntime/runtime/webhooks/workflow/api/management/workflows/contain/runs"
+
+
 def _run_standard_playbook(azure, envelope):
     _rule_runs(azure, STD)
     azure.arm[(STD, "2024-04-01")] = envelope
+    azure.arm[(STD_RUNS, "2024-04-01")] = {"value": [
+        wf_run("08584", "Succeeded", NOW - timedelta(hours=3), trigger="incident"),
+        wf_run("08583", "TimedOut", NOW - timedelta(days=1), trigger="incident")]}
 
 
 def test_sentinel_playbooks_standard_workflow(azure, tmp_path):
@@ -2621,6 +2792,9 @@ def test_sentinel_playbooks_standard_workflow(azure, tmp_path):
     assert code == 0 and std["plan"] == "standard" and std["definition_read"] and std["enabled"]
     assert std["triggers"][0]["kind"] == "incident" and std["capabilities"]["account_containment"]
     assert ("GET", STD, "2024-04-01") in azure.calls and ev["summary"]["standard_playbooks"] == 1
+    assert ("GET", STD_RUNS, "2024-04-01") in azure.calls and std["run_history_read"]
+    assert std["last_run_status"] == "Succeeded" and std["failed_runs"] == 1 and std["recent_runs"][0]["trigger"] == "incident"
+    assert ev["summary"]["live_playbook_failed_runs"] == 2 and ev["summary"]["live_playbooks_last_run_failed"] == 1
 
 
 def test_sentinel_playbooks_standard_workflow_without_definition(azure, tmp_path):

@@ -89,6 +89,13 @@ class FormModal(ButtonRowNav, ModalScreen[dict]):
 
     @on(Button.Pressed, "#save")
     def action_save(self) -> None:
+        for row in self.query(FieldRow):
+            problems = row.problems()
+            if problems:
+                key = row.spec.get("label") or row.spec["key"]
+                self.notify(f"{key}: {problems[0]}", severity="error")
+                row.query_one("#field-input").focus()
+                return
         result: Dict[str, dict] = {}
         for row in self.query(FieldRow):
             value = row.get_value()

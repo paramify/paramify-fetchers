@@ -162,8 +162,8 @@ def test_a_failed_save_keeps_the_edit_in_memory_and_says_so(tmp_path, monkeypatc
 def test_entry_editor_keeps_an_env_reference_in_a_string_field(tmp_path, run_tui):
     m = api.init_manifest()
     api.set_output_dir(m, str(tmp_path / "evidence"))
-    api.add_entry(m, "azure_front_door_origins")
-    api.set_fetcher_config(m, "azure_front_door_origins", "scope_exclusions", "${env:SCOPE_PATTERNS}")
+    api.add_entry(m, "azure_storage_encryption_status")
+    api.set_fetcher_config(m, "azure_storage_encryption_status", "owner_tag_keys", "${env:OWNER_KEYS}")
     path = tmp_path / "entry.yaml"
     api.dump_manifest(m, path, REPO_ROOT)
 
@@ -177,4 +177,27 @@ def test_entry_editor_keeps_an_env_reference_in_a_string_field(tmp_path, run_tui
 
     run_tui(body, path)
     [entry] = _on_disk(path)["run"]["fetchers"]
-    assert entry["config"]["scope_exclusions"] == "${env:SCOPE_PATTERNS}"
+    assert entry["config"]["owner_tag_keys"] == "${env:OWNER_KEYS}"
+
+
+def test_entry_editor_leaves_a_pattern_list_and_its_reasons_alone(tmp_path):
+    patterns = [{"pattern": "route:qa-*", "reason": "QA routes"}, "qa.example.com"]
+    m = api.init_manifest()
+    api.set_output_dir(m, str(tmp_path / "evidence"))
+    api.add_entry(m, "azure_front_door_origins")
+    api.set_fetcher_config(m, "azure_front_door_origins", "scope_exclusions", patterns)
+    api.set_fetcher_config(m, "azure_front_door_origins", "metrics_lookback_days", 7)
+    path = tmp_path / "entry.yaml"
+    api.dump_manifest(m, path, REPO_ROOT)
+
+    async def body(app, pilot):
+        await _manifest_tab(pilot)
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, FormModal)
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+    _run(body, path)
+    [entry] = _on_disk(path)["run"]["fetchers"]
+    assert entry["config"] == {"scope_exclusions": patterns, "metrics_lookback_days": 7}
