@@ -1706,6 +1706,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_app_service_backups` 0.3.1: an app with no restore point misses the RPO.**
+  On a plan that supports backups, an app with no restore point at all, when both the
+  restore-point read and the backup-history read succeeded, now reads
+  `meets_recovery_point_objective: false` and counts in
+  `apps_missing_recovery_point_objective`, not in `apps_recovery_point_objective_unknown`.
+  It stays null when either read failed, or when there is one restore point inside the RPO.
+
 - **`azure_devops_service_connections` 0.1.1: variable groups list their projects.**
   The per-project variable group list carries no `variableGroupProjectReferences`, so
   every group's `projects` came back empty. The fetcher now reads each newly seen group
