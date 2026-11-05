@@ -29,19 +29,16 @@ from azure_common import (  # noqa: E402
     vnet_id_of,
     write_evidence,
 )
+from ddos_coverage import (  # noqa: E402
+    EFFECTIVE_PROTECTION,
+    attachment,
+    effective_protection,
+    vnet_by_resource,
+    vnet_has_plan,
+)
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_ddos_protection")
-
-ATTACHMENT_TYPES = {
-    "networkinterfaces": "network_interface",
-    "loadbalancers": "load_balancer",
-    "bastionhosts": "bastion_host",
-    "azurefirewalls": "azure_firewall",
-    "virtualnetworkgateways": "virtual_network_gateway",
-    "applicationgateways": "application_gateway",
-}
-EFFECTIVE_PROTECTION = ("network_protection", "ip_protection", "none", "disabled", "not_supported", "unknown")
 
 
 # --- projection: the only code here that touches an azure-mgmt model ---
@@ -119,74 +116,6 @@ def project_load_balancer(lb) -> dict:
 
 
 # --- pure transforms (flat snake_case dicts in, evidence records out) ---
-
-def resource_of(child_id):
-    """(attachment type, owning resource id) for an ARM child id such as an IP configuration."""
-    parts = str(child_id or "").split("/")
-    lowered = [p.lower() for p in parts]
-    if "providers" not in lowered:
-        return None, None
-    i = lowered.index("providers")
-    if len(parts) < i + 4:
-        return None, None
-    return ATTACHMENT_TYPES.get(lowered[i + 2], "other"), "/".join(parts[: i + 4])
-
-
-def attachment(ip: dict):
-    if ip.get("ip_configuration_id"):
-        return resource_of(ip["ip_configuration_id"])
-    if ip.get("nat_gateway_id"):
-        return "nat_gateway", ip["nat_gateway_id"]
-    return "unattached", None
-
-
-def _nic_of(config_id) -> str:
-    """The NIC id of a NIC IP configuration id (VM or scale-set instance)."""
-    key = arm_id_key(config_id)
-    return key.rsplit("/ipconfigurations/", 1)[0] if "/networkinterfaces/" in key else ""
-
-
-def vnet_by_resource(vnets: list[dict], nics: list[dict], load_balancers: list[dict] = ()) -> dict:
-    """Lower-cased resource id -> lower-cased VNet id, from subnet back-references, NIC subnets, then a load
-    balancer's backend pools (whose IP configurations or addresses must all sit in one VNet)."""
-    index, by_config = {}, {}
-    for vnet in vnets:
-        for config_id in vnet.get("subnet_ip_configuration_ids") or []:
-            by_config[arm_id_key(config_id)] = arm_id_key(vnet["id"])
-            _, resource_id = resource_of(config_id)
-            if resource_id:
-                index.setdefault(arm_id_key(resource_id), arm_id_key(vnet["id"]))
-    for nic in nics:
-        vnet_ids = {vnet_id_of(s) for s in nic.get("subnet_ids") or [] if vnet_id_of(s)}
-        if len(vnet_ids) == 1:
-            index.setdefault(arm_id_key(nic["id"]), vnet_ids.pop())
-    for lb in load_balancers:
-        backends = {arm_id_key(v) for v in lb.get("backend_virtual_network_ids") or []}
-        for config_id in lb.get("backend_ip_configuration_ids") or []:
-            backends.add(by_config.get(arm_id_key(config_id)) or index.get(_nic_of(config_id)))
-        if len(backends) == 1 and None not in backends:
-            index.setdefault(arm_id_key(lb["id"]), backends.pop())
-    return index
-
-
-def vnet_has_plan(vnet) -> bool:
-    return bool(vnet and vnet.get("enable_ddos_protection") and vnet.get("ddos_protection_plan_id"))
-
-
-def effective_protection(ip: dict, attached_to: str, vnet) -> str:
-    if attached_to == "nat_gateway":
-        return "not_supported"
-    mode = ip.get("protection_mode") or "VirtualNetworkInherited"
-    if mode == "Enabled":
-        return "ip_protection"
-    if mode == "Disabled":
-        return "disabled"
-    if attached_to == "unattached":
-        return "none"
-    if vnet is None:
-        return "unknown"
-    return "network_protection" if vnet_has_plan(vnet) else "none"
-
 
 def public_ip_record(ip: dict, resource_vnets: dict, vnets_by_id: dict) -> dict:
     attached_to, resource_id = attachment(ip)

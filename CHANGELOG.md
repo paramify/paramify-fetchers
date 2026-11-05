@@ -1096,6 +1096,33 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_waf_ddos_activity` 0.2.0: DDoS figures include IPs protected by a network-level DDoS plan.**
+  The existing figures `protected_ips_with_attack_alert_reaching_receiver`,
+  `protected_ips_without_attack_alert`, `public_ips_attacked` and
+  `ddos_mitigations_started` now include public IPs that a virtual network's DDoS
+  protection plan (Network Protection) covers. So do the per-IP `attack_alert_can_fire`,
+  `attack_hours` and `mitigations_*`. Before, all of these counted only IPs with IP
+  Protection.
+  - An attached public IP that inherits its protection is now placed in its virtual
+    network, the same way `azure_ddos_protection` places it: the network of its NIC,
+    gateway, firewall or Bastion host, or of a load balancer's backend pool.
+  - Both SKUs give a public IP the same `IfUnderDDoSAttack` metric, the same DDoS
+    log categories and the same mitigations
+    (https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-sku-comparison,
+    https://learn.microsoft.com/en-us/azure/ddos-protection/monitor-ddos-protection-reference).
+  - Each IP gets `effective_protection`, plus `virtual_network_id` and
+    `virtual_network_ddos_protection_plan_id` when it inherits.
+  - The summary adds `public_ips_with_network_protection`, `protected_public_ips`
+    and `public_ips_protection_unknown`. The first two are null when the virtual
+    network, NIC or load balancer list can't be read.
+  - `protected_ips_without_attack_alert`, `public_ips_attacked` and
+    `ddos_mitigations_started` are null when any attached IP's protection is
+    unknown, because that IP may be protected, attacked or mitigated.
+  - An IP on a NAT gateway no longer counts in `public_ips_with_ip_protection`,
+    because neither SKU covers it.
+  - The virtual network, NIC and load balancer lists are read only when some
+    attached IP inherits its protection. They need no access beyond Reader.
+
 - **`azure_policy_compliance` 0.5.0: in-scope compliant counts under
   resource_exclusions.** With patterns set, the fetcher reads every latest
   (resource, policy) state grouped on the server (`groupby((ResourceId,
