@@ -248,7 +248,8 @@ def service_principal_list_query(settings: Dict[str, Any]) -> str:
         "| summarize SignIns = count(), Succeeded = countif(Ok), Failed = countif(not(Ok)), LastSignIn = max(TimeGenerated) "
         "by ServicePrincipalId = tostring(ServicePrincipalId), ServicePrincipalName = tostring(ServicePrincipalName), "
         "AppId = tolower(tostring(AppId)) "
-        "| order by SignIns desc, ServicePrincipalId asc"
+        # One row more than the cap, so a cut list is detected without reading the whole table.
+        f"| order by SignIns desc, ServicePrincipalId asc | take {settings['max_rows'] + 1}"
     )
 
 
