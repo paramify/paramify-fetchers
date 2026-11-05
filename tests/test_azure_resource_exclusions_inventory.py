@@ -477,6 +477,8 @@ def _policy_client(calls, refuse=(), fail=()):
                 raise RuntimeError("request timed out")
             groups = [] if "latest_empty" in fail else [_latest(*g) for g in LATEST_GROUPS]
             if apply.endswith("/aggregate($count as n)"):
+                if "latest_count" in fail:
+                    raise RuntimeError("request timed out")
                 if "latest_uncounted" in fail or "latest_empty" in fail:
                     return []
                 if "latest_over_cap" in fail:
@@ -700,7 +702,8 @@ def test_policy_recount_survives_a_states_read_that_fails_partway(monkeypatch, t
 
 def test_policy_recounts_are_null_when_the_latest_pairs_are_not_read_in_full(monkeypatch, tmp_path):
     for fail, exit_code, status in (("latest", 1, "failed"), ("latest_short", 0, "truncated"),
-                                    ("latest_over_cap", 0, "truncated"), ("latest_uncounted", 0, "uncounted")):
+                                    ("latest_over_cap", 0, "truncated"), ("latest_uncounted", 0, "uncounted"),
+                                    ("latest_count", 1, "failed")):
         code, evidence, calls = run_policy(monkeypatch, tmp_path, PATTERNS, fail=(fail,))
         summary, results = evidence["summary"], evidence["results"]
         assert (code, summary["in_scope_states_status"]) == (exit_code, status), fail

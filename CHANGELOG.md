@@ -969,7 +969,9 @@ schemas and the `paramify` CLI — not the internal code.
   `in_scope_states_status` says how it went (`read`, `truncated`, `uncounted` or
   `failed`; null without patterns). A count over the 50,000 cap skips the read, and
   an empty count with no groups reads as nothing evaluated. A pattern that matches
-  only compliant resources now counts as matched. Without patterns nothing changes and the read is not made.
+  only compliant resources now counts as matched. Without patterns the read is not
+  made and the counts are the service's, as before; the only change is one more
+  summary line, `"in_scope_states_status": null`.
 
 - **`azure_backup_recovery_status` 0.4.0: restore jobs.** Each vault now lists
   its restore jobs (`restore_jobs`) over `restore_window_days` (365 by default
