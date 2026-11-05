@@ -291,6 +291,26 @@ def test_sample_status_and_read_sample(two_fetchers):
         api.read_sample(root, "empty_fetcher", fetchers=fx)
 
 
+def test_samples_show_completes_only_fetchers_with_a_sample(two_fetchers, monkeypatch):
+    from framework import cli
+    root, fx = two_fetchers
+    api.backfill_samples(root, root / "evidence", fetchers=fx)
+    status = api.sample_status
+    monkeypatch.setattr(api, "find_repo_root", lambda: root)
+    monkeypatch.setattr(api, "sample_status", lambda r: status(r, fetchers=fx))
+    assert cli._complete_sampled_fetcher("") == [("good_fetcher", "v0.1.0 live 2026-09-28")]
+    assert cli._complete_sampled_fetcher("leaky") == []
+
+
+def test_samples_show_completion_is_empty_outside_the_repo(monkeypatch):
+    from framework import cli
+
+    def nowhere():
+        raise RuntimeError("Could not locate repo root")
+    monkeypatch.setattr(api, "find_repo_root", nowhere)
+    assert cli._complete_sampled_fetcher("aws") == []
+
+
 # --------------------------------------------------------------------------- #
 # The committed samples
 # --------------------------------------------------------------------------- #

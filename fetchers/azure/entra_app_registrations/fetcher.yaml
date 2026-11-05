@@ -61,6 +61,6 @@ evidence_set:
   reference_id: EVD-AZURE-ENTRA-APP-CREDS
   name: Microsoft Entra ID App Registration Credentials
   instructions: >
-    Script: fetcher.py. Microsoft Graph calls: GET /applications with
+    Script: azure/entra_app_registrations/fetcher.py. Microsoft Graph calls: GET /applications with
     $select=id,appId,displayName,createdDateTime,signInAudience,passwordCredentials,keyCredentials;
     GET /organization. Paged via @odata.nextLink.

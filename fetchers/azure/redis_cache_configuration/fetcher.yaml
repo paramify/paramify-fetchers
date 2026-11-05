@@ -1,5 +1,5 @@
 name: azure_redis_cache_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   For each classic Azure Cache for Redis (Microsoft.Cache/redis) cache in the subscription,
   reports the transport and access posture: the minimum TLS version and whether the
@@ -13,6 +13,29 @@ description: >
   azure_managed_redis_configuration. Access keys and storage connection strings are never
   requested or recorded.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching cache is listed under excluded with the pattern and left
+      out of every count and verdict; its firewall rules, access
+      policies, patch schedule, linked servers and diagnostic settings
+      are not read. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -55,7 +78,7 @@ evidence_set:
   reference_id: EVD-AZURE-REDIS-CACHE-CONFIG
   name: Azure Cache for Redis Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-redis RedisManagementClient):
+    Script: azure/redis_cache_configuration/fetcher.py. Azure SDK calls (azure-mgmt-redis RedisManagementClient):
     redis.list_by_subscription() for every cache, then per cache firewall_rules.list,
     access_policy.list, access_policy_assignment.list, patch_schedules.list_by_redis_resource and
     linked_server.list (resource_group, cache), plus azure-mgmt-monitor
@@ -86,3 +109,13 @@ evidence_set:
     leaves its field null (unknown, never compliant), lists the cache under
     summary.exceptions.unknown_state, and fails the run.
     summary.tls_only_caches over summary.total_caches is the TLS-only coverage.
+
+    Caches the resource_exclusions patterns take out are listed under results.excluded instead, each
+    with the pattern that matched; they get no per-cache reads and every count, percentage and
+    exceptions list covers only the caches that stayed.
+
+    Which resources are left out of scope?
+      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every cache is in scope
+      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no cache, such as a mistyped name
+      - excluded_redis_caches — Number of caches left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them; null if the list couldn't be read
+      - in_scope_redis_caches — Number of caches read and in scope; null if the list couldn't be read, and 0 means there are none or the patterns took out every cache, which a check can catch by requiring more than 0

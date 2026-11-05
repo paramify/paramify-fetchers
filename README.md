@@ -54,6 +54,8 @@ If you have a question about this repo, ask DeepWiki. It answers in plain Englis
   <tr>
     <td align="center" width="128"><a href="fetchers/web/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/web-dark.svg"><img src="fetchers/logos/web.svg" alt="Web" width="48" height="48"></picture></a><br><sub>Web</sub></td>
     <td align="center" width="128"><a href="fetchers/zendesk/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/zendesk-dark.svg"><img src="fetchers/logos/zendesk.svg" alt="Zendesk" width="48" height="48"></picture></a><br><sub>Zendesk</sub></td>
+    <td align="center" width="128"><a href="fetchers/oci/"><img src="fetchers/logos/oracle.svg" alt="Oracle Cloud" width="48" height="48"></a><br><sub>Oracle Cloud</sub></td>
+    <td align="center" width="128"><a href="fetchers/fedramp_marketplace/"><img src="fetchers/logos/fedramp.png" alt="FedRAMP Marketplace" width="48" height="48"></a><br><sub>FedRAMP Marketplace</sub></td>
   </tr>
 </table>
 
@@ -119,7 +121,7 @@ pip install -e '.[all]'      # '[all]' bundles the TUI; use `pip install -e .` f
 Each platform has its own requirements:
 
 - Most fetchers call a CLI, such as `aws`, `jq`, `curl` or `kubectl`. Install only the CLIs for the platforms that you use.
-- Azure and GCP use the official SDKs, not a CLI. Install them with `pip install -e '.[azure]'` or `pip install -e '.[gcp]'`. These extras are large, so `[all]` does not include them. Azure signs in with `DefaultAzureCredential` and GCP with Application Default Credentials, so neither one needs a key file.
+- Azure, GCP and Oracle Cloud use the official SDKs, not a CLI. Install them with `pip install -e '.[azure]'`, `pip install -e '.[gcp]'` or `pip install -e '.[oci]'`. These extras are only needed for those platforms, so `[all]` does not include them. Azure signs in with `DefaultAzureCredential` and GCP with Application Default Credentials, so neither one needs a key file. OCI uses an API signing key that the runner injects as a secret, or an instance or resource principal where it is deployed; see [`fetchers/oci/README.md`](fetchers/oci/README.md).
 - Most platforms have a credential setup guide at `fetchers/<category>/README.md`. Select a logo under [Supported services](#supported-services) to open its folder.
 
 ---
@@ -172,6 +174,7 @@ To ask for a new platform or fetcher, post in [Fetcher requests](https://github.
   for evidence and [`docs/pipelines_guide.md`](docs/pipelines_guide.md) for scan
   reports.
 - **Write a fetcher:** read [`docs/authoring_fetcher_guide.md`](docs/authoring_fetcher_guide.md).
+- **Match records across fetchers:** [`docs/comparators_guide.md`](docs/comparators_guide.md) writes a comparator.
 - **How it works:** [`docs/architecture.md`](docs/architecture.md) explains the four parts, the evidence envelope and the repo layout.
 - **FedRAMP KSI coverage:** read [`docs/ksi_mapping.md`](docs/ksi_mapping.md).
 

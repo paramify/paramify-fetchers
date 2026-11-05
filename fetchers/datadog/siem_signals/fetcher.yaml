@@ -28,4 +28,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-SIEM-SIGNALS
   name: Datadog SIEM Signals
-  instructions: 'Calls POST /api/v2/security_monitoring/signals/search with a lookback window. Lookback controlled by DATADOG_SIGNALS_LOOKBACK_DAYS (default 30). Writes JSON signals list.'
+  instructions: 'Script: datadog/siem_signals/fetcher.py. Calls POST /api/v2/security_monitoring/signals/search with a lookback window. Lookback controlled by DATADOG_SIGNALS_LOOKBACK_DAYS (default 30). Writes JSON signals list.'

@@ -32,4 +32,4 @@ ksis:
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-03
   name: Okta Non-User Accounts
-  instructions: 'Script: okta_non_user_accounts_authentication.py. Uses Okta APIs to identify non-user/service accounts using definitive indicators and automation credentials. Output: okta_non_user_accounts_authentication.json'
+  instructions: 'Script: okta/non_user_accounts_authentication/fetcher.py. Uses Okta APIs to identify non-user/service accounts using definitive indicators and automation credentials. Output: okta_non_user_accounts_authentication.json'

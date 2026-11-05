@@ -57,7 +57,7 @@ evidence_set:
   reference_id: EVD-CS-DETECTIONS
   name: CrowdStrike Falcon Detections
   instructions: >-
-    Script: fetcher.py. Authenticates at POST /oauth2/token, queries alert
+    Script: crowdstrike/detections/fetcher.py. Authenticates at POST /oauth2/token, queries alert
     composite IDs via GET /alerts/queries/alerts/v2 filtered to the lookback
     window (integer-offset pagination), and resolves them in batches of 100 via
     POST /alerts/entities/alerts/v2. Summarizes severity, status, MITRE

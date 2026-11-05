@@ -1,0 +1,83 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_detect_new_aws_resource",
+  "fetcher_version": "0.3.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.eventbridge.rules.New-Resource-Launched-Alert-Rule.targets[]",
+      "records": 1,
+      "fields": {
+        "Id": 1,
+        "Arn": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:33Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "aws_config": {
+        "recorders": [],
+        "status": [],
+        "delivery_channels": []
+      },
+      "eventbridge": {
+        "rules": {
+          "New-Resource-Launched-Alert-Rule": {
+            "rule": {
+              "Name": "New-Resource-Launched-Alert-Rule",
+              "Arn": "arn:aws:events:us-east-2:111111111111:rule/New-Resource-Launched-Alert-Rule",
+              "EventPattern": "{\"detail\":{\"state\":[\"pending\"]},\"detail-type\":[\"EC2 Instance State-change Notification\"],\"source\":[\"aws.ec2\"]}",
+              "State": "ENABLED",
+              "Description": "EC2 instance launches",
+              "EventBusName": "default"
+            },
+            "targets": [
+              {
+                "Id": "terraform-d4VTtxnV5qxMVgL4JkmGleP0Z2",
+                "Arn": "arn:aws:sns:us-east-2:111111111111:New_AWS_Resource_Launch_Detected"
+              }
+            ],
+            "schedule": ""
+          }
+        }
+      },
+      "sns": {
+        "topics": {
+          "New_AWS_Resource_Launch_Detected": {
+            "topic": {
+              "TopicArn": "arn:aws:sns:us-east-2:111111111111:New_AWS_Resource_Launch_Detected"
+            },
+            "subscriptions": []
+          }
+        }
+      },
+      "validation_results": {
+        "interval_checks": {
+          "New-Resource-Launched-Alert-Rule": {
+            "status": "NOT_APPLICABLE",
+            "schedule": "",
+            "reason": "Event-driven rule; no monitoring schedule is required."
+          }
+        },
+        "rule_checks": {
+          "New-Resource-Launched-Alert-Rule": {
+            "present": "PASS",
+            "enabled": "PASS",
+            "event_pattern": "PASS",
+            "sns_target": "PASS",
+            "trigger_type": "event"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_cloud_sql_network_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.instances[]",
+      "records": 1,
+      "fields": {
+        "allocated_ip_range": 0,
+        "authorized_network_count": 1,
+        "authorized_networks": 0,
+        "database_flag_count": 1,
+        "database_flags": 0,
+        "database_version": 1,
+        "engine": 1,
+        "instance_type": 1,
+        "ip_address_types": 1,
+        "min_tls_version": 0,
+        "name": 1,
+        "open_authorized_networks": 0,
+        "open_to_internet": 1,
+        "private_ip": 1,
+        "private_ip_only": 1,
+        "private_network": 0,
+        "private_path_for_google_cloud_services": 1,
+        "psc_allowed_consumer_projects": 0,
+        "psc_enabled": 1,
+        "public_ip": 1,
+        "public_ip_enabled": 1,
+        "region": 1,
+        "require_ssl": 1,
+        "security_flags": 1,
+        "server_ca_mode": 1,
+        "ssl_mode": 1,
+        "ssl_required": 1,
+        "state": 1,
+        "unset_security_flags": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:40Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "instances": [
+        {
+          "allocated_ip_range": null,
+          "authorized_network_count": 0,
+          "authorized_networks": [],
+          "database_flag_count": 0,
+          "database_flags": {},
+          "database_version": "MYSQL_8_0",
+          "engine": "MYSQL",
+          "instance_type": "CLOUD_SQL_INSTANCE",
+          "ip_address_types": [
+            "PRIMARY"
+          ],
+          "min_tls_version": null,
+          "name": "example-sql",
+          "open_authorized_networks": [],
+          "open_to_internet": false,
+          "private_ip": false,
+          "private_ip_only": false,
+          "private_network": null,
+          "private_path_for_google_cloud_services": false,
+          "psc_allowed_consumer_projects": [],
+          "psc_enabled": false,
+          "public_ip": true,
+          "public_ip_enabled": true,
+          "region": "us-central1",
+          "require_ssl": true,
+          "security_flags": {
+            "local_infile": null,
+            "skip_show_database": null,
+            "tls_version": null
+          },
+          "server_ca_mode": "GOOGLE_MANAGED_INTERNAL_CA",
+          "ssl_mode": "TRUSTED_CLIENT_CERTIFICATE_REQUIRED",
+          "ssl_required": true,
+          "state": "RUNNABLE",
+          "unset_security_flags": [
+            "local_infile",
+            "skip_show_database",
+            "tls_version"
+          ]
+        }
+      ]
+    },
+    "summary": {
+      "cloud_sql_api_readable": true,
+      "instances_by_engine": {
+        "MYSQL": 1
+      },
+      "instances_open_to_internet": 0,
+      "instances_with_authorized_networks": 0,
+      "instances_with_min_tls_version": 0,
+      "instances_with_unset_security_flags": 1,
+      "private_ip_only_instances": 0,
+      "private_ip_only_percentage": 0,
+      "private_network_instances": 0,
+      "private_path_instances": 0,
+      "psc_instances": 0,
+      "public_ip_instances": 1,
+      "ssl_required_instances": 1,
+      "ssl_required_percentage": 100,
+      "total_instances": 1
+    }
+  }
+}

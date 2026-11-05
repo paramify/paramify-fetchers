@@ -91,7 +91,7 @@ One block remains. Every fetcher carries an `evidence_set` identity — one fetc
 evidence_set:
   reference_id: EVD-TLS-CERTIFICATE-EXPIRY
   name: TLS Certificate Expiry
-  instructions: 'Script: fetcher.py. Opens a verified TLS connection to the
+  instructions: 'Script: tls/certificate_expiry/fetcher.py. Opens a verified TLS connection to the
     configured host and records the peer certificate: subject, issuer,
     validity window, SANs, and computed days remaining.'
 ```

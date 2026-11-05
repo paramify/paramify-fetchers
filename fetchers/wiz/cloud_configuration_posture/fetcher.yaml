@@ -103,7 +103,7 @@ evidence_set:
   reference_id: EVD-WIZ-CLOUD-CONFIG-POSTURE
   name: Wiz Cloud Configuration Posture
   instructions: >-
-    Script: fetcher.py. Read-only service account (scopes
+    Script: wiz/cloud_configuration_posture/fetcher.py. Read-only service account (scopes
     read:cloud_configuration, read:security_frameworks). Resolves the framework
     by name via securityFrameworks, then pages configurationFindings filtered to
     that framework and to PASS/FAIL results. Summarizes pass rate, open failures

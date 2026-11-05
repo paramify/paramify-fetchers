@@ -26,4 +26,4 @@ ksis:
 evidence_set:
   reference_id: EVD-S1-AGENT
   name: SentinelOne Agents
-  instructions: 'Script: agentfetcher.py. Calls /web/api/v2.1/agents (and /web/api/v2.1/agents/count), pages with cursor, collects cluster names and container/pod counts, writes JSON and CSV summary.'
+  instructions: 'Script: sentinelone/agents/fetcher.py. Calls /web/api/v2.1/agents (and /web/api/v2.1/agents/count), pages with cursor, collects cluster names and container/pod counts, writes JSON and CSV summary.'

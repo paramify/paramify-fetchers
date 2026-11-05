@@ -1,0 +1,41 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_neptune_encryption_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 1,
+      "fields": {
+        "name": 1,
+        "arn": 1,
+        "type": 1,
+        "encrypted": 1,
+        "kms_key_id": 1,
+        "engine": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:13:00Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "name": "pft-neptune",
+        "arn": "arn:aws:rds:us-east-2:111111111111:cluster:pft-neptune",
+        "type": "neptune_cluster",
+        "encrypted": true,
+        "kms_key_id": "arn:aws:kms:us-east-2:111111111111:key/00000000-0000-4000-8000-222222222222",
+        "engine": "neptune"
+      }
+    ]
+  }
+}

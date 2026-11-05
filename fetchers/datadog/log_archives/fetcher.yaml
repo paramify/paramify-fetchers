@@ -27,4 +27,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-LOG-ARCHIVES
   name: Datadog Log Archives
-  instructions: 'Calls GET /api/v2/logs/config/archives. Extracts archive name, destination type, state, and filter query. Writes JSON archive config list.'
+  instructions: 'Script: datadog/log_archives/fetcher.py. Calls GET /api/v2/logs/config/archives. Extracts archive name, destination type, state, and filter query. Writes JSON archive config list.'

@@ -27,4 +27,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-AGENT-HOSTS
   name: Datadog Agent Hosts
-  instructions: 'Calls GET /api/v1/hosts with pagination (start/count). Extracts host name, platform, agent version, cloud provider, aliases, and up/muted state. Writes JSON inventory.'
+  instructions: 'Script: datadog/agent_hosts/fetcher.py. Calls GET /api/v1/hosts with pagination (start/count). Extracts host name, platform, agent version, cloud provider, aliases, and up/muted state. Writes JSON inventory.'

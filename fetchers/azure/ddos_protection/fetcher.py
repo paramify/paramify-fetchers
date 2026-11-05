@@ -29,6 +29,7 @@ from azure_common import (  # noqa: E402
     vnet_id_of,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_ddos_protection")
 
@@ -272,10 +273,24 @@ def build_records(
     return by_id(plans), by_id(vnets), by_id(ips)
 
 
+def build_scoped(raw_plans, raw_vnets, raw_ips, raw_nics, raw_lbs, exclusions: ResourceExclusions):
+    """Verdicts are worked out against every plan, VNet and public IP; excluded ones then leave the lists and counts."""
+    plans, vnets, ips = build_records(raw_plans, raw_vnets, raw_ips, raw_nics, raw_lbs)
+    plans, out_plans = exclusions.split(plans, "ddos_protection_plan", resource_group=lambda r: None)
+    ips, out_ips = exclusions.split(ips, "public_ip", resource_group=lambda r: None)
+    in_vnets, out_vnets = exclusions.split(vnets, "virtual_network", resource_group=lambda r: None)
+    # A VNet's attached-IP counts cover only the in-scope IPs; each IP's own protection verdict is unchanged.
+    plan_ids = {arm_id_key(p["id"]) for p in raw_plans}
+    by_id = {arm_id_key(v["id"]): v for v in raw_vnets}
+    vnets = [virtual_network_record(by_id[arm_id_key(v["id"])], plan_ids, ips) for v in in_vnets]
+    return plans, vnets, ips, out_plans + out_vnets + out_ips
+
+
 # --- collection (lazy azure imports) ---
 
 def collect(subscription_id, cred, collector: Collector):
-    """DDoS protection plans, VNets with their subnets' back-references, public IPs, NICs and load balancers."""
+    """DDoS protection plans, VNets with their subnets' back-references, public IPs, NICs and load balancers; the
+    first three are None when their list wasn't read."""
     from azure.mgmt.network import NetworkManagementClient
 
     client = collector.guard(
@@ -285,22 +300,19 @@ def collect(subscription_id, cred, collector: Collector):
         ),
     )
     if client is None:
-        return [], [], [], [], []
+        return None, None, None, [], []
 
     plans = collector.guard(
         "network.ddos_protection_plans.list",
         lambda: [project_plan(p) for p in client.ddos_protection_plans.list()],
-        default=[],
     )
     vnets = collector.guard(
         "network.virtual_networks.list_all",
         lambda: [project_virtual_network(v) for v in client.virtual_networks.list_all()],
-        default=[],
     )
     ips = collector.guard(
         "network.public_ip_addresses.list_all",
         lambda: [project_public_ip(i) for i in client.public_ip_addresses.list_all()],
-        default=[],
     )
     nics = collector.guard(
         "network.network_interfaces.list_all",
@@ -330,7 +342,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    raw = ([], [], [], [], [])
+    raw: tuple = (None, None, None, [], [])
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Network")
@@ -349,7 +361,12 @@ def main() -> int:
             ),
         )
 
-    plans, vnets, ips = build_records(*raw)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    read = {"ddos_protection_plans": raw[0] is not None, "virtual_networks": raw[1] is not None,
+            "public_ips": raw[2] is not None}
+    plans, vnets, ips, excluded = build_scoped(*(r or [] for r in raw), exclusions)
+    exclusions.warn_unmatched(logger)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -359,8 +376,15 @@ def main() -> int:
             "virtual_networks": vnets,
             "public_ip_addresses": ips,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(plans, vnets, ips), "provider_registration_status": registration},
+        summary={
+            **summarize(plans, vnets, ips),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("ddos_protection_plan", "virtual_network", "public_ip"), {
+                name: len(rows) if read[name] else None for name, rows in
+                (("ddos_protection_plans", plans), ("virtual_networks", vnets), ("public_ips", ips))}),
+        },
     )
 
     filename = f"azure_ddos_protection_{sanitize_for_filename(subscription_id or 'unknown')}.json"

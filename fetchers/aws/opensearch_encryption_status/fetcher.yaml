@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-OPENSEARCH-ENC
   name: OpenSearch Encryption
-  instructions: 'Commands executed: aws opensearch list-domain-names, aws opensearch describe-domains (up to five domains per call). Reports encryption-at-rest, node-to-node encryption, and enforce-HTTPS per domain.'
+  instructions: 'Script: aws/opensearch_encryption_status/fetcher.sh. Commands executed: aws opensearch list-domain-names, aws opensearch describe-domains (up to five domains per call). Reports encryption-at-rest, node-to-node encryption, and enforce-HTTPS per domain.'

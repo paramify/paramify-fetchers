@@ -1,0 +1,37 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "demo_hello",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-18",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 2,
+      "fields": {
+        "policy": 2,
+        "enabled": 2,
+        "applies_to": 2,
+        "enrolled_users": 1,
+        "total_users": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "source": "demo",
+      "note": "Synthetic evidence — not collected from any real system.",
+      "generated_at": "2026-09-18T20:37:33.244748+00:00"
+    },
+    "results": [
+      {
+        "policy": "require-phishing-resistant-mfa",
+        "enabled": true,
+        "applies_to": "all-users",
+        "enrolled_users": 42,
+        "total_users": 42
+      }
+    ]
+  }
+}

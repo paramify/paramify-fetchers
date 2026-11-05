@@ -41,7 +41,7 @@ evidence_set:
   reference_id: EVD-CS-PREVENTION-POLICIES
   name: CrowdStrike Prevention Policies
   instructions: >-
-    Script: fetcher.py. Authenticates at POST /oauth2/token and pages
+    Script: crowdstrike/prevention_policies/fetcher.py. Authenticates at POST /oauth2/token and pages
     GET /policy/combined/prevention/v1 (integer-offset pagination), which
     returns each policy with its prevention_settings tree and assigned host
     groups. Summarizes enabled/disabled policies, platform coverage, unassigned

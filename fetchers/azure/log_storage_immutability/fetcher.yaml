@@ -1,5 +1,5 @@
 name: azure_log_storage_immutability
-version: 0.1.0
+version: 0.2.0
 description: >
   Whether archived logs in Azure Storage can be altered or deleted. In every
   storage account in the subscription, finds the blob containers Azure Monitor
@@ -10,6 +10,16 @@ description: >
   account also reports its blob soft-delete window and versioning. Per
   subscription: containers that are locked, unlocked only, on legal hold, or
   unprotected, and the shortest retention.
+  Storage accounts and log containers the resource_exclusions patterns take out
+  are listed under excluded instead, each with the pattern that matched, and
+  every count covers only what stays in scope (storage_accounts_scanned counts
+  in-scope accounts). The summary echoes resource_exclusion_patterns, lists
+  resource_exclusion_patterns_unmatched (patterns that matched no storage
+  account or log container, such as a mistyped name), and counts
+  excluded_storage_accounts, excluded_containers, in_scope_storage_accounts and
+  in_scope_containers (in-scope log containers; 0 accounts when none was found
+  or the patterns took out every one, which a check can catch by requiring more
+  than 0; all four are null when the account list couldn't be read).
 category: azure
 
 supports_targets: true
@@ -38,6 +48,30 @@ target_schema:
     env: AZURE_ENVIRONMENT
     description: Deployment environment label (e.g. prod) written into the evidence metadata.
 
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching storage account is listed under excluded with the pattern and
+      left out of every count; its containers and blob service are not read. An
+      id: pattern naming a log container (the account's id, then
+      /blobServices/default/containers/<name>) takes just that container out of
+      an in-scope account, and an account left with no in-scope log container is
+      not listed. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
+
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
 ksis:
@@ -47,7 +81,7 @@ evidence_set:
   reference_id: EVD-AZURE-LOG-STORAGE-IMMUTABILITY
   name: Azure Log Storage Immutability
   instructions: >
-    Script: fetcher.py. ARM REST, Microsoft.Storage api-version 2023-05-01:
+    Script: azure/log_storage_immutability/fetcher.py. ARM REST, Microsoft.Storage api-version 2023-05-01:
     storageAccounts, each account's blobServices/default/containers and
     blobServices/default. Log containers are found by the names Azure Monitor
     creates (insights-logs-, insights-activity-logs, insights-metrics-, am-).

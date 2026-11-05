@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CLOUDFRONT-SECURITY
   name: AWS CloudFront Distribution Security
-  instructions: 'Script: fetcher.sh. Commands executed: aws cloudfront list-distributions, aws cloudfront get-distribution-config.'
+  instructions: 'Script: aws/cloudfront_distribution_security/fetcher.sh. Commands executed: aws cloudfront list-distributions, aws cloudfront get-distribution-config.'

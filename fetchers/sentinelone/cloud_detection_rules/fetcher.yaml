@@ -25,4 +25,4 @@ ksis:
 evidence_set:
   reference_id: EVD-S1-CLOUD-RULE
   name: SentinelOne Cloud Detection Rules
-  instructions: 'Script: clouddetectionrules.py. Calls /web/api/v2.1/cloud-detection/rules with cursor pagination, extracts lastAlertTime and updatedAt fields, writes JSON and CSV summary.'
+  instructions: 'Script: sentinelone/cloud_detection_rules/fetcher.py. Calls /web/api/v2.1/cloud-detection/rules with cursor pagination, extracts lastAlertTime and updatedAt fields, writes JSON and CSV summary.'

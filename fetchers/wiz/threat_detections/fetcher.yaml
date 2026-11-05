@@ -91,7 +91,7 @@ evidence_set:
   reference_id: EVD-WIZ-THREAT-DETECTIONS
   name: Wiz Threat Detections
   instructions: >-
-    Script: fetcher.py. Read-only service account (read:detections,
+    Script: wiz/threat_detections/fetcher.py. Read-only service account (read:detections,
     read:threat_issues; Wiz Defend license). Pages the detections GraphQL
     connection for the look-back window and THREAT_DETECTION issues (open, and
     resolved in the window). Summarizes detections by severity, type, origin and

@@ -46,6 +46,6 @@ evidence_set:
   reference_id: EVD-GCP-BIGQUERY-CONFIG
   name: BigQuery Dataset Configuration
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls: bigquery
+    Script: gcp/bigquery_dataset_configuration/fetcher.py. Google Cloud client library calls: bigquery
     datasets.list(), then datasets.get() per dataset. One evidence file per
     project.

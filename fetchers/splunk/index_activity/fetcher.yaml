@@ -51,7 +51,7 @@ evidence_set:
   reference_id: EVD-SPLUNK-INDEX-ACTIVITY
   name: Splunk Index Activity
   instructions: >-
-    Every index, event and metric, with whether it holds data and when it last
+    Script: splunk/index_activity/fetcher.py. Every index, event and metric, with whether it holds data and when it last
     received any (`last_received`). Event indexes use index time; metric
     indexes, which have none, use the newest data point. `stale` is true when an
     index holds no data, or its last data is more than `max_silence_minutes`

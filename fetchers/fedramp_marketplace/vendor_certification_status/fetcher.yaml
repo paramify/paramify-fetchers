@@ -1,0 +1,70 @@
+name: fedramp_marketplace_vendor_certification_status
+version: 0.1.0
+description: >-
+  Checks the FedRAMP Marketplace certification status of a configured list of
+  third-party vendor packages: listed or delisted, certified / in process /
+  ready / in remediation, certification class and impact level, the latest
+  status change, and the marketplace listing link.
+
+category: fedramp_marketplace
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: fedramp_marketplace_vendor_certification_status.json
+
+secrets: []          # FedRAMP marketplace data is public
+
+config_schema:
+  vendors:
+    type: string
+    required: true
+    env: FEDRAMP_VENDORS
+    description: >-
+      Comma-separated `Vendor Name=PACKAGE_ID` pairs, for example
+      `Okta for Government=FR2131856836, AWS GovCloud=F1603047866`. The name is
+      yours and is carried into the evidence beside FedRAMP's listed name, so a
+      reader knows what each package ID is. The package ID is the one in the
+      listing URL, fedramp.gov/marketplace/products/<PACKAGE_ID>/.
+
+ksis:
+  - KSI-SCR-MIT
+  - KSI-SCR-MON
+
+evidence_set:
+  reference_id: EVD-FEDRAMP-VENDOR-CERTIFICATION
+  name: FedRAMP Vendor Certification Status
+  instructions: >-
+    Script: fedramp_marketplace/vendor_certification_status/fetcher.py. Three unauthenticated GETs of FedRAMP's published
+    marketplace data (github.com/FedRAMP/marketplace-fedramp-gov-data):
+    data.json, fedramp-status-changelog.json and fedramp-frc-cso-pkg.json. Each
+    configured package ID is looked up in all three.
+
+    certification_state is one of certified, in_process, ready,
+    in_remediation, delisted, not_listed or unknown. The changelog's latest transition
+    decides, because fedramp.gov/marketplace follows it: a package whose
+    latest row is "No Status Found (Delisted)" is delisted (its marketplace
+    page returns 404). data.json lags the changelog and omits some live
+    packages, so it decides only for a package the changelog has never
+    recorded, and missing from data.json alone is not a delisting. An ID
+    found in neither file is not_listed. In Remediation is only published in
+    the changelog. status_sources_disagree is true when data.json shows a
+    different state, or omits a package the changelog shows as active. A
+    latest transition to a status this fetcher does not recognise is unknown
+    (counted in vendors_status_unknown) and fails both certification checks. FedRAMP publishes no corrective action
+    plan (CAP) status, so this evidence cannot show one.
+
+    certification_class (A-D) comes from the most authoritative source
+    published, named in class_source: the package's CSO-PKG overview
+    (cso_pkg), else the changelog's cert_class (changelog), else derived from
+    impact level (derived: LI-SaaS B, Low B, Moderate C, High D).
+
+    package_id_resolves is false for an ID FedRAMP does not know and for a
+    delisted ID with a re-issue the changelog shows as certified (FR2023864279 -> FR2023864279A),
+    which is named in suggested_package_ids but never substituted.
+
+    summary carries the counts the validators read; feed.feed_age_hours is the
+    age of the older of the two status files.

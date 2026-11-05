@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-EKS-PRIV
   name: EKS Least Privilege
-  instructions: 'Script: eks_least_privilege.sh. Commands executed: aws eks describe-cluster, aws eks list-pod-identity-associations, aws eks list-addons'
+  instructions: 'Script: aws/eks_least_privilege/fetcher.sh. Commands executed: aws eks describe-cluster, aws eks list-pod-identity-associations, aws eks list-addons'

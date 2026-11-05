@@ -60,7 +60,7 @@ evidence_set:
   reference_id: EVD-AZURE-DEFENDER
   name: Microsoft Defender for Cloud Plans
   instructions: >
-    Script: fetcher.py. Azure SDK call (azure-mgmt-security SecurityCenter):
+    Script: azure/defender_plans/fetcher.py. Azure SDK call (azure-mgmt-security SecurityCenter):
     pricings.list(scope_id="subscriptions/<subscription_id>") (api-version
     2024-01-01) for every Defender for Cloud plan, with its tier, sub-plan,
     enablement time, coverage status, enforcement, deprecation and inheritance.

@@ -13,7 +13,7 @@
 
 name: <category>_<short_name>            # globally unique (e.g. tenable_vuln_scan)
 version: 0.1.0
-description: <what report this pulls, from which tool, covering what scope>
+description: <one sentence of at most 30 words on which report this pulls, from which tool, over what scope>
 category: <category>                      # matches the parent directory
 
 kind: issue_report                        # the one line that makes this a report

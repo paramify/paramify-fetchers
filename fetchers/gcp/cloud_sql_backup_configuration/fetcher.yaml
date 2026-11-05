@@ -45,5 +45,5 @@ evidence_set:
   reference_id: EVD-GCP-CLOUDSQL-BACKUP
   name: Cloud SQL Backup Configuration
   instructions: >
-    Script: fetcher.py. Google Cloud client library call: sqladmin
+    Script: gcp/cloud_sql_backup_configuration/fetcher.py. Google Cloud client library call: sqladmin
     instances.list(). One evidence file per project.

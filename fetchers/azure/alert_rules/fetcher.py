@@ -31,10 +31,12 @@ from alert_routing import (  # noqa: E402
     add_referenced_groups,
     collect_action_groups,
     collect_processing_rules,
+    matching_processing_rules,
     route,
     tri_state,
 )
 from arm_rest import arm_rest_client, list_all  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_alert_rules")
 
@@ -192,6 +194,9 @@ def main() -> int:
     group_records: list[dict] = []
     processing_rules: list[dict] = []
     pages: dict = {}
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
+    excluded_processing: list[dict] = []
     registration = {ns: REGISTRATION_UNKNOWN for ns in ("Microsoft.Insights", "Microsoft.AlertsManagement")}
     if subscription_id and cred is not None:
         for ns in registration:
@@ -220,11 +225,20 @@ def main() -> int:
                     lambda: collect_processing_rules(rest, subscription_id, now),
                 )
                 processing_rules = apr["rules"] if apr else []
+            raw_rules, excluded = exclusions.split(
+                raw_rules, "alert_rule", resource_id=lambda t: t[1].get("id"), location=lambda t: t[1].get("location"),
+                resource_group=lambda t: None, name=lambda t: t[1].get("name"))
+            in_scope_processing, excluded_processing = exclusions.split(processing_rules, "processing_rule")
+            # Other subscriptions' groups are read only for in-scope rules' routes and in-scope processing rules.
+            projected = [PROJECT[t](r) for t, r in raw_rules]
+            referenced = [gid for p in projected for gid in p["action_group_ids"]]
+            referenced += [gid for p in projected for m in matching_processing_rules(p["scopes"], processing_rules)
+                           for gid in m["rule"]["added_action_group_ids"]]
+            referenced += [gid for p in in_scope_processing for gid in p["added_action_group_ids"]]
             by_id = {(g["id"] or "").lower(): g for g in group_records}
-            referenced = [gid for t, r in raw_rules for gid in PROJECT[t](r)["action_group_ids"]]
-            referenced += [gid for p in processing_rules for gid in p["added_action_group_ids"]]
             add_referenced_groups(rest, referenced, by_id, collector)
             rules = [rule_record(t, r, by_id, processing_rules) for t, r in raw_rules]
+            processing_rules = in_scope_processing
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -233,6 +247,12 @@ def main() -> int:
                 "ambient Azure credential that can list subscriptions)"
             ),
         )
+
+    # Routing is resolved against every group and processing rule first, so an in-scope rule keeps its verdict.
+    exclusions.record_invalid(collector)
+    group_records, excluded_groups = exclusions.split(group_records, "action_group")
+    excluded += excluded_groups + excluded_processing
+    exclusions.warn_unmatched(logger)
 
     rules.sort(key=lambda r: (r["id"] or "").lower())
     evidence = build_payload(
@@ -246,8 +266,14 @@ def main() -> int:
             "pages_read": pages,
             "evaluated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(rules, group_records, processing_rules), "provider_registration_status": registration},
+        summary={
+            **summarize(rules, group_records, processing_rules),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("alert_rule", "action_group", "processing_rule"), {
+                "alert_rules": len(rules), "action_groups": len(group_records), "processing_rules": len(processing_rules)}),
+        },
     )
 
     filename = f"azure_alert_rules_{sanitize_for_filename(subscription_id or 'unknown')}.json"

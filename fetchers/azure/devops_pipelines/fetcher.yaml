@@ -77,7 +77,7 @@ evidence_set:
   reference_id: EVD-AZURE-DEVOPS-PIPELINES
   name: Azure DevOps Pipelines
   instructions: >
-    Script: fetcher.py. Azure DevOps REST 7.1 per project, every continuation
+    Script: azure/devops_pipelines/fetcher.py. Azure DevOps REST 7.1 per project, every continuation
     token followed. Population: the projects _apis/projects returns to the
     identity in metadata.collecting_identity (from _apis/connectionData);
     summary.not_collected lists what is out of scope. Pipelines:

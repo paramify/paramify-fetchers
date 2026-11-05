@@ -42,7 +42,7 @@ evidence_set:
   reference_id: EVD-CS-FIREWALL-POLICIES
   name: CrowdStrike Firewall Policies
   instructions: >-
-    Script: fetcher.py. Authenticates at POST /oauth2/token, then pages
+    Script: crowdstrike/firewall_policies/fetcher.py. Authenticates at POST /oauth2/token, then pages
     GET /policy/combined/firewall/v1 (integer-offset) for the policies and
     resolves three GET-by-ids endpoints under /fwmgr/entities/: policies/v1
     for the enforcement fields (enforce, test_mode, default_inbound,

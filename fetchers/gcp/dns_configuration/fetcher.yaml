@@ -45,5 +45,5 @@ evidence_set:
   reference_id: EVD-GCP-DNS
   name: Cloud DNS Zone and DNSSEC Configuration
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls: dns
+    Script: gcp/dns_configuration/fetcher.py. Google Cloud client library calls: dns
     managedZones.list(), policies.list(). One evidence file per project.

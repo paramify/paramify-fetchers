@@ -17,6 +17,7 @@ start to finish.
 **Platform setup.** Most platforms have a guide for their credentials and
 permissions:
 [AWS](../fetchers/aws/README.md) ·
+[Azure](../fetchers/azure/README.md) ·
 [GCP](../fetchers/gcp/README.md) ·
 [Wiz](../fetchers/wiz/README.md) ·
 [Datadog](../fetchers/datadog/README.md) ·
@@ -51,10 +52,14 @@ permissions:
 ## Write fetchers
 
 - [Write a new evidence fetcher](authoring_fetcher_guide.md)
+- [Port an existing fetcher](porting_guide.md)
 - [Examine a fetcher against the contract](fetcher_contract_guide.md)
 - [Onboard a new platform](platform_onboarding_guide.md)
 - [Write an issue-report fetcher](issue_report_fetchers_guide.md), and the
-  [Wiz pipeline fetchers](wiz_pipeline_fetchers.md)
+  [Wiz pipeline guide](wiz_pipeline_guide.md)
+- [Write a comparator](comparators_guide.md), the
+  [comparator reference](comparators.md), and the
+  [comparator design](comparators_design.md)
 
 ## FedRAMP KSI coverage
 

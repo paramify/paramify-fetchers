@@ -1,5 +1,5 @@
 name: azure_log_analytics_deletion_rights
-version: 0.1.0
+version: 0.2.0
 description: >
   Who can remove log data from each Log Analytics workspace in the subscription:
   through the Purge API, the Delete Data API, deleting the workspace, or
@@ -11,6 +11,14 @@ description: >
   scope, whether it is active or eligible, and whether each right comes from an
   explicit grant (Data Purger) or a wildcard such as Log Analytics Contributor's
   Microsoft.OperationalInsights/* or Contributor's '*'.
+  Workspaces the resource_exclusions patterns take out are listed under excluded
+  instead, each with the pattern that matched, and every count covers only
+  in-scope workspaces. The summary echoes resource_exclusion_patterns, lists
+  resource_exclusion_patterns_unmatched (patterns that matched no workspace,
+  such as a mistyped name), and counts excluded_workspaces and
+  in_scope_workspaces (0 when none was found or the patterns took out every
+  workspace, which a check can catch by requiring more than 0; both are null
+  when the workspace list couldn't be read).
 category: azure
 
 supports_targets: true
@@ -46,6 +54,31 @@ target_schema:
       Comma-separated workspace names or resource ids to limit collection to.
       Optional — omit to collect every Log Analytics workspace in the subscription.
 
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Log Analytics workspace is listed under excluded with the
+      pattern and left out of every count; its role assignments, eligible
+      assignments and role definitions are not read. An in-scope workspace keeps
+      every role assignment that applies at it, wherever it was made (resource
+      group, subscription, management group or root), and a SENTINEL_WORKSPACES
+      filter applies first, and a workspace it names that a
+      pattern takes out fails the run as bad_config. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
+
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
 ksis:
@@ -55,7 +88,7 @@ evidence_set:
   reference_id: EVD-AZURE-LOG-ANALYTICS-DELETION-RIGHTS
   name: Azure Log Analytics Deletion Rights
   instructions: >
-    Script: fetcher.py. ARM REST at each workspace with $filter=atScope():
+    Script: azure/log_analytics_deletion_rights/fetcher.py. ARM REST at each workspace with $filter=atScope():
     roleAssignments (2022-04-01), PIM roleEligibilityScheduleInstances
     (2020-10-01), and each role definition. Checked actions: workspaces purge,
     tables/deleteData, delete, write (retention) and tables/write. A grant holds

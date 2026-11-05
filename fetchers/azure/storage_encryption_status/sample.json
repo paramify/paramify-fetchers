@@ -1,0 +1,115 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_storage_encryption_status",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.storage_accounts[]",
+      "records": 4,
+      "fields": {
+        "allow_blob_public_access": 4,
+        "allow_cross_tenant_replication": 4,
+        "allow_shared_key_access": 4,
+        "blob_properties": 4,
+        "customer_managed_key": 4,
+        "default_to_entra_authorization": 4,
+        "enable_https_traffic_only": 4,
+        "encryption_type": 4,
+        "file_service_properties": 4,
+        "id": 4,
+        "infrastructure_encryption": 4,
+        "key_expiration_period_in_days": 0,
+        "location": 4,
+        "minimum_tls_version": 4,
+        "name": 4,
+        "network_rule_set": 4,
+        "private_endpoint_connections": 0,
+        "public_network_access": 2,
+        "replication_settings": 4,
+        "resource_group": 4
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T17:08:24Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "provider_registration_status": "registered",
+      "storage_accounts": [
+        {
+          "allow_blob_public_access": false,
+          "allow_cross_tenant_replication": false,
+          "allow_shared_key_access": false,
+          "blob_properties": {
+            "container_delete_retention_policy": {
+              "days": 0,
+              "enabled": false
+            },
+            "default_service_version": null,
+            "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Storage/storageAccounts/stpfhardjov5akcv/blobServices/default",
+            "name": "default",
+            "type": "Microsoft.Storage/storageAccounts/blobServices",
+            "versioning_enabled": false
+          },
+          "customer_managed_key": true,
+          "default_to_entra_authorization": true,
+          "enable_https_traffic_only": true,
+          "encryption_type": "Microsoft.Keyvault",
+          "file_service_properties": {
+            "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Storage/storageAccounts/stpfhardjov5akcv/fileServices/default",
+            "name": "default",
+            "share_delete_retention_policy": {
+              "days": 7,
+              "enabled": true
+            },
+            "smb_protocol_settings": {
+              "channel_encryption": [],
+              "supported_versions": []
+            },
+            "type": "Microsoft.Storage/storageAccounts/fileServices"
+          },
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Storage/storageAccounts/stpfhardjov5akcv",
+          "infrastructure_encryption": true,
+          "key_expiration_period_in_days": null,
+          "location": "eastus",
+          "minimum_tls_version": "TLS1_2",
+          "name": "stpfhardjov5akcv",
+          "network_rule_set": {
+            "bypass": "AzureServices",
+            "default_action": "Deny"
+          },
+          "private_endpoint_connections": [],
+          "public_network_access": "Disabled",
+          "replication_settings": "Standard_GRS",
+          "resource_group": "rg-example-example-profile"
+        }
+      ]
+    },
+    "summary": {
+      "blob_versioning_accounts": 1,
+      "cmk_percentage": 25,
+      "container_soft_delete_accounts": 1,
+      "customer_managed_key_storage": 1,
+      "https_only_accounts": 4,
+      "infrastructure_encryption_accounts": 1,
+      "key_expiration_policy_accounts": 0,
+      "minimum_tls_1_2_accounts": 3,
+      "platform_managed_key_storage": 3,
+      "private_endpoint_accounts": 0,
+      "provider_registration_status": "registered",
+      "public_blob_access_accounts": 1,
+      "share_soft_delete_accounts": 4,
+      "shared_key_access_accounts": 3,
+      "total_storage_accounts": 4
+    }
+  }
+}

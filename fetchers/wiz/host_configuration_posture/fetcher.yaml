@@ -113,7 +113,7 @@ evidence_set:
   reference_id: EVD-WIZ-HOST-CONFIG-POSTURE
   name: Wiz Host Configuration Posture (OS STIG)
   instructions: >-
-    Script: fetcher.py. Read-only service account (scope
+    Script: wiz/host_configuration_posture/fetcher.py. Read-only service account (scope
     read:host_configuration). Pages hostConfigurationRuleAssessments once per
     result value, looks up each rule's benchmark, keeps assessments whose
     benchmark or rule short name matches the configured text (default

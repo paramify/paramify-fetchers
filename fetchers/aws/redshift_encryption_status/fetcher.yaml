@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-REDSHIFT-ENC
   name: Redshift Encryption
-  instructions: 'Script: fetcher.sh. Commands executed: aws redshift describe-clusters, aws redshift describe-cluster-parameters.'
+  instructions: 'Script: aws/redshift_encryption_status/fetcher.sh. Commands executed: aws redshift describe-clusters, aws redshift describe-cluster-parameters.'

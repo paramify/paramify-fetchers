@@ -31,20 +31,28 @@ from azure_common import (  # noqa: E402
 from frontdoor import (  # noqa: E402
     SECURITY_POLICY_API_VERSION,
     arm_key,
+    cdn_api_version,
     cdn_client,
     collect_waf_policies,
     custom_domains,
     endpoints_with_routes,
     front_door_profiles,
+    has_scope_fields,
+    in_scope_totals,
+    profile_scope,
     project_reference,
     route_hosts,
     route_serving,
     waf_policy_record,
     wire,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import ScopeExclusions, excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_front_door_waf_coverage")
 
+SCOPE_EXCLUSIONS_ENV = "AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS"
+EXCLUDED_KINDS = ("custom_domain", "endpoint", "route", "host_route")
 SCOPES = ("route", "domain", "profile")
 WAF_LOG_CATEGORY = "FrontDoorWebApplicationFirewallLog"
 ACCESS_LOG_CATEGORY = "FrontDoorAccessLog"
@@ -52,7 +60,9 @@ ACCESS_LOG_CATEGORY = "FrontDoorAccessLog"
 
 # --- projection: the only code here that touches an azure-mgmt model ---
 
-def project_security_policy(policy) -> dict:
+def project_security_policy(policy, scope_fields: bool = True) -> dict:
+    """With scope_fields False (an api-version older than 2026-04-01-preview), isProfileLevel and
+    associations[].routes are not returned, so both read None (unknown), never False or []."""
     props = model_attr(policy, "properties")
     params = model_attr(props, "parameters")
     return {
@@ -61,11 +71,11 @@ def project_security_policy(policy) -> dict:
         "type": model_attr(params, "type"),
         "waf_policy_id": model_attr(model_attr(params, "waf_policy"), "id"),
         # Recorded responses return isProfileLevel false when it was never set, and routes null.
-        "is_profile_level": wire(params, "isProfileLevel") is True,
+        "is_profile_level": (wire(params, "isProfileLevel") is True) if scope_fields else None,
         "associations": [
             {
                 "domains": [project_reference(d) for d in (model_attr(a, "domains") or [])],
-                "routes": [r.get("id") for r in (wire(a, "routes") or []) if hasattr(r, "get")],
+                "routes": [r.get("id") for r in (wire(a, "routes") or []) if hasattr(r, "get")] if scope_fields else None,
                 "patterns_to_match": list(model_attr(a, "patterns_to_match") or []),
             }
             for a in (model_attr(params, "associations") or [])
@@ -147,25 +157,31 @@ def profile_log_export(categories: list[dict], settings: list[dict]) -> dict:
 
 
 def resolve_scope(host_key: str, route_key: str, security_policies: list[dict]):
-    """Most specific WAF association for one host on one route: (scope, policy, association, other matches)."""
+    """Most specific WAF association for one host on one route: (scope, policy, association, other matches).
+
+    "unknown" when nothing matches but a WAF policy's route or profile-level attachment was not returned
+    (is_profile_level or routes None): the host may be covered, so it is not reported as "none"."""
     found = {scope: [] for scope in SCOPES}
+    unread = False
     for sp in security_policies:
         if sp["type"] != "WebApplicationFirewall":
             continue
         for assoc in sp["associations"]:
             domains = {arm_key(d["id"]) for d in assoc["domains"]}
-            routes = {arm_key(r) for r in assoc["routes"]}
+            unread = unread or assoc["routes"] is None
+            routes = {arm_key(r) for r in assoc["routes"] or []}
             if route_key in routes and (not domains or host_key in domains):
                 found["route"].append((sp, assoc))
             elif not routes and host_key in domains:
                 found["domain"].append((sp, assoc))
+        unread = unread or sp["is_profile_level"] is None
         if sp["is_profile_level"]:
             found["profile"].append((sp, None))
     for scope in SCOPES:
         if found[scope]:
             sp, assoc = found[scope][0]
             return scope, sp, assoc, len(found[scope]) - 1
-    return "none", None, None, 0
+    return ("unknown" if unread else "none"), None, None, 0
 
 
 def host_route_record(profile, endpoint, route, host, security_policies, waf_by_key) -> dict:
@@ -179,7 +195,9 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
     serving = route_serving(endpoint, route)
 
     reasons = []
-    if scope == "none":
+    if scope == "unknown":
+        pass  # not read, so neither protected nor unprotected
+    elif scope == "none":
         reasons.append("no_waf")
     else:
         if waf is None:
@@ -214,7 +232,7 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
         "waf_policy": waf["name"] if waf else None,
         "waf_mode": waf["mode"] if waf else None,
         "waf_enabled_state": waf["enabled_state"] if waf else None,
-        "waf_blocking": waf["blocking"] if waf else False,
+        "waf_blocking": waf["blocking"] if waf else (None if scope == "unknown" else False),
         "waf_not_blocking_reasons": waf["not_blocking_reasons"] if waf else [],
         "waf_disabled_managed_rules": waf["disabled_managed_rules"] if waf else None,
         "waf_default_rule_set_enabled_rules": waf["default_rule_set_enabled_rules"] if waf else None,
@@ -223,41 +241,82 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
         "waf_default_rule_set_groups_without_blocking_rules": (
             waf["default_rule_set_groups_without_blocking_rules"] if waf else None
         ),
-        "protected": serving and not reasons,
+        "protected": None if scope == "unknown" and serving else serving and not reasons,
         "unprotected_reasons": reasons,
     }
 
 
-def coverage_for_profile(collected: dict, waf_by_key: dict) -> dict:
+def coverage_for_profile(collected: dict, waf_by_key: dict, exclusions: ScopeExclusions | None = None) -> dict:
     profile, sps = collected["profile"], collected["security_policies"]
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions())
+    excluded_hosts, excluded_routes = scope["hosts"], scope["routes"]
     domains_by_key = {arm_key(d["id"]): d for d in collected["custom_domains"]}
-    host_routes, endpoints_without_routes, routed = [], [], set()
+    host_routes, endpoints_without_routes, routed, excluded = [], [], set(), list(scope["excluded"])
     for endpoint in collected["endpoints"]:
-        if not endpoint["routes"]:
+        if not endpoint["routes"] and arm_key(endpoint["id"]) not in excluded_hosts:
             endpoints_without_routes.append(
                 {"profile": profile["name"], "endpoint": endpoint["name"], "host_name": endpoint["host_name"]}
             )
         for route in endpoint["routes"]:
             routed |= {arm_key(d["id"]) for d in route["custom_domains"]}
             for host in route_hosts(endpoint, route, domains_by_key):
-                host_routes.append(host_route_record(profile, endpoint, route, host, sps, waf_by_key))
+                context = {"profile": profile["name"], "endpoint": endpoint["name"], "route": route["name"],
+                           "host_kind": host["kind"]}
+                pattern = excluded_hosts.get(arm_key(host["id"]))
+                if pattern:
+                    excluded.append(excluded_item("host_route", host["host_name"], pattern, **context))
+                elif arm_key(route["id"]) in excluded_routes:
+                    excluded.append(excluded_item("host_route", host["host_name"], None, reason="route_excluded", **context))
+                else:
+                    host_routes.append(host_route_record(profile, endpoint, route, host, sps, waf_by_key))
+    domains = [d for d in collected["custom_domains"] if arm_key(d["id"]) not in excluded_hosts]
     unrouted = [
         {"profile": profile["name"], "custom_domain": d["name"], "host_name": d["host_name"]}
-        for d in collected["custom_domains"]
+        for d in domains
         if arm_key(d["id"]) not in routed
     ]
-    return {"host_routes": host_routes, "endpoints_without_routes": endpoints_without_routes, "unrouted_custom_domains": unrouted}
+    return {
+        "host_routes": host_routes,
+        "endpoints_without_routes": endpoints_without_routes,
+        "unrouted_custom_domains": unrouted,
+        "excluded": excluded,
+        # An endpoint whose own host name is out of scope still counts while it carries an in-scope route.
+        "endpoint_count": sum(1 for e in collected["endpoints"] if arm_key(e["id"]) not in excluded_hosts
+                              or any(arm_key(r["id"]) not in excluded_routes for r in e["routes"])),
+        "route_count": sum(1 for e in collected["endpoints"] for r in e["routes"] if arm_key(r["id"]) not in excluded_routes),
+        "custom_domain_count": len(domains),
+        "in_scope": scope["in_scope"],
+    }
+
+
+def profile_waf_in_use(host_routes: list[dict]):
+    """True when a serving host-route has a WAF applied; None when none does but one's coverage was not read
+    (unknown scope), since that host-route may have one; else False."""
+    serving = [h for h in host_routes if h["serving"]]
+    if any(h["effective_scope"] not in ("none", "unknown") for h in serving):
+        return True
+    return None if any(h["effective_scope"] == "unknown" for h in serving) else False
 
 
 def summarize(profiles, skipped_by_sku, host_routes, endpoints_without_routes, unrouted, security_policies) -> dict:
     serving = [h for h in host_routes if h["serving"]]
     waf_profiles = [p for p in profiles if p["waf_in_use"]]
-    unprotected = [h for h in serving if not h["protected"]]
+    unprotected = [h for h in serving if h["protected"] is False]
+    unknown = [h for h in serving if h["protected"] is None]
 
-    def reason(name: str) -> int:
-        return sum(1 for h in serving if name in h["unprotected_reasons"])
+    # While any serving host-route's coverage was not read (Azure Government), every count of protected or
+    # unprotected host-routes, and of the reasons, is only a lower bound, so each reads null rather than a number
+    # a check could pass on.
+    def known(count: int):
+        return None if unknown else count
 
-    protected = len(serving) - len(unprotected)
+    def reason(name: str):
+        return known(sum(1 for h in serving if name in h["unprotected_reasons"]))
+
+    protected = len(serving) - len(unprotected) - len(unknown)
+    # A profile whose WAF use is unknown counts as a log-export gap unless it exports its WAF log anyway.
+    unknown_waf_profiles = [p for p in profiles if p["waf_in_use"] is None]
+    unknown_log_gap = any(not p["waf_log_exported"] for p in unknown_waf_profiles)
     return {
         "total_front_door_profiles": len(profiles),
         "premium_profiles": sum(1 for p in profiles if p["sku"] == "Premium_AzureFrontDoor"),
@@ -271,37 +330,52 @@ def summarize(profiles, skipped_by_sku, host_routes, endpoints_without_routes, u
         "total_security_policies": len(security_policies),
         "total_host_routes": len(host_routes),
         "serving_host_routes": len(serving),
-        "protected_host_routes": protected,
-        "unprotected_host_routes": len(unprotected),
-        "protected_host_route_percentage": coverage_percentage(protected, len(serving)),
+        "protected_host_routes": known(protected),
+        "unprotected_host_routes": known(len(unprotected)),
+        "unknown_host_routes": len(unknown),
+        # A share of hosts can't be stated while some hosts' coverage was not read.
+        "protected_host_route_percentage": known(coverage_percentage(protected, len(serving))),
         "host_routes_without_waf": reason("no_waf"),
         "host_routes_waf_not_blocking": reason("waf_not_blocking"),
         "host_routes_waf_unresolved": reason("waf_unresolved"),
         "host_routes_partial_path_coverage": reason("partial_path_coverage"),
         "host_routes_reference_inactive": reason("host_reference_inactive"),
-        **{f"host_routes_{s}_scope": sum(1 for h in serving if h["effective_scope"] == s) for s in (*SCOPES, "none")},
-        "profiles_with_waf_in_use": len(waf_profiles),
+        **{f"host_routes_{s}_scope": sum(1 for h in serving if h["effective_scope"] == s) for s in (*SCOPES, "none", "unknown")},
+        "profiles_with_waf_in_use": None if unknown_waf_profiles else len(waf_profiles),
         "profiles_waf_log_exported": sum(1 for p in profiles if p["waf_log_exported"]),
-        "profiles_with_waf_in_use_without_waf_log_export": sum(1 for p in waf_profiles if not p["waf_log_exported"]),
-        "security_policies_api_version": SECURITY_POLICY_API_VERSION,
+        "profiles_with_waf_in_use_without_waf_log_export": (
+            None if unknown_log_gap else sum(1 for p in waf_profiles if not p["waf_log_exported"])
+        ),
+        "security_policies_api_version": cdn_api_version(SECURITY_POLICY_API_VERSION),
     }
 
 
 # --- collection (lazy azure imports) ---
 
-def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[dict], dict]:
+def collect_profiles(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+                     excluded: list | None = None) -> tuple[list[dict] | None, dict]:
+    """Profiles the exclusions take out are appended to `excluded` and get no further reads; None when the profile
+    list wasn't read."""
     from azure.mgmt.monitor import MonitorManagementClient
 
     cdn = cdn_client(subscription_id, cred, collector)
     cdn_sp = cdn_client(subscription_id, cred, collector, api_version=SECURITY_POLICY_API_VERSION)
+    scope_fields = has_scope_fields(cdn_api_version(SECURITY_POLICY_API_VERSION))
     monitor = collector.guard(
         "monitor.MonitorManagementClient (init)",
         lambda: MonitorManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs()),
     )
     if cdn is None or cdn_sp is None or monitor is None:
-        return [], {}
+        return None, {}
 
     profiles, skipped = front_door_profiles(cdn, collector)
+    if profiles is None:
+        return None, skipped
+    if exclusions:
+        # A Front Door profile is global, so location: reaches it only as location:global.
+        profiles, out = exclusions.split(profiles, "profile", location=lambda p: "global")
+        if excluded is not None:
+            excluded += out
     collected = []
     for profile in profiles:
         rg, name = resource_group_from_id(profile["id"]), profile["name"]
@@ -313,7 +387,7 @@ def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[
             "custom_domains": custom_domains(cdn, collector, profile),
             "security_policies": collector.guard(
                 f"cdn.security_policies.list_by_profile({name})",
-                lambda: [project_security_policy(s) for s in cdn_sp.security_policies.list_by_profile(rg, name)],
+                lambda: [project_security_policy(s, scope_fields) for s in cdn_sp.security_policies.list_by_profile(rg, name)],
                 default=[],
             ),
             "log_categories": collector.guard(
@@ -346,17 +420,21 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    collected: list[dict] = []
+    collected: list[dict] | None = None
     skipped_by_sku: dict = {}
     waf_by_key: dict = {}
+    resources = ResourceExclusions.from_env()
+    resources.record_invalid(collector)
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Cdn")
         if registration == NOT_REGISTERED:
             logger.warning("Microsoft.Cdn is not registered on subscription %s", subscription_id)
-        collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector)
+        collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector, resources, excluded)
+        # Every WAF policy, excluded ones too, so an in-scope host's verdict holds when its policy is excluded.
         waf_policies, definitions = collect_waf_policies(subscription_id, cred, collector)
-        waf_by_key = {arm_key(p["id"]): waf_policy_record(p, definitions) for p in waf_policies}
+        waf_by_key = {arm_key(p["id"]): waf_policy_record(p, definitions) for p in waf_policies or []}
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -366,20 +444,28 @@ def main() -> int:
             ),
         )
 
-    profiles, host_routes, no_routes, unrouted, security_policies = [], [], [], [], []
+    resources.warn_unmatched(logger)
+    listed = collected is not None
+    collected = collected or []
+    # Scope exclusions apply to the profiles left in scope.
+    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV, kinds=("route",))
+    exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
+    profiles, host_routes, no_routes, unrouted, security_policies, scopes = [], [], [], [], [], []
     for c in collected:
-        cov = coverage_for_profile(c, waf_by_key)
+        cov = coverage_for_profile(c, waf_by_key, exclusions)
+        scopes.append(cov["in_scope"])
         host_routes += cov["host_routes"]
         no_routes += cov["endpoints_without_routes"]
         unrouted += cov["unrouted_custom_domains"]
+        excluded += cov["excluded"]
         security_policies += [{**sp, "profile": c["profile"]["name"]} for sp in c["security_policies"]]
         profiles.append({
             **c["profile"],
             **profile_log_export(c["log_categories"], c["log_settings"]),
-            "waf_in_use": any(h["serving"] and h["effective_scope"] != "none" for h in cov["host_routes"]),
-            "endpoint_count": len(c["endpoints"]),
-            "route_count": sum(len(e["routes"]) for e in c["endpoints"]),
-            "custom_domain_count": len(c["custom_domains"]),
+            "waf_in_use": profile_waf_in_use(cov["host_routes"]),
+            "endpoint_count": cov["endpoint_count"],
+            "route_count": cov["route_count"],
+            "custom_domain_count": cov["custom_domain_count"],
             "security_policy_count": len(c["security_policies"]),
         })
 
@@ -394,12 +480,16 @@ def main() -> int:
             "security_policies": security_policies,
             "profiles": profiles,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(profiles, skipped_by_sku, host_routes, no_routes, unrouted, security_policies),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, EXCLUDED_KINDS, {**in_scope_totals(scopes), "host_routes": len(host_routes)}),
+            **resources.summary(excluded, ("profile",), {"profiles": len(profiles) if listed else None}),
         },
     )
+    exclusions.warn_unmatched(logger)
     filename = f"azure_front_door_waf_coverage_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)
 

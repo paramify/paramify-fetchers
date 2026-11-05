@@ -1,0 +1,61 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_cloud_sql_encryption_status",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.instances[]",
+      "records": 1,
+      "fields": {
+        "backup_enabled": 1,
+        "backup_retained_count": 1,
+        "backup_start_time": 1,
+        "cmek": 1,
+        "database_version": 1,
+        "kms_key_name": 1,
+        "kms_key_version": 1,
+        "name": 1,
+        "point_in_time_recovery_enabled": 1,
+        "region": 1,
+        "state": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:38Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "instances": [
+        {
+          "backup_enabled": true,
+          "backup_retained_count": 7,
+          "backup_start_time": "03:00",
+          "cmek": true,
+          "database_version": "MYSQL_8_0",
+          "kms_key_name": "projects/example-project/locations/us-central1/keyRings/example-test/cryptoKeys/sql-key",
+          "kms_key_version": "projects/example-project/locations/us-central1/keyRings/example-test/cryptoKeys/sql-key/cryptoKeyVersions/1",
+          "name": "example-sql",
+          "point_in_time_recovery_enabled": true,
+          "region": "us-central1",
+          "state": "RUNNABLE"
+        }
+      ]
+    },
+    "summary": {
+      "backup_enabled_instances": 1,
+      "cmek_instances": 1,
+      "cmek_percentage": 100,
+      "google_managed_instances": 0,
+      "total_instances": 1
+    }
+  }
+}

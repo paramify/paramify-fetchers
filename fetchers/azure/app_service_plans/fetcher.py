@@ -37,6 +37,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
     report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_app_service_plans")
 
@@ -46,6 +47,7 @@ NO_SLA_TIERS = ("free", "shared")
 # Tiers where the platform scales instances itself, so `sku.capacity` is not a
 # provisioned instance count (it reads 0 on a consumption plan, seen live).
 PLATFORM_SCALED_TIERS = ("dynamic", "flexconsumption", "elasticpremium")
+PLAN_KIND, SITE_KIND = "app_service_plan", "site"
 
 
 # --- projection: the only azure-mgmt model access ---
@@ -70,7 +72,6 @@ def project_plan(plan) -> dict:
         "maximum_elastic_worker_count": model_attr(plan, "maximum_elastic_worker_count"),
         "elastic_scale_enabled": model_attr(plan, "elastic_scale_enabled"),
         "per_site_scaling": model_attr(plan, "per_site_scaling"),
-        "number_of_sites": model_attr(plan, "number_of_sites"),
         "reserved": model_attr(plan, "reserved"),
     }
 
@@ -84,6 +85,7 @@ def project_site(site) -> dict:
     return {
         "id": model_attr(site, "id"),
         "name": model_attr(site, "name"),
+        "location": model_attr(site, "location"),
         "kind": model_attr(site, "kind"),
         "state": model_attr(site, "state"),
         "server_farm_id": model_attr(site, "server_farm_id"),
@@ -156,9 +158,22 @@ def plan_record(plan: dict, sites: list[dict]) -> dict:
         "elastic_scale_enabled": bool(plan.get("elastic_scale_enabled") or False),
         "per_site_scaling": bool(plan.get("per_site_scaling") or False),
         "linux": bool(plan.get("reserved") or False),
-        "number_of_sites": plan.get("number_of_sites"),
+        # The in-scope sites listed below; Azure's own numberOfSites also counts excluded ones.
+        "number_of_sites": len(attached),
         "sites": attached,
     }
+
+
+def plan_records(raw_plans: list[dict], raw_sites: list[dict], exclusions: ResourceExclusions):
+    """(in-scope plans, excluded entries). Sites are split first; a plan a pattern matches leaves scope only when
+    no in-scope site runs on it, so in-scope workload keeps its plan in every plan-level count."""
+    sites, excluded = exclusions.split(raw_sites, SITE_KIND)
+    records = sorted((plan_record(p, sites) for p in raw_plans), key=lambda r: r.get("id") or "")
+    _, matched = exclusions.split(records, PLAN_KIND)
+    hosting = {_arm_id_key(r["id"]) for r in records if r["sites"]}
+    excluded_plans = [e for e in matched if _arm_id_key(e["id"]) not in hosting]
+    out = {_arm_id_key(e["id"]) for e in excluded_plans}
+    return [r for r in records if _arm_id_key(r["id"]) not in out], excluded + excluded_plans
 
 
 def summarize(plans: list[dict]) -> dict:
@@ -190,8 +205,8 @@ def summarize(plans: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_plans(subscription_id, cred, collector: Collector) -> list[dict]:
-    """app_service_plans.list(detailed=True), then web_apps.list() for the join.
+def collect_plans(subscription_id, cred, collector: Collector) -> tuple[list[dict], list[dict]]:
+    """app_service_plans.list(detailed=True), then web_apps.list() for the join: (plans, sites), projected.
 
     Both are ItemPaged, so the SDK follows nextLink itself. `web_apps.list()` returns
     web apps AND function apps; both run on a plan, so neither is filtered out. If the
@@ -206,7 +221,7 @@ def collect_plans(subscription_id, cred, collector: Collector) -> list[dict]:
 
     client = collector.guard("web.WebSiteManagementClient (init)", _client)
     if client is None:
-        return []
+        return [], []
 
     raw_plans = collector.guard(
         "web.app_service_plans.list",
@@ -218,8 +233,7 @@ def collect_plans(subscription_id, cred, collector: Collector) -> list[dict]:
         lambda: [project_site(s) for s in client.web_apps.list()],
         default=[],
     )
-    plans = [plan_record(p, raw_sites) for p in raw_plans]
-    return sorted(plans, key=lambda r: r.get("id") or "")
+    return raw_plans, raw_sites
 
 
 def main() -> int:
@@ -239,7 +253,8 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    plans: list[dict] = []
+    raw_plans: list[dict] = []
+    raw_sites: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list call, so a zero-plan result is legible: Azure returns
@@ -253,7 +268,7 @@ def main() -> int:
                 "in use; reporting status not_registered",
                 subscription_id,
             )
-        plans = collect_plans(subscription_id, cred, collector)
+        raw_plans, raw_sites = collect_plans(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -263,6 +278,12 @@ def main() -> int:
             ),
         )
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    plans, excluded = plan_records(raw_plans, raw_sites, exclusions)
+    exclusions.warn_unmatched(logger)
+    summary = summarize(plans)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -270,8 +291,14 @@ def main() -> int:
         results={
             "app_service_plans": plans,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(plans), "provider_registration_status": registration},
+        summary={
+            **summary,
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, (PLAN_KIND, SITE_KIND), {
+                "app_service_plans": len(plans), "sites": summary["total_sites"]}),
+        },
     )
 
     filename = (

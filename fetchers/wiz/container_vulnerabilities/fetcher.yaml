@@ -101,7 +101,7 @@ evidence_set:
   reference_id: EVD-WIZ-CONTAINER-VULNS
   name: Wiz Container Vulnerabilities
   instructions: >-
-    Script: fetcher.py. Read-only service account (scope read:vulnerabilities).
+    Script: wiz/container_vulnerabilities/fetcher.py. Read-only service account (scope read:vulnerabilities).
     Pages vulnerabilityFindings filtered to open status, keeps findings whose
     vulnerable asset is a container image or container, and summarizes by
     severity, KEV, fix availability, asset count and age against remediation
