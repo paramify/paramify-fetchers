@@ -292,12 +292,19 @@ def assignment_record(assignment: dict, role_names: dict[str, dict]) -> dict:
     }
 
 
-def summarize(assignments: list[dict]) -> dict:
+def _if(known: bool, value):
+    return value if known else None
+
+
+def summarize(assignments: list[dict] | None, roles_read: bool = True) -> dict:
     """Over-broad built-in assignments are the headline, distinct principals second.
 
     One service principal holding Contributor on four scopes is one identity to review,
-    not four, so both counts are reported.
+    not four, so both counts are reported. An unread list nulls every key; unread role
+    definitions null the role-kind counts.
     """
+    if assignments is None:
+        return dict.fromkeys(summarize([]))
     over_broad = [a for a in assignments if a["is_over_broad_builtin"]]
     by_type: dict[str, int] = {}
     for assignment in assignments:
@@ -350,11 +357,11 @@ def summarize(assignments: list[dict]) -> dict:
             if a["at_subscription_scope"] or a["inherited_from_above_subscription"]
         ),
         # --- by role kind and principal kind ---
-        "custom_role_assignments": sum(1 for a in assignments if a["is_custom_role"]),
-        "builtin_role_assignments": sum(
+        "custom_role_assignments": _if(roles_read, sum(1 for a in assignments if a["is_custom_role"])),
+        "builtin_role_assignments": _if(roles_read, sum(
             1 for a in assignments if a["role_name_resolved"] and not a["is_custom_role"]
-        ),
-        "unresolved_role_definitions": sum(1 for a in assignments if not a["role_name_resolved"]),
+        )),
+        "unresolved_role_definitions": _if(roles_read, sum(1 for a in assignments if not a["role_name_resolved"])),
         "assignments_by_principal_type": by_type,
         "assignments_with_conditions": sum(1 for a in assignments if a["has_condition"]),
     }
@@ -369,7 +376,7 @@ def assignments_by_scope_level(assignments: list[dict]) -> dict[str, int]:
     return counts
 
 
-def summarize_all_scopes(at_scope: list[dict], below: list[dict]) -> dict:
+def summarize_all_scopes(at_scope: list[dict] | None, below: list[dict] | None, roles_read: bool = True) -> dict:
     """The keys that count resource-group and resource grants too.
 
     New keys rather than a widened `summarize`: every key it returns has always meant
@@ -377,8 +384,11 @@ def summarize_all_scopes(at_scope: list[dict], below: list[dict]) -> dict:
     `total_role_assignments` or `over_broad_builtin_assignments` must keep reading that.
     A resource-scoped Owner is the same escalation path as a subscription-scoped one,
     only over less, which is why the over-broad and role-granting counts are repeated
-    for this set.
+    for this set. An unread list nulls the keys counted over it.
     """
+    if at_scope is None or below is None:
+        known = summarize_all_scopes([], below or [], roles_read)
+        return {k: v if below is not None and k.startswith("below_") else None for k, v in known.items()}
     everything = at_scope + below
     below_over_broad = [a for a in below if a["is_over_broad_builtin"]]
     by_type: dict[str, int] = {}
@@ -409,10 +419,10 @@ def summarize_all_scopes(at_scope: list[dict], below: list[dict]) -> dict:
         ),
         "below_subscription_over_broad_builtin_assignments": len(below_over_broad),
         "below_subscription_role_granting_assignments": sum(1 for a in below if a["can_grant_roles"]),
-        "below_subscription_custom_role_assignments": sum(1 for a in below if a["is_custom_role"]),
-        "below_subscription_unresolved_role_definitions": sum(
+        "below_subscription_custom_role_assignments": _if(roles_read, sum(1 for a in below if a["is_custom_role"])),
+        "below_subscription_unresolved_role_definitions": _if(roles_read, sum(
             1 for a in below if not a["role_name_resolved"]
-        ),
+        )),
         "below_subscription_assignments_by_principal_type": by_type,
     }
 
@@ -629,13 +639,15 @@ def _lacks(value: bool | None) -> bool | None:
 
 
 def summarize_pim(
-    active: list[dict],
+    active: list[dict] | None,
     schedules_read: bool,
     eligible: list[dict] | None,
     policies: list[dict] | None,
     pim_available: bool | None,
 ) -> dict:
-    """PIM keys over every scope; null where the PIM read they depend on failed."""
+    """PIM keys over every scope; null where the PIM read or the role-assignment list they depend on failed."""
+    schedules_read = schedules_read and active is not None
+    active = active or []
     over_broad = [a for a in active if a["is_over_broad_builtin"]]
     permanent = [a for a in over_broad if a.get("standing") == STANDING_PERMANENT]
     eligible_over_broad = [e for e in eligible or [] if e["is_over_broad_builtin"]]
@@ -723,7 +735,7 @@ def authorization_client(subscription_id, cred, collector: Collector):
 
 def collect_role_assignments(
     subscription_id, client, collector: Collector
-) -> tuple[list[dict] | None, list[dict] | None, dict]:
+) -> tuple[list[dict] | None, list[dict] | None, dict | None]:
     """One role_definitions.list() to name the roles, two role_assignments lists.
 
     The definitions call comes first because an assignment references its role only by
@@ -740,7 +752,8 @@ def collect_role_assignments(
     second set is what it returns minus the first, by assignment id, rather than a
     re-classification by scope string, so the two sets partition the listing exactly
     whatever a scope string looks like. Returns (at_scope, below_subscription,
-    role_names); a list that couldn't be read is None.
+    role_names); a list that couldn't be read is None, and the below-subscription set is
+    None too when the atScope() list failed, since it can't be told apart.
     """
     scope = f"/subscriptions/{subscription_id}"
 
@@ -756,13 +769,12 @@ def collect_role_assignments(
                 definitions[guid] = projected
         return definitions
 
-    role_names = collector.guard(
-        "authorization.role_definitions.list", _list_definitions, default={}
-    )
+    role_names = collector.guard("authorization.role_definitions.list", _list_definitions)
+    names = role_names or {}
 
     def _list_assignments():
         return [
-            assignment_record(project_role_assignment(a), role_names)
+            assignment_record(project_role_assignment(a), names)
             for a in client.role_assignments.list_for_subscription(filter="atScope()")
         ]
 
@@ -778,13 +790,13 @@ def collect_role_assignments(
         return [
             record
             for record in (
-                assignment_record(project_role_assignment(a), role_names)
+                assignment_record(project_role_assignment(a), names)
                 for a in client.role_assignments.list_for_subscription()
             )
             if str(record.get("id") or "").lower() not in at_scope_ids
         ]
 
-    below = collector.guard(
+    below = None if assignments is None else collector.guard(
         "authorization.role_assignments.list_for_subscription(unfiltered)",
         _list_below_subscription,
     )
@@ -793,7 +805,7 @@ def collect_role_assignments(
         "against %d role definition(s)",
         len(assignments or []),
         len(below or []),
-        len(role_names),
+        len(names),
     )
     # Sorted by ARM id so a re-run against unchanged access is byte-stable.
     return (
@@ -890,6 +902,7 @@ def main() -> int:
 
     assignments: list[dict] | None = None
     below_subscription: list[dict] | None = None
+    role_names: dict | None = None
     pim: dict = {"available": None, "schedules": None, "eligible": None, "policies": None, "notes": []}
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
@@ -909,7 +922,7 @@ def main() -> int:
             assignments, below_subscription, role_names = collect_role_assignments(
                 subscription_id, client, collector
             )
-            pim = collect_pim(subscription_id, client, collector, role_names)
+            pim = collect_pim(subscription_id, client, collector, role_names or {})
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -919,7 +932,8 @@ def main() -> int:
             ),
         )
 
-    listed = assignments is not None and below_subscription is not None
+    at_scope_read, below_read = assignments is not None, below_subscription is not None
+    listed, roles_read = at_scope_read and below_read, role_names is not None
     assignments, below_subscription = assignments or [], below_subscription or []
     # Each grant takes its PIM schedule from the full schedule list before grants at excluded scopes leave.
     add_pim_fields(assignments + below_subscription, pim["schedules"])
@@ -936,7 +950,6 @@ def main() -> int:
         pim["eligible"], excluded_eligible = split_by_scope(
             pim["eligible"], "eligible_role_assignment", exclusions, keep)
         excluded += excluded_eligible
-    exclusions.warn_unmatched(logger)
     everything = assignments + below_subscription
     counts = exclusions.summary(excluded, ("role_assignment", "eligible_role_assignment"), {
         "role_assignments": len(everything), "eligible_role_assignments": len(pim["eligible"] or [])})
@@ -945,6 +958,12 @@ def main() -> int:
         counts.update(excluded_role_assignments=None, in_scope_role_assignments=None)
     if pim["eligible"] is None:
         counts.update(excluded_eligible_role_assignments=None, in_scope_eligible_role_assignments=None)
+    if listed and pim["eligible"] is not None:
+        exclusions.warn_unmatched(logger)
+    elif exclusions:
+        counts["resource_exclusion_patterns_unmatched"] = None
+    assignments = assignments if at_scope_read else None
+    below_subscription = below_subscription if below_read else None
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -965,11 +984,11 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(assignments),
-            **summarize_all_scopes(assignments, below_subscription),
+            **summarize(assignments, roles_read),
+            **summarize_all_scopes(assignments, below_subscription, roles_read),
             "provider_registration_status": registration,
             **summarize_pim(
-                everything,
+                everything if listed else None,
                 pim["schedules"] is not None,
                 pim["eligible"],
                 pim["policies"],
