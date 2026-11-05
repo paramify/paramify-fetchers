@@ -66,15 +66,17 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 # Microsoft Graph permissions (application permissions, admin consent):
 #   Policy.Read.All        — authenticationMethodsPolicy and
 #                            identitySecurityDefaultsEnforcementPolicy
-#   Directory.Read.All     — groupSettings, groupSettingTemplates, subscribedSkus,
-#                            organization certificateBasedAuthConfiguration, and with
-#                            X.509 enabled users (authorizationInfo) and group
-#                            transitive members (Organization.Read.All, User.Read.All
-#                            and GroupMember.Read.All cover the same reads)
+#   Directory.Read.All     — groupSettings, groupSettingTemplates, subscribedSkus, and
+#                            with X.509 enabled users (authorizationInfo) and group
+#                            transitive members (User.Read.All and GroupMember.Read.All
+#                            cover the same reads)
+#   Organization.Read.All  — optional; the CAs in the classic trust store
+#                            (organization certificateBasedAuthConfiguration), the only
+#                            permission Microsoft documents for that read.
 #   PublicKeyInfrastructure.Read.All — optional; the CAs in the PKI-based trust store.
-#                            Without it that store reads not_authorized, its CAs and the
-#                            combined CA counts read null, pki_store_missing_permission
-#                            names the grant, and the run still succeeds.
+# Without an optional grant its store reads not_authorized, its CAs and the combined
+# CA counts read null, classic_store_missing_permission or pki_store_missing_permission
+# names the grant, and the run still succeeds.
 # An `az login` session CANNOT read the authentication methods policy or security
 # defaults: the Azure CLI's first-party client is not pre-authorized for
 # Policy.Read.All, so both return 403 however privileged the signed-in user is.
@@ -96,14 +98,17 @@ evidence_set:
     GET /organization; GET /organization/{id}/certificateBasedAuthConfiguration
     (the trusted certificate authorities: issuer, root or intermediate, revocation
     list URLs, and the subject and expiry read from each certificate, which is not
-    copied into the evidence), and GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations
+    copied into the evidence; optional Organization.Read.All: refused, it reads
+    not_authorized and null, names the missing grant in
+    classic_store_missing_permission, and doesn't fail the run), and GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations
     with each one's /certificateAuthorities (the PKI-based trust store; optional
     PublicKeyInfrastructure.Read.All: refused, it reads not_authorized and null, names
     the missing grant in pki_store_missing_permission, and doesn't fail the run; a cloud
     without the API (400 or 404) reads not_available the same way). Each CA records its
     trust store; the CA counts take a CA listed in both stores (same thumbprint, or the
     same key identifier when a certificate can't be read) once, and are null unless both
-    stores were read. The CA list is null when either store's read failed. With the X.509 method enabled, also GET
+    stores were read. The CA list is null when either store's read failed or neither
+    was read. With the X.509 method enabled, also GET
     /groups/{id}/transitiveMembers/microsoft.graph.user for each group an enabled
     method includes or excludes, and GET /users only when X.509 targets all users or
     a user directly (both $select id, userPrincipalName, userType, accountEnabled,

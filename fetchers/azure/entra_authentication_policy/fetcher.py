@@ -122,7 +122,8 @@ STORE_READ = "read"
 STORE_NOT_AUTHORIZED = "not_authorized"
 STORE_NOT_AVAILABLE = "not_available"
 STORE_FAILED = "failed"
-# Optional: without it the PKI store reads null and names this grant, and the run still succeeds.
+# Optional: without one, its store reads null and names the grant, and the run still succeeds.
+CLASSIC_PERMISSION = "Organization.Read.All"
 PKI_PERMISSION = "PublicKeyInfrastructure.Read.All"
 # The certificate field each certificate user id type names (X509:<SKI>… is a SubjectKeyIdentifier id).
 CERTIFICATE_ID_FIELDS = {"pn": "PrincipalName", "rfc822": "RFC822Name", "ski": "SubjectKeyIdentifier",
@@ -723,13 +724,15 @@ def summarize_certificates(authorities: list[dict] | None, users: list[dict] | N
     complete = authorities is not None and all(
         (stores.get(store) or {}).get("status") == STORE_READ for store in (STORE_CLASSIC, STORE_PKI))
     distinct = distinct_authorities(authorities) if complete else None
-    pki = stores.get(STORE_PKI) or {}
+    classic, pki = stores.get(STORE_CLASSIC) or {}, stores.get(STORE_PKI) or {}
     return {
         "trusted_certificate_authorities": len(distinct) if distinct is not None else None,
         "expired_certificate_authorities": _count(distinct, lambda a: a["expired"] is True),
         "certificate_authorities_expiry_unknown": _count(distinct, lambda a: a["expired"] is None),
         "certificate_authorities_without_crl": _count(distinct, lambda a: not a["has_crl"]),
-        "classic_store_certificate_authorities": (stores.get(STORE_CLASSIC) or {}).get("certificate_authorities"),
+        "classic_store_certificate_authorities": classic.get("certificate_authorities"),
+        "classic_store_status": classic.get("status"),
+        "classic_store_missing_permission": classic.get("missing_permission"),
         "pki_store_certificate_authorities": pki.get("certificate_authorities"),
         "pki_store_status": pki.get("status"),
         "pki_store_missing_permission": pki.get("missing_permission"),
@@ -875,33 +878,39 @@ async def _collect(collector: Collector, cred):
 
 
 async def _certificate_authorities(collector: Collector, client, tenant_id) -> tuple:
-    """(the CAs of the stores that were read, None if a store failed; {store: its status and CA count or None})."""
-    classic = await _classic_store(collector, client, tenant_id)
-    pki, status = await _pki_store(collector, client)
+    """(the CAs of the stores that were read, None if a store failed or none was read; {store: its status, CA count
+    or None, and the grant it lacks})."""
+    classic, classic_status = await _classic_store(collector, client, tenant_id)
+    pki, pki_status = await _pki_store(collector, client)
     stores = {
-        STORE_CLASSIC: {"status": STORE_READ if classic is not None else STORE_FAILED,
-                        "certificate_authorities": len(classic) if classic is not None else None},
-        STORE_PKI: {"status": status, "certificate_authorities": len(pki) if pki is not None else None,
-                    "missing_permission": PKI_PERMISSION if status == STORE_NOT_AUTHORIZED else None},
+        store: {"status": status, "certificate_authorities": len(cas) if cas is not None else None,
+                "missing_permission": permission if status == STORE_NOT_AUTHORIZED else None}
+        for store, cas, status, permission in ((STORE_CLASSIC, classic, classic_status, CLASSIC_PERMISSION),
+                                               (STORE_PKI, pki, pki_status, PKI_PERMISSION))
     }
     failed = any(store["status"] == STORE_FAILED for store in stores.values())
-    read = None if failed else (classic or []) + (pki or [])
+    read = None if failed or (classic is None and pki is None) else (classic or []) + (pki or [])
     return read, stores
 
 
-async def _classic_store(collector: Collector, client, tenant_id) -> list[dict] | None:
-    """Every CA in the tenant's certificate-based authentication configuration; None when the read failed."""
+async def _classic_store(collector: Collector, client, tenant_id) -> tuple:
+    """(every CA in the tenant's classic certificate-based authentication configuration, read status); a refused
+    read doesn't fail the run."""
     operation = "graph.organization.certificateBasedAuthConfiguration.get"
     if not tenant_id:
         collector.record(operation, RuntimeError("the tenant id is unknown, so its trusted CAs can't be read"))
-        return None
-    before = len(collector.failures)
-    configs = await paginate(
-        collector, operation, client.organization.by_organization_id(tenant_id).certificate_based_auth_configuration)
-    if len(collector.failures) > before:
-        return None
+        return None, STORE_FAILED
+    try:
+        configs = await paginate(collector, operation, client.organization.by_organization_id(
+            tenant_id).certificate_based_auth_configuration, raise_on_error=True)
+    except Exception as exc:  # noqa: BLE001 — classified: a refusal is the optional grant missing
+        if is_denied(exc):
+            logger.warning("the classic trust store was refused (needs %s); its CAs read null", CLASSIC_PERMISSION)
+            return None, STORE_NOT_AUTHORIZED
+        collector.record(operation, exc)
+        return None, STORE_FAILED
     return [project_certificate_authority(a)
-            for c in configs for a in getattr(c, "certificate_authorities", None) or []]
+            for c in configs for a in getattr(c, "certificate_authorities", None) or []], STORE_READ
 
 
 async def _pki_store(collector: Collector, client) -> tuple:

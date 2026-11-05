@@ -157,7 +157,8 @@ def _client(calls, configs, authorities, fail=(), pki=None, pki_error=None):
     organization = ns(
         get=_async(ns(value=[ns(id="t1", display_name="Example", verified_domains=[])])),
         by_organization_id=lambda oid: ns(certificate_based_auth_configuration=Pages(
-            DENIED if "authorities" in fail else [ns(certificate_authorities=authorities)], calls, "authorities")),
+            DENIED if "authorities" in fail else RuntimeError("timed out") if "authorities_error" in fail
+            else [ns(certificate_authorities=authorities)], calls, "authorities")),
     )
 
     def group(gid):
@@ -257,13 +258,14 @@ def test_trusted_authorities_flag_expired_and_crl_less_ones(monkeypatch, tmp_pat
 
 
 def test_failed_reads_are_null_never_zero(monkeypatch, tmp_path):
-    code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=("authorities", "g3"))
+    code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=("authorities_error", "g3"))
     summary, results = evidence["summary"], evidence["results"]
     assert code == 1
     # The classic store failed, so the list and every count are null even though the PKI store read empty.
     assert results["trusted_certificate_authorities"] is None
     assert results["certificate_authority_stores"]["certificate_based_auth_configuration"] == {
-        "status": "failed", "certificate_authorities": None}
+        "status": "failed", "certificate_authorities": None, "missing_permission": None}
+    assert (summary["classic_store_status"], summary["classic_store_missing_permission"]) == ("failed", None)
     for key in ("trusted_certificate_authorities", "expired_certificate_authorities",
                 "certificate_authorities_expiry_unknown", "certificate_authorities_without_crl"):
         assert summary[key] is None, key
@@ -354,6 +356,7 @@ def test_pki_store_cas_are_read_with_the_classic_ones_and_counted_once(monkeypat
         2, 1, 0, 1)
     assert (summary["classic_store_certificate_authorities"], summary["pki_store_certificate_authorities"],
             summary["pki_store_status"], summary["pki_store_missing_permission"]) == (1, 2, "read", None)
+    assert (summary["classic_store_status"], summary["classic_store_missing_permission"]) == ("read", None)
 
 
 @pytest.mark.parametrize("fail", ["pki", "pki_authorities"])
@@ -374,6 +377,37 @@ def test_a_refused_pki_store_reads_null_and_names_the_grant(monkeypatch, tmp_pat
         assert summary[key] is None, key
     assert [r["trust_store"] for r in results["trusted_certificate_authorities"]] == [
         "certificate_based_auth_configuration"]
+
+
+def test_a_refused_classic_store_reads_null_and_names_the_grant(monkeypatch, tmp_path):
+    code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=("authorities",),
+                            pki={"p1": [_pki_authority(30)]})
+    summary, results = evidence["summary"], evidence["results"]
+    # The grant is optional: the run succeeds, and the store is unknown rather than empty.
+    assert code == 0 and evidence["metadata"].get("partial_failure") is not True
+    assert results["certificate_authority_stores"]["certificate_based_auth_configuration"] == {
+        "status": "not_authorized", "certificate_authorities": None, "missing_permission": "Organization.Read.All"}
+    assert (summary["classic_store_status"], summary["classic_store_missing_permission"],
+            summary["classic_store_certificate_authorities"], summary["pki_store_certificate_authorities"]) == (
+        "not_authorized", "Organization.Read.All", None, 1)
+    for key in ("trusted_certificate_authorities", "expired_certificate_authorities",
+                "certificate_authorities_expiry_unknown", "certificate_authorities_without_crl"):
+        assert summary[key] is None, key
+    assert [r["trust_store"] for r in results["trusted_certificate_authorities"]] == ["public_key_infrastructure"]
+
+    # With neither store read, there is no list at all.
+    code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=("authorities", "pki"))
+    assert code == 0 and evidence["results"]["trusted_certificate_authorities"] is None
+
+
+def test_a_failed_classic_read_fails_the_run(monkeypatch, tmp_path):
+    code, evidence, _ = run(monkeypatch, tmp_path, (_x509(state="disabled"),), [_authority(300)],
+                            fail=("authorities_error",))
+    summary = evidence["summary"]
+    assert code == 1 and evidence["results"]["trusted_certificate_authorities"] is None
+    assert (summary["classic_store_status"], summary["classic_store_missing_permission"],
+            summary["classic_store_certificate_authorities"], summary["trusted_certificate_authorities"]) == (
+        "failed", None, None, None)
 
 
 def test_a_failed_pki_read_fails_the_run(monkeypatch, tmp_path):

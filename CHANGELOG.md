@@ -1475,12 +1475,14 @@ schemas and the `paramify` CLI — not the internal code.
   and each one's `certificateAuthorities`) into `trusted_certificate_authorities`:
   trust store, issuer, subject, root or intermediate, revocation list URLs,
   thumbprint, `not_after` and `days_until_expiry` from the certificate, and
-  `expired` and `has_crl`. The PKI store needs the optional
-  `PublicKeyInfrastructure.Read.All`: refused, it reads `not_authorized` in
-  `certificate_authority_stores` and `pki_store_status`,
-  `pki_store_missing_permission` names the grant, and the run still succeeds; a
+  `expired` and `has_crl`. Each store's grant is optional: the classic store needs
+  `Organization.Read.All` and the PKI store `PublicKeyInfrastructure.Read.All`.
+  Refused, a store reads `not_authorized` in `certificate_authority_stores` and
+  `classic_store_status` or `pki_store_status`, `classic_store_missing_permission`
+  or `pki_store_missing_permission` names the grant, and the run still succeeds; any
+  other failure fails it. For the PKI store, a
   cloud without the API (400 or 404) reads `not_available` the same way. The CA list
-  is null when either store's read failed. With the X.509 method enabled it also reads users with
+  is null when either store's read failed or neither was read. With the X.509 method enabled it also reads users with
   their `authorizationInfo` (from the target groups, or from the directory only when
   X.509 targets all users) and the groups the enabled methods target. It counts every
   enabled member account X.509 targets, and lists in `x509_certificate_users` the
@@ -1498,6 +1500,7 @@ schemas and the `paramify` CLI — not the internal code.
   `certificate_authorities_without_crl` (a CA in both stores counted once, by
   thumbprint or, when a certificate can't be read, key identifier; null unless both
   stores were read), `classic_store_certificate_authorities`,
+  `classic_store_status`, `classic_store_missing_permission`,
   `pki_store_certificate_authorities`, `pki_store_status`,
   `pki_store_missing_permission`, `x509_targeted_users`,
   `x509_targeted_users_unmapped`, `x509_targeted_users_mapping_unverified`,
