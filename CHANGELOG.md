@@ -12,10 +12,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_emergency_accounts` 0.1.1: a synced passkey counts as a phishing-resistant
+  method.** `phishing_resistant_method_registered` and
+  `emergency_accounts_with_phishing_resistant_method` now count `passKeySynced`
+  alongside device-bound passkeys, as Microsoft treats synced passkeys as
+  phishing-resistant credentials. The set is shared with `azure_entra_mfa_status`.
+
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
-  a device-bound passkey, Windows Hello for Business or a macOS platform credential
-  (the same set `azure_entra_emergency_accounts` uses). Certificate-based authentication
+  a passkey (synced or device-bound), Windows Hello for Business or a macOS platform
+  credential (the same set `azure_entra_emergency_accounts` uses). Synced passkeys
+  count because Microsoft treats them as phishing-resistant credentials
+  (https://learn.microsoft.com/en-us/entra/identity/authentication/how-to-authentication-passkeys-fido2). Certificate-based authentication
   isn't visible in the registration report, so a certificate-only user counts as without.
   The summary adds
   `phishing_resistant_enabled_users`, `phishing_resistant_coverage_percentage`,
