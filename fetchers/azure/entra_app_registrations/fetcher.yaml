@@ -107,4 +107,4 @@ evidence_set:
     How long were credentials issued for?
     - credentials_issued_beyond_approved_lifetime — Number of secrets and certificates whose end date is more than approved_lifetime_days after their start date; null if any credential has no start or end date, because the count could be short
     - credentials_without_lifetime — Number of credentials with no start date or no end date, whose issued lifetime can't be computed
-    - approved_lifetime_days — The longest issued lifetime counted as within the approved interval (365 unless configured)
+    - approved_lifetime_days — Number of days a credential can be issued for and still count as within the approved interval (365 unless configured)
