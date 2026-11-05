@@ -4,9 +4,10 @@ type: AUTOMATED
 role: configuration
 statement: >-
   Every administrator in the Entra tenant has registered a phishing-resistant authentication method
-  (a FIDO2 security key or device-bound passkey, Windows Hello for Business, or multifactor
-  certificate-based authentication). Supports KSI-IAM-APM for the highest-risk subset. Does NOT count
-  Microsoft Authenticator phone sign-in, which is passwordless but not phishing-resistant, and does NOT
+  (a FIDO2 security key or device-bound passkey, Windows Hello for Business, or a macOS platform credential). Supports KSI-IAM-APM for the highest-risk subset. Does NOT count
+  Microsoft Authenticator phone sign-in, which is passwordless but not phishing-resistant, and cannot
+  see certificate-based authentication, which the registration report doesn't list, so a certificate-only
+  admin counts as without. Does NOT
   assert that the admin is required to use the method at sign-in (that is a Conditional Access
   authentication-strength check). Fails when no admin was found, and when directory role membership or
   the registration report couldn't be read (the admin counts read null). An admin with no row in the

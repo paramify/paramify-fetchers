@@ -20,6 +20,10 @@ cases:
     expect: PASS
     artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_users":15,"admin_users_without_phishing_resistant":0,"phishing_resistant_admin_users":15}}}'
 
+  - name: registration_report_unreadable
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{},"summary":{"admin_users":3,"admin_users_without_phishing_resistant":null,"phishing_resistant_admin_users":null}}}'
+
   - name: field_renamed
     expect: FAIL
     artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_users":3,"admins_without_phishing_resistant":0}}}'
