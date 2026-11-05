@@ -1,0 +1,24 @@
+key: azure_devops_no_users_deleted_in_origin
+name: Azure DevOps No Users Deleted in Their Identity Source
+type: AUTOMATED
+role: configuration
+statement: >-
+  The organization's users were read with no partial failure, at least one person is a member, and no
+  person deleted in Entra ID or in their Microsoft account is still in the organization
+  (users_deleted_in_origin is an empty list), so no orphaned account of a departed user remains.
+  Supports KSI-IAM-AAM for Azure DevOps users. Covers only what the collecting identity can see. A
+  deleted person whose Azure DevOps access is already disabled still fails, since the account is
+  still in the organization. Does not prove: that a person who left but is still enabled in Entra ID
+  was removed (the Entra dormant-identity evidence covers that); shared or duplicate accounts; or
+  service principals and managed identities.
+
+# users_deleted_in_origin is null when the users weren't read.
+regex: '"partial_failure":\s*false\b[\s\S]*?"users_deleted_in_origin":\s*\[\s*\],[\s\S]*?"users_total":\s*[1-9]\d*'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DEVOPS-IDENTITIES

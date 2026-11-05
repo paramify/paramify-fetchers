@@ -1,0 +1,26 @@
+key: azure_devops_no_inactive_users
+name: Azure DevOps No Inactive Users Who Can Sign In
+type: AUTOMATED
+role: configuration
+statement: >-
+  The organization's users and user entitlements were read with no partial failure, at least one
+  person is a member, the inactivity threshold is at most 90 days, and no person who can still sign
+  in has gone longer than that without accessing the organization (or, never having signed in, was
+  added longer ago than that): inactive_users is an empty list. Supports KSI-IAM-AAM for Azure DevOps
+  users. Covers only what the collecting identity can see. Does not prove: a person whose access
+  status or dates Azure DevOps doesn't report (no inactivity verdict, so not listed); shared or
+  duplicate accounts; service principals, managed identities or service identities (no last access is
+  collected for them); or that a documented exception is current, so a documented exception still
+  fails.
+
+# inactive_users is null when the entitlements weren't read; anchored after "summary" because
+# results repeats inactivity_threshold_days.
+regex: '"partial_failure":\s*false\b[\s\S]*?"summary":\s*\{[\s\S]*?"inactive_users":\s*\[\s*\],[\s\S]*?"inactivity_threshold_days":\s*(?:[1-8]?\d|90)(?!\d)[\s\S]*?"last_access_collected":\s*true\b[\s\S]*?"users_total":\s*[1-9]\d*'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DEVOPS-IDENTITIES
