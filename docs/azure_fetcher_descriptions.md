@@ -5674,7 +5674,7 @@ Summary fields:
 
 
 ### azure_devops_permissions
-Short Description: Shows which identities and groups hold which Azure DevOps permissions at each scope, allowed or denied, and flags high-impact rights held outside the admin groups.
+Short Description: Shows which identities and groups hold which Azure DevOps permissions at each scope, flags high-impact rights held outside the admin groups, and lists who can override check-in validation.
 
 Script: fetchers/azure/devops_permissions/fetcher.py (uses the shared Azure DevOps client fetchers/azure/_shared/devops_rest.py)
 
@@ -5688,7 +5688,7 @@ Commands Executed:
 - `GET _apis/git/repositories` — counts Git repositories, since branch policies exist only in Git
 - `GET _apis/identities` (in batches) — the user, group or service account behind each entry
 
-Output: `azure_devops_permissions_<organization>.json` — every explicit permission entry in the organization's delivery-related namespaces (organization, project, Git and TFVC, build, release, environments, service connections, library and audit streams), with who it applies to, the scope it applies at, and the actions it allows, denies and inherits, plus the high-impact rights held outside the admin groups.
+Output: `azure_devops_permissions_<organization>.json` — every explicit permission entry in the organization's delivery-related namespaces (organization, project, Git and TFVC, build, release, environments, service connections, library and audit streams), with who it applies to, the scope it applies at, and the actions it allows, denies and inherits, plus the high-impact rights held outside the admin groups and who can override check-in validation.
 
 Summary fields:
 
@@ -5717,12 +5717,19 @@ Summary fields:
 - `identities_with_high_impact_rights_from_defaults` — List of the `[<project>]\Contributors` groups in the entries `high_impact_grants_from_defaults` counts; null if a namespace couldn't be read, an identity couldn't be looked up or the project list couldn't be read
 - `branch_policy_bypass_holders` — List of identities allowed to bypass Git branch policies (exempt from policy enforcement, or bypass policies when completing a pull request); null if the organization has no Git repositories this identity can read, as when it uses only TFVC or when the identity can't read any of its repositories, or if the Git permissions or repositories couldn't be read
 
+**Who can skip check-in validation?**
+- `checkin_validation_override_grants` — Number of permission entries in the Build namespace that allow overriding check-in validation, set on the entry or inherited from a parent object and not denied on the entry; this right lets someone check in to TFVC without a gated build first building the change; null if the Build permissions couldn't be read or, under a project filter, the project list couldn't be read
+- `checkin_validation_override_holders` — List of users, groups and service accounts named in the entries `checkin_validation_override_grants` counts; null if the Build permissions couldn't be read or, under a project filter, the project list couldn't be read
+- `checkin_validation_override_build_services` — List of the build service accounts, the organization's and each project's, and the organization's Project Collection Build Service Accounts group, named in the entries `checkin_validation_override_grants` counts; Azure DevOps grants them this right by default, since a gated build checks the change in as its build service; null if the Build permissions couldn't be read or, under a project filter, the project list couldn't be read
+- `checkin_validation_override_grants_outside_admin_groups` — Number of the entries `checkin_validation_override_grants` counts that name neither an admin group (as `high_impact_grants_outside_admin_groups` defines them) nor one of the build services `checkin_validation_override_build_services` lists; null if the Build permissions couldn't be read, an identity in an entry that allows overriding check-in validation couldn't be looked up or, under a project filter, the project list couldn't be read
+- `checkin_validation_override_holders_outside_admin_groups` — List of users, groups and service accounts named in the entries `checkin_validation_override_grants_outside_admin_groups` counts; null if the Build permissions couldn't be read, an identity in an entry that allows overriding check-in validation couldn't be looked up or, under a project filter, the project list couldn't be read
+
 **What isn't collected?**
 - `not_collected` — What the fetcher deliberately doesn't collect, with a note for each area:
   - group_membership (who is in each group; see the identities evidence)
   - resource_names (repositories, pipelines, environments, service connections and library items appear by id)
   - other_namespaces (namespaces outside the delivery platform: work items, boards, wiki, dashboards, analytics, agent pools)
-  - inherited_grants (a high-impact right only inherited from a parent object is flagged on that parent)
+  - inherited_grants (a high-impact right only inherited from a parent object is flagged on that parent; the check-in validation override is also counted where an entry inherits it)
 
 
 ### azure_devops_pipelines
