@@ -6,8 +6,11 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace as ns
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
@@ -68,6 +71,13 @@ MI_SOUTH = f"{IN_RG}/providers/Microsoft.Sql/managedInstances/mi-south"
 MI_OUT = f"{OUT_RG}/providers/Microsoft.Sql/managedInstances/mi-out"
 LOCATIONS = {MI_IN: "regioneast", MI_OUT: "regionwest", MI_SOUTH: "regionsouth"}
 WORKSPACE_OUT = f"{OUT_RG}/providers/Microsoft.OperationalInsights/workspaces/law-out"
+# Each instance gets its own network resources and maintenance configuration, named so a read shows whose it is.
+MAINTENANCE = {rid: f"{SUB}/providers/Microsoft.Maintenance/publicMaintenanceConfigurations/SQL_{loc}_MI_1"
+               for rid, loc in LOCATIONS.items()}
+
+
+def _network_id(rid, kind):
+    return f"{rid.split('/providers/')[0]}/providers/Microsoft.Network/{kind}/{rid.rsplit('/', 1)[1]}"
 
 
 def _key(rid):
@@ -113,7 +123,9 @@ def _sql_client(failover=None, reads=None, deny=()):
     return ns(
         managed_instances=ns(list=lambda: [
             ns(id=rid, name=_key(rid)[1], location=loc, state="Ready", current_backup_storage_redundancy="Geo",
-               public_data_endpoint_enabled=rid != MI_IN, minimal_tls_version="1.2")
+               public_data_endpoint_enabled=rid != MI_IN, minimal_tls_version="1.2",
+               subnet_id=f"{_network_id(rid, 'virtualNetworks')}/subnets/mi",
+               maintenance_configuration_id=MAINTENANCE[rid])
             for rid, loc in LOCATIONS.items()]),
         managed_databases=ns(list_by_instance=per_instance("databases", {
             _key(rid): [ns(id=f"{rid}/databases/app", name="app", status="Online")] for rid in LOCATIONS})),
@@ -132,13 +144,78 @@ def _sql_client(failover=None, reads=None, deny=()):
             k: [ns(administrator_type="ActiveDirectory", login="dba")] for k in keys})),
         managed_instance_azure_ad_only_authentications=ns(list_by_instance=per_instance("entra_only", {
             k: [ns(azure_ad_only_authentication=True)] for k in keys})),
+        managed_database_sensitivity_labels=ns(list_current_by_database=per_instance("sensitivity_labels", {
+            (*k, "app"): [ns(label_name="Confidential", information_type="Financial")] for k in keys})),
     )
 
 
-def run_sql_reads(monkeypatch, tmp_path, module, patterns, failover=None, deny=()):
+def _network_client(reads, deny):
+    subnets, groups, tables = {}, {}, {}
+    for rid in LOCATIONS:
+        rg, name = _key(rid)
+        nsg, table = _network_id(rid, "networkSecurityGroups"), _network_id(rid, "routeTables")
+        subnets[(rg, name, "mi")] = ns(id=f"{_network_id(rid, 'virtualNetworks')}/subnets/mi", name="mi",
+                                       address_prefix="10.0.0.0/27", network_security_group=ns(id=nsg),
+                                       route_table=ns(id=table))
+        groups[(rg, name)] = ns(id=nsg, name=name, security_rules=[], default_security_rules=[])
+        tables[(rg, name)] = ns(id=table, name=name, routes=[])
+    return ns(subnets=ns(get=_call(subnets, "subnets", reads, deny)),
+              network_security_groups=ns(get=_call(groups, "network_security_groups", reads, deny)),
+              route_tables=ns(get=_call(tables, "route_tables", reads, deny)))
+
+
+def _maintenance_get_json(reads, deny):
+    owners = {cid: _key(rid)[1] for rid, cid in MAINTENANCE.items()}
+
+    def get_json(rest, url):
+        path = url.split("?")[0]
+        reads.append(("maintenance", ("", owners[path])))
+        if owners[path] in deny:
+            raise DENIED
+        return {"id": path, "name": path.rsplit("/", 1)[1], "properties": {"maintenanceWindow": {"duration": "08:00"}}}
+
+    return get_json
+
+
+NOW = datetime(2026, 10, 1, tzinfo=timezone.utc)
+
+
+def _event(resource_id, operation, status, minute, correlation, caller=None):
+    return ns(operation_name=ns(value=operation), status=ns(value=status), caller=caller,
+              claims={"idtyp": "user"} if caller else {}, resource_id=resource_id, correlation_id=correlation,
+              event_data_id=f"{correlation}-{status}", event_timestamp=NOW - timedelta(days=5) + timedelta(minutes=minute))
+
+
+def _group_id(rg, location, name):
+    return f"{SUB}/resourceGroups/{rg}/providers/Microsoft.Sql/locations/{location}/instanceFailoverGroups/{name}"
+
+
+GROUP_FAILOVER = "Microsoft.Sql/locations/instanceFailoverGroups/failover/action"
+FORCED_FAILOVER = "Microsoft.Sql/locations/instanceFailoverGroups/forceFailoverAllowDataLoss/action"
+# fog-a fails over to regionwest; fog-b is forced to regionsouth; mi-in's own failover fails.
+ACTIVITY = [
+    _event(_group_id("rg-out", "regionwest", "fog-a"), GROUP_FAILOVER, "Started", 0, "c1", "ops@example.com"),
+    _event(_group_id("rg-out", "regionwest", "fog-a"), GROUP_FAILOVER, "Succeeded", 12, "c1"),
+    _event(_group_id("rg-in", "regionsouth", "fog-b"), FORCED_FAILOVER, "Started", 30, "c2", "ops@example.com"),
+    _event(_group_id("rg-in", "regionsouth", "fog-b"), FORCED_FAILOVER, "Succeeded", 33, "c2"),
+    _event(MI_IN, "Microsoft.Sql/managedInstances/failover/action", "Started", 60, "c3", "ops@example.com"),
+    _event(MI_IN, "Microsoft.Sql/managedInstances/failover/action", "Failed", 61, "c3"),
+    _event(MI_IN, "Microsoft.Sql/managedInstances/write", "Succeeded", 90, "c4", "ops@example.com"),
+]
+
+
+def run_sql_reads(monkeypatch, tmp_path, module, patterns, failover=None, deny=(), activity=None):
     _common(monkeypatch, tmp_path, module, patterns)
     reads: list = []
     monkeypatch.setattr(module, "sql_client", lambda *a: _sql_client(failover, reads, deny))
+    if module is backups:
+        def activity_logs(filter):
+            if isinstance(activity, Exception):
+                raise activity
+            return iter(ACTIVITY if activity is None else activity)
+
+        monkeypatch.setattr(module, "monitor_client", lambda *a: ns(activity_logs=ns(list=activity_logs)))
+        monkeypatch.setattr(module, "utc_now", lambda: NOW)
     if module is configuration:
         audit = ns(id="ds", name="ds", workspace_id=WORKSPACE_OUT,
                    logs=[ns(category="SQLSecurityAuditEvents", enabled=True)])
@@ -151,13 +228,16 @@ def run_sql_reads(monkeypatch, tmp_path, module, patterns, failover=None, deny=(
             return [audit]
 
         monkeypatch.setattr(module, "monitor_client", lambda *a: ns(diagnostic_settings=ns(list=diagnostic_settings)))
+        monkeypatch.setattr(module, "network_client", lambda *a: _network_client(reads, deny))
+        monkeypatch.setattr(module, "arm_rest_client", lambda *a: object())
+        monkeypatch.setattr(module, "get_json", _maintenance_get_json(reads, deny))
     code = module.main()
     name = module.logger.name
     return code, json.loads((tmp_path / f"{name}_s1.json").read_text()), reads
 
 
-def run_sql(monkeypatch, tmp_path, module, patterns, failover=None):
-    code, evidence, _ = run_sql_reads(monkeypatch, tmp_path, module, patterns, failover)
+def run_sql(monkeypatch, tmp_path, module, patterns, failover=None, activity=None):
+    code, evidence, _ = run_sql_reads(monkeypatch, tmp_path, module, patterns, failover, activity=activity)
     return code, evidence
 
 
@@ -190,6 +270,12 @@ def test_sql_configuration_excludes_by_group_and_region_and_keeps_an_excluded_au
     assert (summary["total_managed_instances"], summary["in_scope_managed_instances"],
             summary["excluded_managed_instances"]) == (1, 1, 2)
     assert (summary["instances_public_data_endpoint_enabled"], summary["instances_audit_logs_exported"]) == (0, 1)
+    assert instance["subnet_network_security_group"]["name"] == "mi-in"
+    assert instance["maintenance_window"]["name"] == "SQL_regioneast_MI_1"
+    assert (summary["instances_subnet_network_security_group"], summary["instances_subnet_route_table"],
+            summary["instances_custom_maintenance_window"]) == (1, 1, 1)
+    assert (summary["total_user_databases"], summary["user_databases_with_sensitivity_labels"],
+            summary["sensitivity_labeled_columns"]) == (1, 1, 1)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
 
 
@@ -214,10 +300,92 @@ def test_sql_backups_without_patterns_add_only_empty_exclusion_fields(monkeypatc
     assert summary["in_scope_managed_instances"] == summary["total_managed_instances"] == 3
     assert summary["in_scope_instance_failover_groups"] == summary["total_instance_failover_groups"] == 2
     assert summary["excluded_managed_instances"] == summary["excluded_instance_failover_groups"] == 0
-    kinds, plurals = ("managed_instance", "instance_failover_group"), ("managed_instances", "instance_failover_groups")
+    assert summary["excluded_failovers"] == 0 and summary["in_scope_failovers"] == summary["total_failovers"] == 3
+    kinds = ("managed_instance", "instance_failover_group", "failover")
+    plurals = ("managed_instances", "instance_failover_groups", "failovers")
     assert _without_exclusion_fields(summary, kinds, plurals) == {
         **backups.summarize(results["managed_instances"], results["instance_failover_groups"], True),
+        **backups.summarize_failovers(results["failovers"], results["failover_history_window"], NOW),
         "provider_registration_status": "registered"}
+
+
+def test_sql_backups_failovers_follow_the_group_or_instance_they_moved(monkeypatch, tmp_path):
+    code, evidence = run_sql(monkeypatch, tmp_path, backups, None)
+    failovers, summary = evidence["results"]["failovers"], evidence["summary"]
+    assert code == 0
+    assert [(f["kind"], f["failover_group"] or f["managed_instance"], f["status"], f["allows_data_loss"],
+             f["new_primary_location"], f["duration_minutes"], f["target_found"]) for f in failovers] == [
+        ("managed_instance", "mi-in", "Failed", None, None, 1.0, True),
+        ("failover_group", "fog-b", "Succeeded", True, "regionsouth", 3.0, True),
+        ("failover_group", "fog-a", "Succeeded", False, "regionwest", 12.0, True),
+    ]
+    assert failovers[2]["caller"] == "ops@example.com" and failovers[2]["failover_policy"] == "Manual"
+    assert {g["name"]: (g["failovers_in_window"], g["latest_succeeded_failover_time"])
+            for g in evidence["results"]["instance_failover_groups"]} == {
+        "fog-a": (1, "2026-09-26T00:12:00Z"), "fog-b": (1, "2026-09-26T00:33:00Z")}
+    assert (summary["failover_group_failovers"], summary["forced_failovers_allowing_data_loss"],
+            summary["managed_instance_failovers"], summary["succeeded_failovers"], summary["failed_failovers"],
+            summary["failover_groups_with_succeeded_failover"], summary["longest_succeeded_failover_minutes"],
+            summary["days_since_latest_succeeded_failover"]) == (2, 1, 1, 2, 1, 2, 12.0, 5.0)
+
+    # fog-b leaves with its instances, so its forced failover does too; fog-a keeps mi-in in scope.
+    code, evidence = run_sql(monkeypatch, tmp_path, backups, PATTERNS)
+    results, summary = evidence["results"], evidence["summary"]
+    assert code == 0
+    assert [(f["kind"], f["failover_group"] or f["managed_instance"]) for f in results["failovers"]] == [
+        ("managed_instance", "mi-in"), ("failover_group", "fog-a")]
+    [entry] = [e for e in results["excluded"] if e["kind"] == "failover"]
+    assert (entry["name"], entry["pattern"], entry["reason"], entry["correlation_id"]) == (
+        "fog-b", "location:regionsouth", "failover_group_excluded", "c2")
+    assert (summary["total_failovers"], summary["excluded_failovers"], summary["in_scope_failovers"],
+            summary["forced_failovers_allowing_data_loss"]) == (2, 1, 2, 0)
+
+
+def test_sql_backups_failover_on_an_unlisted_group_leaves_only_by_pattern(monkeypatch, tmp_path):
+    gone = [_event(_group_id("rg-out", "regionwest", "fog-gone"), GROUP_FAILOVER, "Succeeded", 0, "c9", "a@b.c")]
+    code, evidence = run_sql(monkeypatch, tmp_path, backups, None, activity=gone)
+    [failover] = evidence["results"]["failovers"]
+    assert code == 0 and (failover["target_found"], failover["failover_policy"]) == (False, None)
+    code, evidence = run_sql(monkeypatch, tmp_path, backups, "rg:rg-out", activity=gone)
+    assert evidence["results"]["failovers"] == []
+    assert [(e["kind"], e["name"], e["reason"]) for e in evidence["results"]["excluded"] if e["kind"] == "failover"] == [
+        ("failover", "fog-gone", "resource_matched")]
+
+
+@pytest.mark.parametrize("raw, days, requested, code", [
+    (None, 90, 90, 0), ("30", 30, 30, 0), ("365", 90, 365, 0), ("9O", 90, None, 1), ("0", 90, 0, 1),
+])
+def test_sql_backups_record_a_bad_failover_window_as_bad_config_and_keep_the_value_asked_for(
+        monkeypatch, tmp_path, raw, days, requested, code):
+    if raw is None:
+        monkeypatch.delenv(backups.FAILOVER_DAYS_ENV, raising=False)
+    else:
+        monkeypatch.setenv(backups.FAILOVER_DAYS_ENV, raw)
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    returned, evidence = run_sql(monkeypatch, tmp_path, backups, None)
+    window = evidence["results"]["failover_history_window"]
+    assert (returned, window["days"], window["days_requested"], evidence["summary"]["failover_history_days"]) == (
+        code, days, requested, days)
+    assert window["complete"] is True
+    if code:
+        status = json.loads((tmp_path / "status.json").read_text())
+        assert status["code"] == "bad_config" and backups.FAILOVER_DAYS_ENV in status["error"]
+
+
+def test_sql_backups_unread_activity_log_leaves_failover_counts_null(monkeypatch, tmp_path):
+    code, evidence = run_sql(monkeypatch, tmp_path, backups, None, activity=DENIED)
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 1
+    assert [f["operation"] for f in evidence["metadata"]["api_failures"]] == ["monitor.activity_logs.list"]
+    assert results["failovers"] is None and results["failover_history_window"]["cut_reason"] == "read_failed"
+    assert summary["failover_history_read"] is False and summary["failover_history_days"] == 90
+    assert all(summary[k] is None for k in (
+        "total_failovers", "succeeded_failovers", "failed_failovers", "failover_group_failovers",
+        "latest_succeeded_failover_time", "longest_succeeded_failover_minutes", "in_scope_failovers",
+        "excluded_failovers"))
+    assert {g["failovers_in_window"] for g in results["instance_failover_groups"]} == {None}
+    # The rest of the evidence is unchanged by the failed read.
+    assert summary["total_instance_failover_groups"] == 2 and summary["total_managed_instances"] == 3
 
 
 def test_sql_backups_keep_a_failover_group_with_an_in_scope_instance_and_drop_one_with_none(monkeypatch, tmp_path):
@@ -227,7 +395,8 @@ def test_sql_backups_keep_a_failover_group_with_an_in_scope_instance_and_drop_on
     [instance] = results["managed_instances"]
     assert (instance["name"], instance["failover_groups"], instance["in_failover_group"]) == ("mi-in", ["fog-a"], True)
     assert [g["name"] for g in results["instance_failover_groups"]] == ["fog-a"]
-    assert _excluded(results) == [("instance_failover_group", "fog-b", "location:regionsouth"),
+    assert _excluded(results) == [("failover", "fog-b", "location:regionsouth"),
+                                  ("instance_failover_group", "fog-b", "location:regionsouth"),
                                   ("managed_instance", "mi-out", "rg:rg-out"),
                                   ("managed_instance", "mi-south", "location:regionsouth")]
     [group] = [e for e in results["excluded"] if e["kind"] == "instance_failover_group"]

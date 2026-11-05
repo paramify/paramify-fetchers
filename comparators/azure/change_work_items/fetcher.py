@@ -205,8 +205,12 @@ def check_with(cfg):
                  in cfg["environments"]]
         changes = [c for f in files for c in (f.payload.get("results") or {}).get("changes") or []]
         lookbacks = [(f.payload.get("results") or {}).get("lookback_days") for f in files]
+        # Changes the boundary excluded still lend their caller to an in-scope change, as before they were excluded.
+        lenders = changes + [{**e, "change_id": e.get("id"), "target_resource_id": e.get("target_id")}
+                             for f in files for e in (f.payload.get("results") or {}).get("excluded") or []
+                             if e.get("kind") == "change"]
         by_resource, by_deployment = {}, {}
-        for c in changes:
+        for c in lenders:
             if named(c):
                 by_resource.setdefault(resource(c), []).append(c)
                 if c.get("deployment_id"):

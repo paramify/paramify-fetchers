@@ -87,7 +87,7 @@ evidence_set:
     - total_groups — Number of groups in the tenant; a group that is neither security- nor mail-enabled (rare) is in none of the four kind counts, so the four may not add up to the total
     - groups_readable — True if the whole group list was read; false if any page failed, and every count reads null, since a partial list would pass for the whole tenant
     - members_readable — True if every group's members were read, apart from hidden_membership_groups_unread; false if any member read failed, and the member fields read null
-    - member_details_readable — True if every user member came back with its guest status and account state; false if members couldn't be read or any one user came back without one of them (Graph returns users as an id only when User.Read.All isn't granted, and older accounts can have no guest status). A missing guest status nulls the guest fields for the whole tenant, and a missing account state nulls the disabled-user field
+    - member_details_readable — True if every user member came back with its guest status and account state; false if members couldn't be read or any one user came back without its guest status or account state (Graph returns users as an id only when User.Read.All isn't granted, and older accounts can have no guest status). A missing guest status nulls the guest fields for the whole tenant, and a missing account state nulls the disabled-user field
     - owners_readable — True if every group's owners (the users or service principals who can manage the group) were read; false if any owner read failed, and the owner fields read null
     - owner_details_readable — True if owners were read and every owner came back with its account state (enabled or disabled); false if not (User.Read.All or Application.Read.All isn't granted), and groups_with_only_disabled_owners reads null
 
@@ -108,9 +108,9 @@ evidence_set:
     - dynamic_groups_paused — Number of dynamic groups whose rule processing is paused, so membership no longer follows the rule
     - assigned_groups — Number of groups whose membership isn't set by a rule: members are added and removed by hand, or, for synced groups (included here), managed in on-premises Active Directory
     - synced_groups — Number of groups synced from on-premises Active Directory, and managed there
-    - cloud_groups — Number of groups created in Entra ID rather than synced
+    - cloud_groups — Number of groups not currently synced from on-premises Active Directory, so a group that was synced and no longer is counts as cloud
     - hidden_membership_groups — Number of Microsoft 365 groups whose membership is hidden; their members are listed only with Member.Read.Hidden
-    - hidden_membership_groups_unread — Number of hidden-membership groups that came back with no members, which Graph also returns without Member.Read.Hidden, so their members read unknown and the member fields leave them out; null if members couldn't be read
+    - hidden_membership_groups_unread — Number of hidden-membership groups that came back with no members, which Graph also returns without Member.Read.Hidden, so their members read unknown and are left out of every member figure (total_direct_memberships, empty_groups, groups_with_guest_members, groups_with_disabled_user_members, groups_with_nested_groups, users_in_role_assignable_groups and role_assignable_groups_with_guest_members), which can then read low; null if members couldn't be read
 
     Who owns each group?
     - groups_with_owners_not_in_graph — Number of groups whose owners Microsoft Graph doesn't return: synced groups, distribution groups and mail-enabled security groups (created in Exchange); the owner fields leave them out

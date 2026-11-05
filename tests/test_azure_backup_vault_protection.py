@@ -277,6 +277,25 @@ def test_summary_counts_backed_up_overdue_and_unknown():
                                                                "Microsoft.Storage/storageAccounts/blobServices": 1}
 
 
+def test_summary_matches_the_instructions(assert_summary_documented):
+    fresh = judged([raw_point(6)])
+    vaults = [vault_with([fresh])]
+    for store in ("LocallyRedundant", "ZoneRedundant", "GeoRedundant"):
+        vaults.append({**vault_with([]), **bv.vault_record(raw_vault(f"bv-{store}", store=store)),
+                       "backup_policies": [], "backup_instances": [], "policies_read": True, "instances_read": True})
+    no_store = raw_vault("bv-none")
+    no_store["properties"]["storageSettings"] = []
+    vaults.append({**vault_with([]), **bv.vault_record(no_store), "backup_policies": [], "backup_instances": [],
+                   "policies_read": True, "instances_read": True})
+    summary = bv.summarize(vaults, {**SETTINGS, "rpo_hours": 24})
+    assert set(summary["vaults_by_vault_store_redundancy"]) == {"LocallyRedundant", "ZoneRedundant", "GeoRedundant",
+                                                                 "None"}
+    assert_summary_documented("azure/backup_vault_protection", {
+        **summary, "api_version": "2025-07-01", "provider_registration_status": "registered",
+        **bv.ResourceExclusions().summary([], ("backup_vault", "backup_instance"),
+                                          {"backup_vaults": 5, "backup_instances": 1})})
+
+
 def test_all_backed_up_is_null_when_any_is_unknown_and_true_when_all_are_fresh():
     fresh = judged([raw_point(6)])
     failed = {**judged([], status=bv.RECOVERY_POINTS_ERROR), "id": "x"}

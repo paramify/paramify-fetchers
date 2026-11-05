@@ -238,7 +238,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "MonitorManagementClient",
         "activity_logs",
         ["list"],
-        "azure/app_service_deployments — without it no slot swap or publish-profile download is seen",
+        "azure/app_service_deployments — without it no slot swap or publish-profile download is seen; "
+        "azure/sql_managed_instance_backups — failover history",
     ),
     (
         "azure.mgmt.monitor",
@@ -283,6 +284,27 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "route_tables",
         ["list_all"],
         "azure/vnet_egress_routing",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "subnets",
+        ["get"],
+        "azure/sql_managed_instance_configuration — the instance's subnet, NSG and route table",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "network_security_groups",
+        ["get"],
+        "azure/sql_managed_instance_configuration — the instance subnet's NSG rules",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "route_tables",
+        ["get"],
+        "azure/sql_managed_instance_configuration — the instance subnet's routes",
     ),
     (
         "azure.mgmt.network",
@@ -748,6 +770,20 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list"],
         "azure/backup_recovery_status",
     ),
+    (
+        "azure.mgmt.recoveryservicesbackup",
+        "RecoveryServicesBackupClient",
+        "backup_jobs",
+        ["list"],
+        "azure/backup_recovery_status — restore jobs, with a $filter",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup",
+        "RecoveryServicesBackupClient",
+        "job_details",
+        ["get"],
+        "azure/backup_recovery_status — the property bag the job list leaves out",
+    ),
     # --- storage -------------------------------------------------------------
     (
         "azure.mgmt.storage",
@@ -1029,6 +1065,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "managed_database_transparent_data_encryption",
         ["get"],
         "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_database_sensitivity_labels",
+        ["list_current_by_database"],
+        "azure/sql_managed_instance_configuration — classified columns per user database",
     ),
     # --- MySQL / PostgreSQL --------------------------------------------------
     (
@@ -1625,6 +1668,39 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ],
         "azure/sql_managed_instance_backups — a lost redundancy field reads as "
         "'not zone-redundant'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceProperties",
+        ["subnet_id", "maintenance_configuration_id"],
+        "azure/sql_managed_instance_configuration — a lost field reads the subnet and "
+        "maintenance window as unknown",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "SensitivityLabelProperties",
+        ["label_name", "information_type"],
+        "azure/sql_managed_instance_configuration — a lost field drops a column's "
+        "label from the counts",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "SubnetPropertiesFormat",
+        ["route_table", "delegations"],
+        "azure/sql_managed_instance_configuration — a renamed field reads the instance "
+        "subnet as having no route table",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RouteTablePropertiesFormat",
+        ["routes", "disable_bgp_route_propagation"],
+        "azure/sql_managed_instance_configuration — the instance subnet's routes",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RoutePropertiesFormat",
+        ["address_prefix", "next_hop_type", "next_hop_ip_address"],
+        "azure/sql_managed_instance_configuration — each route's destination and next hop",
     ),
     (
         "azure.mgmt.sql.models",
@@ -2860,6 +2936,37 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "method is counted as phishing-resistant",
     ),
     (
+        "msgraph.generated.models.certificate_authority",
+        "CertificateAuthority",
+        ["certificate", "certificate_revocation_list_url", "is_root_authority", "issuer", "issuer_ski"],
+        "azure/entra_authentication_policy — trusted CAs; a missing certificate leaves every expiry unknown",
+    ),
+    (
+        "msgraph.generated.models.certificate_authority_detail",
+        "CertificateAuthorityDetail",
+        ["certificate", "certificate_authority_type", "certificate_revocation_list_url", "expiration_date_time",
+         "issuer", "issuer_subject_key_identifier", "thumbprint"],
+        "azure/entra_authentication_policy — CAs in the PKI-based trust store",
+    ),
+    (
+        "msgraph.generated.models.certificate_based_auth_configuration",
+        "CertificateBasedAuthConfiguration",
+        ["certificate_authorities"],
+        "azure/entra_authentication_policy — a missing list reads as no trusted CA",
+    ),
+    (
+        "msgraph.generated.models.x509_certificate_user_binding",
+        "X509CertificateUserBinding",
+        ["user_property", "x509_certificate_field", "priority", "trust_affinity_level"],
+        "azure/entra_authentication_policy — which user property matches a certificate",
+    ),
+    (
+        "msgraph.generated.models.authorization_info",
+        "AuthorizationInfo",
+        ["certificate_user_ids"],
+        "azure/entra_authentication_policy — a missing field reads as no certificate user ids",
+    ),
+    (
         "msgraph.generated.models.identity_security_defaults_enforcement_policy",
         "IdentitySecurityDefaultsEnforcementPolicy",
         ["is_enabled"],
@@ -2948,7 +3055,8 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "EventData",
         ["claims", "caller", "correlation_id", "event_data_id", "resource_id", "operation_name", "status",
          "event_timestamp"],
-        "azure/app_service_deployments — a renamed caller reads as an unattributed swap or download",
+        "azure/app_service_deployments — a renamed caller reads as an unattributed swap or download; "
+        "azure/sql_managed_instance_backups — failover history",
     ),
     (
         "azure.mgmt.monitor.models",
@@ -3814,6 +3922,36 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["message_retention_in_days", "retention_description", "capture_description", "status", "partition_count"],
         "azure/data_services_configuration",
     ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "Job",
+        ["entity_friendly_name", "backup_management_type", "operation", "status", "start_time", "end_time"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureWorkloadJob",
+        ["workload_type", "duration", "error_details", "extended_info"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureIaaSVMJob",
+        ["duration", "error_details", "extended_info", "container_name", "is_user_triggered"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureWorkloadJobExtendedInfo",
+        ["property_bag"],
+        "azure/backup_recovery_status — the recovery point time and restore target",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureIaaSVMJobExtendedInfo",
+        ["property_bag"],
+        "azure/backup_recovery_status — the recovery point time and restore target",
+    ),
 ]
 
 
@@ -4128,6 +4266,10 @@ def test_graph_admin_membership_builders_present() -> None:
         "directory_roles.by_directory_role_id(...).members is gone.\n"
         "  affected fetchers: azure/entra_privileged_roles, azure/entra_mfa_status"
     )
+    assert getattr(role.members, "graph_service_principal", None) is not None, (
+        "directory_roles.by_directory_role_id(...).members.graph_service_principal is gone.\n"
+        "  affected fetchers: azure/entra_privileged_roles — v1.0 members leaves service principals out"
+    )
     assert getattr(group, "transitive_members", None) is not None, (
         "groups.by_group_id(...).transitive_members is gone.\n"
         "  affected fetchers: azure/entra_mfa_status — admins via a group would be missed"
@@ -4233,6 +4375,32 @@ def test_graph_access_review_models_present() -> None:
         model = _import(f"msgraph.generated.models.{module}", name)
         missing = [f for f in fields if f not in getattr(model, "__dataclass_fields__", {})]
         assert not missing, f"{name} lost {missing} (azure/entra_access_reviews)"
+
+
+def test_graph_certificate_sign_in_builders_present() -> None:
+    """The per-item builders azure/entra_authentication_policy walks for trusted CAs and X.509 targets."""
+    client = _build("msgraph", "GraphServiceClient")
+    organization = client.organization.by_organization_id("00000000-0000-0000-0000-000000000000")
+    group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
+    assert getattr(organization, "certificate_based_auth_configuration", None) is not None, (
+        "organization.by_organization_id(...).certificate_based_auth_configuration is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — trusted CAs read null"
+    )
+    pki = client.directory.public_key_infrastructure.certificate_based_auth_configurations
+    assert getattr(pki.by_certificate_based_auth_pki_id("p"), "certificate_authorities", None) is not None, (
+        "directory.public_key_infrastructure.certificate_based_auth_configurations...certificate_authorities is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — the PKI trust store reads failed"
+    )
+    assert getattr(group.transitive_members, "graph_user", None) is not None, (
+        "groups.by_group_id(...).transitive_members.graph_user is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — X.509 targets read null"
+    )
+    builder = type(group.transitive_members.graph_user)
+    params = getattr(builder, "GraphUserRequestBuilderGetQueryParameters", None)
+    assert params is not None and {"select", "top"} <= set(vars(params()).keys()) | set(dir(params)), (
+        "GraphUserRequestBuilder.GraphUserRequestBuilderGetQueryParameters (select, top) is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — X.509 target groups read without their users"
+    )
 
 
 def test_graph_group_member_builders_present() -> None:

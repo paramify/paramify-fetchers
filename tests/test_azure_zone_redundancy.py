@@ -359,12 +359,13 @@ def _evidence(tmp_path):
     return json.loads(path.read_text())
 
 
-def test_main_joins_regions_public_ips_and_resources(arm, tmp_path):
+def test_main_joins_regions_public_ips_and_resources(arm, tmp_path, assert_summary_documented):
     arm()
     assert zr.main() == 0
     evidence = _evidence(tmp_path)
     assert evidence["metadata"]["partial_failure"] is False
     summary = evidence["summary"]
+    assert_summary_documented("azure/zone_redundancy", summary)
     assert (summary["resources_assessed"], summary["zone_redundant_resources"], summary["regions_in_use"],
             summary["multi_region"], summary["zone_capable_resources"], summary["zone_redundant_percentage"],
             summary["resources_in_regions_without_zone_support"], summary["resource_list_read"],

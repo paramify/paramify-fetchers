@@ -116,6 +116,7 @@ requires:
     - azure-mgmt-storage
     - azure-mgmt-subscription
     - azure-mgmt-web
+    - cryptography
     - msgraph-sdk
 
 auth:

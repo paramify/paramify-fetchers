@@ -32,6 +32,8 @@ from azure_common import (  # noqa: E402
 from diagnostics import log_export_summary  # noqa: E402
 from foundry_connections import compact, connection_fields  # noqa: E402
 from ip_ranges import cidrs_allow_all  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_ai_hub_configuration")
 
@@ -45,6 +47,7 @@ IDENTITY_DATASTORE_MODES = {"identity", "userdelegationsas"}
 # Datastore credential types that keep a secret in the workspace, and "None", identity-based access.
 STORED_CREDENTIAL_TYPES = {"accountkey", "sas", "serviceprincipal", "certificate", "kerberoskeytab", "kerberospassword"}
 NO_STORED_CREDENTIAL_TYPES = {"none"}
+KINDS = ("hub", "project", "other_workspace")
 
 
 def network_exposure(public_network_access, ip_allowlist) -> str:
@@ -273,18 +276,60 @@ def summarize(workspaces: list[dict]) -> dict:
     }
 
 
-def collect(subscription_id, cred, collector: Collector) -> list[dict]:
+def unread_summary(exclusions: ResourceExclusions, registration: str) -> dict:
+    """The summary when the workspace list was not read: every count is null, never 0."""
+    counts = {k: None for k in summarize([])}
+    return {
+        **counts,
+        "provider_registration_status": registration,
+        **exclusions.summary([], KINDS, {"hubs": None, "projects": None, "other_workspaces": None}),
+        **{f"excluded_{k}s": None for k in KINDS},
+    }
+
+
+def workspace_kind(workspace: dict) -> str:
+    kind = compact(workspace["kind"])
+    return kind if kind in ("hub", "project") else "other_workspace"
+
+
+def split_workspaces(listed: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
+    """(in-scope workspaces, excluded entries); every project of an excluded hub leaves with it."""
+    kept, out = [], []
+    for kind in KINDS:
+        k, o = exclusions.split([w for w in listed if workspace_kind(w) == kind], kind)
+        kept += k
+        out += o
+    hubs = {(e["id"] or "").lower(): e for e in out if e["kind"] == "hub"}
+    in_scope = []
+    for w in kept:
+        parent = hubs.get((w["hub_resource_id"] or "").lower()) if workspace_kind(w) == "project" else None
+        if parent is None:
+            in_scope.append(w)
+        else:
+            out.append(excluded_item("project", w["name"], parent["pattern"], "hub_excluded", id=w["id"],
+                                     resource_group=w["resource_group"], location=w["location"], matched_id=parent["id"]))
+    return in_scope, out
+
+
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None) -> list[dict] | None:
+    """Workspaces the exclusions take out go to `excluded` and get no reads; None when the list was not read."""
+    exclusions = exclusions or ResourceExclusions()
     client = collector.guard("arm_rest.arm_rest_client (init)", lambda: arm_rest_client(cred))
     if client is None:
-        return []
-    workspaces = collector.guard(
+        return None
+    listed = collector.guard(
         "machinelearningservices.workspaces.list",
         lambda: [
             project_workspace(w)
             for w in list_all(client, f"/subscriptions/{subscription_id}{WORKSPACES_PATH}", WORKSPACES_API)["items"]
         ],
-        default=[],
     )
+    if listed is None:
+        return None
+    workspaces, out = split_workspaces(listed, exclusions)
+    if excluded is not None:
+        excluded += sorted(out, key=lambda e: e["id"] or "")
     monitor = (
         collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))
         if workspaces
@@ -399,7 +444,9 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    workspaces: list = []
+    workspaces: list | None = None
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(
@@ -410,7 +457,7 @@ def main() -> int:
                 "Microsoft.MachineLearningServices is not registered on subscription %s — reporting status not_registered",
                 subscription_id,
             )
-        workspaces = collect(subscription_id, cred, collector)
+        workspaces = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -420,12 +467,25 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    exclusions.warn_unmatched(logger)
+
+    read = workspaces is not None
+    workspaces = workspaces or []
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"workspaces": workspaces, "provider_registration_status": registration},
-        summary={**summarize(workspaces), "provider_registration_status": registration},
+        results={"workspaces": workspaces, "provider_registration_status": registration, "excluded": excluded},
+        summary={
+            **summarize(workspaces),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, KINDS, {
+                "hubs": sum(1 for w in workspaces if workspace_kind(w) == "hub"),
+                "projects": sum(1 for w in workspaces if workspace_kind(w) == "project"),
+                "other_workspaces": sum(1 for w in workspaces if workspace_kind(w) == "other_workspace"),
+            }),
+        } if read else unread_summary(exclusions, registration),
     )
     filename = f"azure_ai_hub_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)
