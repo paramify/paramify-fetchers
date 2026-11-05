@@ -12,12 +12,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- **`azure_entra_emergency_accounts` 0.1.1: a synced passkey counts as a phishing-resistant
-  method.** `phishing_resistant_method_registered` and
-  `emergency_accounts_with_phishing_resistant_method` now count `passKeySynced`
-  alongside device-bound passkeys, as Microsoft treats synced passkeys as
-  phishing-resistant credentials. The set is shared with `azure_entra_mfa_status`.
-
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
   a passkey (synced or device-bound), Windows Hello for Business or a macOS platform
@@ -1517,6 +1511,12 @@ schemas and the `paramify` CLI — not the internal code.
   unchanged.
 
 ### Fixed
+
+- **`azure_entra_emergency_accounts` 0.1.1: a synced passkey counts as a phishing-resistant
+  method.** `phishing_resistant_method_registered` and
+  `emergency_accounts_with_phishing_resistant_method` now count `passKeySynced`
+  alongside device-bound passkeys, as Microsoft treats synced passkeys as
+  phishing-resistant credentials. The set is shared with `azure_entra_mfa_status`.
 
 - **`aws_organizations_scp` no longer reports a denied read as "no SCPs"**
   (0.2.0 → 0.3.0). From a member account that is neither the management
