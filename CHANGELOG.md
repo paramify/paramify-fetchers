@@ -842,8 +842,10 @@ schemas and the `paramify` CLI — not the internal code.
   (`--json` carries them as `notes`). The TUI shows a list as its patterns, and
   its entry editor (`e`) edits one as text, one `pattern  # reason` per line:
   the box opens on the category's list while the entry inherits it, saving it
-  unchanged writes nothing, an edit gives the entry its own list, and a pattern
-  the field doesn't take keeps the form open with the reason.
+  unchanged writes nothing, an edit gives the entry its own list, and an edit
+  holding a pattern the field doesn't take keeps the form open with the reason.
+  A reason written on several lines shows on one, so its later lines can't
+  become patterns.
   A list or a map given to a config field that isn't `type: patterns`, such as
   a category-wide list reaching a fetcher that declares the key a string, fails
   `validate` and the run instead of reaching the fetcher as Python text. A

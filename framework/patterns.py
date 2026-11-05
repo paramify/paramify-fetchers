@@ -119,8 +119,11 @@ def display(value: Any) -> str:
 
 
 def to_lines(value: Any) -> str:
-    """A value as editor text: one pattern per line, with its reason after `  # `."""
-    return "\n".join(f"{i.pattern}  # {i.reason}" if i.reason else i.pattern for i in parse(value)[0])
+    """A value as editor text: one pattern per line, with its reason after `  # `, its own lines joined by spaces."""
+    def line(item: Item) -> str:
+        reason = " ".join(part.strip() for part in (item.reason or "").splitlines() if part.strip())
+        return f"{item.pattern}  # {reason}" if reason else item.pattern
+    return "\n".join(line(i) for i in parse(value)[0])
 
 
 def from_lines(text: str) -> Tuple[List[Item], List[str]]:

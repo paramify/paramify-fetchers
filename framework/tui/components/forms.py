@@ -93,7 +93,10 @@ class FieldRow(Vertical):
         if self.spec.get("kind") != "patterns":
             return []
         items, shape = patterns.from_lines(self.query_one(TextArea).text)
-        return shape + patterns.check(items, self.spec.get("prefixes", ()), self.spec.get("bare", True))
+        if shape or self.get_value() is None:
+            # An untouched list writes nothing, so what it already holds is validate's to report, not the form's.
+            return shape
+        return patterns.check(items, self.spec.get("prefixes", ()), self.spec.get("bare", True))
 
     def get_value(self) -> Any:
         kind = self.spec.get("kind", "text")

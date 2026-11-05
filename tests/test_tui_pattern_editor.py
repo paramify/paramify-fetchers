@@ -42,27 +42,28 @@ def test_an_emptied_list_stays_empty_only_while_the_category_lists_patterns():
 # The TUI form
 # --------------------------------------------------------------------------- #
 
-def _manifest(tmp_path: Path, own=None) -> Path:
+def _manifest(tmp_path: Path, own=None, use=USE, field="resource_exclusions") -> Path:
     m = api.init_manifest()
     api.set_output_dir(m, str(tmp_path / "evidence"))
-    api.add_entry(m, USE)
+    api.add_entry(m, use)
     api.set_platform_config(m, "azure", "resource_exclusions", BOUNDARY)
     if own is not None:
-        api.set_fetcher_config(m, USE, "resource_exclusions", own)
+        api.set_fetcher_config(m, use, field, own)
     path = tmp_path / "patterns-test.yaml"
     api.dump_manifest(m, path, REPO_ROOT)
     return path
 
 
-def _edit(tmp_path: Path, own=None, text=None, save=True):
+def _edit(tmp_path: Path, own=None, text=None, save=True, use=USE, field="resource_exclusions"):
     """Open the entry form, optionally replace the list's text, save; return what it showed and the saved manifest."""
     pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
     from textual.widgets import Label, TextArea
 
     from framework.tui.app import FetcherApp
+    from framework.tui.components.forms import FieldRow
     from framework.tui.modals import FormModal
 
-    path = _manifest(tmp_path, own)
+    path = _manifest(tmp_path, own, use, field)
 
     async def main():
         app = FetcherApp(manifest_path=str(path), root_override=str(REPO_ROOT))
@@ -73,9 +74,12 @@ def _edit(tmp_path: Path, own=None, text=None, save=True):
             await pilot.press("e")
             await pilot.pause()
             assert isinstance(app.screen, FormModal)
-            area = app.screen.query_one("#field-input", TextArea)
+            [row] = [r for r in app.screen.query(FieldRow) if r.spec["key"] == field]
+            area = row.query_one(TextArea)
             shown = area.text, [str(lb.render()) for lb in app.screen.query(Label)]
-            if text is not None:
+            if callable(text):
+                area.text = text(area.text)
+            elif text is not None:
                 area.text = text
             if save:
                 await pilot.press("ctrl+s")
@@ -117,3 +121,17 @@ def test_an_entry_with_its_own_list_opens_on_it_and_says_what_it_replaces(tmp_pa
 def test_a_pattern_the_field_refuses_keeps_the_form_open_and_writes_nothing(tmp_path):
     _, still_open, entry, _ = _edit(tmp_path, text="route:qa-*")
     assert still_open and entry == {}
+
+
+def test_a_reason_on_several_lines_reads_as_one_line_so_it_never_becomes_a_pattern(tmp_path):
+    assert patterns.to_lines([{"pattern": "staging", "reason": "Outside\n  boundary\n"}]) == "staging  # Outside boundary"
+    own = [{"pattern": "staging", "reason": "Outside\nboundary"}]
+    (text, _), _, entry, _ = _edit(tmp_path, own=own, text=lambda t: t + "\nqa",
+                                   use="azure_dns_configuration", field="scope_exclusions")
+    assert text == "staging  # Outside boundary"
+    assert entry["scope_exclusions"] == [{"pattern": "staging", "reason": "Outside boundary"}, "qa"]
+
+
+def test_an_untouched_list_the_field_refuses_does_not_block_the_rest_of_the_form(tmp_path):
+    _, still_open, entry, _ = _edit(tmp_path, own="${env:SOME_LIST}")
+    assert not still_open and entry == {"resource_exclusions": "${env:SOME_LIST}"}
