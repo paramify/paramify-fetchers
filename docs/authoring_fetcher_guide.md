@@ -166,7 +166,10 @@ example. `tests/test_contracts.py` checks:
 - the layout, for the fetchers listed in `TEXT_FORMAT_FETCHERS`;
 - that a test calls `assert_summary_documented` for every fetcher whose
   instructions list summary fields. Fetchers that listed them before the check
-  existed wait in `SUMMARY_DOCS_PENDING`, and a new fetcher can't join it.
+  existed wait in `SUMMARY_DOCS_PENDING`, which is meant only to shrink. Its
+  count, `SUMMARY_DOCS_PENDING_MAX`, must match it, so adding a fetcher means
+  raising the count, which shows in review. A new fetcher calls the fixture
+  instead.
 
 Until a platform is converted, its instructions only need to open with the
 `Script:` path.

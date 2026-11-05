@@ -238,7 +238,7 @@ TEXT_FORMAT_FETCHERS = (
     "oci",
 )
 # Fetchers whose instructions listed summary fields before their tests checked them; each leaves once its tests
-# call assert_summary_documented. Only shrinks: a fetcher added later calls the fixture instead.
+# call assert_summary_documented, and SUMMARY_DOCS_PENDING_MAX drops with it. A new fetcher calls the fixture instead.
 SUMMARY_DOCS_PENDING = (
     "azure/alert_rules",
     "azure/app_gateway_backend_tls",
@@ -441,7 +441,9 @@ def test_documented_summaries_are_checked_against_the_code() -> None:
     assert not done, f"remove from SUMMARY_DOCS_PENDING, their tests now check the summary: {done}"
     stale = sorted(set(SUMMARY_DOCS_PENDING) - documented)
     assert not stale, f"SUMMARY_DOCS_PENDING names fetchers that list no summary fields: {stale}"
-    assert len(SUMMARY_DOCS_PENDING) <= SUMMARY_DOCS_PENDING_MAX, "a new fetcher calls the fixture, not the pending list"
+    assert len(SUMMARY_DOCS_PENDING) == SUMMARY_DOCS_PENDING_MAX, (
+        f"SUMMARY_DOCS_PENDING has {len(SUMMARY_DOCS_PENDING)} entries; set SUMMARY_DOCS_PENDING_MAX to match when one "
+        "leaves. A new fetcher calls the fixture instead of joining the list.")
 
 
 def test_summary_check_finds_only_real_calls() -> None:

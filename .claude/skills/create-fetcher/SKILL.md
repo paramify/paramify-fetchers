@@ -243,8 +243,9 @@ single confirmation before building.
    summary fields, a test in `tests/` passes a summary holding every field to the
    `assert_summary_documented` fixture, with the fetcher's path written out:
    `assert_summary_documented("<category>/<short_name>", summary)`. For a python
-   fetcher, take the summary from a test run of the code; for a bash fetcher,
-   from its committed `sample.json`. `tests/test_contracts.py` fails a fetcher
+   fetcher, take the summary from a test run of the code. The check for a bash
+   fetcher isn't defined yet; until it is, a bash fetcher's instructions leave
+   out the Summary fields section. `tests/test_contracts.py` fails a fetcher
    with summary fields and no such call. See `docs/authoring_fetcher_guide.md`.
 
 ---
