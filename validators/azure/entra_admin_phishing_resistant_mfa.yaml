@@ -1,0 +1,29 @@
+key: entra_admin_phishing_resistant_mfa
+name: Entra Admins Hold a Phishing-Resistant Method
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every administrator in the Entra tenant has registered a phishing-resistant authentication method
+  (a FIDO2 security key, a synced or device-bound passkey, Windows Hello for Business, or a macOS
+  platform credential; Microsoft treats synced passkeys as phishing-resistant credentials). Supports
+  KSI-IAM-APM for the highest-risk subset. Does NOT count Microsoft Authenticator phone sign-in, which is
+  passwordless but not phishing-resistant, and cannot see certificate-based authentication, which the
+  registration report doesn't list, so a certificate-only admin counts as without. Does NOT assert that
+  the admin is required to use the method at sign-in (that is a Conditional Access authentication-strength
+  check). Fails when no admin was found, and when directory role membership or the registration report
+  couldn't be read (the admin counts read null). An admin with no row in the registration report counts
+  as without one.
+
+# admin_users must be at least 1; admin_users_without_phishing_resistant counts admins with no such method.
+regex: '"admin_users":\s*(?<admin_users>[1-9]\d*)[\s\S]*?"admin_users_without_phishing_resistant":\s*(?<admin_users_without_phishing_resistant>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # admin_users_without_phishing_resistant
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-MFA
