@@ -1582,6 +1582,18 @@ schemas and the `paramify` CLI — not the internal code.
   failed role list leaves every figure null, and a failed members or cast read
   leaves null each figure over that role that it feeds (the Global Administrator
   count when it is that role); each role records `members_read`.
+- **`azure_rbac_role_assignments` 0.4.2: a failed read is null, not 0.** When the
+  subscription-and-above role-assignment list couldn't be read, every count over
+  it read 0, so an unread scope looked like no assignments. Each count is now
+  null when a list it counts couldn't be read: the subscription-and-above counts
+  when that list fails, the `below_subscription_*` and `all_scopes_*` counts when
+  either list fails (the below-subscription set is told apart from the other, so
+  it isn't read when the other fails), the PIM standing counts when either list
+  or the PIM schedules fail, and the custom, built-in and unresolved role counts
+  when the role definitions fail. `results.role_assignments` and
+  `results.role_assignments_below_subscription` are null when unread, and with
+  patterns set `resource_exclusion_patterns_unmatched` is null when a list the
+  patterns apply to wasn't read.
 - **`azure_entra_conditional_access_policies` 0.2.2: an application filter
   narrows MFA coverage in either mode, and each policy shows its filter.** In
   0.2.1 a policy with an application filter still added its client app types to
