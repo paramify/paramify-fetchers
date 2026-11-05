@@ -310,6 +310,14 @@ def test_a_bad_platform_list_is_one_error_and_its_reference_is_no_pattern():
     assert note.startswith("platforms.azure.config.resource_exclusions (a ${env:} reference, refused) applies")
 
 
+def test_the_example_manifest_validates_and_notes_who_takes_the_platform_list():
+    m = api.read_manifest(REPO_ROOT / "examples" / "azure_scope_exclusions.yaml")
+    assert api.validate(m, REPO_ROOT) == []
+    [note] = api.validate_notes(m, REPO_ROOT)
+    assert "replaced by their own list in azure_resource_inventory" in note
+    assert "not a setting of azure_defender_plans" in note
+
+
 def test_unknown_config_keys_fail_validate_with_a_suggestion():
     m = manifest("azure_key_vault_configuration", platform={"resource_exclusion": ["rg:a"]},
                  entries={"azure_key_vault_configuration": {"resource_exclusionz": ["rg:a"]}})
