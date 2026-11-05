@@ -414,6 +414,10 @@ def pem(kind):
     return "-----BEGIN " + kind + "-----\nabc"
 
 
+# Third review: a short assignment URL-encoded once, twice or three times.
+ENCODED = [f"{name}{sep}{value}" for name in ("pin", "pw", "pwd", "key", "sig", "code", "auth")
+           for value in ("4829", "hunter2") for sep in ("%3D", "%253D", "%25253D")]
+
 # (path, value, scope): "default" is the built-in allowlist, "star" is value_paths path:*. Low-entropy fakes.
 PROBE = [
     ("tags.notes", "DB_PASSWORD=hunter2", "default"),
@@ -490,6 +494,7 @@ PROBE = [
     ("properties.accountKeyValue", "hunter2", "star"),
     ("properties.ipsec.psk", "hunter2", "star"),
     ("properties.pfxBlob", "hunter2", "star"),
+    *(("tags.notes", value, "default") for value in ENCODED),
 ]
 
 
@@ -528,6 +533,10 @@ VISIBLE = [
     ("tags.CreatedOn", None, "2026-11-01T00:00:00Z", None),
     ("sku.tier", "Basic", "Standard", None),
     ("location", None, "eastus2", None),
+    ("tags.pinned", None, "yes", None),
+    ("tags.notes", None, "pinned: true", None),
+    ("tags.notes", None, "pwd_policy=strict", None),
+    ("properties.pwd_policy", None, "strict", "path:*"),
     ("properties.definition.actions.Compose_noop.inputs", "fake no-op", None, "path:properties.definition.*"),
     ("properties.definition.actions.Compose_noop.type", "Compose", None, "path:properties.definition.*"),
     ("properties.definition.actions.Stop.inputs.runError.code", None, "FakeNoopFailure", "path:properties.definition.*"),

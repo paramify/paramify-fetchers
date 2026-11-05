@@ -205,8 +205,9 @@ evidence_set:
     an authorization or authentication segment, headers, queries, body, env,
     secrets, environment variables, app settings, args, command, custom data,
     protected settings, and properties.value; or when a value, as written or
-    URL-decoded, looks like one: one of those secret words anywhere in its text
-    (so "name: DB_PASSWORD" or "Password123!" is withheld), a name such as
+    URL-decoded (repeatedly, up to four times), looks like one: one of those
+    secret words anywhere in its text (so "name: DB_PASSWORD" or "Password123!"
+    is withheld), a name such as
     password, secret, token, key, sig, code, pin or pw followed by = or :, a
     --flag naming one, a Basic, Bearer, Digest or Negotiate credential, a URL with
     a user, a JWT, a PEM private key or certificate, a short random-looking

@@ -101,8 +101,9 @@ schemas and the `paramify` CLI — not the internal code.
     name ending in key or key<n>, pwd, pw, pin, uri or url, key data, key value,
     pfx, psk, connection string, authorization, headers, queries, body, env, app
     settings, args, custom data), compared without case, `_` or `-`. It is also
-    withheld when the value, as written or URL-decoded, looks like one: a secret
-    word anywhere in its text (`name: DB_PASSWORD`, `Password123!`),
+    withheld when the value, as written or URL-decoded (repeatedly, up to four
+    times), looks like one: a secret word anywhere in its text
+    (`name: DB_PASSWORD`, `Password123!`),
     `NAME_PASSWORD=`, `pin=`, `pw=`, `--password x`, `Basic`/`Bearer`
     credentials, a URL with a user, a JWT, a PEM private key, a short
     random-looking string, or a long key-like string. The built-in allowlist

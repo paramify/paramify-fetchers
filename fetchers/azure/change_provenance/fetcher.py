@@ -223,8 +223,11 @@ def random_token(token: str) -> bool:
 
 
 def looks_secret(value: str) -> bool:
-    # Read URL-decoded too, so password%3D… is caught like password=….
-    return any(_looks_secret(v) for v in {value, unquote(value)})
+    # Read URL-decoded too, until it stops changing (at most 4 times), so password%253D… is caught like password=….
+    forms = [value]
+    while len(forms) <= 4 and (decoded := unquote(forms[-1])) != forms[-1]:
+        forms.append(decoded)
+    return any(_looks_secret(v) for v in forms)
 
 
 def _looks_secret(value: str) -> bool:
