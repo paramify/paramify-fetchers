@@ -1064,6 +1064,23 @@ schemas and the `paramify` CLI — not the internal code.
   TFVC paths too. PAT scopes: Security (Manage), because Azure DevOps has no
   read-only scope for access control lists (the fetcher only reads), plus
   Identity (Read), Code (Read) and Project and Team (Read).
+- **`azure_devops_permissions` lists who can override check-in validation**
+  (0.1.1 → 0.2.0). `branch_policy_bypass_holders` covers Git only, so a TFVC-only
+  organization had no evidence of who can check in without a gated build. Each
+  Build entry now gets `checkin_validation_override`, true when the entry allows
+  Override check-in validation by build, set on it or inherited from a parent
+  object, and doesn't deny it. The summary adds `checkin_validation_override_grants`,
+  `checkin_validation_override_holders`, `checkin_validation_override_build_services`
+  (the build service accounts and the organization's Project Collection Build
+  Service Accounts group, which hold it by default), and
+  `checkin_validation_override_grants_outside_admin_groups` and
+  `checkin_validation_override_holders_outside_admin_groups`, which leave out the
+  admin groups and those build services. The Project Collection Build Service
+  Accounts group is recognised by its built-in security ID as well as its name, so
+  a project group that takes the name still counts outside. They read null when
+  the Build permissions can't be read, or under a project filter the project list
+  can't; the build-service list and the outside-admin pair also when an identity
+  can't be looked up.
 
 ### Changed
 
@@ -1891,6 +1908,17 @@ schemas and the `paramify` CLI — not the internal code.
   a batch whose split finds no one is a failure, so its identities read as
   unread and the admin-group figures null, rather than every admin group read
   as an ordinary group.
+- **`azure_devops_permissions` resolves the organization-level groups**
+  (0.1.1 → 0.2.0). Permission entries name the organization's built-in groups,
+  such as Project Collection Administrators, by a template SID, and the
+  identities API answers with the group's own descriptor, so matching rows by
+  descriptor left them unresolved. As looked-up groups with no name they read as
+  ordinary groups, and their high-impact rights counted outside the admin groups.
+  Rows come back in request order, null where a descriptor isn't found, so they
+  are now matched by position; `unresolved_identities` and the outside-admin
+  figures can fall. A row that answers a different descriptor from the one
+  requested in its place leaves that identity unread and is reported as a
+  failure, so a reordered answer can't put one identity's rights on another.
 - **`azure_devops_audit_streams` no longer reads unlisted streams as no
   streams** (0.1.0 → 0.1.1). When the audit streams can't be listed, for
   example a 403 to an identity that may read the audit log but not its streams,
