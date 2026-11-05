@@ -8,6 +8,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
+from types import ModuleType
 from types import SimpleNamespace as ns
 
 import pytest
@@ -180,6 +181,27 @@ def _client(calls, configs, authorities, fail=(), pki=None, pki_error=None):
     )
 
 
+class Query:
+    def __init__(self, select=None, top=None):
+        self.select, self.top = select, top
+
+
+def _stub_msgraph(monkeypatch):
+    """Stand in for the msgraph and kiota imports the X.509 user reads make, so these tests run without the
+    azure extra (the CI `test` job doesn't install it)."""
+    for module_name, cls in {
+        "msgraph.generated.users.users_request_builder": "UsersRequestBuilder",
+        "msgraph.generated.groups.item.transitive_members.graph_user.graph_user_request_builder":
+            "GraphUserRequestBuilder",
+    }.items():
+        module = ModuleType(module_name)
+        setattr(module, cls, type(cls, (), {f"{cls}GetQueryParameters": Query}))
+        monkeypatch.setitem(sys.modules, module_name, module)
+    config = ModuleType("kiota_abstractions.base_request_configuration")
+    config.RequestConfiguration = lambda query_parameters=None: ns(query_parameters=query_parameters)
+    monkeypatch.setitem(sys.modules, "kiota_abstractions.base_request_configuration", config)
+
+
 def run(monkeypatch, tmp_path, configs, authorities=(), fail=(), pki=None, pki_error=None):
     calls: list = []
     client = _client(calls, list(configs), list(authorities), fail, pki, pki_error)
@@ -187,6 +209,7 @@ def run(monkeypatch, tmp_path, configs, authorities=(), fail=(), pki=None, pki_e
     async def with_client(collector, cred, work, default=None):
         return await work(client)
 
+    _stub_msgraph(monkeypatch)
     monkeypatch.setattr(ap, "load_dotenv", lambda: None)
     monkeypatch.setattr(ap, "credential", lambda: object())
     monkeypatch.setattr(ap, "with_graph_client", with_client)
@@ -453,6 +476,12 @@ def test_an_unreadable_classic_certificate_matches_its_pki_entry_by_key_identifi
     # Counted once, with the expiry its PKI entry could read.
     assert (summary["trusted_certificate_authorities"], summary["certificate_authorities_expiry_unknown"],
             summary["expired_certificate_authorities"]) == (1, 0, 0)
+
+
+def test_a_missing_cryptography_package_raises_rather_than_reading_as_an_unreadable_certificate(monkeypatch):
+    monkeypatch.setitem(sys.modules, "cryptography", None)
+    with pytest.raises(ImportError):
+        ap.certificate_details(b"not a certificate")
 
 
 def test_mapping_is_unknown_without_reported_bindings():

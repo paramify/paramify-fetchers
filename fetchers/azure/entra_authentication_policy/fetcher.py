@@ -332,10 +332,11 @@ def certificate_details(der) -> dict:
     details = {"subject": None, "not_before": None, "not_after": None, "thumbprint": None}
     if not der:
         return details
-    try:
-        from cryptography import x509  # lazy
-        from cryptography.hazmat.primitives import hashes  # lazy
+    # Lazy, but outside the try: a missing package fails the run instead of reading as an unreadable certificate.
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
 
+    try:
         data = bytes(der)
         cert = (x509.load_pem_x509_certificate(data) if data.lstrip().startswith(b"-----BEGIN")
                 else x509.load_der_x509_certificate(data))
@@ -346,6 +347,8 @@ def certificate_details(der) -> dict:
         "subject": cert.subject.rfc4514_string(),
         "not_before": _utc(cert.not_valid_before_utc),
         "not_after": _utc(cert.not_valid_after_utc),
+        # SHA-1 is Entra's own thumbprint (the PKI store's `thumbprint`), compared in distinct_authorities: an
+        # identifier, not a security hash.
         "thumbprint": cert.fingerprint(hashes.SHA1()).hex().upper(),
     }
 
