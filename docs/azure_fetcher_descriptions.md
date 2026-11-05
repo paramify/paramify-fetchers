@@ -205,7 +205,7 @@ Summary fields:
 
 
 ### azure_entra_authentication_policy
-Short Description: Shows which sign-in methods the tenant allows, flagging weak SMS and voice codes and phishing-resistant methods, plus security defaults and password protection settings.
+Short Description: Shows which sign-in methods the tenant allows, flagging weak and phishing-resistant ones, which certificate authorities certificate sign-in trusts, and whether certificate users map to certificates.
 
 Script: fetchers/azure/entra_authentication_policy/fetcher.py (uses the shared Graph helpers fetchers/azure/_shared/entra_graph.py)
 
@@ -217,8 +217,11 @@ Commands Executed:
 - Microsoft Graph `GET /policies/identitySecurityDefaultsEnforcementPolicy` — whether security defaults are on
 - Microsoft Graph `GET /groupSettings` and `GET /groupSettingTemplates/{Password Rule Settings id}` — the tenant's password protection settings, and Microsoft's defaults for any it never set
 - Microsoft Graph `GET /subscribedSkus` — the tenant's licences, to tell Free, P1 and P2 apart
+- Microsoft Graph `GET /organization/{id}/certificateBasedAuthConfiguration` — the certificate authorities trusted for certificate sign-in, with each one's revocation list; expiry is read from the certificate
+- Microsoft Graph `GET /users` with `authorizationInfo` (only when X.509 is enabled) — each user's sign-in names and how many certificate user ids they hold
+- Microsoft Graph `GET /groups/{id}/transitiveMembers/microsoft.graph.user` (per group an enabled method includes or excludes, only when X.509 is enabled) — which users each method reaches
 
-Output: `azure_entra_authentication_policy_<tenant>.json` — each sign-in method in the authentication methods policy with its state, who it applies to, its settings and whether it's weak or phishing-resistant, plus the registration campaign, security defaults, password protection settings and the tenant's licences; Windows Hello for Business is set through device management and isn't covered.
+Output: `azure_entra_authentication_policy_<tenant>.json` — each sign-in method in the authentication methods policy with its state, who it applies to, its settings and whether it's weak or phishing-resistant, the trusted certificate authorities, the users certificate sign-in targets, plus the registration campaign, security defaults, password protection settings and the tenant's licences; Windows Hello for Business is set through device management and isn't covered.
 
 Summary fields:
 
@@ -240,6 +243,19 @@ Summary fields:
 - `x509_certificate_multi_factor` — True if certificate-based sign-in defaults to multi-factor, so a certificate alone satisfies MFA; false if it defaults to single-factor; null if the policy couldn't be read, has no X.509 entry or reports no default. Set whether or not the method is enabled
 - `phishing_resistant_methods_enabled` — List of enabled phishing-resistant methods: FIDO2, and X.509 certificates only when `x509_certificate_multi_factor` is true (binding rules that raise particular certificates to multi-factor aren't evaluated); null if the policy couldn't be read
 - `phishing_resistant_method_enabled` — True if at least one phishing-resistant method is enabled; false if none is; null if the policy couldn't be read
+
+**Does certificate sign-in trust only current certificate authorities that publish revocation lists?**
+- `trusted_certificate_authorities` — Number of root and intermediate certificate authorities trusted for certificate sign-in; null if they couldn't be read
+- `expired_certificate_authorities` — Number of trusted certificate authorities whose certificate has expired; null if they couldn't be read
+- `certificate_authorities_expiry_unknown` — Number of trusted certificate authorities whose certificate couldn't be read for its expiry date; null if the authorities couldn't be read
+- `certificate_authorities_without_crl` — Number of trusted certificate authorities with no certificate revocation list (CRL) address, so a revoked user certificate signed by them isn't rejected; null if the authorities couldn't be read
+
+**Can each user targeted for certificate sign-in be matched to a certificate?**
+- `x509_targeted_users` — Number of enabled member accounts (not guests) the X.509 method includes and doesn't exclude, directly, as all users or through a group; 0 when X.509 is off; null if the policy, the users or a group the method names couldn't be read
+- `x509_targeted_users_unmapped` — Number of targeted users no username binding can match to a certificate ("mapped": a binding's user property — user principal name, on-premises user principal name or certificate user ids — has a value for the user); 0 when X.509 is off; null if `x509_targeted_users` is null or the policy reports no bindings
+- `x509_targeted_users_without_certificate_user_ids` — Number of targeted users with no certificate user ids, which the high-trust bindings (subject key identifier, public key hash) match against; 0 when X.509 is off; null if `x509_targeted_users` is null
+- `x509_targeted_users_with_weaker_methods` — Number of targeted users an enabled method that isn't phishing-resistant still reaches, such as Microsoft Authenticator, SMS or a temporary access pass (X.509 itself and email one-time passcodes, which only guests sign in with, aren't counted); 0 when X.509 is off; null if `x509_targeted_users` is null or a group such a method names couldn't be read
+- `x509_targeted_users_with_weak_methods` — Number of targeted users SMS or voice call still reaches; 0 when X.509 is off; null if `x509_targeted_users` is null or a group SMS or voice call names couldn't be read
 
 **Does this policy alone decide which methods work?**
 - `policy_migration_state` — Whether the move from the legacy per-user MFA and self-service password reset (SSPR) policies to this policy is finished: preMigration, migrationInProgress or migrationComplete; null if the policy couldn't be read
