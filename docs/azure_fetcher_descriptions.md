@@ -219,10 +219,10 @@ Commands Executed:
 - Microsoft Graph `GET /subscribedSkus` — the tenant's licences, to tell Free, P1 and P2 apart
 - Microsoft Graph `GET /organization/{id}/certificateBasedAuthConfiguration` — the certificate authorities trusted for certificate sign-in in the classic store, with each one's revocation list; expiry is read from the certificate
 - Microsoft Graph `GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations` and `GET …/{id}/certificateAuthorities` (per configuration) — the certificate authorities in the PKI-based trust store, the newer place Entra keeps them
-- Microsoft Graph `GET /users` with `authorizationInfo` (only when X.509 is enabled) — each user's sign-in names and how many certificate user ids they hold
-- Microsoft Graph `GET /groups/{id}/transitiveMembers/microsoft.graph.user` (per group an enabled method includes or excludes, only when X.509 is enabled) — which users each method reaches
+- Microsoft Graph `GET /groups/{id}/transitiveMembers/microsoft.graph.user` with `authorizationInfo` (per group an enabled method includes or excludes, only when X.509 is enabled) — which users each method reaches, with their sign-in names and the count and types of their certificate user ids
+- Microsoft Graph `GET /users` with `authorizationInfo` (only when X.509 targets all users or a user directly) — the same for every user
 
-Output: `azure_entra_authentication_policy_<tenant>.json` — each sign-in method in the authentication methods policy with its state, who it applies to, its settings and whether it's weak or phishing-resistant, the trusted certificate authorities, the users certificate sign-in targets, plus the registration campaign, security defaults, password protection settings and the tenant's licences; Windows Hello for Business is set through device management and isn't covered.
+Output: `azure_entra_authentication_policy_<tenant>.json` — each sign-in method in the authentication methods policy with its state, who it applies to, its settings and whether it's weak or phishing-resistant, the trusted certificate authorities, up to 100 of the users certificate sign-in targets that fail a check, plus the registration campaign, security defaults, password protection settings and the tenant's licences; Windows Hello for Business is set through device management and isn't covered.
 
 Summary fields:
 
@@ -246,21 +246,27 @@ Summary fields:
 - `phishing_resistant_method_enabled` — True if at least one phishing-resistant method is enabled; false if none is; null if the policy couldn't be read
 
 **Does certificate sign-in trust only current certificate authorities that publish revocation lists?**
-- `trusted_certificate_authorities` — Number of root and intermediate certificate authorities trusted for certificate sign-in across the classic store and the PKI-based trust store, a certificate authority in both (same thumbprint) counted once; null unless both stores were read
+- `trusted_certificate_authorities` — Number of root and intermediate certificate authorities trusted for certificate sign-in across the classic store and the PKI-based trust store, a certificate authority in both (same thumbprint, or the same key identifier when a certificate can't be read) counted once; null unless both stores were read
 - `expired_certificate_authorities` — Number of trusted certificate authorities whose certificate has expired (by either store's entry); null unless both stores were read
 - `certificate_authorities_expiry_unknown` — Number of trusted certificate authorities whose expiry date couldn't be read from the certificate or the service; null unless both stores were read
 - `certificate_authorities_without_crl` — Number of trusted certificate authorities with no certificate revocation list (CRL) address in at least one store, so a revoked user certificate signed by them isn't rejected; null unless both stores were read
 - `classic_store_certificate_authorities` — Number of certificate authorities in the classic store; null if it couldn't be read
 - `pki_store_certificate_authorities` — Number of certificate authorities in the PKI-based trust store; null if it couldn't be read
-- `pki_store_status` — Whether the PKI-based trust store was read: read, not_authorized (the optional PublicKeyInfrastructure.Read.All isn't granted; the run still succeeds) or failed
+- `pki_store_status` — Whether the PKI-based trust store was read: read, not_authorized, not_available or failed
+  - read (its certificate authorities are counted)
+  - not_authorized (the optional PublicKeyInfrastructure.Read.All isn't granted; the run still succeeds)
+  - not_available (this cloud doesn't offer the store; the run still succeeds)
+  - failed (the read failed, and the run exits non-zero)
 - `pki_store_missing_permission` — Whether the PKI-based trust store read was refused for a missing grant: PublicKeyInfrastructure.Read.All when it was; null when the store was read or failed for another reason
 
 **Can each user targeted for certificate sign-in be matched to a certificate?**
 - `x509_targeted_users` — Number of enabled member accounts (not guests) the X.509 method includes and doesn't exclude, directly, as all users or through a group; 0 when X.509 is off; null if the policy, the users or a group the method names couldn't be read
-- `x509_targeted_users_unmapped` — Number of targeted users no username binding can match to a certificate ("mapped": a binding's user property — user principal name, on-premises user principal name or certificate user ids — has a value for the user); 0 when X.509 is off; null if `x509_targeted_users` is null or the policy reports no bindings
+- `x509_targeted_users_unmapped` — Number of targeted users no username binding can match to a certificate: they hold no certificate user id of the type a certificate-user-id binding matches on (such as `X509:<SKI>…` for the subject key identifier), and lack the user principal name a name binding would compare; 0 when X.509 is off; null if `x509_targeted_users` is null or the policy reports no bindings
+- `x509_targeted_users_mapping_unverified` — Number of targeted users only a binding the fetcher can't check could match: a name binding (user principal name or on-premises user principal name), which matches only if the user's certificate carries that name, or a binding on a certificate field it doesn't recognise; 0 when X.509 is off; null if `x509_targeted_users` is null or the policy reports no bindings
 - `x509_targeted_users_without_certificate_user_ids` — Number of targeted users with no certificate user ids, which the high-trust bindings (subject key identifier, public key hash) match against; 0 when X.509 is off; null if `x509_targeted_users` is null
 - `x509_targeted_users_with_weaker_methods` — Number of targeted users an enabled method that isn't phishing-resistant still reaches, such as Microsoft Authenticator, SMS or a temporary access pass (X.509 itself and email one-time passcodes, which only guests sign in with, aren't counted); 0 when X.509 is off; null if `x509_targeted_users` is null or a group such a method names couldn't be read
 - `x509_targeted_users_with_weak_methods` — Number of targeted users SMS or voice call still reaches; 0 when X.509 is off; null if `x509_targeted_users` is null or a group SMS or voice call names couldn't be read
+- `x509_certificate_users_truncated` — True if more than 100 targeted users fail a check (not matched by a certificate user id, holding none, or reached or possibly reached by a weaker method), so the evidence lists only the first 100; false if it lists them all; null if `x509_targeted_users` is null
 
 **Does this policy alone decide which methods work?**
 - `policy_migration_state` — Whether the move from the legacy per-user MFA and self-service password reset (SSPR) policies to this policy is finished: preMigration, migrationInProgress or migrationComplete; null if the policy couldn't be read
