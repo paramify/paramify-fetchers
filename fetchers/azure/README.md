@@ -74,6 +74,7 @@ otherwise.
 | Log Analytics Reader on the workspaces that receive their logs | `azure_network_traffic_activity` | The workspace reads `not_authorized` and its figures unknown; the run succeeds |
 | Log Analytics Reader on the workspaces they query | `azure_log_analytics_query_audit`, `azure_sentinel_analytics_rules`, `azure_sentinel_data_sources`, `azure_sentinel_incidents`, `azure_devops_audit_streams` (Azure Monitor Logs streams) | The KQL query fails |
 | Reader on other subscriptions (optional) | `azure_alert_rules`, `azure_activity_log_alerts` and `azure_waf_ddos_activity` (action groups), `azure_app_gateway_waf` (WAF policies), `azure_vnet_egress_routing` (Virtual WAN hubs), `azure_sentinel_playbooks` (Logic Apps an automation rule runs), `azure_private_endpoint_configuration` (target resources), `azure_private_dns_zone_configuration` (linked virtual networks and record IPs) | That reference reads unresolved; the run succeeds |
+| Reader or Log Analytics Reader on destination workspaces in other subscriptions (optional) | `azure_service_log_records` | Arrival reads unknown for the apps and instances that send logs there; the run succeeds |
 | Reader or Microsoft Sentinel Reader on the workspaces Entra logs are sent to (optional) | `azure_entra_diagnostic_settings` | That category's `to_sentinel_workspace` reads null, with a note; the run succeeds |
 | Log Analytics Reader on the workspaces that receive their logs | `azure_waf_ddos_activity` | The workspace reads `not_authorized` and its figures unknown; the run succeeds |
 | Reader on the management group (optional) | `azure_policy_assignments` | Management-group custom definitions read `unavailable`; the run succeeds |
@@ -133,9 +134,9 @@ which must be added to the organization: project Reader for pipelines, View audi
 and Manage audit streams for audit streams, organization membership for identities
 (the least privilege that reads last-access dates is not yet measured), and an
 organization member who can view
-permissions in each namespace and read every Git repository for permissions, and
+permissions in each namespace and read every Git repository for permissions,
 Reader on the service connections and on the Library in each project for service
-connections. Azure DevOps lists only the service connections the identity holds a
+connections, and Reader in each project for work items. Azure DevOps lists only the service connections the identity holds a
 role on, without refusing the rest; by default only Endpoint Administrators, Endpoint
 Creators and each connection's creator hold one. Only the Entra sign-in can read the
 Log Audit Events policy; with a PAT, `azure_devops_audit_streams` judges auditing
