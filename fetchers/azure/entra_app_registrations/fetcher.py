@@ -14,6 +14,7 @@ three-way classification this reproduces.
 """
 
 import asyncio
+import calendar
 import logging
 import os
 import sys
@@ -31,9 +32,10 @@ from azure_common import (  # noqa: E402
     coverage_percentage,
     credential,
     failure_reason,
-    write_evidence,
     report_failure,
+    write_evidence,
 )
+from azure_rest import bounded_int_config  # noqa: E402
 from entra_graph import (  # noqa: E402
     graph_attr,
     paginate,
@@ -50,14 +52,12 @@ logger = logging.getLogger("azure_entra_app_registrations")
 # entra_app_registration_credential_not_expired check.
 EXPIRY_WARNING_DAYS = 30
 
-# Longest issued lifetime counted as within the approved interval; the tenant's own
+# Longest issued lifetime counted as within the approved interval. 365 is a convention
+# (FedRAMP KSI-SVC-ASM asks for regular rotation and sets no number); the tenant's own
 # policy overrides it through AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS.
+APPROVED_LIFETIME_ENV = "AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS"
 DEFAULT_APPROVED_LIFETIME_DAYS = 365
-
-
-def approved_lifetime_days() -> int:
-    raw = os.environ.get("AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS") or ""
-    return int(raw) if raw.strip().isdigit() and int(raw) > 0 else DEFAULT_APPROVED_LIFETIME_DAYS
+MAX_APPROVED_LIFETIME_DAYS = 3650
 
 # $select'ed explicitly to keep the response small: an app registration's full
 # representation is large and most of it is irrelevant to credential rotation.
@@ -151,6 +151,15 @@ def _parse_timestamp(value) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def _leap_days(start: datetime, end: datetime) -> int:
+    """29 Februaries (00:00 UTC) falling within [start, end]."""
+    return sum(
+        1
+        for year in range(start.year, end.year + 1)
+        if calendar.isleap(year) and start <= datetime(year, 2, 29, tzinfo=timezone.utc) <= end
+    )
+
+
 def credential_record(cred: dict, now: datetime, approved_days: int = DEFAULT_APPROVED_LIFETIME_DAYS) -> dict:
     """Classify one projected credential against `now`.
 
@@ -173,8 +182,16 @@ def credential_record(cred: dict, now: datetime, approved_days: int = DEFAULT_AP
         expiring_soon = not expired and days_until_expiry <= EXPIRY_WARNING_DAYS
 
     start = _parse_timestamp(cred.get("start_date_time"))
-    # Unknown, never 0, when either date is missing.
-    lifetime_days = (end - start).days if start is not None and end is not None else None
+    # Raw end minus start; null (never 0) when either date is missing or the end precedes the start.
+    lifetime_days = (end - start).days if start is not None and end is not None and end >= start else None
+    if start is None or (end is not None and end < start):
+        beyond = None
+    elif end is None:
+        # No end date: it never expires, so it is beyond any interval.
+        beyond = True
+    else:
+        # A 29 February in the span doesn't count, so a one-year credential issued across one isn't flagged.
+        beyond = lifetime_days - _leap_days(start, end) > approved_days
 
     return {
         "display_name": cred.get("display_name") or None,
@@ -186,8 +203,7 @@ def credential_record(cred: dict, now: datetime, approved_days: int = DEFAULT_AP
         "certificate_type": cred.get("certificate_type"),
         "has_expiry": end is not None,
         "lifetime_days": lifetime_days,
-        "approved_lifetime_days": approved_days,
-        "issued_beyond_approved_lifetime": None if lifetime_days is None else lifetime_days > approved_days,
+        "issued_beyond_approved_lifetime": beyond,
         "days_until_expiry": days_until_expiry,
         "expired": expired,
         "expiring_soon": expiring_soon,
@@ -237,7 +253,9 @@ def application_record(app: dict, now: datetime, approved_days: int = DEFAULT_AP
     }
 
 
-def summarize(apps: list[dict], approved_days: int = DEFAULT_APPROVED_LIFETIME_DAYS) -> dict:
+def summarize(
+    apps: list[dict], approved_days: int = DEFAULT_APPROVED_LIFETIME_DAYS, read_complete: bool = True
+) -> dict:
     """Rotation compliance is measured over CREDENTIALS, not over apps.
 
     An app with one healthy secret and one that expired two years ago has one credential
@@ -250,6 +268,7 @@ def summarize(apps: list[dict], approved_days: int = DEFAULT_APPROVED_LIFETIME_D
     credentials = [c for a in apps for c in a["credentials"]]
     healthy = sum(1 for c in credentials if c["healthy"])
     unknown_lifetime = sum(1 for c in credentials if c["lifetime_days"] is None)
+    unknown_verdict = any(c["issued_beyond_approved_lifetime"] is None for c in credentials)
     return {
         "total_app_registrations": len(apps),
         "apps_with_credentials": sum(1 for a in apps if a["has_credentials"]),
@@ -268,11 +287,12 @@ def summarize(apps: list[dict], approved_days: int = DEFAULT_APPROVED_LIFETIME_D
         "credentials_expiring_soon": sum(1 for c in credentials if c["expiring_soon"]),
         "credentials_without_expiry": sum(1 for c in credentials if not c["has_expiry"]),
         "healthy_credentials": healthy,
-        "credentials_without_lifetime": unknown_lifetime,
-        # Null while any lifetime is unknown: the count could be short.
-        "credentials_issued_beyond_approved_lifetime": None if unknown_lifetime else sum(
+        # Null after a failed or partial applications read, and the count while any credential's
+        # verdict is unknown: it could be short.
+        "credentials_without_lifetime": unknown_lifetime if read_complete else None,
+        "credentials_issued_beyond_approved_lifetime": sum(
             1 for c in credentials if c["issued_beyond_approved_lifetime"]
-        ),
+        ) if read_complete and not unknown_verdict else None,
         "approved_lifetime_days": approved_days,
         "rotation_threshold_days": EXPIRY_WARNING_DAYS,
         "credential_rotation_compliance_percentage": coverage_percentage(
@@ -292,8 +312,10 @@ def summarize(apps: list[dict], approved_days: int = DEFAULT_APPROVED_LIFETIME_D
 
 # --- collection (lazy msgraph imports) ---
 
-async def _collect(collector: Collector, cred, now: datetime, approved_days: int) -> tuple[list[dict], dict]:
-    """One applications.get() with a $select projection, paged to the end."""
+async def _collect(collector: Collector, cred, now: datetime, approved_days: int) -> tuple[list[dict], dict, bool]:
+    """One applications.get() with a $select projection, paged to the end.
+
+    The third value is False when the applications read failed or stopped part-way."""
 
     async def _work(client):
         tenant = await resolve_tenant(collector, client)
@@ -308,15 +330,15 @@ async def _collect(collector: Collector, cred, now: datetime, approved_days: int
                 select=list(APP_SELECT)
             )
         )
-        apps = [
-            application_record(project_application(a), now, approved_days)
-            for a in await paginate(
-                collector,
-                "graph.applications.get",
-                client.applications,
-                request_configuration,
-            )
-        ]
+        failures_before = len(collector.failures)
+        raw_apps = await paginate(
+            collector,
+            "graph.applications.get",
+            client.applications,
+            request_configuration,
+        )
+        complete = len(collector.failures) == failures_before
+        apps = [application_record(project_application(a), now, approved_days) for a in raw_apps]
         logger.info(
             "Collected %d app registration(s) with %d credential(s)",
             len(apps),
@@ -326,10 +348,11 @@ async def _collect(collector: Collector, cred, now: datetime, approved_days: int
         return (
             sorted(apps, key=lambda a: (a.get("display_name") or "", a.get("id") or "")),
             tenant,
+            complete,
         )
 
     result = await with_graph_client(collector, cred, _work, default=None)
-    return result if result is not None else ([], {"tenant_source": "unresolved"})
+    return result if result is not None else ([], {"tenant_source": "unresolved"}, False)
 
 
 def main() -> int:
@@ -349,14 +372,17 @@ def main() -> int:
     # One instant for the whole run, so two credentials sharing an end date cannot land
     # in different buckets.
     now = datetime.now(timezone.utc)
-    approved_days = approved_lifetime_days()
+    approved_days, _ = bounded_int_config(
+        collector, APPROVED_LIFETIME_ENV, DEFAULT_APPROVED_LIFETIME_DAYS, MAX_APPROVED_LIFETIME_DAYS
+    )
 
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
     if cred is None:
         apps: list[dict] = []
         tenant = {"tenant_source": "unresolved"}
+        read_complete = False
     else:
-        apps, tenant = asyncio.run(_collect(collector, cred, now, approved_days))
+        apps, tenant, read_complete = asyncio.run(_collect(collector, cred, now, approved_days))
 
     # No `provider_registration_status()` call, deliberately: Graph is not an ARM
     # resource provider, and a tenant with no app registrations genuinely has none.
@@ -368,7 +394,7 @@ def main() -> int:
         subscription_source=scoping["subscription_source"],
         collector=collector,
         results={"app_registrations": apps, "evaluated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ")},
-        summary=summarize(apps, approved_days),
+        summary=summarize(apps, approved_days, read_complete),
     )
 
     filename = f"azure_entra_app_registrations_{tenant_filename_key(tenant)}.json"

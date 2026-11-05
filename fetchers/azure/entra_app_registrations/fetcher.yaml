@@ -7,7 +7,8 @@ description: >
   expired, inside the 30-day rotation window, and no expiry date at all — because a
   never-expiring credential never appears in an "expiring soon" report by
   construction. Rotation compliance is reported over credentials, excluding apps that
-  hold none.
+  hold none. Each credential also carries the lifetime it was issued for, its end
+  date minus its start date.
 category: azure
 
 supports_targets: true
@@ -29,7 +30,11 @@ config_schema:
     env: AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS
     description: >
       A credential issued for more than this many days counts as beyond the approved
-      lifetime. Set it to the tenant's own rotation interval.
+      lifetime, from 1 to 3650; anything else fails the run as bad_config and 365
+      is used. 365 is a convention: FedRAMP KSI-SVC-ASM asks for regular rotation and
+      sets no number. Set it to the tenant's own rotation interval. A 29 February
+      inside a credential's span isn't counted, so a one-year credential issued across
+      one isn't flagged.
 
 target_schema:
   # Microsoft Graph data is TENANT-scoped, so the fanout unit here is the tenant,
@@ -105,6 +110,6 @@ evidence_set:
     - apps_with_all_credentials_healthy — Number of app registrations whose credentials are all healthy
 
     How long were credentials issued for?
-    - credentials_issued_beyond_approved_lifetime — Number of secrets and certificates whose end date is more than approved_lifetime_days after their start date; null if any credential has no start or end date, because the count could be short
-    - credentials_without_lifetime — Number of credentials with no start date or no end date, whose issued lifetime can't be computed
-    - approved_lifetime_days — Number of days a credential can be issued for and still count as within the approved interval (365 unless configured)
+    - credentials_issued_beyond_approved_lifetime — Number of secrets and certificates issued for more than approved_lifetime_days days, not counting any 29 February in the span; a credential with a start date and no end date counts, because it never expires; null if the applications read failed or stopped part-way, or if any credential has no start date or ends before it starts, because the count could be short
+    - credentials_without_lifetime — Number of credentials whose issued lifetime can't be computed: no start date, no end date, or an end before the start; null if the applications read failed or stopped part-way
+    - approved_lifetime_days — Number of days a credential can be issued for and still count as within the approved interval (365 unless configured, from 1 to 3650; 365 is a convention, as FedRAMP KSI-SVC-ASM asks for regular rotation and sets no number)

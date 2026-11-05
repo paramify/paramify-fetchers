@@ -44,7 +44,7 @@ def test_exactly_the_interval_is_within_it():
 
 
 def test_missing_start_or_end_is_unknown_not_zero():
-    for cred in (_cred(None, "2027-01-01T00:00:00Z"), _cred("2026-01-01T00:00:00Z", None), _cred("junk", "2027-01-01T00:00:00Z")):
+    for cred in (_cred(None, "2027-01-01T00:00:00Z"), _cred("junk", "2027-01-01T00:00:00Z")):
         c = apps.credential_record(cred, NOW)
         assert c["lifetime_days"] is None and c["issued_beyond_approved_lifetime"] is None
 
@@ -71,17 +71,150 @@ def test_no_credentials_counts_zero():
     assert apps.summarize([_app()])["credentials_issued_beyond_approved_lifetime"] == 0
 
 
-def test_interval_comes_from_the_environment(monkeypatch):
-    assert apps.approved_lifetime_days() == 365
-    monkeypatch.setenv("AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS", "90")
-    assert apps.approved_lifetime_days() == 90
-    for bad in ("0", "abc", "-5"):
-        monkeypatch.setenv("AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS", bad)
-        assert apps.approved_lifetime_days() == 365
-    monkeypatch.setenv("AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS", "90")
-    rec = apps.application_record({"id": "a", "credentials": [_cred("2026-01-01T00:00:00Z", "2026-06-01T00:00:00Z")]}, NOW, 90)
-    s = apps.summarize([rec], 90)
-    assert s["credentials_issued_beyond_approved_lifetime"] == 1
+def test_interval_comes_from_the_environment(monkeypatch, tmp_path):
+    import logging
+
+    from azure_common import Collector, classify_failure_code
+
+    def read(value=None):
+        if value is None:
+            monkeypatch.delenv(apps.APPROVED_LIFETIME_ENV, raising=False)
+        else:
+            monkeypatch.setenv(apps.APPROVED_LIFETIME_ENV, value)
+        collector = Collector(logging.getLogger("t"))
+        return apps.bounded_int_config(collector, apps.APPROVED_LIFETIME_ENV, 365, 3650)[0], collector
+
+    assert read()[0] == 365
+    assert read("90")[0] == 90
+    value, collector = read("99999999999999999999")
+    assert value == 3650 and collector.ok
+    for bad in ("0", "abc", "-5", "180d", "\u00b2"):
+        value, collector = read(bad)
+        assert value == 365 and classify_failure_code(collector.failures) == "bad_config"
+
+
+def test_interval_applies_to_the_summary():
+    rec = apps.application_record(
+        {"id": "a", "credentials": [_cred("2026-01-01T00:00:00Z", "2026-06-01T00:00:00Z")]}, NOW, 90
+    )
+    assert apps.summarize([rec], 90)["credentials_issued_beyond_approved_lifetime"] == 1
+
+
+def test_one_year_credential_across_a_leap_day_is_within_the_interval():
+    c = apps.credential_record(_cred("2027-06-01T00:00:00Z", "2028-06-01T00:00:00Z"), NOW)
+    assert c["lifetime_days"] == 366 and c["issued_beyond_approved_lifetime"] is False
+    c = apps.credential_record(_cred("2027-06-01T00:00:00Z", "2028-06-02T00:00:00Z"), NOW)
+    assert c["lifetime_days"] == 367 and c["issued_beyond_approved_lifetime"] is True
+    # A span that stops short of 29 February gets no allowance.
+    c = apps.credential_record(_cred("2028-03-01T00:00:00Z", "2029-03-02T00:00:00Z"), NOW)
+    assert c["lifetime_days"] == 366 and c["issued_beyond_approved_lifetime"] is True
+
+
+def test_no_end_date_counts_as_beyond_the_interval():
+    c = apps.credential_record(_cred("2026-01-01T00:00:00Z", None), NOW)
+    assert c["lifetime_days"] is None and c["issued_beyond_approved_lifetime"] is True
+    s = apps.summarize([_app(_cred("2026-01-01T00:00:00Z", None))])
+    assert s["credentials_issued_beyond_approved_lifetime"] == 1 and s["credentials_without_lifetime"] == 1
+
+
+def test_end_before_start_is_unknown():
+    c = apps.credential_record(_cred("2026-02-01T00:00:00Z", "2026-01-01T00:00:00Z"), NOW)
+    assert c["lifetime_days"] is None and c["issued_beyond_approved_lifetime"] is None
+
+
+def test_failed_or_partial_read_makes_both_new_counts_null():
+    s = apps.summarize([], read_complete=False)
+    assert s["credentials_issued_beyond_approved_lifetime"] is None and s["credentials_without_lifetime"] is None
+    partial = apps.summarize([_app(_cred("2026-01-01T00:00:00Z", "2030-01-01T00:00:00Z"))], read_complete=False)
+    assert partial["credentials_issued_beyond_approved_lifetime"] is None and partial["credentials_without_lifetime"] is None
+
+
+def _run(monkeypatch, tmp_path, graph_get, applications=None):
+    import json
+    from types import ModuleType
+    from types import SimpleNamespace as ns
+
+    class Query:
+        def __init__(self, **kw):
+            pass
+
+    builders = ModuleType("msgraph.generated.applications.applications_request_builder")
+    builders.ApplicationsRequestBuilder = type("B", (), {"ApplicationsRequestBuilderGetQueryParameters": Query})
+    config = ModuleType("kiota_abstractions.base_request_configuration")
+    config.RequestConfiguration = lambda query_parameters=None: ns(query_parameters=query_parameters)
+    monkeypatch.setitem(sys.modules, builders.__name__, builders)
+    monkeypatch.setitem(sys.modules, config.__name__, config)
+
+    async def fake_with_graph_client(collector, cred, work, default=None):
+        return await work(ns(applications=applications or ns(get=graph_get)))
+
+    async def fake_resolve(collector, client):
+        return {"tenant_id": "t", "tenant_source": "env"}
+
+    monkeypatch.setattr(apps, "with_graph_client", fake_with_graph_client)
+    monkeypatch.setattr(apps, "resolve_tenant", fake_resolve)
+    monkeypatch.setattr(apps, "credential", lambda: object())
+    monkeypatch.setattr(apps, "load_dotenv", lambda: None)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    monkeypatch.setenv("AZURE_TENANT_ID", "t")
+    code = apps.main()
+    out = next(tmp_path.glob("azure_entra_app_registrations_*.json"))
+    return code, json.loads(out.read_text())
+
+
+def _application(secret_start, secret_end):
+    from types import SimpleNamespace as ns
+    cred = ns(display_name="s", key_id="k", start_date_time=secret_start, end_date_time=secret_end, usage=None, type=None)
+    return ns(id="a", app_id="b", display_name="App", created_date_time=None, sign_in_audience="AzureADMyOrg",
+              password_credentials=[cred], key_credentials=[])
+
+
+def test_main_denied_read_leaves_both_counts_null(monkeypatch, tmp_path):
+    async def denied(request_configuration=None):
+        raise Exception("Insufficient privileges (status 403)")
+
+    code, evidence = _run(monkeypatch, tmp_path, denied)
+    summary = (evidence.get("payload") or evidence)["summary"]
+    assert code == 1
+    assert summary["credentials_issued_beyond_approved_lifetime"] is None
+    assert summary["credentials_without_lifetime"] is None
+
+
+def test_main_page_failing_midway_leaves_both_counts_null(monkeypatch, tmp_path):
+    from types import SimpleNamespace as ns
+    first = ns(value=[_application("2026-01-01T00:00:00Z", "2030-01-01T00:00:00Z")], odata_next_link="https://next")
+
+    async def fail(request_configuration=None):
+        raise Exception("Service unavailable (status 503)")
+
+    class Builder:
+        async def get(self, request_configuration=None):
+            return first
+
+        def with_url(self, url):
+            return ns(get=fail)
+
+    code, evidence = _run(monkeypatch, tmp_path, None, applications=Builder())
+    summary = (evidence.get("payload") or evidence)["summary"]
+    assert code == 1
+    assert summary["total_credentials"] == 1
+    assert summary["credentials_issued_beyond_approved_lifetime"] is None
+    assert summary["credentials_without_lifetime"] is None
+
+
+def test_main_complete_read_counts(monkeypatch, tmp_path, assert_summary_documented):
+    from types import SimpleNamespace as ns
+
+    async def get(request_configuration=None):
+        return ns(value=[_application("2026-01-01T00:00:00Z", "2030-01-01T00:00:00Z")], odata_next_link=None)
+
+    code, evidence = _run(monkeypatch, tmp_path, get)
+    summary = (evidence.get("payload") or evidence)["summary"]
+    assert code == 0
+    assert summary["credentials_issued_beyond_approved_lifetime"] == 1
+    assert summary["credentials_without_lifetime"] == 0
+    assert_summary_documented("azure/entra_app_registrations", summary)
 
 
 def test_summary_is_documented(assert_summary_documented):
