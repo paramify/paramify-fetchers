@@ -33,12 +33,13 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_sql_encryption_status")
 
@@ -241,9 +242,10 @@ def _optional_get(collector: Collector, operation: str, fn):
         return None
 
 
-def collect_sql_servers(subscription_id, cred, collector: Collector) -> list[dict]:
-    """One servers.list(); per server a protector GET, databases, a TDE GET each — every
-    call guarded separately so one inaccessible server does not blank out the rest.
+def collect_sql_servers(subscription_id, cred, collector: Collector, exclusions=None, excluded=None) -> list[dict] | None:
+    """One servers.list(); per in-scope server a protector GET, databases, a TDE GET each — every
+    call guarded separately so one inaccessible server does not blank out the rest. Excluded
+    servers (and their databases, never read) are appended to `excluded`.
     """
 
     def _client():
@@ -254,13 +256,20 @@ def collect_sql_servers(subscription_id, cred, collector: Collector) -> list[dic
     # Guarded: a missing azure-mgmt-sql becomes internal_error, evidence still written.
     client = collector.guard("sql.SqlManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself, so pagination is handled.
         return [project_sql_server(s) for s in client.servers.list()]
 
-    projected_servers = collector.guard("sql.servers.list", _list, default=[])
+    projected_servers = collector.guard("sql.servers.list", _list)
+    if projected_servers is None:
+        return None
+
+    if exclusions:
+        projected_servers, out = exclusions.split(projected_servers, "sql_server")
+        if excluded is not None:
+            excluded.extend(out)
 
     servers: list[dict] = []
     for server in projected_servers:
@@ -333,7 +342,10 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    servers: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    excluded: list[dict] = []
+    servers: list[dict] | None = None
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked first: an unregistered provider returns an empty list, not an error.
@@ -346,7 +358,7 @@ def main() -> int:
                 "in use; reporting status not_registered",
                 subscription_id,
             )
-        servers = collect_sql_servers(subscription_id, cred, collector)
+        servers = collect_sql_servers(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -356,6 +368,10 @@ def main() -> int:
             ),
         )
 
+    exclusions.warn_unmatched(logger)
+    listed = servers is not None
+    servers = servers or []
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -363,8 +379,13 @@ def main() -> int:
         results={
             "sql_servers": servers,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(servers), "provider_registration_status": registration},
+        summary={
+            **summarize(servers),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("sql_server",), {"sql_servers": len(servers) if listed else None}),
+        },
     )
 
     filename = (

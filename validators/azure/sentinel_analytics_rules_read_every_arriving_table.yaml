@@ -19,7 +19,7 @@ statement: >
   are neither covering nor missing data here, or Basic and Auxiliary tables, which the window query
   skips.
 
-regex: '"partial_failure":\s*false\b[\s\S]*?"enabled_rules_missing_data":\s*(?<enabled_rules_missing_data>\d+),\s*"enabled_rules_quiet":\s*(?<enabled_rules_quiet>\d+),\s*"enabled_rules_tables_unknown":\s*\d+,\s*"enabled_rules_total":\s*[1-9]\d*,\s*"ingesting_tables_not_read":\s*0\b'
+regex: '"partial_failure":\s*false\b[\s\S]*?"enabled_rules_missing_data":\s*(?<enabled_rules_missing_data>\d+),\s*"enabled_rules_quiet":\s*(?<enabled_rules_quiet>\d+),\s*"enabled_rules_tables_unknown":\s*\d+,\s*"enabled_rules_total":\s*[1-9]\d*,\s*(?:"(?:excluded|in_scope)_workspaces":\s*\d+,\s*)*"ingesting_tables_not_read":\s*0\b'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

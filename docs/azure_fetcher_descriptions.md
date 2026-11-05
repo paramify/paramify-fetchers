@@ -34,6 +34,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Logging and monitoring | [azure_monitor_fired_alerts](#azure_monitor_fired_alerts) | `EVD-AZURE-MONITOR-FIRED-ALERTS` |
 | Logging and monitoring | [azure_network_flow_logs](#azure_network_flow_logs) | `EVD-AZURE-NETWORK-FLOW-LOGS` |
 | Logging and monitoring | [azure_resource_diagnostic_settings](#azure_resource_diagnostic_settings) | `EVD-AZURE-RESOURCE-DIAG-SETTINGS` |
+| Logging and monitoring | [azure_service_health_advisories](#azure_service_health_advisories) | `EVD-AZURE-SERVICE-HEALTH` |
 | Logging and monitoring | [azure_service_log_records](#azure_service_log_records) | `EVD-AZURE-SERVICE-LOG-RECORDS` |
 | Microsoft Sentinel | [azure_sentinel_analytics_rules](#azure_sentinel_analytics_rules) | `EVD-AZURE-SENTINEL-ANALYTICS-RULES` |
 | Microsoft Sentinel | [azure_sentinel_automation_rules](#azure_sentinel_automation_rules) | `EVD-AZURE-SENTINEL-AUTOMATION-RULES` |
@@ -270,7 +271,7 @@ Commands Executed:
 - Microsoft Graph `GET /identity/conditionalAccess/policies` — every policy with its state, conditions, grant controls and session controls
 - Microsoft Graph `GET /policies/authenticationStrengthPolicies` (only when a policy uses an authentication strength) — each strength's allowed sign-in method combinations, read as raw JSON because the SDK drops combinations of two methods such as password and SMS
 
-Output: `azure_entra_conditional_access_policies_<tenant>.json` — each Conditional Access policy with its state, the users, groups, roles and apps it includes and excludes, its other conditions (client apps, risk levels, platforms, locations), what it grants or blocks and its session controls, and each authentication strength the policies use with its allowed method combinations.
+Output: `azure_entra_conditional_access_policies_<tenant>.json` — each Conditional Access policy with its state, the users, groups, roles and apps it includes and excludes, its other conditions (client apps, sign-in, user, insider and service principal risk levels, platforms, locations, device filter, authentication flows), what it grants or blocks and its session controls, and each authentication strength the policies use with its allowed method combinations.
 
 Summary fields:
 
@@ -298,7 +299,7 @@ Summary fields:
 - `enforced_policies_targeting_all_users` — Number of enforced policies that include all users; a policy can still exclude users, groups or roles; null if the policies couldn't be read
 - `enforced_policies_targeting_all_applications` — Number of enforced policies that include all cloud apps; a policy can still exclude apps; null if the policies couldn't be read
 - `enforced_mfa_for_all_users_and_apps` — Number of enforced policies that require MFA for all users on all cloud apps, before any exclusions; null if the policies couldn't be read
-- `mfa_client_app_types_for_all_users_and_apps` — List of client app types (browser, mobileAppsAndDesktopClients, exchangeActiveSync, other) on which enforced policies, taken together, require MFA for all users on all cloud apps. A policy counts when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no risk, platform or location condition; a policy for all client app types adds all four. Excluded users, groups and roles, device filters and authentication flows aren't checked; null if the policies couldn't be read
+- `mfa_client_app_types_for_all_users_and_apps` — List of client app types (browser, mobileAppsAndDesktopClients, exchangeActiveSync, other) on which enforced policies, taken together, require MFA for all users on all cloud apps. A policy counts when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no sign-in, user, insider or service principal risk, platform, location, device filter or authentication flow condition; a policy for all client app types adds all four. Excluded users, groups and roles aren't checked; null if the policies couldn't be read
 - `enforced_policies_targeting_legacy_authentication` — Number of enforced policies whose conditions include legacy clients (Exchange ActiveSync or other older clients, which can't prompt for MFA), whether the policy blocks them or requires something else; null if the policies couldn't be read
 
 **Do admin portals and Azure management require MFA?**
@@ -415,7 +416,7 @@ Summary fields:
 - `registration_details` — Whether the emergency accounts' registered methods were read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused, failed, or the accounts themselves weren't read)
 - `enforced_mfa_policies` — Number of enabled (not report-only) Conditional Access policies that require MFA or an authentication strength, even when another control can be met instead (their exclusions all count); null if the policies weren't read
 - `enforced_mfa_policies_for_all_users` — Number of enforced MFA policies that include all users; null if the policies weren't read
-- `mfa_policies_counting_for_coverage` — Number of enforced MFA policies that count for coverage: MFA is mandatory (the MFA control or an authentication strength that satisfies MFA, and, when any one control is enough, no compliant device, terms of use or other control that isn't MFA as an alternative), they target all cloud apps (app exclusions aren't judged), apply to browsers or to mobile and desktop apps (the two modern client app types), and have no other condition that limits when they apply (sign-in, user, insider or service principal risk, platforms, locations, a device filter or authentication flows); null if the policies weren't read
+- `mfa_policies_counting_for_coverage` — Number of enforced MFA policies that count for coverage: MFA is mandatory (the MFA control or an authentication strength that satisfies MFA, and, when any one control is enough, no compliant device, terms of use or other control that isn't MFA as an alternative), they target all cloud apps with none excluded (a policy that excludes an app gives no coverage), apply to browsers or to mobile and desktop apps (the two modern client app types), and have no other condition that limits when they apply (sign-in, user, insider or service principal risk, platforms, locations, a device filter or authentication flows); null if the policies weren't read
 - `legacy_authentication_blocked_for_all_users` — True if an enforced policy blocks Exchange ActiveSync and other legacy clients for all users on all cloud apps, with no risk, platform, location, device filter or authentication flow condition (excluded users, groups, roles and apps aren't checked); false if none does; null if the policies weren't read
 - `sentinel_workspaces_checked` — Number of Microsoft Sentinel workspaces in the subscription whose analytics rules were read; null if the rules weren't all read
 - `alert_rules_checked` — Number of Sentinel analytics rules and log search alert rules read; null if the rules weren't all read
@@ -529,11 +530,12 @@ Summary fields:
 - `mfa_capable_enabled_users` — Number of enabled users who are MFA-capable; null if the users list or the registration report couldn't be read in full
 - `enabled_users_without_mfa` — Number of enabled users who aren't MFA-capable, including users with no row in the registration report; null if the users list or the registration report couldn't be read in full
 - `mfa_coverage_percentage` — Percentage of enabled users who are MFA-capable = `mfa_capable_enabled_users` / `enabled_users` × 100 (a whole number, 0–100); 0 when `enabled_users` is 0; null if the users list or the registration report couldn't be read in full. Users with no row in the registration report count in the total but not as capable
-- `mfa_coverage_percentage_all_users` — Percentage of users, enabled or not, with a row in the registration report who are MFA-capable = `mfa_capable_users` / `users_with_registration_details` × 100 (a whole number, 0–100); 0 when `users_with_registration_details` is 0; null if the users list or the registration report couldn't be read in full. Users with no row are left out of both: the report omits disabled accounts, so their MFA is unknown, not absent
+- `mfa_coverage_percentage_all_users` — Percentage of users, enabled or not, who are MFA-capable, leaving out disabled users with no row in the registration report = `mfa_capable_users` / `users_counted_in_all_users_coverage` × 100 (a whole number, 0–100); 0 when `users_counted_in_all_users_coverage` is 0; null if the users list or the registration report couldn't be read in full. The report omits disabled accounts, so a disabled user with no row has unknown MFA and is left out of both; an enabled user with no row counts in the total but not as capable
 - `mfa_registered_enabled_users` — Number of enabled users the registration report shows as registered for MFA, whether or not the tenant's policy allows the method they registered; null if the users list or the registration report couldn't be read in full
 - `sspr_registered_enabled_users` — Number of enabled users registered for self-service password reset (SSPR); null if the users list or the registration report couldn't be read in full
+- `users_counted_in_all_users_coverage` — Number of users counted in `mfa_coverage_percentage_all_users`: every enabled user, plus each disabled user with a row in the registration report; null if the users list or the registration report couldn't be read in full
 - `users_with_registration_details` — Number of users, enabled or not, with a row in the registration report; null if the users list or the registration report couldn't be read in full
-- `users_without_registration_details` — Number of users, enabled or not, with no row in the registration report (the report omits disabled accounts); each counts as not MFA-capable in the enabled-user and admin figures and is left out of `mfa_coverage_percentage_all_users`; null if the users list or the registration report couldn't be read in full
+- `users_without_registration_details` — Number of users, enabled or not, with no row in the registration report (the report omits disabled accounts); each counts as not MFA-capable in the enabled-user and admin figures; a disabled one is left out of `mfa_coverage_percentage_all_users`, and an enabled one counts there as not MFA-capable; null if the users list or the registration report couldn't be read in full
 
 **Can enabled users sign in without a password?**
 - `passwordless_capable_enabled_users` — Number of enabled users who are passwordless-capable: the registration report says they've registered a passwordless method the policy allows (a FIDO2 security key or passkey, Windows Hello for Business, or Microsoft Authenticator phone sign-in); null if the users list or the registration report couldn't be read in full
@@ -1668,6 +1670,76 @@ Summary fields:
 **Are all audit logs captured?**
 - `resources_with_audit_categories` — Number of log-producing resources whose type has audit log categories
 - `resources_capturing_all_audit_categories` — Number of resources that export every audit log category their type has
+
+
+### azure_service_health_advisories
+Short Description: Lists the Microsoft service issues, planned maintenance, health and security advisories reported to the subscription, with their status, recommended actions and the in-scope resources they name.
+
+Script: fetchers/azure/service_health_advisories/fetcher.py
+
+Access: Reader on the subscription. Optional: `Microsoft.ResourceHealth/events/fetchEventDetails/action` for security advisory summaries and updates, and `Microsoft.ResourceHealth/events/listSecurityAdvisoryImpactedResources/action` for the resources a security advisory names; without them, those read unknown.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `providers.get()` for Microsoft.ResourceHealth — tells an unregistered provider from a quiet subscription
+- `GET Microsoft.ResourceHealth/events` — the Service Health events last updated within the lookback window (180 days at most)
+- `ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events'` — events Resource Graph still holds, with their last update, to catch older ones the window misses
+- `GET Microsoft.ResourceHealth/events/{trackingId}` (per event Resource Graph holds that the window missed, from 30 days before its last update in Resource Graph) — its full record
+- `POST Microsoft.ResourceHealth/events/{trackingId}/fetchEventDetails` (per sensitive event) — the summary and updates the list leaves out
+- `ServiceHealthResources | where type =~ 'microsoft.resourcehealth/events/impactedresources'` — the resources each event names
+- `POST Microsoft.ResourceHealth/events/{trackingId}/listSecurityAdvisoryImpactedResources` (per security advisory) — the resources the advisory names
+
+Output: `azure_service_health_advisories_<subscription>.json` — each Service Health event with its type, status, level, Microsoft's description, impacted services and regions, impact start and end, published and last update times, recommended actions and the in-scope resources it names; resources outside the boundary are listed separately.
+
+Summary fields:
+
+**What did Microsoft report to the subscription?**
+- `lookback_days` — Number of days back the event list reaches, counted against each event's last update (180 by default, and at most 180, because the list answers an error for a longer window)
+- `events` — Number of Service Health events in scope: events last updated within the window plus older events Resource Graph still holds, billing communications left out; null, like every count below except the scope lists, when the event list couldn't be read
+- `events_from_resource_graph` — Number of events in scope that the windowed list left out and Resource Graph still holds, such as a retirement announced long ago, each read by its tracking id; null when Resource Graph's events couldn't be read
+- `events_in_resource_graph_not_found` — Number of events Resource Graph holds, outside the windowed list, that the event API did not find when read by tracking id; such an event is missing from every other count, so above 0 the evidence is short; null when Resource Graph's events could not be read
+- `events_by_type` — Number of events of each type; a type with none is left out:
+  - ServiceIssue (an outage or degradation of an Azure service)
+  - PlannedMaintenance (scheduled maintenance that may affect availability)
+  - HealthAdvisory (a change that needs attention, such as a retirement)
+  - SecurityAdvisory (a security notice for the subscription)
+  - RCA (a post-incident review of an earlier service issue)
+  - EmergingIssues (a broad issue Microsoft is still investigating)
+- `events_by_status` — Number of events in each status Microsoft gives: Active, Resolved, or unknown when Microsoft gives none
+- `events_by_level` — Number of events at each level Microsoft gives: Critical, Error, Warning, Informational, or unknown when Microsoft gives none
+- `retirement_advisories` — Number of health advisories that announce a retirement (sub-type Retirement)
+- `billing_events_skipped` — Number of billing communications left out of the evidence
+- `provider_registration_status` — Whether Microsoft.ResourceHealth is registered on the subscription: registered, not_registered or unknown (the lookup failed). Only registered makes 0 events mean none: with the provider not registered, the event list may come back empty without an error, so 0 events means unreadable, not quiet
+
+**Which events are still open, and what do they ask for?**
+- `open_events` — Number of open events. Open follows Microsoft's own rule for an active event: a service issue while its status is Active, and any other event until its impact mitigation time passes (or while its status is Active, when it has none)
+- `open_events_by_type` — Number of open events of each type; a type with none is left out
+- `open_service_issues` — Number of open service issues
+- `open_security_advisories` — Number of open security advisories
+- `open_health_advisories` — Number of open health advisories, retirements included
+- `open_retirement_advisories` — Number of open health advisories that announce a retirement
+- `upcoming_planned_maintenance` — Number of planned maintenance events whose maintenance hasn't ended
+- `open_events_action_recommended` — Number of open events that ask for action: Microsoft tagged them Action Recommended or listed recommended actions
+- `open_high_severity_advisories` — Number of open health or security advisories at level Critical or Error
+
+**Which resources do the events name?**
+- `impacted_resources` — Number of distinct in-scope resources named by any event; null while any event's resource list is unread
+- `impacted_resources_by_type` — Number of distinct in-scope resources named by any event, for each resource type; null while any event's resource list is unread
+- `events_with_impacted_resources` — Number of events that name at least one in-scope resource; null while any event's resource list is unread
+- `open_events_with_impacted_resources` — Number of open events that name at least one in-scope resource; null while any event's resource list is unread
+- `events_impacted_resources_unread` — Number of events whose resource list was refused or failed (Resource Graph's list, or a security advisory's own); above 0, the resource counts are null
+- `events_impacted_resources_not_authorized` — Number of security advisories whose resource list was refused because the optional action isn't granted
+
+**Can the security advisories be read in full?**
+- `sensitive_events` — Number of events Microsoft marks sensitive, whose summary and updates the event list leaves out
+- `sensitive_event_details_read` — Number of sensitive events whose summary and updates were read with fetchEventDetails
+- `sensitive_event_details_not_authorized` — Number of sensitive events whose details were refused because the optional action isn't granted; their summary and updates read null
+
+**Which resources are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no resource an event names, such as a mistyped name
+- `excluded_impacted_resources` — Number of distinct resources named by events that a pattern took out by resource group, region or id; each is listed under excluded with the pattern, once for each event that names it, and no other count includes them; null while any event's resource list is unread
+- `excluded_events` — Number of events left out because a pattern took out every resource they name; each is listed under excluded
 
 
 ### azure_service_log_records

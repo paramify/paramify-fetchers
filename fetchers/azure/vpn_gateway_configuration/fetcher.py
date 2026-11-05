@@ -29,6 +29,8 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 from vpn_crypto import (  # noqa: E402
     VPN_GATEWAY_DEFAULT_WEAK,
     effective_weak_algorithms,
@@ -179,7 +181,37 @@ def summarize(gateways: list[dict], connections: list[dict], local_gateways: lis
     }
 
 
-def collect(subscription_id, cred, collector: Collector):
+def record_connection(conn, owner_ids: dict) -> dict:
+    owner_ids[model_attr(conn, "id")] = model_attr(model_attr(conn, "virtual_network_gateway1"), "id")
+    return connection_record(project_connection(conn))
+
+
+def split_connections(connections: list[dict], owner_ids: dict, out_gateways: list[dict],
+                      exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
+    """A connection leaves on its own match or with the gateway that owns it (gateway1); a connection to an excluded
+    gateway2 or local network gateway stays."""
+    by_gateway = {(e["id"] or "").lower(): e for e in out_gateways}
+    kept, excluded = [], []
+    for conn in connections:
+        owner = by_gateway.get((owner_ids.get(conn["id"]) or "").lower())
+        pattern = exclusions.match(conn["id"], conn.get("location"))
+        if pattern is not None:
+            reason, by, extra = "resource_matched", pattern, {}
+        elif owner is not None:
+            reason, by, extra = "gateway_matched", owner["pattern"], {"matched_id": owner["id"]}
+        else:
+            kept.append(conn)
+            continue
+        excluded.append(excluded_item(
+            "connection", conn["name"], by, reason, id=conn["id"],
+            resource_group=conn["resource_group"], location=conn.get("location"), **extra))
+    return kept, excluded
+
+
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None):
+    """With exclusions, connection status is not read for excluded connections and they are appended to `excluded`.
+    All three are None when the resource group list wasn't read."""
     def _clients():
         from azure.mgmt.network import NetworkManagementClient  # lazy
 
@@ -194,14 +226,16 @@ def collect(subscription_id, cred, collector: Collector):
 
     clients = collector.guard("network.NetworkManagementClient (init)", _clients)
     if clients is None:
-        return [], [], []
+        return None, None, None
     rm, net = clients
     groups = collector.guard(
         "resource.resource_groups.list",
         lambda: sorted(model_attr(g, "name") for g in rm.resource_groups.list()),
-        default=[],
     )
+    if groups is None:
+        return None, None, None
     gateways, connections, local_gateways = [], [], []
+    owner_ids: dict = {}
     for rg in groups:
         gateways += collector.guard(
             f"network.virtual_network_gateways.list({rg})",
@@ -210,10 +244,7 @@ def collect(subscription_id, cred, collector: Collector):
         )
         connections += collector.guard(
             f"network.virtual_network_gateway_connections.list({rg})",
-            lambda: [
-                connection_record(project_connection(c))
-                for c in net.virtual_network_gateway_connections.list(rg)
-            ],
+            lambda: [record_connection(c, owner_ids) for c in net.virtual_network_gateway_connections.list(rg)],
             default=[],
         )
         local_gateways += collector.guard(
@@ -221,6 +252,13 @@ def collect(subscription_id, cred, collector: Collector):
             lambda: [project_local_gateway(g) for g in net.local_network_gateways.list(rg)],
             default=[],
         )
+
+    if exclusions:
+        gateways, out_gateways = exclusions.split(gateways, "virtual_network_gateway")
+        local_gateways, out_local = exclusions.split(local_gateways, "local_network_gateway")
+        connections, out_connections = split_connections(connections, owner_ids, out_gateways, exclusions)
+        if excluded is not None:
+            excluded += out_gateways + out_connections + out_local
 
     for conn in connections:
         # connection_status is only populated on a per-connection GET, never on list.
@@ -253,15 +291,18 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    gateways, connections, local_gateways = [], [], []
+    gateways = connections = local_gateways = None
     registration = REGISTRATION_UNKNOWN
+    excluded: list = []
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
     if subscription_id and cred is not None:
         registration = provider_registration_status(
             collector, subscription_id, cred, "Microsoft.Network"
         )
         if registration == NOT_REGISTERED:
             logger.warning("Microsoft.Network is not registered on subscription %s", subscription_id)
-        gateways, connections, local_gateways = collect(subscription_id, cred, collector)
+        gateways, connections, local_gateways = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -271,6 +312,9 @@ def main() -> int:
             ),
         )
 
+    exclusions.warn_unmatched(logger)
+    listed = gateways is not None
+    gateways, connections, local_gateways = gateways or [], connections or [], local_gateways or []
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -280,10 +324,15 @@ def main() -> int:
             "connections": connections,
             "local_network_gateways": local_gateways,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(gateways, connections, local_gateways),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("virtual_network_gateway", "connection", "local_network_gateway"), {
+                "virtual_network_gateways": len(gateways) if listed else None,
+                "connections": len(connections) if listed else None,
+                "local_network_gateways": len(local_gateways) if listed else None}),
         },
     )
     filename = (

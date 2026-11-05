@@ -1,5 +1,5 @@
 name: azure_entra_dormant_identities
-version: 0.1.0
+version: 0.2.0
 description: >-
   Shows whether any dormant, never-used, guest or deleted user or service principal still holds an Entra directory role or an Azure role in the subscription.
 category: azure
@@ -75,6 +75,7 @@ evidence_set:
     - Microsoft Graph GET /applications — when each of this tenant's app registrations was created, for the grace period of a service principal with no creation date of its own
     - Microsoft Graph GET /reports/servicePrincipalSignInActivities on the beta endpoint — when each app or managed identity last signed in
     - Microsoft Graph GET /directoryRoles and GET /directoryRoles/{id}/members (per role) — who holds each directory role now, tenant-wide; eligible (PIM) assignments and roles scoped to an administrative unit aren't read
+    - Microsoft Graph GET /directoryRoles/{id}/members/microsoft.graph.servicePrincipal (per role) — the service principals holding the role, which v1.0 /members leaves out
     - GET Microsoft.Authorization/roleDefinitions and GET Microsoft.Authorization/roleAssignments — every active Azure role assignment that applies in the subscription, including those inherited from management groups and made below it, with its role name; eligible (PIM) assignments aren't read
     - Microsoft Graph GET /groups/{id}/transitiveMembers on the beta endpoint (per group holding a role) — who holds the role through the group; beta because v1.0 member reads are known to leave out service principals
     - Microsoft Graph POST /directoryObjects/getByIds — the service principals holding a role, and which assigned principals no longer exist

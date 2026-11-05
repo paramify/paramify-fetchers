@@ -35,11 +35,14 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
+    resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_rbac_custom_roles")
 
@@ -240,7 +243,23 @@ def custom_role_record(role: dict) -> dict:
     }
 
 
-def summarize(custom_roles: list[dict], total_definitions: int) -> dict:
+def split_custom_roles(roles: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
+    """A custom role leaves only when every assignable scope is a resource group or resource a pattern matches."""
+    kept, excluded = [], []
+    for role in roles:
+        scopes = role["assignable_scopes"]
+        below = bool(exclusions) and bool(scopes) and all(resource_group_from_id(s) for s in scopes)
+        matched = [(s, exclusions.match(s)) for s in scopes] if below else []
+        if matched and all(pattern for _, pattern in matched):
+            excluded.append(excluded_item(
+                "custom_role", role["role_name"], matched[0][1], "all_scopes_matched", id=role["id"],
+                matched_scopes=[{"scope": s, "pattern": pattern} for s, pattern in matched]))
+        else:
+            kept.append(role)
+    return kept, excluded
+
+
+def summarize(custom_roles: list[dict], total_definitions: int, excluded_custom_roles: int = 0) -> dict:
     """Escalation-capable custom roles are the headline.
 
     `total_role_definitions` and `builtin_role_definitions` are reported alongside so
@@ -250,7 +269,7 @@ def summarize(custom_roles: list[dict], total_definitions: int) -> dict:
     escalating = [r for r in custom_roles if r["can_escalate_privileges"]]
     return {
         "total_role_definitions": total_definitions,
-        "builtin_role_definitions": total_definitions - len(custom_roles),
+        "builtin_role_definitions": total_definitions - len(custom_roles) - excluded_custom_roles,
         "custom_role_definitions": len(custom_roles),
         # --- the headline ---
         "custom_roles_with_privilege_escalation": len(escalating),
@@ -300,7 +319,7 @@ def summarize(custom_roles: list[dict], total_definitions: int) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_custom_roles(subscription_id, cred, collector: Collector) -> tuple[list[dict], int]:
+def collect_custom_roles(subscription_id, cred, collector: Collector) -> tuple[list[dict] | None, int]:
     """One role_definitions.list(), split into custom and built-in in Python.
 
     Listing unfiltered rather than passing `filter="type eq 'CustomRole'"` is Prowler's
@@ -308,7 +327,7 @@ def collect_custom_roles(subscription_id, cred, collector: Collector) -> tuple[l
 
     The scope is the subscription, so custom roles defined at a management group above
     it and assignable here are NOT returned — a known limitation of a per-subscription
-    read, not a failure.
+    read, not a failure. The roles are None when the list couldn't be read.
     """
     from azure.mgmt.authorization import AuthorizationManagementClient
 
@@ -317,7 +336,7 @@ def collect_custom_roles(subscription_id, cred, collector: Collector) -> tuple[l
 
     client = collector.guard("authorization.AuthorizationManagementClient (init)", _client)
     if client is None:
-        return [], 0
+        return None, 0
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself, so pagination is handled.
@@ -329,9 +348,10 @@ def collect_custom_roles(subscription_id, cred, collector: Collector) -> tuple[l
                 custom.append(custom_role_record(projected))
         return custom, total
 
-    custom_roles, total = collector.guard(
-        "authorization.role_definitions.list", _list, default=([], 0)
-    )
+    listed = collector.guard("authorization.role_definitions.list", _list)
+    if listed is None:
+        return None, 0
+    custom_roles, total = listed
     logger.info(
         "Collected %d custom role definition(s) out of %d total", len(custom_roles), total
     )
@@ -351,12 +371,14 @@ def main() -> int:
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
 
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    custom_roles: list[dict] = []
+    custom_roles: list[dict] | None = None
     total_definitions = 0
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
@@ -381,6 +403,14 @@ def main() -> int:
             ),
         )
 
+    listed = custom_roles is not None
+    custom_roles, excluded = split_custom_roles(custom_roles or [], exclusions)
+    exclusions.warn_unmatched(logger)
+    counts = exclusions.summary(excluded, ("custom_role",), {"custom_roles": len(custom_roles)})
+    # Unknown, not none, when the list wasn't read.
+    if not listed:
+        counts.update(excluded_custom_roles=None, in_scope_custom_roles=None)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -392,10 +422,12 @@ def main() -> int:
             "privilege_escalation_actions_checked": dict(
                 sorted(PRIVILEGE_ESCALATION_ACTIONS.items())
             ),
+            "excluded": excluded,
         },
         summary={
-            **summarize(custom_roles, total_definitions),
+            **summarize(custom_roles, total_definitions, len(excluded)),
             "provider_registration_status": registration,
+            **counts,
         },
     )
 

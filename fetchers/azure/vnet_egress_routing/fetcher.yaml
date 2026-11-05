@@ -1,5 +1,5 @@
 name: azure_vnet_egress_routing
-version: 0.2.0
+version: 0.3.0
 description: >
   Where each subnet's Internet-bound traffic goes: through a firewall or network
   virtual appliance, into a black hole, to a VPN/ExpressRoute gateway, out a NAT
@@ -50,12 +50,14 @@ config_schema:
       How many other subscriptions to search for the Virtual WAN hub of a spoke whose
       hub is not in this subscription. Only used when such a spoke exists.
   resource_exclusions:
-    type: string
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
     description: >
       Resources outside the authorization boundary, to leave out of scope, as
-      case-insensitive glob patterns separated by commas or spaces, each with a
+      case-insensitive glob patterns listed in the manifest, each with a
       prefix: rg:<resource group> (read from the resource id), location:<region>
       (the region's name without spaces, such as eastus2; a resource with no
       location never matches one) or id:<resource id> (also matches that
@@ -72,7 +74,8 @@ config_schema:
       to. Peerings are still read for every virtual network, excluded ones too,
       so a failed read on one still fails the run. A pattern without one of these
       prefixes fails the run. Set it once under platforms.azure.config for every Azure
-      fetcher that has this field; fetchers without it ignore it. Can be ${env:VAR}. Empty: every
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
       resource is in scope.
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
