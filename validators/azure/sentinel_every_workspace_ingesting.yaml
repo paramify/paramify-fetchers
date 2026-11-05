@@ -7,8 +7,9 @@ statement: >
   and housekeeping tables) that ingested data inside the ingestion window (default 14 days). The
   fetcher's minimum across workspaces must be 1 or more; null (not collected) fails, and so does any
   workspace whose sources_ingesting is null, since the minimum skips a workspace whose ingestion query
-  failed or, with the Basic and Auxiliary search on, whose table list or a table's search failed.
-  Basic and Auxiliary tables count as sources only when that search is on. Substantiates that connectors are connected in the sense that data is arriving.
+  failed or, with the Basic and Auxiliary search on, whose table list or a table's search failed. A
+  Basic or Auxiliary table counts as a source only when that search is on and finds data in the hours
+  searched. Substantiates that connectors are connected in the sense that data is arriving.
 
 regex: '^\s*\{(?=[\s\S]*?"min_sources_ingesting":\s*[1-9])(?![\s\S]*?"sources_ingesting":\s*null)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
