@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 95 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 98 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -73,7 +73,7 @@ otherwise.
 | Key Vault Reader (RBAC vaults), or an access policy with key List and Get Rotation Policy (optional) | `azure_key_vault_key_rotation` | The vault reports `data_plane_status: inaccessible`; rotation policies still come from the management plane |
 | Log Analytics Reader on the workspaces that receive their logs | `azure_network_traffic_activity` | The workspace reads `not_authorized` and its figures unknown; the run succeeds |
 | Log Analytics Reader on the workspaces they query | `azure_log_analytics_query_audit`, `azure_sentinel_analytics_rules`, `azure_sentinel_data_sources`, `azure_sentinel_incidents`, `azure_devops_audit_streams` (Azure Monitor Logs streams) | The KQL query fails |
-| Reader on other subscriptions (optional) | `azure_alert_rules`, `azure_activity_log_alerts` and `azure_waf_ddos_activity` (action groups), `azure_app_gateway_waf` (WAF policies), `azure_vnet_egress_routing` (Virtual WAN hubs), `azure_sentinel_playbooks` (Logic Apps an automation rule runs), `azure_private_endpoint_configuration` (target resources), `azure_private_dns_zone_configuration` (linked virtual networks and record IPs) | That reference reads unresolved; the run succeeds |
+| Reader on other subscriptions (optional) | `azure_alert_rules`, `azure_activity_log_alerts` and `azure_waf_ddos_activity` (action groups), `azure_app_gateway_waf` (WAF policies), `azure_vnet_egress_routing` (Virtual WAN hubs), `azure_sentinel_playbooks` (Logic Apps an automation rule runs), `azure_private_endpoint_configuration` (target resources), `azure_private_dns_zone_configuration` (linked virtual networks and record IPs), `azure_firewall_configuration` (a Firewall Policy or base policy held elsewhere), `azure_bastion_configuration` (Bastion hosts in a peered subscription) | That reference reads unresolved; the run succeeds |
 | Reader or Log Analytics Reader on destination workspaces in other subscriptions (optional) | `azure_service_log_records` | Arrival reads unknown for the apps and instances that send logs there; the run succeeds |
 | Reader or Microsoft Sentinel Reader on the workspaces Entra logs are sent to (optional) | `azure_entra_diagnostic_settings` | That category's `to_sentinel_workspace` reads null, with a note; the run succeeds |
 | Log Analytics Reader on the workspaces that receive their logs | `azure_waf_ddos_activity` | The workspace reads `not_authorized` and its figures unknown; the run succeeds |
@@ -239,6 +239,8 @@ Network and edge:
 | `azure_network_security_groups` | NSG rules (whether admin ports such as 22 and 3389 are reachable from the internet) and each subnet's NSG association |
 | `azure_vnet_egress_routing` | Where each subnet's internet-bound traffic goes: a firewall or appliance, a gateway, a NAT gateway, a black hole, or Azure's default outbound access |
 | `azure_ddos_protection` | Whether every public IP is covered by DDoS Network or IP Protection, and every DDoS protection plan |
+| `azure_firewall_configuration` | Azure Firewalls and Firewall Policies: every rule with allow-all, any-FQDN and DNAT-to-admin-port rules flagged, threat intelligence, IDPS, TLS inspection, DNS proxy, management IP, and whether rule and threat logs are exported |
+| `azure_bastion_configuration` | Bastion hosts: SKU, shareable links, IP connect, native client tunneling, file copy, copy-paste, session recording, private-only mode, IP allow-list, subnet NSG and audit log export, and which virtual machines a Bastion reaches directly or through a peering |
 | `azure_waf_ddos_activity` | Whether WAF and DDoS protection are watched: what each WAF blocked or only logged, WAF and DDoS attack alerts and who they reach, and DDoS mitigations |
 | `azure_dns_configuration` | Public zones with DNSSEC state and signing keys; private zones and their virtual network links |
 | `azure_private_dns_zone_configuration` | Private DNS zones and their virtual network links, whether each privatelink record resolves to a live private endpoint or is stale, and zone names that exist more than once |
@@ -309,6 +311,7 @@ Logging and monitoring:
 | `azure_log_analytics_deletion_rights` | Who can purge, delete or shorten the retention of each workspace's log data, active or PIM-eligible |
 | `azure_service_log_records` | Whether App Service HTTP logs and SQL Managed Instance audit events reach Log Analytics, with their retention, the principals that connect and the services each app calls |
 | `azure_log_storage_immutability` | Immutability policies, legal holds and soft delete on the blob containers Azure Monitor writes logs to |
+| `azure_resource_locks` | Management locks at every scope, and whether each Log Analytics workspace, Backup and Recovery Services vault, key vault and storage account (configurable) is locked against deletion |
 | `azure_network_flow_logs` | Network Watchers and flow logs (target, state, storage, retention, Traffic Analytics), and which virtual networks and subnets an enabled flow log covers |
 | `azure_network_traffic_activity` | The traffic actually seen: Traffic Analytics flows with new destinations, unexpected inbound ports and denied-flow spikes, Front Door requests, and requests that reached Front Door's App Service origins directly |
 | `azure_alert_rules` | Metric, log search and smart detector alert rules, resolved to the receivers they notify and checked against suppression rules |

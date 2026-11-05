@@ -227,10 +227,13 @@ def test_instructions_open_with_the_entry_path() -> None:
 TEXT_FORMAT_FETCHERS = (
     "azure/alert_rules",
     "azure/app_service_backups",
+    "azure/bastion_configuration",
     "azure/change_work_items",
     "azure/entra_access_reviews",
     "azure/entra_pim_assignments",
     "azure/entra_risky_users",
+    "azure/firewall_configuration",
+    "azure/resource_locks",
     "azure/sentinel_playbooks",
     "azure/service_availability",
     "azure/service_health_advisories",
