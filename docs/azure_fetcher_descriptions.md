@@ -253,7 +253,7 @@ Summary fields:
 - `classic_store_certificate_authorities` — Number of certificate authorities in the classic store; null if it couldn't be read
 - `pki_store_certificate_authorities` — Number of certificate authorities in the PKI-based trust store; null if it couldn't be read
 - `pki_store_status` — Whether the PKI-based trust store was read: read, not_authorized (the optional PublicKeyInfrastructure.Read.All isn't granted; the run still succeeds) or failed
-- `pki_store_missing_permission` — The permission the PKI-based trust store read needs and was refused (PublicKeyInfrastructure.Read.All); null when it was read or failed for another reason
+- `pki_store_missing_permission` — Whether the PKI-based trust store read was refused for a missing grant: PublicKeyInfrastructure.Read.All when it was; null when the store was read or failed for another reason
 
 **Can each user targeted for certificate sign-in be matched to a certificate?**
 - `x509_targeted_users` — Number of enabled member accounts (not guests) the X.509 method includes and doesn't exclude, directly, as all users or through a group; 0 when X.509 is off; null if the policy, the users or a group the method names couldn't be read
