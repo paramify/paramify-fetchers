@@ -514,7 +514,8 @@ def ip_coverage(ip: dict, resource_vnets: dict, vnets_by_id: dict) -> dict:
     return {
         "effective_protection": effective,
         "virtual_network_id": vnet.get("id") if vnet and inherits else None,
-        "virtual_network_ddos_protection_plan_id": vnet.get("ddos_protection_plan_id") if effective == NETWORK_PROTECTION else None,
+        "virtual_network_ddos_protection_plan_id":
+            vnet.get("ddos_protection_plan_id") if vnet and effective == NETWORK_PROTECTION else None,
     }
 
 
@@ -638,9 +639,12 @@ def summarize(waf: list[dict], ips: list[dict], rules: list[dict] | None, worksp
         "protected_ips_without_attack_alert":
             alerts(lambda: sum(1 for i in protected if not i["attack_alert_rules"])) if protected and not unknown else None,
         "ddos_attack_alert_rules": alerts(lambda: sum(1 for r in rules or [] if r["watches_ddos_attack"])),
+        # An IP whose protection is unknown may be protected, attacked and mitigated, so these can't be complete.
         "public_ips_attacked":
-            None if any(i["attack_hours"] is None for i in protected) else (attacked if protected or attacked else None),
-        "ddos_mitigations_started": _total(i["mitigations_started"] for i in protected) if protected else None,
+            None if unknown or any(i["attack_hours"] is None for i in protected)
+            else (attacked if protected or attacked else None),
+        "ddos_mitigations_started":
+            _total(i["mitigations_started"] for i in protected) if protected and not unknown else None,
         "log_workspaces": len(workspaces),
         "log_workspaces_queried": status[WS_QUERIED],
         "log_workspaces_not_authorized": status[WS_NOT_AUTHORIZED],

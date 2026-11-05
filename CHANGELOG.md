@@ -1073,8 +1073,9 @@ schemas and the `paramify` CLI — not the internal code.
   - The summary adds `public_ips_with_network_protection`, `protected_public_ips`
     and `public_ips_protection_unknown`. The first two are null when the virtual
     network, NIC or load balancer list can't be read.
-  - `protected_ips_without_attack_alert` is null when any attached IP's protection
-    is unknown.
+  - `protected_ips_without_attack_alert`, `public_ips_attacked` and
+    `ddos_mitigations_started` are null when any attached IP's protection is
+    unknown, because that IP may be protected, attacked or mitigated.
   - An IP on a NAT gateway no longer counts in `public_ips_with_ip_protection`,
     because neither SKU covers it.
   - The virtual network, NIC and load balancer lists are read only when some

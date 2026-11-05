@@ -519,15 +519,28 @@ def test_summary_adds_ip_and_network_protection():
 
 
 def test_unknown_protection_nulls_the_without_alert_figure():
-    unknown = wda.ddos_record({**ip_on(), "id": f"{IP}2"}, DDOS_SETTINGS, ddos_ws(), [], [], {LAW.lower(): True})
+    unknown_id = f"{IP}2"
+    mitigated = [{"ResourceId": unknown_id.lower(), "Notifications": 2, "MitigationsStarted": 2, "Reports": 2, "FlowLogRecords": 0}]
+    unknown = wda.ddos_record({**ip_on(), "id": unknown_id}, DDOS_SETTINGS, ddos_ws(mitigated), [], [], {LAW.lower(): True})
     assert unknown["effective_protection"] == "unknown" and unknown["ddos_protection_known_on"] is None
+    assert unknown["mitigations_started"] == 2
     summary = wda.summarize([], [network_protected(), unknown], [], [], 30, 0, total_ips=2)
     assert summary["public_ips_protection_unknown"] == 1 and summary["protected_public_ips"] == 1
     assert summary["protected_ips_without_attack_alert"] is None
+    # Leaving the unknown IP out would read 0 mitigations though one started.
+    assert summary["ddos_mitigations_started"] is None
     assert summary["protected_ips_with_attack_alert_reaching_receiver"] == 0
     only_unknown = wda.summarize([], [unknown], [], [], 30, 0, total_ips=1)
     assert only_unknown["protected_ips_with_attack_alert_reaching_receiver"] is None
     assert only_unknown["protected_ips_without_attack_alert"] is None and only_unknown["protected_public_ips"] == 0
+
+
+@pytest.mark.parametrize("unknown_metric", [None, [{"timeseries": [{"data": [{"maximum": 0}]}]}]])
+def test_public_ips_attacked_is_null_while_any_protection_is_unknown(unknown_metric):
+    unknown = wda.ddos_record({**ip_on(), "id": f"{IP}2"}, DDOS_SETTINGS, ddos_ws(), [], unknown_metric, {LAW.lower(): True})
+    assert unknown["effective_protection"] == "unknown"
+    assert wda.summarize([], [network_protected()], [], [], 30, 0, total_ips=1)["public_ips_attacked"] == 0
+    assert wda.summarize([], [network_protected(), unknown], [], [], 30, 0, total_ips=2)["public_ips_attacked"] is None
 
 
 def test_a_network_protected_ip_with_an_unread_metric_reads_attacks_unknown():
