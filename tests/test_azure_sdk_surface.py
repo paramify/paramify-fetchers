@@ -1595,6 +1595,18 @@ def test_operation_group_surface(
 # (module, model, required fields, affected fetchers)
 REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
+        "azure.mgmt.containerservice.models",
+        "ManagedClusterAgentPoolProfile",
+        ["enable_fips", "node_image_version", "security_profile"],
+        "azure/aks_cluster_configuration — a renamed enable_fips reads every pool as FIPS unknown",
+    ),
+    (
+        "azure.mgmt.containerservice.models",
+        "AgentPoolSecurityProfile",
+        ["enable_secure_boot", "enable_vtpm", "ssh_access"],
+        "azure/aks_cluster_configuration — node pool Trusted Launch and SSH access",
+    ),
+    (
         "azure.mgmt.authorization.v2020_10_01.models",
         "RoleAssignmentScheduleInstance",
         ["origin_role_assignment_id", "assignment_type", "member_type", "status", "end_date_time"],

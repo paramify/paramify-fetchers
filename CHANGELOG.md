@@ -12,6 +12,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_aks_cluster_configuration` 0.3.0: node security per agent pool.** Each
+  pool now reports `enable_fips` (the FIPS-enabled node image), `node_image_version`,
+  Trusted Launch (`secure_boot_enabled`, `vtpm_enabled`) and `ssh_access`. Each is
+  null, not false, when Azure did not return it; the summary counts FIPS-enabled,
+  FIPS-disabled and unknown pools apart, and `all_agent_pools_fips` is null until
+  every pool has answered (and when there are no pools).
 - **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
   secret and certificate gets `lifetime_days` (end date minus start date, null when
   either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.
