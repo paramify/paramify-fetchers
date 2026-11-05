@@ -1,0 +1,26 @@
+key: entra_diag_audit_and_sign_in_logs_to_sentinel
+name: Entra Audit and Sign-In Logs Reach a Sentinel Workspace
+type: AUTOMATED
+role: configuration
+statement: >-
+  The tenant's Entra ID diagnostic settings were read with no partial failure, and an enabled setting
+  sends both AuditLogs and SignInLogs to a Log Analytics workspace onboarded to Microsoft Sentinel
+  (audit_and_signin_logs_to_sentinel true), so directory changes and sign-ins reach the SIEM. It is
+  null when a destination workspace's Sentinel state can't be read, so that fails too. Supports
+  KSI-MLA-OSM for the Entra tenant. Does not prove: that the workspace is the approved one (the
+  evidence carries each setting's workspace_id, so a tenant-tuned copy can pin it); the other Entra
+  log categories (entra_diag_all_log_categories_exported); that records arrive; workspace retention;
+  or Azure resources' own diagnostic settings.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"audit_and_signin_logs_to_sentinel":\s*(?<audit_and_signin_logs_to_sentinel>true|false|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # audit_and_signin_logs_to_sentinel
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-DIAGNOSTIC-SETTINGS
