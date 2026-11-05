@@ -25,12 +25,20 @@ is enabled. Four tenant-level reads:
   banned-password list needs P1. On a Free tenant the directory setting can still
   read as enabled while the custom list is not enforced, so the list is reported as
   enforced only when it is both configured and licensed.
+- `GET /organization/{id}/certificateBasedAuthConfiguration`: the certificate
+  authorities trusted for certificate-based sign-in, each with its expiry (read from
+  the certificate) and revocation list.
+- With X.509 enabled, `GET /users` ($select authorizationInfo) and each targeted
+  group's transitive members: which enabled member accounts the X.509 method targets,
+  whether a username binding can match each to a certificate, and which weaker
+  methods still apply to them.
 """
 
 import asyncio
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -99,6 +107,13 @@ TIER_FREE = "free"
 TIER_P1 = "p1"
 TIER_P2 = "p2"
 
+# A method target naming every user, in place of a group id.
+ALL_USERS = "all_users"
+# Email one-time passcodes sign in guests only, so they are no member's sign-in method.
+GUEST_ONLY_METHODS = frozenset({"email"})
+USER_SELECT = ("id", "userPrincipalName", "userType", "accountEnabled", "onPremisesUserPrincipalName",
+               "authorizationInfo")
+
 
 # --- projections: the only code here that touches a Graph model ---
 
@@ -152,6 +167,18 @@ def project_method_settings(method_id: str, config) -> dict:
             ),
             "certificate_user_binding_count": len(
                 getattr(config, "certificate_user_bindings", None) or []
+            ),
+            "certificate_user_bindings": sorted(
+                (
+                    {
+                        "x509_certificate_field": graph_attr(b, "x509_certificate_field"),
+                        "user_property": graph_attr(b, "user_property"),
+                        "priority": graph_attr(b, "priority"),
+                        "trust_affinity_level": graph_attr(b, "trust_affinity_level"),
+                    }
+                    for b in getattr(config, "certificate_user_bindings", None) or []
+                ),
+                key=lambda b: (b["priority"] is None, b["priority"] or 0),
             ),
         }
     if mid == "microsoftauthenticator":
@@ -271,6 +298,56 @@ def project_sku(sku) -> dict:
             }
             - {None}
         ),
+    }
+
+
+def certificate_details(der) -> dict:
+    """The certificate's subject and validity; None throughout when it is missing or unreadable."""
+    details = {"subject": None, "not_before": None, "not_after": None}
+    if not der:
+        return details
+    try:
+        from cryptography import x509  # lazy
+
+        data = bytes(der)
+        cert = (x509.load_pem_x509_certificate(data) if data.lstrip().startswith(b"-----BEGIN")
+                else x509.load_der_x509_certificate(data))
+    except Exception as exc:  # noqa: BLE001 — an unreadable certificate leaves its dates unknown
+        logger.warning("a trusted certificate authority's certificate could not be read: %s", type(exc).__name__)
+        return details
+    return {
+        "subject": cert.subject.rfc4514_string(),
+        "not_before": _utc(cert.not_valid_before_utc),
+        "not_after": _utc(cert.not_valid_after_utc),
+    }
+
+
+def _utc(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def project_certificate_authority(authority) -> dict:
+    """One trusted `CertificateAuthority`; the certificate itself is kept out, its subject and dates read from it."""
+    return {
+        "issuer": graph_attr(authority, "issuer"),
+        "issuer_ski": graph_attr(authority, "issuer_ski"),
+        "is_root_authority": graph_attr(authority, "is_root_authority"),
+        "certificate_revocation_list_url": graph_attr(authority, "certificate_revocation_list_url") or None,
+        "delta_certificate_revocation_list_url": graph_attr(authority, "delta_certificate_revocation_list_url") or None,
+        **certificate_details(getattr(authority, "certificate", None)),
+    }
+
+
+def project_user(user) -> dict:
+    """A user's sign-in identifiers; only the count of its certificate user ids is kept."""
+    info = getattr(user, "authorization_info", None)
+    return {
+        "id": graph_attr(user, "id"),
+        "user_principal_name": graph_attr(user, "user_principal_name"),
+        "user_type": graph_attr(user, "user_type"),
+        "account_enabled": graph_attr(user, "account_enabled"),
+        "on_premises_user_principal_name": graph_attr(user, "on_premises_user_principal_name"),
+        "certificate_user_ids_count": len(getattr(info, "certificate_user_ids", None) or []),
     }
 
 
@@ -406,6 +483,150 @@ def method_records(policy: dict | None) -> list[dict]:
     return records
 
 
+def authority_record(authority: dict, now: datetime) -> dict:
+    """A trusted CA with its type, whether it publishes a revocation list, and whether it has expired."""
+    root = authority.get("is_root_authority")
+    not_after = authority.get("not_after")
+    expires = datetime.strptime(not_after, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) if not_after else None
+    return {
+        **authority,
+        "authority_type": None if root is None else "root" if root else "intermediate",
+        "has_crl": bool(authority.get("certificate_revocation_list_url")),
+        "expired": None if expires is None else expires <= now,
+        "days_until_expiry": None if expires is None else (expires - now).days,
+    }
+
+
+def _reaches(targets: list[dict], user_id: str, members: dict) -> bool | None:
+    """Whether the targets name the user, directly, as every user or through a group; None when a group is unread."""
+    unread = False
+    for target in targets:
+        tid = str(target.get("id") or "").lower()
+        if tid == ALL_USERS or tid == user_id:
+            return True
+        if str(target.get("target_type") or "").lower() == "user":
+            continue
+        group = members.get(tid)
+        if group is None:
+            unread = True
+        elif user_id in group:
+            return True
+    return None if unread else False
+
+
+def method_applies(method: dict, user_id: str, members: dict) -> bool | None:
+    """Whether an enabled method reaches the user and doesn't exclude them; None when that needs an unread group."""
+    if not method.get("enabled"):
+        return False
+    uid = str(user_id or "").lower()
+    included = _reaches(method.get("include_targets") or [], uid, members)
+    excluded = _reaches(method.get("exclude_targets") or [], uid, members)
+    if excluded or included is False:
+        return False
+    return None if included is None or excluded is None else True
+
+
+def target_groups(methods: list[dict]) -> set[str]:
+    """The group ids the enabled methods include or exclude, lower-cased."""
+    return {
+        str(t.get("id") or "").lower()
+        for m in methods if m.get("enabled")
+        for t in (m.get("include_targets") or []) + (m.get("exclude_targets") or [])
+        if str(t.get("target_type") or "").lower() != "user" and str(t.get("id") or "").lower() not in ("", ALL_USERS)
+    }
+
+
+def is_weaker_method(method: dict) -> bool:
+    """A member sign-in method other than X.509 that isn't phishing-resistant."""
+    mid = method["id"].lower()
+    return mid != METHOD_X509 and mid not in GUEST_ONLY_METHODS and not method["is_phishing_resistant_method"]
+
+
+def _binding_matches(binding: dict, user: dict) -> bool | None:
+    """Whether the user has a value in the binding's user property; None for a property this fetcher doesn't know."""
+    prop = str(binding.get("user_property") or "").lower()
+    if prop == "certificateuserids":
+        return user.get("certificate_user_ids_count", 0) > 0
+    if prop == "userprincipalname":
+        return bool(user.get("user_principal_name"))
+    if prop == "onpremisesuserprincipalname":
+        return bool(user.get("on_premises_user_principal_name"))
+    return None
+
+
+def _any(values: list) -> bool | None:
+    """True if any is True, else None if any is None, else False."""
+    return True if True in values else None if None in values else False
+
+
+def certificate_user_record(user: dict, bindings: list[dict], methods: list[dict], members: dict) -> dict:
+    """A user the X.509 method targets: which bindings can match them to a certificate, and the weaker methods
+    that still reach them."""
+    matches = {i: _binding_matches(b, user) for i, b in enumerate(bindings)}
+    high = [matches[i] for i, b in enumerate(bindings) if str(b.get("trust_affinity_level") or "").lower() == "high"]
+    reach = {m["id"]: method_applies(m, user["id"], members) for m in methods if m["enabled"] and is_weaker_method(m)}
+    return {
+        "id": user["id"],
+        "user_principal_name": user.get("user_principal_name"),
+        "certificate_user_ids_count": user.get("certificate_user_ids_count"),
+        # None when the policy reports no bindings: the rules that would match the user are unknown.
+        "mapped": _any(list(matches.values())) if bindings else None,
+        "mapped_high_affinity": _any(high) if bindings else None,
+        "mapping_user_properties": sorted({str(bindings[i].get("user_property")) for i, m in matches.items() if m}),
+        "weaker_methods_enabled": sorted(mid for mid, applies in reach.items() if applies),
+        "weaker_methods_unknown": sorted(mid for mid, applies in reach.items() if applies is None),
+        "weaker_method_enabled": _any(list(reach.values())),
+        "weak_method_enabled": _any([a for mid, a in reach.items() if mid.lower() in WEAK_METHODS]),
+    }
+
+
+def certificate_users(policy: dict | None, methods: list[dict], users: list[dict] | None,
+                      members: dict) -> list[dict] | None:
+    """Every enabled member account the X.509 method targets; [] when it is off, None when that can't be told."""
+    if policy is None:
+        return None
+    x509 = next((m for m in methods if m["id"].lower() == METHOD_X509), None)
+    if not (x509 or {}).get("enabled"):
+        return []
+    if users is None:
+        return None
+    bindings = (x509.get("settings") or {}).get("certificate_user_bindings") or []
+    records = []
+    for user in users:
+        if user.get("account_enabled") is False or str(user.get("user_type") or "").lower() == "guest":
+            continue
+        applies = method_applies(x509, user["id"], members)
+        if applies is None:
+            return None
+        if applies:
+            records.append(certificate_user_record(user, bindings, methods, members))
+    return sorted(records, key=lambda r: str(r.get("user_principal_name") or r["id"]).lower())
+
+
+def _count(records: list[dict] | None, test) -> int | None:
+    """How many records pass; None when the list is unknown or any record's answer is."""
+    if records is None:
+        return None
+    answers = [test(r) for r in records]
+    return None if None in answers else sum(1 for a in answers if a)
+
+
+def summarize_certificates(authorities: list[dict] | None, users: list[dict] | None) -> dict:
+    """The CA and certificate-mapping counts; null when the read they come from failed."""
+    return {
+        "trusted_certificate_authorities": len(authorities) if authorities is not None else None,
+        "expired_certificate_authorities": _count(authorities, lambda a: a["expired"] is True),
+        "certificate_authorities_expiry_unknown": _count(authorities, lambda a: a["expired"] is None),
+        "certificate_authorities_without_crl": _count(authorities, lambda a: not a["has_crl"]),
+        "x509_targeted_users": len(users) if users is not None else None,
+        "x509_targeted_users_unmapped": _count(users, lambda u: None if u["mapped"] is None else not u["mapped"]),
+        "x509_targeted_users_without_certificate_user_ids": _count(
+            users, lambda u: not u["certificate_user_ids_count"]),
+        "x509_targeted_users_with_weaker_methods": _count(users, lambda u: u["weaker_method_enabled"]),
+        "x509_targeted_users_with_weak_methods": _count(users, lambda u: u["weak_method_enabled"]),
+    }
+
+
 def summarize(
     policy: dict | None,
     methods: list[dict],
@@ -511,18 +732,66 @@ async def _collect(collector: Collector, cred):
         if len(collector.failures) > before:
             skus = None
 
+        policy = project_methods_policy(policy_model) if policy_model is not None else None
+        authorities = await _certificate_authorities(collector, client, tenant.get("tenant_id"))
+        users, members = await _certificate_targets(collector, client, method_records(policy))
+
         return {
             "tenant": tenant,
-            "policy": project_methods_policy(policy_model) if policy_model is not None else None,
+            "policy": policy,
             "security_defaults_enabled": graph_attr(security_defaults, "is_enabled")
             if security_defaults is not None
             else None,
             "settings": settings,
             "template_defaults": project_template_defaults(template) if template is not None else None,
             "skus": skus,
+            "authorities": authorities,
+            "users": users,
+            "members": members,
         }
 
     return await with_graph_client(collector, cred, _work, default=None)
+
+
+async def _certificate_authorities(collector: Collector, client, tenant_id) -> list[dict] | None:
+    """Every CA in the tenant's certificate-based authentication configuration; None when the read failed."""
+    operation = "graph.organization.certificateBasedAuthConfiguration.get"
+    if not tenant_id:
+        collector.record(operation, RuntimeError("the tenant id is unknown, so its trusted CAs can't be read"))
+        return None
+    before = len(collector.failures)
+    configs = await paginate(
+        collector, operation, client.organization.by_organization_id(tenant_id).certificate_based_auth_configuration)
+    if len(collector.failures) > before:
+        return None
+    return [project_certificate_authority(a)
+            for c in configs for a in getattr(c, "certificate_authorities", None) or []]
+
+
+async def _certificate_targets(collector: Collector, client, methods: list[dict]) -> tuple:
+    """(users, {group id: member ids or None}), read only when X.509 is enabled; users is None when its read failed."""
+    if not any(m["enabled"] and m["id"].lower() == METHOD_X509 for m in methods):
+        return None, {}
+    from kiota_abstractions.base_request_configuration import RequestConfiguration  # lazy
+    from msgraph.generated.users.users_request_builder import UsersRequestBuilder  # lazy
+
+    config = RequestConfiguration(query_parameters=UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
+        select=list(USER_SELECT), top=999))
+    before = len(collector.failures)
+    users = [project_user(u)
+             for u in await paginate(collector, "graph.users.get(authorizationInfo)", client.users, config)]
+    if len(collector.failures) > before:
+        users = None
+    members: dict[str, set | None] = {}
+    for gid in sorted(target_groups(methods)):
+        before = len(collector.failures)
+        rows = await paginate(collector, f"graph.groups({gid}).transitiveMembers.graphUser.get",
+                              client.groups.by_group_id(gid).transitive_members.graph_user)
+        members[gid] = None if len(collector.failures) > before else {
+            str(graph_attr(r, "id") or "").lower() for r in rows}
+    logger.info("Read %s user(s) and %d targeted group(s) for X.509 sign-in",
+                len(users) if users is not None else "no", len(members))
+    return users, members
 
 
 def main() -> int:
@@ -550,6 +819,12 @@ def main() -> int:
         collected.get("settings"), collected.get("template_defaults"), tier
     )
     tenant = collected["tenant"]
+    now = datetime.now(timezone.utc)
+    raw_authorities = collected.get("authorities")
+    authorities = (None if raw_authorities is None else sorted(
+        (authority_record(a, now) for a in raw_authorities),
+        key=lambda a: (str(a.get("subject") or a.get("issuer") or ""), str(a.get("issuer_ski") or ""))))
+    users = certificate_users(policy, methods, collected.get("users"), collected.get("members") or {})
 
     # No `provider_registration_status()` call, deliberately: Graph is not an ARM
     # resource provider. Every tenant has an authentication methods policy on every
@@ -572,10 +847,13 @@ def main() -> int:
             "password_protection": passwords,
             "entra_id_tier": tier,
             "subscribed_skus": collected.get("skus"),
+            "trusted_certificate_authorities": authorities,
+            "x509_certificate_users": users,
         },
-        summary=summarize(
-            policy, methods, collected.get("security_defaults_enabled"), tier, passwords
-        ),
+        summary={
+            **summarize(policy, methods, collected.get("security_defaults_enabled"), tier, passwords),
+            **summarize_certificates(authorities, users),
+        },
     )
 
     filename = f"azure_entra_authentication_policy_{tenant_filename_key(tenant)}.json"

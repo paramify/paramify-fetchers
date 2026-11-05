@@ -1,5 +1,5 @@
 name: azure_entra_authentication_policy
-version: 0.2.0
+version: 0.3.0
 description: >
   Which sign-in methods the Microsoft Entra ID tenant allows: every method in the
   authentication methods policy with its state, targets and settings, with SMS and
@@ -9,7 +9,11 @@ description: >
   satisfy MFA by itself. Also the registration campaign, the policy's migration
   state, security defaults, and Entra password protection (custom
   banned-password list and smart lockout) with the tenant's Entra ID licence tier,
-  since enforcing a custom banned-password list needs P1. Windows Hello for
+  since enforcing a custom banned-password list needs P1. It lists the
+  certificate authorities trusted for certificate-based sign-in, flagging expired
+  ones and ones with no revocation list, and, when X.509 is enabled, each enabled
+  member account it targets, whether a username binding can match that user to a
+  certificate, and which weaker methods still apply to them. Windows Hello for
   Business is configured through device management, not this policy, and is not
   covered.
 category: azure
@@ -60,8 +64,11 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 # Microsoft Graph permissions (application permissions, admin consent):
 #   Policy.Read.All        — authenticationMethodsPolicy and
 #                            identitySecurityDefaultsEnforcementPolicy
-#   Directory.Read.All     — groupSettings, groupSettingTemplates, subscribedSkus
-#                            (Organization.Read.All also covers subscribedSkus)
+#   Directory.Read.All     — groupSettings, groupSettingTemplates, subscribedSkus,
+#                            organization certificateBasedAuthConfiguration, and with
+#                            X.509 enabled users (authorizationInfo) and group
+#                            transitive members (Organization.Read.All, User.Read.All
+#                            and GroupMember.Read.All cover the same reads)
 # An `az login` session CANNOT read the authentication methods policy or security
 # defaults: the Azure CLI's first-party client is not pre-authorized for
 # Policy.Read.All, so both return 403 however privileged the signed-in user is.
@@ -80,4 +87,18 @@ evidence_set:
     and GET /policies/identitySecurityDefaultsEnforcementPolicy (Policy.Read.All);
     GET /groupSettings and GET /groupSettingTemplates/5cf42378-d67d-4f36-ba46-e8b86229381d
     (Password Rule Settings) and GET /subscribedSkus (Directory.Read.All);
-    GET /organization. Collections paged via @odata.nextLink.
+    GET /organization; GET /organization/{id}/certificateBasedAuthConfiguration
+    (the trusted certificate authorities: issuer, root or intermediate, revocation
+    list URLs, and the subject and expiry read from each certificate, which is not
+    copied into the evidence). With the X.509 method enabled, also GET /users
+    ($select id, userPrincipalName, userType, accountEnabled,
+    onPremisesUserPrincipalName, authorizationInfo) and GET
+    /groups/{id}/transitiveMembers/microsoft.graph.user for each group an enabled
+    method includes or excludes. A targeted user is an enabled member account (not a
+    guest) the X.509 method includes and doesn't exclude; it counts as mapped when a
+    certificate user binding's user property (userPrincipalName,
+    onPremisesUserPrincipalName, or certificateUserIds, counted only) has a value for
+    it, and as having weaker methods when an enabled method other than X.509, FIDO2
+    and email one-time passcodes (guests only) reaches it. Only the count of a user's
+    certificateUserIds is kept. A failed read leaves the counts it feeds null.
+    Collections paged via @odata.nextLink.

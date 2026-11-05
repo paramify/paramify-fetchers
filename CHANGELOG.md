@@ -1467,6 +1467,27 @@ schemas and the `paramify` CLI — not the internal code.
   against a production subscription. Existing fields and summary keys are
   unchanged.
 
+- **`azure_entra_authentication_policy` 0.3.0: trusted certificate authorities and
+  certificate mapping.** The fetcher reads the certificate authorities trusted for
+  certificate-based sign-in (`GET /organization/{id}/certificateBasedAuthConfiguration`)
+  into `trusted_certificate_authorities`: issuer, subject, root or intermediate,
+  revocation list URLs, `not_after` and `days_until_expiry` from the certificate, and
+  `expired` and `has_crl`. With the X.509 method enabled it also reads users with
+  their `authorizationInfo` and the groups the enabled methods target, and lists in
+  `x509_certificate_users` each enabled member account X.509 targets: whether a
+  certificate user binding can match it (`mapped`, `mapped_high_affinity`, the
+  user properties that match), its count of certificate user ids, and the weaker
+  methods (enabled, not phishing-resistant, not X.509 or guest-only email) that
+  still reach it. The X.509 settings list each `certificate_user_bindings` entry.
+  The summary adds `trusted_certificate_authorities`,
+  `expired_certificate_authorities`, `certificate_authorities_expiry_unknown`,
+  `certificate_authorities_without_crl`, `x509_targeted_users`,
+  `x509_targeted_users_unmapped`, `x509_targeted_users_without_certificate_user_ids`,
+  `x509_targeted_users_with_weaker_methods` and
+  `x509_targeted_users_with_weak_methods` (SMS or Voice). The user counts are 0 when
+  X.509 is off, and null when the policy, the users or a needed group can't be read;
+  the CA counts are null when the CA read fails.
+
 ### Fixed
 
 - **`azure_entra_privileged_roles` 0.2.0 counts service principals that hold a

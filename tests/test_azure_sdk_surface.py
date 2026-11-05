@@ -2936,6 +2936,30 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "method is counted as phishing-resistant",
     ),
     (
+        "msgraph.generated.models.certificate_authority",
+        "CertificateAuthority",
+        ["certificate", "certificate_revocation_list_url", "is_root_authority", "issuer", "issuer_ski"],
+        "azure/entra_authentication_policy — trusted CAs; a missing certificate leaves every expiry unknown",
+    ),
+    (
+        "msgraph.generated.models.certificate_based_auth_configuration",
+        "CertificateBasedAuthConfiguration",
+        ["certificate_authorities"],
+        "azure/entra_authentication_policy — a missing list reads as no trusted CA",
+    ),
+    (
+        "msgraph.generated.models.x509_certificate_user_binding",
+        "X509CertificateUserBinding",
+        ["user_property", "x509_certificate_field", "priority", "trust_affinity_level"],
+        "azure/entra_authentication_policy — which user property matches a certificate",
+    ),
+    (
+        "msgraph.generated.models.authorization_info",
+        "AuthorizationInfo",
+        ["certificate_user_ids"],
+        "azure/entra_authentication_policy — a missing field reads as no certificate user ids",
+    ),
+    (
         "msgraph.generated.models.identity_security_defaults_enforcement_policy",
         "IdentitySecurityDefaultsEnforcementPolicy",
         ["is_enabled"],
@@ -4344,6 +4368,21 @@ def test_graph_access_review_models_present() -> None:
         model = _import(f"msgraph.generated.models.{module}", name)
         missing = [f for f in fields if f not in getattr(model, "__dataclass_fields__", {})]
         assert not missing, f"{name} lost {missing} (azure/entra_access_reviews)"
+
+
+def test_graph_certificate_sign_in_builders_present() -> None:
+    """The per-item builders azure/entra_authentication_policy walks for trusted CAs and X.509 targets."""
+    client = _build("msgraph", "GraphServiceClient")
+    organization = client.organization.by_organization_id("00000000-0000-0000-0000-000000000000")
+    group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
+    assert getattr(organization, "certificate_based_auth_configuration", None) is not None, (
+        "organization.by_organization_id(...).certificate_based_auth_configuration is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — trusted CAs read null"
+    )
+    assert getattr(group.transitive_members, "graph_user", None) is not None, (
+        "groups.by_group_id(...).transitive_members.graph_user is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — X.509 targets read null"
+    )
 
 
 def test_graph_group_member_builders_present() -> None:
