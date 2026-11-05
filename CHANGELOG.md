@@ -65,6 +65,35 @@ schemas and the `paramify` CLI — not the internal code.
   a name fails the run with `bad_config`, since the type meant would need no
   approval: before anything is read when `CHANGE_RECORD_TYPES` is set, and
   otherwise after the comparison, whose file is still written.
+- **`azure_change_provenance` 0.3.0: before and after values for direct edits
+  and manual deployments.** Each such change carries `property_changes`, one
+  entry per changed property from Resource Graph's `changes`. A shown entry has
+  `path`, `previous_value`, `new_value` and `truncated`. A withheld one has only
+  `path` and `withheld`, the reason, and never the value or anything derived
+  from it.
+  - Values are shown only for an allowlist of security settings and tags. The
+    new `value_paths` setting adds to it: a pattern list (`type: patterns`) set
+    in the manifest as `path:<glob>` items, such as `path:properties.siteConfig.*`
+    or `path:*`. Like the exclusion lists, it takes no `${env:}`. A pattern
+    without `path:` fails the run as `bad_config`, and
+    `paramify manifest exclude` can't put a bare pattern in it. Any other path is
+    withheld as `not_allowlisted`.
+  - A path named like a secret (password, key, token, connection string,
+    authorization header, app setting, environment variable) or a value shaped
+    like one (AccountKey=, sig=, code=, a JWT, a PEM block, a URL with
+    credentials, a long key-like string) is withheld as `secret`, even on an
+    allowlisted path and under `path:*`.
+  - Values are cut at 200 characters, and a change lists at most 25 entries
+    (`property_changes_truncated`). `property_values_withheld` counts its
+    withheld values by reason, listed or not.
+  - Only the newest `max_value_changes` such changes keep values
+    (`AZURE_CHANGE_MAX_VALUE_CHANGES`, default 500, 0 for none). An invalid
+    setting fails the run as `bad_config` and keeps none.
+  - The summary adds `changes_with_property_values`,
+    `changes_property_values_capped`, `property_values_shown` and
+    `property_values_withheld_by_reason`, all null when a change table couldn't
+    be read. Changes with any other origin, and excluded changes, carry no
+    values.
 - **`azure_devops_service_connections`** (`EVD-AZURE-DEVOPS-SERVICE-CONNECTIONS`):
   how an Azure DevOps organization's pipelines hold their secrets, and which runs
   used each service connection. Per connection, once however many projects share

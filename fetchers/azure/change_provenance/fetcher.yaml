@@ -1,5 +1,5 @@
 name: azure_change_provenance
-version: 0.2.1
+version: 0.3.0
 description: >
   Every control-plane change to the subscription's resources, resource groups and
   the subscription itself over the last 14 days (Azure Resource Graph change
@@ -7,7 +7,10 @@ description: >
   application, to a deployment a person ran by hand or through the Portal's create
   wizards, to a change made by a named pipeline identity, or to a direct edit made
   outside any of them, such as from the portal or the CLI. Each change carries who
-  made it, the client it came from, the change type and the properties it touched.
+  made it, the client it came from, the change type and the properties it touched,
+  and for direct edits and manual deployments each property's value before and
+  after, for security settings and tags only, with anything that looks like a
+  secret withheld.
   The summary gives the share of changes that were redeployments, a conservative
   share that counts changes with no recorded caller against it, and breaks the
   direct edits down by client, by caller and by resource type. This is evidence
@@ -50,6 +53,36 @@ config_schema:
       apply changes, and ARM deployments they run count as redeployments even when
       the identity is a user. Leave empty and only ARM deployments run by an
       application count; deployments run by a person are `manual_deployment`.
+
+  value_paths:
+    type: patterns
+    prefixes: [path]
+    bare: false
+    required: false
+    env: AZURE_CHANGE_VALUE_PATHS
+    description: >
+      Property paths whose before and after values to keep, added to the built-in
+      list of security settings and tags, listed in the manifest on this fetcher's
+      entry as path:<glob> patterns, such as path:properties.siteConfig.* (case
+      insensitive; * matches any run of characters and ? one character; an array
+      index such as [0] matches any index; path:* allows every path). Values are
+      kept only for direct edits and manual deployments. A path or value that looks
+      like a secret (a password, key, token, connection string, authorization
+      header, app setting or environment variable, or a value shaped like a key,
+      SAS signature, JWT or URL with credentials) is withheld whatever this lists.
+      A pattern without path: fails the run. Each item is a pattern, or a pattern
+      with a reason. Empty: only the built-in list.
+
+  max_value_changes:
+    type: integer
+    required: false
+    default: 500
+    env: AZURE_CHANGE_MAX_VALUE_CHANGES
+    description: >
+      How many direct and manual-deployment changes keep their property values,
+      newest first. The older ones keep their property names only and are counted
+      in changes_property_values_capped. 0 keeps no values. A value that isn't a
+      whole number from 0 fails the run as bad_config and keeps no values.
 
   resource_exclusions:
     type: patterns
@@ -111,7 +144,7 @@ evidence_set:
     from properties: targetResourceId, targetResourceType, changeType (Create /
     Update / Delete), and from changeAttributes: timestamp, changedBy, changedByType,
     clientType, operation, correlationId, changesCount, plus the keys of `changes` as
-    changed_properties. The deployment history comes from
+    changed_properties and `changes` itself for the values. The deployment history comes from
     azure-mgmt-resource-deployments DeploymentsMgmtClient.deployments:
     list_at_subscription_scope() and list_by_resource_group(<rg>) for every resource
     group from ResourceManagementClient.resource_groups.list(). Each deployment gives
@@ -153,6 +186,37 @@ evidence_set:
     deployments by correlationId alone. Each entry in results.deployments also
     carries run_by, the callers of the changes it matched, and origin, deployment or
     manual_deployment (null when no change matched it).
+    Values: each direct and manual_deployment change carries property_changes, one
+    entry per changed property. A shown value has path, previous_value, new_value
+    (Resource Graph's previousValue and newValue; null when the property didn't
+    exist), truncated and withheld null. A withheld one has only its path and
+    withheld, the reason: never the value or anything derived from it. A value is
+    shown only when its path is on the allowlist: the built-in security settings
+    (TLS versions, public network access, network ACLs and NSG rules, Key Vault
+    access policies, soft delete and purge protection, local auth, encryption,
+    retention, SKU, location, tags and similar) plus the value_paths patterns. Any
+    other path is withheld as "not_allowlisted". A path named like a secret
+    (password, key, token, connection string, authorization header, app setting,
+    environment variable, SAS, certificate data), unless it ends in one of the
+    listed setting names, or a value that looks like one (key=value pairs such as
+    AccountKey= or sig=, a JWT, a PEM block, a URL with a user and password, a long
+    key-like string, an object with a secret-named key), is withheld as "secret",
+    even on an allowlisted path and under path:*; true and false are always shown.
+    Shown values are cut at 200 characters, and truncated is true when a value was
+    cut or Resource Graph marked it truncated. A change lists at most 25 entries,
+    shown values first, and property_changes_truncated is true when it had more;
+    property_values_withheld counts its withheld values by reason over every
+    changed property, listed or not. Only the newest max_value_changes such changes
+    keep values; the older ones have property_changes and property_values_withheld
+    null and property_changes_truncated true. Every other origin has all three
+    null, and excluded changes carry no values. summary.changes_with_property_values
+    counts the direct and manual_deployment changes that kept values,
+    summary.changes_property_values_capped the ones past max_value_changes,
+    summary.property_values_shown the values shown, and
+    summary.property_values_withheld_by_reason the values withheld, by reason
+    (not_allowlisted, secret); all four are null when a change table couldn't be
+    read. results.property_value_paths_added and results.max_property_value_changes
+    echo the settings.
     summary.percent_redeployed is deployment plus pipeline changes over deployment,
     pipeline, manual_deployment and direct changes; platform and unattributed
     changes are excluded. summary.percent_redeployed_conservative also counts

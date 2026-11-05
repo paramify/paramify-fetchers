@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Control-plane changes in one subscription, each attributed to a pipeline or ARM deployment, a manual deployment, or a direct edit."""
 
+import json
 import logging
 import os
 import re
@@ -32,7 +33,7 @@ from azure_common import (  # noqa: E402
 from azure_rest import parse_time, pinned_credential  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import query_all, resource_graph_client  # noqa: E402
-from scope_exclusions import excluded_item  # noqa: E402
+from scope_exclusions import excluded_item, parse_patterns  # noqa: E402
 
 logger = logging.getLogger("azure_change_provenance")
 
@@ -57,9 +58,57 @@ CHANGE_COLUMNS = (
     " operation = tostring(properties.changeAttributes.operation),"
     " correlationId = tostring(properties.changeAttributes.correlationId),"
     " changesCount = toint(properties.changeAttributes.changesCount),"
-    " changedProperties = bag_keys(properties.changes)"
+    " changedProperties = bag_keys(properties.changes),"
+    " changes = properties.changes"
     " | order by changeId asc"
 )
+
+# Values are kept for these origins only, on at most MAX_VALUE_CHANGES of them a run (newest first).
+VALUE_ORIGINS = ("direct", "manual_deployment")
+MAX_VALUE_CHANGES = 500
+MAX_VALUES_PER_CHANGE = 25
+MAX_VALUE_CHARS = 200
+WITHHELD_REASONS = ("not_allowlisted", "secret")
+# Paths (lower case, array indexes as [*]) whose values are shown; value_paths adds path:<glob> patterns.
+VALUE_PATHS = (
+    "location", "kind", "sku.*", "identity.type", "zones[*]", "tags.*",
+    "properties.networkacls.*", "properties.securityrules[*].properties.*",
+    "properties.accesspolicies[*].objectid", "properties.accesspolicies[*].tenantid",
+    "properties.accesspolicies[*].permissions.*",
+    "properties.siteconfig.ipsecurityrestrictions[*].*", "properties.siteconfig.scmipsecurityrestrictions[*].*",
+    "properties.encryption.*", "properties.securitysettings.*", "properties.retentionpolicy.*",
+)
+# Settings shown under whatever path they sit.
+VALUE_LEAVES = frozenset({
+    "publicnetworkaccess", "minimumtlsversion", "mintlsversion", "minimaltlsversion", "scmmintlsversion",
+    "ftpsstate", "httpsonly", "supportshttpstrafficonly", "enablehttpstrafficonly", "http20enabled",
+    "allowblobpublicaccess", "allowsharedkeyaccess", "allowcrosstenantreplication", "defaulttooauthauthentication",
+    "disablelocalauth", "enablesoftdelete", "softdeleteretentionindays", "enablepurgeprotection",
+    "enablerbacauthorization", "enabledfordeployment", "enabledfortemplatedeployment", "enabledfordiskencryption",
+    "remotedebuggingenabled", "clientcertenabled", "clientcertmode", "restrictoutboundnetworkaccess",
+    "defaultaction", "bypass", "enforcementmode", "multiuserauthorization", "retentionindays",
+    "startipaddress", "endipaddress", "state", "status", "enabled", "provisioningstate",
+})
+# A path naming a secret is withheld even when allowlisted.
+SECRET_PATH = re.compile(
+    r"password|passwd|pwd\b|secret|token|apikey|api-key|connectionstring|credential|privatekey"
+    r"|accesskey|accountkey|instrumentationkey|sharedaccess|signature|cookie|authorization|authentication|\bsas"
+    r"|pfx|certificatedata|certificateblob|securevalue|securestring|protectedsettings|commandtoexecute"
+    r"|environmentvariables|appsettings|headers|keyvalue|keydata|(^|\.)(primary|secondary)?keys?(\[\*\])?(\.|$)"
+)
+# Key Vault access-policy permission lists (permissions.keys[n], permissions.secrets[n]) hold permission names.
+PERMISSION_LIST = re.compile(r"\.permissions\.\w+\[\*\]$")
+SECRET_VALUE = re.compile(
+    r"-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE)|\beyJ[\w-]{8,}\.[\w-]{8,}|://[^/\s:@]+:[^/\s@]+@"
+    r"|(^|[?&;\s\"'{,])(accountkey|sharedaccesskey|sharedaccesssignature|instrumentationkey|password|pwd|secret"
+    r"|token|access_token|client_secret|apikey|api-key|api_key|subscription-key|sig|code|key)[\"']?\s*[=:]",
+    re.IGNORECASE,
+)
+LONG_TOKEN = re.compile(r"[A-Za-z0-9+/=_-]{32,}")
+_GUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
+_KEBAB = re.compile(r"[a-z0-9]+(-[a-z0-9]+)+")
+_ARM_PATH = re.compile(r"/(subscriptions|resourcegroups|providers)/", re.IGNORECASE)
+_INDEX = re.compile(r"\[\d+\]")
 
 _DURATION = re.compile(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?)?$")
 
@@ -101,8 +150,108 @@ def deployment_record(deployment, scope: str) -> dict:
     }
 
 
-def change_record(row: dict, table: str) -> dict:
+def normalize_path(path) -> str:
+    return _INDEX.sub("[*]", str(path).strip().lower())
+
+
+class ValuePaths:
+    """The built-in allowlist plus the value_paths path:<glob> patterns (* any run, ? one character)."""
+
+    ENV = "AZURE_CHANGE_VALUE_PATHS"
+
+    def __init__(self, patterns=()):
+        self.extra, self.invalid = [], []
+        for p in patterns:
+            kind, sep, glob = p.partition(":")
+            ok = sep and kind.strip().lower() == "path" and glob.strip()
+            (self.extra if ok else self.invalid).append(p)
+        globs = [*VALUE_PATHS, *(normalize_path(p.partition(":")[2]) for p in self.extra)]
+        self._globs = re.compile("|".join(re.escape(g).replace(r"\*", ".*").replace(r"\?", ".") for g in globs))
+
+    @classmethod
+    def from_env(cls) -> "ValuePaths":
+        return cls(parse_patterns(os.environ.get(cls.ENV)))
+
+    def record_invalid(self, collector) -> None:
+        for pattern in self.invalid:
+            collector.record(f"config {self.ENV}", ValueError(
+                f"invalid setting value_paths pattern {pattern!r}: write path: and a property path glob after it"))
+
+    def allows(self, path: str):
+        """"setting" for a listed setting name, "path" for a glob match, None otherwise."""
+        norm = normalize_path(path)
+        if norm.rsplit(".", 1)[-1].split("[", 1)[0] in VALUE_LEAVES:
+            return "setting"
+        return "path" if self._globs.fullmatch(norm) else None
+
+
+def looks_secret(value: str) -> bool:
+    if SECRET_VALUE.search(value):
+        return True
+    # An object or array value is read as paths too, so {"password": …} is caught by its key.
+    if value[:1] in "{[" and SECRET_PATH.search(re.sub(r"[^a-z0-9_\-]+", ".", value.lower())):
+        return True
+    if re.fullmatch(r"/(subscriptions|providers)/[^?#=&\s]*", value, re.IGNORECASE):
+        return False
+    for run in LONG_TOKEN.findall(value):
+        if _GUID.fullmatch(run) or _KEBAB.fullmatch(run) or run.isdigit() or _ARM_PATH.search(run):
+            continue
+        if any(c.isalpha() for c in run) and any(c.isdigit() or c in "+/=" for c in run):
+            return True
+    return False
+
+
+def withheld_reason(path: str, before, after, paths: ValuePaths):
+    """None when the values may be shown; a boolean is never a secret, whatever its path is called."""
+    allowed = paths.allows(path)
+    if not allowed:
+        return "not_allowlisted"
+    values = [v for v in (before, after) if v is not None]
+    if all(v.lower() in ("true", "false") for v in values):
+        return None
+    norm = normalize_path(path)
+    named = allowed == "path" and SECRET_PATH.search(norm) and not PERMISSION_LIST.search(norm)
+    if named or any(looks_secret(v) for v in values):
+        return "secret"
+    return None
+
+
+def _text(value):
+    return value if value is None or isinstance(value, str) else json.dumps(value, sort_keys=True)
+
+
+def property_changes(raw, paths: ValuePaths) -> tuple[list, bool, dict]:
+    """Each changed property's values, or its path and why they were withheld; shown values first. Also the
+    withheld counts by reason, over every changed property."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = None
+    withheld = dict.fromkeys(WITHHELD_REASONS, 0)
+    if not isinstance(raw, dict):
+        return [], False, withheld
+    entries = []
+    for path, detail in raw.items():
+        detail = detail if isinstance(detail, dict) else {}
+        before, after = _text(detail.get("previousValue")), _text(detail.get("newValue"))
+        reason = withheld_reason(str(path), before, after, paths)
+        if reason:
+            withheld[reason] += 1
+            entries.append({"path": str(path), "withheld": reason})
+            continue
+        cut = str(detail.get("isTruncated") or "").lower() == "true" or any(
+            v is not None and len(v) > MAX_VALUE_CHARS for v in (before, after))
+        before, after = (v if v is None else v[:MAX_VALUE_CHARS] for v in (before, after))
+        entries.append({"path": str(path), "previous_value": before, "new_value": after, "truncated": cut,
+                        "withheld": None})
+    entries.sort(key=lambda e: (e["withheld"] is not None, e["path"]))
+    return entries[:MAX_VALUES_PER_CHANGE], len(entries) > MAX_VALUES_PER_CHANGE, withheld
+
+
+def change_record(row: dict, table: str, paths: ValuePaths = None) -> dict:
     props = row.get("changedProperties")
+    values, values_cut, withheld = property_changes(row.get("changes"), paths or ValuePaths())
     return {
         "change_id": row.get("changeId") or None,
         "table": table,
@@ -118,7 +267,29 @@ def change_record(row: dict, table: str) -> dict:
         "correlation_id": row.get("correlationId") or None,
         "changes_count": row.get("changesCount"),
         "changed_properties": sorted(props) if isinstance(props, list) else [],
+        "property_changes": values,
+        "property_changes_truncated": values_cut,
+        "property_values_withheld": withheld,
     }
+
+
+def keep_values(changes: list, limit: int) -> list:
+    """Values stay on the newest `limit` direct and manual-deployment changes; every other change carries none."""
+    eligible = sorted((c for c in changes if c["origin"] in VALUE_ORIGINS),
+                      key=lambda c: (c["timestamp"] or "", c["change_id"] or ""), reverse=True)
+    kept = {id(c) for c in eligible[:limit]}
+    capped = {id(c) for c in eligible[limit:]}
+    out = []
+    for c in changes:
+        if id(c) in kept:
+            out.append({**c, "property_changes": c.get("property_changes") or [],
+                        "property_changes_truncated": bool(c.get("property_changes_truncated")),
+                        "property_values_withheld": c.get("property_values_withheld")
+                        or dict.fromkeys(WITHHELD_REASONS, 0)})
+        else:
+            out.append({**c, "property_changes": None, "property_values_withheld": None,
+                        "property_changes_truncated": True if id(c) in capped else None})
+    return out
 
 
 def pipeline_principals() -> set:
@@ -274,6 +445,21 @@ def summarize(changes: list, deployments: list, at_cap: list, groups=None) -> di
         "direct_changes_in_deleted_resource_groups": None if groups is None else sum(
             1 for c in direct if c["resource_group"] and c["resource_group"].lower() not in groups
         ),
+        "changes_with_property_values": sum(
+            1 for c in changes if c["origin"] in VALUE_ORIGINS and c.get("property_changes") is not None
+        ),
+        "changes_property_values_capped": sum(
+            1 for c in changes if c["origin"] in VALUE_ORIGINS and c.get("property_changes") is None
+        ),
+        "property_values_shown": sum(
+            1 for c in changes if c["origin"] in VALUE_ORIGINS
+            for e in c.get("property_changes") or [] if e["withheld"] is None
+        ),
+        "property_values_withheld_by_reason": {
+            reason: sum((c.get("property_values_withheld") or {}).get(reason, 0)
+                        for c in changes if c["origin"] in VALUE_ORIGINS and c.get("property_changes") is not None)
+            for reason in WITHHELD_REASONS
+        },
         "deployments_in_history": len(deployments),
         "deployments_matched_to_changes": len({c["deployment_id"] for c in changes if c["deployment_id"]}),
         "resource_groups_at_deployment_history_cap": at_cap,
@@ -296,7 +482,24 @@ def lookback_days(collector: Collector) -> int:
     return clamped
 
 
-def collect_changes(subscription_id, cred, days: int, collector: Collector):
+def max_value_changes(collector: Collector) -> int:
+    """An invalid setting fails the run and keeps no values, rather than more than were asked for."""
+    raw = (os.environ.get("AZURE_CHANGE_MAX_VALUE_CHANGES") or "").strip()
+    if not raw:
+        return MAX_VALUE_CHANGES
+    try:
+        value = int(raw)
+    except ValueError:
+        value = -1
+    if value < 0:
+        collector.record("config AZURE_CHANGE_MAX_VALUE_CHANGES", ValueError(
+            f"invalid setting AZURE_CHANGE_MAX_VALUE_CHANGES={raw!r}: expected a whole number from 0; kept no values"))
+        return 0
+    return value
+
+
+def collect_changes(subscription_id, cred, days: int, collector: Collector, paths: ValuePaths = None):
+    paths = paths or ValuePaths.from_env()
     client = collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
     if client is None:
         return [], {}
@@ -314,7 +517,7 @@ def collect_changes(subscription_id, cred, days: int, collector: Collector):
             "total_records_reported": result["total_records"],
             "pages": result["pages"],
         }
-        changes.extend(change_record(row, table) for row in result["rows"])
+        changes.extend(change_record(row, table, paths) for row in result["rows"])
     return changes, sources
 
 
@@ -373,6 +576,9 @@ def main() -> int:
     days = lookback_days(collector)
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
+    paths = ValuePaths.from_env()
+    paths.record_invalid(collector)
+    value_limit = max_value_changes(collector)
 
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
@@ -395,12 +601,15 @@ def main() -> int:
     attributed = attribute(changes, deployments, frozenset(pipelines))
     # Attributed against every change and deployment first, so an in-scope change keeps an origin an excluded one gave.
     in_scope, excluded = split_changes(attributed, exclusions)
+    in_scope = keep_values(in_scope, value_limit)
     exclusions.warn_unmatched(logger)
     existing = None if groups is None else {g.lower() for g in groups}
     counts = exclusions.summary(excluded, ("change",), {"changes": len(in_scope)})
     # Unknown, not none, when a change table wasn't read.
     if set(sources) != set(CHANGE_TABLES):
-        counts.update(excluded_changes=None, in_scope_changes=None)
+        counts.update(excluded_changes=None, in_scope_changes=None, changes_with_property_values=None,
+                      changes_property_values_capped=None, property_values_shown=None,
+                      property_values_withheld_by_reason=None)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -410,6 +619,8 @@ def main() -> int:
             "deployments": deployment_runs(deployments, attributed),
             "lookback_days": days,
             "pipeline_principals": sorted(pipelines),
+            "property_value_paths_added": paths.extra,
+            "max_property_value_changes": value_limit,
             "window_start": iso(datetime.now(timezone.utc) - timedelta(days=days)),
             "change_sources": sources,
             "resource_groups_read": len(groups or []),
