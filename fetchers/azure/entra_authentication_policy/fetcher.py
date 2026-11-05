@@ -60,8 +60,8 @@ from azure_common import (  # noqa: E402
 from entra_graph import (  # noqa: E402
     aguard,
     graph_attr,
-    is_denied,
     graph_list,
+    is_denied,
     paginate,
     resolve_tenant,
     tenant_filename_key,
