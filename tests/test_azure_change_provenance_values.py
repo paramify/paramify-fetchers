@@ -400,6 +400,11 @@ def test_the_exclude_commands_leave_value_paths_untouched(monkeypatch, tmp_path)
                  ["unexclude", "azure_change_provenance", "--all", "--field", "value_paths"]):
         assert runner.invoke(app, ["manifest", *args, "-f", path, "--json"]).exit_code == 1, args
     assert Path(path).read_text() == before and "value_paths" not in before
+    # A real exclusion still lands in resource_exclusions, for the fetcher and for the category.
+    for target in ("azure_change_provenance", "azure"):
+        out = json.loads(runner.invoke(app, ["manifest", "exclude", target, "rg:rg-out", "-f", path, "--json"]).output)
+        assert (out["ok"], out["field"]) == (True, "resource_exclusions"), target
+    assert "value_paths" not in Path(path).read_text()
 
 
 # --- the review's probe: every case must be withheld ---
