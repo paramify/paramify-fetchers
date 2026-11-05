@@ -47,6 +47,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_sign_in_logs` 0.2.0 (new on this branch): non-interactive and
+  service-principal sign-ins.** Reads `AADNonInteractiveUserSignInLogs` and
+  `AADServicePrincipalSignInLogs` as counts only (no per-event rows): results, users,
+  apps, risk and Conditional Access status for non-interactive sign-ins; results and
+  distinct principals for service-principal sign-ins, plus one capped row per
+  principal with id, name, app id, counts and last sign-in (no IP addresses or
+  resources). The user scope applies to non-interactive sign-ins and the app scope to
+  both. An invalid scope value now fails as `bad_config`. Maps to KSI-IAM-SNU and
+  KSI-MLA-LET as well.
 - **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
   Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
   - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from
