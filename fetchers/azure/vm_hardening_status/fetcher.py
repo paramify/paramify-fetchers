@@ -395,8 +395,9 @@ def patch_settings_record(settings) -> dict:
     setting is "unknown", never "manual". `assessment_automatic` reads the same way.
     """
     settings = settings if isinstance(settings, dict) else {}
-    mode = settings.get("patch_mode")
-    assessment = settings.get("assessment_mode")
+    # An empty string is no setting, not a setting that fails to match the automatic modes.
+    mode = settings.get("patch_mode") or None
+    assessment = settings.get("assessment_mode") or None
     return {
         "os": settings.get("os"),
         "patch_mode": mode,

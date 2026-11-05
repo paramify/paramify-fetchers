@@ -62,3 +62,8 @@ def test_patch_summary_counts_unknown_apart():
     assert s["vms_patch_mode_unknown"] == 1 and s["vms_automatic_patch_assessment"] == 1 and s["vms_patch_assessment_unknown"] == 2
     assert s["vms_patch_modes"] == {"AutomaticByOS": 1, "AutomaticByPlatform": 1, "Manual": 1}
     assert s["scale_sets_platform_managed_patching"] == 1 and s["scale_sets_patch_mode_unknown"] == 0
+
+
+def test_empty_patch_mode_is_unknown_not_manual():
+    r = vmh.patch_settings_record({"os": "linux", "patch_mode": "", "assessment_mode": ""})
+    assert r["patch_mode"] is None and r["platform_managed_patching"] is None and r["assessment_automatic"] is None
