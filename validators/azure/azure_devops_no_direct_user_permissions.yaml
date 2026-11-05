@@ -1,0 +1,25 @@
+key: azure_devops_no_direct_user_permissions
+name: Azure DevOps No Permissions Granted Directly to People
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every delivery-related security namespace was read with no partial failure, at least one permission
+  entry exists, and no person is granted or denied a permission directly rather than through a group
+  (users_with_direct_entries is an empty list), so access follows group membership. Supports
+  KSI-IAM-ELP for Azure DevOps. Covers only the projects the run kept and the collecting identity can
+  see. A direct entry that only denies still fails, and so does the entry Azure DevOps gives whoever
+  creates a Git branch. Does not prove: that the groups themselves hold only what their role needs
+  (azure_devops_high_impact_rights_only_admin_groups covers the high-impact rights); direct entries
+  for service accounts or service principals; or that a direct grant has an approved exception, so an
+  approved grant still fails.
+
+# users_with_direct_entries is null when a namespace couldn't be read.
+regex: '"partial_failure":\s*false\b[\s\S]*?"entries_total":\s*[1-9]\d*,[\s\S]*?"users_with_direct_entries":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DEVOPS-PERMISSIONS
