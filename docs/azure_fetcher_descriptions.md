@@ -2505,7 +2505,12 @@ Summary fields:
 - `in_scope_remediation_deployments` — Number of remediation deployments read and in scope
 
 **What was evaluated?**
-- `resources_evaluated` — Number of resources with a compliance state in the service's evaluation window (the last day); 0 means nothing was evaluated, not that everything passed. With a resource_exclusions pattern set, only in-scope resources count ("in scope": no pattern matches the resource by id, resource group or region), recounted from every latest (resource, policy) state; null when that grouped read fails or returns fewer groups than the service counted
+- `resources_evaluated` — Number of resources with a compliance state in the service's evaluation window (the last day); 0 means nothing was evaluated, not that everything passed. With a resource_exclusions pattern set, only in-scope resources count ("in scope": no pattern matches the resource by id, resource group or region), recounted from every latest (resource, policy) state; null unless that grouped read came back whole (see `in_scope_states_status`)
+- `in_scope_states_status` — Whether the grouped read of every latest (resource, policy) state behind the in-scope counts came back whole, with a resource_exclusions pattern set: read, truncated, uncounted or failed; null when no pattern is set
+  - read (every group came back, so the in-scope counts stand; an empty count with no groups means nothing was evaluated)
+  - truncated (fewer groups came back than the service counted, or it counted more than 50,000)
+  - uncounted (groups came back but their count didn't, so they can't be shown complete)
+  - failed (the read or its count failed, and the run exits non-zero)
 - `resources_by_compliance_state` — Number of resources in each compliance state (for example compliant, noncompliant, exempt, unknown), each resource counted once under its highest-ranked state in the order noncompliant, compliant, error, conflict, protected, exempt, unknown, as the service counts them. With a resource_exclusions pattern set, counted over in-scope resources, keeping every state the service reported (0 when none is in scope); every value is null when `resources_evaluated` is null
 - `policies_by_compliance_state` — Number of policy assignments in each compliance state (an initiative counts once), each under its highest-ranked state across the resources it evaluated, as the service counts them. With a resource_exclusions pattern set, counted over in-scope resources only; every value is null when `resources_evaluated` is null
 - `assignments_evaluated` — Number of in-scope policy assignments the service summarized
