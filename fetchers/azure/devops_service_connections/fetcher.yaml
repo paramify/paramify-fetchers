@@ -1,5 +1,5 @@
 name: azure_devops_service_connections
-version: 0.1.0
+version: 0.1.1
 description: >-
   Shows how each Azure DevOps service connection authenticates, which service
   principal it uses and which pipeline runs used it, and whether variable group
@@ -82,6 +82,7 @@ evidence_set:
     - GET {project}/_apis/pipelines/pipelinepermissions/endpoint/{id} (per connection and project; preview API) — which YAML pipelines may use it
     - GET {project}/_apis/serviceendpoint/{id}/executionhistory (per connection, through each project that lists it until a read shows another project's runs, as the history then isn't filtered by project; preview API missing from Microsoft's REST reference, so its newest-first order is checked on the whole first page before the read stops early) — the runs that used it, and its last pipeline run, looked for at most 5 pages past the window (each connection's last_pipeline_run_search_stopped is true when the search stopped there without finding one) (order and project filtering unmeasured on a live organization)
     - GET {project}/_apis/distributedtask/variablegroups (per project) — variable groups, their secret counts and Key Vault links
+    - GET {project}/_apis/distributedtask/variablegroups/{id} (per variable group, through the first project that lists it) — the projects that share the group, which the list above doesn't return, with or without groupIds= (each group's projects is null when this read failed)
     - GET {project}/_apis/distributedtask/securefiles (per project; preview API) — secure files, by name
 
     Output: azure_devops_service_connections_<organization>.json — each service connection with how it authenticates, its service principal and tenant ids exactly as Azure DevOps gives them, the pipelines allowed to use it and the runs that used it, the connections grouped by service principal to join an Azure change to the run that made it, and each variable group's secret counts and Key Vault link and each secure file, with no credential or secret value.
