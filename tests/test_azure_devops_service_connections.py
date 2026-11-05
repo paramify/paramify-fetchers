@@ -261,11 +261,12 @@ def connection(evidence, name):
     return next(c for c in evidence["results"]["service_connections"] if c["name"] == name)
 
 
-def test_collects_the_organization_and_exits_zero(tmp_path):
+def test_collects_the_organization_and_exits_zero(tmp_path, assert_summary_documented):
     code, evidence, status, _, _ = run(tmp_path)
     assert code == 0 and status is None
     assert evidence["metadata"]["partial_failure"] is False
     s = evidence["summary"]
+    assert_summary_documented("azure/devops_service_connections", s)
     assert s["projects_collected"] == 2 and s["projects_with_no_service_connections_listed"] == []
     assert s["service_connections_total"] == 7  # the shared connection once
     assert s["service_connections_by_auth_method"] == {

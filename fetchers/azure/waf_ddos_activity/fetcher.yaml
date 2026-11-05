@@ -111,7 +111,7 @@ evidence_set:
     - waf_requests_blocked — Number of requests the WAF blocked: Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records, from a policy in Prevention mode; null when any workspace a WAF resource exports its WAF log to couldn't be read
     - waf_requests_would_block — Number of requests that Prevention mode would have blocked but Detection mode only logged: on Front Door, a policy in Detection mode logged a blocking action (Block, Redirect or a failed JavaScript challenge); on an App Gateway, a mandatory rule, such as the anomaly-score rule 949110, logged Detected, which Prevention mode logs as Blocked; null when any workspace a WAF resource exports its WAF log to couldn't be read
     - waf_requests_logged_only — Number of requests that matched a rule but were only logged (Log, AnomalyScoring or Matched, and not blocked, would-block or allowed); null when any workspace a WAF resource exports its WAF log to couldn't be read
-    - last_waf_event — Time of the latest WAF log record across all WAF resources (UTC)
+    - last_waf_event — Time of the latest WAF log record across all WAF resources (UTC); null when no record was read
 
     Do WAF alerts reach someone?
     - waf_alert_rules — Number of alert rules on a WAF metric (WebApplicationFirewallRequestCount, Azwaf*, BlockedCount or MatchedCount) or whose query reads a WAF log; null when the alert rule lists couldn't be read
@@ -136,7 +136,7 @@ evidence_set:
     - ddos_mitigations_started — Number of DDoS mitigations started on public IPs with IP Protection; null when no attached IP has IP Protection, or any workspace that such an IP sends DDoS logs to couldn't be read
 
     Which workspaces were read?
-    - log_workspaces — Number of Log Analytics workspaces queried
+    - log_workspaces — Number of Log Analytics workspaces the fetcher tried to read, whatever the outcome; the three counts below leave out one whose read failed another way
     - log_workspaces_queried — Number of Log Analytics workspaces read
     - log_workspaces_not_authorized — Number of Log Analytics workspaces that refused the read
     - log_workspaces_not_found — Number of Log Analytics workspaces that no longer exist
