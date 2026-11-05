@@ -209,7 +209,7 @@ Short Description: Shows which sign-in methods the tenant allows, flagging weak 
 
 Script: fetchers/azure/entra_authentication_policy/fetcher.py (uses the shared Graph helpers fetchers/azure/_shared/entra_graph.py)
 
-Access: Microsoft Graph application permissions Policy.Read.All and Directory.Read.All.
+Access: Microsoft Graph application permissions Policy.Read.All and Directory.Read.All. Optional: PublicKeyInfrastructure.Read.All; without it, the certificate authorities in the PKI-based trust store and the certificate authority counts read null.
 
 Commands Executed:
 - Microsoft Graph `GET /organization` — the tenant's name and domain
@@ -217,7 +217,8 @@ Commands Executed:
 - Microsoft Graph `GET /policies/identitySecurityDefaultsEnforcementPolicy` — whether security defaults are on
 - Microsoft Graph `GET /groupSettings` and `GET /groupSettingTemplates/{Password Rule Settings id}` — the tenant's password protection settings, and Microsoft's defaults for any it never set
 - Microsoft Graph `GET /subscribedSkus` — the tenant's licences, to tell Free, P1 and P2 apart
-- Microsoft Graph `GET /organization/{id}/certificateBasedAuthConfiguration` — the certificate authorities trusted for certificate sign-in, with each one's revocation list; expiry is read from the certificate
+- Microsoft Graph `GET /organization/{id}/certificateBasedAuthConfiguration` — the certificate authorities trusted for certificate sign-in in the classic store, with each one's revocation list; expiry is read from the certificate
+- Microsoft Graph `GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations` and `GET …/{id}/certificateAuthorities` (per configuration) — the certificate authorities in the PKI-based trust store, the newer place Entra keeps them
 - Microsoft Graph `GET /users` with `authorizationInfo` (only when X.509 is enabled) — each user's sign-in names and how many certificate user ids they hold
 - Microsoft Graph `GET /groups/{id}/transitiveMembers/microsoft.graph.user` (per group an enabled method includes or excludes, only when X.509 is enabled) — which users each method reaches
 
@@ -245,10 +246,14 @@ Summary fields:
 - `phishing_resistant_method_enabled` — True if at least one phishing-resistant method is enabled; false if none is; null if the policy couldn't be read
 
 **Does certificate sign-in trust only current certificate authorities that publish revocation lists?**
-- `trusted_certificate_authorities` — Number of root and intermediate certificate authorities trusted for certificate sign-in; null if they couldn't be read
-- `expired_certificate_authorities` — Number of trusted certificate authorities whose certificate has expired; null if they couldn't be read
-- `certificate_authorities_expiry_unknown` — Number of trusted certificate authorities whose certificate couldn't be read for its expiry date; null if the authorities couldn't be read
-- `certificate_authorities_without_crl` — Number of trusted certificate authorities with no certificate revocation list (CRL) address, so a revoked user certificate signed by them isn't rejected; null if the authorities couldn't be read
+- `trusted_certificate_authorities` — Number of root and intermediate certificate authorities trusted for certificate sign-in across the classic store and the PKI-based trust store, a certificate authority in both (same thumbprint) counted once; null unless both stores were read
+- `expired_certificate_authorities` — Number of trusted certificate authorities whose certificate has expired (by either store's entry); null unless both stores were read
+- `certificate_authorities_expiry_unknown` — Number of trusted certificate authorities whose expiry date couldn't be read from the certificate or the service; null unless both stores were read
+- `certificate_authorities_without_crl` — Number of trusted certificate authorities with no certificate revocation list (CRL) address in at least one store, so a revoked user certificate signed by them isn't rejected; null unless both stores were read
+- `classic_store_certificate_authorities` — Number of certificate authorities in the classic store; null if it couldn't be read
+- `pki_store_certificate_authorities` — Number of certificate authorities in the PKI-based trust store; null if it couldn't be read
+- `pki_store_status` — Whether the PKI-based trust store was read: read, not_authorized (the optional PublicKeyInfrastructure.Read.All isn't granted; the run still succeeds) or failed
+- `pki_store_missing_permission` — The permission the PKI-based trust store read needs and was refused (PublicKeyInfrastructure.Read.All); null when it was read or failed for another reason
 
 **Can each user targeted for certificate sign-in be matched to a certificate?**
 - `x509_targeted_users` — Number of enabled member accounts (not guests) the X.509 method includes and doesn't exclude, directly, as all users or through a group; 0 when X.509 is off; null if the policy, the users or a group the method names couldn't be read
