@@ -60,7 +60,9 @@ their checks.
   `secrets`, `config`, `target_schema`, and the `supports_targets` flag (fanout
   or single). Note which secrets are `per_target`, and which config fields are
   `type: patterns` (pattern lists, such as `resource_exclusions`; `prefixes` and
-  `bare` say what each pattern may start with).
+  `bare` say what each pattern may start with; `exclusion: false` marks a list
+  that shows more as it grows, such as `value_paths`, which `manifest exclude`
+  never edits: set it with `set-config`).
 - **Current manifest** — `paramify manifest show --json`
   (or read the file). Determine:
   - Is the fetcher present in `run.fetchers:` at all?

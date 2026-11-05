@@ -367,17 +367,39 @@ def test_value_paths_refuses_an_env_reference():
         _apply_config({}, PROVENANCE, None, None, entry)
 
 
-@pytest.mark.parametrize("pattern, field", [
-    ("rg:rg-out", "resource_exclusions"), ("path:*", "value_paths"), ("path:tags.*", "value_paths"),
-    ("*", None), ("tags.*", None), ("rg-out", None),
-])
-def test_manifest_exclude_never_puts_a_bare_pattern_in_value_paths(pattern, field):
+@pytest.mark.parametrize("pattern", ["path:*", "path:tags.*", "*", "tags.*", "rg-out"])
+def test_manifest_exclude_never_routes_to_value_paths(pattern):
+    # value_paths is an allowlist (exclusion: false): an exclude must never widen what's shown.
+    assert PROVENANCE.config_schema["value_paths"].exclusion is False
     _, fields, _ = api.pattern_fields("azure_change_provenance", FETCHERS, PLATFORMS)
-    if field is None:
-        with pytest.raises(ValueError):
-            api.pick_pattern_field(fields, pattern)
-    else:
-        assert api.pick_pattern_field(fields, pattern) == field
+    assert list(fields) == ["resource_exclusions"]
+    with pytest.raises(ValueError):
+        api.pick_pattern_field(fields, pattern)
+    with pytest.raises(ValueError):
+        api.pick_pattern_field(fields, pattern, "value_paths")
+    _, category_fields, mixed = api.pattern_fields("azure", FETCHERS, PLATFORMS)
+    assert "value_paths" not in category_fields and "value_paths" not in mixed
+    assert api.pick_pattern_field(fields, "rg:rg-out") == "resource_exclusions"
+
+
+def test_the_exclude_commands_leave_value_paths_untouched(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from framework.cli import app
+
+    runner = CliRunner()
+    monkeypatch.chdir(REPO_ROOT)
+    path = str(tmp_path / "m.yaml")
+    runner.invoke(app, ["manifest", "init", "-f", path])
+    runner.invoke(app, ["manifest", "add", "azure_change_provenance", "-f", path])
+    before = Path(path).read_text()
+    for args in (["exclude", "azure_change_provenance", "path:*"], ["exclude", "azure", "path:*"],
+                 ["exclude", "azure_change_provenance", "path:tags.*", "--field", "value_paths"],
+                 ["exclude", "azure", "path:*", "--field", "value_paths"],
+                 ["unexclude", "azure_change_provenance", "path:*", "--field", "value_paths"],
+                 ["unexclude", "azure_change_provenance", "--all", "--field", "value_paths"]):
+        assert runner.invoke(app, ["manifest", *args, "-f", path, "--json"]).exit_code == 1, args
+    assert Path(path).read_text() == before and "value_paths" not in before
 
 
 # --- the review's probe: every case must be withheld ---

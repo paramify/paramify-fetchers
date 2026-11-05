@@ -194,8 +194,10 @@ paramify manifest set-output-dir <dir>
 paramify manifest show [--json]
 ```
 
-`exclude` and `unexclude` edit pattern lists, such as resource exclusions
+`exclude` and `unexclude` edit exclusion lists, such as resource exclusions
 ([pattern lists](config_injection_guide.md#5-leave-resources-out-of-scope)).
+They never touch a pattern list that shows more when it grows, such as
+`azure_change_provenance`'s `value_paths`; set that one with `set-config`.
 
 Every `manifest` subcommand also accepts `--json` and returns a stable
 `{"ok", "path", "errors"}` object. Thus an agent can build a manifest step by

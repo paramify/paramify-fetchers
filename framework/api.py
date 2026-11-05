@@ -922,13 +922,14 @@ def set_passthrough_env(m: dict, category: str, env_vars: List[str]) -> dict:
 
 
 def pattern_fields(target: str, fetchers: Mapping, platforms: Mapping) -> Tuple[str, Dict[str, ConfigField], List[str]]:
-    """Where `target` keeps pattern lists ("entry" for a fetcher, "platform" for a category), the patterns fields it
-    takes, and, for a category, the ones its fetchers declare with different prefixes, which can't be set category-wide."""
+    """Where `target` keeps pattern lists ("entry" for a fetcher, "platform" for a category), the exclusion lists it
+    takes, and, for a category, the ones its fetchers declare with different prefixes, which can't be set category-wide.
+    A patterns field with `exclusion: false`, such as an allowlist, is never one: exclude must not widen it."""
     if target in fetchers:
         f = fetchers[target]
         spec = platform_for(f, platforms)
         schema = {**(spec.config_schema if spec else {}), **f.config_schema}
-        return "entry", {n: d for n, d in schema.items() if d.type == patterns.TYPE}, []
+        return "entry", {n: d for n, d in schema.items() if d.type == patterns.TYPE and d.exclusion}, []
     members = [f for f in fetchers.values() if platform_category(f) == target]
     if not members and target not in platforms:
         raise LookupError(f"{target!r} is neither a fetcher nor a category")
@@ -937,7 +938,7 @@ def pattern_fields(target: str, fetchers: Mapping, platforms: Mapping) -> Tuple[
     grammars: Dict[str, set] = {}
     fields: Dict[str, ConfigField] = {}
     for d in declared:
-        if d.type == patterns.TYPE:
+        if d.type == patterns.TYPE and d.exclusion:
             grammars.setdefault(d.name, set()).add((frozenset(d.prefixes), d.bare))
             fields.setdefault(d.name, d)
     mixed = sorted(n for n, g in grammars.items() if len(g) > 1)

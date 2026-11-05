@@ -350,7 +350,7 @@ def test_issue_report_keys_are_not_unknown():
 def test_category_lists_exclude_fields_whose_prefixes_differ_between_fetchers():
     fetchers, platforms = api.discover_fetchers(REPO_ROOT), api.discover_platforms(REPO_ROOT)
     scope, fields, mixed = api.pattern_fields("azure", fetchers, platforms)
-    assert (scope, list(fields), mixed) == ("platform", ["resource_exclusions", "value_paths"], ["scope_exclusions"])
+    assert (scope, list(fields), mixed) == ("platform", ["resource_exclusions"], ["scope_exclusions"])
     scope, fields, _ = api.pattern_fields("azure_front_door_origins", fetchers, platforms)
     assert (scope, list(fields)) == ("entry", ["scope_exclusions", "resource_exclusions"])
     # With two pattern lists on one entry, the prefix picks the list.

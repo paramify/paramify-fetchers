@@ -58,12 +58,14 @@ config_schema:
     type: patterns
     prefixes: [path]
     bare: false
+    exclusion: false
     required: false
     env: AZURE_CHANGE_VALUE_PATHS
     description: >
       Property paths whose before and after values to keep, added to the built-in
       list of security settings and tags, listed in the manifest on this fetcher's
-      entry as path:<glob> patterns, such as path:properties.siteConfig.* (case
+      entry (paramify manifest set-config; manifest exclude never edits this list)
+      as path:<glob> patterns, such as path:properties.siteConfig.* (case
       insensitive; * matches any run of characters and ? one character; an array
       index such as [0] matches any index; path:* allows every path). Values are
       kept only for direct edits and manual deployments. A path or value that looks
@@ -194,20 +196,23 @@ evidence_set:
     withheld, the reason: never the value or anything derived from it. The secret
     check runs first, on every path, whatever the allowlist or value_paths says: a
     value is withheld as "secret" when any segment of its path names a secret or
-    free-form content (password, pass, pwd, passphrase, secret, token, any name
+    free-form content, compared without case, _ or -, such as password, pwd,
+    passphrase, any name ending in pass (but not bypass), secret, token, any name
     ending in key, keys or key<n>, pin, uri or url, sas…, connection string,
-    credential, authorization, authentication, headers, queries, body, env,
-    environment variables, app settings, args, command, custom data, and
-    properties.value), compared without case, _ or -; or when a value looks like
-    one (a name such as password, secret, token, key, sig or code followed by = or
-    :, a --flag naming one, a Basic or Bearer credential, a URL with a user, a JWT,
-    a PEM private key, a short random-looking string, a long key-like string, or an
-    object with a secret-named key). Key Vault access-policy permission names and
+    credential, signature, cookie, an authorization or authentication segment,
+    headers, queries, body, env, secrets, environment variables, app settings,
+    args, command, custom data, protected settings, and properties.value; or when a
+    value looks like one: a name such as password, secret, token, key, sig or code
+    followed by = or :, a --flag naming one, a Basic, Bearer, Digest or Negotiate
+    credential, a URL with a user, a JWT, a PEM private key or certificate, a short
+    random-looking string, a long key-like string, or an object with a
+    secret-named key. Key Vault access-policy permission names and
     true or false are never secrets. A value that passes is shown only when its
     path is on the allowlist: the built-in list of specific paths (TLS versions,
     public network access, network ACLs and NSG rules, Key Vault access policies,
     soft delete and purge protection, local auth, encryption, retention, the
-    resource's own state, status and provisioning state, SKU, location and tags)
+    resource's own state, status and provisioning state, SKU, location, tags and
+    similar settings, each at its own path)
     plus the value_paths patterns; any other path is withheld as
     "not_allowlisted". Shown values are cut at 200 characters, and truncated is
     true when a value was cut or Resource Graph marked it truncated. A change lists

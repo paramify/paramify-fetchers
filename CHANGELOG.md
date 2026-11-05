@@ -74,9 +74,11 @@ schemas and the `paramify` CLI — not the internal code.
   - Values are shown only for an allowlist of security settings and tags. The
     new `value_paths` setting adds to it: a pattern list (`type: patterns`) set
     in the manifest as `path:<glob>` items, such as `path:properties.siteConfig.*`
-    or `path:*`. Like the exclusion lists, it takes no `${env:}`. A pattern
-    without `path:` fails the run as `bad_config` and keeps no values, and
-    `paramify manifest exclude` can't put a bare pattern in it. Any other path is
+    or `path:*`, with `paramify manifest set-config`. Like the exclusion lists,
+    it takes no `${env:}`. It is marked `exclusion: false`, so
+    `paramify manifest exclude` and `unexclude` never edit it, and an exclude
+    can't widen what's shown. A pattern without `path:` fails the run as
+    `bad_config` and keeps no values. Any other path is
     withheld as `not_allowlisted`.
   - The secret check runs first, on every path, whatever the allowlist says. A
     value is withheld as `secret` when a path segment names a secret or
@@ -101,6 +103,11 @@ schemas and the `paramify` CLI — not the internal code.
     withheld are null when any change's values couldn't be read, and all five are
     null when a change table couldn't be read. Changes with any other origin, and excluded changes, carry no
     values.
+- **Pattern-list fields take `exclusion: false`.** It marks a `type: patterns`
+  field that shows more as it grows, such as an allowlist.
+  `paramify manifest exclude` and `unexclude` never pick it, even with
+  `--field`, so an exclude can't widen it. Set it with `set-config` or in the
+  manifest. Every existing pattern list keeps the default, `true`.
 - **`azure_devops_service_connections`** (`EVD-AZURE-DEVOPS-SERVICE-CONNECTIONS`):
   how an Azure DevOps organization's pipelines hold their secrets, and which runs
   used each service connection. Per connection, once however many projects share
