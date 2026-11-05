@@ -70,7 +70,7 @@ python tools/gen_ksi_mapping.py
 
 > Machine-based information resources are persistently reviewed to ensure they are appropriately optimized for high availability and rapid recovery.
 
-*22 fetchers:* [`aws_auto_scaling_high_availability`](../fetchers/aws/auto_scaling_high_availability), [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_cloudwatch_high_availability`](../fetchers/aws/cloudwatch_high_availability), [`aws_database_high_availability`](../fetchers/aws/database_high_availability), [`aws_efs_high_availability`](../fetchers/aws/efs_high_availability), [`aws_eks_high_availability`](../fetchers/aws/eks_high_availability), [`aws_global_accelerator_ha`](../fetchers/aws/global_accelerator_ha), [`aws_load_balancer_high_availability`](../fetchers/aws/load_balancer_high_availability), [`aws_network_resilience_high_availability`](../fetchers/aws/network_resilience_high_availability), [`aws_route53_high_availability`](../fetchers/aws/route53_high_availability), [`azure_app_service_plans`](../fetchers/azure/app_service_plans), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_data_services_configuration`](../fetchers/azure/data_services_configuration), [`azure_front_door_origins`](../fetchers/azure/front_door_origins), [`azure_managed_redis_configuration`](../fetchers/azure/managed_redis_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_redis_cache_configuration`](../fetchers/azure/redis_cache_configuration), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`azure_vpn_gateway_configuration`](../fetchers/azure/vpn_gateway_configuration), [`betterstack_public_status_page`](../fetchers/betterstack/public_status_page)
+*24 fetchers:* [`aws_auto_scaling_high_availability`](../fetchers/aws/auto_scaling_high_availability), [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_cloudwatch_high_availability`](../fetchers/aws/cloudwatch_high_availability), [`aws_database_high_availability`](../fetchers/aws/database_high_availability), [`aws_efs_high_availability`](../fetchers/aws/efs_high_availability), [`aws_eks_high_availability`](../fetchers/aws/eks_high_availability), [`aws_global_accelerator_ha`](../fetchers/aws/global_accelerator_ha), [`aws_load_balancer_high_availability`](../fetchers/aws/load_balancer_high_availability), [`aws_network_resilience_high_availability`](../fetchers/aws/network_resilience_high_availability), [`aws_route53_high_availability`](../fetchers/aws/route53_high_availability), [`azure_app_service_plans`](../fetchers/azure/app_service_plans), [`azure_backup_vault_protection`](../fetchers/azure/backup_vault_protection), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_data_services_configuration`](../fetchers/azure/data_services_configuration), [`azure_front_door_origins`](../fetchers/azure/front_door_origins), [`azure_managed_redis_configuration`](../fetchers/azure/managed_redis_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_redis_cache_configuration`](../fetchers/azure/redis_cache_configuration), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`azure_vpn_gateway_configuration`](../fetchers/azure/vpn_gateway_configuration), [`azure_zone_redundancy`](../fetchers/azure/zone_redundancy), [`betterstack_public_status_page`](../fetchers/betterstack/public_status_page)
 
 #### `KSI-CNA-RNT` — Restricting Network Traffic
 
@@ -296,7 +296,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2.3`, `cp-6`, `cp-9`, `cp-10`, `cp-10.2`, `si-12`
 
-*16 fetchers:* [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_backup_validation`](../fetchers/aws/backup_validation), [`aws_dlm_lifecycle_policies`](../fetchers/aws/dlm_lifecycle_policies), [`aws_dynamodb_pitr_status`](../fetchers/aws/dynamodb_pitr_status), [`aws_ebs_snapshot_status`](../fetchers/aws/ebs_snapshot_status), [`azure_app_service_backups`](../fetchers/azure/app_service_backups), [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_dns_configuration`](../fetchers/azure/dns_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`gcp_cloud_sql_backup_configuration`](../fetchers/gcp/cloud_sql_backup_configuration), [`gcp_cloud_sql_encryption_status`](../fetchers/gcp/cloud_sql_encryption_status), [`gcp_cloud_storage_encryption_status`](../fetchers/gcp/cloud_storage_encryption_status)
+*17 fetchers:* [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_backup_validation`](../fetchers/aws/backup_validation), [`aws_dlm_lifecycle_policies`](../fetchers/aws/dlm_lifecycle_policies), [`aws_dynamodb_pitr_status`](../fetchers/aws/dynamodb_pitr_status), [`aws_ebs_snapshot_status`](../fetchers/aws/ebs_snapshot_status), [`azure_app_service_backups`](../fetchers/azure/app_service_backups), [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status), [`azure_backup_vault_protection`](../fetchers/azure/backup_vault_protection), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_dns_configuration`](../fetchers/azure/dns_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`gcp_cloud_sql_backup_configuration`](../fetchers/gcp/cloud_sql_backup_configuration), [`gcp_cloud_sql_encryption_status`](../fetchers/gcp/cloud_sql_encryption_status), [`gcp_cloud_storage_encryption_status`](../fetchers/gcp/cloud_storage_encryption_status)
 
 #### ⬜ `KSI-RPL-ARP` — Aligning Recovery Plan
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-298 of 310 fetchers carry a mapping.
+300 of 312 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -505,7 +505,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (96)
+### azure  (98)
 
 | Fetcher | Indicators |
 |---|---|
@@ -523,6 +523,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments) | `KSI-CMT-RMV` |
 | [`azure_app_service_plans`](../fetchers/azure/app_service_plans) | `KSI-CNA-OFA` |
 | [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status) | `KSI-RPL-ABO`, `KSI-RPL-RRO`, `KSI-RPL-TRC` |
+| [`azure_backup_vault_protection`](../fetchers/azure/backup_vault_protection) | `KSI-CNA-OFA`, `KSI-RPL-ABO` |
 | [`azure_change_provenance`](../fetchers/azure/change_provenance) | `KSI-CMT-RMV` |
 | [`azure_change_work_items`](../comparators/azure/change_work_items) | `KSI-CMT-LMC`, `KSI-CMT-RMV`, `KSI-SVC-ACM` |
 | [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration) | `KSI-CNA-MAT`, `KSI-IAM-ELP`, `KSI-SVC-SIN`, `KSI-SVC-VRI` |
@@ -605,6 +606,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_vnet_egress_routing`](../fetchers/azure/vnet_egress_routing) | `KSI-CNA-DFP`, `KSI-CNA-RNT`, `KSI-CNA-ULN` |
 | [`azure_vpn_gateway_configuration`](../fetchers/azure/vpn_gateway_configuration) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-SVC-SIN` |
 | [`azure_waf_ddos_activity`](../fetchers/azure/waf_ddos_activity) | `KSI-CNA-RVP` |
+| [`azure_zone_redundancy`](../fetchers/azure/zone_redundancy) | `KSI-CNA-OFA` |
 
 ### betterstack  (1)
 
