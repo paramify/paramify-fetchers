@@ -157,6 +157,36 @@ def test_admin_without_registration_row_counts_as_admin_without_mfa():
     assert summary["admin_users_without_registration_details"] == 1
 
 
+def test_all_users_coverage_leaves_out_disabled_users_the_report_omits():
+    users = mfa_status.join_users(
+        USERS + [_user("u-gone", "disabled@contoso.test", enabled=False)], REGISTRATIONS, {}
+    )
+    summary = mfa_status.summarize(users)
+    # The disabled u-gone has no report row: unknown, left out. The enabled u-unreg counts as without MFA.
+    assert summary["users_counted_in_all_users_coverage"] == 3
+    assert summary["users_with_registration_details"] == 2
+    assert summary["users_without_registration_details"] == 2
+    assert summary["mfa_capable_users"] == 1
+    assert summary["mfa_coverage_percentage_all_users"] == 33
+    assert summary["mfa_coverage_percentage"] == 33 and summary["enabled_users_without_mfa"] == 2
+
+
+def test_all_users_coverage_is_never_above_enabled_coverage_from_missing_rows():
+    users = mfa_status.join_users(
+        [_user(f"u-mfa-{i}", f"mfa{i}@contoso.test") for i in range(90)]
+        + [_user(f"u-norow-{i}", f"norow{i}@contoso.test") for i in range(10)]
+        + [_user(f"u-off-{i}", f"off{i}@contoso.test", enabled=False) for i in range(50)]
+        + [_user("u-off-reg", "offreg@contoso.test", enabled=False)],
+        [_reg(f"u-mfa-{i}", True) for i in range(90)] + [_reg("u-off-reg", False)],
+        {},
+    )
+    summary = mfa_status.summarize(users)
+    assert summary["mfa_coverage_percentage"] == 90
+    # A disabled user with a row is still counted; the 50 without one are not.
+    assert summary["users_counted_in_all_users_coverage"] == 101
+    assert summary["mfa_coverage_percentage_all_users"] == 89
+
+
 def test_registration_report_admin_flag_still_counts():
     """A role this fetcher does not list (or a PIM-eligible one) is still an admin
     when the registration report says so."""
@@ -274,10 +304,8 @@ def test_graph_status_text_is_classified_like_arm(status, code):
     assert mfa_status.classify_failure_code(failures) == code
 
 
-def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, monkeypatch):
-    """End to end through main(): users and registrations read, directoryRoles 403s."""
+def _mfa_graph():
     graph = FakeGraph(roles=[], role_members={}, group_members={})
-    graph.directory_roles.error = DENIED
     graph.organization = Builder([ns(id="t-1", display_name="Contoso", verified_domains=[])])
     graph.users = Builder([ns(id="u-ga", user_principal_name="ga@contoso.test", account_enabled=True)])
     graph.reports = ns(
@@ -285,6 +313,11 @@ def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, 
             user_registration_details=Builder([ns(id="u-ga", is_mfa_capable=True, is_admin=True)])
         )
     )
+    return graph
+
+
+def _run_mfa_main(graph, tmp_path, monkeypatch):
+    """main() against a fake Graph client; returns its exit code and the evidence."""
 
     async def fake_with_graph_client(collector, cred, work, default=None):
         return await work(graph)
@@ -307,9 +340,17 @@ def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, 
     status_file = tmp_path / "status.json"
     monkeypatch.setenv("FETCHER_STATUS_FILE", str(status_file))
 
-    assert mfa_status.main() == 1
+    code = mfa_status.main()
+    return code, json.loads((tmp_path / "azure_entra_mfa_status_t-1.json").read_text())
 
-    evidence = json.loads((tmp_path / "azure_entra_mfa_status_t-1.json").read_text())
+
+def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, monkeypatch):
+    """End to end through main(): users and registrations read, directoryRoles 403s."""
+    graph = _mfa_graph()
+    graph.directory_roles.error = DENIED
+    code, evidence = _run_mfa_main(graph, tmp_path, monkeypatch)
+
+    assert code == 1
     summary = evidence["summary"]
     assert summary["admin_role_membership_readable"] is False
     assert summary["admin_users"] is None
@@ -318,4 +359,118 @@ def test_denied_directory_roles_fails_the_run_with_null_admin_figures(tmp_path, 
     (user,) = evidence["results"]["users"]
     assert user["is_admin"] is True  # the report's flag is still honored
     assert user["privileged_directory_roles"] is None
-    assert json.loads(status_file.read_text())["code"] == "not_authorized"
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+
+
+# --- azure_entra_privileged_roles: service principals come from the cast ------
+
+def _roles_graph(members, service_principals, cast_error=None):
+    """members/service_principals: role id -> items; the cast is /members/microsoft.graph.servicePrincipal."""
+    graph = FakeGraph(roles=[_role("r-sr", "Security Reader"), _role("r-dr", "Directory Readers")],
+                      role_members=members, group_members={})
+    for rid, builder in graph.role_members.items():
+        builder.graph_service_principal = Builder(service_principals.get(rid, []), error=cast_error)
+    return graph
+
+
+def _collect_roles(monkeypatch, graph):
+    async def fake_with_graph_client(collector, cred, work, default=None):
+        return await work(graph)
+
+    async def fake_tenant(collector, client):
+        return {"tenant_id": "t-1", "tenant_source": "env"}
+
+    monkeypatch.setattr(privileged_roles, "with_graph_client", fake_with_graph_client)
+    monkeypatch.setattr(privileged_roles, "resolve_tenant", fake_tenant)
+    collector = privileged_roles.Collector(logging.getLogger("test_entra_privileged_roles"))
+    roles, _, roles_read = asyncio.run(privileged_roles._collect(collector, object()))
+    return collector, {r["display_name"]: r for r in roles}, privileged_roles.summarize(roles, roles_read)
+
+
+def test_service_principals_the_members_list_leaves_out_are_read_from_the_cast(monkeypatch):
+    # v1.0 members leaves sp-hidden out; the cast's items may carry no @odata.type.
+    graph = _roles_graph(
+        members={"r-sr": [_obj("g-sec", "group"), _obj("sp-listed", "servicePrincipal")],
+                 "r-dr": [_obj("g-sec", "group")]},
+        # The cast repeating an id still lists it once.
+        service_principals={"r-sr": [ns(id="sp-listed", odata_type=None), ns(id="sp-hidden", odata_type=None),
+                                     ns(id="sp-hidden", odata_type=None)],
+                            "r-dr": [ns(id="sp-hidden", odata_type=None)]},
+    )
+    collector, roles, summary = _collect_roles(monkeypatch, graph)
+
+    assert collector.ok
+    reader = roles["Security Reader"]
+    assert sorted(m["id"] for m in reader["members"]) == ["g-sec", "sp-hidden", "sp-listed"]
+    assert reader["service_principal_member_count"] == 2 and reader["service_principal_members_read"] is True
+    assert summary["service_principals_in_privileged_roles"] == 2
+    assert summary["privileged_role_assignments"] == 3 and summary["total_role_assignments"] == 5
+
+
+def test_a_failed_cast_leaves_the_service_principal_count_unknown(monkeypatch):
+    graph = _roles_graph(members={"r-sr": [_obj("g-sec", "group")], "r-dr": []}, service_principals={},
+                         cast_error=DENIED)
+    collector, roles, summary = _collect_roles(monkeypatch, graph)
+
+    assert not collector.ok and privileged_roles.classify_failure_code(collector.failures) == "not_authorized"
+    assert roles["Security Reader"]["service_principal_members_read"] is False
+    assert summary["service_principals_in_privileged_roles"] is None
+    assert summary["groups_in_privileged_roles"] == 1
+    # Every count of all holders takes service principals from the cast, so it reads null too.
+    for key in ("total_role_assignments", "distinct_principals_with_a_directory_role",
+                "privileged_role_assignments", "distinct_privileged_principals", "privileged_roles_with_members",
+                "privileged_role_names_assigned", "roles_with_no_members", "privileged_assignment_percentage"):
+        assert summary[key] is None, key
+    assert summary["users_in_privileged_roles"] == 0 and summary["total_directory_roles_activated"] == 2
+
+
+def test_a_failed_members_read_leaves_the_figures_it_feeds_unknown(monkeypatch):
+    graph = _roles_graph(members={"r-sr": [_obj("g-sec", "group")], "r-dr": [_obj("u-1", "user")]},
+                         service_principals={})
+    graph.role_members["r-sr"].error = DENIED
+    collector, roles, summary = _collect_roles(monkeypatch, graph)
+
+    assert not collector.ok and roles["Security Reader"]["members_read"] is False
+    assert summary["privileged_role_assignments"] is None and summary["groups_in_privileged_roles"] is None
+    assert summary["total_role_assignments"] is None and summary["privileged_assignment_percentage"] is None
+    # The cast was read, so the service principal count still stands.
+    assert summary["service_principals_in_privileged_roles"] == 0
+    assert summary["total_directory_roles_activated"] == 2 and summary["privileged_roles_activated"] == 1
+
+    # A role outside the privileged list leaves the privileged figures known.
+    graph = _roles_graph(members={"r-sr": [_obj("g-sec", "group")], "r-dr": [_obj("u-1", "user")]},
+                         service_principals={})
+    graph.role_members["r-dr"].error = DENIED
+    _, _, summary = _collect_roles(monkeypatch, graph)
+    assert summary["privileged_role_assignments"] == 1 and summary["total_role_assignments"] is None
+
+
+def test_a_failed_role_list_leaves_every_figure_unknown(monkeypatch):
+    graph = _roles_graph(members={}, service_principals={})
+    graph.directory_roles.error = DENIED
+    collector, roles, summary = _collect_roles(monkeypatch, graph)
+
+    assert not collector.ok and roles == {}
+    assert set(summary.values()) == {None}
+
+
+def test_a_failed_users_read_leaves_every_figure_null(tmp_path, monkeypatch):
+    graph = _mfa_graph()
+    graph.users.error = DENIED
+    code, evidence = _run_mfa_main(graph, tmp_path, monkeypatch)
+
+    assert code == 1
+    summary = evidence["summary"]
+    assert summary.pop("admin_role_membership_readable") is True
+    assert set(summary.values()) == {None}
+
+
+def test_a_failed_registration_read_leaves_its_figures_null(tmp_path, monkeypatch):
+    graph = _mfa_graph()
+    graph.reports.authentication_methods.user_registration_details.error = DENIED
+    code, evidence = _run_mfa_main(graph, tmp_path, monkeypatch)
+
+    assert code == 1
+    summary = evidence["summary"]
+    assert all(summary[k] is None for k in mfa_status.REGISTRATION_FIGURES)
+    assert summary["total_users"] == 1 and summary["enabled_users"] == 1 and summary["admin_users"] == 0

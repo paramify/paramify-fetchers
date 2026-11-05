@@ -1,5 +1,5 @@
 name: azure_front_door_origins
-version: 0.5.0
+version: 0.8.0
 description: >-
   Shows whether Front Door's in-scope back ends span two healthy, serving regions, are reached securely, accept traffic only through their own profile, and have a regional twin with enough capacity.
 category: azure
@@ -15,12 +15,13 @@ config_schema:
       30; a larger value is clamped to 30 with a warning. The window ends at the
       last whole hour.
   scope_exclusions:
-    type: string
+    type: patterns
+    prefixes: [route]
     required: false
     env: AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS
     description: >
       Parts of Front Door to leave out of scope, as case-insensitive glob patterns
-      separated by commas or spaces, matched against custom-domain and endpoint host
+      listed in the manifest, matched against custom-domain and endpoint host
       names (* matches any run of characters, dots included, ? one character, and [
       ] one character from a set, such as [0-9]). A pattern starting route:
       (route:qa-*) matches route names instead; a pattern without it never matches a
@@ -28,7 +29,37 @@ config_schema:
       a route: pattern matches its name or every host it serves is out; an origin
       group when every route reaching it is out of scope; an app when only
       out-of-scope groups reach it. Each is listed under excluded and left out of
-      every verdict and count. Can be ${env:VAR}. Empty: everything is in scope.
+      every verdict and count. Each item is a pattern, or a pattern with a reason.
+      Empty: everything is in scope.
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Front Door profile is listed under excluded with the
+      pattern and left out of every count and verdict, with its endpoints,
+      routes, origin groups, origins and health; its metrics are not read, nor
+      the access restrictions of apps only it reaches. A profile is global, so
+      location: matches one only as location:global. Its routes and origins are
+      still read, so an in-scope production app it fronts stays behind Front Door
+      and keeps its regional twins; as with an out-of-scope route, it can't vouch
+      for an app that admits its Front Door id. A production app is also listed
+      under excluded when a pattern matches its own resource group, region or id.
+      An in-scope origin whose app or other back end is excluded stays and keeps
+      every verdict. The scope_exclusions patterns then apply to the profiles left
+      in scope. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -82,6 +113,7 @@ evidence_set:
     Script: azure/front_door_origins/fetcher.py
 
     Access: Reader on the subscription. Optional: Reader on other subscriptions holding origin apps; without it, those origins read as not visible and not locked.
+    Azure Government: when AZURE_AUTHORITY_HOST is login.microsoftonline.us, the fetcher reads Microsoft.Cdn from management.usgovcloudapi.net with API version 2025-12-01, because Azure Government does not offer the public-cloud versions yet. The evidence records the version actually used. That version does not return an origin's certificate_name_check_validation_mode or token_destination_header, so both read null there; no summary field uses them.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
@@ -96,17 +128,17 @@ evidence_set:
     - Resource Graph: Resources | where type =~ 'microsoft.web/sites' — every App Service app in the subscription, and each origin's app or slot, with its public network access and plan
     - Resource Graph: Resources | where type =~ 'microsoft.web/serverfarms' — each app's plan capacity and zone redundancy
     - web_apps.get_configuration() or get_configuration_slot() (per origin app an in-scope origin group reaches) — the app's access restrictions and those of its Kudu (scm) site
-    - metrics.list() for OriginHealthPercentage and OriginRequestCount (per profile) — hourly health and request count of each origin over the lookback window
+    - metrics.list() for OriginHealthPercentage and OriginRequestCount (per in-scope profile) — hourly health and request count of each origin over the lookback window
 
-    Output: azure_front_door_origins_<subscription>.json — each origin group with its origins, regions and connection settings, its measured health and traffic per region, each App Service origin with whether only its Front Door profile can reach it, each app with its regional twin, and the domains, routes, origin groups and apps left out of scope with the pattern that took each out.
+    Output: azure_front_door_origins_<subscription>.json — each origin group with its origins, regions and connection settings, its measured health and traffic per region, each App Service origin with whether only its Front Door profile can reach it, each app with its regional twin, and the profiles, domains, routes, origin groups and apps left out of scope with the pattern that took each out.
 
     Summary fields:
 
     What was checked?
-    - total_front_door_profiles — Number of Front Door Standard and Premium profiles
-    - premium_profiles — Number of Front Door Premium profiles
-    - standard_profiles — Number of Front Door Standard profiles
-    - skipped_profiles_by_sku — Number of classic CDN profiles skipped, for each SKU
+    - total_front_door_profiles — Number of in-scope Front Door Standard and Premium profiles
+    - premium_profiles — Number of in-scope Front Door Premium profiles
+    - standard_profiles — Number of in-scope Front Door Standard profiles
+    - skipped_profiles_by_sku — Number of classic CDN profiles skipped, for each SKU, whatever the patterns
     - total_origin_groups — Number of in-scope origin groups across all profiles (out-of-scope ones are counted in excluded_origin_groups)
     - serving_origin_groups — Number of in-scope origin groups that serve traffic: an enabled in-scope route on an enabled endpoint sends requests to the group, directly or through a rule-set override
     - unused_origin_groups — Number of in-scope origin groups that no serving route reaches
@@ -121,6 +153,13 @@ evidence_set:
     - origin_api_version — What the fetcher reads origins and origin groups with: the Front Door API version
     - provider_registration_status — Whether Microsoft.Cdn is registered on the subscription: registered, not_registered or unknown
 
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no Front Door profile or production app, such as a mistyped name
+    - excluded_profiles — Number of Front Door profiles left out of scope because a pattern matched their resource group or id (or location:global); each is listed under excluded with the pattern, and no other count includes them or their origin groups, origins and health. Their routes and origins still put an in-scope production app behind Front Door and give it regional twins, but they don't vouch for an app that admits their Front Door id; null if the profile list couldn't be read
+    - excluded_production_apps — Number of production apps left out of scope because a pattern matched their resource group, region or id; an in-scope origin pointing at one stays and keeps every verdict; null if the subscription's app list couldn't be read
+    - in_scope_profiles — Number of Front Door profiles read and in scope; 0 means there are none or the patterns took out every one, which a check can catch by requiring more than 0; null if the profile list couldn't be read
+
     Which parts of Front Door are left out of scope?
     - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against custom-domain and endpoint host names (azurefd.net), or against route names when they start route:. A route is in scope unless a route: pattern matches its name or every host it serves matches (its custom domains, plus the endpoint's own host name when the route links it); an origin group is in scope unless every route that reaches it is out of scope (a group no route reaches stays in scope); a production app is in scope unless only out-of-scope groups reach it. Verdicts on an in-scope group use only its in-scope routes. Empty when none are set, so everything is in scope
     - scope_exclusion_patterns_unmatched — List of configured patterns that matched no custom-domain host name, endpoint host name or route name, such as a mistyped name
@@ -134,7 +173,7 @@ evidence_set:
     - in_scope_endpoints — Number of endpoints whose own host name no pattern matches
     - in_scope_routes — Number of routes in scope
     - in_scope_origin_groups — Number of origin groups in scope
-    - in_scope_apps — Number of production apps in scope
+    - in_scope_apps — Number of production apps in scope, after both resource_exclusions and scope_exclusions
 
     Does more than one region serve traffic?
     - serving_regions — List of regions holding an active origin in a serving group (active = enabled at the group's best priority)
@@ -181,7 +220,7 @@ evidence_set:
     - serving_app_service_origins_non_front_door_allow_rule — Number of serving App Service origins whose app allows a public caller other than Front Door, such as an IP range or subnet
     - serving_app_service_origins_front_door_rule_without_fdid — Number of serving App Service origins whose app allows the Front Door service tag without an X-Azure-FDID header, so any customer's Front Door can reach it
     - serving_app_service_origins_unknown_front_door_id_allowed — Number of serving App Service origins whose app allows a Front Door id that no profile in the subscription has
-    - serving_app_service_origins_other_front_door_id_allowed — Number of serving App Service origins whose app allows the Front Door id of another profile in the subscription that doesn't serve the app, which can bypass the serving profile's WAF
+    - serving_app_service_origins_other_front_door_id_allowed — Number of serving App Service origins whose app allows the Front Door id of another profile in the subscription that doesn't serve the app through an in-scope group (an excluded profile never vouches), which can bypass the serving profile's WAF
     - serving_app_service_origins_profile_front_door_id_not_allowed — Number of serving App Service origins reached over the public internet whose app's rules don't admit the origin's own profile
     - serving_app_service_origins_profile_front_door_id_unknown — Number of serving App Service origins reached over the public internet whose profile's Front Door id couldn't be read
     - serving_app_service_origins_scm_public_access_unrestricted — Number of serving App Service origins whose app's Kudu (scm) site, the deployment and console endpoint, lets any public caller in through its own rules (an "Allow all" rule, an allow default, or no rules) rather than using the main site's

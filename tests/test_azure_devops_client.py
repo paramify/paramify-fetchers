@@ -110,6 +110,16 @@ def test_iter_lets_a_caller_stop_before_the_next_page():
     assert len(s.calls) == 1
 
 
+def test_pages_yields_each_page_whole():
+    path = "dev.azure.com/contoso/_apis/projects"
+    c, s = client({
+        (path, None): Resp(body={"value": [{"id": 1}, {"id": 2}]}, headers={"x-ms-continuationtoken": "t2"}),
+        (path, "t2"): Resp(body={"value": [{"id": 3}]}),
+    })
+    assert [[p["id"] for p in page] for page in c.pages("_apis/projects")] == [[1, 2], [3]]
+    assert len(s.calls) == 2
+
+
 def test_same_host_next_link_is_followed():
     c, s = client({
         "dev.azure.com/contoso/_apis/things": Resp(body={"value": [1], "nextLink": f"{ORG}/_apis/things2?skip=1"}),
@@ -163,6 +173,15 @@ def test_project_not_found_or_hidden_is_not_authorized():
     with pytest.raises(dr.DevOpsError) as err:
         c.list("x/_apis/build/definitions")
     assert err.value.failure_code == "not_authorized"
+
+
+def test_an_unreadable_changeset_is_not_authorized_and_not_retried():
+    body = {"message": "TF14098: Access Denied: User x needs Read permission(s) for at least one item in changeset 7."}
+    c, session = client({"dev.azure.com/contoso/_apis/tfvc/changesets/7": Resp(500, body)})
+    with pytest.raises(dr.DevOpsError) as err:
+        c.get("_apis/tfvc/changesets/7")
+    assert (err.value.code, err.value.failure_code) == ("TF14098", "not_authorized")
+    assert len(session.calls) == 1
 
 
 def test_sign_in_page_with_203_is_an_auth_failure():

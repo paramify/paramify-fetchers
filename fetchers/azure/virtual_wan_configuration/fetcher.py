@@ -29,6 +29,8 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 from vpn_crypto import (  # noqa: E402
     VIRTUAL_WAN_DEFAULT_WEAK,
     effective_weak_algorithms,
@@ -244,7 +246,43 @@ COLLECTIONS = (
 )
 
 
-def collect(subscription_id, cred, collector: Collector) -> dict:
+# Collection -> (the raw attribute naming the parent, the parent collection, the parent's kind).
+PARENTS = {
+    "virtual_hubs": ("virtual_wan", "virtual_wans"),
+    "vpn_gateways": ("virtual_hub", "virtual_hubs"),
+    "p2s_vpn_gateways": ("virtual_hub", "virtual_hubs"),
+    "vpn_sites": ("virtual_wan", "virtual_wans"),
+}
+KINDS = {"virtual_wans": "virtual_wan", "virtual_hubs": "virtual_hub", "vpn_gateways": "vpn_gateway",
+         "vpn_sites": "vpn_site", "p2s_vpn_gateways": "p2s_vpn_gateway",
+         "vpn_server_configurations": "vpn_server_configuration"}
+
+
+def scope(key: str, rows: list, gone: dict, exclusions: ResourceExclusions) -> tuple[list, list[dict]]:
+    """rows are (record, parent id) pairs. A record leaves on its own match or with its excluded parent; `gone`
+    maps each collection to its excluded ids and the entry that removed them."""
+    kept, excluded = [], []
+    parent_key = PARENTS.get(key)
+    for record, parent_id in rows:
+        pattern = exclusions.match(record["id"], record.get("location"))
+        parent = gone.get(parent_key[1], {}).get((parent_id or "").lower()) if parent_key else None
+        if pattern is not None:
+            reason, by, extra = "resource_matched", pattern, {}
+        elif parent is not None and parent_key:
+            reason, by, extra = f"{KINDS[parent_key[1]]}_matched", parent["pattern"], {"matched_id": parent["id"]}
+        else:
+            kept.append(record)
+            continue
+        entry = excluded_item(KINDS[key], record["name"], by, reason, id=record["id"],
+                              resource_group=record["resource_group"], location=record.get("location"), **extra)
+        excluded.append(entry)
+        gone.setdefault(key, {})[(record["id"] or "").lower()] = entry
+    return kept, excluded
+
+
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None) -> dict:
+    """Each collection's records; None for a list that wasn't read."""
     def _client():
         from azure.mgmt.network import NetworkManagementClient  # lazy
 
@@ -253,17 +291,35 @@ def collect(subscription_id, cred, collector: Collector) -> dict:
         )
 
     client = collector.guard("network.NetworkManagementClient (init)", _client)
-    results = {key: [] for key, _, _ in COLLECTIONS}
+    results: dict = {key: None for key, _, _ in COLLECTIONS}
     if client is None:
         return results
+    gone: dict = {}
     for key, operation, project in COLLECTIONS:
-        records = collector.guard(
+        parent_attr = PARENTS.get(key, (None,))[0]
+        rows = collector.guard(
             f"network.{operation}.list",
-            lambda: [with_common(project(r)) for r in getattr(client, operation).list()],
-            default=[],
+            lambda: [(with_common(project(r)), model_attr(model_attr(r, parent_attr), "id") if parent_attr else None)
+                     for r in getattr(client, operation).list()],
         )
-        results[key] = sorted(records, key=lambda r: r.get("id") or "")
+        if rows is None:
+            continue
+        rows = sorted(rows, key=lambda r: r[0].get("id") or "")
+        if exclusions:
+            records, out = scope(key, rows, gone, exclusions)
+            if excluded is not None:
+                excluded += out
+        else:
+            records = [r for r, _ in rows]
+        results[key] = records
     return results
+
+
+def counted(key: str, listed: set, exclusions: ResourceExclusions) -> bool:
+    """Whether a collection's in-scope count is known: its list was read and, with patterns set, so were its
+    ancestors', since a record leaves with its excluded parent."""
+    parent = PARENTS.get(key)
+    return key in listed and (not (exclusions and parent) or counted(parent[1], listed, exclusions))
 
 
 def main() -> int:
@@ -281,15 +337,18 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    results = {key: [] for key, _, _ in COLLECTIONS}
+    results: dict = {key: None for key, _, _ in COLLECTIONS}
     registration = REGISTRATION_UNKNOWN
+    excluded: list = []
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
     if subscription_id and cred is not None:
         registration = provider_registration_status(
             collector, subscription_id, cred, "Microsoft.Network"
         )
         if registration == NOT_REGISTERED:
             logger.warning("Microsoft.Network is not registered on subscription %s", subscription_id)
-        results = collect(subscription_id, cred, collector)
+        results = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -299,12 +358,20 @@ def main() -> int:
             ),
         )
 
+    exclusions.warn_unmatched(logger)
+    listed = {key for key, rows in results.items() if rows is not None}
+    results = {key: rows or [] for key, rows in results.items()}
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={**results, "provider_registration_status": registration},
-        summary={**summarize(results), "provider_registration_status": registration},
+        results={**results, "provider_registration_status": registration, "excluded": excluded},
+        summary={
+            **summarize(results),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, tuple(KINDS.values()), {
+                key: len(rows) if counted(key, listed, exclusions) else None for key, rows in results.items()}),
+        },
     )
     filename = (
         f"azure_virtual_wan_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"

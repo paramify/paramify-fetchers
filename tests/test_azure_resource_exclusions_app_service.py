@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace as ns
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
 sys.path.insert(0, str(AZURE / "_shared"))
@@ -32,6 +34,7 @@ def _load(name):
 config_fetcher = _load("app_service_configuration")
 plans_fetcher = _load("app_service_plans")
 backups_fetcher = _load("app_service_backups")
+deployments_fetcher = _load("app_service_deployments")
 
 
 def _site_id(rg: str, name: str) -> str:
@@ -360,3 +363,179 @@ def test_backups_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence = run_backups(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["summary"]["total_web_apps"] == 3
+
+
+# --- azure_app_service_deployments ---
+
+# (group, site, region, kind) -> its slots.
+DEPLOY_SITES = [(IN_RG, "web-in", "regionwest", "app", ["stage", "qa"]),
+                (OUT_RG, "web-out", "regionwest", "app", ["stage"]),
+                (IN_RG, "web-east", "regioneast", "app", ["stage"]),
+                (IN_RG, "web-id", "regionwest", "app", ["stage"]),
+                (IN_RG, "func-in", "regionwest", "functionapp", []),
+                (OUT_RG, "func-out", "regionwest", "functionapp", [])]
+SWAP = "Microsoft.Web/sites/slots/slotsSwap/action"
+PUBLISH = "Microsoft.Web/sites/publishxml/action"
+PACKAGE = "Microsoft.Web/sites/extensions/write"
+# (operation, group, the path below sites/): one request each.
+DEPLOY_EVENTS = [
+    (SWAP, IN_RG, "web-in/slots/stage"),
+    (SWAP, IN_RG, "web-in/slots/qa"),
+    (SWAP, OUT_RG, "web-out/slots/stage"),
+    (PUBLISH, IN_RG, "web-east"),
+    (PUBLISH, IN_RG, "web-id"),
+    (PACKAGE, OUT_RG, "func-out/extensions/MSDeploy"),
+    (PUBLISH, OUT_RG, "deleted-out"),
+    (PUBLISH, IN_RG, "deleted-in"),
+    (PUBLISH, IN_RG, "func-in"),
+]
+DEPLOY_SCOPE = f"rg:rg-out, location:regioneast, id:{_site_id(IN_RG, 'web-id')}, " \
+               f"id:{_site_id(IN_RG, 'web-in')}/slots/qa, rg:typo"
+DEPLOY_BOUNDARY = ["boundary_excluded_web_apps", "boundary_excluded_function_apps",
+                   "boundary_excluded_deployment_slots", "in_scope_web_apps"]
+
+
+def _deploy_site(rg, name, location, kind="app"):
+    return ns(id=_site_id(rg, name), name=name, kind=kind, location=location, state="Running", https_only=True,
+              client_cert_enabled=None, public_network_access="Enabled")
+
+
+def _deploy_client(reads):
+    regions = {name: (rg, location) for rg, name, location, _, _ in DEPLOY_SITES}
+    slots = {name: names for _, name, _, _, names in DEPLOY_SITES}
+
+    def read(value):
+        def fn(resource_group_name, name, slot=None):
+            reads.append(f"{name}/{slot}" if slot else name)
+            return value(name) if callable(value) else value
+        return fn
+
+    def list_slots(name):
+        rg, location = regions[name]
+        return [ns(**{**vars(_deploy_site(rg, f"{name}/{s}", location)), "id": f"{_site_id(rg, name)}/slots/{s}"})
+                for s in slots[name]]
+
+    source = ns(repo_url=None, branch=None)
+    return ns(web_apps=ns(
+        list=lambda: [_deploy_site(rg, name, location, kind) for rg, name, location, kind, _ in DEPLOY_SITES],
+        list_deployments=read([]), list_deployments_slot=read([]),
+        get_source_control=read(source), get_source_control_slot=read(source),
+        list_slots=read(list_slots),
+        get_configuration=read(ns(min_tls_version="1.2")), get_configuration_slot=read(ns(min_tls_version="1.2")),
+    ))
+
+
+def _deploy_event(op, rg, path, correlation, status="Succeeded", caller="releaser@example.com", idtyp="user",
+                  when=NOW):
+    return ns(operation_name=ns(value=op), status=ns(value=status), caller=caller,
+              claims={"idtyp": idtyp} if idtyp else {}, resource_id=f"{rg}/providers/Microsoft.Web/sites/{path}",
+              correlation_id=correlation, event_data_id=f"ev-{correlation}-{path}-{status}", event_timestamp=when)
+
+
+def run_deployments(monkeypatch, tmp_path, patterns, events=None):
+    if events is None:
+        events = [_deploy_event(op, rg, path, f"corr-{i}") for i, (op, rg, path) in enumerate(DEPLOY_EVENTS)]
+    reads: list = []
+    failures: list = []
+    m = deployments_fetcher
+    _common(m, monkeypatch, tmp_path, patterns)
+    monkeypatch.delenv("AZURE_APP_SERVICE_ACTIVITY_LOG_DAYS", raising=False)
+    monkeypatch.setattr(m, "credential", lambda: object())
+    monkeypatch.setattr(m, "web_client", lambda *a: _deploy_client(reads))
+    monkeypatch.setattr(m, "monitor_client", lambda *a: ns(activity_logs=ns(list=lambda filter: iter(events))))
+    monkeypatch.setattr(m, "report_failure", lambda reason, code: failures.append(code))
+    code = m.main()
+    evidence = json.loads((tmp_path / "azure_app_service_deployments_s1.json").read_text())
+    return code, evidence, set(reads), failures
+
+
+def test_deployments_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+    code, evidence, reads, _ = run_deployments(monkeypatch, tmp_path, None)
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0 and results["excluded"] == []
+    assert reads == {"web-in", "web-in/stage", "web-in/qa", "web-out", "web-out/stage", "web-east", "web-east/stage",
+                     "web-id", "web-id/stage"}
+    expected = deployments_fetcher.summarize(results["web_apps"], 2, results["activity_log"])
+    assert set(summary) - set(expected) == NEW_FIELDS | {"provider_registration_status", *DEPLOY_BOUNDARY}
+    assert [summary[k] for k in DEPLOY_BOUNDARY] == [0, 0, 0, 4]
+    assert summary["resource_exclusion_patterns"] == summary["resource_exclusion_patterns_unmatched"] == []
+    assert (summary["total_web_apps"], summary["total_deployment_slots"], summary["excluded_function_apps"]) == (4, 5, 2)
+    assert (summary["slot_swaps"], summary["publish_profile_downloads"]) == (3, 2)
+    assert summary["deployment_activity_on_unlisted_sites"] == 4
+    assert summary["slots_matching_production"] == 5
+    assert results["activity_log"]["requests_on_excluded_sites"] == dict.fromkeys(deployments_fetcher.ACTIVITY_CATEGORIES, 0)
+
+
+def test_deployments_exclude_by_group_region_and_id_and_read_nothing_for_them(monkeypatch, tmp_path):
+    code, evidence, reads, _ = run_deployments(monkeypatch, tmp_path, DEPLOY_SCOPE)
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0
+    assert reads == {"web-in", "web-in/stage"}
+    assert [a["name"] for a in results["web_apps"]] == ["web-in"]
+    assert [s["name"] for s in results["web_apps"][0]["slots"]] == ["stage"]
+    assert sorted((e["kind"], e["name"], e["pattern"]) for e in results["excluded"]) == [
+        ("deployment_slot", "web-in/qa", f"id:{_site_id(IN_RG, 'web-in')}/slots/qa"),
+        ("function_app", "func-out", "rg:rg-out"),
+        ("web_app", "web-east", "location:regioneast"),
+        ("web_app", "web-id", f"id:{_site_id(IN_RG, 'web-id')}"),
+        ("web_app", "web-out", "rg:rg-out"),
+    ]
+    assert results["excluded"][0] == {"kind": "web_app", "name": "web-east", "pattern": "location:regioneast",
+                                      "reason": "resource_matched", "id": _site_id(IN_RG, "web-east"),
+                                      "resource_group": "rg-in", "location": "regioneast"}
+    assert [summary[k] for k in DEPLOY_BOUNDARY] == [3, 1, 1, 1]
+    # Out of the boundary by pattern, versus in scope but not a web app.
+    assert (summary["total_web_apps"], summary["excluded_function_apps"]) == (1, 1)
+    assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
+
+
+def test_deployments_leave_out_an_excluded_apps_slots_and_activity_log_events(monkeypatch, tmp_path):
+    code, evidence, reads, _ = run_deployments(monkeypatch, tmp_path, DEPLOY_SCOPE)
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0
+    # Only web-in/stage is compared with production; the excluded qa slot and every excluded app's slots are not.
+    assert (summary["total_deployment_slots"], summary["slots_matching_production"], summary["apps_with_slots"]) == (
+        1, 1, 1)
+    assert not {"web-in/qa", "web-out/stage", "web-east/stage", "web-id/stage"} & reads
+    # The swap on web-in/stage stays; events on excluded apps, slots and sites leave every count.
+    assert (summary["slot_swaps"], summary["publish_profile_downloads"], summary["package_deployments"]) == (1, 0, 0)
+    assert summary["deployment_activity_by_caller_type"] == {"user": 1}
+    # deleted-in and func-in are unlisted but in scope; deleted-out matches rg:rg-out by its id alone.
+    assert summary["deployment_activity_on_unlisted_sites"] == 2
+    assert results["activity_log"]["requests_on_excluded_sites"] == {
+        "slot_swaps": 2, "publish_profile_downloads": 3, "publishing_credential_reads": 0, "package_deployments": 1}
+    assert results["web_apps"][0]["slots"][0]["activity"]["slot_swaps"]["count"] == 1
+
+
+@pytest.mark.parametrize("patterns", ["rg-out", "region:regioneast", "rg:rg-out, scope:x"])
+def test_deployments_bare_or_unknown_pattern_fails_the_run_as_bad_config(monkeypatch, tmp_path, patterns):
+    code, evidence, _, failures = run_deployments(monkeypatch, tmp_path, patterns)
+    assert code == 1 and failures == ["bad_config"]
+    assert [f["operation"] for f in evidence["metadata"]["api_failures"]] == [f"config {ENV}"]
+
+
+QA_SWAP = (SWAP, IN_RG, "web-in/slots/qa")
+PROD_SWAP = ("Microsoft.Web/sites/slotsSwap/action", IN_RG, "web-in")
+PLATFORM = {"caller": "Microsoft.Web", "idtyp": None}
+
+
+@pytest.mark.parametrize("rows, on_production, excluded_swaps", [
+    # Requested on the excluded slot; production logs a row naming the user too, or only the platform's.
+    ([(QA_SWAP, {}), (PROD_SWAP, {})], 0, 1),
+    ([(QA_SWAP, {}), (PROD_SWAP, PLATFORM)], 0, 1),
+    # Requested on production; the excluded slot logs only the platform's row.
+    ([(PROD_SWAP, {}), (QA_SWAP, PLATFORM)], 1, 0),
+])
+def test_deployments_count_a_swap_with_an_excluded_slot_once_on_the_requesters_site(
+        monkeypatch, tmp_path, rows, on_production, excluded_swaps):
+    # One swap between in-scope web-in and its id:-excluded qa slot, logged on both under one correlation id.
+    events = [_deploy_event(*where, "swap-1", when=NOW + timedelta(minutes=i), **kwargs)
+              for i, (where, kwargs) in enumerate(rows)]
+    code, evidence, _, _ = run_deployments(monkeypatch, tmp_path, DEPLOY_SCOPE, events)
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0
+    assert results["web_apps"][0]["activity"]["slot_swaps"]["count"] == on_production
+    assert (summary["slot_swaps"], summary["apps_with_slot_swaps"]) == (on_production, on_production)
+    assert summary["deployment_activity_by_caller_type"] == ({"user": 1} if on_production else {})
+    assert summary["deployment_activity_on_unlisted_sites"] == 0
+    assert results["activity_log"]["requests_on_excluded_sites"]["slot_swaps"] == excluded_swaps

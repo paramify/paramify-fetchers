@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import pytest
 
@@ -288,6 +288,56 @@ def test_identities_are_resolved_in_batches(tmp_path, monkeypatch):
     assert [len(b) for b in batches] == [3, 3, 1]
     assert all(p["queryMembership"] == "None" for _, _, path, p in fake.calls if path.endswith("/_apis/identities"))
     assert evidence["summary"]["unresolved_identities"] == 1
+
+
+def test_identity_batches_keep_the_query_short(tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "IDENTITY_QUERY_CHARS", 120)
+    _, evidence, _, fake = run(tmp_path)
+    queries = [p["descriptors"] for _, _, path, p in fake.calls if path.endswith("/_apis/identities")]
+    assert len(queries) > 1 and all(len(quote(q, safe="")) <= 120 for q in queries if "," in q)
+    assert evidence["summary"]["unresolved_identities"] == 1
+
+
+def test_a_404_batch_is_split_and_an_unknown_descriptor_is_not_a_failure(tmp_path):
+    # Azure DevOps answers 404 to a descriptors query that is too long; here, to more than two descriptors.
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = lambda params: (
+        err(404, "Not Found") if params["descriptors"].count(",") > 1
+        or params["descriptors"] not in IDENTITIES and "," not in params["descriptors"] else identities(params))
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 0 and status is None and evidence["metadata"]["api_failures"] == []
+    s = evidence["summary"]
+    assert s["unresolved_identities"] == 1 and s["high_impact_grants_outside_admin_groups"] is not None
+
+
+def test_a_batch_in_which_no_descriptor_is_found_is_unread_not_unknown(tmp_path, monkeypatch):
+    # Every descriptor answering 404, as a wrong host would, must not read the admin groups as other groups.
+    monkeypatch.setattr(mod, "IDENTITY_BATCH", 4)
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = err(404, "Not Found")
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 1 and status["code"] == "internal_error"
+    assert [f["operation"] for f in evidence["metadata"]["api_failures"]] == ["identities.read(1)", "identities.read(2)"]
+    s = evidence["summary"]
+    assert s["unresolved_identities"] == 7
+    assert s["high_impact_grants_outside_admin_groups"] is None
+    assert s["identities_with_high_impact_rights_outside_admin_groups"] is None
+    pca = entry(evidence, "AuditLog", "AllPermissions", PCA)
+    assert pca["identity"]["admin_group"] is None and pca["high_impact_outside_admin_groups"] is None
+
+
+@pytest.mark.parametrize("message", [
+    "TF401019: The Git repository with name or identifier x does not exist or you do not have permissions.",
+    "VS800075: The project with id 'x' does not exist, or you do not have permission to access it.",
+])
+def test_a_404_that_hides_a_refusal_is_not_authorized_and_not_split(tmp_path, message):
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = err(404, message)
+    code, evidence, status, fake = run(tmp_path, fake)
+    assert code == 1 and status["code"] == "not_authorized"
+    assert len([1 for _, _, path, _ in fake.calls if path.endswith("/_apis/identities")]) == 1
+    s = evidence["summary"]
+    assert s["unresolved_identities"] == 7 and s["high_impact_grants_outside_admin_groups"] is None
 
 
 def test_a_project_filter_drops_other_projects_entries(tmp_path, monkeypatch):

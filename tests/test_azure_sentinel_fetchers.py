@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import logging
 import os
 import sys
 from collections import namedtuple
@@ -2148,9 +2149,44 @@ PLAYBOOK = {"id": PB, "name": "pb", "properties": {
                     "host": {"connection": {"name": "@parameters('$connections')['azuread']['connectionId']"}},
                     "method": "patch", "path": "/v1.0/users/@{encodeURIComponent('x')}",
                     "body": {"accountEnabled": False}}}}}}}}}}
+
+
+def wf_run(name, status, started, trigger="Microsoft_Sentinel_incident", error=None):
+    props = {"status": status, "startTime": iso(started), "endTime": iso(started + timedelta(seconds=40)),
+             "trigger": {"name": trigger, "status": "Succeeded"}}
+    if error:
+        props["code"], props["error"] = error, {"code": error, "message": "An action failed."}
+    return {"id": f"{PB}/runs/{name}", "name": name, "type": "Microsoft.Logic/workflows/runs", "properties": props}
+
+
+PB_RUNS = [
+    {"value": [wf_run("r-new", "Failed", NOW - timedelta(days=2), error="ActionFailed"),
+               wf_run("r-mid", "Succeeded", NOW - timedelta(days=5))],
+     "nextLink": f"https://management.azure.com{PB}/runs?api-version=2019-05-01&$skiptoken=p2"},
+    # The service filters on StartTime; a run outside the lookback still has to be left out if one comes back.
+    {"value": [wf_run("r-old", "Succeeded", NOW - timedelta(days=20)),
+               wf_run("r-stale", "Succeeded", NOW - timedelta(days=120))]},
+]
 NOT_A_PLAYBOOK = {"id": f"{RG}/providers/Microsoft.Logic/workflows/etl", "name": "etl",
                   "properties": {"state": "Enabled", "definition": {"triggers": {"Recurrence": {"type": "Recurrence"}},
                                                                      "actions": {"Compose": {"type": "Compose", "inputs": "noop"}}}}}
+
+def history_item(state, level, when, detail, initiated_by=None):
+    return {"riskState": state, "riskLevel": level, "riskDetail": detail, "riskLastUpdatedDateTime": iso(when),
+            "initiatedBy": initiated_by, "activity": {"detail": detail, "riskEventTypes": []}}
+
+
+def user_evidence(user_id=None, upn=None):
+    return {"@odata.type": "#microsoft.graph.security.userEvidence",
+            "userAccount": {"azureAdUserId": user_id, "userPrincipalName": upn}}
+
+
+def idp_alert(alert_id, created, incident_id, assigned_to, *evidence, status="new"):
+    return {"id": alert_id, "title": "Unfamiliar sign-in properties", "severity": "high", "status": status,
+            "classification": None, "determination": None, "assignedTo": assigned_to, "incidentId": incident_id,
+            "serviceSource": "azureAdIdentityProtection", "createdDateTime": iso(created), "resolvedDateTime": None,
+            "evidence": list(evidence)}
+
 
 EXTRA_ARM = {
     ("/providers/microsoft.aadiam/diagnosticSettings", "2017-04-01"): {"value": [
@@ -2195,6 +2231,8 @@ EXTRA_ARM = {
         "deleteRetentionPolicy": {"enabled": True, "days": 14}, "isVersioningEnabled": True}},
     (f"{SA}/stapp/blobServices/default/containers", "2023-05-01"): {"value": [container("images")]},
     (f"/subscriptions/{SUB}/providers/Microsoft.Logic/workflows", "2019-05-01"): {"value": [PLAYBOOK, NOT_A_PLAYBOOK]},
+    (f"{PB}/runs", "2019-05-01"): PB_RUNS[0],
+    (f"{PB}/runs", "2019-05-01", "p2"): PB_RUNS[1],
     ("/v1.0/identityProtection/riskyUsers", None): {"value": [
         {"id": "u-admin", "userPrincipalName": "admin@contoso.com", "riskLevel": "high", "riskState": "atRisk",
          "riskLastUpdatedDateTime": iso(NOW - timedelta(days=10))}],
@@ -2219,6 +2257,24 @@ EXTRA_ARM = {
     ("/v1.0/directoryRoles/role-ga/members/microsoft.graph.group", None): {"value": []},
     ("/v1.0/directoryRoles/role-dr/members/microsoft.graph.group", None): {"value": []},
     ("/v1.0/users/u-admin", None): {"id": "u-admin", "accountEnabled": True},
+    # Out of order on purpose: the fetcher sorts history oldest first.
+    ("/v1.0/identityProtection/riskyUsers/u-admin/history", None): {"value": [
+        history_item("atRisk", "high", NOW - timedelta(days=10), "none"),
+        history_item("remediated", "none", NOW - timedelta(days=40), "adminDismissedAllRiskForUser", "u-secops"),
+        history_item("atRisk", "medium", NOW - timedelta(days=45), "none")]},
+    ("/v1.0/identityProtection/riskyUsers/u-reader/history", None): {"value": [
+        history_item("atRisk", "low", NOW - timedelta(days=1), "none")]},
+    ("/v1.0/security/alerts_v2", None): {
+        "value": [
+            idp_alert("a-1", NOW - timedelta(days=10), "101", "secops@contoso.com", user_evidence(user_id="u-admin")),
+            idp_alert("a-2", NOW - timedelta(days=9), "102", None, user_evidence(upn="Admin@Contoso.com")),
+            idp_alert("a-3", NOW - timedelta(days=8), "103", None, user_evidence(user_id="u-elsewhere")),
+            # Only user evidence names the user an alert is about.
+            idp_alert("a-4", NOW - timedelta(days=7), "104", None,
+                      {"@odata.type": "#microsoft.graph.security.processEvidence", "userAccount": {"azureAdUserId": "u-reader"}})],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/security/alerts_v2?$skiptoken=p2"},
+    ("/v1.0/security/alerts_v2", None, "p2"): {"value": [
+        idp_alert("a-5", NOW - timedelta(days=1), None, None, user_evidence(user_id="U-READER"))]},
 }
 
 
@@ -2296,7 +2352,9 @@ def test_log_storage_immutability(azure, tmp_path):
     assert accounts[0]["blob_soft_delete_days"] == 14
     assert ev["summary"] == {"storage_accounts_scanned": 3, "accounts_with_log_containers": 1, "log_containers": 3,
                              "locked_policy": 1, "unlocked_policy_only": 1, "legal_hold": 0, "unprotected": 2,
-                             "min_retention_days": 30}
+                             "min_retention_days": 30, "resource_exclusion_patterns": [],
+                             "resource_exclusion_patterns_unmatched": [], "excluded_storage_accounts": 0,
+                             "excluded_containers": 0, "in_scope_storage_accounts": 3, "in_scope_containers": 3}
     assert not any("stfiles" in c[1] for c in azure.calls)
 
 
@@ -2313,6 +2371,118 @@ def test_sentinel_playbooks(azure, tmp_path):
     assert s["run_by_active_automation_rule"] == 1 and s["live_account_containment_playbooks"] == 1
     assert s["notification_recipients"] == ["secops@contoso.com"] and s["logic_apps_scanned"] == 2
     assert s["live_playbooks_without_definition"] == 0 and ev["results"]["notes"] == []
+
+
+def test_sentinel_playbooks_run_history(azure, tmp_path):
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    assert code == 0 and pb["run_history_read"] is True
+    assert pb["runs_in_lookback"] == 3 and pb["runs_by_status"] == {"Failed": 1, "Succeeded": 2}
+    assert pb["failed_runs"] == 1 and pb["last_run_status"] == "Failed"
+    assert [r["name"] for r in pb["recent_runs"]] == ["r-new", "r-mid", "r-old"]
+    assert pb["recent_runs"][0]["error_code"] == "ActionFailed" and pb["recent_runs"][1]["error_code"] is None
+    assert pb["recent_runs"][0]["trigger"] == "Microsoft_Sentinel_incident" and pb["recent_runs"][0]["end_time"]
+    assert pb["last_run_time"] == pb["recent_runs"][0]["start_time"]
+    assert pb["last_success_time"] == pb["recent_runs"][1]["start_time"]
+    assert pb["last_failure_time"] == pb["recent_runs"][0]["start_time"]
+    assert {k: ev["summary"][k] for k in RUN_SUMMARY} == {
+        "run_lookback_days": 90, "playbooks_run_history_unread": [], "live_playbooks_run_history_unread": 0,
+        "live_playbooks_last_run_succeeded": 0, "live_playbooks_last_run_failed": 1,
+        "live_playbooks_without_runs": 0, "live_playbook_failed_runs": 1}
+    assert not any(c[1].endswith("/etl/runs") for c in azure.calls)
+
+
+RUN_SUMMARY = ("run_lookback_days", "playbooks_run_history_unread", "live_playbooks_run_history_unread",
+               "live_playbooks_last_run_succeeded", "live_playbooks_last_run_failed", "live_playbooks_without_runs",
+               "live_playbook_failed_runs")
+
+
+def test_sentinel_playbooks_runs_are_filtered_on_the_lookback(azure, tmp_path, monkeypatch):
+    monkeypatch.setenv("SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS", "3")
+    filters = []
+    get = azure.get
+    azure.get = lambda url, params=None, **kw: (filters.append((params or {}).get("$filter")), get(url, params, **kw))[1]
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    since = (NOW - timedelta(days=3)).strftime("%Y-%m-%dT")
+    assert any(f and f.startswith(f"StartTime ge {since}") and f.endswith("Z") for f in filters)
+    assert code == 0 and ev["summary"]["run_lookback_days"] == 3
+    assert pb["runs_in_lookback"] == 1 and pb["last_success_time"] is None and pb["failed_runs"] == 1
+
+
+@pytest.mark.parametrize("raw, days, warned", [("30", 30, False), ("90", 90, False), ("365", 90, True), ("0", 90, False)])
+def test_sentinel_playbooks_lookback_is_capped_at_the_run_history_retention(monkeypatch, caplog, raw, days, warned):
+    monkeypatch.setenv("SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS", raw)
+    with caplog.at_level(logging.WARNING):
+        assert MODS["sentinel_playbooks"].lookback_days() == days
+    assert ("outside 1-90" in caplog.text) is warned
+
+
+def test_sentinel_playbooks_capped_lookback_is_what_the_evidence_reports(azure, tmp_path, monkeypatch):
+    monkeypatch.setenv("SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS", "365")
+    filters = []
+    get = azure.get
+    azure.get = lambda url, params=None, **kw: (filters.append((params or {}).get("$filter")), get(url, params, **kw))[1]
+    code, ev = run("sentinel_playbooks", tmp_path)
+    since = (NOW - timedelta(days=90)).strftime("%Y-%m-%dT")
+    assert code == 0 and ev["summary"]["run_lookback_days"] == 90
+    assert any(f and f.startswith(f"StartTime ge {since}") for f in filters)
+
+
+def test_sentinel_playbooks_live_playbook_without_runs(azure, tmp_path):
+    azure.arm[(f"{PB}/runs", "2019-05-01")] = {"value": []}
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    s = ev["summary"]
+    assert code == 0 and pb["runs_in_lookback"] == 0 and pb["runs_by_status"] == {} and pb["recent_runs"] == []
+    assert pb["last_run_status"] is None and pb["last_success_time"] is None and pb["failed_runs"] == 0
+    assert s["live_playbooks_without_runs"] == 1 and s["live_playbooks_last_run_failed"] == 0
+    assert s["live_playbook_failed_runs"] == 0 and s["live_playbooks_last_run_succeeded"] == 0
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_sentinel_playbooks_unreadable_runs_read_null(azure, tmp_path, status):
+    azure.arm[(f"{PB}/runs", "2019-05-01")] = Resp(status, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    s = ev["summary"]
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    assert pb["run_history_read"] is False and pb["runs_in_lookback"] is None and pb["failed_runs"] is None
+    assert pb["recent_runs"] is None and pb["last_run_status"] is None and pb["runs_by_status"] is None
+    assert s["playbooks_run_history_unread"] == [PB] and s["live_playbooks_run_history_unread"] == 1
+    assert s["live_playbooks_last_run_failed"] is None and s["live_playbooks_last_run_succeeded"] is None
+    assert s["live_playbooks_without_runs"] is None and s["live_playbook_failed_runs"] is None
+    assert PB in ev["results"]["notes"][0] and "run history" in ev["results"]["notes"][0]
+    # What the playbook does is still reported.
+    assert s["live_account_containment_playbooks"] == 1
+
+
+def test_sentinel_playbooks_other_run_read_errors_fail(azure, tmp_path):
+    azure.arm[(f"{PB}/runs", "2019-05-01")] = Resp(400, {"error": {"code": "BadRequest", "message": "bad filter"}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and ev["results"]["notes"] == []
+    assert pb["run_history_read"] is False and ev["summary"]["live_playbook_failed_runs"] is None
+
+
+def test_sentinel_playbooks_disabled_playbook_runs_are_not_live(azure, tmp_path):
+    PLAYBOOK["properties"]["state"] = "Disabled"
+    try:
+        code, ev = run("sentinel_playbooks", tmp_path)
+    finally:
+        PLAYBOOK["properties"]["state"] = "Enabled"
+    (pb,) = ev["results"]["playbooks"]
+    s = ev["summary"]
+    assert code == 0 and pb["failed_runs"] == 1 and s["run_by_active_automation_rule"] == 0
+    assert s["live_playbook_failed_runs"] == 0 and s["live_playbooks_last_run_failed"] == 0
+
+
+def test_sentinel_playbooks_runs_path():
+    mod = MODS["sentinel_playbooks"]
+    assert mod.runs_path(PB) == (f"{PB}/runs", "2019-05-01")
+    assert mod.runs_path(STD) == (
+        f"{RG}/providers/Microsoft.Web/sites/la-std/hostruntime/runtime/webhooks/workflow/api/management/workflows/contain/runs",
+        "2024-04-01")
 
 
 def test_entra_risky_users(azure, tmp_path):
@@ -2354,6 +2524,115 @@ def test_entra_risky_users_failed_group_read_leaves_privileged_figures_unknown(a
     assert ev["results"]["privileged_role_groups"] is None
 
 
+def test_entra_risky_users_history_and_alerts(azure, tmp_path):
+    filters = []
+    get = azure.get
+    azure.get = lambda url, params=None, **kw: (filters.append((params or {}).get("$filter")), get(url, params, **kw))[1]
+    code, ev = run("entra_risky_users", tmp_path)
+    assert code == 0
+    assert "serviceSource eq 'azureAdIdentityProtection'" in filters
+    users = {u["user_principal_name"]: u for u in ev["results"]["risky_users"]}
+    admin, reader, staff = users["admin@contoso.com"], users["reader@contoso.com"], users["staff@contoso.com"]
+    assert [h["risk_state"] for h in admin["risk_history"]] == ["atRisk", "remediated", "atRisk"]
+    assert admin["last_closed_risk"]["initiated_by"] == "u-secops"
+    assert admin["last_closed_risk"]["risk_detail"] == "adminDismissedAllRiskForUser"
+    # Matched on object id or UPN, ignoring case; a-3 names someone else and a-4's account isn't user evidence.
+    # a-1 was raised the moment the current risk opened, which still counts.
+    assert [a["id"] for a in admin["alerts"]] == ["a-1", "a-2"]
+    assert admin["alerts"][0]["incident_id"] == "101" and admin["alerts"][0]["assigned_to"] == "secops@contoso.com"
+    assert [a["id"] for a in reader["alerts"]] == ["a-5"] and reader["last_closed_risk"] is None
+    # Medium risk, already remediated: not followed up.
+    assert not {"risk_history", "alerts", "last_closed_risk"} & set(staff)
+    s = ev["summary"]
+    assert s["open_or_high_risk_users"] == 2 and s["risk_histories_read"] == 2
+    assert s["identity_protection_alerts"] == 5 and s["alerts_for_open_or_high_risk_users"] == 3
+    assert s["open_high_risk_users_without_alert"] == 0
+    assert s["alerts_without_owner"] == 2 and s["alerts_without_incident"] == 1
+
+
+def test_entra_risky_users_high_risk_without_alert(azure, tmp_path):
+    azure.arm[("/v1.0/security/alerts_v2", None)] = {"value": []}
+    page = azure.arm[("/v1.0/identityProtection/riskyUsers", None, "p2")]
+    azure.arm[("/v1.0/identityProtection/riskyUsers", None, "p2")] = {"value": [*page["value"], {
+        "id": "u-old", "userPrincipalName": "old@contoso.com", "riskLevel": "high", "riskState": "dismissed",
+        "riskLastUpdatedDateTime": iso(NOW - timedelta(days=60))}]}
+    azure.arm[("/v1.0/identityProtection/riskyUsers/u-old/history", None)] = {"value": [
+        history_item("dismissed", "high", NOW - timedelta(days=60), "adminDismissedAllRiskForUser", "u-secops")]}
+    code, ev = run("entra_risky_users", tmp_path)
+    old = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "old@contoso.com")
+    assert code == 0 and old["alerts"] == [] and old["last_closed_risk"]["risk_state"] == "dismissed"
+    s = ev["summary"]
+    # The dismissed user is followed up for its high level but its risk isn't open.
+    assert s["open_or_high_risk_users"] == 3 and s["open_high_risk_users_without_alert"] == 1
+    assert s["alerts_for_open_or_high_risk_users"] == 0 and s["alerts_without_owner"] == 0
+
+
+def test_entra_risky_users_alert_from_an_earlier_risk_is_not_follow_up(azure, tmp_path):
+    # Raised during the admin's risk that was remediated 40 days ago, not the one open since 10 days ago.
+    azure.arm[("/v1.0/security/alerts_v2", None)] = {"value": [
+        idp_alert("a-old", NOW - timedelta(days=42), "100", "secops@contoso.com", user_evidence(user_id="u-admin"))]}
+    code, ev = run("entra_risky_users", tmp_path)
+    admin = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "admin@contoso.com")
+    assert code == 0 and admin["alerts"] == []
+    s = ev["summary"]
+    assert s["identity_protection_alerts"] == 1 and s["alerts_for_open_or_high_risk_users"] == 0
+    assert s["open_high_risk_users_without_alert"] == 1
+
+
+def test_entra_risky_users_reopened_risk_counts_only_alerts_after_the_closure(azure, tmp_path):
+    # The reader is at risk again, but the history's last entry is the dismissal 20 days ago.
+    azure.arm[("/v1.0/identityProtection/riskyUsers/u-reader/history", None)] = {"value": [
+        history_item("atRisk", "low", NOW - timedelta(days=30), "none"),
+        history_item("dismissed", "none", NOW - timedelta(days=20), "adminDismissedAllRiskForUser", "u-secops")]}
+    page = azure.arm[("/v1.0/security/alerts_v2", None, "p2")]
+    azure.arm[("/v1.0/security/alerts_v2", None, "p2")] = {"value": [
+        *page["value"], idp_alert("a-6", NOW - timedelta(days=25), "106", None, user_evidence(user_id="u-reader"))]}
+    code, ev = run("entra_risky_users", tmp_path)
+    reader = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "reader@contoso.com")
+    assert code == 0 and [a["id"] for a in reader["alerts"]] == ["a-5"]
+
+
+def test_entra_risky_users_resolved_alerts_need_no_owner_or_incident(azure, tmp_path):
+    page = azure.arm[("/v1.0/security/alerts_v2", None, "p2")]
+    azure.arm[("/v1.0/security/alerts_v2", None, "p2")] = {"value": [*page["value"], idp_alert(
+        "a-6", NOW - timedelta(days=5), None, None, user_evidence(user_id="u-admin"), status="resolved")]}
+    code, ev = run("entra_risky_users", tmp_path)
+    admin = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "admin@contoso.com")
+    assert code == 0 and [a["id"] for a in admin["alerts"]] == ["a-1", "a-2", "a-6"]
+    s = ev["summary"]
+    # Counted as an alert for the risk, but not as one missing an owner or an incident.
+    assert s["alerts_for_open_or_high_risk_users"] == 4
+    assert s["alerts_without_owner"] == 2 and s["alerts_without_incident"] == 1
+
+
+def test_entra_risky_users_refused_alerts_fail_not_authorized(azure, tmp_path):
+    azure.arm[("/v1.0/security/alerts_v2", None)] = Resp(
+        403, {"error": {"code": "Forbidden", "message": "Missing role permissions on the request."}})
+    code, ev = run("entra_risky_users", tmp_path)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+    admin = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "admin@contoso.com")
+    assert admin["alerts"] is None and len(admin["risk_history"]) == 3
+    s = ev["summary"]
+    assert s["identity_protection_alerts"] is None and s["open_high_risk_users_without_alert"] is None
+    assert s["alerts_without_owner"] is None and s["risky_users_total"] == 3
+
+
+def test_entra_risky_users_unreadable_history_fails(azure, tmp_path):
+    azure.arm[("/v1.0/identityProtection/riskyUsers/u-reader/history", None)] = Resp(
+        500, {"error": {"code": "InternalServerError", "message": "boom"}})
+    code, ev = run("entra_risky_users", tmp_path)
+    reader = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "reader@contoso.com")
+    assert code == 1 and reader["risk_history"] is None and reader["last_closed_risk"] is None
+    # Without the history the start of the risk is unknown, so are its alerts and the counts they feed.
+    s = ev["summary"]
+    assert s["risk_histories_read"] == 1 and reader["alerts"] is None
+    assert s["alerts_for_open_or_high_risk_users"] is None and s["alerts_without_owner"] is None
+    assert s["alerts_without_incident"] is None
+    # The reader's risk is low, so the high-risk figure doesn't depend on it.
+    assert s["open_high_risk_users_without_alert"] == 0
+
+
 def test_entra_risky_users_refused_account_read_is_unknown(azure, tmp_path):
     azure.arm[("/v1.0/users/u-admin", None)] = Resp(
         403, {"error": {"code": "Authorization_RequestDenied", "message": "Insufficient privileges to complete the operation."}})
@@ -2392,6 +2671,7 @@ def test_entra_risky_users_without_p2_is_a_state(azure, tmp_path):
         403, {"error": {"code": "Forbidden", "message": "Your tenant is not licensed for this feature."}})
     code, ev = run("entra_risky_users", tmp_path)
     assert code == 0 and ev["summary"] == {"identity_protection_available": False}
+    assert not any("alerts_v2" in c[1] or "history" in c[1] for c in azure.calls)
 
 
 def test_entra_diagnostic_settings_unreadable_destination_is_unknown(azure, tmp_path):
@@ -2458,9 +2738,15 @@ def _rule_runs(azure, playbook_id):
         {"order": 2, "actionType": "RunPlaybook", "actionConfiguration": {"logicAppResourceId": playbook_id}})
 
 
+STD_RUNS = f"{RG}/providers/Microsoft.Web/sites/la-std/hostruntime/runtime/webhooks/workflow/api/management/workflows/contain/runs"
+
+
 def _run_standard_playbook(azure, envelope):
     _rule_runs(azure, STD)
     azure.arm[(STD, "2024-04-01")] = envelope
+    azure.arm[(STD_RUNS, "2024-04-01")] = {"value": [
+        wf_run("08584", "Succeeded", NOW - timedelta(hours=3), trigger="incident"),
+        wf_run("08583", "TimedOut", NOW - timedelta(days=1), trigger="incident")]}
 
 
 def test_sentinel_playbooks_standard_workflow(azure, tmp_path):
@@ -2476,6 +2762,9 @@ def test_sentinel_playbooks_standard_workflow(azure, tmp_path):
     assert code == 0 and std["plan"] == "standard" and std["definition_read"] and std["enabled"]
     assert std["triggers"][0]["kind"] == "incident" and std["capabilities"]["account_containment"]
     assert ("GET", STD, "2024-04-01") in azure.calls and ev["summary"]["standard_playbooks"] == 1
+    assert ("GET", STD_RUNS, "2024-04-01") in azure.calls and std["run_history_read"]
+    assert std["last_run_status"] == "Succeeded" and std["failed_runs"] == 1 and std["recent_runs"][0]["trigger"] == "incident"
+    assert ev["summary"]["live_playbook_failed_runs"] == 2 and ev["summary"]["live_playbooks_last_run_failed"] == 1
 
 
 def test_sentinel_playbooks_standard_workflow_without_definition(azure, tmp_path):
