@@ -63,6 +63,9 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
         meta["evidence_set"] = es_meta
     if result.inputs is not None:
         meta["inputs"] = result.inputs
+    # Only when the fetcher received a pattern: a run without patterns writes the envelope it always has.
+    if result.config_patterns:
+        meta["config_patterns"] = result.config_patterns
     return meta
 
 

@@ -1,0 +1,200 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_entra_emergency_accounts",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-06-27",
+  "reviewed": true,
+  "collections": [
+    {
+      "path": "results.emergency_accounts[]",
+      "records": 1,
+      "fields": {
+        "account_enabled": 1,
+        "alert_rules_naming_account": 0,
+        "certificate_user_ids_count": 1,
+        "covered_by_an_mfa_policy": 1,
+        "created_date_time": 1,
+        "days_since_last_successful_sign_in": 1,
+        "display_name": 1,
+        "excluded_from_an_mfa_policy": 1,
+        "excluded_from_every_all_users_mfa_policy": 1,
+        "excluded_from_mfa": 1,
+        "id": 1,
+        "last_sign_in_attempt": 1,
+        "last_successful_sign_in": 1,
+        "methods_registered": 0,
+        "mfa_policy_exclusions": 1,
+        "mfa_registered": 1,
+        "monitored": 1,
+        "multi_factor_certificate_method_applies": 1,
+        "named_as": 1,
+        "phishing_resistant_certificate": 1,
+        "phishing_resistant_method": 1,
+        "phishing_resistant_method_registered": 1,
+        "sign_in_activity_read": 1,
+        "user_principal_name": 1,
+        "user_type": 1
+      }
+    },
+    {
+      "path": "results.emergency_accounts[].mfa_policy_exclusions[]",
+      "records": 3,
+      "fields": {
+        "policy": 3,
+        "policy_id": 3,
+        "via": 3,
+        "via_id": 3
+      }
+    },
+    {
+      "path": "results.mfa_policies[]",
+      "records": 3,
+      "fields": {
+        "client_app_types": 3,
+        "counts_for_coverage": 3,
+        "display_name": 3,
+        "exclude_groups": 0,
+        "exclude_roles": 3,
+        "exclude_users": 3,
+        "excludes_guests_or_external_users": 3,
+        "id": 3,
+        "include_groups": 0,
+        "include_roles": 1,
+        "include_users": 0,
+        "includes_all_users": 3,
+        "includes_every_guest": 3,
+        "mfa_mandatory": 3,
+        "modern_client_types": 3,
+        "narrowing_conditions": 0,
+        "targets_all_applications": 3
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-06-27T10:45:14Z",
+      "environment": null,
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "emergency_accounts": [
+        {
+          "account_enabled": true,
+          "alert_rules_naming_account": [],
+          "certificate_user_ids_count": 0,
+          "covered_by_an_mfa_policy": false,
+          "created_date_time": "2024-04-17T08:10:04Z",
+          "days_since_last_successful_sign_in": 97,
+          "display_name": "Person1",
+          "excluded_from_an_mfa_policy": true,
+          "excluded_from_every_all_users_mfa_policy": true,
+          "excluded_from_mfa": true,
+          "id": "00000000-0000-4000-8000-222222222222",
+          "last_sign_in_attempt": "2026-03-22T01:22:31Z",
+          "last_successful_sign_in": "2026-03-22T02:19:58Z",
+          "methods_registered": [],
+          "mfa_policy_exclusions": [
+            {
+              "policy": "Require MFA for all users (browser)",
+              "policy_id": "00000000-0000-4000-8000-333333333333",
+              "via": "user",
+              "via_id": "00000000-0000-4000-8000-222222222222"
+            }
+          ],
+          "mfa_registered": false,
+          "monitored": false,
+          "multi_factor_certificate_method_applies": false,
+          "named_as": "user1@example.com",
+          "phishing_resistant_certificate": false,
+          "phishing_resistant_method": false,
+          "phishing_resistant_method_registered": false,
+          "sign_in_activity_read": true,
+          "user_principal_name": "user1@example.com",
+          "user_type": "Member"
+        }
+      ],
+      "emergency_accounts_not_found": [],
+      "emergency_accounts_source": "configured",
+      "evaluated_at": "2026-06-27T10:45:06Z",
+      "mfa_policies": [
+        {
+          "client_app_types": [
+            "all"
+          ],
+          "counts_for_coverage": false,
+          "display_name": "Require MFA for selected roles and apps",
+          "exclude_groups": [],
+          "exclude_roles": [
+            "00000000-0000-4000-8000-444444444444"
+          ],
+          "exclude_users": [
+            "00000000-0000-4000-8000-222222222222"
+          ],
+          "excludes_guests_or_external_users": false,
+          "id": "00000000-0000-4000-8000-555555555555",
+          "include_groups": [],
+          "include_roles": [
+            "00000000-0000-4000-8000-666666666666",
+            "00000000-0000-4000-8000-777777777777",
+            "00000000-0000-4000-8000-888888888888"
+          ],
+          "include_users": [],
+          "includes_all_users": false,
+          "includes_every_guest": false,
+          "mfa_mandatory": true,
+          "modern_client_types": [
+            "browser",
+            "mobileAppsAndDesktopClients"
+          ],
+          "narrowing_conditions": [],
+          "targets_all_applications": false
+        }
+      ],
+      "notes": [],
+      "other_users_excluded_from_mfa": [],
+      "tenant_id": "00000000-0000-4000-8000-999999999999",
+      "x509_certificate_method": {
+        "default_authentication_mode": "x509CertificateSingleFactor",
+        "exclude_targets": [],
+        "include_targets": [
+          "all_users"
+        ],
+        "multi_factor_sign_in_enabled": false,
+        "state": "disabled"
+      }
+    },
+    "summary": {
+      "emergency_accounts_source": "configured",
+      "emergency_accounts_named": 1,
+      "conditional_access_readable": true,
+      "exclusions_readable": true,
+      "coverage_readable": true,
+      "alert_rules_readable": true,
+      "preview_alert_rules_readable": true,
+      "user_sign_in_activity": "read",
+      "registration_details": "read",
+      "multi_factor_certificate_sign_in_enabled": false,
+      "enforced_mfa_policies": 3,
+      "enforced_mfa_policies_for_all_users": 2,
+      "mfa_policies_counting_for_coverage": 2,
+      "legacy_authentication_blocked_for_all_users": false,
+      "sentinel_workspaces_checked": 0,
+      "alert_rules_checked": 0,
+      "emergency_accounts": 1,
+      "emergency_accounts_not_found": 0,
+      "emergency_accounts_enabled": 1,
+      "emergency_accounts_excluded_from_every_all_users_mfa_policy": 1,
+      "emergency_accounts_with_phishing_resistant_method": 0,
+      "emergency_accounts_monitored": 0,
+      "users_excluded_from_an_mfa_policy": 1,
+      "users_excluded_from_mfa": 1,
+      "excluded_users_not_emergency_accounts": 0,
+      "emergency_accounts_excluded_without_alert": 1,
+      "excluded_users_not_monitored_emergency_accounts": 1
+    }
+  }
+}
