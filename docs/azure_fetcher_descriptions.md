@@ -1257,7 +1257,7 @@ Commands Executed:
 - `resource_groups.list()` — the resource groups
 - `deployments.list_by_resource_group()` (per group) — each group's deployment history, to match changes to deployments
 
-Output: `azure_change_provenance_<subscription>.json` — every change in the lookback window labelled by origin (pipeline, deployment, manual deployment, direct edit, platform or unattributed), and the deployment history it was matched against.
+Output: `azure_change_provenance_<subscription>.json` — every change in the lookback window labelled by origin (pipeline, deployment, manual deployment, direct edit, platform or unattributed), the before and after values of the settings people changed outside a pipeline, and the deployment history the changes were matched against.
 
 Summary fields:
 
@@ -1287,6 +1287,14 @@ Summary fields:
 - `deployments_in_history` — Number of deployments read from subscription and resource group history
 - `deployments_matched_to_changes` — Number of deployments that at least one change was traced to
 - `resource_groups_at_deployment_history_cap` — List of resource groups at ARM's 800-deployment history limit, where older deployments were deleted, so their changes look direct
+
+**What did people change outside a pipeline?**
+- `changes_with_property_values` — Number of direct-edit and manual-deployment changes that keep each changed property's value before and after; a value is shown only for a list of security settings and tags, plus any `path:` patterns added in the manifest's `value_paths`, and anything that looks like a secret is withheld (null if a change table couldn't be read)
+- `changes_property_values_capped` — Number of direct-edit and manual-deployment changes past the `max_value_changes` limit (500 by default, newest kept first), which name the properties they changed but keep no values (null if a change table couldn't be read)
+- `property_values_shown` — Number of changed property values shown, before and after, on direct-edit and manual-deployment changes (null if a change table couldn't be read)
+- `property_values_withheld_by_reason` — Number of changed property values withheld on direct-edit and manual-deployment changes for each reason; a withheld value shows only its property's path and the reason (null if a change table couldn't be read):
+  - not_allowlisted (the property isn't on the list of settings whose values are shown)
+  - secret (the property's name or its value looks like a secret, such as a password, key, token, connection string or SAS signature; withheld even when the property is on the list)
 
 
 ### azure_diagnostic_settings
