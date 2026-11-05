@@ -101,7 +101,10 @@ def summarize(records):
 def collect(client, org, repos, config):
     now = now_epoch()
     records = [repo_record(client, org["login"], repo, now) for repo in repos]
-    return {"metadata": {"as_of": iso(now)}, "summary": summarize(records), "repositories": records}
+    # GitHub returns generic (non-provider) alerts only for the types secret_type names, and has no "all types"
+    # value, so the run names the ones it asked for: a type GitHub adds later is not requested.
+    return {"metadata": {"as_of": iso(now), "generic_secret_types_requested": GENERIC_TYPES.split(",")},
+            "summary": summarize(records), "repositories": records}
 
 
 if __name__ == "__main__":

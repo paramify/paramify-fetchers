@@ -48,7 +48,7 @@ query($owner: String!, $name: String!, $ref: String!, $since: GitTimestamp!, $fi
           oid message committedDate
           author { name user { login } }
           signature { isValid }
-          associatedPullRequests(first: %d) { totalCount nodes { mergedAt } }
+          associatedPullRequests(first: %d) { totalCount nodes { mergedAt baseRefName } }
         }
       }
     } } }
@@ -228,7 +228,10 @@ def history(data):
 
 
 def direct_pushes(client, owner, name, branch, since, merge_shas, cap):
-    """Commits on the branch in the window that no pull request brought in. (commits, truncated)"""
+    """Commits on the branch in the window that no pull request into this branch brought in. (commits, truncated)
+
+    A pull request merged into another branch does not count: pushing that branch here bypasses review on this one.
+    """
     seen = []
     commits = client.graphql_nodes(f"GraphQL history repos/{owner}/{name}", HISTORY,
                                    {"owner": owner, "name": name, "ref": f"refs/heads/{branch}", "since": iso(since)},
@@ -241,12 +244,12 @@ def direct_pushes(client, owner, name, branch, since, merge_shas, cap):
             continue
         associated = commit.get("associatedPullRequests") or {}
         nodes = associated.get("nodes") or []
-        merged = any(p.get("mergedAt") for p in nodes)
+        merged = any(p.get("mergedAt") and p.get("baseRefName") == branch for p in nodes)
         if not merged and (associated.get("totalCount") or 0) > len(nodes):
             more = client.paginate_required(f"repos/{owner}/{name}/commits/{commit.get('oid')}/pulls")
             if more is None:
                 return None, False
-            merged = any(p.get("merged_at") for p in more)
+            merged = any(p.get("merged_at") and (p.get("base") or {}).get("ref") == branch for p in more)
         if not merged:
             message = commit.get("message") or ""
             author = commit.get("author") or {}

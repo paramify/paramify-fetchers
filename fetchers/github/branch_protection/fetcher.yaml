@@ -62,4 +62,6 @@ evidence_set:
     `requires_status_checks` and the check names, signed commits, force-push
     and deletion blocks. Rulesets that exist but enforce nothing (disabled or
     evaluate) are listed in `rulesets_not_enforced`; rulesets whose bypass list
-    allows always-bypass in `rulesets_with_always_bypass`.
+    allows always-bypass in `rulesets_with_always_bypass`; rulesets with an
+    exempt actor, whose pushes skip the rules and leave no bypass entry, in
+    `rulesets_with_exempt_actors`.

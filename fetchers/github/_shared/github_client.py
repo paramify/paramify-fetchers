@@ -615,7 +615,10 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
     """Run one fetcher against the organization in the environment and write its evidence. Returns the exit code.
 
     An inventory's `collect` returns its records under "data". Any failure withholds every record (`data: []`,
-    `records_included: false`, the count kept): a pipeline reads the file as the whole estate.
+    `records_included: false`, the count kept): a pipeline reads the file as the whole estate. For the same reason an
+    inventory ignores the `repositories` allowlist and always includes archived repositories, and names the filters it
+    ignored in `filters_ignored`. It does not fail on them: the fetchers usually share one target, and narrowing the
+    others must not break the inventory.
     """
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -627,6 +630,11 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
         report_failure(str(exc), "bad_config")
         return 1
 
+    filters_ignored = []
+    if inventory:
+        filters_ignored = [key for key, narrows in (("repositories", bool(target["repositories"])),
+                                                    ("include_archived", not target["include_archived"])) if narrows]
+        target = {**target, "repositories": [], "include_archived": True}
     client = GitHubClient(target["api_url"], target["token"])
     result: Dict[str, Any] = {}
     org: Dict[str, Any] = {}
@@ -648,6 +656,7 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
             "plan": (org.get("plan") or {}).get("name"),
             "repositories_filter": target["repositories"] or None,
             "include_archived": target["include_archived"],
+            **({"filters_ignored": filters_ignored} if inventory else {}),
             **settings,
             **result.pop("metadata", {}),
             "rate_limit": client.rate or None,

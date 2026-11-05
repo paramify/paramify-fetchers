@@ -62,6 +62,9 @@ def collect(client, org, repos, config):
     coverage = {r["name"]: None if r.get("security_and_analysis") is None else {
         k: (r["security_and_analysis"].get(k) or {}).get("status") for k in REPO_SETTINGS} for r in repos}
     attached = set() if configs is None else {n for c in configs for n in c["repositories"] or []}
+    # A configuration whose repository list failed (recorded) may hold any repository: a readable list can prove a
+    # repository attached, but none can prove it unattached. Unreadable is not absent.
+    lists_known = configs is not None and all(c["repositories"] is not None for c in configs)
     readable = {n: c for n, c in coverage.items() if c is not None}
     return {
         "summary": {
@@ -76,7 +79,7 @@ def collect(client, org, repos, config):
             "actions_default_token_permissions": workflow.get("default_workflow_permissions"),
             "actions_can_approve_pull_requests": workflow.get("can_approve_pull_request_reviews"),
             "security_configurations": None if configs is None else len(configs),
-            "repositories_without_security_configuration": None if configs is None else sorted(
+            "repositories_without_security_configuration": None if not lists_known else sorted(
                 n for n in coverage if n not in attached),
             "repositories_settings_unreadable": sorted(n for n, c in coverage.items() if c is None),
             **{f"repositories_{k}_off": sorted(n for n, c in readable.items() if c.get(k) != "enabled")
@@ -89,7 +92,8 @@ def collect(client, org, repos, config):
                                                     "can_approve_pull_request_reviews")}},
         "security_configurations": configs,
         "repositories": [{"repository": n, "security_and_analysis": c, "security_configuration_attached":
-                          None if configs is None else n in attached} for n, c in coverage.items()],
+                          True if n in attached else False if lists_known else None}
+                         for n, c in coverage.items()],
     }
 
 

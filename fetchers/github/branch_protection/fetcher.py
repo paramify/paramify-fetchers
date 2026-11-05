@@ -98,6 +98,12 @@ def bypass_summary(ruleset):
             for a in actors]
 
 
+def rulesets_with_mode(sets, mode):
+    """Names of the rulesets enforced on the default branch that have a bypass actor with this bypass_mode."""
+    return [s["name"] for s in sets if s["enforced_on_default_branch"]
+            and any(a["bypass_mode"] == mode for a in s["bypass_actors"] or [])]
+
+
 def codeowners(client, base, branch):
     """{"state": "valid" | "errors" | "missing", "errors": [...]}, or None when unreadable (recorded).
 
@@ -187,8 +193,9 @@ def repo_record(client, org, repo, details):
         "rulesets": sets,
         "rulesets_not_enforced": [s["name"] for s in sets
                                   if s["targets_default_branch"] is not False and s["enforcement"] != "active"],
-        "rulesets_with_always_bypass": [s["name"] for s in sets if s["enforced_on_default_branch"]
-                                        and any(a["bypass_mode"] == "always" for a in s["bypass_actors"] or [])],
+        "rulesets_with_always_bypass": rulesets_with_mode(sets, "always"),
+        # An exempt actor skips the rules and GitHub writes no bypass entry, so the rule suites cannot show its pushes.
+        "rulesets_with_exempt_actors": rulesets_with_mode(sets, "exempt"),
         "admins_exempt_from_classic": classic is not None and
                                       (classic.get("enforce_admins") or {}).get("enabled") is False,
     })
@@ -214,11 +221,12 @@ def summarize(records):
         "requiring_signed_commits": len([r for r in known if r["requirements"].get("signed_commits")]),
         "blocking_force_push": len([r for r in known if r["requirements"].get("blocks_force_push")]),
         "unprotected": [r["repository"] for r in known if not r["requirements"].get("rule_types")
-                        and r["classic_protection_state"] in ("not_protected", "no_branch")],
+                        and r["classic_protection_state"] in ("not_protected", "no_branch", "plan_unavailable")],
         "without_approval": names(lambda r: r["requires_approval"] is False),
         "without_status_checks": names(lambda r: r["requires_status_checks"] is False),
         "with_rulesets_not_enforced": names(lambda r: r.get("rulesets_not_enforced")),
         "with_always_bypass": names(lambda r: r.get("rulesets_with_always_bypass")),
+        "with_exempt_actors": names(lambda r: r.get("rulesets_with_exempt_actors")),
         # Bypass actors are returned only to a token with admin rights on the ruleset's source: unknown, not none.
         "bypass_actors_unreadable": names(lambda r: any(s["enforced_on_default_branch"] and s["bypass_actors"] is None
                                                         for s in r.get("rulesets") or [])),

@@ -193,7 +193,9 @@ def graphql_from_rest(routes, query, variables):
                                  "user": {"login": c["author"]["login"]} if c.get("author") else None},
                       "signature": {"isValid": True} if (info.get("verification") or {}).get("verified") else None,
                       "associatedPullRequests": {"totalCount": len(associated),
-                                                 "nodes": [{"mergedAt": a.get("merged_at")} for a in associated]}})
+                                                 "nodes": [{"mergedAt": a.get("merged_at"),
+                                                            "baseRefName": (a.get("base") or {}).get("ref")}
+                                                           for a in associated]}})
     history = gql_page(nodes, variables)
     return 200, {"data": {"repository": {"isEmpty": False, "ref": {"target": {"history": history}}}}}
 
@@ -669,12 +671,38 @@ def test_a_commit_with_more_associated_prs_than_fit_is_read_over_rest(fake, monk
         status, body = graphql_from_rest(routes, query, variables)
         if "history(" in query:
             body["data"]["repository"]["ref"]["target"]["history"]["nodes"][0]["associatedPullRequests"]["totalCount"] += 1
-            routes[routes_rest] = [{"merged_at": ago(1)}]
+            routes[routes_rest] = [{"merged_at": ago(1), "base": {"ref": "main"}}]
         return status, body
     routes["graphql"] = crowded
     fake(routes)
     code, ev, _ = run_fetcher("pull_request_checks", monkeypatch, tmp_path)
     assert code == 0 and ev["repositories"][0]["direct_pushes"] == []  # the sixth PR merged it
+
+
+def test_a_commit_merged_into_another_branch_then_pushed_here_is_a_direct_push(fake, monkeypatch, tmp_path):
+    commits = [{"sha": c, "commit": {"message": c, "committer": {"date": ago(1)}}} for c in ("c1", "c2")]
+    into_develop = [{"merged_at": ago(2), "base": {"ref": "develop"}}]
+    into_main = [{"merged_at": ago(1), "base": {"ref": "main"}}]
+    fake(pr_routes([], {}, {}, commits=commits, associated={"c1": into_develop, "c2": into_develop + into_main}))
+    code, ev, _ = run_fetcher("pull_request_checks", monkeypatch, tmp_path)
+    assert code == 0 and [d["sha"] for d in ev["repositories"][0]["direct_pushes"]] == ["c1"]
+
+
+def test_the_rest_fallback_also_checks_the_base_branch(fake, monkeypatch, tmp_path):
+    pc = MODS["pull_request_checks"]
+    commits = [{"sha": "c1", "commit": {"message": "x", "committer": {"date": ago(1)}}}]
+    routes = pr_routes([], {}, {}, commits=commits, associated={"c1": [{"merged_at": None}] * pc.ASSOCIATED_PAGE})
+
+    def crowded(query, variables):
+        status, body = graphql_from_rest(routes, query, variables)
+        if "history(" in query:
+            body["data"]["repository"]["ref"]["target"]["history"]["nodes"][0]["associatedPullRequests"]["totalCount"] += 1
+            routes[f"repos/{ORG}/app/commits/c1/pulls"] = [{"merged_at": ago(1), "base": {"ref": "develop"}}]
+        return status, body
+    routes["graphql"] = crowded
+    fake(routes)
+    code, ev, _ = run_fetcher("pull_request_checks", monkeypatch, tmp_path)
+    assert code == 0 and [d["sha"] for d in ev["repositories"][0]["direct_pushes"]] == ["c1"]
 
 
 def test_a_commit_status_still_expected_is_pending():
@@ -925,6 +953,16 @@ def test_org_security_settings_verdicts(fake, monkeypatch, tmp_path):
     assert configs["GitHub recommended"]["repositories"] == [] and configs["baseline"]["default_for_new_repos"] == "all"
 
 
+def test_an_unreadable_configuration_list_leaves_attachment_unknown(fake, monkeypatch, tmp_path):
+    routes = org_settings_routes()
+    routes[f"orgs/{ORG}/code-security/configurations/1/repositories"] = FAILING
+    fake(routes)
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path)
+    assert code == 1 and ev["summary"]["repositories_without_security_configuration"] is None
+    attached = {r["repository"]: r["security_configuration_attached"] for r in ev["repositories"]}
+    assert attached == {"a": True, "b": None, "c": None}  # a is proven by the readable list
+
+
 def test_two_factor_is_unknown_to_a_non_owner(fake, monkeypatch, tmp_path):
     f = fake(org_settings_routes(owner=False))
     _, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path)
@@ -1006,6 +1044,25 @@ def test_access_review_verdicts(fake, monkeypatch, tmp_path):
     assert s["teams_with_admin"] == ["platform"] and ev["teams"][0]["write_on"] == ["infra"]
     assert ev["pending_invitations"][0]["email_domain"] == "example.com"
     assert "new.hire" not in json.dumps(ev)  # the address itself is never stored
+
+
+def test_a_custom_repository_role_is_classified_by_its_permission_flags(fake, monkeypatch, tmp_path):
+    routes = access_routes()
+    routes[f"repos/{ORG}/infra/collaborators"] = [
+        {"login": "contractor", "role_name": "release-manager",
+         "permissions": {"admin": False, "maintain": True, "push": True, "triage": True, "pull": True}},
+        {"login": "dev", "role_name": "security-auditor",
+         "permissions": {"admin": False, "maintain": False, "push": False, "triage": True, "pull": True}}]
+    routes[f"repos/{ORG}/app/collaborators"] = [{"login": "boss", "role_name": "admin"}]
+    routes[f"repos/{ORG}/infra/teams"] = [{"slug": "platform", "permission": "deployers",
+                                           "permissions": {"admin": False, "push": True, "pull": True}}]
+    fake(routes)
+    _, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    infra = next(r for r in ev["repositories"] if r["repository"] == "infra")
+    assert infra["writers"] == ["contractor"]  # dev's custom role is read-level
+    assert infra["outside_collaborators"] == [{"login": "contractor", "role": "release-manager", "access": "write"}]
+    assert ev["summary"]["outside_collaborators_with_write"] == ["contractor"]
+    assert ev["teams"][0]["write_on"] == ["infra"]
 
 
 def test_access_review_needs_owner_reads(fake, monkeypatch, tmp_path):
@@ -1158,6 +1215,33 @@ def test_classic_protection_and_ruleset_details_are_reported(fake, monkeypatch, 
     assert ev["metadata"]["org_rulesets_available"] is False and by["protected"]["empty"] is False
 
 
+def test_an_exempt_actor_is_reported_apart_from_always_bypass(fake, monkeypatch, tmp_path):
+    routes = sandbox_routes()
+    exempt = ruleset(9, "org-baseline", "active", [PR_RULE], source_type="Organization",
+                     bypass_actors=[{"actor_id": 7, "actor_type": "Integration", "bypass_mode": "exempt"}])
+    routes[f"repos/{ORG}/org-bypass/rulesets"] = [exempt]
+    routes[f"repos/{ORG}/org-bypass/rulesets/9"] = exempt
+    routes[f"repos/{ORG}/org-bypass/rules/branches/main"] = enforced(exempt["rules"], 9)
+    fake(routes)
+    _, ev, _ = run_fetcher("branch_protection", monkeypatch, tmp_path)
+    by = {r["repository"]: r for r in ev["repositories"]}
+    assert by["org-bypass"]["rulesets_with_exempt_actors"] == ["org-baseline"]
+    assert by["org-bypass"]["rulesets_with_always_bypass"] == []
+    assert ev["summary"]["with_exempt_actors"] == ["org-bypass"]
+    assert "org-bypass" not in ev["summary"]["with_always_bypass"]
+
+
+def test_a_branch_the_plan_cannot_protect_is_unprotected(fake, monkeypatch, tmp_path):
+    routes = sandbox_routes()
+    routes[f"repos/{ORG}/unprotected/branches/main/protection"] = (
+        403, {"message": "Upgrade to GitHub Pro or make this repository public to enable this feature."})
+    fake(routes)
+    _, ev, _ = run_fetcher("branch_protection", monkeypatch, tmp_path)
+    by = {r["repository"]: r for r in ev["repositories"]}
+    assert by["unprotected"]["classic_protection_state"] == "plan_unavailable"
+    assert "unprotected" in ev["summary"]["unprotected"]
+
+
 FAILING = (500, {"message": "Server Error"})
 
 
@@ -1251,6 +1335,8 @@ def test_non_provider_secret_alerts_are_requested_by_name(fake, monkeypatch, tmp
     _, ev, _ = run_fetcher("secret_scanning", monkeypatch, tmp_path)
     clean = {r["repository"]: r for r in ev["repositories"]}["clean"]
     assert sorted(a["number"] for a in clean["alerts"]) == [1, 4] and clean["open_alerts"] == 1
+    requested = ev["metadata"]["generic_secret_types_requested"]
+    assert "rsa_private_key" in requested and "password" in requested
 
 
 def test_a_plan_without_secret_scanning_is_not_scanning(fake, monkeypatch, tmp_path):
@@ -1300,7 +1386,7 @@ def test_access_record_fields(fake, monkeypatch, tmp_path):
     fake(routes)
     code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
     infra = next(r for r in ev["repositories"] if r["repository"] == "infra")
-    assert infra["outside_collaborators"] == [{"login": "contractor", "role": "pull"}]
+    assert infra["outside_collaborators"] == [{"login": "contractor", "role": "pull", "access": "read"}]
     assert ev["pending_invitations"][1]["email_domain"] is None
     assert code == 1 and ev["teams"][0]["members"] is None  # unreadable, not empty
 
@@ -1545,6 +1631,23 @@ def test_inventory_records_one_per_repository_with_flat_fields(fake, monkeypatch
     assert site["security_settings_readable"] is False and site["secret_scanning"] is None
     assert set(app) == set(site)  # one pipeline mapping holds for every record
     assert ev["record_count"] == 2 and ev["summary"]["by_visibility"] == {"private": 1, "public": 1}
+
+
+def test_inventory_ignores_the_repository_filters_and_names_them(fake, monkeypatch, tmp_path):
+    repos = [repo("app", id=1), repo("old", id=2, archived=True), repo("site", id=3)]
+    fake(inv_routes(repos=repos, values=[]))
+    code, ev, _ = run_fetcher("repository_inventory", monkeypatch, tmp_path,
+                              GITHUB_REPOSITORIES="app", GITHUB_INCLUDE_ARCHIVED="false")
+    assert code == 0 and ev["records_included"] is True
+    assert sorted(r["name"] for r in ev["data"]) == ["app", "old", "site"]
+    assert ev["metadata"]["filters_ignored"] == ["repositories", "include_archived"]
+    assert ev["metadata"]["repositories_filter"] is None and ev["metadata"]["include_archived"] is True
+
+
+def test_inventory_names_no_ignored_filter_when_none_was_set(fake, monkeypatch, tmp_path):
+    fake(inv_routes())
+    _, ev, _ = run_fetcher("repository_inventory", monkeypatch, tmp_path, GITHUB_INCLUDE_ARCHIVED="true")
+    assert ev["metadata"]["filters_ignored"] == []
 
 
 def test_an_unknown_visibility_is_counted_as_unknown(fake, monkeypatch, tmp_path):
@@ -1915,6 +2018,19 @@ def test_release_verdicts(fake, monkeypatch, tmp_path):
     assert calls and all(q.get("predicate_type") == "provenance" for q in calls)
 
 
+def test_an_exempt_actor_on_a_tag_ruleset_is_reported_apart_from_always_bypass(fake, monkeypatch, tmp_path):
+    exempt = [{"actor_id": 3, "actor_type": "Integration", "bypass_mode": "exempt"}]
+    always = [{"actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]
+    rulesets = [tag_ruleset(1, ["refs/tags/v1"], bypass_actors=exempt),
+                tag_ruleset(2, ["refs/tags/v2"], bypass_actors=always)]
+    fake(release_routes([release("v2", [asset("x", None)]), release("v1", [asset("x", None)])], rulesets))
+    _, ev, _ = run_fetcher("release_integrity", monkeypatch, tmp_path)
+    by_tag = {r["tag"]: r["tag_protection"] for r in ev["repositories"][0]["releases"]}
+    assert by_tag["v1"]["exempt_actors"] == ["tags-1"] and by_tag["v1"]["always_bypass"] == []
+    assert by_tag["v2"]["exempt_actors"] == [] and by_tag["v2"]["always_bypass"] == ["tags-2"]
+    assert ev["summary"]["release_tags_with_exempt_actors"] == ["app@v1"]
+
+
 def test_an_attestation_whose_statement_names_another_digest_does_not_count():
     m = MODS["release_integrity"]
     s = m.attestation_summary([{"bundle": bundle("f" * 64)}], "sha256:" + "a" * 64)
@@ -1942,7 +2058,7 @@ def test_tag_ruleset_reach(fake, monkeypatch, tmp_path):
     m = MODS["release_integrity"]
     always = [{"actor_type": "OrganizationAdmin", "actor_id": 1, "bypass_mode": "always"}]
     assert m.tag_rules([tag_ruleset(1, ["refs/tags/v*"], bypass_actors=always)], "app", "v1.2", "main") == {
-        "locked": True, "rules": ["deletion", "update"], "always_bypass": ["tags-1"]}
+        "locked": True, "rules": ["deletion", "update"], "always_bypass": ["tags-1"], "exempt_actors": []}
     assert m.tag_rules([tag_ruleset(1, ["refs/tags/v*"], enforcement="evaluate")], "app", "v1", "main")["locked"] is False
     assert m.tag_rules([tag_ruleset(1, ["~ALL"])], "app", "anything", "main")["locked"] is True
     branch_rs = {**tag_ruleset(1, ["~ALL"]), "target": "branch"}

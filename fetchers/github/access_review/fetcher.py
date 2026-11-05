@@ -9,7 +9,6 @@ from github_client import PLAN_UNAVAILABLE, run  # noqa: E402
 
 NAME = "github_access_review"
 CONFIG = {"include_organization_roles": ("GITHUB_INCLUDE_ORGANIZATION_ROLES", True)}
-WRITE = ("admin", "maintain", "push", "write")
 
 
 def logins(items):
@@ -17,11 +16,28 @@ def logins(items):
 
 
 def role_of(collaborator):
-    """GitHub's role_name, falling back to the highest flag in permissions."""
+    """GitHub's role_name, falling back to the highest flag in permissions. For display only: see access_of."""
     if collaborator.get("role_name"):
         return collaborator["role_name"]
     perms = collaborator.get("permissions") or {}
     return next((p for p in ("admin", "maintain", "push", "triage", "pull") if perms.get(p)), None)
+
+
+def access_of(grantee, name_key="role_name"):
+    """"admin", "write" or "read" from the permissions flags, else from a built-in role name; None when unknown.
+
+    A custom repository role (Enterprise Cloud) reports its own name, such as "release-manager", in role_name. GitHub
+    sets the permissions flags from the role's base role, so the flags classify it and the name cannot.
+    """
+    perms = grantee.get("permissions") or {}
+    if any(perms.values()):
+        return "admin" if perms.get("admin") else "write" if perms.get("maintain") or perms.get("push") else "read"
+    name = grantee.get(name_key)
+    if name == "admin":
+        return "admin"
+    if name in ("maintain", "push", "write"):
+        return "write"
+    return "read" if name in ("triage", "pull", "read") else None
 
 
 def repo_record(client, org, repo, owners, outsiders):
@@ -31,17 +47,19 @@ def repo_record(client, org, repo, owners, outsiders):
     teams = client.paginate_required(f"{base}/teams")
     if collaborators is None or teams is None:
         return {"repository": name, "collected": False}
-    people = [{"login": c.get("login"), "role": role_of(c), "outside": c.get("login") in outsiders,
-               "owner": c.get("login") in owners} for c in collaborators]
+    people = [{"login": c.get("login"), "role": role_of(c), "access": access_of(c),
+               "outside": c.get("login") in outsiders, "owner": c.get("login") in owners} for c in collaborators]
     return {
         "repository": name,
         "visibility": repo.get("visibility"),
         "collected": True,
         # Owners are admins of every repository; listed apart so a per-repository grant stands out.
-        "admins": sorted(p["login"] for p in people if p["role"] == "admin" and not p["owner"]),
-        "writers": sorted(p["login"] for p in people if p["role"] in ("maintain", "push", "write")),
-        "outside_collaborators": [{"login": p["login"], "role": p["role"]} for p in people if p["outside"]],
-        "teams": [{"team": t.get("slug"), "permission": t.get("permission")} for t in teams],
+        "admins": sorted(p["login"] for p in people if p["access"] == "admin" and not p["owner"]),
+        "writers": sorted(p["login"] for p in people if p["access"] == "write"),
+        "outside_collaborators": [{"login": p["login"], "role": p["role"], "access": p["access"]}
+                                  for p in people if p["outside"]],
+        "teams": [{"team": t.get("slug"), "permission": t.get("permission"), "access": access_of(t, "permission")}
+                  for t in teams],
         "collaborators_total": len(people),
     }
 
@@ -96,11 +114,11 @@ def collect(client, org, repos, config):
         team_rows.append({"team": t.get("slug"), "privacy": t.get("privacy"),
                           "members": None if team_members is None else logins(team_members),
                           "admin_on": sorted(r["repository"] for r in done
-                                             if any(x["team"] == t.get("slug") and x["permission"] == "admin"
+                                             if any(x["team"] == t.get("slug") and x["access"] == "admin"
                                                     for x in r["teams"])),
                           "write_on": sorted(r["repository"] for r in done
-                                             if any(x["team"] == t.get("slug") and x["permission"] in WRITE
-                                                    and x["permission"] != "admin" for x in r["teams"]))})
+                                             if any(x["team"] == t.get("slug") and x["access"] == "write"
+                                                    for x in r["teams"]))})
     pending = None if state is not None else [
         {"login": i.get("login"), "email_domain": (i.get("email") or "@").split("@")[-1] or None,
          "role": i.get("role"), "created_at": i.get("created_at"),
@@ -114,7 +132,7 @@ def collect(client, org, repos, config):
             "members_total": len(logins(members)),
             "outside_collaborators_total": len(outsider_set),
             "outside_collaborators_with_write": sorted({o["login"] for r in done for o in r["outside_collaborators"]
-                                                        if o["role"] in WRITE}),
+                                                        if o["access"] in ("admin", "write")}),
             "pending_invitations": None if pending is None else len(pending),
             "teams_total": len(team_rows),
             "teams_with_admin": sorted(t["team"] for t in team_rows if t["admin_on"]),
