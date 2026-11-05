@@ -84,3 +84,8 @@ def test_collect_returns_records(monkeypatch):
 def test_collect_failure_is_none_and_recorded(monkeypatch):
     out, collector = _run(monkeypatch, _Contacts(exc=RuntimeError("HTTP 403")))
     assert out is None and not collector.ok
+
+
+def test_emails_given_as_a_list_are_kept_as_separate_addresses():
+    r = dp.security_contact_record({"emails": ["b@contoso.com", " a@contoso.com "], "phone": None})
+    assert r["emails"] == ["a@contoso.com", "b@contoso.com"] and r["email_count"] == 2

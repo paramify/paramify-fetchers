@@ -316,7 +316,10 @@ def security_contact_record(contact: dict) -> dict:
     number is reduced to whether one is set.
     """
     raw_emails = contact.get("emails") or ""
-    emails = sorted({e.strip() for e in str(raw_emails).split(";") if e.strip()})
+    # ARM sends one semicolon-separated string; accept a list too, so a future SDK that
+    # splits it does not turn the whole list into one bogus address.
+    parts = raw_emails if isinstance(raw_emails, (list, tuple)) else str(raw_emails).split(";")
+    emails = sorted({str(e).strip() for e in parts if str(e).strip()})
     state = contact.get("alert_notifications_state")
     role_state = contact.get("notifications_by_role_state")
     return {
