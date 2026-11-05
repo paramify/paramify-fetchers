@@ -180,7 +180,7 @@ def test_entry_editor_keeps_an_env_reference_in_a_string_field(tmp_path, run_tui
     assert entry["config"]["owner_tag_keys"] == "${env:OWNER_KEYS}"
 
 
-def test_entry_editor_leaves_a_pattern_list_and_its_reasons_alone(tmp_path):
+def test_entry_editor_leaves_a_pattern_list_and_its_reasons_alone(tmp_path, run_tui):
     patterns = [{"pattern": "route:qa-*", "reason": "QA routes"}, "qa.example.com"]
     m = api.init_manifest()
     api.set_output_dir(m, str(tmp_path / "evidence"))
@@ -198,6 +198,6 @@ def test_entry_editor_leaves_a_pattern_list_and_its_reasons_alone(tmp_path):
         await pilot.press("ctrl+s")
         await pilot.pause()
 
-    _run(body, path)
+    run_tui(body, path)
     [entry] = _on_disk(path)["run"]["fetchers"]
     assert entry["config"] == {"scope_exclusions": patterns, "metrics_lookback_days": 7}
