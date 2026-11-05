@@ -983,6 +983,7 @@ Commands Executed:
 - `role_assignment_schedule_instances.list_for_scope()` on the subscription, unfiltered — the PIM schedule behind each active grant at, above and below it
 - `role_eligibility_schedule_instances.list_for_scope()` on the subscription, unfiltered — PIM-eligible assignments at, above and below it
 - `role_management_policy_assignments.list_for_scope()` on the subscription — the subscription's PIM settings for the four over-broad roles (Owner, Contributor, User Access Administrator and Role Based Access Control Administrator)
+- `GET {user-assigned identity id}` — only with resource_exclusions set, once for each excluded user-assigned identity a grant is made on: its principal id, to see whether it holds a grant inside the boundary
 
 Output: `azure_rbac_role_assignments_<subscription>.json` — every role assignment with its scope, user, group or app, role and flags, whether it is permanent, time-bound or activated through PIM, plus PIM-eligible assignments and the over-broad roles' PIM settings.
 
@@ -990,62 +991,62 @@ Summary fields:
 
 **What was checked?**
 - `provider_registration_status` — Whether Microsoft.Authorization is registered on the subscription: registered, not_registered or unknown
-- `total_role_assignments` — Number of role assignments at subscription scope or above (made on the subscription, or inherited from a management group or the tenant root)
-- `distinct_principals` — Number of distinct users, groups and apps with a role assignment at subscription scope or above
-- `unresolved_role_definitions` — Number of role assignments at subscription scope or above whose role name couldn't be found (usually a custom role defined on a management group)
+- `total_role_assignments` — Number of role assignments at subscription scope or above (made on the subscription, or inherited from a management group or the tenant root); null if they couldn't be read
+- `distinct_principals` — Number of distinct users, groups and apps with a role assignment at subscription scope or above; null if the role assignments couldn't be read
+- `unresolved_role_definitions` — Number of role assignments at subscription scope or above whose role name couldn't be found (usually a custom role defined on a management group); null if they or the role definitions couldn't be read
 - `pim_available` — True if the tenant has PIM; false if Azure refused a PIM read because the tenant has no Entra ID P2 or ID Governance licence, even when another PIM read failed (the PIM reads that succeeded are kept); null if a PIM read failed for another reason and none was refused for the licence. Any PIM failure other than the licence refusal fails the run
 
 **Who holds over-broad access at subscription scope or above?**
-- `over_broad_builtin_assignments` — Number of role assignments at subscription scope or above that grant an over-broad built-in role (Owner, Contributor, User Access Administrator or Role Based Access Control Administrator)
-- `distinct_principals_with_over_broad_roles` — Number of distinct users, groups and apps holding an over-broad role at subscription scope or above
-- `over_broad_percentage` — Percentage of role assignments at subscription scope or above that grant an over-broad role = `over_broad_builtin_assignments` / `total_role_assignments` × 100 (a whole number, 0–100); 0 when `total_role_assignments` is 0
-- `least_privilege_assignments` — Number of role assignments at subscription scope or above that don't grant an over-broad role
-- `owner_assignments` — Number of Owner assignments at subscription scope or above
-- `contributor_assignments` — Number of Contributor assignments at subscription scope or above
-- `user_access_administrator_assignments` — Number of User Access Administrator assignments at subscription scope or above
-- `rbac_administrator_assignments` — Number of Role Based Access Control Administrator assignments at subscription scope or above
-- `role_granting_assignments` — Number of role assignments at subscription scope or above that let the holder grant access, including to itself (Owner, User Access Administrator or Role Based Access Control Administrator)
-- `over_broad_at_subscription_scope_or_above` — Number of over-broad role assignments made on the subscription or inherited from a management group or the tenant root
+- `over_broad_builtin_assignments` — Number of role assignments at subscription scope or above that grant an over-broad built-in role (Owner, Contributor, User Access Administrator or Role Based Access Control Administrator); null if they couldn't be read
+- `distinct_principals_with_over_broad_roles` — Number of distinct users, groups and apps holding an over-broad role at subscription scope or above; null if the role assignments couldn't be read
+- `over_broad_percentage` — Percentage of role assignments at subscription scope or above that grant an over-broad role = `over_broad_builtin_assignments` / `total_role_assignments` × 100 (a whole number, 0–100); 0 when `total_role_assignments` is 0; null if the role assignments couldn't be read
+- `least_privilege_assignments` — Number of role assignments at subscription scope or above that don't grant an over-broad role; null if they couldn't be read
+- `owner_assignments` — Number of Owner assignments at subscription scope or above; null if they couldn't be read
+- `contributor_assignments` — Number of Contributor assignments at subscription scope or above; null if they couldn't be read
+- `user_access_administrator_assignments` — Number of User Access Administrator assignments at subscription scope or above; null if they couldn't be read
+- `rbac_administrator_assignments` — Number of Role Based Access Control Administrator assignments at subscription scope or above; null if they couldn't be read
+- `role_granting_assignments` — Number of role assignments at subscription scope or above that let the holder grant access, including to itself (Owner, User Access Administrator or Role Based Access Control Administrator); null if they couldn't be read
+- `over_broad_at_subscription_scope_or_above` — Number of over-broad role assignments made on the subscription or inherited from a management group or the tenant root; null if they couldn't be read
 
 **Where are the assignments at subscription scope or above made?**
-- `assignments_at_root_scope` — Number of role assignments made at the tenant root and inherited by the subscription
-- `assignments_at_management_group_scope` — Number of role assignments made on a management group above the subscription
-- `assignments_at_subscription_scope` — Number of role assignments made on the subscription itself
-- `assignments_at_resource_group_scope` — Number of role assignments in the subscription-and-above list that are made on a resource group (normally 0; resource group grants are counted in the below-subscription fields)
-- `assignments_at_resource_scope` — Number of role assignments in the subscription-and-above list that are made on a single resource (normally 0; resource grants are counted in the below-subscription fields)
-- `assignments_inherited_from_above_subscription` — Number of role assignments inherited from a management group or the tenant root
+- `assignments_at_root_scope` — Number of role assignments made at the tenant root and inherited by the subscription; null if they couldn't be read
+- `assignments_at_management_group_scope` — Number of role assignments made on a management group above the subscription; null if they couldn't be read
+- `assignments_at_subscription_scope` — Number of role assignments made on the subscription itself; null if they couldn't be read
+- `assignments_at_resource_group_scope` — Number of role assignments in the subscription-and-above list that are made on a resource group (normally 0; resource group grants are counted in the below-subscription fields); null if they couldn't be read
+- `assignments_at_resource_scope` — Number of role assignments in the subscription-and-above list that are made on a single resource (normally 0; resource grants are counted in the below-subscription fields); null if they couldn't be read
+- `assignments_inherited_from_above_subscription` — Number of role assignments inherited from a management group or the tenant root; null if they couldn't be read
 
 **What kinds of roles and principals are they?**
-- `custom_role_assignments` — Number of role assignments at subscription scope or above that grant a custom role
-- `builtin_role_assignments` — Number of role assignments at subscription scope or above that grant a built-in role whose name was found
-- `assignments_by_principal_type` — Number of role assignments at subscription scope or above for each kind of principal:
+- `custom_role_assignments` — Number of role assignments at subscription scope or above that grant a custom role; null if they or the role definitions couldn't be read
+- `builtin_role_assignments` — Number of role assignments at subscription scope or above that grant a built-in role whose name was found; null if they or the role definitions couldn't be read
+- `assignments_by_principal_type` — Number of role assignments at subscription scope or above for each kind of principal; null if they couldn't be read:
   - User (a person's account)
   - Group (an Entra group)
   - ServicePrincipal (an app or managed identity)
   - Unknown (Azure doesn't say)
-- `assignments_with_conditions` — Number of role assignments at subscription scope or above with an attribute-based condition that narrows what the role allows
+- `assignments_with_conditions` — Number of role assignments at subscription scope or above with an attribute-based condition that narrows what the role allows; null if they couldn't be read
 
 **What is granted below the subscription?**
-- `below_subscription_role_assignments` — Number of role assignments made on a resource group or a single resource
-- `below_subscription_distinct_principals` — Number of distinct users, groups and apps with a role assignment on a resource group or a single resource
-- `below_subscription_resource_group_assignments` — Number of role assignments made on a resource group
-- `below_subscription_resource_assignments` — Number of role assignments made on a single resource
-- `below_subscription_over_broad_builtin_assignments` — Number of over-broad role assignments made on a resource group or a single resource
-- `below_subscription_role_granting_assignments` — Number of access-granting role assignments (Owner, User Access Administrator or Role Based Access Control Administrator) made on a resource group or a single resource
-- `below_subscription_custom_role_assignments` — Number of custom role assignments made on a resource group or a single resource
-- `below_subscription_unresolved_role_definitions` — Number of role assignments on a resource group or a single resource whose role name couldn't be found
-- `below_subscription_assignments_by_principal_type` — Number of role assignments on a resource group or a single resource for each kind of principal:
+- `below_subscription_role_assignments` — Number of role assignments made on a resource group or a single resource; null if either role-assignment list couldn't be read
+- `below_subscription_distinct_principals` — Number of distinct users, groups and apps with a role assignment on a resource group or a single resource; null if either role-assignment list couldn't be read
+- `below_subscription_resource_group_assignments` — Number of role assignments made on a resource group; null if either role-assignment list couldn't be read
+- `below_subscription_resource_assignments` — Number of role assignments made on a single resource; null if either role-assignment list couldn't be read
+- `below_subscription_over_broad_builtin_assignments` — Number of over-broad role assignments made on a resource group or a single resource; null if either role-assignment list couldn't be read
+- `below_subscription_role_granting_assignments` — Number of access-granting role assignments (Owner, User Access Administrator or Role Based Access Control Administrator) made on a resource group or a single resource; null if either role-assignment list couldn't be read
+- `below_subscription_custom_role_assignments` — Number of custom role assignments made on a resource group or a single resource; null if either role-assignment list or the role definitions couldn't be read
+- `below_subscription_unresolved_role_definitions` — Number of role assignments on a resource group or a single resource whose role name couldn't be found; null if either role-assignment list or the role definitions couldn't be read
+- `below_subscription_assignments_by_principal_type` — Number of role assignments on a resource group or a single resource for each kind of principal; null if either role-assignment list couldn't be read:
   - User (a person's account)
   - Group (an Entra group)
   - ServicePrincipal (an app or managed identity)
   - Unknown (Azure doesn't say)
 
 **What is granted at every scope together?**
-- `all_scopes_total_role_assignments` — Number of role assignments at every scope: tenant root, management group, subscription, resource group and single resource
-- `all_scopes_distinct_principals` — Number of distinct users, groups and apps with a role assignment at any scope
-- `all_scopes_over_broad_builtin_assignments` — Number of over-broad role assignments at any scope
-- `all_scopes_role_granting_assignments` — Number of access-granting role assignments at any scope
-- `all_scopes_assignments_by_scope_level` — Number of role assignments at each scope level:
+- `all_scopes_total_role_assignments` — Number of role assignments at every scope: tenant root, management group, subscription, resource group and single resource; null if either role-assignment list couldn't be read
+- `all_scopes_distinct_principals` — Number of distinct users, groups and apps with a role assignment at any scope; null if either role-assignment list couldn't be read
+- `all_scopes_over_broad_builtin_assignments` — Number of over-broad role assignments at any scope; null if either role-assignment list couldn't be read
+- `all_scopes_role_granting_assignments` — Number of access-granting role assignments at any scope; null if either role-assignment list couldn't be read
+- `all_scopes_assignments_by_scope_level` — Number of role assignments at each scope level; null if either role-assignment list couldn't be read:
   - root (the tenant root)
   - management_group (a management group above the subscription)
   - subscription (the subscription itself)
@@ -1054,18 +1055,18 @@ Summary fields:
   - unknown (a scope the fetcher couldn't classify)
 
 **Is privileged access permanent or just-in-time?**
-- `assignments_by_standing` — Number of role assignments at any scope of each standing; null if the PIM schedules couldn't be read:
+- `assignments_by_standing` — Number of role assignments at any scope of each standing; null if the PIM schedules or either role-assignment list couldn't be read:
   - permanent (no end date: PIM lists a grant made outside it as assigned with no end date, and a grant PIM lists no schedule for also reads permanent; a grant to a group whose membership is just-in-time through PIM for Groups reads permanent although its members' access is not standing)
   - pim_activated (an eligible user, group or app activated it through PIM, so it ends when the activation does)
   - time_bound (assigned with an end date through PIM)
-- `over_broad_assignments_by_standing` — Number of over-broad role assignments at any scope of each standing; null if the PIM schedules couldn't be read:
+- `over_broad_assignments_by_standing` — Number of over-broad role assignments at any scope of each standing; null if the PIM schedules or either role-assignment list couldn't be read:
   - permanent (no end date)
   - pim_activated (activated through PIM, so it ends when the activation does)
   - time_bound (assigned through PIM with an end date)
-- `permanent_over_broad_assignments` — Number of over-broad role assignments at any scope that are permanent; null if the PIM schedules couldn't be read
-- `permanent_over_broad_user_assignments` — Number of permanent over-broad role assignments at any scope held by users (not groups or apps); null if the PIM schedules couldn't be read
-- `principals_with_permanent_over_broad_access` — Number of distinct users, groups and apps holding an over-broad role permanently at any scope; null if the PIM schedules couldn't be read
-- `assignments_without_pim_schedule` — Number of role assignments at any scope that PIM lists no schedule for; these read permanent; null if the PIM schedules couldn't be read
+- `permanent_over_broad_assignments` — Number of over-broad role assignments at any scope that are permanent; null if the PIM schedules or either role-assignment list couldn't be read
+- `permanent_over_broad_user_assignments` — Number of permanent over-broad role assignments at any scope held by users (not groups or apps); null if the PIM schedules or either role-assignment list couldn't be read
+- `principals_with_permanent_over_broad_access` — Number of distinct users, groups and apps holding an over-broad role permanently at any scope; null if the PIM schedules or either role-assignment list couldn't be read
+- `assignments_without_pim_schedule` — Number of role assignments at any scope that PIM lists no schedule for; these read permanent; null if the PIM schedules or either role-assignment list couldn't be read
 
 **Who can activate an over-broad role on demand?**
 - `total_eligible_role_assignments` — Number of PIM-eligible assignments (a user, group or app that can activate a role when needed) at any scope; null if they couldn't be read
@@ -1082,6 +1083,13 @@ Summary fields:
 - `over_broad_roles_allowing_permanent_active_assignment` — List of over-broad role names whose PIM settings let an admin assign the role through PIM with no end date; null if any of the four over-broad roles' settings weren't read or lack the rule this reads, or if PIM isn't available
 - `over_broad_roles_allowing_permanent_eligible_assignment` — List of over-broad role names whose PIM settings let an admin make someone eligible with no end date; null if any of the four over-broad roles' settings weren't read or lack the rule this reads, or if PIM isn't available
 
+**Which grants are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every grant is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no resource group or resource a role assignment or PIM-eligible assignment is made on, such as a mistyped name; null if patterns are set and a role-assignment list or the PIM-eligible assignments couldn't be read
+- `excluded_role_assignments` — Number of role assignments left out of scope because a pattern matched the resource group or resource they are made on; each is listed under excluded with the pattern, and no other count includes them; null if a role-assignment list couldn't be read
+- `excluded_eligible_role_assignments` — Number of PIM-eligible assignments left out of scope because a pattern matched the resource group or resource they are made on; null if they couldn't be read
+- `in_scope_role_assignments` — Number of role assignments read and in scope, at every scope (equal to `all_scopes_total_role_assignments`); null if a role-assignment list couldn't be read
+- `in_scope_eligible_role_assignments` — Number of PIM-eligible assignments read and in scope (equal to `total_eligible_role_assignments`); null if they couldn't be read
 
 ## Logging and monitoring
 
