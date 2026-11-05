@@ -102,7 +102,7 @@ evidence_set:
     - azure_service_connections_using_workload_identity_federation — Number of Azure Resource Manager service connections that use workload identity federation
     - azure_service_connections_with_stored_secret — List of Azure Resource Manager service connections that hold a stored credential, meaning a secret, certificate, password, token, key, publish profile or kubeconfig kept in Azure DevOps; one whose credential can't be told is in service_connections_credential_unknown instead
     - service_connections_with_stored_credential — List of service connections of any type that hold a stored credential; a connection with no sign-in scheme counts when it keeps any parameter besides the service principal and tenant ids
-    - service_connections_credential_unknown — List of service connections for which the fetcher can't tell whether they hold a stored credential: a sign-in scheme it doesn't recognise, or no sign-in scheme and no parameter besides the service principal and tenant ids. They are in neither stored-credential list, so those two lists are complete only when service_connections_credential_unknown is empty
+    - service_connections_credential_unknown — List of service connections for which the fetcher can't tell whether they hold a stored credential: a sign-in scheme it doesn't recognise, or no sign-in scheme and no parameter besides the service principal and tenant ids. They are in neither stored-credential list, so the two stored-credential lists are complete only when service_connections_credential_unknown is empty
     - service_connections_not_ready — List of service connections Azure DevOps reports as not ready (creation failed or incomplete)
 
     Who may use them, and were they used?
