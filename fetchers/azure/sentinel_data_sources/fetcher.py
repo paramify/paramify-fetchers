@@ -495,7 +495,8 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def main() -> int:
-    return run_workspaces(fetcher=NAME, logger=logger, collect=collect, summarize=summarize)
+    return run_workspaces(fetcher=NAME, logger=logger, collect=collect, summarize=summarize,
+                          resource_exclusions=True)
 
 
 if __name__ == "__main__":

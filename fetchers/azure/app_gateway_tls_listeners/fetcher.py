@@ -20,6 +20,7 @@ from app_gateway import (  # noqa: E402
     run_fetcher,
 )
 from azure_common import Collector, basename, model_attr  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_app_gateway_tls_listeners")
 
@@ -229,7 +230,19 @@ def summarize(gateways: list[dict], listeners: list[dict]) -> dict:
     }
 
 
-def build(raw_gateways: list, collector: Collector, subscription_id, cred) -> tuple[dict, dict]:
+def split_gateways(raw_gateways: list, exclusions: ResourceExclusions) -> tuple[list, list[dict]]:
+    return exclusions.split(
+        raw_gateways, "application_gateway", resource_id=lambda g: model_attr(g, "id"),
+        location=lambda g: model_attr(g, "location"), resource_group=lambda g: None, name=lambda g: model_attr(g, "name"))
+
+
+def build(raw_gateways: list | None, collector: Collector, subscription_id, cred) -> tuple[dict, dict]:
+    # The completeness check already ran against the full list; listeners follow their gateway.
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    listed = raw_gateways is not None
+    raw_gateways, excluded = split_gateways(raw_gateways or [], exclusions)
+    exclusions.warn_unmatched(logger)
     gateways, listeners = [], []
     for gateway in raw_gateways:
         records = collector.guard(
@@ -239,7 +252,10 @@ def build(raw_gateways: list, collector: Collector, subscription_id, cred) -> tu
         gateways.append(gateway_record(gateway, records))
     gateways.sort(key=lambda r: arm_id_key(r["id"]))
     listeners.sort(key=lambda r: arm_id_key(r["id"]))
-    return {"application_gateways": gateways, "listeners": listeners}, summarize(gateways, listeners)
+    results = {"application_gateways": gateways, "listeners": listeners, "excluded": excluded}
+    summary = {**summarize(gateways, listeners), **exclusions.summary(excluded, ("application_gateway",), {
+        "application_gateways": len(gateways) if listed else None, "listeners": len(listeners) if listed else None})}
+    return results, summary
 
 
 if __name__ == "__main__":

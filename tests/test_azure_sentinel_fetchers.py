@@ -2352,7 +2352,9 @@ def test_log_storage_immutability(azure, tmp_path):
     assert accounts[0]["blob_soft_delete_days"] == 14
     assert ev["summary"] == {"storage_accounts_scanned": 3, "accounts_with_log_containers": 1, "log_containers": 3,
                              "locked_policy": 1, "unlocked_policy_only": 1, "legal_hold": 0, "unprotected": 2,
-                             "min_retention_days": 30}
+                             "min_retention_days": 30, "resource_exclusion_patterns": [],
+                             "resource_exclusion_patterns_unmatched": [], "excluded_storage_accounts": 0,
+                             "excluded_containers": 0, "in_scope_storage_accounts": 3, "in_scope_containers": 3}
     assert not any("stfiles" in c[1] for c in azure.calls)
 
 
