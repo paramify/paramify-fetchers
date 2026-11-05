@@ -93,24 +93,39 @@ evidence_set:
     - projects_collected — Number of projects read
     - service_connections_total — Number of service connections, each counted once however many projects share it
     - projects_with_no_service_connections_listed — List of projects whose service connection list came back empty. Azure DevOps lists only the connections the identity holds a role on (Reader or above) and refuses nothing when it holds none, so an empty project may have connections the identity can't see; by default only Endpoint Administrators, Endpoint Creators and each connection's creator hold a role
-    - service_connections_by_type — Number of service connections of each type (for example azurerm for Azure Resource Manager, Generic, GitHub, kubernetes)
-    - secure_files_total — Number of secure files (certificates, keys and other files pipelines download)
+    - service_connections_by_type — Number of service connections of each type (for example azurerm for Azure Resource Manager, Generic, GitHub, kubernetes; unknown for a connection with no type)
+    - secure_files_total — Number of secure files (certificates, keys and other files pipelines download); a project whose secure files couldn't be read adds none, and the count is never null
 
     How do service connections authenticate?
-    - service_connections_by_auth_method — Number of service connections using each sign-in method: workload_identity_federation (a short-lived token, no stored secret), managed_identity (the build agent's Azure identity, no stored secret), github_app (a GitHub App installation, no stored secret), service_principal_secret (a stored client secret), service_principal_certificate (a stored certificate), service_principal (a stored secret or certificate; Azure DevOps didn't say which), username_password, token, personal_access_token, oauth, certificate, publish_profile and kubernetes (other stored credentials), none (no sign-in scheme, though the connection can still keep a key such as a NuGet API key), or the raw scheme name for one the fetcher doesn't recognise
+    - service_connections_by_auth_method — Number of service connections using each sign-in method, with the lowercased raw scheme name for one the fetcher doesn't recognise:
+      - workload_identity_federation (a short-lived token, no stored secret)
+      - managed_identity (the build agent's Azure identity, no stored secret)
+      - github_app (a GitHub App installation, no stored secret)
+      - service_principal_secret (a stored client secret)
+      - service_principal_certificate (a stored certificate)
+      - service_principal (a stored secret or certificate; Azure DevOps didn't say which)
+      - username_password (another stored credential)
+      - token (another stored credential)
+      - personal_access_token (another stored credential)
+      - oauth (another stored credential)
+      - certificate (another stored credential)
+      - publish_profile (another stored credential)
+      - kubernetes (another stored credential)
+      - none (the sign-in scheme is None, though the connection can still keep a key such as a NuGet API key)
+      - unknown (no sign-in scheme at all)
     - azure_service_connections — Number of Azure Resource Manager (azurerm) service connections
     - azure_service_connections_using_workload_identity_federation — Number of Azure Resource Manager service connections that use workload identity federation
     - azure_service_connections_with_stored_secret — List of Azure Resource Manager service connections that hold a stored credential, meaning a secret, certificate, password, token, key, publish profile or kubeconfig kept in Azure DevOps; one whose credential can't be told is in service_connections_credential_unknown instead
-    - service_connections_with_stored_credential — List of service connections of any type that hold a stored credential; a connection with no sign-in scheme counts when it keeps any parameter besides the service principal and tenant ids
-    - service_connections_credential_unknown — List of service connections for which the fetcher can't tell whether they hold a stored credential: a sign-in scheme it doesn't recognise, or no sign-in scheme and no parameter besides the service principal and tenant ids. They are in neither stored-credential list, so those two lists are complete only when this one is empty
+    - service_connections_with_stored_credential — List of service connections of any type that hold a stored credential; a connection whose sign-in scheme is None counts when it keeps any parameter besides the service principal and tenant ids
+    - service_connections_credential_unknown — List of service connections for which the fetcher can't tell whether they hold a stored credential: a sign-in scheme it doesn't recognise, no sign-in scheme at all (whatever its parameters), or the scheme None and no parameter besides the service principal and tenant ids. They are in neither stored-credential list, so the two stored-credential lists are complete only when service_connections_credential_unknown is empty
     - service_connections_not_ready — List of service connections Azure DevOps reports as not ready (creation failed or incomplete)
 
     Who may use them, and were they used?
     - service_connections_open_to_all_pipelines — List of service connections that any YAML pipeline in at least one project may use without being authorised one by one (classic pipelines aren't limited by this); a connection whose pipeline permissions couldn't be read in some project, and that isn't open in another, is left out and the run reports the failure
     - service_principals — Number of distinct service principals behind the service connections, told apart by tenant id and app id, both compared ignoring case and surrounding spaces
     - service_connections_used_in_window — Number of service connections used by at least one pipeline run in the lookback period; a pipeline run is a build or a classic release, and the records a release logs for each of its stages count as one run
-    - service_connections_unused_in_window — List of service connections whose history was read in every project and shows no pipeline run in the lookback period
-    - pipeline_runs_using_service_connections — Number of pipeline runs in the lookback period that used at least one service connection, each run counted once however many connections or stages it used
+    - service_connections_unused_in_window — List of service connections whose history was read in every project and shows no pipeline run in the lookback period; a history read counts as read even when it stopped at the cap of 50 pages of 100 records per project, so a connection whose records aren't newest-first, or whose recent runs lie past the cap, can be listed as unused
+    - pipeline_runs_using_service_connections — Number of pipeline runs in the lookback period that used at least one service connection, each run counted once however many connections or stages it used; a connection's history is read to at most 50 pages of 100 records per project, so a connection with more records than that in the window is undercounted
 
     Are pipeline secrets kept in Key Vault?
     - variable_groups_total — Number of variable groups, each counted once however many projects share it
@@ -122,4 +137,9 @@ evidence_set:
     - key_vault_secrets_without_expiry — Number of Key Vault-linked secrets with no expiry date set
 
     What isn't collected?
-    - not_collected — What the fetcher deliberately doesn't collect, by area: secret values (credentials, secret variables and secure file contents; of a connection's sign-in parameters only the service principal and tenant ids are kept, and its URL is cut to scheme and host); when a service principal's secret or certificate expires (Azure DevOps doesn't expose it); which classic pipelines may use a connection (pipeline permissions limit YAML pipelines only); who holds the User, Creator and Administrator roles on each connection; and projects and connections the identity can't see (Azure DevOps lists only the connections it holds a role on, with no refusal for the rest)
+    - not_collected — What the fetcher deliberately doesn't collect, with a note for each area:
+      - secret_values (credentials, secret variables and secure file contents are never read; of a connection's sign-in parameters only the service principal and tenant ids are kept, and its URL is cut to scheme and host)
+      - secret_expiry (when a service principal's secret or certificate expires, which Azure DevOps doesn't expose)
+      - classic_pipeline_authorization (which classic pipelines may use a connection, since pipeline permissions limit YAML pipelines only)
+      - connection_roles (who holds the User, Creator and Administrator roles on each connection)
+      - projects_not_visible (projects and connections the identity can't see, since Azure DevOps lists only the connections it holds a role on and refuses nothing for the rest)
