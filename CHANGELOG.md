@@ -987,6 +987,32 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_policy_compliance` 0.5.0: in-scope compliant counts under
+  resource_exclusions.** With patterns set, the fetcher reads every latest
+  (resource, policy) state grouped on the server (`groupby((ResourceId,
+  ResourceLocation, PolicyAssignmentId, PolicyDefinitionId,
+  PolicyDefinitionReferenceId, ComplianceState))`, after a count of those groups,
+  up to 50,000), keeps the in-scope ones by resource id, group and region, and
+  recounts both sides from them: `compliant_resources`, `resources_evaluated`,
+  `resource_compliance_percentage` and every entry of
+  `resources_by_compliance_state` and `policies_by_compliance_state` (Compliant,
+  Exempt, Unknown and the rest), each assignment's `compliant_resources`,
+  `compliance_percentage` and `resource_details`, and the non-compliant counts.
+  A resource counts once under its highest-ranked state (NonCompliant, Compliant,
+  Error, Conflict, Protected, Exempt, Unknown), and a policy the same way. At
+  subscription scope a policy is an assignment, an initiative counting once, as
+  the service counts them; 0.4.0's recount of `non_compliant_policies` counted
+  each member policy of each assignment instead. The compliant side was null
+  before, and the non-compliant counts no longer go null when the itemized list
+  is truncated or skipped. All of them read null, map
+  values included, unless the grouped read came back whole, and the new
+  `in_scope_states_status` says how it went (`read`, `truncated`, `uncounted` or
+  `failed`; null without patterns). A count over the 50,000 cap skips the read, and
+  an empty count with no groups reads as nothing evaluated. A pattern that matches
+  only compliant resources now counts as matched. Without patterns the read is not
+  made and the counts are the service's, as before; the only change is one more
+  summary line, `"in_scope_states_status": null`.
+
 - **`azure_backup_recovery_status` 0.4.0: restore jobs.** Each vault now lists
   its restore jobs (`restore_jobs`) over `restore_window_days` (365 by default
   and at most, `AZURE_BACKUP_RESTORE_WINDOW_DAYS`; a value that isn't a whole
