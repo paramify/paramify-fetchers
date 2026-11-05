@@ -585,6 +585,13 @@ def test_project_references_come_from_the_project_scoped_by_id_read(tmp_path):
     assert not any(path.startswith("/contoso/_apis/") for path in paths)
 
 
+def test_a_group_listed_by_two_projects_is_read_by_id_once(tmp_path):
+    fake = FakeADO()
+    run(tmp_path, fake)
+    reads = [path for _, path, _ in fake.calls if path.endswith("/variablegroups/2")]
+    assert len(reads) == 1
+
+
 def test_failed_by_id_read_leaves_projects_unknown(tmp_path):
     fake = FakeADO()
     del fake.routes[f"/contoso/{WEB}/_apis/distributedtask/variablegroups/1"]
