@@ -9,6 +9,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import unquote
 
 from dotenv import load_dotenv
 
@@ -94,10 +95,10 @@ VALUE_PATHS = (
 SECRET_WORD = re.compile(
     r"password|passwd|passphrase|secret|token|apikey|credential|privatekey|connectionstring|sharedaccess|signature"
     r"|cookie|certificatedata|certificateblob|securevalue|securestring|protectedsettings|commandtoexecute"
-    r"|customdata|environmentvariables|environmentsettings|appsettings"
+    r"|customdata|environmentvariables|environmentsettings|appsettings|pfx|psk|passcode|keydata|keyvalue"
 )
 SECRET_SEGMENT = re.compile(
-    r".*(key|keys|key\d+|pwd|pin|uri|url)|(?!bypass$).*pass|sas.*|authorization|authentication|headers|queries"
+    r".*(key|keys|key\d+|pwd|pw|pin|uri|url)|(?!bypass$).*pass|sas.*|authorization|authentication|headers|queries"
     r"|body|env|secrets|args|command"
 )
 # Key Vault access-policy permission lists (permissions.keys[n], permissions.secrets[n]) hold permission names.
@@ -111,7 +112,7 @@ SECRET_VALUE = re.compile(
     r"-----BEGIN [A-Z0-9 ]*(PRIVATE KEY|CERTIFICATE)"
     r"|\beyJ[\w-]{8,}\.[\w-]{8,}"
     r"|://[^/\s@]+@"
-    rf"|({_SECRET_NAME})[\"']?\s*[=:]"
+    rf"|({_SECRET_NAME}|pin|pw)[\"']?\s*[=:]"
     rf"|--?[\w-]*({_SECRET_NAME})[\w-]*(\s+|=)\S"
     r"|\b(basic|bearer|digest|negotiate)\s+[\w.~+/=-]{6,}",
     re.IGNORECASE,
@@ -222,7 +223,13 @@ def random_token(token: str) -> bool:
 
 
 def looks_secret(value: str) -> bool:
-    if SECRET_VALUE.search(value):
+    # Read URL-decoded too, so password%3D… is caught like password=….
+    return any(_looks_secret(v) for v in {value, unquote(value)})
+
+
+def _looks_secret(value: str) -> bool:
+    # A secret named anywhere in the text, such as "name: DB_PASSWORD" or "Password123!", withholds it.
+    if SECRET_VALUE.search(value) or SECRET_WORD.search(re.sub(r"[_\-$@]", "", value.lower())):
         return True
     # An object or array value is read as paths too, so {"password": …} is caught by its key.
     if (value.lstrip()[:1] in ("{", "[") or "{" in value) and secret_name(re.sub(r"[^a-z0-9_\-]+", ".", value.lower())):

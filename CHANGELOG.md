@@ -97,14 +97,22 @@ schemas and the `paramify` CLI — not the internal code.
     withheld as `not_allowlisted`.
   - The secret check runs first, on every path, whatever the allowlist says. A
     value is withheld as `secret` when a path segment names a secret or
-    free-form content (password, pass, passphrase, secret, token, any name
-    ending in key or key<n>, pin, uri or url, connection string, authorization,
-    headers, queries, body, env, app settings, args, custom data), compared
-    without case, `_` or `-`. It is also withheld when the value looks like one:
-    `NAME_PASSWORD=`, `--password x`, `Basic`/`Bearer` credentials, a URL with a
-    user, a JWT, a PEM private key, a short random-looking string, or a long
-    key-like string. The built-in allowlist names specific paths, so a setting
-    name such as `status` is shown only on its own resource path.
+    free-form content (password, pass, passphrase, passcode, secret, token, any
+    name ending in key or key<n>, pwd, pw, pin, uri or url, key data, key value,
+    pfx, psk, connection string, authorization, headers, queries, body, env, app
+    settings, args, custom data), compared without case, `_` or `-`. It is also
+    withheld when the value, as written or URL-decoded, looks like one: a secret
+    word anywhere in its text (`name: DB_PASSWORD`, `Password123!`),
+    `NAME_PASSWORD=`, `pin=`, `pw=`, `--password x`, `Basic`/`Bearer`
+    credentials, a URL with a user, a JWT, a PEM private key, a short
+    random-looking string, or a long key-like string. The built-in allowlist
+    names specific paths, so a setting name such as `status` is shown only on its
+    own resource path.
+  - Two things can't be caught: a short password with nothing marking it, such
+    as one alone in a tag, and, under `path:*`, free-form content whose names
+    don't mark a secret (a generic parameter, setting or variable value, or a
+    script). `path:*` shows whatever such content holds, so it is the
+    operator's risk.
   - Values are cut at 200 characters, and a change lists at most 25 entries
     (`property_changes_truncated`). `property_value_counts` counts its values
     shown, not allowlisted and secret, over every changed property. Values that

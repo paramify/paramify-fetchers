@@ -72,7 +72,9 @@ config_schema:
       like a secret (a password, key, token, connection string, header, body, app
       setting or environment variable, or a value shaped like a key, password
       assignment, SAS signature, JWT or URL with credentials) is withheld whatever
-      this lists.
+      this lists. The check can't catch a short password with nothing marking it,
+      such as one alone in a tag, or a secret in free-form content under generic
+      names, so path:* shows whatever such content holds: it is your risk.
       A pattern without path: fails the run and keeps no values. Each item is a
       pattern, or a pattern with a reason. Empty: only the built-in list.
 
@@ -196,19 +198,26 @@ evidence_set:
     withheld, the reason: never the value or anything derived from it. The secret
     check runs first, on every path, whatever the allowlist or value_paths says: a
     value is withheld as "secret" when any segment of its path names a secret or
-    free-form content, compared without case, _ or -, such as password, pwd,
-    passphrase, any name ending in pass (but not bypass), secret, token, any name
-    ending in key, keys or key<n>, pin, uri or url, sas…, connection string,
-    credential, signature, cookie, an authorization or authentication segment,
-    headers, queries, body, env, secrets, environment variables, app settings,
-    args, command, custom data, protected settings, and properties.value; or when a
-    value looks like one: a name such as password, secret, token, key, sig or code
-    followed by = or :, a --flag naming one, a Basic, Bearer, Digest or Negotiate
-    credential, a URL with a user, a JWT, a PEM private key or certificate, a short
-    random-looking string, a long key-like string, or an object with a
-    secret-named key. Key Vault access-policy permission names and
-    true or false are never secrets. A value that passes is shown only when its
-    path is on the allowlist: the built-in list of specific paths (TLS versions,
+    free-form content, compared without case, _ or -, such as password,
+    passphrase, passcode, any name ending in pass (but not bypass), secret, token,
+    any name ending in key, keys or key<n>, pwd, pw, pin, uri or url, sas…, key
+    data, key value, pfx, psk, connection string, credential, signature, cookie,
+    an authorization or authentication segment, headers, queries, body, env,
+    secrets, environment variables, app settings, args, command, custom data,
+    protected settings, and properties.value; or when a value, as written or
+    URL-decoded, looks like one: one of those secret words anywhere in its text
+    (so "name: DB_PASSWORD" or "Password123!" is withheld), a name such as
+    password, secret, token, key, sig, code, pin or pw followed by = or :, a
+    --flag naming one, a Basic, Bearer, Digest or Negotiate credential, a URL with
+    a user, a JWT, a PEM private key or certificate, a short random-looking
+    string, a long key-like string, or an object with a secret-named key. Key
+    Vault access-policy permission names and true or false are never secrets.
+    The check can't catch two things: a short password with nothing marking it,
+    such as one written alone in a tag, and under path:* free-form content whose
+    names don't mark a secret, such as a generic parameter, setting or variable
+    value or a script. path:* shows whatever such content holds, so widening the
+    allowlist with it is the operator's risk. A value that passes is shown only
+    when its path is on the allowlist: the built-in list of specific paths (TLS versions,
     public network access, network ACLs and NSG rules, Key Vault access policies,
     soft delete and purge protection, local auth, encryption, retention, the
     resource's own state, status and provisioning state, SKU, location, tags and
