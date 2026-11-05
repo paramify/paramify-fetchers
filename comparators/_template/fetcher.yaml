@@ -1,0 +1,50 @@
+# Template comparator fetcher.yaml. Copy this directory to
+# comparators/<category>/<short_name>/ and fill in the placeholders.
+#
+# A COMPARATOR reads other fetchers' evidence from the same run instead of an
+# API, matches records across them, and writes one evidence file a validator can
+# read. The runner runs it after its inputs and gives it no credentials. See
+# docs/comparators_guide.md.
+#
+# Validated against framework/schemas/fetcher_schema.json.
+
+name: <category>_<short_name>            # globally unique, same namespace as fetchers
+version: 0.1.0
+description: <which claim needs both inputs, and how a record in one is matched to the other>
+category: <category>                      # matches the parent directory
+
+# The fetchers whose evidence this reads. Each must be JSON evidence (kind
+# evidence or inventory), and each must be in the same manifest.
+depends_on:
+  - <input_fetcher_a>
+  - <input_fetcher_b>
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json                              # a comparator always writes json
+  path: <category>_<short_name>.json
+
+# Always empty: a comparator reads files the run already holds.
+secrets: []
+
+# Non-secret settings, e.g. which environments count as production:
+# config_schema:
+#   environments:
+#     type: string
+#     env: COMPARE_ENVIRONMENTS
+#     default: production
+#     description: Comma-separated `environment` target labels to compare.
+
+evidence_set:
+  reference_id: EVD-<CATEGORY>-<SHORT-NAME>
+  name: <Display name>
+  instructions: >-
+    Script: <category>/<short_name>/fetcher.py. Reads <input_fetcher_a> and
+    <input_fetcher_b> from the same run and <how each record is matched>. Calls
+    no API.
+
+ksis:
+  - <KSI-ID>

@@ -1,0 +1,49 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_cloudfront_distribution_security",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 1,
+      "fields": {
+        "Id": 1,
+        "ARN": 1,
+        "DomainName": 1,
+        "Enabled": 1,
+        "ViewerProtocolPolicy": 1,
+        "MinimumProtocolVersion": 1,
+        "CloudFrontDefaultCertificate": 1,
+        "WebACLId": 0,
+        "WafEnabled": 1,
+        "LoggingEnabled": 0
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:13Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "Id": "EGTAJI8BEJNR0",
+        "ARN": "arn:aws:cloudfront::111111111111:distribution/EGTAJI8BEJNR0",
+        "DomainName": "ddyji7rxc626c.cloudfront.net",
+        "Enabled": true,
+        "ViewerProtocolPolicy": "redirect-to-https",
+        "MinimumProtocolVersion": "TLSv1",
+        "CloudFrontDefaultCertificate": true,
+        "WebACLId": "",
+        "WafEnabled": false,
+        "LoggingEnabled": null
+      }
+    ]
+  }
+}

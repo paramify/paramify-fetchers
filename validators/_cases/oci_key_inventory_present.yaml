@@ -1,0 +1,15 @@
+validator: oci_key_inventory_present
+cases:
+  - name: keys_were_collected
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"live_keys": 2, "keys_not_rotated_within_window": 0}}'
+
+  - name: no_keys_collected
+    expect: FAIL
+    note: >
+      The point of the validator: 'no unrotated keys' and 'no keys' produce the same zero.
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"live_keys": 0, "keys_not_rotated_within_window": 0}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"liveKeys": 2, "keys_not_rotated_within_window": 0}}'

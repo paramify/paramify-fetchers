@@ -44,4 +44,4 @@ ksis:
 evidence_set:
   reference_id: EVD-GITLAB-CICD-CONFIG
   name: GitLab CI/CD Pipeline Configuration
-  instructions: 'Script: gitlab_ci_cd_pipeline_config.sh. Commands executed: GitLab API calls to retrieve project .gitlab-ci.yml and pipeline configuration'
+  instructions: 'Script: gitlab/ci_cd_pipeline_config/fetcher.py. Commands executed: GitLab API calls to retrieve project .gitlab-ci.yml and pipeline configuration'

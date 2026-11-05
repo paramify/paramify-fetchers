@@ -47,7 +47,7 @@ evidence_set:
   reference_id: EVD-GCP-IAM-CUSTOM-ROLES
   name: IAM Custom Role Definitions
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls: iam roles.list()
+    Script: gcp/iam_custom_roles/fetcher.py. Google Cloud client library calls: iam roles.list()
     for the project and, where readable, the organization;
     cloudresourcemanager projects.get() and folders.get() for ancestry. One
     evidence file per project.

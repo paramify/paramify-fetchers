@@ -271,3 +271,15 @@ def test_skip_resources_empty_entry_does_not_match_everything(harness):
     assert payload["summary"]["failed_checks"] == 2
     assert payload["summary"]["skipped_by_resource_filter"] == 1
     assert payload["metadata"]["skip_resources"] == ["aws_instance.web"]
+
+
+@pytest.mark.parametrize("names", [[], [""], ["", ""]])
+def test_require_tools_without_names_checks_the_defaults(tmp_path, names):
+    # Only date on PATH, so every default tool is reported missing by name.
+    (tmp_path / "date").symlink_to(shutil.which("date"))
+    proc = subprocess.run([shutil.which("bash"), "-c", '. "$1"; shift; checkov_require_tools x "$@"', "_",
+                           str(CHECKOV / "_shared" / "clone.sh"), *names],
+                          env={"PATH": str(tmp_path)}, capture_output=True, text=True)
+    assert proc.returncode == 1
+    missing = [line.rsplit(": ", 1)[1] for line in proc.stderr.splitlines()]
+    assert missing == ["git", "checkov", "jq"]

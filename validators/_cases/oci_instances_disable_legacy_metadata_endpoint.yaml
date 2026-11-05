@@ -1,0 +1,13 @@
+validator: oci_instances_disable_legacy_metadata_endpoint
+cases:
+  - name: oci_instances_disable_legacy_metadata_endpoint_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_instances": 3, "instances_with_legacy_metadata_endpoint": 0}}'
+
+  - name: oci_instances_disable_legacy_metadata_endpoint_fails
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_instances": 3, "instances_with_legacy_metadata_endpoint": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_instances": 3, "instances-with-legacy-metadata-endpoint": 0}}'

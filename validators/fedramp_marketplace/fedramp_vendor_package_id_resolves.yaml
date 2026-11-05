@@ -1,0 +1,25 @@
+key: fedramp_vendor_package_id_resolves
+name: Third-Party Vendor Package IDs Resolve
+type: AUTOMATED
+role: configuration
+statement: Every third-party vendor checked resolves to a current FedRAMP package ID, with no unknown ID, no replaced ID and no workspace element left unmatched.
+
+# A delisted ID with a certified re-issue (FR2023864279 -> FR2023864279A) is unresolved; the evidence names the new ID in suggested_package_ids.
+#
+# Reads the fetcher's own count in `summary`, which is written ahead of the
+# vendor list, so MATCH_GROUP's first match is always the summary. The
+# presence rule makes a missing summary (failed run, renamed key) fail rather
+# than pass vacuously.
+regex: '"vendors_unresolved":\s*(?<vendors_unresolved>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # vendors_unresolved
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-FEDRAMP-VENDOR-CERTIFICATION
+  - EVD-FEDRAMP-WORKSPACE-VENDOR-CERTIFICATION

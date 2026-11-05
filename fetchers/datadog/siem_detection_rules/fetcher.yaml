@@ -28,4 +28,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-SIEM-RULES
   name: Datadog SIEM Detection Rules
-  instructions: 'Calls GET /api/v2/security_monitoring/rules with pagination, filtered to custom rules. Extracts rule name, type, severity, enabled state, and detection method. Writes JSON rules list.'
+  instructions: 'Script: datadog/siem_detection_rules/fetcher.py. Calls GET /api/v2/security_monitoring/rules with pagination, filtered to custom rules. Extracts rule name, type, severity, enabled state, and detection method. Writes JSON rules list.'

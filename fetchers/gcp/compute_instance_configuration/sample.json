@@ -1,0 +1,185 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_compute_instance_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.instances[]",
+      "records": 3,
+      "fields": {
+        "automatic_restart": 3,
+        "block_project_ssh_keys": 3,
+        "can_ip_forward": 3,
+        "confidential_computing": 3,
+        "confidential_instance_type": 0,
+        "creation_timestamp": 3,
+        "default_service_account_with_full_api_access": 3,
+        "deletion_protection": 3,
+        "gke_managed": 3,
+        "has_full_api_access_scope": 3,
+        "id": 3,
+        "instance_ssh_keys_present": 3,
+        "integrity_monitoring": 3,
+        "machine_type": 3,
+        "name": 3,
+        "network_interface_count": 3,
+        "network_interfaces": 3,
+        "network_tags": 1,
+        "on_host_maintenance": 3,
+        "os_login_2fa_enabled": 3,
+        "os_login_enabled": 3,
+        "os_login_source": 3,
+        "preemptible": 3,
+        "provisioning_model": 3,
+        "public_ip": 3,
+        "secure_boot": 3,
+        "serial_port_access_enabled": 3,
+        "service_account_attached": 3,
+        "service_accounts": 3,
+        "shielded_vm_enabled": 3,
+        "status": 3,
+        "uses_default_compute_service_account": 3,
+        "vtpm": 3,
+        "zone": 3
+      }
+    },
+    {
+      "path": "results.instances[].network_interfaces[]",
+      "records": 3,
+      "fields": {
+        "access_config_types": 1,
+        "has_external_ip": 3,
+        "name": 3,
+        "network": 3,
+        "nic_type": 0,
+        "stack_type": 3,
+        "subnetwork": 3
+      }
+    },
+    {
+      "path": "results.instances[].service_accounts[]",
+      "records": 3,
+      "fields": {
+        "default_compute_service_account": 3,
+        "email": 3,
+        "full_api_access": 3,
+        "scopes": 3
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:43Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "instances": [
+        {
+          "automatic_restart": true,
+          "block_project_ssh_keys": false,
+          "can_ip_forward": false,
+          "confidential_computing": false,
+          "confidential_instance_type": null,
+          "creation_timestamp": "2026-08-17T09:44:20.791-07:00",
+          "default_service_account_with_full_api_access": false,
+          "deletion_protection": false,
+          "gke_managed": true,
+          "has_full_api_access_scope": false,
+          "id": "0000000000000000002",
+          "instance_ssh_keys_present": false,
+          "integrity_monitoring": true,
+          "machine_type": "e2-small",
+          "name": "gke-example-gke-default-pool-f1fa58b6-kwh7",
+          "network_interface_count": 1,
+          "network_interfaces": [
+            {
+              "access_config_types": [
+                "ONE_TO_ONE_NAT"
+              ],
+              "has_external_ip": true,
+              "name": "nic0",
+              "network": "example-vpc",
+              "nic_type": null,
+              "stack_type": "IPV4_ONLY",
+              "subnetwork": "example-subnet"
+            }
+          ],
+          "network_tags": [
+            "gke-example-gke-34d55aca-node"
+          ],
+          "on_host_maintenance": "MIGRATE",
+          "os_login_2fa_enabled": false,
+          "os_login_enabled": false,
+          "os_login_source": "project",
+          "preemptible": false,
+          "provisioning_model": "STANDARD",
+          "public_ip": true,
+          "secure_boot": true,
+          "serial_port_access_enabled": false,
+          "service_account_attached": true,
+          "service_accounts": [
+            {
+              "default_compute_service_account": true,
+              "email": "111111111111-compute@developer.gserviceaccount.com",
+              "full_api_access": false,
+              "scopes": [
+                "https://www.googleapis.com/auth/devstorage.read_only",
+                "https://www.googleapis.com/auth/logging.write",
+                "https://www.googleapis.com/auth/monitoring"
+              ]
+            }
+          ],
+          "shielded_vm_enabled": true,
+          "status": "RUNNING",
+          "uses_default_compute_service_account": true,
+          "vtpm": true,
+          "zone": "us-central1-a"
+        }
+      ],
+      "project_defaults": {
+        "default_network_tier": "PREMIUM",
+        "default_service_account": "111111111111-compute@developer.gserviceaccount.com",
+        "os_login_2fa_enabled": false,
+        "os_login_enabled": false,
+        "project_wide_ssh_keys_present": false
+      }
+    },
+    "summary": {
+      "block_project_ssh_keys_instances": 1,
+      "compute_api_readable": true,
+      "confidential_computing_instances": 0,
+      "default_service_account_full_api_access_instances": 1,
+      "default_service_account_instances": 2,
+      "deletion_protection_instances": 1,
+      "full_api_access_scope_instances": 1,
+      "gke_managed_instances": 1,
+      "instances_without_service_account": 0,
+      "integrity_monitoring_instances": 3,
+      "ip_forwarding_instances": 0,
+      "multi_nic_instances": 0,
+      "os_login_2fa_instances": 0,
+      "os_login_instances": 1,
+      "os_login_percentage": 33,
+      "preemptible_instances": 0,
+      "project_default_service_account": "111111111111-compute@developer.gserviceaccount.com",
+      "project_os_login_2fa_enabled": false,
+      "project_os_login_enabled": false,
+      "project_wide_ssh_keys_present": false,
+      "public_ip_instances": 1,
+      "running_instances": 3,
+      "secure_boot_instances": 2,
+      "serial_port_access_instances": 0,
+      "shielded_vm_instances": 3,
+      "shielded_vm_percentage": 100,
+      "total_instances": 3,
+      "vtpm_instances": 3
+    }
+  }
+}

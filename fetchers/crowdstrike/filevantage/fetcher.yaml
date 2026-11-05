@@ -52,7 +52,7 @@ evidence_set:
   reference_id: EVD-CS-FILEVANTAGE
   name: CrowdStrike Falcon File Integrity Changes
   instructions: >-
-    Script: fetcher.py. Authenticates at POST /oauth2/token, enumerates change
+    Script: crowdstrike/filevantage/fetcher.py. Authenticates at POST /oauth2/token, enumerates change
     IDs via GET /filevantage/queries/changes/v3 (after-cursor pagination, 5000
     per page) filtered to the lookback window on action_timestamp, then resolves
     them in batches of 500 via GET /filevantage/entities/changes/v2 (ids as

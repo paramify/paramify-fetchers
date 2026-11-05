@@ -18,7 +18,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, DataTable, Input, Static
 
-from framework import api
+from framework import api, patterns
 from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
 from framework.tui import kinds, palette, render
 from framework.tui.components.forms import env_name_from_ref
@@ -370,9 +370,14 @@ class ManifestPage(ButtonRowNav, Vertical):
             # is only needed for the edge case where a name differs. (Per-target
             # secrets are not wired here — each target usually needs its own cred.)
             descriptors = self._descriptors()
+            try:
+                fetchers = api.discover(self.app.root_path)["fetchers"]
+            except Exception:  # never let a discovery failure kill the UI
+                fetchers = {}
+            # A comparator brings its inputs with it.
+            added = [a for name in names for a in api.add_entry(m, name, fetchers)]
             wired = False
-            for name in names:
-                api.add_entry(m, name)
+            for name in added:
                 d = descriptors.get(name)
                 if d:
                     for s in d.get("secrets", []):
@@ -382,7 +387,7 @@ class ManifestPage(ButtonRowNav, Vertical):
             self._selected = names[-1]
             self._autosave()
             self.rebuild()
-            n = len(names)
+            n = len(added)
             noun = "fetcher" if n == 1 else "fetchers"
             if wired:
                 self.notify(f"Added {n} {noun} — secrets wired to default env vars (e to change).")
@@ -410,7 +415,10 @@ class ManifestPage(ButtonRowNav, Vertical):
         entry = self._entry(use)
         cfg = entry.get("config") or {}
         secs = entry.get("secrets") or {}
-        config_specs = [self._config_spec(c, cfg.get(c["name"])) for c in d.get("config", [])]
+        # A text box would save a pattern list back as one string and drop its reasons; the CLI edits those.
+        config_specs = [self._config_spec(c, cfg.get(c["name"])) for c in d.get("config", [])
+                        if c.get("type") != patterns.TYPE]
+        lists = [c["name"] for c in d.get("config", []) if c.get("type") == patterns.TYPE]
         secret_specs = [
             {
                 "key": s["name"], "label": s["name"], "kind": "secret",
@@ -423,6 +431,8 @@ class ManifestPage(ButtonRowNav, Vertical):
         ]
         if not config_specs and not secret_specs:
             hint = " — press 't' to edit its targets" if d.get("supports_targets") else ""
+            if lists:
+                hint += f" — edit {', '.join(lists)} with: paramify manifest exclude {use} <pattern>"
             self.notify(f"{use} has no entry-level config or secrets to edit{hint}.")
             return
         groups = {"config": config_specs, "secrets": secret_specs}

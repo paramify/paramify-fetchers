@@ -1,0 +1,151 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_activity_log_alerts",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.activity_log_alerts[]",
+      "records": 1,
+      "fields": {
+        "action_groups": 1,
+        "condition": 1,
+        "description": 1,
+        "enabled": 1,
+        "id": 1,
+        "location": 1,
+        "monitored_operations": 1,
+        "name": 1,
+        "resource_group": 1,
+        "scopes": 1,
+        "service_health_alert": 1
+      }
+    },
+    {
+      "path": "results.activity_log_alerts[].condition.all_of[]",
+      "records": 2,
+      "fields": {
+        "any_of": 0,
+        "contains_any": 0,
+        "equals": 2,
+        "field": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:08:59Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "activity_log_alerts": [
+        {
+          "action_groups": [
+            "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Insights/actionGroups/pf-test-actiongroup"
+          ],
+          "condition": {
+            "all_of": [
+              {
+                "any_of": [],
+                "contains_any": null,
+                "equals": "Administrative",
+                "field": "category"
+              }
+            ]
+          },
+          "description": "Fires when a network security group is deleted.",
+          "enabled": true,
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Insights/activityLogAlerts/pf-alert-nsg-delete",
+          "location": "global",
+          "monitored_operations": [
+            "microsoft.network/networksecuritygroups/delete"
+          ],
+          "name": "pf-alert-nsg-delete",
+          "resource_group": "rg-example-example-profile",
+          "scopes": [
+            "/subscriptions/00000000-0000-4000-8000-111111111111"
+          ],
+          "service_health_alert": false
+        }
+      ],
+      "monitored_operations": {
+        "create_update_network_security_group": [
+          "Microsoft.Network/networkSecurityGroups/write"
+        ],
+        "create_update_network_security_group_rule": [
+          "Microsoft.Network/networkSecurityGroups/securityRules/write"
+        ],
+        "create_update_policy_assignment": [
+          "Microsoft.Authorization/policyAssignments/write"
+        ],
+        "create_update_public_ip_address": [
+          "Microsoft.Network/publicIPAddresses/write"
+        ],
+        "create_update_security_solution": [
+          "Microsoft.Security/securitySolutions/write"
+        ],
+        "create_update_sql_server_firewall_rule": [
+          "Microsoft.Sql/servers/firewallRules/write"
+        ],
+        "delete_network_security_group": [
+          "Microsoft.Network/networkSecurityGroups/delete",
+          "Microsoft.ClassicNetwork/networkSecurityGroups/delete"
+        ],
+        "delete_network_security_group_rule": [
+          "Microsoft.Network/networkSecurityGroups/securityRules/delete"
+        ],
+        "delete_policy_assignment": [
+          "Microsoft.Authorization/policyAssignments/delete"
+        ],
+        "delete_public_ip_address": [
+          "Microsoft.Network/publicIPAddresses/delete"
+        ],
+        "delete_security_solution": [
+          "Microsoft.Security/securitySolutions/delete"
+        ],
+        "delete_sql_server_firewall_rule": [
+          "Microsoft.Sql/servers/firewallRules/delete"
+        ]
+      },
+      "provider_registration_status": "registered"
+    },
+    "summary": {
+      "alerts_with_action_groups": 1,
+      "alerts_without_action_groups": 0,
+      "all_monitored_operations_covered": false,
+      "disabled_alerts": 0,
+      "enabled_alerts": 1,
+      "monitored_operation_coverage": {
+        "create_update_network_security_group": false,
+        "create_update_network_security_group_rule": false,
+        "create_update_policy_assignment": false,
+        "create_update_public_ip_address": false,
+        "create_update_security_solution": false,
+        "create_update_sql_server_firewall_rule": false,
+        "delete_network_security_group": true,
+        "delete_network_security_group_rule": false,
+        "delete_policy_assignment": false,
+        "delete_public_ip_address": false,
+        "delete_security_solution": false,
+        "delete_sql_server_firewall_rule": false
+      },
+      "monitored_operation_percentage": 8,
+      "monitored_operations_covered": 1,
+      "monitored_operations_total": 12,
+      "provider_registration_status": "registered",
+      "service_health_alert_configured": false,
+      "total_activity_log_alerts": 1,
+      "uncovered_monitored_operations": [
+        "create_update_network_security_group",
+        "create_update_network_security_group_rule",
+        "create_update_policy_assignment"
+      ]
+    }
+  }
+}

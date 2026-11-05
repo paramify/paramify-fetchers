@@ -1,0 +1,13 @@
+validator: oci_cloud_guard_targets_assess_configuration
+cases:
+  - name: oci_cloud_guard_targets_assess_configuration_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_targets": 2, "configuration_assessment_percentage": 100}}'
+
+  - name: oci_cloud_guard_targets_assess_configuration_fails
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_targets": 2, "configuration_assessment_percentage": 50}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_targets": 2, "configurationAssessmentPercentage": 100}}'

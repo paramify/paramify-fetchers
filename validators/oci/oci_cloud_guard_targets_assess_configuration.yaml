@@ -1,0 +1,24 @@
+key: oci_cloud_guard_targets_assess_configuration
+name: OCI Cloud Guard Targets Assess Configuration
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Cloud Guard target whose detail was read has the configuration
+  detector enabled with at least one rule, so the resources beneath it are re-
+  evaluated for drift. Asserts the percentage the fetcher computes over
+  readable targets is 100. Does NOT assert enforcement (responder rules or
+  Security Zones), which the evidence reports separately. Pair with
+  oci_cloud_guard_target_present and oci_cloud_guard_enabled. Fails when any
+  target assesses nothing, and when the summary key is renamed.
+regex: '"configuration_assessment_percentage":\s*(?<configuration_assessment_percentage>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-OCI-CLOUD-GUARD

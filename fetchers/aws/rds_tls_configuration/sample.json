@@ -1,0 +1,49 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_rds_tls_configuration",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.ca_certificates[]",
+      "records": 3,
+      "fields": {
+        "id": 3,
+        "type": 3,
+        "valid_from": 3,
+        "valid_till": 3
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:13:09Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "instances": [],
+      "parameter_groups": [],
+      "ca_certificates": [
+        {
+          "id": "rds-ca-ecc384-g1",
+          "type": "CA",
+          "valid_from": "2021-05-21T23:15:56+00:00",
+          "valid_till": "2121-05-22T00:15:56+00:00"
+        }
+      ],
+      "summary": {
+        "total_instances": 0,
+        "force_ssl_enabled": 0,
+        "require_secure_transport_enabled": 0,
+        "ssl_enforced": 0,
+        "tls_1_2_minimum_enforced": 0,
+        "parameter_groups_in_sync": 0
+      }
+    }
+  }
+}

@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-WAF-ALL-RULES
   name: WAF All Rules
-  instructions: 'Script: fetcher.sh. Commands executed: aws wafv2 list-web-acls, aws wafv2 get-web-acl'
+  instructions: 'Script: aws/waf_all_rules/fetcher.sh. Commands executed: aws wafv2 list-web-acls, aws wafv2 get-web-acl'

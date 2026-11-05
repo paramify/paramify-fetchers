@@ -128,4 +128,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CHECKOV-TERRAFORM
   name: Checkov Terraform IaC Scan
-  instructions: 'Script: checkov_terraform/fetcher.sh. Shallow-clones the target repo and runs the checkov CLI (--framework terraform) over its .tf files, merging default + configured skip-checks/skip-resources, and records passed/failed/skipped checks with repo+commit provenance. metadata records the branch actually scanned (branch_fallback when the requested branch could not be cloned), the effective skip-check list and the skip-resource patterns; failed checks on skipped resources are moved to skipped_checks, not dropped.'
+  instructions: 'Script: checkov/terraform/fetcher.sh. Shallow-clones the target repo and runs the checkov CLI (--framework terraform) over its .tf files, merging default + configured skip-checks/skip-resources, and records passed/failed/skipped checks with repo+commit provenance. metadata records the branch actually scanned (branch_fallback when the requested branch could not be cloned), the effective skip-check list and the skip-resource patterns; failed checks on skipped resources are moved to skipped_checks, not dropped.'

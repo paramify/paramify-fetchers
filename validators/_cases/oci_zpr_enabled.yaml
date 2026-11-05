@@ -1,0 +1,13 @@
+validator: oci_zpr_enabled
+cases:
+  - name: oci_zpr_enabled_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"zpr_enabled": true}}'
+
+  - name: oci_zpr_enabled_fails
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"zpr_enabled": false}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"zpr-enabled": true}}'

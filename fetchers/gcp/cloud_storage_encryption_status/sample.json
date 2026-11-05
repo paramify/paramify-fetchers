@@ -1,0 +1,60 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_cloud_storage_encryption_status",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.buckets[]",
+      "records": 3,
+      "fields": {
+        "cmek": 3,
+        "has_retention_policy": 3,
+        "kms_key_name": 1,
+        "location": 3,
+        "location_type": 3,
+        "name": 3,
+        "public_access_prevention": 3,
+        "retention_period_seconds": 0,
+        "uniform_bucket_level_access": 3,
+        "versioning_enabled": 3
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:41Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "buckets": [
+        {
+          "cmek": true,
+          "has_retention_policy": false,
+          "kms_key_name": "projects/example-project/locations/us-central1/keyRings/example-test/cryptoKeys/bucket-key",
+          "location": "US-CENTRAL1",
+          "location_type": "region",
+          "name": "example-project-cmek",
+          "public_access_prevention": "enforced",
+          "retention_period_seconds": null,
+          "uniform_bucket_level_access": true,
+          "versioning_enabled": true
+        }
+      ]
+    },
+    "summary": {
+      "cmek_buckets": 1,
+      "cmek_percentage": 33,
+      "google_managed_buckets": 2,
+      "total_buckets": 3,
+      "uniform_access_buckets": 1,
+      "versioned_buckets": 1
+    }
+  }
+}

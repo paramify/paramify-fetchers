@@ -53,5 +53,5 @@ evidence_set:
   reference_id: EVD-GCP-GKE-CONFIG
   name: GKE Cluster Configuration
   instructions: >
-    Script: fetcher.py. Google Cloud client library call: container
+    Script: gcp/gke_cluster_configuration/fetcher.py. Google Cloud client library call: container
     clusters.list(). One evidence file per project.

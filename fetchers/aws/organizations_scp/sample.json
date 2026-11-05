@@ -1,0 +1,39 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_organizations_scp",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 1,
+      "fields": {
+        "Organization": 0,
+        "Roots": 0,
+        "ServiceControlPolicies": 0,
+        "OrganizationsInUse": 1,
+        "Note": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:13:06Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "Organization": {},
+        "Roots": [],
+        "ServiceControlPolicies": [],
+        "OrganizationsInUse": false,
+        "Note": "account not a member of an AWS Organization (no SCPs apply)"
+      }
+    ]
+  }
+}

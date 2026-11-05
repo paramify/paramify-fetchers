@@ -12,7 +12,7 @@ A traced, inspected run. You'll install the CLI from this repo, build a scratch 
 
 ## Prerequisites
 
-- **Python 3.10+** — `pyproject.toml` requires `>=3.10`; this guide was written and verified against Python 3.14.5.
+- **Python 3.11+** — `pyproject.toml` requires `>=3.11`; this guide was written and verified against Python 3.14.5.
 - A clone of `paramify-fetchers`, on `main`.
 - A virtualenv. Commands below assume it's activated.
 - **No credentials.** Deliberately. Everything in this part runs with `RIPPLING_API_TOKEN=fake`.
@@ -324,7 +324,7 @@ ls /tmp/tour/evidence/run-*/
 
 ## What's next
 
-You've read the contract from both sides; in Part 2 you sign it. We'll copy `fetchers/_template/` into a new category, fill in a `fetcher.yaml` the discovery layer accepts, write the collection script with a failure ledger that can defend itself, and take it through the same smoke-test-then-runner gauntlet — the same path as `docs/porting_playbook.md`, but with the reasoning attached. The open question to carry there: of everything `rippling_current_employees` does, which parts were *contract* and which were merely *convention*?
+You've read the contract from both sides; in Part 2 you sign it. We'll copy `fetchers/_template/` into a new category, fill in a `fetcher.yaml` the discovery layer accepts, write the collection script with a failure ledger that can defend itself, and take it through the same smoke-test-then-runner gauntlet — the same path as `docs/porting_guide.md`, but with the reasoning attached. The open question to carry there: of everything `rippling_current_employees` does, which parts were *contract* and which were merely *convention*?
 
 Before the exercises, one question, two sentences, in your own words: why does the *runner* write the envelope, when the fetcher already knows everything about its own run? The answer that satisfies a skeptical colleague explains what would go wrong across 172 fetchers — and on customer infrastructure — if each script wrapped its own output.
 
@@ -343,7 +343,7 @@ This part was researched directly from the repository working tree (branch `main
 **Repository docs**
 
 1. `README.md` — the four-piece architecture, the strictness rationale, and the smoke-test pattern.
-2. `docs/design.md` / [`docs/config_injection_design.md`](https://github.com/paramify/paramify-fetchers/blob/1f690ac/docs/config_injection_design.md) — design rationale and the config/auth flow (referenced; read the originals for depth).
+2. [`docs/design.md`](https://github.com/paramify/paramify-fetchers/blob/1f690ac/docs/design.md) / [`docs/config_injection_design.md`](https://github.com/paramify/paramify-fetchers/blob/1f690ac/docs/config_injection_design.md) — design rationale and the config/auth flow (referenced; read the originals for depth).
 
 **Code read directly**
 

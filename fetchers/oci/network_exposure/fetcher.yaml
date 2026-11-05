@@ -1,0 +1,125 @@
+name: oci_network_exposure
+version: 0.1.0
+description: >-
+  Shows every security list and network security group rule admitting the internet, which of those a packet can actually reach, egress limits, and flow logging per subnet.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_network_exposure.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect networking from. Optional — omit to collect
+      from the tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — a VCN and the
+      subnets inside it can sit in different compartments, and reachability is
+      only correct when both are read.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-CNA-RNT      # Inbound AND outbound traffic limited — ingress and egress rules, with reachability
+  - KSI-CNA-MAT      # Minimal attack surface — sensitive ports reachable from the internet
+  - KSI-MLA-LET      # What is logged — VCN and subnet flow logs
+
+evidence_set:
+  reference_id: EVD-OCI-NETWORK-EXPOSURE
+  name: Network Traffic Rules and Internet Reachability
+  instructions: |
+    Script: oci/network_exposure/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope. A route table, gateway or flow log in a compartment outside the scope reads as unknown, so point the target at a common parent.
+
+    Commands Executed:
+    - identity.list_compartments — the compartments beneath the target
+    - virtual_network.list_vcns (per compartment) — VCNs and their default security list
+    - virtual_network.list_internet_gateways (per compartment) — internet gateways and whether each is enabled
+    - virtual_network.list_route_tables (per compartment) — route tables, to find default routes to an enabled gateway
+    - logging.list_log_groups (per compartment) — log groups
+    - logging.list_logs (per log group) — flow logs, matched to subnets and VCNs
+    - virtual_network.list_subnets (per compartment) — subnets with their security lists, route table and ingress prohibitions
+    - virtual_network.list_security_lists (per compartment) — security lists with their ingress and egress rules
+    - virtual_network.list_network_security_groups (per compartment) — network security groups
+    - virtual_network.list_network_security_group_security_rules (per group) — each group's rules
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_network_exposure_<compartment>_<region>.json — every VCN, subnet, security list, network security group and internet gateway, with each rule parsed into peer, protocol and ports and each subnet's reachability and flow logs.
+
+    Summary fields:
+
+    What was read?
+    - network_readable — True if the VCN listing was read in at least one compartment; false if every listing failed
+    - total_vcns — Number of VCNs
+    - total_subnets — Number of live subnets
+    - total_security_lists — Number of live security lists
+    - total_network_security_groups — Number of live network security groups
+    - nsgs_with_unreadable_rules — Number of network security groups whose rules could not be read; they count as having no rules
+    - unattached_security_lists — Number of security lists attached to no subnet, which govern no traffic
+
+    Which rules admit the internet, and can a packet arrive?
+    - internet_ingress_rules — Number of security-list ingress rules whose source is 0.0.0.0/0 or ::/0, as configured
+    - reachable_internet_ingress_rules — Number of those on a security list attached to a subnet that permits internet ingress and whose route table sends a default route to an enabled internet gateway (reachable, as this evidence defines it)
+    - internet_ingress_rules_with_unknown_reachability — Number of those on a subnet whose route table was not read, so reachability could not be decided; non-zero means reachable_internet_ingress_rules is a floor
+    - internet_ingress_rules_on_unattached_lists — Number of internet ingress rules on security lists attached to no subnet
+    - internet_ingress_rules_opening_all_ports — Number of internet ingress rules with no port restriction
+    - ipv6_internet_ingress_rules — Number of internet ingress rules whose source is ::/0
+    - sensitive_ports_open_to_internet — List of named sensitive services (SSH, RDP, MySQL, PostgreSQL, Redis and others) that any internet ingress rule opens
+    - sensitive_ports_reachable_from_internet — List of those services opened by a reachable rule
+    - default_security_lists_with_internet_ingress — Number of VCN default security lists carrying an internet ingress rule
+    - stateless_rules — Number of stateless rules across lists and groups
+
+    What may leave?
+    - internet_egress_rules — Number of security-list egress rules whose destination is 0.0.0.0/0 or ::/0
+    - unrestricted_internet_egress_rules — Number of those with no port restriction
+    - security_lists_with_unrestricted_egress — List of security list names, with the last characters of their OCID, allowing unrestricted egress to the internet
+
+    What do the network security groups allow?
+    - nsg_internet_ingress_rules — Number of network security group ingress rules admitting the internet; these attach to VNICs, so reachability is not resolved for them
+    - nsg_sensitive_ports_open_to_internet — List of named sensitive services those rules open
+
+    Is there a way in at all?
+    - internet_gateways — Number of live internet gateways
+    - enabled_internet_gateways — List of enabled internet gateway names with the last characters of their OCID
+    - enabled_internet_gateways_routed_to — Number of enabled internet gateways that some route table sends a default route to
+    - internet_routable_subnets — Number of subnets whose route table reaches an enabled internet gateway
+    - subnets_with_unreadable_route_table — Number of subnets whose route table was not read
+    - private_subnets — Number of subnets that prohibit public IPs on VNICs
+    - subnets_prohibiting_internet_ingress — Number of subnets that prohibit internet ingress regardless of their rules
+
+    Is traffic logged?
+    - subnets_with_flow_logging — Number of subnets with an enabled flow log on the subnet or its VCN
+    - flow_logging_percentage — Percentage of subnets with flow logging = subnets_with_flow_logging / total_subnets × 100, a whole number; 0 when total_subnets is 0

@@ -1,0 +1,87 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_iam_roles",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 19,
+      "fields": {
+        "RoleName": 18,
+        "Arn": 18,
+        "CreateDate": 18,
+        "Description": 5,
+        "MaxSessionDuration": 18,
+        "TrustPolicy": 18,
+        "AttachedPolicies": 13,
+        "InstanceProfiles": 0,
+        "Tags": 9,
+        "Type": 1,
+        "Policy": 1
+      }
+    },
+    {
+      "path": "results[].TrustPolicy.Statement[]",
+      "records": 18,
+      "fields": {
+        "Effect": 18,
+        "Principal": 18,
+        "Action": 18
+      }
+    },
+    {
+      "path": "results[].Tags[]",
+      "records": 18,
+      "fields": {
+        "Key": 18,
+        "Value": 18
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:12:23Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "RoleName": "pft-backup",
+        "Arn": "arn:aws:iam::111111111111:role/pft-backup",
+        "CreateDate": "2026-09-28T17:03:52+00:00",
+        "Description": null,
+        "MaxSessionDuration": 3600,
+        "TrustPolicy": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "backup.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "AttachedPolicies": [
+          [
+            "AWSBackupServiceRolePolicyForBackup",
+            "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
+          ]
+        ],
+        "InstanceProfiles": [],
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "terraform"
+          }
+        ]
+      }
+    ]
+  }
+}

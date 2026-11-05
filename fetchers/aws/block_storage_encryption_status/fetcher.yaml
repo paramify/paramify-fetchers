@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-BLOCK-ENC
   name: Block Storage Encryption
-  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 get-ebs-encryption-by-default, aws ec2 get-ebs-default-kms-key-id, aws ec2 describe-volumes, aws efs describe-file-systems'
+  instructions: 'Script: aws/block_storage_encryption_status/fetcher.sh. Commands executed: aws ec2 get-ebs-encryption-by-default, aws ec2 get-ebs-default-kms-key-id, aws ec2 describe-volumes, aws efs describe-file-systems'

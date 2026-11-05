@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-KMS-ROT
   name: KMS Key Rotation
-  instructions: 'Script: fetcher.sh. Commands executed: aws kms list-keys, aws kms describe-key, aws kms get-key-rotation-status, aws kms get-key-policy, aws configservice describe-compliance-by-config-rule'
+  instructions: 'Script: aws/kms_key_rotation/fetcher.sh. Commands executed: aws kms list-keys, aws kms describe-key, aws kms get-key-rotation-status, aws kms get-key-policy, aws configservice describe-compliance-by-config-rule'

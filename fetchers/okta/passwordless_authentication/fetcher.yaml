@@ -25,4 +25,4 @@ ksis:
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-02
   name: Okta Passwordless Authentication
-  instructions: 'Script: okta_passwordless_authentication.py. Uses Okta APIs to collect passwordless authentication policy and enrollment evidence. Output: okta_passwordless_authentication.json'
+  instructions: 'Script: okta/passwordless_authentication/fetcher.py. Uses Okta APIs to collect passwordless authentication policy and enrollment evidence. Output: okta_passwordless_authentication.json'

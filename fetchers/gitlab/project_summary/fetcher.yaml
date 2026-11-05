@@ -42,4 +42,4 @@ ksis:
 evidence_set:
   reference_id: EVD-GITLAB-PROJECT-SUMMARY
   name: GitLab Project Summary
-  instructions: 'Script: gitlab_project_summary.sh. Commands executed: GitLab API to list repository tree and file metadata'
+  instructions: 'Script: gitlab/project_summary/fetcher.py. Commands executed: GitLab API to list repository tree and file metadata'

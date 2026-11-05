@@ -1,5 +1,5 @@
 name: azure_app_gateway_backend_tls
-version: 0.1.0
+version: 0.2.0
 description: >
   Every Azure Application Gateway in the subscription and each of its backend
   settings, layer 7 (HTTP/HTTPS) and layer 4 (TCP/TLS): whether traffic from the
@@ -9,6 +9,30 @@ description: >
   traffic through the setting. The gateway count is checked against Resource
   Graph, and the collection fails on a mismatch.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching application gateway is listed under excluded with the
+      pattern and left out of every count and verdict; its backend
+      settings leave with it. The gateway count check against Resource
+      Graph still covers every gateway.
+      A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -48,7 +72,7 @@ evidence_set:
   reference_id: EVD-AZURE-APPGW-BACKEND-TLS
   name: Azure Application Gateway Backend TLS
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-network
+    Script: azure/app_gateway_backend_tls/fetcher.py. Azure SDK calls: azure-mgmt-network
     application_gateways.list_all() and a Resource Graph count of
     microsoft.network/applicationgateways; the run fails if the two differ
     (results.completeness.match false). Reader at subscription scope is
@@ -75,3 +99,14 @@ evidence_set:
     validation is not disabled, and validate_sni is not false.
     summary.insecure_backend_settings_in_use counts in-use settings where it is
     false; summary.plaintext_in_use counts in-use Http/Tcp settings.
+    Application gateways the patterns take out (their backend settings
+    with them) are listed under results.excluded, each with the pattern
+    that matched; every count covers the rest, while results.completeness
+    still compares the full list with Resource Graph. Summary fields:
+    resource_exclusion_patterns (the configured patterns, empty when none
+    are set), resource_exclusion_patterns_unmatched (patterns that matched
+    nothing, such as a mistyped name), excluded_application_gateways (how
+    many the patterns took out) and in_scope_application_gateways,
+    in_scope_backend_settings (how many stayed); all three are null when
+    the gateway list couldn't be read. results.excluded is always present,
+    empty when nothing is excluded.

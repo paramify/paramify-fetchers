@@ -12,6 +12,7 @@ The module isn't an importable package (loaded by path), so we do the same here.
 from __future__ import annotations
 
 import importlib.util
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -376,3 +377,9 @@ def test_create_evidence_set_falls_back_to_find_on_409():
     c = _client(get=lambda url, params: gets.pop(0),
                 post=lambda url, body: _Resp(409, text="Evidence already exists"))
     assert c.create_evidence_set("EVD-X", "X") == "ev-7"
+
+
+def test_create_evidence_set_starts_the_schedule_on_the_creation_day():
+    c = _client(post=lambda url, body: _Resp(201, {"id": "ev-1"}))
+    c.create_evidence_set("EVD-X", "X")
+    assert c.session.posts[0][1]["startDate"] == date.today().isoformat()

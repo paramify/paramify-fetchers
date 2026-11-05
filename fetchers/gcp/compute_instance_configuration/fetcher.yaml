@@ -49,6 +49,6 @@ evidence_set:
   reference_id: EVD-GCP-VM-CONFIG
   name: Compute Engine Instance Configuration
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls: compute
+    Script: gcp/compute_instance_configuration/fetcher.py. Google Cloud client library calls: compute
     instances.aggregatedList(), projects.get() for the project-wide metadata
     defaults instances inherit. One evidence file per project.

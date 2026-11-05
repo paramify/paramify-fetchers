@@ -37,6 +37,8 @@ from azure_common import (  # noqa: E402
     write_evidence,        # writes the evidence dict to disk as JSON
     report_failure,        # logs the reason AND writes $FETCHER_STATUS_FILE
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_defender_assessments")
 
@@ -84,6 +86,21 @@ def _enum_list(values: Any) -> list:
 
 ASSESSMENT_ID_MARKER = "/providers/microsoft.security/assessments/"
 
+# Each assessment's own severity; the subscription's metadata catalogue can rate a check lower.
+SEVERITY_QUERY = (
+    "SecurityResources"
+    " | where type =~ 'microsoft.security/assessments'"
+    " | project id, severity = tostring(properties.metadata.severity)"
+    " | order by id asc"
+)
+SEVERITY_OPERATION = "resourcegraph.resources (SecurityResources)"
+FROM_ASSESSMENT = "assessment"
+FROM_CATALOGUE = "catalogue"
+
+
+def _id_key(assessment_id: Optional[str]) -> str:
+    return (assessment_id or "").strip().lower().rstrip("/")
+
 
 def _raw_detail(resource_details, key: str) -> Any:
     """A `resource_details` field the SDK failed to deserialize.
@@ -105,14 +122,17 @@ def _resource_id_from_assessment_id(assessment_id: Optional[str]) -> Optional[st
     return assessment_id[:cut] if cut > 0 else None
 
 
-def project_assessment(assessment, metadata_by_name: Optional[dict] = None) -> dict:
+def project_assessment(
+    assessment, metadata_by_name: Optional[dict] = None, severity_by_id: Optional[dict] = None
+) -> dict:
     """Read one `SecurityAssessmentResponse` model's attributes into a flat dict.
 
     `assessments.list` does not return `metadata` (only `get` takes
-    `expand=metadata`), so severity/categories/type would all be null. The caller
-    passes the subscription's assessment definitions keyed by `name` — the GUID
-    the assessment and its metadata share — and they fill the gap in one call
-    instead of one `get` per assessment.
+    `expand=metadata`), so severity/categories/type would all be null. Severity
+    comes from `severity_by_id`, each assessment's own from Resource Graph keyed
+    by lowercased assessment id; the subscription's assessment definitions, keyed
+    by `name` (the GUID the assessment and its metadata share), fill in the other
+    fields and are the fallback severity. `severity_source` says which one it was.
 
     `resource_details`, `status`, and `metadata` are nested models (sub-objects),
     so each needs its own `model_attr` reads rather than one flat pass over
@@ -127,9 +147,15 @@ def project_assessment(assessment, metadata_by_name: Optional[dict] = None) -> d
     # dict below doesn't repeat the same three model_attr(assessment, ...) calls.
     resource_details = model_attr(assessment, "resource_details")
     status = model_attr(assessment, "status")
-    metadata = model_attr(assessment, "metadata") or (metadata_by_name or {}).get(
-        model_attr(assessment, "name")
+    own_metadata = model_attr(assessment, "metadata")
+    metadata = own_metadata or (metadata_by_name or {}).get(model_attr(assessment, "name"))
+    severity = model_attr(own_metadata, "severity") or (severity_by_id or {}).get(
+        _id_key(model_attr(assessment, "id"))
     )
+    severity_source: Optional[str] = FROM_ASSESSMENT if severity else None
+    if not severity:
+        severity = model_attr(metadata, "severity")
+        severity_source = FROM_CATALOGUE if severity else None
 
     return {
         # --- identity: which check, on which resource ---
@@ -162,13 +188,91 @@ def project_assessment(assessment, metadata_by_name: Optional[dict] = None) -> d
         "first_evaluation_date": _iso(model_attr(status, "first_evaluation_date")),  # when Defender first checked this
 
         # --- static info about the check (severity, what it's checking for, how hard to fix) ---
-        "severity": model_attr(metadata, "severity"),                # "Low" / "Medium" / "High"
+        "severity": severity,                                         # "Low" / "Medium" / "High"
+        "severity_source": severity_source,  # "assessment" / "catalogue" / None when unknown
         "categories": _enum_list(model_attr(metadata, "categories")),  # e.g. ["Compute"], ["Networking"]
         "threats": _enum_list(model_attr(metadata, "threats")),        # e.g. ["dataExfiltration"]
         "assessment_type": model_attr(metadata, "assessment_type"),  # BuiltIn / CustomPolicy / etc.
         "user_impact": model_attr(metadata, "user_impact"),          # disruption cost of remediating
         "implementation_effort": model_attr(metadata, "implementation_effort"),  # effort to remediate
         "policy_definition_id": model_attr(metadata, "policy_definition_id"),    # the Azure Policy backing this check
+    }
+
+
+# --- SLA age: days an Unhealthy assessment has been open, and whether that is past its severity's SLA ---
+
+SEVERITIES = ("High", "Medium", "Low")
+DEFAULT_SLA_DAYS = {"High": 30, "Medium": 90, "Low": 180}
+SLA_ENV = {s: f"AZURE_DEFENDER_SLA_DAYS_{s.upper()}" for s in SEVERITIES}
+
+
+def sla_days_from_env(collector: Optional[Collector] = None) -> dict:
+    """SLA days per severity; a bad value is recorded and that severity's days are None (no default)."""
+    days: dict = dict(DEFAULT_SLA_DAYS)
+    for severity, env in SLA_ENV.items():
+        raw = (os.environ.get(env) or "").strip()
+        if not raw:
+            continue
+        if raw.isdecimal() and int(raw) > 0:
+            days[severity] = int(raw)
+            continue
+        days[severity] = None
+        if collector is not None:
+            collector.record(f"config {env}", ValueError(f"invalid SLA days {raw!r}: needs a whole number above 0"))
+    return days
+
+
+def _parse_iso(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment.astimezone(timezone.utc) if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def apply_sla(assessments: list[dict], sla_days: dict, now: datetime) -> None:
+    """Set days_open, sla_days and past_sla on each record; only Unhealthy ones are aged, the rest are null."""
+    for a in assessments:
+        a["days_open"] = a["sla_days"] = a["past_sla"] = None
+        if a.get("status_code") != "Unhealthy":
+            continue
+        changed = _parse_iso(a.get("status_change_date"))
+        if changed is not None:
+            a["days_open"] = max(0, (now - changed).days)
+        a["sla_days"] = sla_days.get(a.get("severity"))
+        if a["days_open"] is not None and a["sla_days"] is not None:
+            a["past_sla"] = a["days_open"] > a["sla_days"]
+
+
+def sla_summary(assessments: list[dict], sla_days: dict, list_read: bool, severity_read: bool = True) -> dict:
+    """Unhealthy findings past SLA per severity and in total; a count is null when it can't be known.
+
+    Every count is null when the list or the Resource Graph severity read failed, or any Unhealthy finding took
+    its severity from the catalogue, which can rate a check lower than its assessment, so the finding may belong
+    to any severity. A severity's count is also null when its SLA days are invalid or one of its Unhealthy
+    findings has no date. The total is also null when an Unhealthy finding has no severity.
+    """
+    unhealthy = [a for a in assessments if a.get("status_code") == "Unhealthy"]
+    readable = list_read and severity_read and not any(a.get("severity_source") == FROM_CATALOGUE for a in unhealthy)
+    by_severity: dict = {}
+    for severity in SEVERITIES:
+        mine = [a for a in unhealthy if a.get("severity") == severity]
+        known = readable and sla_days.get(severity) is not None and all(a.get("days_open") is not None for a in mine)
+        by_severity[severity] = sum(1 for a in mine if a.get("past_sla")) if known else None
+    total_known = (
+        readable
+        and all(v is not None for v in by_severity.values())
+        and all(a.get("severity") in SEVERITIES for a in unhealthy)
+    )
+    return {
+        "sla_days_by_severity": dict(sla_days),
+        "unhealthy_past_sla_by_severity": by_severity,
+        "unhealthy_past_sla_count": sum(by_severity.values()) if total_known else None,
+        "unhealthy_days_open_unknown_count": (
+            sum(1 for a in unhealthy if a.get("days_open") is None) if list_read else None
+        ),
     }
 
 
@@ -187,6 +291,8 @@ def summarize(assessments: list[dict], registration_status: str) -> dict:
     unhealthy_severities = Counter(
         a["severity"] for a in assessments if a["status_code"] == "Unhealthy" and a["severity"]
     )
+    by_source = Counter(a.get("severity_source") for a in assessments)
+    unhealthy_by_source = Counter(a.get("severity_source") for a in assessments if a["status_code"] == "Unhealthy")
     return {
         "provider_registration_status": registration_status,
         "total_assessments": total,
@@ -195,6 +301,12 @@ def summarize(assessments: list[dict], registration_status: str) -> dict:
         "not_applicable_count": by_status.get("NotApplicable", 0),
         "healthy_percentage": coverage_percentage(by_status.get("Healthy", 0), total),
         "unhealthy_by_severity": dict(unhealthy_severities),
+        # Records whose own severity was not found, so the catalogue's (possibly lower) one or none is used.
+        "severity_from_catalogue_count": by_source.get(FROM_CATALOGUE, 0),
+        "severity_unknown_count": by_source.get(None, 0),
+        # The same for Unhealthy records only: an unknown one is missing from unhealthy_by_severity.
+        "unhealthy_severity_from_catalogue_count": unhealthy_by_source.get(FROM_CATALOGUE, 0),
+        "unhealthy_severity_unknown_count": unhealthy_by_source.get(None, 0),
     }
 
 
@@ -216,8 +328,14 @@ def is_provider_not_registered(exc: BaseException) -> bool:
     return PROVIDER_NOT_REGISTERED_MARKER in message
 
 
+def _own_severities(cred, subscription_id) -> dict:
+    """Each assessment's own severity, keyed by lowercased assessment id, paged to the end."""
+    rows = query_all(resource_graph_client(cred), subscription_id, SEVERITY_QUERY)["rows"]
+    return {_id_key(row.get("id")): row.get("severity") or None for row in rows}
+
+
 def collect_assessments(subscription_id, cred, collector: Collector) -> tuple[list[dict], str]:
-    """One assessments.list(scope=...) call; returns (assessments, registration_status)."""
+    """assessments.list, the metadata catalogue and one paged Resource Graph query; returns (assessments, status)."""
     from azure.mgmt.security import SecurityCenter
 
     # `collector.guard(...)` runs `_client()`, and if it raises, records the
@@ -263,14 +381,22 @@ def collect_assessments(subscription_id, cred, collector: Collector) -> tuple[li
 
     # Fetched only after the list succeeded, so an unregistered subscription is
     # still classified above instead of being recorded as a metadata failure. A
-    # failure here is recorded: without it every severity is null and the
-    # unhealthy_by_severity summary silently reads as "nothing severe".
+    # failure here is recorded: without it categories and type are null and
+    # severity has no fallback.
     metadata_by_name = collector.guard(
         "security.assessments_metadata.list_by_subscription",
         lambda: {model_attr(m, "name"): m for m in client.assessments_metadata.list_by_subscription()},
         default={},
     )
-    assessments = [project_assessment(a, metadata_by_name) for a in raw]
+    # Recorded too on failure: the catalogue's severities alone understate some checks.
+    severity_by_id: dict = {}
+    if raw:
+        severity_by_id = collector.guard(
+            SEVERITY_OPERATION,
+            lambda: _own_severities(cred, subscription_id),
+            default={},
+        )
+    assessments = [project_assessment(a, metadata_by_name, severity_by_id) for a in raw]
 
     # Sorted for a deterministic, diffable evidence file — otherwise the API's
     # own ordering (not guaranteed stable) would shuffle the JSON between runs.
@@ -310,6 +436,9 @@ def main() -> int:
     # managed identity, `az login` cache, etc., in order). collector.guard means
     # a bad/missing credential is recorded as a failure, not a crash.
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    sla_days = sla_days_from_env(collector)
 
     assessments: list[dict] = []
     registration_status = UNKNOWN
@@ -335,6 +464,14 @@ def main() -> int:
             ),
         )
 
+    apply_sla(assessments, sla_days, datetime.now(timezone.utc))
+
+    # An assessment follows the resource it is about; it carries no region, so location: patterns never match one.
+    assessments, excluded = exclusions.split(
+        assessments, "assessment", resource_id=lambda a: a["resource_id"],
+        name=lambda a: a["display_name"] or a["name"])
+    exclusions.warn_unmatched(logger)
+
     # Step 4: assemble the raw evidence dict. build_payload wraps our
     # results/summary with the standard metadata block (subscription id, when
     # this ran, whether anything failed) — the runner then wraps THIS whole
@@ -347,8 +484,16 @@ def main() -> int:
             "assessments": assessments,
             # Also in results so a validator can assert the service is in use at all.
             "provider_registration_status": registration_status,
+            "excluded": excluded,
         },
-        summary=summarize(assessments, registration_status),
+        summary={
+            **summarize(assessments, registration_status),
+            **sla_summary(
+                assessments, sla_days, registration_status != UNKNOWN,
+                not any(f["operation"] == SEVERITY_OPERATION for f in collector.failures),
+            ),
+            **exclusions.summary(excluded, ("assessment",), {"assessments": len(assessments)}),
+        },
     )
 
     # Step 5: write the evidence file. The subscription id is baked into the

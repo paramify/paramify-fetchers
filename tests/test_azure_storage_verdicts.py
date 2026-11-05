@@ -1,0 +1,359 @@
+"""Azure Storage geo-replication, access-key age, containers and ownership tags. Synthetic fixtures, no SDK or network."""
+
+from __future__ import annotations
+
+import importlib.util
+import logging
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace as ns
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+AZURE = REPO_ROOT / "fetchers" / "azure"
+sys.path.insert(0, str(REPO_ROOT / "fetchers" / "_lib"))
+sys.path.insert(0, str(AZURE / "_shared"))
+
+
+def _load(name):
+    spec = importlib.util.spec_from_file_location(f"azure_{name}_under_test", AZURE / name / "fetcher.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+st = _load("storage_encryption_status")
+Collector = sys.modules["azure_common"].Collector
+
+NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
+SUB = "/subscriptions/00000000-0000-0000-0000-000000000000"
+RG = f"{SUB}/resourceGroups/rg-storage"
+
+
+def collector():
+    return Collector(logging.getLogger("test_storage"))
+
+
+def account(name="sa1", sku="Standard_LRS", key1=None, key2=None, policy_days=None, tags=None,
+            allow_public=False, network_rule_set=None, **extra):
+    return ns(
+        id=f"{RG}/providers/Microsoft.Storage/storageAccounts/{name}", name=name, location="eastus",
+        encryption=None, network_rule_set=network_rule_set, sku=ns(name=sku), tags=tags,
+        key_policy=ns(key_expiration_period_in_days=policy_days) if policy_days is not None else None,
+        key_creation_time=ns(key1=key1, key2=key2), allow_blob_public_access=allow_public,
+        primary_location="eastus", secondary_location="westus" if "GRS" in sku else None,
+        status_of_primary="available", status_of_secondary="available" if "GRS" in sku else None,
+        last_geo_failover_time=None, **extra,
+    )
+
+
+def record(model, **kw):
+    return st.account_record(st.project_storage_account(model), NOW, **kw)
+
+
+class StorageError(Exception):
+    pass
+
+
+def container(name, public="None", metadata=None, immutability=False, legal_hold=False, versioning=None):
+    return ns(id=f"{RG}/c/{name}", name=name, public_access=public, metadata=metadata,
+              has_immutability_policy=immutability, has_legal_hold=legal_hold,
+              immutable_storage_with_versioning=versioning, last_modified_time=NOW)
+
+
+class FakeClient:
+    def __init__(self, accounts, stats=None, stats_error=None, containers=None, containers_error=None):
+        def get_properties(group, name, expand=None):
+            assert expand == "geoReplicationStats"
+            if stats_error:
+                raise stats_error
+            return ns(geo_replication_stats=stats)
+
+        def list_keys(*_, **__):
+            raise AssertionError("listKeys must never be called")
+
+        def list_containers(group, name):
+            if containers_error:
+                raise containers_error
+            return iter(containers or [])
+
+        props = ns(id="x", name="default", type="t", default_service_version=None,
+                   container_delete_retention_policy=None, is_versioning_enabled=None,
+                   share_delete_retention_policy=None, protocol_settings=None)
+        self.storage_accounts = ns(list=lambda: iter(accounts), get_properties=get_properties, list_keys=list_keys,
+                                   regenerate_key=list_keys, list_account_sas=list_keys, list_service_sas=list_keys)
+        self.blob_services = ns(get_service_properties=lambda g, n: props)
+        self.file_services = ns(get_service_properties=lambda g, n: props)
+        self.blob_containers = ns(list=list_containers)
+
+
+def collect(monkeypatch, *accounts, **client_kw):
+    client = FakeClient(list(accounts), **client_kw)
+    monkeypatch.setitem(sys.modules, "azure.mgmt.storage", ns(StorageManagementClient=lambda **_: client))
+    c = collector()
+    return st.collect_storage_accounts("sub", object(), c, NOW), c
+
+
+# --- geo-replication ---
+
+@pytest.mark.parametrize("sku, geo, read_access", [
+    ("Standard_LRS", False, False), ("Standard_ZRS", False, False), ("Premium_LRS", False, False),
+    ("Standard_GRS", True, False), ("Standard_GZRS", True, False),
+    ("Standard_RAGRS", True, True), ("Standard_RAGZRS", True, True),
+])
+def test_geo_redundancy_from_sku(sku, geo, read_access):
+    r = record(account(sku=sku))
+    assert (r["geo_redundant"], r["read_access_secondary"]) == (geo, read_access)
+
+
+def test_geo_stats_collected_with_sync_lag(monkeypatch):
+    stats = ns(status="Live", last_sync_time=NOW - timedelta(minutes=12, seconds=30), can_failover=True,
+               can_planned_failover=False, post_failover_redundancy="Standard_LRS", post_planned_failover_redundancy=None)
+    (r,), c = collect(monkeypatch, account(sku="Standard_RAGRS"), stats=stats)
+    g = r["geo_replication_stats"]
+    assert (g["stats_status"], g["status"], g["sync_lag_minutes"], g["can_failover"], c.ok) == (
+        "collected", "Live", 12, True, True)
+    assert g["last_sync_time"] == "2026-10-19T11:47:30Z"
+    summary = st.summarize([r])
+    assert (summary["geo_redundant_accounts"], summary["geo_replication_live_accounts"],
+            summary["geo_failover_ready_accounts"], summary["geo_replication_max_sync_lag_minutes"]) == (1, 1, 1, 12)
+
+
+def test_locally_redundant_account_is_not_asked_for_stats(monkeypatch):
+    (r,), c = collect(monkeypatch, account(sku="Standard_LRS"), stats_error=AssertionError("must not be called"))
+    assert (r["geo_replication_stats"], c.ok) == (None, True)
+
+
+def test_last_sync_time_unavailable_is_a_posture(monkeypatch):
+    error = StorageError("(LastSyncTimeUnavailable) Last sync time is unavailable for account sa1.")
+    (r,), c = collect(monkeypatch, account(sku="Standard_GRS"), stats_error=error)
+    assert (r["geo_replication_stats"]["stats_status"], c.ok) == ("unavailable", True)
+
+
+def test_other_geo_stats_failure_fails_the_run(monkeypatch):
+    (r,), c = collect(monkeypatch, account(sku="Standard_GRS"), stats_error=StorageError("(500) boom"))
+    assert (r["geo_replication_stats"]["stats_status"], c.ok) == ("failed", False)
+
+
+def test_geo_account_with_no_stats_returned(monkeypatch):
+    (r,), _ = collect(monkeypatch, account(sku="Standard_GRS"), stats=None)
+    assert r["geo_replication_stats"]["stats_status"] == "not_returned"
+
+
+def test_sync_lag_is_measured_when_the_stats_arrive():
+    stats = ns(status="Live", last_sync_time=datetime.now(timezone.utc) - timedelta(minutes=5), can_failover=True,
+               can_planned_failover=None, post_failover_redundancy=None, post_planned_failover_redundancy=None)
+    g = st._geo_replication_stats(FakeClient([], stats=stats), collector(), "rg", "sa1", None)
+    assert g["sync_lag_minutes"] == 5
+
+
+def test_sync_after_the_measuring_clock_reads_zero_lag():
+    g = st.geo_replication_stats_record({"last_sync_time": NOW + timedelta(seconds=30)}, "collected", NOW)
+    assert g["sync_lag_minutes"] == 0
+
+
+def test_max_sync_lag_is_unknown_while_any_geo_account_lag_is():
+    live = record(account("a", sku="Standard_GRS"))
+    live["geo_replication_stats"] = st.geo_replication_stats_record(
+        {"status": "Live", "last_sync_time": NOW - timedelta(minutes=7)}, "collected", NOW)
+    unavailable = record(account("b", sku="Standard_RAGRS"))
+    unavailable["geo_replication_stats"] = st.geo_replication_stats_record(None, "unavailable", NOW, "x")
+    local = record(account("c"))
+    assert st.summarize([live, local])["geo_replication_max_sync_lag_minutes"] == 7
+    summary = st.summarize([live, unavailable, local])
+    assert (summary["geo_replication_max_sync_lag_minutes"], summary["geo_replication_stats_collected_accounts"]) == (
+        None, 1)
+
+
+# --- access-key age ---
+
+def test_key_age_against_expiry_policy():
+    r = record(account(key1=NOW - timedelta(days=120), key2=NOW - timedelta(days=10), policy_days=90))
+    assert [(k["name"], k["age_days"], k["exceeds_expiration_period"]) for k in r["access_keys"]] == [
+        ("key1", 120, True), ("key2", 10, False)]
+    assert (r["access_key_max_age_days"], r["access_keys_within_expiration_period"]) == (120, False)
+    assert r["access_keys"][0]["created"] == "2026-06-21T12:00:00Z"
+
+
+def test_key_age_without_policy_is_reported_but_not_judged():
+    r = record(account(key1=NOW - timedelta(days=400), key2=NOW - timedelta(days=400)))
+    assert [k["exceeds_expiration_period"] for k in r["access_keys"]] == [None, None]
+    assert (r["access_key_max_age_days"], r["access_keys_within_expiration_period"]) == (400, None)
+    summary = st.summarize([r])
+    assert (summary["accounts_with_access_key_older_than_90_days"],
+            summary["accounts_with_access_key_beyond_expiration_period"]) == (1, 0)
+
+
+@pytest.mark.parametrize("key1, key2, within", [
+    (None, None, None),
+    (NOW - timedelta(days=5), None, None),
+    (NOW - timedelta(days=100), None, False),
+    (NOW - timedelta(days=5), NOW - timedelta(days=6), True),
+])
+def test_within_expiration_period(key1, key2, within):
+    assert record(account(key1=key1, key2=key2, policy_days=90))["access_keys_within_expiration_period"] is within
+
+
+def test_unknown_key_creation_time_reads_unknown_not_zero():
+    summary = st.summarize([record(account(key1=None, key2=None)), record(account(key1=NOW, key2=NOW))])
+    assert (summary["access_key_age_known_accounts"], summary["access_key_max_age_days"],
+            summary["accounts_with_access_key_older_than_90_days"]) == (1, None, None)
+
+
+@pytest.mark.parametrize("key1_days, older", [(3, None), (120, 1)])
+def test_one_unknown_key_leaves_the_account_max_unknown(key1_days, older):
+    r = record(account(key1=NOW - timedelta(days=key1_days), key2=None))
+    assert r["access_key_max_age_days"] is None
+    # A known key past 90 days settles the account; a young one can't, while the other key is unknown.
+    assert st.summarize([r])["accounts_with_access_key_older_than_90_days"] == older
+
+
+def test_expiry_policy_with_an_unknown_key_age_reads_unknown():
+    with_policy = record(account(key1=NOW - timedelta(days=5), key2=None, policy_days=90))
+    without_policy = record(account(key1=None, key2=None))
+    assert st.summarize([without_policy])["accounts_with_access_key_beyond_expiration_period"] == 0
+    assert st.summarize([with_policy, without_policy])["accounts_with_access_key_beyond_expiration_period"] is None
+
+
+def test_expiry_is_judged_to_the_moment_not_the_day():
+    r = record(account(key1=NOW - timedelta(days=90, hours=1), key2=NOW, policy_days=90))
+    assert (r["access_keys"][0]["age_days"], r["access_keys"][0]["exceeds_expiration_period"]) == (90, True)
+
+
+def test_collection_never_calls_list_keys(monkeypatch):
+    (r,), c = collect(monkeypatch, account(key1=NOW - timedelta(days=1), key2=NOW - timedelta(days=1)))
+    assert (r["access_key_max_age_days"], c.ok) == (1, True)
+
+
+# --- containers ---
+
+def test_containers_with_access_level_metadata_keys_and_immutability(monkeypatch):
+    listed = [
+        container("public", public="Blob", metadata={"owner": "someone", "classification": "internal"}),
+        container("locked", immutability=True, legal_hold=True, versioning=ns(enabled=True), metadata={}),
+        container("unknown-meta"),
+    ]
+    (r,), c = collect(monkeypatch, account(allow_public=True), containers=listed)
+    by_name = {x["name"]: x for x in r["containers"]}
+    assert (r["containers_status"], c.ok) == ("collected", True)
+    assert by_name["public"]["metadata_keys"] == ["classification", "owner"]
+    assert "someone" not in str(r["containers"])
+    assert (by_name["locked"]["metadata_keys"], by_name["unknown-meta"]["metadata_keys"]) == ([], None)
+    assert (by_name["public"]["anonymous_access_effective"], by_name["locked"]["anonymous_access_effective"]) == (
+        True, False)
+    assert (by_name["locked"]["has_immutability_policy"], by_name["locked"]["has_legal_hold"],
+            by_name["locked"]["version_level_immutability"]) == (True, True, True)
+    summary = st.summarize([r])
+    assert (summary["total_containers"], summary["containers_with_public_access_level"],
+            summary["anonymously_accessible_containers"], summary["containers_with_immutability_policy"],
+            summary["containers_with_legal_hold"]) == (3, 1, 1, 1, 1)
+
+
+def test_public_container_level_is_not_effective_when_the_account_forbids_it(monkeypatch):
+    (r,), _ = collect(monkeypatch, account(allow_public=False), containers=[container("c", public="Container")])
+    assert (r["containers"][0]["public_access"], r["containers"][0]["anonymous_access_effective"]) == (
+        "Container", False)
+
+
+def test_public_container_is_effective_when_the_account_setting_was_never_set(monkeypatch):
+    (r,), _ = collect(monkeypatch, account(allow_public=None), containers=[container("c", public="Blob")])
+    assert r["containers"][0]["anonymous_access_effective"] is True
+    assert st.summarize([r])["anonymously_accessible_containers"] == 1
+
+
+def rules(default="Deny", ip=(), ipv6=None, vnet=()):
+    listed = lambda xs: None if xs is None else [ns(value=x) for x in xs]  # noqa: E731
+    return ns(bypass="AzureServices", default_action=default, ip_rules=listed(ip), ipv6_rules=listed(ipv6),
+              virtual_network_rules=listed(vnet))
+
+
+@pytest.mark.parametrize("public_network, rule_set, effective", [
+    (None, None, True),
+    ("Enabled", rules(default="Allow"), True),
+    ("Disabled", rules(default="Allow"), False),
+    ("Disabled", None, False),
+    ("SecuredByPerimeter", None, True),
+    ("SecuredByPerimeter", rules(), True),
+    ("Enabled", rules(), False),
+    ("Enabled", rules(ipv6=()), False),
+    ("Enabled", rules(ip=("203.0.113.0/24",)), True),
+    ("Enabled", rules(ipv6=("2001:db8::/32",)), True),
+    ("Enabled", rules(vnet=("subnet-a",)), True),
+    ("Enabled", rules(ip=None), True),
+    ("Enabled", rules(vnet=None), True),
+])
+def test_network_settings_that_turn_internet_clients_away_block_anonymous_access(
+    monkeypatch, public_network, rule_set, effective
+):
+    model = account(allow_public=True, public_network_access=public_network, network_rule_set=rule_set)
+    (r,), _ = collect(monkeypatch, model, containers=[container("c", public="Blob")])
+    assert r["containers"][0]["anonymous_access_effective"] is effective
+    assert st.summarize([r])["anonymously_accessible_containers"] == int(effective)
+    # The rule counts decide the verdict only; the account's rule set keeps its two keys.
+    assert sorted(r["network_rule_set"]) == ["bypass", "default_action"]
+
+
+@pytest.mark.parametrize("setting, allowed", [(None, True), (True, True), (False, False)])
+def test_unset_account_public_blob_access_reads_as_allowed(setting, allowed):
+    r = record(account(allow_public=setting))
+    assert r["allow_blob_public_access"] is allowed
+    assert st.summarize([r])["public_blob_access_accounts"] == int(allowed)
+
+
+def test_account_without_blob_service_is_not_supported(monkeypatch):
+    error = StorageError("(FeatureNotSupportedForAccount) Blob is not supported for the account.")
+    (r,), c = collect(monkeypatch, account(), containers_error=error)
+    assert (r["containers_status"], r["containers"], c.ok) == ("not_supported", None, True)
+
+
+def test_container_list_failure_fails_the_run(monkeypatch):
+    (r,), c = collect(monkeypatch, account(), containers_error=StorageError("(500) boom"))
+    assert (r["containers_status"], c.ok) == ("failed", False)
+    assert st.summarize([r])["accounts_with_containers_not_collected"] == 1
+
+
+# --- ownership tags ---
+
+def test_owner_and_classification_from_default_tag_keys():
+    r = record(account(tags={"data-owner": "team-a", "Data Classification": "Confidential", "Env": "prod"}))
+    assert (r["owner_tag"], r["classification_tag"]) == ("team-a", "Confidential")
+    assert list(r["tags"]) == ["Data Classification", "Env", "data-owner"]
+
+
+def test_configured_tag_keys_replace_the_defaults(monkeypatch):
+    monkeypatch.setenv(st.OWNER_TAG_KEYS_ENV, "CostCenter, Application")
+    monkeypatch.setenv(st.CLASSIFICATION_TAG_KEYS_ENV, "Exposure")
+    (r,), _ = collect(monkeypatch, account(tags={"Application": "app", "Owner": "ignored", "exposure": "internal"}))
+    assert (r["owner_tag"], r["classification_tag"]) == ("app", "internal")
+
+
+def test_tags_that_differ_only_in_case_pick_the_same_value_every_run():
+    assert record(account(tags={"owner": "b", "Owner": "a"}))["owner_tag"] == "a"
+    assert record(account(tags={"Owner": "", "owner": "x"}))["owner_tag"] == "x"
+
+
+def test_empty_tag_value_does_not_count():
+    r = record(account(tags={"Owner": "", "OwnerEmail": "a@example.com"}))
+    assert r["owner_tag"] == "a@example.com"
+    summary = st.summarize([r, record(account(tags=None))])
+    assert (summary["accounts_with_owner_tag"], summary["accounts_with_classification_tag"]) == (1, 0)
+
+
+# --- the existing evidence is unchanged ---
+
+def test_existing_account_and_summary_keys_are_kept():
+    r = record(account())
+    assert {"id", "name", "location", "resource_group", "encryption_type", "customer_managed_key",
+            "infrastructure_encryption", "enable_https_traffic_only", "minimum_tls_version",
+            "allow_blob_public_access", "public_network_access", "network_rule_set",
+            "private_endpoint_connections", "key_expiration_period_in_days", "allow_shared_key_access",
+            "default_to_entra_authorization", "replication_settings", "allow_cross_tenant_replication",
+            "blob_properties", "file_service_properties"} <= set(r)
+    assert {"total_storage_accounts", "customer_managed_key_storage", "platform_managed_key_storage",
+            "cmk_percentage", "infrastructure_encryption_accounts", "https_only_accounts",
+            "minimum_tls_1_2_accounts", "public_blob_access_accounts", "shared_key_access_accounts",
+            "private_endpoint_accounts", "key_expiration_policy_accounts", "blob_versioning_accounts",
+            "container_soft_delete_accounts", "share_soft_delete_accounts"} <= set(st.summarize([r]))
+    assert st.account_record(st.project_storage_account(account()))["customer_managed_key"] is False

@@ -46,5 +46,5 @@ evidence_set:
   reference_id: EVD-GCP-CLOUDSQL-ENC
   name: Cloud SQL Encryption
   instructions: >
-    Script: fetcher.py. Google Cloud client library call: sqladmin
+    Script: gcp/cloud_sql_encryption_status/fetcher.py. Google Cloud client library call: sqladmin
     instances.list(). One evidence file per project.

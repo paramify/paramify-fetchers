@@ -16,7 +16,7 @@ A complete new fetcher at `fetchers/tls/certificate_expiry/`: a `fetcher.yaml` w
 ## Prerequisites
 
 - **Part 1 completed** — the `paramify` CLI installed (`pip install -e .`), the repo cloned, and the mental model: four pieces, one contract, envelope at the end.
-- Same toolchain as Part 1: Python 3.10+ (verified against 3.14.5).
+- Same toolchain as Part 1: Python 3.11+ (verified against 3.14.5).
 - Network egress to `paramify.com:443`.
 - Still no credentials. That's the point of this particular fetcher.
 
@@ -91,7 +91,7 @@ One block remains. Every fetcher carries an `evidence_set` identity — one fetc
 evidence_set:
   reference_id: EVD-TLS-CERTIFICATE-EXPIRY
   name: TLS Certificate Expiry
-  instructions: 'Script: fetcher.py. Opens a verified TLS connection to the
+  instructions: 'Script: tls/certificate_expiry/fetcher.py. Opens a verified TLS connection to the
     configured host and records the peer certificate: subject, issuer,
     validity window, SANs, and computed days remaining.'
 ```

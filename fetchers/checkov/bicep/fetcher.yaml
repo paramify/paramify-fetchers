@@ -1,0 +1,159 @@
+name: checkov_bicep
+version: 0.2.1
+description: >
+  Runs Checkov IaC security scanning over the Bicep and ARM templates in a repo.
+  Clones the repo (generic git, any host, including Azure DevOps), or with
+  source_type tfvc downloads an Azure DevOps TFVC folder at one changeset through
+  the REST API, and scans its .bicep files and ARM deploymentTemplate .json files,
+  emitting passed/failed/skipped checks plus an aggregate pass percentage. A source
+  with nothing to scan fails the run instead of reading as clean. One source per
+  invocation; the runner fans out across targets.
+category: checkov
+
+supports_targets: true
+
+runtime:
+  type: bash
+  entry: fetcher.sh
+  timeout: 1800
+
+output:
+  type: json
+  path: checkov_bicep.json
+  aggregation: per_target
+
+target_schema:
+  repo_url:
+    type: string
+    required: true
+    env: CHECKOV_REPO_URL
+    description: >-
+      Git: clone URL of the repo to scan (https://host/group/project.git, or an Azure DevOps
+      https://dev.azure.com/org/project/_git/repo URL; any user@ prefix is dropped).
+      TFVC: the Azure DevOps project URL (https://dev.azure.com/org/project, or
+      https://server/collection/project for Azure DevOps Server).
+  source_type:
+    type: string
+    required: false
+    default: git
+    env: CHECKOV_SOURCE_TYPE
+    description: >-
+      git (default) clones repo_url. tfvc downloads tfvc_path from the project's TFVC
+      repository as a zip (GET _apis/tfvc/items, Accept application/zip), pinned to one
+      changeset, which is recorded in metadata.changeset.
+  tfvc_path:
+    type: string
+    required: false
+    env: CHECKOV_TFVC_PATH
+    description: TFVC only, and required for it. Server path of the folder to scan, e.g. $/Project/infra.
+  tfvc_version:
+    type: string
+    required: false
+    default: latest
+    env: CHECKOV_TFVC_VERSION
+    description: >-
+      TFVC only. latest (the project's newest changeset, looked up first so the whole
+      folder is read at that one version) or a changeset number (1234 or C1234).
+  branch:
+    type: string
+    required: false
+    default: main
+    env: CHECKOV_CLONE_BRANCH
+    description: >-
+      Git only. Branch/ref to clone. If it cannot be cloned the repo's default branch is scanned
+      instead; metadata.branch then names the default branch, metadata.requested_branch
+      this value, and metadata.branch_fallback is true.
+
+secrets:
+  - name: clone_token
+    env: GIT_CLONE_TOKEN
+    per_target: true
+    required: false
+    description: >-
+      Git only. Token for cloning a private repo over HTTPS; omit for public repos.
+      For Azure DevOps, a read-only PAT with Code (Read).
+  - name: tfvc_token
+    env: TFVC_TOKEN
+    per_target: true
+    required: false
+    description: >-
+      TFVC only. Read-only Azure DevOps PAT with Code (Read) on the project, sent as
+      HTTP basic auth to the TFVC REST API. Omit for a public project.
+
+config_schema:
+  soft_fail:
+    type: boolean
+    default: true
+    env: CHECKOV_SOFT_FAIL
+    description: Findings do not fail the scan (findings are evidence, not a fetch failure).
+  compact:
+    type: boolean
+    default: true
+    env: CHECKOV_COMPACT
+    description: Compact checkov output (omits code blocks).
+  repo_id:
+    type: string
+    default: evidence-fetchers-bicep
+    env: CHECKOV_REPO_ID
+    description: Label only — appears in checkov's output.
+  skip_checks:
+    type: string
+    env: CHECKOV_SKIP_CHECKS
+    description: >-
+      Check IDs to skip, separated by commas, spaces or newlines (each entry trimmed); added to
+      _shared/skip-checks.default.txt unless use_default_skip_checks is false. Skipped checks do not appear in
+      checkov's results; the effective list is recorded in metadata.skip_checks.
+  use_default_skip_checks:
+    type: boolean
+    default: true
+    env: CHECKOV_USE_DEFAULT_SKIP_CHECKS
+    description: >-
+      Include the shipped _shared/skip-checks.default.txt in the skip list. Set false
+      to replace the defaults with skip_checks alone. metadata.default_skip_checks_applied
+      records the choice.
+  skip_resources:
+    type: string
+    env: CHECKOV_SKIP_RESOURCES
+    description: >-
+      Whole-name resource globs, comma- or newline-separated (each entry trimmed; * is the only
+      wildcard, e.g. Microsoft.Storage/storageAccounts.dev*); merged with _shared/skip-resources.default.txt.
+      Applied post-scan: a failed check on a matching resource is moved to skipped_checks
+      (check_result.result SKIPPED, suppress_comment naming the pattern), so it still counts
+      in total_checks. summary.skipped_by_resource_filter counts them; metadata.skip_resources
+      lists the patterns.
+  skip_paths:
+    type: string
+    env: CHECKOV_SKIP_PATHS
+    description: >-
+      Python regular expressions for the paths to leave out of the scan, comma- or newline-separated
+      (each entry trimmed; it may contain spaces but not a comma). checkov searches each file's path
+      for every entry, so legacy skips any path containing legacy; escape . * ? + ( ) [ ] with a
+      backslash to match them literally, e.g. legacy \(old\). These are not globs: an entry that is
+      not a valid regular expression, such as *.json, fails the run with bad_config before anything
+      is fetched. Checking them needs python3 on PATH. Recorded in metadata.skip_paths. Also how to
+      exclude a file checkov cannot parse, which otherwise fails the run. file_counts still counts
+      skipped files.
+  checks:
+    type: string
+    env: CHECKOV_BICEP_CHECKS
+    description: >-
+      Allowlist of check IDs to run, separated by commas, spaces or newlines (each entry trimmed);
+      overrides skips for those checks. Recorded in metadata.checks, which is empty when the scan
+      was not restricted.
+  external_checks_dir:
+    type: string
+    env: CHECKOV_EXTERNAL_CHECKS_DIR
+    description: Path to a custom checks directory.
+  git_username:
+    type: string
+    default: oauth2
+    env: CHECKOV_GIT_USERNAME
+    description: Basic-auth username paired with GIT_CLONE_TOKEN (any value works for an Azure DevOps PAT).
+
+ksis:
+  - KSI-MLA-EVC
+
+evidence_set:
+  reference_id: EVD-CHECKOV-BICEP
+  name: Checkov Bicep/ARM IaC Scan
+  instructions: 'Script: checkov/bicep/fetcher.sh. Shallow-clones the target repo, or with source_type tfvc looks up the changeset to read (the newest, or the one named) through the Azure DevOps TFVC REST API and downloads tfvc_path at that changeset as a zip; then counts its .bicep files and ARM templates (.json whose $schema is a deploymentTemplate), and runs the checkov CLI (--framework bicep,arm) over them, merging default + configured skip-checks/skip-resources. Records passed/failed/skipped checks from both frameworks (each check tagged with check_type), per-framework counts in summary.by_framework, file_counts, and provenance: metadata.source_type, then repo, branch actually scanned and commit (git) or project, tfvc_path and changeset (tfvc), plus the checks allowlist (metadata.checks, empty when every check ran), the effective skip-check list, skip-resource patterns and skip paths. Failed checks on skipped resources are moved to skipped_checks, not dropped. status is success only when at least one check ran and every file parsed: no Bicep/ARM files (no_files), zero checks evaluated (no_checks, e.g. resources only behind registry modules), or files checkov could not parse (partial, listed in results.parsing_errors and metadata.api_failures) all exit non-zero, and summary counts are null when nothing was scanned. Needs: a token that can read the code (Azure DevOps PAT: Code (Read)).'

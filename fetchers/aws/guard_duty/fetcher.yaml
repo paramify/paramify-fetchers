@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-GUARD-DUTY
   name: GuardDuty Configuration
-  instructions: 'Script: fetcher.sh. Commands executed: aws guardduty list-detectors, aws guardduty get-detector'
+  instructions: 'Script: aws/guard_duty/fetcher.sh. Commands executed: aws guardduty list-detectors, aws guardduty get-detector'

@@ -1,0 +1,13 @@
+validator: oci_vault_keys_rotated
+cases:
+  - name: every_key_rotated_inside_the_window
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"live_keys": 2, "keys_not_rotated_within_window": 0}}'
+
+  - name: one_key_is_stale
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"live_keys": 2, "keys_not_rotated_within_window": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"live_keys": 2, "keys_unrotated": 0}}'

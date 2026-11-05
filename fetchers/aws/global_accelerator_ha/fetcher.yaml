@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-GLOBAL-ACCELERATOR-HA
   name: Global Accelerator High Availability
-  instructions: 'Script: global_accelerator_ha.sh. Commands executed: aws globalaccelerator list-accelerators, aws globalaccelerator list-listeners, aws globalaccelerator list-endpoint-groups.'
+  instructions: 'Script: aws/global_accelerator_ha/fetcher.sh. Commands executed: aws globalaccelerator list-accelerators, aws globalaccelerator list-listeners, aws globalaccelerator list-endpoint-groups.'

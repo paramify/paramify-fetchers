@@ -33,6 +33,7 @@ import hashlib
 import logging
 import os
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse
@@ -119,7 +120,14 @@ class ParamifyScriptsClient:
     def create_evidence_set(
         self, reference_id: str, name: str, frequency: str = DEFAULT_EVIDENCE_FREQUENCY
     ) -> Optional[str]:
-        body = {"referenceId": reference_id, "name": name, "automated": True, "frequency": frequency}
+        body = {
+            "referenceId": reference_id,
+            "name": name,
+            "automated": True,
+            "frequency": frequency,
+            # The frequency schedule counts from the day the set is created.
+            "startDate": date.today().isoformat(),
+        }
         r = self.session.post(f"{self.base_url}/evidence", json=body, timeout=self.timeout)
         if r.status_code in (200, 201):
             return r.json().get("id")

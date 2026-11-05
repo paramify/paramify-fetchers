@@ -25,4 +25,4 @@ ksis:
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-07
   name: Okta Automated Account Management
-  instructions: 'Script: okta_automated_account_management.py. Uses Okta APIs to collect account lifecycle monitoring and health evidence. Output: okta_automated_account_management.json'
+  instructions: 'Script: okta/automated_account_management/fetcher.py. Uses Okta APIs to collect account lifecycle monitoring and health evidence. Output: okta_automated_account_management.json'

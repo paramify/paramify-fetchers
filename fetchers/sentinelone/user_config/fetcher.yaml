@@ -26,4 +26,4 @@ ksis:
 evidence_set:
   reference_id: EVD-S1-USER
   name: SentinelOne User Config
-  instructions: 'Script: userfetcher.py. Calls the SentinelOne API endpoint /web/api/v2.1/users using ApiToken authorization, pages with cursor, and writes JSON and CSV summary.'
+  instructions: 'Script: sentinelone/user_config/fetcher.py. Calls the SentinelOne API endpoint /web/api/v2.1/users using ApiToken authorization, pages with cursor, and writes JSON and CSV summary.'

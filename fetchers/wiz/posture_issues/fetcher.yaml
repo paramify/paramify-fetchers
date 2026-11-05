@@ -107,7 +107,7 @@ evidence_set:
   reference_id: EVD-WIZ-POSTURE-ISSUES
   name: Wiz Posture Issues
   instructions: >-
-    Script: fetcher.py. Read-only service account (scope read:issues). Pages
+    Script: wiz/posture_issues/fetcher.py. Read-only service account (scope read:issues). Pages
     issuesV2 twice: open issues (status OPEN, IN_PROGRESS) and issues resolved
     within the window. Summarizes open issues by severity, type and age against
     remediation windows, overdue due dates, the share of CRITICAL/HIGH issues

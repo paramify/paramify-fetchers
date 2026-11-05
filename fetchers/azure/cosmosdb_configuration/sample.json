@@ -1,0 +1,107 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_cosmosdb_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.cosmosdb_accounts[]",
+      "records": 1,
+      "fields": {
+        "backup_policy_type": 1,
+        "continuous_backup": 1,
+        "customer_managed_key": 1,
+        "database_account_offer_type": 1,
+        "default_identity": 1,
+        "disable_local_auth": 1,
+        "document_endpoint": 1,
+        "enable_automatic_failover": 1,
+        "enable_multiple_write_locations": 1,
+        "id": 1,
+        "ip_rules": 0,
+        "is_virtual_network_filter_enabled": 1,
+        "key_vault_key_uri": 0,
+        "kind": 1,
+        "location": 1,
+        "minimal_tls_version": 1,
+        "minimal_tls_version_recommended": 1,
+        "name": 1,
+        "network_acl_bypass": 1,
+        "private_endpoint_connections": 0,
+        "public_network_access": 1,
+        "public_network_access_disabled": 1,
+        "resource_group": 1,
+        "tags": 1,
+        "type": 1,
+        "uses_private_endpoints": 1,
+        "virtual_network_rules": 0
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:09:19Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "cosmosdb_accounts": [
+        {
+          "backup_policy_type": "Periodic",
+          "continuous_backup": false,
+          "customer_managed_key": false,
+          "database_account_offer_type": "Standard",
+          "default_identity": "FirstPartyIdentity",
+          "disable_local_auth": false,
+          "document_endpoint": "https://cosmos-pf-jov5akcv.documents.azure.com:443/",
+          "enable_automatic_failover": false,
+          "enable_multiple_write_locations": false,
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-pf-jov5akcv",
+          "ip_rules": [],
+          "is_virtual_network_filter_enabled": false,
+          "key_vault_key_uri": null,
+          "kind": "GlobalDocumentDB",
+          "location": "Central US",
+          "minimal_tls_version": "Tls12",
+          "minimal_tls_version_recommended": true,
+          "name": "cosmos-pf-jov5akcv",
+          "network_acl_bypass": "None",
+          "private_endpoint_connections": [],
+          "public_network_access": "Enabled",
+          "public_network_access_disabled": false,
+          "resource_group": "rg-example-example-profile",
+          "tags": {
+            "tier": "1"
+          },
+          "type": "Microsoft.DocumentDB/databaseAccounts",
+          "uses_private_endpoints": false,
+          "virtual_network_rules": []
+        }
+      ],
+      "provider_registration_status": "registered"
+    },
+    "summary": {
+      "accounts_by_kind": {
+        "GlobalDocumentDB": 1
+      },
+      "automatic_failover_accounts": 0,
+      "cmk_percentage": 0,
+      "continuous_backup_accounts": 0,
+      "customer_managed_key_accounts": 0,
+      "local_auth_disabled_accounts": 0,
+      "multiple_write_location_accounts": 0,
+      "platform_managed_key_accounts": 1,
+      "private_endpoint_accounts": 0,
+      "provider_registration_status": "registered",
+      "public_network_access_disabled_accounts": 0,
+      "recommended_minimal_tls_accounts": 1,
+      "total_cosmosdb_accounts": 1,
+      "virtual_network_filter_accounts": 0
+    }
+  }
+}

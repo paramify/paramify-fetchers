@@ -1,0 +1,72 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_iam_users_groups",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.users[]",
+      "records": 8,
+      "fields": {
+        "UserName": 8,
+        "CreateDate": 8,
+        "PasswordLastUsed": 3,
+        "Groups": 6,
+        "AccessKeys": 1,
+        "MFADevices": 0,
+        "HasLoginProfile": 8
+      }
+    },
+    {
+      "path": "results.groups[]",
+      "records": 2,
+      "fields": {
+        "GroupName": 2,
+        "CreateDate": 2,
+        "Policies": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:12:25Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "users": [
+        {
+          "UserName": "user1",
+          "CreateDate": "2026-09-28T17:03:51+00:00",
+          "PasswordLastUsed": null,
+          "Groups": [],
+          "AccessKeys": [
+            [
+              "<redacted>",
+              "<redacted>",
+              "<redacted>"
+            ]
+          ],
+          "MFADevices": [],
+          "HasLoginProfile": false
+        }
+      ],
+      "groups": [
+        {
+          "GroupName": "Administrators",
+          "CreateDate": "2026-09-23T17:55:03+00:00",
+          "Policies": [
+            [
+              "AdministratorAccess",
+              "arn:aws:iam::aws:policy/AdministratorAccess"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

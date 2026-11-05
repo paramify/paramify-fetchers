@@ -1,0 +1,111 @@
+name: oci_dependency_vulnerabilities
+version: 0.1.0
+description: >-
+  Shows Application Dependency Management audits with the severity they report and the severity their ignore lists hide, and how far remediation runs got.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_dependency_vulnerabilities.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect from. Optional — omit to collect from the
+      tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — ADM knowledge
+      bases are normally created in a build or application compartment.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-SCR-MIT
+  - KSI-SCR-MON
+
+evidence_set:
+  reference_id: EVD-OCI-DEP-VULNS
+  name: Third-Party Dependency Vulnerabilities
+  instructions: |
+    Script: oci/dependency_vulnerabilities/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope.
+
+    Commands Executed:
+    - identity.list_compartments — the compartments beneath the target
+    - adm.list_knowledge_bases (per compartment) — the vulnerability knowledge bases audits read from
+    - adm.list_vulnerability_audits (per compartment) — audits with their visible and with-ignored severities and counts
+    - adm.list_remediation_recipes (per compartment) — remediation recipes
+    - adm.list_remediation_runs (per compartment) — remediation runs and the stage each reached
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_dependency_vulnerabilities_<compartment>_<region>.json — every knowledge base, vulnerability audit with its suppression delta, remediation recipe and remediation run.
+
+    Summary fields:
+
+    Is anything being scanned?
+    - adm_service_readable — True if the knowledge base listing was read in at least one compartment; false if every listing failed
+    - knowledge_bases_configured — Number of knowledge bases; 0 means no dependency scanning is set up at all
+    - build_types_scanned — List of build types audited (ADM supports MAVEN only)
+
+    Are the audits recent and complete?
+    - total_audits — Number of vulnerability audits
+    - audits_completed — Number of audits in the ACTIVE state, meaning the scan finished
+    - audits_failed_to_scan — Number of audits in the FAILED state
+    - audits_within_90_days — Number of completed audits created within 90 days of the run
+    - audit_currency_percentage — Percentage of completed audits within 90 days = audits_within_90_days / audits_completed × 100, a whole number; 0 when audits_completed is 0
+    - latest_audit — Timestamp of the most recently created audit; null when there is none
+    - days_since_latest_audit — Number of days since latest_audit; null when there is none
+
+    What did they find?
+    - audits_with_actionable_findings — Number of audits whose visible maximum severity is HIGH or CRITICAL
+    - completed_audits_with_unknown_severity — Number of completed audits whose maximum severity is none of NONE, LOW, MEDIUM, HIGH or CRITICAL
+    - worst_severity_observed — Highest visible maximum severity across audits: NONE, LOW, MEDIUM, HIGH or CRITICAL; null when none is recognisable
+    - worst_severity_including_suppressed — Highest maximum severity across audits counting ignored findings; null when none is recognisable
+    - total_vulnerable_artifacts — Number of vulnerable artifacts across audits, counting visible findings only
+    - audits_passing_own_thresholds — Number of audits Oracle marks as successful, meaning nothing exceeded the thresholds and ignore list the team set
+
+    What do the ignore lists hide?
+    - audits_with_suppressed_findings — Number of audits where the with-ignored artifact count exceeds the visible one
+    - total_suppressed_artifacts — Number of vulnerable artifacts hidden by ignore lists across audits
+    - audits_where_suppression_lowered_severity — Number of audits whose with-ignored maximum severity is higher than the visible one, so the headline reads cleaner than the dependencies are
+    - audits_passing_with_suppressed_findings — Number of audits marked successful that also hide findings
+
+    Was anything fixed?
+    - remediation_recipes — Number of remediation recipes
+    - recipes_triggered_on_knowledge_base_change — Number of recipes that run automatically when their knowledge base changes
+    - total_remediation_runs — Number of remediation runs
+    - remediation_runs_reaching_apply — Number of runs that reached the APPLY or VERIFY stage
+    - remediation_runs_reaching_verify — Number of runs that reached VERIFY, the only stage that confirms a fix landed
+    - last_verified_remediation — Timestamp when the most recent run reaching VERIFY finished; null when there is none

@@ -1,0 +1,39 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_athena_encryption_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 3,
+      "fields": {
+        "name": 3,
+        "state": 3,
+        "enforce_workgroup_configuration": 3,
+        "encryption_option": 1,
+        "encrypted": 3
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:10:51Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "name": "pft-encrypted",
+        "state": "ENABLED",
+        "enforce_workgroup_configuration": true,
+        "encryption_option": "SSE_S3",
+        "encrypted": true
+      }
+    ]
+  }
+}

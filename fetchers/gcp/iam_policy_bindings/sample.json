@@ -1,0 +1,203 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_iam_policy_bindings",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.audit_configs[]",
+      "records": 1,
+      "fields": {
+        "exempted_member_count": 1,
+        "exempted_members": 0,
+        "log_configs": 1,
+        "log_types": 1,
+        "service": 1
+      }
+    },
+    {
+      "path": "results.audit_configs[].log_configs[]",
+      "records": 3,
+      "fields": {
+        "exempted_members": 0,
+        "log_type": 3
+      }
+    },
+    {
+      "path": "results.bindings[]",
+      "records": 12,
+      "fields": {
+        "condition": 0,
+        "conditional": 12,
+        "consumer_account_members": 0,
+        "cross_project_service_account_members": 2,
+        "external_members": 0,
+        "member_count": 12,
+        "member_types": 12,
+        "members": 12,
+        "over_broad_role": 12,
+        "primitive_role": 12,
+        "public_members": 0,
+        "publicly_granted": 12,
+        "role": 12,
+        "service_account_granted_over_broad_role": 12,
+        "service_account_members": 11
+      }
+    },
+    {
+      "path": "results.principals[]",
+      "records": 12,
+      "fields": {
+        "conditional_role_count": 12,
+        "consumer_account": 12,
+        "cross_project_service_account": 12,
+        "domain": 12,
+        "external": 12,
+        "google_service_agent": 12,
+        "has_over_broad_role": 12,
+        "member": 12,
+        "member_type": 12,
+        "over_broad_roles": 2,
+        "primitive_roles": 2,
+        "public": 12,
+        "role_count": 12,
+        "roles": 12,
+        "service_account_project": 9
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-17T21:08:03Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "audit_configs": [
+        {
+          "exempted_member_count": 0,
+          "exempted_members": [],
+          "log_configs": [
+            {
+              "exempted_members": [],
+              "log_type": "ADMIN_READ"
+            }
+          ],
+          "log_types": [
+            "ADMIN_READ",
+            "DATA_READ",
+            "DATA_WRITE"
+          ],
+          "service": "allServices"
+        }
+      ],
+      "bindings": [
+        {
+          "condition": null,
+          "conditional": false,
+          "consumer_account_members": [],
+          "cross_project_service_account_members": [
+            "serviceAccount:service-111111111111@compute-system.iam.gserviceaccount.com"
+          ],
+          "external_members": [],
+          "member_count": 1,
+          "member_types": {
+            "serviceAccount": 1
+          },
+          "members": [
+            "serviceAccount:service-111111111111@compute-system.iam.gserviceaccount.com"
+          ],
+          "over_broad_role": false,
+          "primitive_role": false,
+          "public_members": [],
+          "publicly_granted": false,
+          "role": "roles/compute.serviceAgent",
+          "service_account_granted_over_broad_role": false,
+          "service_account_members": [
+            "serviceAccount:service-111111111111@compute-system.iam.gserviceaccount.com"
+          ]
+        }
+      ],
+      "organization": {
+        "domain": "example-1.com",
+        "domain_source": "organization",
+        "name": "organizations/222222222222"
+      },
+      "principals": [
+        {
+          "conditional_role_count": 0,
+          "consumer_account": false,
+          "cross_project_service_account": false,
+          "domain": "developer.gserviceaccount.com",
+          "external": false,
+          "google_service_agent": false,
+          "has_over_broad_role": true,
+          "member": "serviceAccount:111111111111-compute@developer.gserviceaccount.com",
+          "member_type": "serviceAccount",
+          "over_broad_roles": [
+            "roles/editor"
+          ],
+          "primitive_roles": [
+            "roles/editor"
+          ],
+          "public": false,
+          "role_count": 1,
+          "roles": [
+            "roles/editor"
+          ],
+          "service_account_project": null
+        }
+      ],
+      "project": {
+        "display_name": "My First Project",
+        "labels": null,
+        "parent": "organizations/222222222222",
+        "project_id": "example-project",
+        "project_number": "333333333333",
+        "state": "ACTIVE"
+      }
+    },
+    "summary": {
+      "audit_all_services_configured": true,
+      "audit_all_services_log_types": [
+        "ADMIN_READ",
+        "DATA_READ",
+        "DATA_WRITE"
+      ],
+      "audit_config_services": [
+        "allServices"
+      ],
+      "audit_exempted_member_count": 0,
+      "audit_full_log_types_on_all_services": true,
+      "audit_logging_configured": true,
+      "conditional_bindings": 0,
+      "consumer_account_principals": 0,
+      "cross_project_service_account_principals": 2,
+      "deleted_principals": 0,
+      "editor_principals": 1,
+      "external_members_evaluated": true,
+      "external_principals": 0,
+      "non_primitive_binding_percentage": 83,
+      "organization_domain": "example-1.com",
+      "organization_domain_source": "organization",
+      "over_broad_role_bindings": 2,
+      "owner_principals": 1,
+      "primitive_role_bindings": 2,
+      "principals_with_over_broad_roles": 2,
+      "public_bindings": 0,
+      "public_members": [],
+      "publicly_granted": false,
+      "service_account_bindings_with_over_broad_roles": 1,
+      "service_account_principals": 11,
+      "total_bindings": 12,
+      "total_principals": 12,
+      "total_roles_granted": 12,
+      "viewer_principals": 0
+    }
+  }
+}
