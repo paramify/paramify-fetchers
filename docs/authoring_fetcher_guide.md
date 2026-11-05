@@ -142,10 +142,28 @@ spaces, as `- <value> (<meaning>)`:
       - INACTIVE (turned off, so it applies to nobody)
 ```
 
+Keep each field line under about 400 characters where you can; the test stops
+at 800, and at 20,000 for the whole `instructions`.
+
+The fetcher's tests keep the list in step with the code. Pass a summary that
+holds every field, from a full run of the code, to the `assert_summary_documented`
+fixture:
+
+```python
+def test_main_writes_the_summary(monkeypatch, tmp_path, assert_summary_documented):
+    ...
+    assert_summary_documented("okta/password_policy", evidence["summary"])
+```
+
+It fails on a field the instructions don't list, a listed field the summary
+doesn't have, and a breakdown key that isn't among the values listed under its
+field.
+
 [`azure/alert_rules`](../fetchers/azure/alert_rules/fetcher.yaml) is a full
 example. `tests/test_contracts.py` checks this layout for the fetchers listed in
-`TEXT_FORMAT_FETCHERS`; until a platform is converted, its instructions only
-need to open with the `Script:` path.
+`TEXT_FORMAT_FETCHERS`, and that a test calls `assert_summary_documented` for
+each one. Until a platform is converted, its instructions only need to open with
+the `Script:` path.
 
 ## 3. Write `fetcher.py` and smoke-test it
 

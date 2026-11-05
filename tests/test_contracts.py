@@ -223,10 +223,34 @@ def test_instructions_open_with_the_entry_path() -> None:
 # add a category (or category/short_name) once its fetchers are converted.
 # --------------------------------------------------------------------------- #
 
-TEXT_FORMAT_FETCHERS = ("azure/alert_rules", "azure/change_work_items", "azure/entra_risky_users",
-                        "azure/sentinel_playbooks", "azure/service_availability",
-                        "azure/service_health_advisories", "azure/sql_managed_instance_configuration", "oci")
+TEXT_FORMAT_FETCHERS = (
+    "azure/alert_rules",
+    "azure/app_service_backups",
+    "azure/change_work_items",
+    "azure/entra_access_reviews",
+    "azure/entra_pim_assignments",
+    "azure/entra_risky_users",
+    "azure/sentinel_playbooks",
+    "azure/service_availability",
+    "azure/service_health_advisories",
+    "azure/sql_managed_instance_configuration",
+    "oci",
+)
+# Converted before their tests compared the summary fields with the code; each leaves once its tests do.
+SUMMARY_DOCS_PENDING = (
+    "azure/alert_rules",
+    "azure/change_work_items",
+    "azure/entra_risky_users",
+    "azure/sentinel_playbooks",
+    "azure/service_availability",
+    "azure/service_health_advisories",
+    "azure/sql_managed_instance_configuration",
+    "oci",
+)
 MAX_DESCRIPTION_WORDS = 30
+MAX_INSTRUCTIONS_CHARS = 20_000
+MAX_FIELD_LINE_CHARS = 800
+SUMMARY_DOCS_CALL = re.compile(r'assert_summary_documented\(\s*"([^"]+)"')
 FIELD_LINE = re.compile(r"^- (\S+) — \S")
 BREAKDOWN_LINE = re.compile(r"^  - \S+ \(\S.*\)$")
 COMMAND_LINE = re.compile(r"^- \S.* — \S")
@@ -263,6 +287,8 @@ def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
     text = es.get("instructions") or ""
     if "`" in text or "**" in text:
         problems.append("instructions use markdown (backticks or **); Paramify shows them as typed")
+    problems += [f"summary field line has {len(ln)} characters; at most {MAX_FIELD_LINE_CHARS}: {ln[:40]!r}"
+                 for ln in text.splitlines() if FIELD_LINE.match(ln) and len(ln) > MAX_FIELD_LINE_CHARS]
     blocks = [b.split("\n") for b in text.strip("\n").split("\n\n")]
     labels = [b[0] for b in blocks]
     if labels[0] != _script_line(yaml_path, spec):
@@ -322,6 +348,48 @@ def test_converted_fetcher_text_follows_the_format(yaml_path: Path) -> None:
     spec = yaml.safe_load(yaml_path.read_text())
     problems = _text_format_problems(yaml_path, spec)
     assert not problems, f"{_short(yaml_path)}:\n  " + "\n  ".join(problems)
+
+
+def test_instructions_fit_the_size_limit() -> None:
+    bad = [f"{_short(y)}: {n} characters" for y in FETCHER_YAMLS
+           if (n := len((yaml.safe_load(y.read_text()).get("evidence_set") or {}).get("instructions") or ""))
+           > MAX_INSTRUCTIONS_CHARS]
+    assert not bad, f"instructions over {MAX_INSTRUCTIONS_CHARS} characters:\n" + "\n".join(bad)
+
+
+def _documents_summary(yaml_path: Path) -> bool:
+    return "\nSummary fields:\n" in ((yaml.safe_load(yaml_path.read_text()).get("evidence_set") or {})
+                                       .get("instructions") or "")
+
+
+def test_converted_summaries_are_checked_against_the_code() -> None:
+    """A converted fetcher's tests call assert_summary_documented("<category>/<name>", summary) on a full summary."""
+    checked = {m for p in (REPO_ROOT / "tests").glob("test_*.py") for m in SUMMARY_DOCS_CALL.findall(p.read_text())}
+    documented = [y for y in CONVERTED_YAMLS if _documents_summary(y)]
+    missing = [_short(y) for y in documented
+               if _short(y) not in checked and not any(_matches(y, p) for p in SUMMARY_DOCS_PENDING)]
+    assert not missing, "no test calls assert_summary_documented for:\n" + "\n".join(missing)
+    done = [p for p in SUMMARY_DOCS_PENDING
+            if all(_short(y) in checked for y in documented if _matches(y, p))]
+    assert not done, f"remove from SUMMARY_DOCS_PENDING, their tests now check the summary: {done}"
+
+
+@pytest.mark.parametrize(("change", "problem"), [
+    (lambda s: s, None),
+    (lambda s: {**s, "new_field": 1}, "not in the instructions: new_field"),
+    (lambda s: {k: v for k, v in s.items() if k != "eligible_assignments"},
+     "in the instructions but not the summary: eligible_assignments"),
+    (lambda s: {**s, "active_privileged_by_standing": {"permanent": 1, "other": 1}},
+     "value 'other' is not listed under it"),
+])
+def test_summary_check_catches_each_drift(change, problem, assert_summary_documented, documented_summary) -> None:
+    fetcher = "azure/entra_pim_assignments"  # a variable, so this call isn't counted as that fetcher's check
+    summary = change({k: {v: 0 for v in values} if values else 0 for k, values in documented_summary(fetcher).items()})
+    if problem is None:
+        assert_summary_documented(fetcher, summary)
+    else:
+        with pytest.raises(AssertionError, match=re.escape(problem)):
+            assert_summary_documented(fetcher, summary)
 
 
 _ALERT_RULES_YAML = FETCHERS_ROOT / "azure" / "alert_rules" / "fetcher.yaml"

@@ -106,6 +106,51 @@ def make_result():
 
 
 # --------------------------------------------------------------------------- #
+# Summary fields in the instructions, checked against a summary the code built (docs/authoring_fetcher_guide.md)
+# --------------------------------------------------------------------------- #
+
+def documented_summary(fetcher: str) -> Dict[str, list[str]]:
+    """Each field under 'Summary fields:' in a fetcher's instructions, with the breakdown values listed below it."""
+    import re
+
+    import yaml
+
+    yaml_path = next(p for root in ("fetchers", "comparators")
+                     if (p := REPO_ROOT / root / fetcher / "fetcher.yaml").exists())
+    text = (yaml.safe_load(yaml_path.read_text()).get("evidence_set") or {}).get("instructions") or ""
+    _, found, section = text.partition("\nSummary fields:\n")
+    assert found, f"{fetcher}: the instructions have no 'Summary fields:' section"
+    fields: Dict[str, list[str]] = {}
+    field = None
+    for line in section.splitlines():
+        if m := re.match(r"- (\S+) — ", line):
+            field = m.group(1)
+            fields[field] = []
+        elif field and (m := re.match(r"  - (\S+) \(", line)):
+            fields[field].append(m.group(1))
+    return fields
+
+
+@pytest.fixture(name="documented_summary")
+def documented_summary_fixture():
+    return documented_summary
+
+
+@pytest.fixture
+def assert_summary_documented():
+    """Call as assert_summary_documented("azure/<name>", summary) with a summary holding every field."""
+    def _check(fetcher: str, summary: Dict[str, Any]) -> None:
+        documented = documented_summary(fetcher)
+        problems = [f"not in the instructions: {k}" for k in sorted(set(summary) - set(documented))]
+        problems += [f"in the instructions but not the summary: {k}" for k in sorted(set(documented) - set(summary))]
+        for name, values in documented.items():
+            if values and isinstance(summary.get(name), dict):
+                problems += [f"{name}: value {v!r} is not listed under it" for v in sorted(set(summary[name]) - set(values))]
+        assert not problems, f"{fetcher} summary fields vs instructions:\n  " + "\n  ".join(problems)
+    return _check
+
+
+# --------------------------------------------------------------------------- #
 # requests test doubles
 #
 # For new uploader tests. The uploaders hold a requests.Session, so a fake with
