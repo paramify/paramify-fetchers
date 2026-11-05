@@ -1479,8 +1479,11 @@ schemas and the `paramify` CLI — not the internal code.
   `PublicKeyInfrastructure.Read.All`: refused, it reads `not_authorized` in
   `certificate_authority_stores` and `pki_store_status`,
   `pki_store_missing_permission` names the grant, and the run still succeeds. With the X.509 method enabled it also reads users with
-  their `authorizationInfo` and the groups the enabled methods target, and lists in
-  `x509_certificate_users` each enabled member account X.509 targets: whether a
+  their `authorizationInfo` (from the target groups, or from the directory only when
+  X.509 targets all users) and the groups the enabled methods target. It counts every
+  enabled member account X.509 targets, and lists in `x509_certificate_users` the
+  first 100 that fail a check (`x509_certificate_users_truncated` says when more
+  did), each with whether a
   certificate user binding matches it (`mapping`: `certificate_user_id` when a
   certificateUserIds binding's field matches the type of one of its ids,
   `unverified` when only a name binding could, which depends on the certificate, or
@@ -1497,7 +1500,8 @@ schemas and the `paramify` CLI — not the internal code.
   `x509_targeted_users_unmapped`, `x509_targeted_users_mapping_unverified`,
   `x509_targeted_users_without_certificate_user_ids`,
   `x509_targeted_users_with_weaker_methods` and
-  `x509_targeted_users_with_weak_methods` (SMS or Voice). The user counts are 0 when
+  `x509_targeted_users_with_weak_methods` (SMS or Voice) and
+  `x509_certificate_users_truncated`. The user counts are 0 when
   X.509 is off, and null when the policy, the users or a needed group can't be read;
   the CA counts are null when the CA read fails. `authentication_methods` now reads
   null, not an empty list, when the methods policy can't be read.

@@ -101,11 +101,11 @@ evidence_set:
     PublicKeyInfrastructure.Read.All: refused, it reads not_authorized and null, names
     the missing grant in pki_store_missing_permission, and doesn't fail the run). Each
     CA records its trust store; the CA counts take a CA listed in both stores (same
-    thumbprint) once, and are null unless both stores were read. With the X.509 method enabled, also GET /users
-    ($select id, userPrincipalName, userType, accountEnabled,
-    onPremisesUserPrincipalName, authorizationInfo) and GET
+    thumbprint) once, and are null unless both stores were read. With the X.509 method enabled, also GET
     /groups/{id}/transitiveMembers/microsoft.graph.user for each group an enabled
-    method includes or excludes. A targeted user is an enabled member account (not a
+    method includes or excludes, and GET /users only when X.509 targets all users or
+    a user directly (both $select id, userPrincipalName, userType, accountEnabled,
+    onPremisesUserPrincipalName, authorizationInfo). A targeted user is an enabled member account (not a
     guest) the X.509 method includes and doesn't exclude. It counts as mapped when a
     certificateUserIds binding's certificate field matches the type of one of the
     user's certificate user ids (X509:<SKI>... for SubjectKeyIdentifier, and so on),
@@ -115,6 +115,10 @@ evidence_set:
     the fetcher doesn't know) could match reads unverified, never mapped; a user no
     binding can match is unmapped. It has weaker methods when an enabled method other
     than X.509, FIDO2 and email one-time passcodes (guests only) reaches it. Only the
-    count and the types of a user's certificateUserIds are kept. A failed read leaves
-    the counts it feeds null.
+    count and the types of a user's certificateUserIds are kept. The counts cover every
+    targeted user; x509_certificate_users lists only those that fail a check (not
+    mapped by a certificate user id, without any, or reached or possibly reached by a
+    weaker method), at most 100, and x509_certificate_users_truncated says when more
+    failed. A failed read leaves the counts it feeds null; one unread group a target
+    depends on leaves the whole user list and its counts null.
     Collections paged via @odata.nextLink.

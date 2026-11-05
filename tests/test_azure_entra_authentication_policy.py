@@ -155,7 +155,7 @@ def _client(calls, configs, authorities, fail=(), pki=None):
     )
 
     def group(gid):
-        members = DENIED if gid in fail else [ns(id=u) for u in GROUPS.get(gid, [])]
+        members = DENIED if gid in fail else [next(u for u in USERS if u.id == uid) for uid in GROUPS.get(gid, [])]
         return ns(transitive_members=ns(graph_user=Pages(members, calls, f"group {gid}")))
 
     return ns(
@@ -217,10 +217,12 @@ def test_targeted_users_are_matched_to_certificates_and_their_weaker_methods_lis
             summary["x509_targeted_users_without_certificate_user_ids"],
             summary["x509_targeted_users_with_weaker_methods"], summary["x509_targeted_users_with_weak_methods"]) == (
         3, 1, 1, 2, 3, 3)
-    # The users are read with their certificate user ids, and only the groups the enabled methods name.
-    (users_call,) = [c for c in calls if c[0] == "users"]
-    assert "authorizationInfo" in users_call[1].query_parameters.select
-    assert sorted(c[0] for c in calls if c[0].startswith("group")) == ["group g1", "group g2", "group g3"]
+    # X.509 targets a group, so its users come from the groups the enabled methods name, with their certificate
+    # user ids, and the directory isn't read.
+    assert [c for c in calls if c[0] == "users"] == []
+    groups = [c for c in calls if c[0].startswith("group")]
+    assert sorted(c[0] for c in groups) == ["group g1", "group g2", "group g3"]
+    assert all("authorizationInfo" in c[1].query_parameters.select for c in groups)
     bindings = next(m for m in results["authentication_methods"] if m["id"] == "X509Certificate")["settings"][
         "certificate_user_bindings"]
     assert [(b["priority"], b["user_property"], b["trust_affinity_level"]) for b in bindings] == [
@@ -275,13 +277,35 @@ def test_failed_reads_are_null_never_zero(monkeypatch, tmp_path):
     assert (evidence["summary"]["x509_targeted_users_with_weaker_methods"],
             evidence["summary"]["x509_targeted_users_with_weak_methods"]) == (None, 0)
 
-    for fail in ("users", "g1"):
-        code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, fail=(fail,))
+    for fail, x509 in (("users", _x509(include=("all_users",))), ("g1", _x509())):
+        code, evidence, _ = run(monkeypatch, tmp_path, (x509, *CONFIGS[1:]), fail=(fail,))
         assert code == 1 and evidence["results"]["x509_certificate_users"] is None, fail
         for key in ("x509_targeted_users", "x509_targeted_users_unmapped",
                     "x509_targeted_users_without_certificate_user_ids", "x509_targeted_users_with_weaker_methods",
                     "x509_targeted_users_with_weak_methods"):
             assert evidence["summary"][key] is None, (fail, key)
+
+
+def test_all_users_targeting_reads_the_directory(monkeypatch, tmp_path):
+    code, evidence, calls = run(monkeypatch, tmp_path, (_x509(include=("all_users",), exclude=("g2",)), _method("Fido2")))
+    (users_call,) = [c for c in calls if c[0] == "users"]
+    assert "authorizationInfo" in users_call[1].query_parameters.select
+    # u4 is a guest, u5 is disabled and u3 is excluded.
+    assert (code, evidence["summary"]["x509_targeted_users"]) == (0, 4)
+
+
+def test_only_users_failing_a_check_are_listed_and_the_list_is_capped(monkeypatch, tmp_path):
+    configs = (_x509(), _method("Fido2"))
+    _, evidence, _ = run(monkeypatch, tmp_path, configs)
+    # u1 is matched by its certificate user id and reached by no weaker method, so only the counts include it.
+    assert [u["id"] for u in evidence["results"]["x509_certificate_users"]] == ["u2", "u7"]
+    assert (evidence["summary"]["x509_targeted_users"], evidence["summary"]["x509_certificate_users_truncated"]) == (
+        3, False)
+    monkeypatch.setattr(ap, "MAX_LISTED_USERS", 1)
+    _, evidence, _ = run(monkeypatch, tmp_path, configs)
+    assert [u["id"] for u in evidence["results"]["x509_certificate_users"]] == ["u2"]
+    assert (evidence["summary"]["x509_targeted_users_unmapped"], evidence["summary"]["x509_certificate_users_truncated"]) == (
+        1, True)
 
 
 def test_x509_off_reads_no_users_and_counts_none_targeted(monkeypatch, tmp_path):

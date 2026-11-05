@@ -133,6 +133,8 @@ NAME_PROPERTIES = {"userprincipalname": "user_principal_name",
 MAPPING_ID = "certificate_user_id"
 MAPPING_UNVERIFIED = "unverified"
 MAPPING_NONE = "none"
+# The evidence lists at most this many of the targeted users that fail a check.
+MAX_LISTED_USERS = 100
 USER_SELECT = ("id", "userPrincipalName", "userType", "accountEnabled", "onPremisesUserPrincipalName",
                "authorizationInfo")
 
@@ -668,6 +670,17 @@ def certificate_users(policy: dict | None, methods: list[dict], users: list[dict
     return sorted(records, key=lambda r: str(r.get("user_principal_name") or r["id"]).lower())
 
 
+def fails_a_check(user: dict) -> bool:
+    """Not matched to a certificate by a certificate user id, without any, or reached (or maybe) by a weaker method."""
+    return (user["mapping"] != MAPPING_ID or not user["certificate_user_ids_count"]
+            or user["weaker_method_enabled"] is not False)
+
+
+def listed_users(users: list[dict] | None) -> list[dict] | None:
+    """The targeted users that fail a check, the first MAX_LISTED_USERS of them; the counts cover every user."""
+    return None if users is None else [u for u in users if fails_a_check(u)][:MAX_LISTED_USERS]
+
+
 def _count(records: list[dict] | None, test) -> int | None:
     """How many records pass; None when the list is unknown or any record's answer is."""
     if records is None:
@@ -714,6 +727,8 @@ def summarize_certificates(authorities: list[dict] | None, users: list[dict] | N
             users, lambda u: not u["certificate_user_ids_count"]),
         "x509_targeted_users_with_weaker_methods": _count(users, lambda u: u["weaker_method_enabled"]),
         "x509_targeted_users_with_weak_methods": _count(users, lambda u: u["weak_method_enabled"]),
+        "x509_certificate_users_truncated": (
+            None if users is None else sum(1 for u in users if fails_a_check(u)) > MAX_LISTED_USERS),
     }
 
 
@@ -894,26 +909,47 @@ async def _pki_store(collector: Collector, client) -> tuple:
 
 
 async def _certificate_targets(collector: Collector, client, methods: list[dict]) -> tuple:
-    """(users, {group id: member ids or None}), read only when X.509 is enabled; users is None when its read failed."""
-    if not any(m["enabled"] and m["id"].lower() == METHOD_X509 for m in methods):
+    """(users, {group id: member ids or None}), read only when X.509 is enabled; users is None when its read failed.
+    When X.509 targets groups only, its users come from those groups instead of the whole directory."""
+    x509 = next((m for m in methods if m["enabled"] and m["id"].lower() == METHOD_X509), None)
+    if x509 is None:
         return None, {}
-    from kiota_abstractions.base_request_configuration import RequestConfiguration  # lazy
-    from msgraph.generated.users.users_request_builder import UsersRequestBuilder  # lazy
+    from kiota_abstractions.base_request_configuration import RequestConfiguration
+    from msgraph.generated.groups.item.transitive_members.graph_user.graph_user_request_builder import (
+        GraphUserRequestBuilder,
+    )
+    from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
-    config = RequestConfiguration(query_parameters=UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
-        select=list(USER_SELECT), top=999))
-    before = len(collector.failures)
-    users = [project_user(u)
-             for u in await paginate(collector, "graph.users.get(authorizationInfo)", client.users, config)]
-    if len(collector.failures) > before:
-        users = None
+    include = target_groups([{"enabled": True, "include_targets": x509.get("include_targets") or []}])
+    groups_only = all(str(t.get("target_type") or "").lower() != "user" and str(t.get("id") or "").lower() != ALL_USERS
+                      for t in x509.get("include_targets") or [])
+    users = None
+    if not groups_only:
+        config = RequestConfiguration(query_parameters=UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
+            select=list(USER_SELECT), top=999))
+        before = len(collector.failures)
+        users = [project_user(u)
+                 for u in await paginate(collector, "graph.users.get(authorizationInfo)", client.users, config)]
+        if len(collector.failures) > before:
+            users = None
+    group_config = RequestConfiguration(
+        query_parameters=GraphUserRequestBuilder.GraphUserRequestBuilderGetQueryParameters(
+            select=list(USER_SELECT), top=999))
     members: dict[str, set | None] = {}
+    found: dict[str, dict] = {}
     for gid in sorted(target_groups(methods)):
         before = len(collector.failures)
         rows = await paginate(collector, f"graph.groups({gid}).transitiveMembers.graphUser.get",
-                              client.groups.by_group_id(gid).transitive_members.graph_user)
-        members[gid] = None if len(collector.failures) > before else {
-            str(graph_attr(r, "id") or "").lower() for r in rows}
+                              client.groups.by_group_id(gid).transitive_members.graph_user, group_config)
+        if len(collector.failures) > before:
+            members[gid] = None
+            continue
+        projected = [project_user(r) for r in rows]
+        members[gid] = {str(u["id"] or "").lower() for u in projected}
+        if gid in include:
+            found.update((str(u["id"] or "").lower(), u) for u in projected)
+    if groups_only:
+        users = None if any(members.get(g) is None for g in include) else list(found.values())
     logger.info("Read %s user(s) and %d targeted group(s) for X.509 sign-in",
                 len(users) if users is not None else "no", len(members))
     return users, members
@@ -976,7 +1012,7 @@ def main() -> int:
             "subscribed_skus": collected.get("skus"),
             "trusted_certificate_authorities": authorities,
             "certificate_authority_stores": stores,
-            "x509_certificate_users": users,
+            "x509_certificate_users": listed_users(users),
         },
         summary={
             **summarize(policy, methods, collected.get("security_defaults_enabled"), tier, passwords),
