@@ -287,9 +287,7 @@ def test_collects_the_organization_and_exits_zero(tmp_path):
 
 
 def test_the_summary_matches_the_instructions(assert_summary_documented):
-    methods = ("workload_identity_federation managed_identity github_app service_principal_secret "
-               "service_principal_certificate service_principal username_password token personal_access_token oauth "
-               "certificate publish_profile kubernetes none unknown").split()
+    methods = sorted({*mod.AUTH_METHODS.values(), *mod.SPN_CREDENTIALS.values(), "service_principal", "unknown"})
     connections = [{"name": m, "type": "azurerm", "auth_method": None if m == "unknown" else m, "azure": {},
                     "stored_credential": False, "open_to_all_pipelines": False, "is_ready": True,
                     "pipeline_runs_in_window": 0, "executions_collected": True, "executions": []} for m in methods]

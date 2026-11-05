@@ -108,9 +108,9 @@ evidence_set:
     - dynamic_groups_paused — Number of dynamic groups whose rule processing is paused, so membership no longer follows the rule
     - assigned_groups — Number of groups whose membership isn't set by a rule: members are added and removed by hand, or, for synced groups (included here), managed in on-premises Active Directory
     - synced_groups — Number of groups synced from on-premises Active Directory, and managed there
-    - cloud_groups — Number of groups created in Entra ID rather than synced
+    - cloud_groups — Number of groups not currently synced from on-premises Active Directory, so a group that was synced and no longer is counts as cloud
     - hidden_membership_groups — Number of Microsoft 365 groups whose membership is hidden; their members are listed only with Member.Read.Hidden
-    - hidden_membership_groups_unread — Number of hidden-membership groups that came back with no members, which Graph also returns without Member.Read.Hidden, so their members read unknown and the member fields leave them out; null if members couldn't be read
+    - hidden_membership_groups_unread — Number of hidden-membership groups that came back with no members, which Graph also returns without Member.Read.Hidden, so their members read unknown and are left out of every member figure (total_direct_memberships, empty_groups, groups_with_guest_members, groups_with_disabled_user_members, groups_with_nested_groups, users_in_role_assignable_groups and role_assignable_groups_with_guest_members), which can then read low; null if members couldn't be read
 
     Who owns each group?
     - groups_with_owners_not_in_graph — Number of groups whose owners Microsoft Graph doesn't return: synced groups, distribution groups and mail-enabled security groups (created in Exchange); the owner fields leave them out
