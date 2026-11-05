@@ -14,8 +14,10 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
-  a device-bound passkey, Windows Hello for Business or multifactor certificate
-  method (Microsoft's "Phishing-resistant MFA" strength). The summary adds
+  a device-bound passkey, Windows Hello for Business or a macOS platform credential
+  (the same set `azure_entra_emergency_accounts` uses). Certificate-based authentication
+  isn't visible in the registration report, so a certificate-only user counts as without.
+  The summary adds
   `phishing_resistant_enabled_users`, `phishing_resistant_coverage_percentage`,
   `phishing_resistant_admin_users`, `phishing_resistant_admin_coverage_percentage`
   and `admin_users_without_phishing_resistant`. They read null when the

@@ -32,6 +32,7 @@ def _load(name):
 
 
 auth_policy = _load("entra_authentication_policy")
+emergency_accounts = _load("entra_emergency_accounts")
 mfa_status = _load("entra_mfa_status")
 privileged_roles = _load("entra_privileged_roles")
 
@@ -221,30 +222,37 @@ def _methods_user(uid, methods, admin=False):
     return reg
 
 
-def test_phishing_resistant_counts_only_fido2_hello_and_certificate_methods():
-    users = [_user(f"p{i}", f"p{i}@contoso.test") for i in range(5)] + [
-        _user("p-none", "none@contoso.test")
-    ]
-    regs = [
-        _methods_user("p0", ["fido2SecurityKey"], admin=True),
-        _methods_user("p1", ["windowsHelloForBusiness", "mobilePhone"]),
-        _methods_user("p2", ["microsoftAuthenticatorPasswordless", "microsoftAuthenticatorPush"]),
-        _methods_user("p3", ["mobilePhone", "email"]),
-        _methods_user("p4", ["x509CertificateMultiFactor"]),
-    ]
+def test_phishing_resistant_counts_only_bound_methods():
+    cases = {
+        "p0": (["fido2SecurityKey"], True),
+        "p1": (["windowsHelloForBusiness", "mobilePhone"], True),
+        "p2": (["microsoftAuthenticatorPasswordless", "microsoftAuthenticatorPush"], False),
+        "p3": (["mobilePhone", "email"], False),
+        "p4": (["passKeyDeviceBound"], True),
+        "p5": (["passKeyDeviceBoundAuthenticator"], True),
+        "p6": (["passKeySynced"], False),
+        "p7": (["macOsSecureEnclaveKey"], True),
+        "p8": (["PASSKEYDEVICEBOUND"], True),
+    }
+    users = [_user(k, f"{k}@contoso.test") for k in cases] + [_user("p-none", "none@contoso.test")]
+    regs = [_methods_user(k, m, admin=(k == "p0")) for k, (m, _) in cases.items()]
     records = mfa_status.join_users(users, regs, {"p0": ["Global Administrator"]})
     by_id = {r["id"]: r for r in records}
-    assert [by_id[k]["is_phishing_resistant"] for k in ("p0", "p1", "p2", "p3", "p4", "p-none")] == [
-        True, True, False, False, True, False,
-    ]
+    for k, (_, want) in cases.items():
+        assert by_id[k]["is_phishing_resistant"] is want, k
+    assert by_id["p-none"]["is_phishing_resistant"] is False
     assert by_id["p2"]["is_passwordless_capable"] is True
     summary = mfa_status.summarize(records)
-    assert summary["phishing_resistant_enabled_users"] == 3
-    assert summary["phishing_resistant_coverage_percentage"] == 50
-    assert summary["passwordless_capable_enabled_users"] == 5
+    assert summary["phishing_resistant_enabled_users"] == 6
+    assert summary["phishing_resistant_coverage_percentage"] == 60
+    assert summary["passwordless_capable_enabled_users"] == 9
     assert summary["phishing_resistant_admin_users"] == 1
     assert summary["phishing_resistant_admin_coverage_percentage"] == 100
     assert summary["admin_users_without_phishing_resistant"] == 0
+
+
+def test_mfa_status_and_emergency_accounts_share_one_phishing_resistant_set():
+    assert mfa_status.PHISHING_RESISTANT_METHODS is emergency_accounts.PHISHING_RESISTANT_METHODS
 
 
 def test_phishing_resistant_figures_are_null_when_unreadable():

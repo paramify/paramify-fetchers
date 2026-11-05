@@ -43,6 +43,7 @@ from azure_common import (  # noqa: E402
     report_failure,
 )
 from entra_graph import (  # noqa: E402
+    PHISHING_RESISTANT_METHODS,
     graph_attr,
     graph_list,
     is_privileged_role,
@@ -77,22 +78,6 @@ GUEST_USER_TYPE = "guest"
 # every user in it.
 ODATA_USER = "#microsoft.graph.user"
 ODATA_GROUP = "#microsoft.graph.group"
-
-# Methods in Microsoft's built-in "Phishing-resistant MFA" strength: FIDO2 / device-bound
-# passkeys, Windows Hello for Business and multifactor certificate-based authentication.
-# Authenticator phone sign-in and synced passkeys are deliberately absent.
-PHISHING_RESISTANT_METHODS = frozenset(
-    m.lower()
-    for m in (
-        "fido2SecurityKey",
-        "passKeyDeviceBound",
-        "passKeyDeviceBoundAuthenticator",
-        "passKeyDeviceBoundWindowsHello",
-        "windowsHelloForBusiness",
-        "x509CertificateMultiFactor",
-    )
-)
-
 
 # --- projections: the only code here that touches a Graph model ---
 
@@ -210,6 +195,7 @@ def user_record(
         "is_mfa_capable": bool(details.get("is_mfa_capable") or False),
         "is_mfa_registered": bool(details.get("is_mfa_registered") or False),
         "is_passwordless_capable": bool(details.get("is_passwordless_capable") or False),
+        # Certificate-based authentication isn't in the registration report, so a certificate-only user reads false.
         "is_phishing_resistant": any(
             str(m).lower() in PHISHING_RESISTANT_METHODS
             for m in details.get("methods_registered") or []

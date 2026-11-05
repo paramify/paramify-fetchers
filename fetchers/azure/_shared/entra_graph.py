@@ -189,6 +189,13 @@ def is_privileged_role(role: dict) -> bool:
     return str(role.get("role_template_id") or "").lower() == GLOBAL_ADMINISTRATOR_TEMPLATE_ID
 
 
+# userRegistrationDetails.methodsRegistered values bound to the sign-in origin, so a look-alike site can't relay them (lowercase; compare with .lower()).
+PHISHING_RESISTANT_METHODS = frozenset({
+    "fido2securitykey", "windowshelloforbusiness", "passkeydevicebound", "passkeydeviceboundauthenticator",
+    "passkeydeviceboundwindowshello", "macossecureenclavekey",
+})
+
+
 # --------------------------------------------------------------------------- #
 # Privileged Microsoft Graph permissions
 # --------------------------------------------------------------------------- #
