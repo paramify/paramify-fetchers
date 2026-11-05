@@ -12,6 +12,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
+  `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
+  a device-bound passkey, Windows Hello for Business or multifactor certificate
+  method (Microsoft's "Phishing-resistant MFA" strength). The summary adds
+  `phishing_resistant_enabled_users`, `phishing_resistant_coverage_percentage`,
+  `phishing_resistant_admin_users`, `phishing_resistant_admin_coverage_percentage`
+  and `admin_users_without_phishing_resistant`. They read null when the
+  registration report can't be read, the admin ones also when role membership
+  can't. `is_passwordless_capable` is unchanged and still counts Authenticator phone
+  sign-in, which isn't phishing-resistant; the description no longer calls it that.
+
 - **`aws_organizations_scp` can record the SCPs that apply to each account.**
   Set `effective_scp_accounts` (env `SCP_EFFECTIVE_ACCOUNTS`) to comma-separated
   account IDs, or `all`. For each account the fetcher records
