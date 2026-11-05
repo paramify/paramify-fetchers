@@ -357,13 +357,16 @@ def _pin(value: Any, roots: list) -> Any:
 
 
 def _offline(mp: pytest.MonkeyPatch) -> None:
-    """Make os.environ match offline_env(): no .env, and no PARAMIFY_* or AZURE_* values."""
-    env = _cli().offline_env()
-    for name in set(os.environ) - set(env):
+    """No .env and no PARAMIFY_* or AZURE_* values in os.environ, the Paramify names as offline_env() sets them."""
+    # Not offline_env()'s allowlist: pytest plugins keep state in os.environ (TEXTUAL_SNAPSHOT_TEMPDIR).
+    # An earlier load_dotenv() in this process may have copied any .env name into os.environ.
+    cli = _cli()
+    dotenv = cli.dotenv_names()
+    for name in [k for k in os.environ if k.startswith(("PARAMIFY_", "AZURE_")) or k in dotenv]:
         mp.delenv(name)
-    for name, value in env.items():
-        if os.environ.get(name) != value:
-            mp.setenv(name, value)
+    offline = cli.offline_env()
+    for name in (*cli.PARAMIFY_ENV, "PYTHON_DOTENV_DISABLED"):
+        mp.setenv(name, offline[name])
 
 
 @pytest.fixture(scope="session")
