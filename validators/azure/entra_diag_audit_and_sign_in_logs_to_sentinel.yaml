@@ -3,10 +3,12 @@ name: Entra Audit and Sign-In Logs Reach a Sentinel Workspace
 type: AUTOMATED
 role: configuration
 statement: >-
-  The tenant's Entra ID diagnostic settings were read with no partial failure, and an enabled setting
-  sends both AuditLogs and SignInLogs to a Log Analytics workspace onboarded to Microsoft Sentinel
-  (audit_and_signin_logs_to_sentinel true), so directory changes and sign-ins reach the SIEM. It is
-  null when a destination workspace's Sentinel state can't be read, so that fails too. Supports
+  The tenant's Entra ID diagnostic settings were read with no partial failure, and AuditLogs and
+  SignInLogs are each enabled in a setting that sends them to a Log Analytics workspace onboarded to
+  Microsoft Sentinel, possibly different settings and workspaces (audit_and_signin_logs_to_sentinel
+  true), so directory changes and sign-ins reach the SIEM. It is null, and fails, when a category's
+  destination workspace can't be read and none of its other destinations is a known Sentinel
+  workspace. Supports
   KSI-MLA-OSM for the Entra tenant. Does not prove: that the workspace is the approved one (the
   evidence carries each setting's workspace_id, so a tenant-tuned copy can pin it); the other Entra
   log categories (entra_diag_all_log_categories_exported); that records arrive; workspace retention;
