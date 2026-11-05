@@ -867,14 +867,26 @@ schemas and the `paramify` CLI — not the internal code.
   comma-separated list. `describe` shows what a pattern list takes instead of its
   env var. `validate` adds a note for each category-wide list, naming the entries
   that take it, the ones with their own list, and the ones without the field
-  (`--json` carries them as `notes`). The TUI shows a list as its patterns and
-  leaves it out of the entry editor, which would save it back as one string.
+  (`--json` carries them as `notes`). The TUI shows a list as its patterns, and
+  its entry editor (`e`) edits one as text, one `pattern  # reason` per line:
+  the box opens on the category's list while the entry inherits it, saving it
+  unchanged writes nothing, an edit gives the entry its own list, and an edit
+  holding a pattern the field doesn't take keeps the form open with the reason.
+  A reason written on several lines shows on one, so its later lines can't
+  become patterns.
   A list or a map given to a config field that isn't `type: patterns`, such as
   a category-wide list reaching a fetcher that declares the key a string, fails
   `validate` and the run instead of reaching the fetcher as Python text. A
   pattern list the manifest leaves unset reaches the fetcher as an empty
   variable, so a `.env` file can't fill it, and `passthrough_env` doesn't carry
   it.
+- **The evidence names the patterns a fetcher received.** The envelope of a
+  fetcher that received a pattern list gains `metadata.config_patterns`: per
+  field, each pattern in manifest order, its reason (null when the manifest
+  gives none) and the layer that set the list (`entry`, `platform` or
+  `default`). A run that passes no pattern writes the envelope it always has,
+  with no new key. `examples/azure_scope_exclusions.yaml` sets both Azure lists
+  with synthetic patterns and reasons.
 - **A string config field can be a `${env:VAR}` reference.** The runner
   resolves it the way it resolves a secret. An unset or empty variable gives way
   to the next value down (platform config, then the default; an error for a

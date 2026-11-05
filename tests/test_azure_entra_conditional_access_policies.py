@@ -268,6 +268,17 @@ def test_mfa_client_types_skip_app_and_device_filters_flows_and_other_risks(monk
     assert json.loads(json.dumps(by_id["p-device"])) == by_id["p-device"]
 
 
+def test_mfa_for_everyone_skips_an_include_mode_application_filter(monkeypatch):
+    policy = _with(_policy("p-include", "MFA", controls=("mfa",)), client_apps=("browser",))
+    policy["conditions"]["applications"]["applicationFilter"] = {
+        "mode": "include", "rule": 'CustomSecurityAttribute.Tier -eq "Core"'}
+    types, by_id = _client_types(monkeypatch, policy)
+    assert types == []
+    assert not ca._mfa_for_everyone(by_id["p-include"])
+    assert by_id["p-include"]["target_resources"]["application_filter"] == {
+        "mode": "include", "rule": 'CustomSecurityAttribute.Tier -eq "Core"'}
+
+
 def test_no_graph_client_leaves_the_strengths_unknown(monkeypatch):
     async def no_client(collector, cred, work, default=None):
         collector.record("graph.client", RuntimeError("no Graph client"))

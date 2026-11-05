@@ -356,6 +356,10 @@ API_TO_CLI = {
     "add_entry": "manifest add",
     "set_secret": "manifest set-secret",
     "set_fetcher_config": "manifest set-config",
+    # The entry form's pattern-list box: a whole list at once, which exclude/unexclude/set-config write piecewise.
+    "set_pattern_list": "manifest exclude / manifest unexclude / manifest set-config",
+    "category_patterns": "<implicit: the inherited list the form opens on; manifest show prints it>",
+    "grammar_text": "describe",
     "set_output_dir": "manifest set-output-dir",
     "remove_entry": "manifest remove",
     "add_target": "manifest add-target",
