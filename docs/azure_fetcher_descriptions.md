@@ -209,7 +209,7 @@ Short Description: Shows which sign-in methods the tenant allows, flagging weak 
 
 Script: fetchers/azure/entra_authentication_policy/fetcher.py (uses the shared Graph helpers fetchers/azure/_shared/entra_graph.py)
 
-Access: Microsoft Graph application permissions Policy.Read.All and Directory.Read.All. Optional: PublicKeyInfrastructure.Read.All; without it, the certificate authorities in the PKI-based trust store and the certificate authority counts read null.
+Access: Microsoft Graph application permissions Policy.Read.All and Directory.Read.All. Optional: Organization.Read.All and PublicKeyInfrastructure.Read.All; without either, the certificate authorities in its trust store (classic or PKI-based) and the certificate authority counts read null.
 
 Commands Executed:
 - Microsoft Graph `GET /organization` — the tenant's name and domain
@@ -251,6 +251,11 @@ Summary fields:
 - `certificate_authorities_expiry_unknown` — Number of trusted certificate authorities whose expiry date couldn't be read from the certificate or the service; null unless both stores were read
 - `certificate_authorities_without_crl` — Number of trusted certificate authorities with no certificate revocation list (CRL) address in at least one store, so a revoked user certificate signed by them isn't rejected; null unless both stores were read
 - `classic_store_certificate_authorities` — Number of certificate authorities in the classic store; null if it couldn't be read
+- `classic_store_status` — Whether the classic trust store was read: read, not_authorized or failed
+  - read (its certificate authorities are counted)
+  - not_authorized (the optional Organization.Read.All isn't granted; the run still succeeds)
+  - failed (the read failed, and the run exits non-zero)
+- `classic_store_missing_permission` — Whether the classic trust store read was refused for a missing grant: Organization.Read.All when it was; null when the store was read or failed for another reason
 - `pki_store_certificate_authorities` — Number of certificate authorities in the PKI-based trust store; null if it couldn't be read
 - `pki_store_status` — Whether the PKI-based trust store was read: read, not_authorized, not_available or failed
   - read (its certificate authorities are counted)
