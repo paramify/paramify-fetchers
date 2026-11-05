@@ -73,7 +73,7 @@ evidence_set:
     - resources_assessed — Number of resources of the assessed types in the subscription
     - resource_types_assessed — List of the resource types assessed: scale sets, application gateways, public IPs, NAT gateways, Azure Firewalls, Bastion hosts, Redis caches, virtual machines, managed disks, AKS clusters, load balancers, storage accounts, App Service plans, Backup vaults, Recovery Services vaults, Cosmos DB accounts, PostgreSQL and MySQL flexible servers, and SQL databases (the master database left out)
     - resources_by_type — Number of resources for each type
-    - resource_list_read — True if Resource Graph returned the resource list; false if it failed, so every count below is 0 and the run fails
+    - resource_list_read — True if Resource Graph returned the resource list; false if it failed, and then every count, list and verdict that comes from the resources is null, not 0, and the run fails
 
     How is each resource spread across zones?
     - resources_by_zone_configuration — Number of resources for each zone configuration:

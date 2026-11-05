@@ -289,7 +289,17 @@ def _flag(values: List[Optional[bool]]) -> Optional[bool]:
     return all(values)
 
 
-def summarize(vaults: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dict[str, Any]:
+# Summary keys that hold the run's settings rather than anything read from Azure; they stay set when a read fails.
+SETTING_KEYS = ("retention_threshold_days", "recovery_point_window_hours", "recovery_point_lookback_days",
+                "recovery_point_objective_hours")
+POLICY_KEYS = ("total_backup_policies", "policies_meeting_retention_threshold", "policies_without_readable_retention")
+VAULT_LEVEL_KEYS = ("vaults_instances_listed", "vaults_with_backup_instances", "vaults_without_backup_instances")
+
+
+def summarize(vaults: List[Dict[str, Any]], settings: Dict[str, Any], vaults_listed: bool = True) -> Dict[str, Any]:
+    """Every count is null, not 0, when the read behind it failed: an unread list is not an empty one, and a partial
+    count would read as complete. A failed vault list leaves everything but the settings null; a failed policy list
+    leaves the policy totals null; a failed instance list leaves every instance count null."""
     policies = [p for v in vaults for p in v["backup_policies"]]
     instances = [i for v in vaults for i in v["backup_instances"]]
     read = [i for i in instances if i["recovery_points_status"] == RECOVERY_POINTS_READ]
@@ -301,7 +311,8 @@ def summarize(vaults: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dict[st
     instances_listed = all(v["instances_read"] for v in vaults)
     all_backed_up = _flag([i["backed_up_in_window"] for i in applicable]) if instances_listed else None
     all_rpo = _flag([i["meets_recovery_point_objective"] for i in applicable]) if instances_listed else None
-    return {
+    retention_unknown = sum(1 for i in instances if i["meets_retention_threshold"] is None)
+    summary = {
         "total_backup_vaults": len(vaults),
         "vaults_instances_listed": instances_listed,
         "vaults_with_backup_instances": sum(1 for v in vaults if v["total_backup_instances"]) if instances_listed else None,
@@ -325,8 +336,9 @@ def summarize(vaults: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dict[st
             1 for i in instances if _lower(i["current_protection_state"]) in ERROR_STATES or i["protection_error"]),
         "backup_instances_without_policy": sum(1 for i in instances if not i["policy_id"]),
         "backup_instances_meeting_retention_threshold": adequate,
-        "backup_instances_retention_unknown": sum(1 for i in instances if i["meets_retention_threshold"] is None),
-        "retention_threshold_percentage": coverage_percentage(adequate, len(instances)),
+        "backup_instances_retention_unknown": retention_unknown,
+        # An instance whose retention couldn't be read is neither adequate nor short, so no share can be stated.
+        "retention_threshold_percentage": None if retention_unknown else coverage_percentage(adequate, len(instances)),
         "recovery_point_window_hours": settings["window_hours"],
         "recovery_point_lookback_days": settings["lookback_days"],
         "backup_instances_recovery_points_read": len(read),
@@ -346,6 +358,17 @@ def summarize(vaults: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dict[st
             1 for i in read if i["meets_recovery_point_objective"] is False) if rpo else None,
         "all_backup_instances_meet_recovery_point_objective": all_rpo if rpo else None,
     }
+    if not vaults_listed:
+        return {k: (v if k in SETTING_KEYS else None) for k, v in summary.items()}
+    if not all(v["policies_read"] for v in vaults):
+        summary.update({k: None for k in POLICY_KEYS})
+    if not instances_listed:
+        # Instance counts start at total_backup_instances; the vault-level ones above already handle a failed list.
+        keys = list(summary)
+        for k in keys[keys.index("total_backup_instances"):]:
+            if k not in SETTING_KEYS and k not in VAULT_LEVEL_KEYS:
+                summary[k] = None
+    return summary
 
 
 def settings_from_env(collector: Optional[Collector] = None) -> Dict[str, Any]:
@@ -471,6 +494,7 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
     api = provider["api_version"]
     vaults: List[Dict[str, Any]] = []
     excluded: List[dict] = []
+    vaults_listed = True  # an unregistered provider has no vaults, which is known
     if provider["registration"] == NOT_REGISTERED:
         logger.warning("%s is not registered on subscription %s; no Backup vaults in use", NAMESPACE, subscription_id)
     else:
@@ -480,6 +504,7 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
                 f"/subscriptions/{subscription_id}/providers/{NAMESPACE}/backupVaults", api)],
             default=None,
         )
+        vaults_listed = raw is not None
         vaults = sorted(raw or [], key=lambda v: arm_id_key(v["id"]))
         vaults, out = exclusions.split(vaults, "backup_vault")
         excluded += out
@@ -495,12 +520,13 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
         "excluded": sorted(excluded, key=lambda e: arm_id_key(e.get("id"))),
     }
     summary = {
-        **summarize(vaults, settings),
+        **summarize(vaults, settings, vaults_listed),
         "api_version": api,
         "provider_registration_status": provider["registration"],
         **exclusions.summary(excluded, ("backup_vault", "backup_instance"), {
-            "backup_vaults": len(vaults),
-            "backup_instances": sum(v["total_backup_instances"] or 0 for v in vaults),
+            "backup_vaults": len(vaults) if vaults_listed else None,
+            "backup_instances": sum(v["total_backup_instances"] for v in vaults)
+            if vaults_listed and all(v["instances_read"] for v in vaults) else None,
         }),
     }
     return results, summary

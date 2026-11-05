@@ -155,8 +155,9 @@ def test_an_unread_policy_list_leaves_retention_unknown_not_short():
     instances = [bv.instance_record(raw_instance(1), {}), bv.instance_record(raw_instance(2), policies())]
     judged_all = [bv.with_recovery_points(i, bv.RECOVERY_POINTS_READ, [], SETTINGS, NOW) for i in instances]
     summary = bv.summarize([vault_with(judged_all)], SETTINGS)
+    # The unknown instance is neither adequate nor short, so no share of instances can be stated.
     assert (summary["backup_instances_meeting_retention_threshold"], summary["backup_instances_retention_unknown"],
-            summary["retention_threshold_percentage"]) == (1, 1, 50)
+            summary["retention_threshold_percentage"]) == (1, 1, None)
 
 
 @pytest.mark.parametrize("kind, vaulted, applicable", [
@@ -245,7 +246,12 @@ def test_a_vault_whose_instance_list_failed_leaves_vault_verdicts_null():
     summary = bv.summarize([vault_with([fresh]), vault_with([], instances_read=False)], SETTINGS)
     assert (summary["vaults_instances_listed"], summary["vaults_with_backup_instances"],
             summary["vaults_without_backup_instances"], summary["all_backup_instances_backed_up"],
-            summary["total_backup_instances"]) == (False, None, None, None, 1)
+            summary["total_backup_instances"]) == (False, None, None, None, None)
+    # Every instance count is partial, so each reads null rather than a number a check could pass on.
+    for key in ("backup_instances_not_backed_up_in_window", "backup_instances_backed_up_in_window",
+                "backup_instances_overdue", "retention_threshold_percentage", "backup_instances_by_datasource_type"):
+        assert summary[key] is None, key
+    assert summary["retention_threshold_days"] == SETTINGS["retention_threshold_days"]
 
 
 def test_summary_counts_backed_up_overdue_and_unknown():
@@ -304,8 +310,9 @@ class _Resp:
 class _Arm:
     """requests.Session for subscription s1: one vault (paged), one policy, two instances and their recovery points."""
 
-    def __init__(self, registered=True, refuse_filter=False, refused=(), versions=None):
+    def __init__(self, registered=True, refuse_filter=False, refused=(), versions=None, failed_lists=()):
         self.registered, self.refuse_filter, self.refused = registered, refuse_filter, set(refused)
+        self.failed_lists = tuple(failed_lists)  # path suffixes answered with 403
         self.versions = versions if versions is not None else ["2024-04-01", "2025-07-01", "2026-07-01"]
         self.urls: list[str] = []
 
@@ -313,6 +320,8 @@ class _Arm:
         query = {**{k: v[0] for k, v in parse_qs(urlparse(url).query).items()}, **(params or {})}
         self.urls.append(url.split("?")[0] + "?" + "&".join(f"{k}={v}" for k, v in sorted(query.items())))
         path = urlparse(url).path
+        if any(path.endswith(suffix) for suffix in self.failed_lists):
+            return _Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
         if path.endswith("/providers/Microsoft.DataProtection"):
             return _Resp(200, {"registrationState": "Registered" if self.registered else "NotRegistered",
                                "resourceTypes": [{"resourceType": "backupVaults", "apiVersions": self.versions}]})
@@ -472,3 +481,43 @@ def test_an_invalid_exclusion_pattern_fails_the_run(arm, tmp_path):
         mp.setenv("AZURE_RESOURCE_EXCLUSIONS", "bv2")
         assert bv.main() == 1
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
+
+
+VAULT_COUNTS = ("total_backup_vaults", "vaults_instances_listed", "soft_delete_enabled_vaults",
+                "vaults_by_vault_store_redundancy", "total_backup_policies", "total_backup_instances",
+                "backup_instances_not_backed_up_in_window", "retention_threshold_percentage", "in_scope_backup_vaults",
+                "in_scope_backup_instances")
+
+
+def test_a_refused_vault_list_leaves_every_count_null_not_zero(arm, tmp_path):
+    arm(failed_lists=("/providers/Microsoft.DataProtection/backupVaults",))
+    assert bv.main() == 1
+    evidence = _evidence(tmp_path)
+    assert evidence["metadata"]["partial_failure"] is True
+    summary = evidence["summary"]
+    for key in VAULT_COUNTS:
+        assert summary[key] is None, key
+    assert summary["retention_threshold_days"] == bv.DEFAULT_RETENTION_THRESHOLD_DAYS
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+
+
+def test_a_refused_policy_list_leaves_the_policy_totals_null(arm, tmp_path):
+    arm(failed_lists=("/bv1/backupPolicies",))
+    assert bv.main() == 1
+    summary = _evidence(tmp_path)["summary"]
+    assert (summary["total_backup_policies"], summary["policies_meeting_retention_threshold"],
+            summary["policies_without_readable_retention"]) == (None, None, None)
+    # The vaults and instances were read, so their counts stand; retention can't be judged without the policy.
+    assert (summary["total_backup_vaults"], summary["total_backup_instances"]) == (2, 2)
+    assert (summary["backup_instances_retention_unknown"], summary["retention_threshold_percentage"]) == (2, None)
+
+
+def test_a_refused_instance_list_leaves_every_instance_count_null(arm, tmp_path):
+    arm(failed_lists=("/bv1/backupInstances",))
+    assert bv.main() == 1
+    summary = _evidence(tmp_path)["summary"]
+    assert (summary["total_backup_vaults"], summary["vaults_instances_listed"], summary["total_backup_policies"]) == (
+        2, False, 1)
+    for key in ("total_backup_instances", "backup_instances_not_backed_up_in_window",
+                "backup_instances_backed_up_in_window", "retention_threshold_percentage", "in_scope_backup_instances"):
+        assert summary[key] is None, key

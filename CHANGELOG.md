@@ -24,7 +24,10 @@ schemas and the `paramify` CLI — not the internal code.
   without one when the cloud refuses it. Operational (continuous) blob backup,
   which lists no recovery points, is reported as not applicable rather than as not
   backed up. The API version is the newest stable one the cloud lists at or below
-  2025-07-01, so Azure Government runs without a pinned variant. Reader is enough.
+  2025-07-01, so Azure Government runs without a pinned variant. A failed vault,
+  policy or instance list leaves the counts that depend on it null, not 0, and an
+  instance whose retention can't be read leaves `retention_threshold_percentage`
+  null. Reader is enough.
 - **`azure_zone_redundancy`** (`EVD-AZURE-ZONE-REDUNDANCY`): one Resource Graph
   query over scale sets, VMs, disks, AKS clusters (per node pool), application
   gateways, load balancers (per frontend, public ones through their public IP),
@@ -37,7 +40,8 @@ schemas and the `paramify` CLI — not the internal code.
   measures zone redundancy only against resources of a type that has a
   zone-redundant mode (not single VMs, disks, NAT gateways or Basic SKUs) in regions
   that have zones, and reports the regions in use, `multi_region`, and the resources
-  sitting in regions with no zones. Reader is enough.
+  sitting in regions with no zones. A failed Resource Graph query leaves every
+  count from the resources null, not 0. Reader is enough.
 - **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
   Unhealthy assessment reports `days_open` (from `status_change_date`, null when
   missing; it starts again at 0 when a finding turns Healthy and then Unhealthy

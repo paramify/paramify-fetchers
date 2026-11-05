@@ -114,8 +114,8 @@ evidence_set:
     Summary fields:
 
     Which Backup vaults exist, and do their own settings protect the backups?
-    - total_backup_vaults — Number of Backup vaults in the subscription
-    - vaults_instances_listed — True if every vault's backup instance list was read; false if any failed, and then the two counts below and the two all_ fields are null and the run fails
+    - total_backup_vaults — Number of Backup vaults in the subscription; null when the vault list was not read, and then every count and verdict here is null too (only the settings stay) and the run fails
+    - vaults_instances_listed — True if every vault's backup instance list was read; false if any failed, and then the two counts below, every backup instance count and the two all_ fields are null and the run fails
     - vaults_with_backup_instances — Number of vaults protecting at least one resource
     - vaults_without_backup_instances — Number of vaults protecting nothing
     - vaults_by_vault_store_redundancy — Number of vaults for each redundancy of their vault store, where the backups are kept:
@@ -131,7 +131,7 @@ evidence_set:
     - api_version — The Microsoft.DataProtection API version the run used, the newest stable version this cloud lists at or below the one the fetcher was written against
 
     How long do the policies keep backups?
-    - total_backup_policies — Number of backup policies across every vault
+    - total_backup_policies — Number of backup policies across every vault; null when any vault's policy list was not read, as are the other policy counts, and the run fails
     - retention_threshold_days — The fewest days a policy must keep a backup to count as adequate (retention_threshold_days setting, default 30)
     - policies_meeting_retention_threshold — Number of policies whose longest retention rule keeps a backup for at least retention_threshold_days; months count as 30 days and years as 365
     - policies_without_readable_retention — Number of policies with no retention rule the fetcher could read; these never count as meeting the threshold
@@ -145,7 +145,7 @@ evidence_set:
     - backup_instances_without_policy — Number of backup instances with no policy id, which have no schedule or retention
     - backup_instances_meeting_retention_threshold — Number of backup instances whose policy meets the retention threshold
     - backup_instances_retention_unknown — Number of backup instances whose policy was not read (the policy list failed, or the policy id names none listed), so their retention is unknown rather than short
-    - retention_threshold_percentage — Percentage of backup instances whose policy meets the retention threshold: backup_instances_meeting_retention_threshold * 100 / total_backup_instances, 0 when there are none
+    - retention_threshold_percentage — Percentage of backup instances whose policy meets the retention threshold: backup_instances_meeting_retention_threshold * 100 / total_backup_instances, 0 when there are none; null when backup_instances_retention_unknown is more than 0
 
     Has every backup instance been backed up recently?
     - recovery_point_window_hours — How recent the newest recovery point must be for an instance to count as backed up (recovery_point_window_hours setting, default 48)

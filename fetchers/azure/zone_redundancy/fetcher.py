@@ -313,6 +313,16 @@ def summarize(resources: List[Dict[str, Any]], regions: Optional[Dict[str, dict]
     return summary, region_list
 
 
+# Summary keys that don't come from the resource list, so they stay set when the Resource Graph query fails.
+NOT_FROM_RESOURCES = ("resource_types_assessed", "region_support_read")
+
+
+def unread_resources_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """The summary when the resource list wasn't read: every count, list and verdict that comes from the resources is
+    null, not 0, so an unread subscription doesn't read as an empty one."""
+    return {k: (v if k in NOT_FROM_RESOURCES else None) for k, v in summary.items()}
+
+
 # --- collection ---
 
 def read_regions(client, subscription_id: str, collector: Collector) -> Optional[Dict[str, dict]]:
@@ -340,15 +350,17 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
     summary, region_list = summarize(resources, regions)
+    if result is None:
+        summary, region_list = unread_resources_summary(summary), None
     results = {
-        "resources": resources,
+        "resources": resources if result is not None else None,
         "regions": region_list,
         "resource_graph": {"rows": len(rows), "total_records_reported": result["total_records"], "pages": result["pages"]}
         if result else None,
         "excluded": sorted(excluded, key=lambda e: arm_id_key(e.get("id"))),
     }
     summary = {**summary, "resource_list_read": result is not None,
-               **exclusions.summary(excluded, ("resource",), {"resources": len(resources)})}
+               **exclusions.summary(excluded, ("resource",), {"resources": len(resources) if result is not None else None})}
     return results, summary
 
 

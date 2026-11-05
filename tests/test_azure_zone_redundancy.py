@@ -389,11 +389,19 @@ def test_a_refused_region_list_fails_the_run_but_still_classifies(arm, tmp_path)
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
 
 
-def test_a_failed_resource_graph_query_fails_the_run_with_no_resources(arm, tmp_path):
+def test_a_failed_resource_graph_query_leaves_every_resource_count_null(arm, tmp_path):
     arm(graph_ok=False)
     assert zr.main() == 1
-    summary = _evidence(tmp_path)["summary"]
-    assert (summary["resource_list_read"], summary["resources_assessed"], summary["regions_in_use"]) == (False, 0, 0)
+    evidence = _evidence(tmp_path)
+    summary = evidence["summary"]
+    assert (summary["resource_list_read"], summary["region_support_read"]) == (False, True)
+    # An unread subscription is not an empty one: nothing that comes from the resources reads as a known 0 or false.
+    for key in ("resources_assessed", "regions_in_use", "multi_region", "zone_capable_resources",
+                "zone_redundant_percentage", "zone_redundant_resources", "resources_by_zone_configuration",
+                "geo_redundant_resources", "regions", "in_scope_resources"):
+        assert summary[key] is None, key
+    assert summary["resource_types_assessed"] == list(zr.TYPES)
+    assert (evidence["results"]["resources"], evidence["results"]["regions"]) == (None, None)
 
 
 def test_exclusions_take_a_resource_group_out_of_every_count(arm, tmp_path, monkeypatch):
