@@ -387,8 +387,7 @@ def summarize_all_scopes(at_scope: list[dict] | None, below: list[dict] | None, 
     for this set. An unread list nulls the keys counted over it.
     """
     if at_scope is None or below is None:
-        known = summarize_all_scopes([], below or [], roles_read)
-        return {k: v if below is not None and k.startswith("below_") else None for k, v in known.items()}
+        return dict.fromkeys(summarize_all_scopes([], [], roles_read))
     everything = at_scope + below
     below_over_broad = [a for a in below if a["is_over_broad_builtin"]]
     by_type: dict[str, int] = {}

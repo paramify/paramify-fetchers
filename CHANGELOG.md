@@ -1494,7 +1494,6 @@ schemas and the `paramify` CLI — not the internal code.
   `results.role_assignments_below_subscription` are null when unread, and with
   patterns set `resource_exclusion_patterns_unmatched` is null when a list the
   patterns apply to wasn't read.
-
 - **`azure_entra_conditional_access_policies` 0.2.2: an application filter
   narrows MFA coverage in either mode, and each policy shows its filter.** In
   0.2.1 a policy with an application filter still added its client app types to

@@ -394,7 +394,7 @@ class _Definitions:
                      for guid, d in ROLE_NAMES.items()])
 
 
-def _failing_run(monkeypatch, tmp_path, fail=(), schedules=None):
+def _failing_run(monkeypatch, tmp_path, fail=(), schedules=None, eligible=None, patterns="rg:rg-out"):
     at_scope = [ns(id=f"{SUB}/providers/Microsoft.Authorization/roleAssignments/a1", name="a1", scope=SUB,
                    principal_id="p1", principal_type="User", role_definition_id=OWNER)]
     rg = f"{SUB}/resourceGroups/rg1"
@@ -402,7 +402,7 @@ def _failing_run(monkeypatch, tmp_path, fail=(), schedules=None):
                 principal_id="p2", principal_type="Group", role_definition_id=READER)]
     client = ns(role_definitions=_Definitions("definitions" in fail),
                 role_assignments=_Assignments(at_scope, below, fail),
-                **vars(_fake_client(schedules or _Pages(items=[]), _Pages(items=[]), _Pages(items=[]))))
+                **vars(_fake_client(schedules or _Pages(items=[]), eligible or _Pages(items=[]), _Pages(items=[]))))
     module = types.ModuleType("azure.mgmt.authorization")
     module.AuthorizationManagementClient = lambda **kwargs: client
     monkeypatch.setitem(sys.modules, "azure.mgmt.authorization", module)
@@ -413,7 +413,10 @@ def _failing_run(monkeypatch, tmp_path, fail=(), schedules=None):
     monkeypatch.setattr(rbac, "load_dotenv", lambda: None)
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
     monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
-    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:rg-out")
+    if patterns:
+        monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", patterns)
+    else:
+        monkeypatch.delenv("AZURE_RESOURCE_EXCLUSIONS", raising=False)
     code = rbac.main()
     return code, json.loads((tmp_path / "azure_rbac_role_assignments_00000000-0000-0000-0000-000000000000.json").read_text())
 
@@ -477,6 +480,23 @@ def test_a_failed_pim_schedule_list_leaves_only_the_standing_counts_null(monkeyp
     assert summary["custom_role_assignments"] == 0
     assert summary["total_eligible_role_assignments"] == 0
     assert all(g["standing"] is None for g in evidence["results"]["role_assignments_below_subscription"])
+
+
+def test_a_failed_eligible_list_leaves_unmatched_patterns_unknown(monkeypatch, tmp_path):
+    code, evidence = _failing_run(monkeypatch, tmp_path, eligible=_Pages(DENIED))
+    summary = evidence["summary"]
+    assert code == 1
+    assert summary["resource_exclusion_patterns_unmatched"] is None
+    assert summary["total_eligible_role_assignments"] is None
+    assert summary["in_scope_role_assignments"] == 2
+
+
+def test_without_patterns_unmatched_stays_empty_when_a_list_fails(monkeypatch, tmp_path):
+    code, evidence = _failing_run(monkeypatch, tmp_path, fail=("at_scope",), patterns=None)
+    summary = evidence["summary"]
+    assert code == 1
+    assert summary["resource_exclusion_patterns"] == []
+    assert summary["resource_exclusion_patterns_unmatched"] == []
 
 
 def test_every_count_is_numeric_when_every_read_succeeds(monkeypatch, tmp_path):
