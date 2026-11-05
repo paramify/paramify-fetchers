@@ -1176,6 +1176,36 @@ def test_analytics_rules_without_alert_only_rules_missing_data_skip_the_connecto
     assert not any(c[1] == f"{SI_A}/dataConnectors" for c in azure.calls)
 
 
+def test_analytics_rules_failed_alert_products_query_leaves_missing_data_unknown(azure, tmp_path):
+    incident_rules_workspace(azure, [incident_rule("ipc", "Azure Active Directory Identity Protection")],
+                             stable=[connection("aad", "AzureActiveDirectory")])
+    azure.queries.insert(0, ("by ProductName", Resp(403, {"error": {"code": "InsufficientAccessError", "message": "no"}})))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["rules"][0]["tables_without_data"] is None
+    assert ws["enabled_rules_missing_data"] is None and ws["enabled_rules_quiet"] is None
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (None, None)
+    assert ws["ingesting_tables_not_read"] == ["AzureActivity"]
+    assert not any(c[1] == f"{SI_A}/dataConnectors" for c in azure.calls)
+
+
+def test_analytics_rules_failed_alert_products_query_spares_workspaces_without_enabled_incident_rules(azure, tmp_path):
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
+        incident_rule("off", "Azure Advanced Threat Protection", enabled=False),
+        rule("act", "Scheduled", True, query="AzureActivity | take 1")]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    azure.queries.insert(0, ("by ProductName", Resp(403, {"error": {"code": "InsufficientAccessError", "message": "no"}})))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["enabled_rules_missing_data"] == [] and ws["enabled_rules_quiet"] == []
+
+
+def test_both_sentinel_fetchers_share_one_defender_xdr_list():
+    shared = MODS["sentinel_analytics_rules"].DEFENDER_XDR_CARRIES
+    assert MODS["sentinel_data_sources"].DEFENDER_XDR_CARRIES is shared
+    assert {"OfficeIRM", "MicrosoftThreatProtection"} <= shared and not {"AzureSecurityCenter", "IOT"} & shared
+
+
 def test_analytics_rules_quiet_total_is_null_if_any_measured_workspace_is_unknown():
     summarize = MODS["sentinel_analytics_rules"].summarize
     quiet = [{"name": "mdi"}]

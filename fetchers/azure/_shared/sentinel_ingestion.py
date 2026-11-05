@@ -13,6 +13,11 @@ NON_SOURCE_TABLES = frozenset({
 })
 # SecurityAlert holds both other products' alerts (each a source) and Sentinel's own analytics alerts (not one).
 ALERTS_TABLE = "SecurityAlert"
+# Defender XDR's own MtpAlerts list: the connection kinds whose alerts it carries. Defender for Cloud's and IoT's aren't among them.
+DEFENDER_XDR_CARRIES = frozenset({
+    "AzureActiveDirectory", "AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity",
+    "MicrosoftDefenderAdvancedThreatProtection", "MicrosoftThreatProtection", "OfficeATP", "OfficeIRM",
+})
 
 INGESTION_QUERY = (
     "union withsource=ParamifySourceTable * "
