@@ -1,0 +1,38 @@
+key: azure_defender_assessments_no_findings_past_sla
+name: No Defender Recommendations Unresolved Beyond SLA
+type: AUTOMATED
+role: configuration
+statement: >
+  No Defender for Cloud recommendation on the subscription, on any resource, has been open
+  (Unhealthy) longer than its severity's SLA: unhealthy_past_sla_count is 0. The SLA is 30 days
+  for High, 90 for Medium and 180 for Low, and the evidence's sla_days_by_severity must show
+  exactly those days, so a run measured against other days fails until this validator is updated
+  to match. Days open run from when the finding last became Unhealthy (status_change_date) to the
+  collection. The count is null, and this fails, when the assessment list, a finding's date or the
+  SLA configuration couldn't be read, or an Unhealthy finding has no severity. It also fails when the
+  run had a partial failure, on evidence from azure_defender_assessments before 0.4.0, which has no
+  such count, when Microsoft.Security isn't registered on the subscription (Defender for Cloud was
+  never turned on, so an empty list would count 0), and when any Unhealthy finding's severity was
+  taken from the catalogue rather than its assessment (the catalogue can rate a check lower, which
+  would measure it against a longer SLA). An exempted recommendation reports NotApplicable and a baselined SQL vulnerability
+  assessment rule reports Healthy, so neither counts against the SLA. Supports KSI-CNA-IBP (Defender
+  recommendations are not left unresolved beyond SLA without an approved exception). Does NOT read an
+  exception kept outside Defender, so a finding excepted that way still fails while it is open past
+  its SLA. Does NOT prove the SLA days are the organization's own, or anything about findings Defender
+  doesn't report.
+
+# Self-guarding (Form A): the match needs the summary's structure, a registered provider, no
+# catalogue severity on an Unhealthy finding and the pinned SLA days, and group 1 reads the count,
+# so a missing field (fetcher before 0.4.0) or null fails.
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false\b)(?=[\s\S]*?"provider_registration_status":\s*"registered")(?=[\s\S]*?"unhealthy_severity_from_catalogue_count":\s*0\b)(?=[\s\S]*?"sla_days_by_severity":\s*\{(?=[^{}]*"High":\s*30\b)(?=[^{}]*"Medium":\s*90\b)(?=[^{}]*"Low":\s*180\b))(?=[\s\S]*?"unhealthy_past_sla_count":\s*(?<unhealthy_past_sla_count>-?\d+|null))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DEFENDER-ASSESSMENTS
