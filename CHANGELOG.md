@@ -31,14 +31,19 @@ schemas and the `paramify` CLI — not the internal code.
     unmeasured, since answering it would bill another scan.
   - **An empty table** is measured only when the search covers the whole
     window. With fewer hours, it stays not measured.
-  - **A table new to the Auxiliary plan.** For a time after a table is created
-    on, or switched to, the Auxiliary plan, a search spanning the date its lake
-    data starts answers with a `PartialLakeDataWarning`. The table is then
+  - **A table new to the Auxiliary plan.** After a table is created on, or
+    switched to, the Auxiliary plan, a search spanning the date its lake data
+    starts answers with a `PartialLakeDataWarning`, until that date is older
+    than the hours searched (up to the whole window). The table is then
     searched again in two parts, cut exactly at that date, and the answers are
     combined (newest record time, summed count), with the date in the table's
-    new `lake_data_start` field. If a part still warns, the first answer's
-    newest record time stands, its count reads null, and a table with nothing
-    found is not measured. Either way the workspace's `notes` say so.
+    new `lake_data_start` field. If `/search` includes both ends of an
+    interval, a record stamped exactly at that date counts in both parts; only
+    the table's `records` can be off by it. When the warning names no date,
+    names two different dates or names one outside the hours searched, or when
+    a part still warns, the first answer's newest record time stands, its count
+    reads null, and a table with nothing found is not measured. Either way the
+    workspace's `notes` say so.
   - **A failed search**, or one that returns no result row, leaves its table
     unmeasured, lists it in `tables_search_failed` and fails the run. Any
     partial error other than that warning counts as failed. `sources_ingesting`
@@ -50,8 +55,9 @@ schemas and the `paramify` CLI — not the internal code.
   `basic_logs_lookback_hours`, the hours each table is searched over (0 when
   off), and the fetcher's tests now check every summary field against its
   instructions. The shared Azure query client's `QueryError` now carries the
-  error's `details[]` (and a partial error's result), and its message names
-  them, since a partial error's top message is generic.
+  error's `details[]` and a partial error's result. Its message is unchanged,
+  so every check that reads it (a missing table, the failure codes) reads the
+  same.
 
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,

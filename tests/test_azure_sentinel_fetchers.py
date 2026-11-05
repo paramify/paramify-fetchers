@@ -771,13 +771,36 @@ def test_query_error_carries_details_and_the_partial_result(azure):
     exc = caught.value
     assert exc.code == "PartialError" and exc.rows == [{"LastIngested": None, "Records": 0}]
     assert [c for c, _ in exc.details] == ["PartialLakeDataWarning"] and LAKE_START in exc.details[0][1]
-    # The generic top message no longer hides the cause.
-    assert "PartialLakeDataWarning: Table 'AppLogs_CL' has Auxiliary / Lake data starting from" in str(exc)
+    # The message is the innermost one, as before details were read.
+    assert str(exc) == "PartialError: There were some errors when processing your query."
+
+
+@pytest.mark.parametrize("detail", [
+    {"code": "SemanticError", "message": "Failed to resolve table or column expression named 'LAQueryLogs'"},
+    {"code": "InsufficientAccessError", "message": "Forbidden: the caller can't read this table"},
+    {"code": "QueryThrottled", "message": "Too many requests (429)"},
+])
+def test_query_error_details_leave_the_message_and_its_readers_as_they_were(azure, detail):
+    # table_missing, the diagnostic-settings fetcher's ingestion_status and classify_failure_code match on str(exc).
+    body = {**table(["Records"], [[1]]), "error": {"code": "PartialError", "message": "There were some errors."}}
+    azure.queries.insert(0, ("LAQueryLogs", Resp(200, {**body, "error": {**body["error"], "details": [detail]}})))
+    client = azure_rest.AzureRestClient(FakeCred(), session=azure)
+    with pytest.raises(azure_rest.QueryError) as caught:
+        client.query("cust-a", "LAQueryLogs | count", "P1D")
+    exc = caught.value
+    assert str(exc) == "PartialError: There were some errors." and exc.details == [(detail["code"], detail["message"])]
+    assert azure_rest.table_missing(exc, "LAQueryLogs") is False
+    assert _load("resource_diagnostic_settings").ingestion_status(exc) == "error"
+    failures = [{"type": type(exc).__name__, "message": str(exc)}]
+    assert sys.modules["azure_common"].classify_failure_code(failures) == "partial_failure"
 
 
 @pytest.mark.parametrize("details, warning_only, start", [
     ([("PartialLakeDataWarning", f"Table 'T' has Auxiliary / Lake data starting from {LAKE_START}. A query …")], True, LAKE_START),
     ([("PartialLakeDataWarning", "Table 'T' has Auxiliary / Lake data. A query …")], True, None),
+    # Two different dates: no single cut, so no split.
+    ([("PartialLakeDataWarning", f"… starting from {LAKE_START}. …"),
+      ("PartialLakeDataWarning", "… starting from 2026-01-02T03:04:05.678Z. …")], True, None),
     ([("PartialLakeDataWarning", f"… starting from {LAKE_START}. …"), ("EngineError", "boom")], False, None),
     ([], False, None),
 ])

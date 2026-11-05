@@ -245,11 +245,8 @@ class AzureRestClient:
         columns = [c["name"] for c in tables[0].get("columns") or []] if tables else []
         rows = [dict(zip(columns, row)) for row in tables[0].get("rows") or []] if tables else []
         if body.get("error"):
-            details = _error_details(body["error"])
-            # The top message is generic ("There were some errors…"); the cause is in details[].
-            named = "; ".join(f"{c}: {m}" for c, m in details)
-            message = _innermost_error(body["error"]) + (f" [{named}]" if named else "")
-            raise QueryError("PartialError", message, details, rows)
+            # The message stays the innermost one: table_missing and the failure classifiers match on its text.
+            raise QueryError("PartialError", _innermost_error(body["error"]), _error_details(body["error"]), rows)
         return rows
 
 
