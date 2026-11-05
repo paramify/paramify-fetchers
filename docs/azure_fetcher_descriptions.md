@@ -153,12 +153,11 @@ Summary fields:
 
 **What did the last cycle decide, and was it applied?**
 - `last_cycle_decisions` — Number of review decisions in each active review series' latest completed cycle
-- `last_cycle_decisions_by_result` — Number of latest-cycle review decisions of each result:
+- `last_cycle_decisions_by_result` — Number of latest-cycle review decisions of each result; any other result Graph sends, such as NotNotified (not in Graph's documented list), gets its own key, present only then:
   - Approve (the reviewer kept the access)
   - Deny (the reviewer, or the default decision, chose to remove the access)
   - NotReviewed (no one answered and no default decision was applied)
   - DontKnow (the reviewer answered that they don't know)
-  - any other value Graph sends, such as NotNotified (not in Graph's documented list), is counted under its own key, which is present only then
 - `last_cycle_denied_decisions_applied` — Number of latest-cycle Deny decisions whose removal was applied (apply result AppliedSuccessfully, or AppliedSuccessfullyButObjectNotFound when the access was already gone)
 - `last_cycle_denied_decisions_not_applied` — Number of latest-cycle Deny decisions not applied, either not yet or because applying failed (any other apply result, such as New, ApplyNotSupported or AppliedWithUnknownFailure)
 
@@ -2064,17 +2063,17 @@ Short Description: Shows whether each App Service web app has a recent restore p
 
 Script: fetchers/azure/app_service_backups/fetcher.py
 
-Access: Reader on the subscription. Optional: Microsoft.Web/sites/config/list/action, to read custom backup settings; without it they read as unknown.
+Access: Reader on the subscription. Optional: Microsoft.Web/sites/config/list/action, to read custom backup settings; it also exposes app settings and connection strings, so it's opt-in, and without it those settings read as unknown.
 
 Commands Executed:
 - `subscriptions.list()` — picks a subscription when none is set
 - `providers.get("Microsoft.Web")` — tells "App Service not in use" from "no apps"
-- `web_apps.list()` — every web app
+- `web_apps.list()` — every site, web apps and function apps alike
 - Resource Graph query on `microsoft.web/sites` and `sites/slots` — confirms the list is complete; finds function apps and slots to exclude
 - `web_apps.get()` (per app only Resource Graph lists) — confirms it exists
-- `web_apps.list_snapshots()` (per app) — automatic backups
-- `web_apps.list_backups()` (per app) — custom backup history and restores
-- `web_apps.get_backup_configuration()` (per app) — custom backup schedule and retention
+- `web_apps.list_snapshots()` (per web app not on a Free or Shared tier) — automatic backups
+- `web_apps.list_backups()` (per web app not on a Free or Shared tier) — custom backup history and restores
+- `web_apps.get_backup_configuration()` (per web app not on a Free or Shared tier) — custom backup schedule and retention
 - Resource Graph query on `microsoft.storage/storageaccounts` — the backup storage's region, replication and immutability
 
 Output: `azure_app_service_backups_<subscription>.json` — each web app's automatic and custom backups, the age of its newest restore point and whether it meets the RPO, plus the apps left out and why.
@@ -2085,55 +2084,55 @@ Summary fields:
 - `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
 - `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no web app, function app or deployment slot, such as a mistyped name
 - `boundary_excluded_web_apps` — Number of web apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, gets no backup calls, and no other count includes it
-- `boundary_excluded_function_apps` — Number of function apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it, `excluded_function_apps` included; null when neither the app list nor Resource Graph could be read
+- `boundary_excluded_function_apps` — Number of function apps left out of scope because a pattern matched their resource group, region or id. Function app here means any site whose kind doesn't start with app, so Logic Apps Standard count too. Each is listed under excluded with the pattern, and no other count includes it, `excluded_function_apps` included; null when neither the app list nor Resource Graph could be read
 - `boundary_excluded_deployment_slots` — Number of deployment slots left out of scope because a pattern matched their resource group, region or id, or their app's (a slot follows its app); each is listed under excluded with the pattern, and no other count includes it, `excluded_deployment_slots` included; null when the Resource Graph query failed, since slots come only from Resource Graph
 - `in_scope_web_apps` — Number of web apps read and in scope; 0 means none was read or the patterns took out every app, which a check can catch by requiring more than 0
 
 **Which web apps were checked?**
-- `total_web_apps` — Number of in-scope web apps assessed (production sites only; function apps and slots are left out)
-- `apps_by_plan_tier` — Number of web apps on each App Service plan tier
-- `excluded_function_apps` — Number of in-scope function apps this fetcher doesn't assess (it assesses web apps only), not the function apps a resource_exclusions pattern took out, which `boundary_excluded_function_apps` counts; null when neither the app list nor Resource Graph could be read
+- `total_web_apps` — Number of in-scope web apps assessed (production sites only; function apps and slots are left out); every count below about web apps is out of this total
+- `apps_by_plan_tier` — Number of web apps for each plan tier, keyed by the tier Azure reports for the site (such as Free, Shared, Basic, Standard or PremiumV3), or unknown when it reports none
+- `excluded_function_apps` — Number of in-scope function apps (any site whose kind doesn't start with app) this fetcher doesn't assess, not the ones a resource_exclusions pattern took out, which `boundary_excluded_function_apps` counts; null when neither the app list nor Resource Graph could be read
 - `excluded_deployment_slots` — Number of in-scope deployment slots this fetcher doesn't assess (it assesses production sites only), not the slots a resource_exclusions pattern took out, which `boundary_excluded_deployment_slots` counts; null when the Resource Graph query failed
-- `resource_graph_web_apps` — Number of in-scope web apps Resource Graph lists, used to check the app list is complete
-- `web_apps_added_from_resource_graph` — Number of web apps Resource Graph found that the main app list missed
+- `resource_graph_web_apps` — Number of in-scope web apps Resource Graph lists, used to check the app list is complete; null when the Resource Graph query failed
+- `web_apps_added_from_resource_graph` — Number of web apps Resource Graph lists that the main app list missed and `web_apps.get()` confirmed still exist; 0 when the Resource Graph query failed, so read it together with `resource_graph_web_apps`
 - `provider_registration_status` — Whether the App Service provider (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown
 
 **Is every web app backed up?**
-- `apps_on_tier_without_backups` — Number of web apps on the Free or Shared tier, which can't have backups
+- `apps_on_tier_without_backups` — Number of web apps on a Free or Shared tier, which can't have backups; they get no backup calls
 - `apps_with_automatic_backups` — Number of web apps with at least one automatic backup
-- `apps_automatic_backups_unknown` — Number of web apps whose automatic backups couldn't be read
-- `apps_backed_up` — Number of web apps with a restore point inside the restore-point window
-- `apps_not_backed_up` — Number of web apps with no restore point inside the restore-point window, or on a tier without backups
-- `apps_backed_up_unknown` — Number of web apps where a failed read means it's unknown whether they're backed up
-- `backup_coverage_percentage` — Percentage of web apps that are backed up = `apps_backed_up` / `total_web_apps` × 100 (a whole number, 0–100); 0 when `total_web_apps` is 0. Apps whose backup state is unknown (`apps_backed_up_unknown`) count in the total but not as backed up, so they lower it
-- `all_web_apps_backed_up` — True if every web app is backed up; false if any isn't; null if any is unknown or there are no apps
-- `restore_point_window_hours` — Hours back the fetcher looks when deciding whether an app is backed up and measuring gaps between restore points (default 48)
+- `apps_automatic_backups_unknown` — Number of web apps whose automatic backup list couldn't be read
+- `apps_backed_up` — Number of web apps whose newest restore point is inside the restore-point window. A restore point is an automatic backup's time or the creation time of a Succeeded custom backup. A fresh point counts even when one of the two reads failed
+- `apps_not_backed_up` — Number of web apps on a Free or Shared tier, plus web apps with no restore point inside the window where both the automatic backup list and the custom backup history were read
+- `apps_backed_up_unknown` — Number of web apps with no restore point inside the window whose automatic backup list or custom backup history couldn't be read
+- `backup_coverage_percentage` — Percentage of web apps that are backed up = `apps_backed_up` / `total_web_apps` × 100 (a whole number, 0–100); 0 when `total_web_apps` is 0. Apps on a Free or Shared tier and apps whose backup state is unknown count in the total but never as backed up, so 100 is impossible while any exists
+- `all_web_apps_backed_up` — True if every web app is backed up; false if any isn't, even when others are unknown; null if none is false but any is unknown, or there are no apps
+- `restore_point_window_hours` — Hours back from the run the fetcher looks for restore points when deciding whether an app is backed up and measuring gaps between them (default 48)
 
 **How often do backups happen?**
-- `max_latest_restore_point_age_hours` — Hours since the newest restore point of the web app that's furthest behind
-- `largest_restore_point_gap_hours` — Longest time, in hours, between two consecutive restore points in the window, across all web apps
-- `longest_effective_backup_interval_hours` — Longest observed time between backups, in hours, across all web apps (for each app, the larger of its newest restore point's age and its largest gap)
-- `longest_configured_backup_interval_hours` — Longest configured backup interval, in hours, across all web apps (automatic backups or a custom schedule)
-- `apps_backup_interval_unknown` — Number of web apps that support backups but have too few restore points in the window to measure an interval
+- `max_latest_restore_point_age_hours` — Hours since the newest restore point, for the web app whose newest restore point is oldest. Only web apps with at least one restore point count; apps with none are in `apps_not_backed_up` or `apps_backed_up_unknown` and don't raise this value. Null if no web app has a restore point
+- `largest_restore_point_gap_hours` — Hours: the longest time between two consecutive restore points inside the window, across web apps. Only web apps with at least two restore points in the window count; null if none has two
+- `longest_effective_backup_interval_hours` — Hours: the longest observed backup interval across web apps, where an app's interval is the larger of its newest restore point's age and its largest gap in the window. Only web apps with at least two restore points in the window count; the others are in `apps_backup_interval_unknown` or `apps_on_tier_without_backups`. Null if no web app has two
+- `longest_configured_backup_interval_hours` — Hours: the longest, across web apps, of each app's shortest configured interval: 1 hour when it has automatic backups, or its enabled custom schedule's frequency interval × unit (hours, or days × 24). Apps with neither are left out; null if no web app has either
+- `apps_backup_interval_unknown` — Number of web apps not on a Free or Shared tier with fewer than two restore points in the window (none at all included), so no backup interval can be measured
 
 **Do backups meet the recovery point objective (RPO)?**
-- `recovery_point_objective_hours` — The configured recovery point objective (RPO), in hours; null if none is set
-- `apps_meeting_recovery_point_objective` — Number of web apps whose newest restore point age and backup interval are both within the RPO
-- `apps_missing_recovery_point_objective` — Number of web apps that exceed the RPO
-- `apps_recovery_point_objective_unknown` — Number of web apps where it's unknown whether they meet the RPO (null when no RPO is set)
-- `all_web_apps_meet_recovery_point_objective` — True if every web app meets the RPO; false if any doesn't; null if any is unknown, there are no apps, or no RPO is set
+- `recovery_point_objective_hours` — Hours: the configured recovery point objective (RPO); null if none is set
+- `apps_meeting_recovery_point_objective` — Number of web apps whose observed backup interval (the larger of the newest restore point's age and the largest gap, which needs at least two restore points in the window) is within the RPO
+- `apps_missing_recovery_point_objective` — Number of web apps that miss the RPO: on a Free or Shared tier, newest restore point older than the RPO, or observed backup interval longer than it
+- `apps_recovery_point_objective_unknown` — Number of web apps neither meeting nor missing the RPO: fewer than two restore points in the window, and a newest restore point no older than the RPO. An app with no restore point at all counts here, even when both reads succeeded. Null when no RPO is set
+- `all_web_apps_meet_recovery_point_objective` — True if every web app meets the RPO; false if any misses it, even when others are unknown; null if none misses it but any is unknown, there are no apps, or no RPO is set
 
 **Are custom backups set up, succeeding and restore-tested?**
-- `apps_with_custom_backup_configured` — Number of web apps with a custom backup set up to a storage container
-- `apps_custom_backup_configuration_unknown` — Number of web apps whose custom backup setup couldn't be determined
-- `apps_custom_backup_configuration_not_authorized` — Number of web apps whose custom backup setup couldn't be read because the optional permission isn't granted
-- `apps_with_scheduled_custom_backup` — Number of web apps with an enabled custom backup schedule
-- `apps_with_custom_backup_history` — Number of web apps with at least one custom backup taken
+- `apps_with_custom_backup_configured` — Number of web apps whose custom backup configuration names a storage container
+- `apps_custom_backup_configuration_unknown` — Number of web apps whose custom backup configuration couldn't be determined: the read was refused because the optional permission isn't granted (these are also in `apps_custom_backup_configuration_not_authorized`), or it failed
+- `apps_custom_backup_configuration_not_authorized` — Number of web apps whose custom backup configuration read was refused because the optional permission isn't granted; each is also in `apps_custom_backup_configuration_unknown`
+- `apps_with_scheduled_custom_backup` — Number of web apps whose custom backup configuration names a storage container and has an enabled schedule
+- `apps_with_custom_backup_history` — Number of web apps with at least one custom backup in their history, whatever its status; apps whose history couldn't be read aren't counted
 - `apps_latest_custom_backup_failed` — Number of web apps whose latest custom backup didn't fully succeed (Failed, TimedOut, PartiallySucceeded or Skipped)
-- `apps_with_custom_backup_restore_in_window` — Number of web apps restored from a custom backup within the restore-test window (restore_test_window_days)
+- `apps_with_custom_backup_restore_in_window` — Number of web apps restored from a custom backup within the restore-test window (restore_test_window_days, default 365). Restores from automatic backups leave no record, so 0 doesn't mean no restore was tested
 
 **Is custom backup storage protected against a regional outage?**
-- `custom_backup_storage_accounts` — Number of distinct storage accounts that custom backups go to
+- `custom_backup_storage_accounts` — Number of distinct storage accounts named by any web app's custom backup configuration or history
 - `custom_backup_storage_accounts_geo_redundant` — Number of custom backup storage accounts that replicate to a second region (GRS, RA-GRS, GZRS or RA-GZRS)
 - `custom_backup_storage_accounts_unresolved` — Number of custom backup storage accounts not found in this subscription, or whose lookup failed
 
