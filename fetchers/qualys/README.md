@@ -9,6 +9,9 @@ Qualys fetchers read the Qualys VM/PC API (XML) with one read-only API user:
 | `qualys_vulnerability_findings` | Open detections by severity and type, and which are past their remediation timeframe |
 | `qualys_vulnerability_remediation` | Detections fixed in the lookback window, on time or late, and reopened ones |
 
+A detection's age, and its days to fix, count from its last reopening when
+Qualys reopened it, and from first found otherwise.
+
 Install the parser with `pip install -e '.[qualys]'` (it adds `defusedxml`).
 
 ## The API user
@@ -33,9 +36,10 @@ The fetchers only list. Create one user for them in Qualys:
 | Variable | Required | Description |
 |---|---|---|
 | `QUALYS_API_URL` | Yes | API server URL of your platform; see below |
+| `QUALYS_PRIVATE_CLOUD_HOST` | No | A private cloud platform's API host; see below |
 | `QUALYS_USERNAME` | Yes | The API user's login |
 | `QUALYS_PASSWORD` | Yes | Its password |
-| `QUALYS_SCAN_WINDOW_DAYS` | No | How recent a scan must be, and how far back the scan list reads. Default 30 |
+| `QUALYS_SCAN_WINDOW_DAYS` | No | How recent a scan must be, and how far back the scan list reads. Default 31, so a monthly schedule fits |
 | `QUALYS_REMEDIATION_DAYS` | No | Days allowed per severity 5 to 1. Default `5:30,4:30,3:90,2:180,1:180` |
 | `QUALYS_REMEDIATION_LOOKBACK_DAYS` | No | `qualys_vulnerability_remediation` only. Default 90 |
 | `QUALYS_INCLUDE_DETECTION_RECORDS` | No | `qualys_vulnerability_findings` only. `false` keeps only past-due records. Default `true` |
@@ -68,8 +72,14 @@ latter. FedRAMP subscriptions are on US1, US2 or US3 (Moderate) or GOV1 (High).
 | AU1 | `https://qualysapi.qg1.apps.qualys.com.au` |
 | KSA1 | `https://qualysapi.qg1.apps.qualysksa.com` |
 
-Source: https://www.qualys.com/platform-identification/. A private cloud platform
-uses `https://qualysapi.<your base URL>`.
+Source: https://www.qualys.com/platform-identification/.
+
+The fetchers send the credentials only to a `qualysapi.` host on a Qualys domain
+(`qualys.com`, `qualys.us`, `qualys.eu` and the others above). Any other URL fails
+as `bad_config` before anything is sent, so a typo cannot leak the password. A
+private cloud platform uses `https://qualysapi.<your base URL>`; set
+`QUALYS_PRIVATE_CLOUD_HOST` to that host name (for example
+`qualysapi.qualys.example.com`) and `QUALYS_API_URL` to the same host.
 
 ## Limits
 

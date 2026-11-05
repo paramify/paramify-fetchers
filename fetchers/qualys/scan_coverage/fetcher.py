@@ -108,7 +108,7 @@ def uncovered(ranges, host_ips):
 
 
 def collect(client, ledger, now):
-    window = int_config("QUALYS_SCAN_WINDOW_DAYS", 30)
+    window = int_config("QUALYS_SCAN_WINDOW_DAYS", 31)
     hosts = [host_item(h, now, window) for h in client.records(
         HOST_PATH, {"action": "list", "details": "All", "show_tags": "0", "truncation_limit": PAGE_SIZE},
         "HOST", "list_hosts")]

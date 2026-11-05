@@ -17,7 +17,7 @@ output:
   type: json
   path: qualys_scan_schedules.json
 
-secrets: []          # username / password and api_url come from _categories/qualys.yaml
+secrets: []          # username / password, api_url and private_cloud_host come from _categories/qualys.yaml
 
 ksis:
   - KSI-CNA-EIS
@@ -28,7 +28,7 @@ evidence_set:
   instructions: |
     Script: qualys/scan_schedules/fetcher.py
 
-    Access: A local Qualys user with the Reader role and API access, assigned the All asset group. A subscription setting can hide schedules on unassigned assets from a Reader, so the evidence records which asset groups it sees.
+    Access: A local Qualys user with the Reader role and API access, assigned the All asset group. A subscription setting can hide schedules on unassigned assets from a Reader, so the evidence records which asset groups it sees. Assumed from the API guide, not seen on a live subscription: a user that sees the All group sees every asset. Under tag-based user scoping that may not hold, and then every count here is too low while scope_all still reads true.
 
     Commands Executed:
     - GET /api/2.0/fo/asset/group/?action=list — the asset groups the API user can see, to show whether its scope covers every asset
@@ -36,7 +36,7 @@ evidence_set:
     - GET /api/5.0/fo/schedule/scan/?action=list — every VM scan schedule, active or not, with its recurrence, target and option profile
     - GET /api/3.0/fo/scan/?action=list&launched_after_datetime=(now minus the window) — the VM scans launched within the window and how each ended
 
-    Output: qualys_scan_schedules.json — one item per schedule with its recurrence, the longest gap in days between its runs (a month counts as 31 days), target asset groups, option profile and that profile's authentication types; one item per scan launched in the window with its type and state; and each option profile's authentication types. A read that failed leaves its fields null and the run exits non-zero.
+    Output: qualys_scan_schedules.json — one item per schedule with its recurrence, the longest gap in days between its runs (a month counts as 31 days), target asset groups, option profile and that profile's authentication types; one item per scan launched in the window with its type and state; and each option profile's authentication types. Assumed from the API guide, not seen on a live subscription: an option profile's SCAN/AUTHENTICATION lists the authentication types it enables; if it lists the types available instead, active_schedules_with_authentication overstates, and if it is missing, every schedule's authentication reads unread. Also assumed: a schedule's ACTIVE is 0 when inactive and 1, 2 or 3 when active; if 2 or 3 mean paused, active_schedules and active_schedules_within_window count schedules that do not run. A read that failed leaves its fields null and the run exits non-zero.
 
     Summary fields:
 
@@ -52,7 +52,7 @@ evidence_set:
       - not_returned (Qualys gave no schedule details)
 
     How often do the active schedules run?
-    - scan_window_days — The window in days, from the scan_window_days setting
+    - scan_window_days — The window in days, from the scan_window_days setting (default 31, so a monthly schedule fits)
     - active_schedules_within_window — Number of active recurring schedules whose longest gap between runs fits in the window
     - active_schedules_over_window — Number of active recurring schedules whose longest gap between runs is longer than the window
     - active_schedules_interval_unread — Number of active recurring schedules whose interval could not be read

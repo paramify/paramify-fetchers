@@ -30,6 +30,7 @@ from qualys_client import QualysClient, QualysError, normalize_api_url  # noqa: 
 
 NOW = datetime.now(timezone.utc)
 USER, PASSWORD = "acme_ro1", "pw"
+LOCAL = "127.0.0.1"  # the double, named as the private cloud host
 
 
 def _iso(days: float) -> str:
@@ -81,7 +82,7 @@ def _detections() -> dict[str, list[dict]]:
                 det("38744", "5", "Fixed", 70, LAST_FIXED_DATETIME=_iso(10)),
                 det("38745", "3", "Fixed", 400, LAST_FIXED_DATETIME=_iso(300))],
         "103": [det("38746", "4", "Active", 10, IS_DISABLED="1"),
-                det("38747", "3", "Fixed", 30, LAST_FIXED_DATETIME=_iso(2), LAST_REOPENED_DATETIME=_iso(60),
+                det("38747", "3", "Fixed", 100, LAST_FIXED_DATETIME=_iso(2), LAST_REOPENED_DATETIME=_iso(60),
                     TIMES_REOPENED="1")],
     }
 
@@ -123,7 +124,8 @@ def _reset() -> None:
     STATE.update(hosts=_hosts(), detections=_detections(), groups=["All", "DMZ", "Lab"], page_size=2,
                  ips=["10.0.0.1-10.0.0.10", "10.0.1.5", "10.0.2.0-10.0.2.3"], excluded=["10.0.0.10"],
                  schedules=_schedules(), profiles=_option_profiles(), scans=_scans(),
-                 fail={}, throttle={}, wait="0", log=[], bad_next=False, drop_id_min=False, entity=False)
+                 fail={}, throttle={}, wait="0", log=[], bad_next=False, drop_id_min=False, entity=False,
+                 extra_warning=False)
 
 
 class QualysDouble(BaseHTTPRequestHandler):
@@ -147,13 +149,15 @@ class QualysDouble(BaseHTTPRequestHandler):
         start = int(q.get("id_min", "0"))
         rest = [i for i in items if int(i[key]) >= start]
         page, more = rest[:STATE["page_size"]], rest[STATE["page_size"]:]
+        extra = ("<WARNING><CODE>1001</CODE><TEXT>This API version is deprecated.</TEXT></WARNING>"
+                 if STATE["extra_warning"] else "")
         if not more:
-            return page, ""
+            return page, extra
         base = "https://evil.example" if STATE["bad_next"] else self._base()
         id_min = "" if STATE["drop_id_min"] else f"&id_min={more[0][key]}"
         url = f"{base}{path}?action=list&truncation_limit={STATE['page_size']}{id_min}"
         return page, (f"<WARNING><CODE>1980</CODE><TEXT>{STATE['page_size']} record limit exceeded.</TEXT>"
-                      f"<URL><![CDATA[{url}]]></URL></WARNING>")
+                      f"<URL><![CDATA[{url}]]></URL></WARNING>{extra}")
 
     def do_GET(self) -> None:  # noqa: N802
         url = urlparse(self.path)
@@ -305,7 +309,7 @@ def run_fetcher(short: str, base: str, tmp_path: Path, **env: str) -> tuple[int,
     status_file = tmp_path / "status.json"
     full_env = {
         "PATH": os.environ.get("PATH", ""), "QUALYS_API_URL": base, "QUALYS_USERNAME": USER,
-        "QUALYS_PASSWORD": PASSWORD, "EVIDENCE_DIR": str(out), "FETCHER_STATUS_FILE": str(status_file),
+        "QUALYS_PASSWORD": PASSWORD, "QUALYS_PRIVATE_CLOUD_HOST": LOCAL, "EVIDENCE_DIR": str(out), "FETCHER_STATUS_FILE": str(status_file),
         **env,
     }
     proc = subprocess.run([sys.executable, str(QUALYS / short / "fetcher.py")], env=full_env,
@@ -322,28 +326,48 @@ def run_fetcher(short: str, base: str, tmp_path: Path, **env: str) -> tuple[int,
 @pytest.mark.parametrize(("raw", "expected"), [
     ("https://qualysapi.qualys.com", "https://qualysapi.qualys.com"),
     ("https://QualysAPI.gov1.qualys.us/api/2.0/", "https://qualysapi.gov1.qualys.us"),
-    ("http://127.0.0.1:8080", "http://127.0.0.1:8080"),
+    ("https://qualysapi.qg1.apps.qualys.co.uk", "https://qualysapi.qg1.apps.qualys.co.uk"),
+    ("https://qualysapi.qg9.apps.qualys.com", "https://qualysapi.qg9.apps.qualys.com"),
 ])
-def test_api_url_is_normalized(raw: str, expected: str) -> None:
+def test_qualys_platform_urls_are_accepted(raw: str, expected: str) -> None:
     assert normalize_api_url(raw) == expected
 
 
 @pytest.mark.parametrize("raw", [
     "http://qualysapi.qualys.com", "https://qualysguard.qualys.com", "https://u:p@qualysapi.qualys.com", "not a url",
+    "https://qualysapi.qualys.co", "https://qualysapi.qualys.com.example.test", "https://qualysapi.notqualys.com",
+    "https://api.qualys.com", "https://qualysapi.example.test", "http://127.0.0.1:8080",
 ])
-def test_bad_api_urls_are_refused(raw: str) -> None:
+def test_other_api_urls_are_refused(raw: str) -> None:
     with pytest.raises(QualysError) as e:
         normalize_api_url(raw)
     assert e.value.code == "bad_config"
 
 
+def test_private_cloud_host_must_be_named() -> None:
+    assert normalize_api_url("https://qualysapi.qualys.example.test", " QualysAPI.qualys.example.test ") == \
+        "https://qualysapi.qualys.example.test"
+    assert normalize_api_url("http://127.0.0.1:8080", LOCAL) == "http://127.0.0.1:8080"
+    with pytest.raises(QualysError, match="QUALYS_PRIVATE_CLOUD_HOST") as e:
+        normalize_api_url("https://qualysapi.qualys.example.test", "qualysapi.other.example.test")
+    assert e.value.code == "bad_config"
+
+
 def test_client_knows_the_platform() -> None:
     assert QualysClient("https://qualysapi.gov1.qualys.us", "u", "p").platform == "GOV1"
-    assert QualysClient("https://qualysapi.example.internal", "u", "p").platform == "private_or_unlisted"
+    assert QualysClient("https://qualysapi.example.test", "u", "p", "qualysapi.example.test").platform == \
+        "private_or_unlisted"
+
+
+def test_unnamed_host_fails_before_credentials_are_sent(qualys: str, tmp_path: Path) -> None:
+    code, ev, status = run_fetcher("scan_coverage", qualys, tmp_path, QUALYS_PRIVATE_CLOUD_HOST="")
+    assert code == 1 and status["code"] == "bad_config"
+    assert "QUALYS_PRIVATE_CLOUD_HOST" in status["error"]
+    assert STATE["log"] == [] and ev["summary"] is None
 
 
 def test_paging_follows_the_warning_url_to_the_end(qualys: str) -> None:
-    client = QualysClient(qualys, USER, PASSWORD, sleep=lambda s: None)
+    client = QualysClient(qualys, USER, PASSWORD, LOCAL, sleep=lambda s: None)
     ids = [h.findtext("ID") for h in client.records("/api/5.0/fo/asset/host/", {"action": "list"}, "HOST", "op")]
     assert ids == ["101", "102", "103", "104", "105"]
     assert client.pages == 3
@@ -351,16 +375,24 @@ def test_paging_follows_the_warning_url_to_the_end(qualys: str) -> None:
 
 
 def test_next_pages_keep_the_original_filters(qualys: str) -> None:
-    client = QualysClient(qualys, USER, PASSWORD, sleep=lambda s: None)
+    client = QualysClient(qualys, USER, PASSWORD, LOCAL, sleep=lambda s: None)
     params = {"action": "list", "status": "Fixed", "include_ignored": "1"}
     list(client.records("/api/5.0/fo/asset/host/", params, "HOST", "op"))
     assert all(e["query"]["status"] == "Fixed" and e["query"]["include_ignored"] == "1" for e in STATE["log"])
     assert "truncation_limit" not in STATE["log"][1]["query"]
 
 
+def test_a_later_warning_does_not_drop_the_next_page(qualys: str) -> None:
+    STATE["extra_warning"] = True
+    client = QualysClient(qualys, USER, PASSWORD, LOCAL, sleep=lambda s: None)
+    ids = [h.findtext("ID") for h in client.records("/api/5.0/fo/asset/host/", {"action": "list"}, "HOST", "op")]
+    assert ids == ["101", "102", "103", "104", "105"]
+    assert client.pages == 3
+
+
 def test_next_page_without_id_min_stops_as_partial(qualys: str) -> None:
     STATE["drop_id_min"] = True
-    client = QualysClient(qualys, USER, PASSWORD, sleep=lambda s: None)
+    client = QualysClient(qualys, USER, PASSWORD, LOCAL, sleep=lambda s: None)
     with pytest.raises(QualysError) as e:
         list(client.records("/api/5.0/fo/asset/host/", {"action": "list"}, "HOST", "op"))
     assert e.value.code == "partial_failure"
@@ -368,7 +400,7 @@ def test_next_page_without_id_min_stops_as_partial(qualys: str) -> None:
 
 def test_next_page_on_another_host_is_not_followed(qualys: str) -> None:
     STATE["bad_next"] = True
-    client = QualysClient(qualys, USER, PASSWORD, sleep=lambda s: None)
+    client = QualysClient(qualys, USER, PASSWORD, LOCAL, sleep=lambda s: None)
     with pytest.raises(QualysError, match="outside"):
         list(client.records("/api/5.0/fo/asset/host/", {"action": "list"}, "HOST", "op"))
     assert len(STATE["log"]) == 1
@@ -376,7 +408,7 @@ def test_next_page_on_another_host_is_not_followed(qualys: str) -> None:
 
 def test_entities_are_refused_not_expanded(qualys: str) -> None:
     STATE["entity"] = True
-    client = QualysClient(qualys, USER, PASSWORD, sleep=lambda s: None)
+    client = QualysClient(qualys, USER, PASSWORD, LOCAL, sleep=lambda s: None)
     with pytest.raises(QualysError, match="parsed safely") as e:
         list(client.records("/api/5.0/fo/asset/host/vm/detection/", {"action": "list"}, "HOST", "op"))
     assert e.value.code == "internal_error"
@@ -386,7 +418,7 @@ def test_entities_are_refused_not_expanded(qualys: str) -> None:
 def test_rate_limit_is_retried(qualys: str) -> None:
     STATE["throttle"]["/api/2.0/fo/asset/group/"] = 2
     waits: list[float] = []
-    client = QualysClient(qualys, USER, PASSWORD, sleep=waits.append)
+    client = QualysClient(qualys, USER, PASSWORD, LOCAL, sleep=waits.append)
     groups = list(client.records("/api/2.0/fo/asset/group/", {"action": "list"}, "ASSET_GROUP", "op"))
     assert len(groups) == 3 and waits == [0.0, 0.0]
 
@@ -394,7 +426,7 @@ def test_rate_limit_is_retried(qualys: str) -> None:
 def test_rate_limit_wait_over_the_cap_fails_as_rate_limited(qualys: str) -> None:
     STATE["throttle"]["/api/2.0/fo/asset/group/"] = 1
     STATE["wait"] = "3600"
-    client = QualysClient(qualys, USER, PASSWORD, sleep=lambda s: pytest.fail("must not wait an hour"))
+    client = QualysClient(qualys, USER, PASSWORD, LOCAL, sleep=lambda s: pytest.fail("must not wait an hour"))
     with pytest.raises(QualysError) as e:
         list(client.records("/api/2.0/fo/asset/group/", {"action": "list"}, "ASSET_GROUP", "op"))
     assert e.value.code == "rate_limited"
@@ -406,7 +438,7 @@ def test_rate_limit_wait_over_the_cap_fails_as_rate_limited(qualys: str) -> None
 ])
 def test_errors_are_classified_without_retry(qualys: str, status: int, code: str, expected: str) -> None:
     STATE["fail"]["/api/2.0/fo/asset/group/"] = (status, code, "denied")
-    client = QualysClient(qualys, USER, PASSWORD, sleep=lambda s: pytest.fail("must not retry"))
+    client = QualysClient(qualys, USER, PASSWORD, LOCAL, sleep=lambda s: pytest.fail("must not retry"))
     with pytest.raises(QualysError) as e:
         list(client.records("/api/2.0/fo/asset/group/", {"action": "list"}, "ASSET_GROUP", "op"))
     assert (e.value.code, e.value.qualys_code) == (expected, code)
@@ -416,7 +448,7 @@ def test_errors_are_classified_without_retry(qualys: str, status: int, code: str
 def test_server_errors_are_retried_then_reported(qualys: str) -> None:
     STATE["fail"]["/api/2.0/fo/asset/group/"] = (503, "1999", "maintenance")
     waits: list[float] = []
-    client = QualysClient(qualys, USER, PASSWORD, sleep=waits.append)
+    client = QualysClient(qualys, USER, PASSWORD, LOCAL, sleep=waits.append)
     with pytest.raises(QualysError) as e:
         list(client.records("/api/2.0/fo/asset/group/", {"action": "list"}, "ASSET_GROUP", "op"))
     assert e.value.code == "target_unreachable" and len(waits) == 4
@@ -431,7 +463,7 @@ def test_scan_coverage_happy_path(qualys: str, tmp_path: Path, assert_summary_do
     assert code == 0, status
     s = ev["summary"]
     assert_summary_documented("qualys/scan_coverage", s)
-    assert s["total_hosts"] == 5
+    assert (s["total_hosts"], s["scan_window_days"]) == (5, 31)
     assert s["hosts_by_tracking_method"] == {"ip": 2, "dns": 1, "netbios": 0, "cloud_agent": 1,
                                              "cloud_instance": 1, "other": 0, "not_returned": 0}
     assert (s["hosts_scanned_within_window"], s["hosts_not_scanned_within_window"]) == (2, 2)
@@ -542,6 +574,16 @@ def test_scan_schedules_happy_path(qualys: str, tmp_path: Path, assert_summary_d
     assert scan_call["query"]["launched_after_datetime"].endswith("Z")
 
 
+def test_scan_schedules_monthly_fits_the_default_window(qualys: str, tmp_path: Path) -> None:
+    STATE["schedules"][1]["SCHEDULE"] = '<MONTHLY frequency_months="1" day_of_month="1"/>'
+    code, ev, _ = run_fetcher("scan_schedules", qualys, tmp_path)
+    s = ev["summary"]
+    assert code == 0 and s["scan_window_days"] == 31
+    assert (s["active_schedules_within_window"], s["active_schedules_over_window"]) == (3, 0)
+    code, ev, _ = run_fetcher("scan_schedules", qualys, tmp_path, QUALYS_SCAN_WINDOW_DAYS="30")
+    assert code == 0 and ev["summary"]["active_schedules_over_window"] == 1
+
+
 def test_scan_schedules_profiles_without_auth_setting_read_null(qualys: str, tmp_path: Path) -> None:
     for p in STATE["profiles"]:
         p["AUTHENTICATION"] = None
@@ -594,9 +636,9 @@ def test_vulnerability_findings_happy_path(qualys: str, tmp_path: Path, assert_s
     assert s["open_by_type"] == {"confirmed": 5, "potential": 1, "other": 0, "not_returned": 0}
     assert s["hosts_with_open_detections"] == 3
     assert s["remediation_days"] == {"5": 30, "4": 30, "3": 90, "2": 180, "1": 180}
-    assert s["past_due_detections"] == 3
-    assert s["past_due_by_severity"] == _sev(s5=1, s3=1, s2=1)
-    assert s["past_due_confirmed"] == 2
+    assert s["past_due_detections"] == 2
+    assert s["past_due_by_severity"] == _sev(s5=1, s2=1)
+    assert s["past_due_confirmed"] == 1
     assert (s["open_age_unread"], s["oldest_open_days"]) == (0, 200.0)
     assert (s["ignored_detections"], s["disabled_detections"], s["ignored_or_disabled_past_due"]) == (1, 1, 1)
     assert ev["detection_records"] == "all" and len(ev["detections"]) == 6
@@ -627,8 +669,18 @@ def test_vulnerability_findings_past_due_only(qualys: str, tmp_path: Path) -> No
     code, ev, _ = run_fetcher("vulnerability_findings", qualys, tmp_path, QUALYS_INCLUDE_DETECTION_RECORDS="false")
     assert code == 0
     assert ev["detection_records"] == "past_due_only"
-    assert {d["qid"] for d in ev["detections"]} == {"38739", "90001", "38741", "38742"}
+    assert {d["qid"] for d in ev["detections"]} == {"38739", "38741", "38742"}
     assert ev["summary"]["open_detections"] == 6
+
+
+def test_vulnerability_findings_age_restarts_at_reopening(qualys: str, tmp_path: Path) -> None:
+    code, ev, _ = run_fetcher("vulnerability_findings", qualys, tmp_path)
+    assert code == 0
+    reopened = next(d for d in ev["detections"] if d["qid"] == "90001")
+    assert (reopened["age_from"], reopened["age_days"], reopened["within_timeframe"]) == ("last_reopened", 10.0, True)
+    assert reopened["first_found"] == _iso(100)
+    never = next(d for d in ev["detections"] if d["qid"] == "38739")
+    assert (never["age_from"], never["age_days"]) == ("first_found", 45.0)
 
 
 def test_vulnerability_findings_forbidden_is_null_not_zero(qualys: str, tmp_path: Path) -> None:
@@ -665,10 +717,25 @@ def test_vulnerability_remediation_happy_path(qualys: str, tmp_path: Path, asser
     assert s["fixed_by_severity"] == _sev(s5=1, s3=1, s1=1)
     assert (s["fixed_within_timeframe"], s["fixed_after_timeframe"], s["fixed_timeframe_unread"]) == (2, 1, 0)
     assert s["fixed_after_timeframe_by_severity"] == _sev(s5=1)
-    assert (s["median_days_to_fix"], s["max_days_to_fix"]) == (45.0, 60.0)
-    assert (s["reopened_in_lookback"], s["fixed_after_reopening"]) == (1, 1)
+    assert (s["median_days_to_fix"], s["max_days_to_fix"]) == (58.0, 60.0)
+    assert (s["reopened_in_lookback"], s["fixed_after_reopening"]) == (2, 1)
+    refixed = next(r for r in ev["fixed"] if r["qid"] == "38747")
+    assert (refixed["age_from"], refixed["age_days"], refixed["first_found"]) == ("last_reopened", 58.0, _iso(100))
     q = next(e for e in STATE["log"] if e["path"] == "/api/5.0/fo/asset/host/vm/detection/")["query"]
-    assert q["status"] == "Fixed,Re-Opened" and q["detection_updated_since"].endswith("Z")
+    assert q["status"] == "Fixed,Re-Opened,Active" and q["detection_updated_since"].endswith("Z")
+
+
+def test_vulnerability_remediation_counts_a_reopened_detection_now_active(qualys: str, tmp_path: Path) -> None:
+    STATE["detections"]["103"].append({
+        "UNIQUE_VULN_ID": "y", "QID": "38748", "TYPE": "Confirmed", "SEVERITY": "4", "STATUS": "Active",
+        "FIRST_FOUND_DATETIME": _iso(300), "LAST_FOUND_DATETIME": _iso(1), "LAST_FIXED_DATETIME": _iso(40),
+        "LAST_REOPENED_DATETIME": _iso(15), "TIMES_REOPENED": "1", "IS_IGNORED": "0", "IS_DISABLED": "0"})
+    code, ev, _ = run_fetcher("vulnerability_remediation", qualys, tmp_path)
+    assert code == 0
+    assert ev["summary"]["reopened_in_lookback"] == 3 and ev["summary"]["fixed_detections"] == 3
+    assert {(r["qid"], r["status"]) for r in ev["reopened"]} == {
+        ("90001", "Re-Opened"), ("38747", "Fixed"), ("38748", "Active")}
+    assert ev["metadata"]["population"]["collected"] == 5
 
 
 def test_vulnerability_remediation_lookback_is_configurable(qualys: str, tmp_path: Path) -> None:

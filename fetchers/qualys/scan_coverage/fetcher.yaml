@@ -17,7 +17,7 @@ output:
   type: json
   path: qualys_scan_coverage.json
 
-secrets: []          # username / password and api_url come from _categories/qualys.yaml
+secrets: []          # username / password, api_url and private_cloud_host come from _categories/qualys.yaml
 
 ksis:
   - KSI-CNA-EIS
@@ -29,7 +29,7 @@ evidence_set:
   instructions: |
     Script: qualys/scan_coverage/fetcher.py
 
-    Access: A local Qualys user with the Reader role and API access, assigned the All asset group. A Reader sees only the hosts in its asset groups, so the evidence records which groups it sees.
+    Access: A local Qualys user with the Reader role and API access, assigned the All asset group. A Reader sees only the hosts in its asset groups, so the evidence records which groups it sees. Assumed from the API guide, not seen on a live subscription: a user that sees the All group sees every asset. Under tag-based user scoping that may not hold, and then every count here is too low while scope_all still reads true.
 
     Commands Executed:
     - GET /api/2.0/fo/asset/group/?action=list — the asset groups the API user can see, to show whether its scope covers every asset
@@ -37,7 +37,7 @@ evidence_set:
     - GET /api/2.0/fo/asset/ip/?action=list — the IPs and ranges in the subscription, to find addresses with no host record
     - GET /api/2.0/fo/asset/excluded_ip/?action=list — the IPs and ranges Qualys is set never to scan
 
-    Output: qualys_scan_coverage.json — one item per host with its address, DNS name, operating system, tracking method, last scan dates and days since each; the subscription IP ranges holding no host record; and the excluded ranges. A host's authenticated scan date is the agent scan date for Cloud Agent hosts. A read that failed leaves its fields null and the run exits non-zero.
+    Output: qualys_scan_coverage.json — one item per host with its address, DNS name, operating system, tracking method, last scan dates and days since each; the subscription IP ranges holding no host record; and the excluded ranges. Assumed from the API guide, not seen on a live subscription: tracking methods read IP, DNS, NETBIOS, an agent value or a cloud instance value (EC2, Azure, GCP, OCI); any other value lands in other in hosts_by_tracking_method and changes no other count. Also assumed: Qualys records a Cloud Agent scan as the host's authenticated scan date; if it does not, hosts_never_auth_scanned overstates the gap. A read that failed leaves its fields null and the run exits non-zero.
 
     Summary fields:
 
@@ -53,7 +53,7 @@ evidence_set:
       - not_returned (Qualys gave no tracking method)
 
     Were they scanned recently?
-    - scan_window_days — The window in days a scan must fall within, from the scan_window_days setting
+    - scan_window_days — The window in days a scan must fall within, from the scan_window_days setting (default 31)
     - hosts_scanned_within_window — Number of hosts whose last vulnerability scan is within the window
     - hosts_not_scanned_within_window — Number of hosts whose last vulnerability scan is older than the window, or that have no vulnerability scan date
     - hosts_without_vm_scan_date — Number of hosts with no vulnerability scan date at all

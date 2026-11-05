@@ -101,7 +101,7 @@ def counts(items, field, keys):
 
 
 def collect(client, ledger, now):
-    window = int_config("QUALYS_SCAN_WINDOW_DAYS", 30)
+    window = int_config("QUALYS_SCAN_WINDOW_DAYS", 31)
     auth_by_profile = None
     try:
         auth_by_profile = profiles(client)

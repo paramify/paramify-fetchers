@@ -144,12 +144,13 @@ def detections(client: QualysClient, params: dict, operation: str) -> Iterable[t
 
 
 def detection_record(identity: dict, det: Element, now: datetime, timeframes: dict[str, int]) -> dict:
-    """One detection with its age against its severity's timeframe; the clock starts at first found."""
+    """One detection with its age against its severity's timeframe; the clock restarts at its last reopening."""
     severity = text(det, "SEVERITY")
     first_found = text(det, "FIRST_FOUND_DATETIME")
     last_fixed = text(det, "LAST_FIXED_DATETIME")
+    last_reopened = text(det, "LAST_REOPENED_DATETIME")
     status = text(det, "STATUS")
-    started = parse_time(first_found)
+    started = parse_time(last_reopened or first_found)
     ended = parse_time(last_fixed) if status == "Fixed" else now
     age = days_between(started, ended)
     timeframe = timeframes.get(severity or "")
@@ -166,10 +167,11 @@ def detection_record(identity: dict, det: Element, now: datetime, timeframes: di
         "first_found": first_found,
         "last_found": text(det, "LAST_FOUND_DATETIME"),
         "last_fixed": last_fixed,
-        "last_reopened": text(det, "LAST_REOPENED_DATETIME"),
+        "last_reopened": last_reopened,
         "times_reopened": _int(text(det, "TIMES_REOPENED")),
         "is_ignored": _flag(text(det, "IS_IGNORED")),
         "is_disabled": _flag(text(det, "IS_DISABLED")),
+        "age_from": "last_reopened" if last_reopened else "first_found",
         "age_days": age,
         "timeframe_days": timeframe,
         "within_timeframe": within,

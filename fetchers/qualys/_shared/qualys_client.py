@@ -44,6 +44,8 @@ PLATFORMS = {
     "qualysapi.qg1.apps.qualys.com.au": "AU1",
     "qualysapi.qg1.apps.qualysksa.com": "KSA1",
 }
+QUALYS_DOMAINS = ("qualys.com", "qualys.us", "qualys.eu", "qualys.it", "qualys.in", "qualys.ca", "qualys.ae",
+                  "qualys.co.uk", "qualys.com.au", "qualysksa.com")
 
 RETRY_CODES = {"1920", "1960", "1965", "1981", "1999"}
 HINTS = {
@@ -86,8 +88,13 @@ def _loopback(host: str) -> bool:
         return False
 
 
-def normalize_api_url(raw: str) -> str:
-    """scheme://host[:port] of the Qualys API server; https only, except a loopback test double."""
+def _qualys_platform_host(host: str) -> bool:
+    rest = host.removeprefix("qualysapi.")
+    return rest != host and any(rest == d or rest.endswith(f".{d}") for d in QUALYS_DOMAINS)
+
+
+def normalize_api_url(raw: str, private_host: Optional[str] = None) -> str:
+    """scheme://host[:port] of a Qualys API server, or of the one private cloud host named; https only, except loopback."""
     parts = urlsplit(raw.strip())
     host = (parts.hostname or "").lower()
     if not host:
@@ -100,6 +107,11 @@ def normalize_api_url(raw: str) -> str:
         raise QualysError(
             f"QUALYS_API_URL {host} is the Qualys web UI; use the API server URL "
             "(qualysapi.…, shown under Help > About in the Qualys UI)", "bad_config", "configuration")
+    if not (_qualys_platform_host(host) or host == (private_host or "").strip().lower()):
+        raise QualysError(
+            f"QUALYS_API_URL host {host} is not a Qualys platform API server (qualysapi.… on a Qualys domain); "
+            "for a Qualys private cloud platform, also set QUALYS_PRIVATE_CLOUD_HOST to its API host",
+            "bad_config", "configuration")
     return f"{parts.scheme}://{parts.netloc.lower()}"
 
 
@@ -111,12 +123,12 @@ def _same_origin(a: str, b: str) -> bool:
 
 
 class QualysClient:
-    def __init__(self, base_url: str, username: str, password: str,
+    def __init__(self, base_url: str, username: str, password: str, private_host: Optional[str] = None,
                  session: Optional[requests.Session] = None,
                  sleep: Callable[[float], None] = time.sleep) -> None:
         if SafeET is None:
             raise QualysError("defusedxml is not installed (pip install defusedxml)", "bad_config", "configuration")
-        self.base_url = normalize_api_url(base_url)
+        self.base_url = normalize_api_url(base_url, private_host)
         self.username = username
         self.password = password
         self.session = session or requests.Session()
@@ -132,7 +144,7 @@ class QualysClient:
                                   ("QUALYS_PASSWORD", password)) if not v]
         if missing:
             raise QualysError(f"{', '.join(missing)} not set", "bad_config", "configuration")
-        return cls(url, username, password)
+        return cls(url, username, password, os.environ.get("QUALYS_PRIVATE_CLOUD_HOST"))
 
     @property
     def platform(self) -> str:
@@ -239,8 +251,9 @@ class QualysClient:
                         yield elem
                         elem.clear()
                     elif elem.tag == "WARNING":
-                        truncated = text(elem, "CODE") == "1980" or text(elem, "URL") is not None
-                        next_url = text(elem, "URL")
+                        url_here = text(elem, "URL")
+                        truncated = truncated or text(elem, "CODE") == "1980" or url_here is not None
+                        next_url = next_url or url_here
             except (ParseError, DefusedXmlException) as e:
                 raise QualysError(f"{operation}: response could not be parsed safely: {e}", "internal_error",
                                   operation) from e
