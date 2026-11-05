@@ -175,7 +175,7 @@ QUERY_RESULTS = {
         ["TimeGenerated", "OperationName", "Result", "InitiatedByUser", "InitiatedByApp", "Target", "TargetId"],
         [["2026-10-20T15:00:00Z", "Update conditional access policy", "success", "admin1@contoso.com", "", "Require MFA for admins", "p1"],
          ["2026-10-15T15:00:00Z", "Update named location", "success", "admin1@contoso.com", "", "HQ", "l1"],
-         ["2026-10-12T15:00:00Z", "Authentication Methods Policy Update", "success", "mehul@contoso.com", "", "", ""]]),
+         ["2026-10-12T15:00:00Z", "Authentication Methods Policy Update", "success", "admin2@contoso.com", "", "", ""]]),
 }
 
 
@@ -342,6 +342,11 @@ def test_non_interactive_and_service_principal_tables_are_counted_not_copied(arm
     assert "users" not in ni and "sign_ins_list" not in ni, "no per-event or per-user rows for non-interactive sign-ins"
     assert len([q for q in session.queries if q.startswith("AADNonInteractiveUserSignInLogs")]) == 2
     assert len([q for q in session.queries if q.startswith("AADServicePrincipalSignInLogs")]) == 2
+
+
+def test_service_principal_list_asks_for_one_row_more_than_the_cap():
+    settings = {"lookback_days": 30, "max_rows": 2, "users": [], "app_ids": [], "scope_invalid": False}
+    assert sl.service_principal_list_query(settings).endswith("| take 3")
 
 
 def test_service_principal_queries_take_only_the_app_scope(arm, tmp_path, monkeypatch):
