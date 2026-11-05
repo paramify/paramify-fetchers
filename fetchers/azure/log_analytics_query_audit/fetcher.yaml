@@ -1,5 +1,5 @@
 name: azure_log_analytics_query_audit
-version: 0.1.0
+version: 0.2.0
 description: >
   For every Log Analytics workspace in the subscription, Sentinel or not: whether
   query auditing is on (a diagnostic setting exporting the workspace's Audit
@@ -7,6 +7,14 @@ description: >
   week split into people and applications, the weeks with no human query, and
   each user who queried the logs with their query count and last query. This
   collector's own queries are excluded.
+  Workspaces the resource_exclusions patterns take out are listed under excluded
+  instead, each with the pattern that matched, and every count covers only
+  in-scope workspaces. The summary echoes resource_exclusion_patterns, lists
+  resource_exclusion_patterns_unmatched (patterns that matched no workspace,
+  such as a mistyped name), and counts excluded_workspaces and
+  in_scope_workspaces (0 when none was found or the patterns took out every
+  workspace, which a check can catch by requiring more than 0; both are null
+  when the workspace list couldn't be read).
 category: azure
 
 supports_targets: true
@@ -50,6 +58,29 @@ config_schema:
     default: 90
     env: QUERY_AUDIT_LOOKBACK_DAYS
     description: How many days of LAQueryLogs to summarize into weeks.
+
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Log Analytics workspace is listed under excluded with the
+      pattern and left out of every count; its diagnostic settings are not read
+      and LAQueryLogs is not queried for it. An in-scope workspace whose audit
+      goes to an excluded workspace is still queried there, so it keeps its
+      verdict. A SENTINEL_WORKSPACES filter applies first, and a workspace it names that a
+      pattern takes out fails the run as bad_config. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
 
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 

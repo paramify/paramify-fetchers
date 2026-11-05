@@ -1,5 +1,5 @@
 name: azure_app_service_deployments
-version: 0.2.0
+version: 0.3.0
 description: >-
   Shows how each App Service web app and slot is deployed: recorded deployments, slot swaps and publishing-credential retrievals with who and when, deployment source, and slot drift from production.
 category: azure
@@ -26,12 +26,14 @@ config_schema:
       90 days, so a larger value is clamped to 90 with a warning. Run at least that
       often, or events in between are never seen.
   resource_exclusions:
-    type: string
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
     description: >
       Resources outside the authorization boundary, to leave out of scope, as
-      case-insensitive glob patterns separated by commas or spaces, each with a
+      case-insensitive glob patterns listed in the manifest, each with a
       prefix: rg:<resource group> (read from the resource id), location:<region>
       (the region's name without spaces, such as eastus2) or id:<resource id>
       (also matches that resource's child resources). * matches any run of
@@ -45,7 +47,8 @@ config_schema:
       swap between production and an excluded slot counts on the side whose event
       names the requester. A pattern without one of these prefixes fails the run. Set it once under
       platforms.azure.config for every Azure fetcher that has this field;
-      fetchers without it ignore it. Can be ${env:VAR}. Empty: every resource is
+      fetchers without it ignore it. Each item is a pattern, or a pattern with a
+      reason. Empty: every resource is
       in scope.
 
 target_schema:

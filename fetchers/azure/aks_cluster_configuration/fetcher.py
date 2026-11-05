@@ -29,18 +29,20 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_aks_cluster_configuration")
 
 # auto_upgrade_profile.upgrade_channel: "none" is the literal for "no automatic
 # upgrades"; an absent field means the same thing.
 UPGRADE_CHANNEL_NONE = "none"
+KINDS = ("cluster",)
 
 
 # --- projection: the only code that touches an azure-mgmt model ---
@@ -256,7 +258,7 @@ def summarize(clusters: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_clusters(subscription_id, cred, collector: Collector) -> list[dict]:
+def collect_clusters(subscription_id, cred, collector: Collector) -> list[dict] | None:
     """One subscription-wide managed_clusters.list().
 
     The list response carries the whole projection (no per-cluster GET needed) and is an
@@ -272,16 +274,15 @@ def collect_clusters(subscription_id, cred, collector: Collector) -> list[dict]:
 
     client = collector.guard("containerservice.ContainerServiceClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     clusters = collector.guard(
         "containerservice.managed_clusters.list",
         lambda: [
             cluster_record(project_managed_cluster(c)) for c in client.managed_clusters.list()
         ],
-        default=[],
     )
-    return sorted(clusters, key=lambda r: r.get("id") or "")
+    return None if clusters is None else sorted(clusters, key=lambda r: r.get("id") or "")
 
 
 def main() -> int:
@@ -301,7 +302,9 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    clusters: list[dict] = []
+    clusters: list[dict] | None = None
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list call, so a zero-cluster result is legible: Azure
@@ -316,6 +319,8 @@ def main() -> int:
                 subscription_id,
             )
         clusters = collect_clusters(subscription_id, cred, collector)
+        if clusters is not None:
+            clusters, excluded = exclusions.split(clusters, "cluster")
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -325,6 +330,11 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    exclusions.warn_unmatched(logger)
+    listed = clusters is not None
+    clusters = clusters or []
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -332,8 +342,13 @@ def main() -> int:
         results={
             "clusters": clusters,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(clusters), "provider_registration_status": registration},
+        summary={
+            **summarize(clusters),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, KINDS, {"clusters": len(clusters) if listed else None}),
+        },
     )
 
     filename = (

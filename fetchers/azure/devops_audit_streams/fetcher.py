@@ -305,16 +305,23 @@ def _short(exc: BaseException) -> str:
 
 
 def summarize(enabled: Optional[bool], streams: Optional[List[Dict[str, Any]]], audit_log: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Stream counts read null when the streams couldn't be listed, and row counts when a workspace went unchecked."""
     listed = streams or []
-    checked = [s["ingestion"] for s in listed if s.get("ingestion")]
+    monitor = [s for s in listed if s["target_type"] == AZURE_MONITOR]
+    checked = [s["ingestion"] for s in monitor if s.get("ingestion")]
+    rows_known = streams is not None and len(checked) == len(monitor)
+
+    def known(value: Any, ok: bool = True) -> Any:
+        return value if streams is not None and ok else None
+
     return {
         "auditing_enabled": enabled,
-        "streams": None if streams is None else len(listed),
-        "streams_delivering": sum(1 for s in listed if s["delivering"]),
-        "streams_not_delivering": [s["display_name"] or str(s["id"]) for s in listed if not s["delivering"]],
-        "streams_by_target": sorted_counts(Counter(s["target_type"] or "unknown" for s in listed)),
-        "azure_monitor_streams_with_rows": sum(1 for i in checked if i["received_rows"]),
-        "azure_monitor_streams_missing_rows": sum(1 for i in checked if i["missing_rows"]),
+        "streams": known(len(listed)),
+        "streams_delivering": known(sum(1 for s in listed if s["delivering"])),
+        "streams_not_delivering": known([s["display_name"] or str(s["id"]) for s in listed if not s["delivering"]]),
+        "streams_by_target": known(sorted_counts(Counter(s["target_type"] or "unknown" for s in listed))),
+        "azure_monitor_streams_with_rows": known(sum(1 for i in checked if i["received_rows"]), rows_known),
+        "azure_monitor_streams_missing_rows": known(sum(1 for i in checked if i["missing_rows"]), rows_known),
         "newest_audit_event": dig(audit_log, "newest_event", "timestamp"),
     }
 
