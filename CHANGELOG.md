@@ -947,6 +947,25 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_policy_compliance` 0.5.0: in-scope compliant counts under
+  resource_exclusions.** With patterns set, the fetcher reads every latest
+  (resource, policy) state grouped on the server (`groupby((ResourceId,
+  ResourceLocation, PolicyAssignmentId, PolicyDefinitionId,
+  PolicyDefinitionReferenceId, ComplianceState))`, after a count of those groups,
+  up to 50,000), keeps the in-scope ones by resource id, group and region, and
+  recounts both sides from them: `compliant_resources`, `resources_evaluated`,
+  `resource_compliance_percentage` and every entry of
+  `resources_by_compliance_state` and `policies_by_compliance_state` (Compliant,
+  Exempt, Unknown and the rest), each assignment's `compliant_resources`,
+  `compliance_percentage` and `resource_details`, and the non-compliant counts.
+  A resource counts once under its highest-ranked state (NonCompliant, Compliant,
+  Error, Conflict, Protected, Exempt, Unknown), a policy once per assignment the
+  same way. These were null before; the non-compliant counts no longer go null
+  when the itemized list is truncated or skipped. All of them read null, map
+  values included, when the grouped read fails or returns fewer groups than the
+  service counted. A pattern that matches only compliant resources now counts as
+  matched. Without patterns nothing changes and the read is not made.
+
 - **`azure_backup_recovery_status` 0.4.0: restore jobs.** Each vault now lists
   its restore jobs (`restore_jobs`) over `restore_window_days` (365 by default
   and at most, `AZURE_BACKUP_RESTORE_WINDOW_DAYS`; a value that isn't a whole

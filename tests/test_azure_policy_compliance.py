@@ -507,7 +507,7 @@ def test_collect_recurrence_reads_history_once_then_each_flipping_pair(monkeypat
 
     client = fake_client(policy_states={"list_query_results_for_subscription": query})
     out = fx.collect_recurrence(client, "s1", 1, fx.Collector(logging.getLogger("t")), now=NOW)
-    assert seen[0][0] == "default" and seen[0][1] == f"groupby(({fx.HISTORY_GROUP_KEYS}))/aggregate($count as n)"
+    assert seen[0][0] == "default" and seen[0][1] == f"groupby(({fx.PAIR_GROUP_KEYS}))/aggregate($count as n)"
     assert "aggregate($count as evaluations)" in seen[1][1]
     assert seen[1][3] == datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
     assert len(seen) == 3 and seen[2][2] == "Timestamp asc"
@@ -523,7 +523,7 @@ def test_collect_recurrence_reads_history_once_then_each_flipping_pair(monkeypat
     assert fx.collect_recurrence(client, "s1", 0, fx.Collector(logging.getLogger("t")), now=NOW)[
         "history_truncated"] is True
 
-    monkeypatch.setattr(fx, "MAX_HISTORY_ROWS", 2)
+    monkeypatch.setattr(fx, "MAX_GROUP_ROWS", 2)
     out = fx.collect_recurrence(client, "s1", 0, fx.Collector(logging.getLogger("t")), now=NOW)
     # 0 reads no pair, which is not truncation.
     assert out["history_truncated"] is True and out["pairs_truncated"] is False
@@ -768,21 +768,45 @@ def test_in_scope_compliance_recounts_initiative_members_and_falls_back_to_the_e
              "results": {"non_compliant_resources": 1}},
         ],
     })
-    rows = [{**state(VM, assignment=ASSIGN.upper()), "policy_definition_action": "deny"},
-            {**state(NSG), "policy_definition_action": "deny"},
-            {**state(NSG, ref="r3"), "policy_definition_action": "modify"}]
-    service = {"non_compliant_resources": 3, "non_compliant_policies": 2, "resource_details": {"NonCompliant": 3}}
-    results, (rebuilt,) = fx.in_scope_compliance(service, [record], rows, known=True)
-    # r2's only non-compliant resource is out of scope; r3 is not in the service's list, so its evaluated effect is used.
+    kv = f"{RG}/providers/Microsoft.KeyVault/vaults/kv1"
+    pairs = [{**state(VM, assignment=ASSIGN.upper()), "compliance_state": "noncompliant"},
+             {**state(NSG), "compliance_state": "noncompliant"},
+             {**state(NSG, ref="r3"), "compliance_state": "noncompliant"},
+             {**state(NSG, ref="r2"), "compliance_state": "compliant"},
+             {**state(kv, ref="r2"), "compliance_state": "compliant"},
+             {**state(kv), "compliance_state": "unknown"}]
+    listed = [{**state(NSG, ref="r3"), "policy_definition_action": "modify"}]
+    service = {"non_compliant_resources": 3, "non_compliant_policies": 2,
+               "resource_details": {"noncompliant": 3, "compliant": 1}, "policy_details": {"noncompliant": 2}}
+    results, (rebuilt,) = fx.in_scope_compliance(service, [record], pairs, listed)
+    # r2 fails only out of scope; r3 is not in the service's list, so a listed state's effect is used.
     assert [(m["policy_definition_reference_id"], m["effect"], m["non_compliant_resources"])
             for m in rebuilt["non_compliant_member_policies"]] == [("R1", "deny", 2), ("r3", "modify", 1)]
     assert (rebuilt["non_compliant_resources"], rebuilt["non_compliant_policies"], rebuilt["is_compliant"],
-            rebuilt["member_policy_count"], rebuilt["compliance_percentage"]) == (2, 2, False, 2, None)
+            rebuilt["member_policy_count"], rebuilt["compliant_resources"], rebuilt["compliance_percentage"]) == (
+        2, 2, False, 2, 1, 33)
+    # kv1 is compliant with r2 and unknown to r1: compliant ranks higher.
+    assert rebuilt["resource_details"] == {"Compliant": 1, "NonCompliant": 2}
     assert (results["non_compliant_resources"], results["non_compliant_policies"], results["resource_details"]) == (
-        2, 2, {"NonCompliant": 2})
-    results, (unknown,) = fx.in_scope_compliance(service, [record], rows, known=False)
+        2, 2, {"compliant": 1, "noncompliant": 2})
+    # Policies per assignment: r1 and r3 fail, r2 is compliant on what is in scope.
+    assert results["policy_details"] == {"compliant": 1, "noncompliant": 2}
+    results, (unknown,) = fx.in_scope_compliance(service, [record], None, listed)
     assert (results["non_compliant_resources"], unknown["is_compliant"], unknown["non_compliant_member_policies"]) == (
         None, None, None)
+    assert (results["resource_details"], unknown["resource_details"]) == (
+        {"noncompliant": None, "compliant": None}, {"NonCompliant": None, "Compliant": None})
+    summary = fx.in_scope_summary(results, [unknown], [])
+    assert (summary["compliant_resources"], summary["resources_evaluated"], summary["compliant_assignments"]) == (
+        None, None, None)
+
+
+def test_rolled_up_counts_each_key_once_under_its_highest_ranked_state():
+    pairs = [{"resource_id": "a", "compliance_state": s} for s in ("unknown", "exempt", "Conflict", "error")]
+    pairs += [{"resource_id": "b", "compliance_state": s} for s in ("exempt", "protected")]
+    pairs += [{"resource_id": "c", "compliance_state": "NewState"}, {"resource_id": "c", "compliance_state": "unknown"}]
+    assert fx.rolled_up(pairs, lambda p: p["resource_id"], {"Exempt": 9}) == {
+        "Exempt": 0, "error": 1, "protected": 1, "unknown": 1}
 
 
 # --- wiring ---
