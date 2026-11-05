@@ -2942,6 +2942,13 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/entra_authentication_policy — trusted CAs; a missing certificate leaves every expiry unknown",
     ),
     (
+        "msgraph.generated.models.certificate_authority_detail",
+        "CertificateAuthorityDetail",
+        ["certificate", "certificate_authority_type", "certificate_revocation_list_url", "expiration_date_time",
+         "issuer", "issuer_subject_key_identifier", "thumbprint"],
+        "azure/entra_authentication_policy — CAs in the PKI-based trust store",
+    ),
+    (
         "msgraph.generated.models.certificate_based_auth_configuration",
         "CertificateBasedAuthConfiguration",
         ["certificate_authorities"],
@@ -4378,6 +4385,11 @@ def test_graph_certificate_sign_in_builders_present() -> None:
     assert getattr(organization, "certificate_based_auth_configuration", None) is not None, (
         "organization.by_organization_id(...).certificate_based_auth_configuration is gone.\n"
         "  affected fetchers: azure/entra_authentication_policy — trusted CAs read null"
+    )
+    pki = client.directory.public_key_infrastructure.certificate_based_auth_configurations
+    assert getattr(pki.by_certificate_based_auth_pki_id("p"), "certificate_authorities", None) is not None, (
+        "directory.public_key_infrastructure.certificate_based_auth_configurations...certificate_authorities is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — the PKI trust store reads failed"
     )
     assert getattr(group.transitive_members, "graph_user", None) is not None, (
         "groups.by_group_id(...).transitive_members.graph_user is gone.\n"

@@ -10,8 +10,10 @@ description: >
   state, security defaults, and Entra password protection (custom
   banned-password list and smart lockout) with the tenant's Entra ID licence tier,
   since enforcing a custom banned-password list needs P1. It lists the
-  certificate authorities trusted for certificate-based sign-in, flagging expired
-  ones and ones with no revocation list, and, when X.509 is enabled, each enabled
+  certificate authorities trusted for certificate-based sign-in, from both the
+  classic store and the PKI-based trust store (the latter needs the optional
+  PublicKeyInfrastructure.Read.All), flagging expired ones and ones with no
+  revocation list, and, when X.509 is enabled, each enabled
   member account it targets, whether a username binding can match that user to a
   certificate, and which weaker methods still apply to them. Windows Hello for
   Business is configured through device management, not this policy, and is not
@@ -69,6 +71,10 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 #                            X.509 enabled users (authorizationInfo) and group
 #                            transitive members (Organization.Read.All, User.Read.All
 #                            and GroupMember.Read.All cover the same reads)
+#   PublicKeyInfrastructure.Read.All — optional; the CAs in the PKI-based trust store.
+#                            Without it that store reads not_authorized, its CAs and the
+#                            combined CA counts read null, pki_store_missing_permission
+#                            names the grant, and the run still succeeds.
 # An `az login` session CANNOT read the authentication methods policy or security
 # defaults: the Azure CLI's first-party client is not pre-authorized for
 # Policy.Read.All, so both return 403 however privileged the signed-in user is.
@@ -90,7 +96,12 @@ evidence_set:
     GET /organization; GET /organization/{id}/certificateBasedAuthConfiguration
     (the trusted certificate authorities: issuer, root or intermediate, revocation
     list URLs, and the subject and expiry read from each certificate, which is not
-    copied into the evidence). With the X.509 method enabled, also GET /users
+    copied into the evidence), and GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations
+    with each one's /certificateAuthorities (the PKI-based trust store; optional
+    PublicKeyInfrastructure.Read.All: refused, it reads not_authorized and null, names
+    the missing grant in pki_store_missing_permission, and doesn't fail the run). Each
+    CA records its trust store; the CA counts take a CA listed in both stores (same
+    thumbprint) once, and are null unless both stores were read. With the X.509 method enabled, also GET /users
     ($select id, userPrincipalName, userType, accountEnabled,
     onPremisesUserPrincipalName, authorizationInfo) and GET
     /groups/{id}/transitiveMembers/microsoft.graph.user for each group an enabled

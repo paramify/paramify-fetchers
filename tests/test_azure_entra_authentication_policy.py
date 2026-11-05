@@ -34,6 +34,11 @@ class Affinity(Enum):
     HIGH = "high"
 
 
+class Kind(Enum):
+    ROOT = "root"
+    INTERMEDIATE = "intermediate"
+
+
 def _cert(days_left: int) -> bytes:
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
@@ -53,6 +58,14 @@ def _authority(days_left, root=True, crl="http://crl.example/ca.crl", cert=None)
     return ns(issuer=f"CN=Example CA {days_left}", issuer_ski="ab", is_root_authority=root,
               certificate_revocation_list_url=crl, delta_certificate_revocation_list_url=None,
               certificate=cert if cert is not None else _cert(days_left))
+
+
+def _pki_authority(days_left, kind=Kind.ROOT, crl="http://crl.example/pki.crl", cert=None, expires=None,
+                   thumbprint=None):
+    return ns(display_name=f"PKI CA {days_left}", issuer=f"CN=PKI CA {days_left}", issuer_subject_key_identifier="cd",
+              certificate_authority_type=kind, certificate_revocation_list_url=crl,
+              delta_certificate_revocation_list_url=None, certificate=cert if cert is not None else _cert(days_left),
+              expiration_date_time=expires, thumbprint=thumbprint)
 
 
 def _target(tid, kind="group"):
@@ -106,6 +119,17 @@ class Pages:
         return self
 
 
+class PkiStore(Pages):
+    """The PKI-based trust store: its configurations, and each one's certificate authorities."""
+
+    def __init__(self, pkis, calls, error=None, ca_error=None):
+        super().__init__(error or [ns(id=pid) for pid in pkis], calls, "pki")
+        self.pkis, self.ca_error = pkis, ca_error
+
+    def by_certificate_based_auth_pki_id(self, pid):
+        return ns(certificate_authorities=Pages(self.ca_error or self.pkis[pid], self.calls, f"pki {pid}"))
+
+
 def _async(value):
     async def get(*a, **k):
         if isinstance(value, Exception):
@@ -114,7 +138,7 @@ def _async(value):
     return get
 
 
-def _client(calls, configs, authorities, fail=()):
+def _client(calls, configs, authorities, fail=(), pki=None):
     policy = ns(id="authenticationMethodsPolicy", policy_migration_state="migrationComplete",
                 authentication_method_configurations=configs)
     organization = ns(
@@ -136,12 +160,15 @@ def _client(calls, configs, authorities, fail=()):
         subscribed_skus=Pages([]),
         users=Pages(DENIED if "users" in fail else USERS, calls, "users"),
         groups=ns(by_group_id=group),
+        directory=ns(public_key_infrastructure=ns(certificate_based_auth_configurations=PkiStore(
+            pki or {}, calls, error=DENIED if "pki" in fail else RuntimeError("timed out") if "pki_error" in fail
+            else None, ca_error=DENIED if "pki_authorities" in fail else None))),
     )
 
 
-def run(monkeypatch, tmp_path, configs, authorities=(), fail=()):
+def run(monkeypatch, tmp_path, configs, authorities=(), fail=(), pki=None):
     calls: list = []
-    client = _client(calls, list(configs), list(authorities), fail)
+    client = _client(calls, list(configs), list(authorities), fail, pki)
 
     async def with_client(collector, cred, work, default=None):
         return await work(client)
@@ -215,7 +242,10 @@ def test_failed_reads_are_null_never_zero(monkeypatch, tmp_path):
     code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=("authorities", "g3"))
     summary, results = evidence["summary"], evidence["results"]
     assert code == 1
-    assert results["trusted_certificate_authorities"] is None
+    # Only the PKI store was read, so the list holds its CAs (none) and every count is null.
+    assert results["trusted_certificate_authorities"] == []
+    assert results["certificate_authority_stores"]["certificate_based_auth_configuration"] == {
+        "status": "failed", "certificate_authorities": None}
     for key in ("trusted_certificate_authorities", "expired_certificate_authorities",
                 "certificate_authorities_expiry_unknown", "certificate_authorities_without_crl"):
         assert summary[key] is None, key
@@ -248,7 +278,7 @@ def test_x509_off_reads_no_users_and_counts_none_targeted(monkeypatch, tmp_path)
     code, evidence, calls = run(monkeypatch, tmp_path, (_x509(state="disabled"), _method("Sms")))
     assert code == 0 and evidence["results"]["x509_certificate_users"] == []
     assert (evidence["summary"]["x509_targeted_users"], evidence["summary"]["x509_targeted_users_unmapped"]) == (0, 0)
-    assert [c for c in calls if c[0] != "authorities"] == []
+    assert [c for c in calls if c[0] not in ("authorities", "pki")] == []
 
 
 def test_an_unreadable_policy_leaves_the_targets_unknown(monkeypatch, tmp_path):
@@ -256,6 +286,61 @@ def test_an_unreadable_policy_leaves_the_targets_unknown(monkeypatch, tmp_path):
     _, evidence, calls = run(monkeypatch, tmp_path, CONFIGS)
     assert evidence["summary"]["x509_targeted_users"] is None
     assert [c for c in calls if c[0] == "users"] == []
+
+
+def test_pki_store_cas_are_read_with_the_classic_ones_and_counted_once(monkeypatch, tmp_path):
+    shared = _cert(300)
+    past = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    pki = {"p1": [_pki_authority(300, cert=shared, crl=""),
+                  _pki_authority(0, kind=Kind.INTERMEDIATE, cert=b"unreadable", expires=past, thumbprint="ab12")]}
+    code, evidence, calls = run(monkeypatch, tmp_path, CONFIGS, [_authority(300, cert=shared)], pki=pki)
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 0
+    assert [c[0] for c in calls if c[0].startswith("pki")] == ["pki", "pki p1"]
+    records = results["trusted_certificate_authorities"]
+    assert [(r["trust_store"], r["authority_type"], r["has_crl"], r["expired"]) for r in records] == [
+        ("certificate_based_auth_configuration", "root", True, False),
+        ("public_key_infrastructure", "root", False, False),
+        ("public_key_infrastructure", "intermediate", True, True)]
+    # The unreadable certificate takes the service's expiry and thumbprint.
+    assert (records[2]["not_after"], records[2]["thumbprint"]) == ("2026-01-01T00:00:00Z", "AB12")
+    assert records[0]["thumbprint"] == records[1]["thumbprint"]
+    assert results["certificate_authority_stores"]["public_key_infrastructure"] == {
+        "status": "read", "certificate_authorities": 2, "missing_permission": None}
+    # The CA in both stores counts once, and without a CRL because its PKI entry has none.
+    assert (summary["trusted_certificate_authorities"], summary["expired_certificate_authorities"],
+            summary["certificate_authorities_expiry_unknown"], summary["certificate_authorities_without_crl"]) == (
+        2, 1, 0, 1)
+    assert (summary["classic_store_certificate_authorities"], summary["pki_store_certificate_authorities"],
+            summary["pki_store_status"], summary["pki_store_missing_permission"]) == (1, 2, "read", None)
+
+
+@pytest.mark.parametrize("fail", ["pki", "pki_authorities"])
+def test_a_refused_pki_store_reads_null_and_names_the_grant(monkeypatch, tmp_path, fail):
+    code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=(fail,),
+                            pki={"p1": [_pki_authority(30)]})
+    summary, results = evidence["summary"], evidence["results"]
+    # The grant is optional: the run succeeds, and the store is unknown rather than empty.
+    assert code == 0 and evidence["metadata"].get("partial_failure") is not True
+    assert results["certificate_authority_stores"]["public_key_infrastructure"] == {
+        "status": "not_authorized", "certificate_authorities": None,
+        "missing_permission": "PublicKeyInfrastructure.Read.All"}
+    assert (summary["pki_store_status"], summary["pki_store_missing_permission"],
+            summary["pki_store_certificate_authorities"], summary["classic_store_certificate_authorities"]) == (
+        "not_authorized", "PublicKeyInfrastructure.Read.All", None, 1)
+    for key in ("trusted_certificate_authorities", "expired_certificate_authorities",
+                "certificate_authorities_expiry_unknown", "certificate_authorities_without_crl"):
+        assert summary[key] is None, key
+    assert [r["trust_store"] for r in results["trusted_certificate_authorities"]] == [
+        "certificate_based_auth_configuration"]
+
+
+def test_a_failed_pki_read_fails_the_run(monkeypatch, tmp_path):
+    code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, [_authority(300)], fail=("pki_error",))
+    summary = evidence["summary"]
+    assert code == 1
+    assert (summary["pki_store_status"], summary["pki_store_missing_permission"],
+            summary["trusted_certificate_authorities"]) == ("failed", None, None)
 
 
 def test_mapping_is_unknown_without_reported_bindings():
