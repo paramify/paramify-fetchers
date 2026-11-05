@@ -12,6 +12,28 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_waf_ddos_activity` 0.2.0: DDoS figures cover Network Protection too.** An
+  attached public IP that inherits its protection is now placed in its virtual
+  network, the same way `azure_ddos_protection` places it (the network of its NIC,
+  gateway, firewall or Bastion host, or of a load balancer's backend pool). If that
+  network has a DDoS protection plan, the IP counts as protected. Both SKUs give a
+  public IP the same `IfUnderDDoSAttack` metric, the same DDoS log categories and the
+  same mitigations
+  (https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-sku-comparison,
+  https://learn.microsoft.com/en-us/azure/ddos-protection/monitor-ddos-protection-reference).
+  So the attack-alert, attack-hour and mitigation figures now count IPs under
+  either SKU. Before, they counted only IPs with IP Protection.
+  - Each IP gets `effective_protection`, plus `virtual_network_id` and
+    `virtual_network_ddos_protection_plan_id` when it inherits.
+  - The summary adds `public_ips_with_network_protection`, `protected_public_ips`
+    and `public_ips_protection_unknown`.
+  - `protected_ips_without_attack_alert` is null when any attached IP's protection
+    is unknown.
+  - An IP on a NAT gateway no longer counts as protected, because neither SKU
+    covers it.
+  - The virtual network, NIC and load balancer lists are read only when some
+    attached IP inherits its protection. They need no access beyond Reader.
+
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
   a passkey (synced or device-bound), Windows Hello for Business or a macOS platform

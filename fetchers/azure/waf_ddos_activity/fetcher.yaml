@@ -1,5 +1,5 @@
 name: azure_waf_ddos_activity
-version: 0.1.0
+version: 0.2.0
 description: >-
   Shows whether DoS protection is watched: what each WAF blocked or only logged, whether WAF and DDoS attack alerts reach someone, and DDoS mitigations, which read unknown without DDoS Protection.
 category: azure
@@ -77,6 +77,7 @@ evidence_set:
     - GET Microsoft.Network/applicationGateways — gateways on a WAF tier with a WAF policy on the gateway, a listener or a path rule, or the legacy in-gateway WAF configuration
     - GET FrontDoorWebApplicationFirewallPolicies and GET ApplicationGatewayWebApplicationFirewallPolicies — each WAF policy's mode (Prevention or Detection) and state
     - GET Microsoft.Network/publicIPAddresses — every public IP, whether it is attached, and its own DDoS protection mode
+    - GET Microsoft.Network/virtualNetworks, networkInterfaces and loadBalancers (only when an attached public IP inherits its protection) — which virtual network the IP's resource sits in and whether that network has a DDoS protection plan, read as azure_ddos_protection reads it
     - GET diagnosticSettings (per WAF resource and per attached public IP) — which workspaces receive the WAF log and the DDoS log categories, and whether a gateway writes resource-specific tables
     - GET metrics for IfUnderDDoSAttack (per attached public IP) — hours the IP was under attack in the window
     - GET metricAlerts and GET scheduledQueryRules — alert rules on a WAF metric, a WAF log, IfUnderDDoSAttack or a DDoS log category
@@ -85,7 +86,7 @@ evidence_set:
     - KQL on AzureDiagnostics (categories FrontDoorWebApplicationFirewallLog and ApplicationGatewayFirewallLog) or AGWFirewallLogs — WAF requests per resource, policy and mode, and the most-matched rules
     - KQL on AzureDiagnostics (categories DDoSProtectionNotifications, DDoSMitigationReports and DDoSMitigationFlowLogs) — DDoS notifications, mitigations and reports per public IP
 
-    Output: azure_waf_ddos_activity_<subscription>.json — each WAF with its policies, log export, activity, top rules and alerts; each attached public IP with its protection mode, DDoS logs, attack alert, attack hours and mitigations; the alert rules; and each workspace read.
+    Output: azure_waf_ddos_activity_<subscription>.json — each WAF with its policies, log export, activity, top rules and alerts; each attached public IP with its own protection mode, the DDoS protection that covers it (and for an IP that inherits, its virtual network and plan), DDoS logs, attack alert, attack hours and mitigations; the alert rules; and each workspace read.
 
     Summary fields:
 
@@ -123,17 +124,20 @@ evidence_set:
     Are DDoS attacks watched on the attached public IPs?
     - public_ips — Number of public IPs in the subscription
     - internet_facing_public_ips — Number of public IPs attached to a resource or a NAT gateway; unattached IPs are left out of every DDoS figure
-    - public_ips_with_ip_protection — Number of attached public IPs whose own DDoS protection mode is Enabled (IP Protection), the only protection this fetcher reads as known to be on
+    - public_ips_with_ip_protection — Number of attached public IPs whose own DDoS protection mode is Enabled (IP Protection); an IP on a NAT gateway isn't counted, because neither DDoS Protection SKU covers it
+    - public_ips_with_network_protection — Number of attached public IPs that inherit their protection from a virtual network with a DDoS protection plan (Network Protection): the network of the IP's NIC, gateway, firewall or Bastion host, or of a load balancer's backend pool
+    - protected_public_ips — Number of attached public IPs that are protected: covered by DDoS IP Protection or DDoS Network Protection (public_ips_with_ip_protection + public_ips_with_network_protection). Either SKU gives a public IP the IfUnderDDoSAttack metric, the DDoS log categories and mitigations, so every protected-IP figure counts both
+    - public_ips_protection_unknown — Number of attached public IPs that inherit their protection but whose virtual network couldn't be found: the network, NIC or load balancer list couldn't be read, or a load balancer's backend pool is empty or spans networks
     - public_ips_protection_disabled — Number of attached public IPs whose DDoS protection mode is Disabled
-    - public_ips_protection_inherited — Number of attached public IPs whose DDoS protection mode is inherited from their virtual network, or unset; whether that network has a DDoS plan is shown by azure_ddos_protection
+    - public_ips_protection_inherited — Number of attached public IPs whose DDoS protection mode is inherited from their virtual network, or unset, whether or not that network has a DDoS plan
     - public_ips_exporting_ddos_logs — Number of attached public IPs whose diagnostic settings send all three DDoS log categories to a workspace
     - public_ips_with_attack_alert — Number of attached public IPs covered by an enabled alert rule on IfUnderDDoSAttack or a DDoS log category; null when the alert rule lists couldn't be read
     - public_ips_with_attack_alert_reaching_person — Number of attached public IPs whose attack alert reaches a person; null when the alert rule lists couldn't be read
     - ddos_attack_alert_rules — Number of alert rules on IfUnderDDoSAttack or whose query reads a DDoS log category; null when the alert rule lists couldn't be read
-    - protected_ips_with_attack_alert_reaching_receiver — Number of public IPs with IP Protection whose attack alert routes to an enabled receiver; null when no attached IP has IP Protection, because without DDoS Protection the alert can't fire, or when the alert rule lists couldn't be read
-    - protected_ips_without_attack_alert — Number of public IPs with IP Protection and no attack alert; null when no attached IP has IP Protection, or when the alert rule lists couldn't be read
-    - public_ips_attacked — Number of attached public IPs with at least one hour under attack in the window; null when no attached IP has IP Protection and none showed an attack, because without DDoS Protection the attack metric stays 0, or when the attack metric of any IP with IP Protection couldn't be read
-    - ddos_mitigations_started — Number of DDoS mitigations started on public IPs with IP Protection; null when no attached IP has IP Protection, or any workspace that such an IP sends DDoS logs to couldn't be read
+    - protected_ips_with_attack_alert_reaching_receiver — Number of protected public IPs (either SKU) whose attack alert routes to an enabled receiver; null when no attached IP is known to be protected, because without DDoS Protection the alert can't fire, or when the alert rule lists couldn't be read. An IP whose protection is unknown isn't counted
+    - protected_ips_without_attack_alert — Number of protected public IPs (either SKU) with no attack alert; null when no attached IP is known to be protected, when any attached IP's protection is unknown, or when the alert rule lists couldn't be read
+    - public_ips_attacked — Number of attached public IPs with at least one hour under attack in the window; null when no attached IP is known to be protected and none showed an attack, because without DDoS Protection the attack metric stays 0, or when the attack metric of any protected IP couldn't be read
+    - ddos_mitigations_started — Number of DDoS mitigations started on protected public IPs (either SKU); null when no attached IP is known to be protected, or any workspace that such an IP sends DDoS logs to couldn't be read
 
     Which workspaces were read?
     - log_workspaces — Number of Log Analytics workspaces queried

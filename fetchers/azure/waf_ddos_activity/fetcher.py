@@ -19,7 +19,7 @@ from alert_routing import (  # noqa: E402
     processing_rule_record,
     route,
 )
-from azure_common import basename  # noqa: E402
+from azure_common import arm_id_key, basename  # noqa: E402
 from azure_rest import (  # noqa: E402
     DIAG_API,
     LAW_API,
@@ -30,6 +30,16 @@ from azure_rest import (  # noqa: E402
     parse_time,
     run_subscription,
     table_missing,
+)
+from ddos_coverage import (  # noqa: E402
+    NETWORK_PROTECTION,
+    attachment,
+    effective_protection,
+    rest_load_balancer,
+    rest_network_interface,
+    rest_public_ip,
+    rest_virtual_network,
+    vnet_by_resource,
 )
 
 NAME = "azure_waf_ddos_activity"
@@ -149,6 +159,7 @@ ANALYTICS = "analytics"
 IP_PROTECTION = "ip_protection"
 DISABLED = "disabled"
 INHERITED = "virtual_network_inherited"
+UNKNOWN = "unknown"
 
 logger = logging.getLogger(NAME)
 
@@ -489,8 +500,22 @@ def protection(ip: dict) -> str | None:
         return IP_PROTECTION
     if mode == "disabled":
         return DISABLED
-    # Unset means inherited: protected only if the IP's virtual network has a DDoS plan (azure_ddos_protection resolves it).
+    # Unset means inherited: protected only if the IP's virtual network has a DDoS plan (ip_coverage resolves it).
     return INHERITED
+
+
+def ip_coverage(ip: dict, resource_vnets: dict, vnets_by_id: dict) -> dict:
+    """The DDoS protection covering an IP, as azure_ddos_protection reads it, and for an IP that inherits, its VNet."""
+    flat = rest_public_ip(ip)
+    attached_to, resource_id = attachment(flat)
+    vnet = vnets_by_id.get(resource_vnets.get(arm_id_key(resource_id))) if resource_id else None
+    effective = effective_protection(flat, attached_to, vnet)
+    inherits = protection(ip) == INHERITED and attached_to != "nat_gateway"
+    return {
+        "effective_protection": effective,
+        "virtual_network_id": vnet.get("id") if vnet and inherits else None,
+        "virtual_network_ddos_protection_plan_id": vnet.get("ddos_protection_plan_id") if effective == NETWORK_PROTECTION else None,
+    }
 
 
 def internet_facing(ip: dict) -> bool:
@@ -506,10 +531,13 @@ def attack_hours(metrics: list | None) -> int | None:
                if (d.get("maximum") or 0) >= 1)
 
 
-def ddos_record(ip: dict, settings, workspaces: dict, alert_rules: list[dict] | None, metric, ddos_read: dict) -> dict:
+def ddos_record(ip: dict, settings, workspaces: dict, alert_rules: list[dict] | None, metric, ddos_read: dict,
+                cover: dict | None = None) -> dict:
     rid = id_key(ip.get("id"))
     mode = protection(ip)
-    known_on = True if mode == IP_PROTECTION else None
+    cover = cover or ip_coverage(ip, {}, {})
+    # Both SKUs carry the same attack metric, logs and mitigations, so an IP covered by either is known to be on.
+    known_on = True if cover["effective_protection"] in (IP_PROTECTION, NETWORK_PROTECTION) else None
     exports = exported_categories(settings, DDOS_CATEGORIES)
     wids = sorted({w for ws in exports.values() for w in ws}, key=id_key)
     rows = [r for w in wids for r in _rows(workspaces.get(id_key(w)) or {}, "ddos", rid)]
@@ -528,6 +556,7 @@ def ddos_record(ip: dict, settings, workspaces: dict, alert_rules: list[dict] | 
         "attached": internet_facing(ip),
         "protection_mode": dig(ip, "properties", "ddosSettings", "protectionMode"),
         "protection": mode,
+        **cover,
         "ddos_protection_known_on": known_on,
         "diagnostic_settings_read": settings is not None,
         "ddos_log_categories_exported": sorted(c for c, ws in exports.items() if ws) if settings is not None else None,
@@ -558,6 +587,7 @@ def summarize(waf: list[dict], ips: list[dict], rules: list[dict] | None, worksp
     status = Counter(w["status"] for w in workspaces)
     facing = [i for i in ips if i["attached"]]
     protected = [i for i in facing if i["ddos_protection_known_on"]]
+    unknown = sum(1 for i in facing if i["effective_protection"] == UNKNOWN)
     last = _latest(w["last_event"] for w in waf)
     attacked = sum(1 for i in facing if i["attack_hours"])
 
@@ -591,7 +621,10 @@ def summarize(waf: list[dict], ips: list[dict], rules: list[dict] | None, worksp
         "waf_resources_without_waf_alert": alerts(lambda: sum(1 for w in waf if not w["waf_alert_rules"])),
         "public_ips": total_ips,
         "internet_facing_public_ips": len(facing),
-        "public_ips_with_ip_protection": len(protected),
+        "public_ips_with_ip_protection": sum(1 for i in facing if i["effective_protection"] == IP_PROTECTION),
+        "public_ips_with_network_protection": sum(1 for i in facing if i["effective_protection"] == NETWORK_PROTECTION),
+        "protected_public_ips": len(protected),
+        "public_ips_protection_unknown": unknown,
         "public_ips_protection_disabled": sum(1 for i in facing if i["protection"] == DISABLED),
         "public_ips_protection_inherited": sum(1 for i in facing if i["protection"] == INHERITED),
         "public_ips_exporting_ddos_logs": _count(facing, "ddos_logs_exported", True),
@@ -599,8 +632,9 @@ def summarize(waf: list[dict], ips: list[dict], rules: list[dict] | None, worksp
         "public_ips_with_attack_alert_reaching_person": alerts(lambda: _count(facing, "attack_alert_reaches_person", True)),
         "protected_ips_with_attack_alert_reaching_receiver":
             alerts(lambda: _count(protected, "attack_alert_can_fire", True)) if protected else None,
+        # An IP whose protection is unknown could be a protected one without an alert.
         "protected_ips_without_attack_alert":
-            alerts(lambda: sum(1 for i in protected if not i["attack_alert_rules"])) if protected else None,
+            alerts(lambda: sum(1 for i in protected if not i["attack_alert_rules"])) if protected and not unknown else None,
         "ddos_attack_alert_rules": alerts(lambda: sum(1 for r in rules or [] if r["watches_ddos_attack"])),
         "public_ips_attacked":
             None if any(i["attack_hours"] is None for i in protected) else (attacked if protected or attacked else None),
@@ -765,6 +799,10 @@ def collect(client, subscription_id: str, collector) -> tuple:
     ips = _provider_list(client, f"{base}/Microsoft.Network/publicIPAddresses", NETWORK_API, "network.publicIPAddresses.list",
                          collector)
     facing = [ip for ip in ips if internet_facing(ip)]
+    resource_vnets, vnets_by_id = {}, {}
+    if any(ip_coverage(ip, {}, {})["effective_protection"] == UNKNOWN for ip in facing):
+        resource_vnets, vnets_by_id = network_index(client, base, collector)
+    covers = {id_key(ip["id"]): ip_coverage(ip, resource_vnets, vnets_by_id) for ip in facing}
     waf_settings = {id_key(r["id"]): _settings(client, r["id"], collector) for r in waf_resources}
     ip_settings = {id_key(ip["id"]): _settings(client, ip["id"], collector) for ip in facing}
     end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
@@ -800,7 +838,8 @@ def collect(client, subscription_id: str, collector) -> tuple:
         key=lambda w: id_key(w["id"]),
     )
     ip_records = sorted(
-        (ddos_record(ip, ip_settings.get(id_key(ip["id"])), workspaces, alert_rules, metrics.get(id_key(ip["id"])), ddos_read)
+        (ddos_record(ip, ip_settings.get(id_key(ip["id"])), workspaces, alert_rules, metrics.get(id_key(ip["id"])), ddos_read,
+                     covers[id_key(ip["id"])])
          for ip in facing),
         key=lambda i: id_key(i["id"]),
     )
@@ -822,6 +861,18 @@ def collect(client, subscription_id: str, collector) -> tuple:
         "metric_timespan": timespan,
     }
     return results, summarize(waf_records, ip_records, rule_records, workspace_records, days, fd_without_waf, len(ips))
+
+
+def network_index(client, base: str, collector) -> tuple:
+    """Which VNet each resource sits in, and the VNets by id; a list that fails leaves the IPs it would place unknown."""
+    net = f"{base}/Microsoft.Network"
+    vnets = [rest_virtual_network(v) for v in _provider_list(client, f"{net}/virtualNetworks", NETWORK_API,
+                                                             "network.virtualNetworks.list", collector)]
+    nics = [rest_network_interface(n) for n in _provider_list(client, f"{net}/networkInterfaces", NETWORK_API,
+                                                              "network.networkInterfaces.list", collector)]
+    lbs = [rest_load_balancer(lb) for lb in _provider_list(client, f"{net}/loadBalancers", NETWORK_API,
+                                                           "network.loadBalancers.list", collector)]
+    return vnet_by_resource(vnets, nics, lbs), {arm_id_key(v["id"]): v for v in vnets}
 
 
 def _metric(client, resource_id: str, timespan: str, collector):
