@@ -5,7 +5,7 @@ A field spec is a plain dict:
     {
         "key":         str,          # the config/secret/target key
         "label":       str,          # display label (defaults to key)
-        "kind":        "text" | "int" | "bool" | "secret",
+        "kind":        "text" | "int" | "bool" | "secret" | "patterns",
         "value":       initial value (str/int/bool/None),
         "placeholder": str,          # e.g. a default or the suggested env var
         "required":    bool,
@@ -14,6 +14,11 @@ A field spec is a plain dict:
 
 `kind == "secret"` is a text input that collects an ENV VAR NAME (never a
 secret value); the caller turns it into a ${env:VAR} reference via api.set_secret.
+
+`kind == "patterns"` is a text area, one `pattern  # reason` per line (see
+patterns.to_lines). Its spec adds "prefixes" and "bare" (the field's grammar)
+and "note" (where the list comes from). get_value() is None while the text
+holds the patterns it opened with, else the list as manifest items.
 """
 
 from __future__ import annotations
@@ -22,8 +27,9 @@ from typing import Any, Optional
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Input, Label, Switch
+from textual.widgets import Input, Label, Switch, TextArea
 
+from framework import patterns
 from framework.secret_resolver import env_var_name
 
 
@@ -66,7 +72,12 @@ class FieldRow(Vertical):
             suffix = f"  [dim]{help_text}[/]" if help_text else ""
             yield Label(f"{head}{req}{suffix}", classes="field-label")
 
-        if kind == "bool":
+        if kind == "patterns":
+            if spec.get("note"):
+                yield Label(spec["note"], classes="field-note")
+            yield TextArea(spec.get("value") or "", placeholder=spec.get("placeholder", ""), soft_wrap=False,
+                           show_line_numbers=False, id="field-input", classes="patterns-input")
+        elif kind == "bool":
             yield Switch(value=bool(spec.get("value")), id="field-input")
         else:
             value = spec.get("value")
@@ -77,8 +88,20 @@ class FieldRow(Vertical):
                 id="field-input",
             )
 
+    def problems(self) -> list:
+        """What stops this row from being saved; only a pattern list is checked here."""
+        if self.spec.get("kind") != "patterns":
+            return []
+        items, shape = patterns.from_lines(self.query_one(TextArea).text)
+        return shape + patterns.check(items, self.spec.get("prefixes", ()), self.spec.get("bare", True))
+
     def get_value(self) -> Any:
         kind = self.spec.get("kind", "text")
+        if kind == "patterns":
+            items = patterns.from_lines(self.query_one(TextArea).text)[0]
+            if items == patterns.from_lines(self.spec.get("value") or "")[0]:
+                return None
+            return [item.as_manifest() for item in items]
         if kind == "bool":
             return self.query_one(Switch).value
         raw = self.query_one(Input).value.strip()

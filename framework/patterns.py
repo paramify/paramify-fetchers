@@ -118,6 +118,24 @@ def display(value: Any) -> str:
     return ", ".join(item.pattern for item in parse(value)[0])
 
 
+def to_lines(value: Any) -> str:
+    """A value as editor text: one pattern per line, with its reason after `  # `."""
+    return "\n".join(f"{i.pattern}  # {i.reason}" if i.reason else i.pattern for i in parse(value)[0])
+
+
+def from_lines(text: str) -> Tuple[List[Item], List[str]]:
+    """Editor text back into items: a line is `pattern` or `pattern  # reason`; blank lines are skipped."""
+    items: List[Item] = []
+    problems: List[str] = []
+    for n, line in enumerate(text.splitlines(), 1):
+        pattern, _, reason = (part.strip() for part in line.partition("#"))
+        if pattern:
+            items.append(Item(pattern, reason or None))
+        elif reason:
+            problems.append(f"line {n} has a reason but no pattern")
+    return items, problems
+
+
 def from_cli(raw: str) -> List[Any]:
     """A comma- or space-separated CLI value as manifest list items."""
     return [item.as_manifest() for item in parse(raw)[0]]

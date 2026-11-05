@@ -1054,6 +1054,17 @@ def remove_pattern(m: dict, scope: str, target: str, field: str, pattern: Option
     return gone
 
 
+def set_pattern_list(m: dict, use: str, field: str, items: List[patterns.Item], category: Optional[str] = None) -> None:
+    """Give a fetcher its own pattern list. An empty one stays as [] while its category lists patterns, so those don't
+    come back to it, and is dropped otherwise."""
+    if items or category_patterns(m, category, field):
+        set_fetcher_config(m, use, field, [it.as_manifest() for it in items])
+    else:
+        held = _existing_pattern_holder(m, "entry", use)
+        if held is not None:
+            held.pop(field, None)
+
+
 def category_patterns(m: dict, category: Optional[str], field: str) -> List[patterns.Item]:
     """The patterns platforms.<category>.config.<field> holds; none for a reference, which is never read."""
     value = ((_existing_pattern_holder(m, "platform", category) if category else None) or {}).get(field)
