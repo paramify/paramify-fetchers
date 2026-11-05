@@ -34,9 +34,13 @@ config_schema:
     description: >
       The defined recovery point objective, in hours. When set, each app reports
       `meets_recovery_point_objective`. It is true when both the newest restore point's
-      age and the largest gap inside the window are within the objective, false when
-      the app has no restore point (both reads succeeded) and null when a read failed.
-      Leave it unset and those fields are null.
+      age and the largest gap inside the window are within the objective. It is false on
+      a Free or Shared tier, when the newest restore point is older than the objective,
+      when the largest gap is longer than it, and when the app has no restore point
+      (both reads succeeded). It is null when a read failed, when there is only one
+      restore point in the window and it is within the objective, and when the plan
+      tier isn't recognised and there is no restore point. Leave it unset and those
+      fields are null.
   restore_test_window_days:
     type: integer
     required: false
