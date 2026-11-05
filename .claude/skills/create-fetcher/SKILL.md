@@ -239,6 +239,14 @@ single confirmation before building.
 
 7. If bash: `chmod +x fetchers/<category>/<short_name>/fetcher.sh`.
 
+8. **Check the summary fields against the code.** If the instructions list
+   summary fields, a test in `tests/` passes a summary holding every field to the
+   `assert_summary_documented` fixture, with the fetcher's path written out:
+   `assert_summary_documented("<category>/<short_name>", summary)`. For a python
+   fetcher, take the summary from a test run of the code; for a bash fetcher,
+   from its committed `sample.json`. `tests/test_contracts.py` fails a fetcher
+   with summary fields and no such call. See `docs/authoring_fetcher_guide.md`.
+
 ---
 
 ## Phase 4 — Verify (STOP on any failure)

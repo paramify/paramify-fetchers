@@ -146,6 +146,7 @@ def assert_summary_documented():
         for name, values in documented.items():
             if values and isinstance(summary.get(name), dict):
                 problems += [f"{name}: value {v!r} is not listed under it" for v in sorted(set(summary[name]) - set(values))]
+                problems += [f"{name}: value {v!r} is listed but not in the summary" for v in sorted(set(values) - set(summary[name]))]
         assert not problems, f"{fetcher} summary fields vs instructions:\n  " + "\n  ".join(problems)
     return _check
 
