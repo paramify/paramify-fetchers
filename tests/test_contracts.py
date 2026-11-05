@@ -227,17 +227,27 @@ def test_instructions_open_with_the_entry_path() -> None:
 TEXT_FORMAT_FETCHERS = (
     "azure/alert_rules",
     "azure/app_service_backups",
+    "azure/backup_vault_protection",
     "azure/bastion_configuration",
     "azure/change_work_items",
+    "azure/devops_identities",
+    "azure/devops_service_connections",
     "azure/entra_access_reviews",
+    "azure/entra_conditional_access_policies",
+    "azure/entra_dormant_identities",
+    "azure/entra_groups",
     "azure/entra_pim_assignments",
     "azure/entra_risky_users",
+    "azure/entra_sign_ins",
     "azure/firewall_configuration",
+    "azure/key_vault_key_rotation",
     "azure/resource_locks",
     "azure/sentinel_playbooks",
     "azure/service_availability",
     "azure/service_health_advisories",
     "azure/sql_managed_instance_configuration",
+    "azure/waf_ddos_activity",
+    "azure/zone_redundancy",
     "oci",
 )
 # Fetchers whose instructions listed summary fields before their tests checked them; each leaves once its tests
@@ -251,22 +261,15 @@ SUMMARY_DOCS_PENDING = (
     "azure/app_service_deployments",
     "azure/change_work_items",
     "azure/ddos_protection",
-    "azure/devops_identities",
     "azure/devops_permissions",
-    "azure/devops_service_connections",
     "azure/devops_work_items",
     "azure/dns_configuration",
-    "azure/entra_conditional_access_policies",
-    "azure/entra_dormant_identities",
     "azure/entra_emergency_accounts",
-    "azure/entra_groups",
     "azure/entra_risky_users",
     "azure/entra_service_principals",
-    "azure/entra_sign_ins",
     "azure/front_door_origins",
     "azure/front_door_tls",
     "azure/front_door_waf_coverage",
-    "azure/key_vault_key_rotation",
     "azure/monitor_fired_alerts",
     "azure/network_flow_logs",
     "azure/network_traffic_activity",
@@ -283,7 +286,6 @@ SUMMARY_DOCS_PENDING = (
     "azure/storage_encryption_status",
     "azure/virtual_wan_configuration",
     "azure/vpn_gateway_configuration",
-    "azure/waf_ddos_activity",
     "oci/audit_logging_events",
     "oci/bastion_sessions",
     "oci/block_volume_encryption",
@@ -300,7 +302,7 @@ SUMMARY_DOCS_PENDING = (
     "oci/vault_keys",
     "oci/zpr_policies",
 )
-SUMMARY_DOCS_PENDING_MAX = 56
+SUMMARY_DOCS_PENDING_MAX = 48
 MAX_DESCRIPTION_WORDS = 30
 MAX_INSTRUCTIONS_CHARS = 20_000
 MAX_FIELD_LINE_CHARS = 800
