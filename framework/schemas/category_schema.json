@@ -28,7 +28,8 @@
             "uniqueItems": true,
             "description": "For type patterns: the prefixes a pattern may start with, such as rg for rg:<glob>. validate refuses any other prefix."
           },
-          "bare": { "type": "boolean", "default": true, "description": "For type patterns: whether a pattern may have no prefix." }
+          "bare": { "type": "boolean", "default": true, "description": "For type patterns: whether a pattern may have no prefix." },
+          "exclusion": { "type": "boolean", "default": true, "description": "For type patterns: whether manifest exclude and unexclude may add to or remove from it. Set false for a list that widens what a fetcher shows, such as an allowlist, so an exclude never widens it." }
         }
       }
     },

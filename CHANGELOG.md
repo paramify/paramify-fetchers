@@ -80,6 +80,58 @@ schemas and the `paramify` CLI — not the internal code.
   a name fails the run with `bad_config`, since the type meant would need no
   approval: before anything is read when `CHANGE_RECORD_TYPES` is set, and
   otherwise after the comparison, whose file is still written.
+- **`azure_change_provenance` 0.3.0: before and after values for direct edits
+  and manual deployments.** Each such change carries `property_changes`, one
+  entry per changed property from Resource Graph's `changes`. A shown entry has
+  `path`, `previous_value`, `new_value` and `truncated`. A withheld one has only
+  `path` and `withheld`, the reason, and never the value or anything derived
+  from it.
+  - Values are shown only for an allowlist of security settings and tags. The
+    new `value_paths` setting adds to it: a pattern list (`type: patterns`) set
+    in the manifest as `path:<glob>` items, such as `path:properties.siteConfig.*`
+    or `path:*`, with `paramify manifest set-config`. Like the exclusion lists,
+    it takes no `${env:}`. It is marked `exclusion: false`, so
+    `paramify manifest exclude` and `unexclude` never edit it, and an exclude
+    can't widen what's shown. A pattern without `path:` fails the run as
+    `bad_config` and keeps no values. Any other path is
+    withheld as `not_allowlisted`.
+  - The secret check runs first, on every path, whatever the allowlist says. A
+    value is withheld as `secret` when a path segment names a secret or
+    free-form content (password, pass, passphrase, passcode, secret, token, any
+    name ending in key or key<n>, pwd, pw, pin, uri or url, key data, key value,
+    pfx, psk, connection string, authorization, headers, queries, body, env, app
+    settings, args, custom data), compared without case, `_` or `-`. It is also
+    withheld when the value, as written or URL-decoded (repeatedly, up to four
+    times), looks like one: a secret word anywhere in its text
+    (`name: DB_PASSWORD`, `Password123!`),
+    `NAME_PASSWORD=`, `pin=`, `pw=`, `--password x`, `Basic`/`Bearer`
+    credentials, a URL with a user, a JWT, a PEM private key, a short
+    random-looking string, or a long key-like string. The built-in allowlist
+    names specific paths, so a setting name such as `status` is shown only on its
+    own resource path.
+  - Two things can't be caught: a short password with nothing marking it, such
+    as one alone in a tag, and, under `path:*`, free-form content whose names
+    don't mark a secret (a generic parameter, setting or variable value, or a
+    script). `path:*` shows whatever such content holds, so it is the
+    operator's risk.
+  - Values are cut at 200 characters, and a change lists at most 25 entries
+    (`property_changes_truncated`). `property_value_counts` counts its values
+    shown, not allowlisted and secret, over every changed property. Values that
+    can't be read are null (unknown), not empty.
+  - Only the newest `max_value_changes` such changes keep values
+    (`AZURE_CHANGE_MAX_VALUE_CHANGES`, default 500, 0 for none). An invalid
+    setting fails the run as `bad_config` and keeps none.
+  - The summary adds `changes_with_property_values`,
+    `changes_property_values_capped`, `changes_property_values_unknown`,
+    `property_values_shown` and `property_values_withheld_by_reason`. Shown and
+    withheld are null when any change's values couldn't be read, and all five are
+    null when a change table couldn't be read. Changes with any other origin, and excluded changes, carry no
+    values.
+- **Pattern-list fields take `exclusion: false`.** It marks a `type: patterns`
+  field that shows more as it grows, such as an allowlist.
+  `paramify manifest exclude` and `unexclude` never pick it, even with
+  `--field`, so an exclude can't widen it. Set it with `set-config` or in the
+  manifest. Every existing pattern list keeps the default, `true`.
 - **`azure_devops_service_connections`** (`EVD-AZURE-DEVOPS-SERVICE-CONNECTIONS`):
   how an Azure DevOps organization's pipelines hold their secrets, and which runs
   used each service connection. Per connection, once however many projects share
