@@ -95,29 +95,29 @@ evidence_set:
     - waf_resources — Number of WAF resources: Front Door profiles that attach a WAF policy (or whose security policies couldn't be read) and WAF-tier App Gateways with a WAF policy on the gateway, a listener or a path rule, or the legacy WAF configuration. Which WAF applies to each listener is shown by azure_app_gateway_waf
     - front_door_waf_resources — Number of WAF resources that are Front Door profiles
     - app_gateway_waf_resources — Number of WAF resources that are App Gateways
-    - front_door_profiles_without_waf — Number of Front Door Standard and Premium profiles that attach no WAF policy
-    - waf_resources_in_detection_mode — Number of WAF resources with a policy in Detection mode, which logs matching requests without blocking them, including a policy that a gateway's listener or path rule attaches in place of the gateway's
+    - front_door_profiles_without_waf — Number of Front Door Standard and Premium profiles that attach no WAF policy; classic Front Door isn't read and is in no figure
+    - waf_resources_in_detection_mode — Number of WAF resources with a policy in Detection mode, which logs matching requests without blocking them, including a policy that a gateway's listener or path rule attaches in place of the gateway's; a disabled policy in Prevention mode is in neither this count nor waf_resources_mode_unknown
     - waf_resources_mode_unknown — Number of WAF resources with no policy in Detection mode where a policy's mode couldn't be read (the profile's security policies or the policy itself couldn't be read)
 
     Do the WAFs send their logs?
     - waf_resources_exporting_waf_log — Number of WAF resources with a diagnostic setting that sends the WAF log to a workspace, by name or through allLogs
-    - waf_resources_without_waf_log_export — Number of WAF resources whose diagnostic settings send the WAF log nowhere
+    - waf_resources_without_waf_log_export — Number of WAF resources whose diagnostic settings send the WAF log nowhere; a resource whose diagnostic settings couldn't be read is in neither this count nor waf_resources_exporting_waf_log, and its event counts read 0, not null
 
     What did the WAFs do in the window?
     - waf_resources_with_waf_events — Number of WAF resources whose WAF log has records in the window
     - waf_resources_without_waf_events — Number of WAF resources that export the WAF log to workspaces that were read and hold no records in the window
     - waf_resources_waf_log_unknown — Number of WAF resources that export the WAF log to a workspace that couldn't be read, or to a Basic-plan table that wasn't queried, and have no records in the workspaces that were read
-    - waf_events — Number of WAF log records in the window (one per rule a request matched); null when any workspace a WAF resource exports its WAF log to couldn't be read
-    - waf_requests_matched — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id (a record without one counts as its own request); null when any workspace a WAF resource exports its WAF log to couldn't be read
-    - waf_requests_blocked — Number of requests the WAF blocked: Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records, from a policy in Prevention mode; null when any workspace a WAF resource exports its WAF log to couldn't be read
-    - waf_requests_would_block — Number of requests that Prevention mode would have blocked but Detection mode only logged: on Front Door, a policy in Detection mode logged a blocking action (Block, Redirect or a failed JavaScript challenge); on an App Gateway, a mandatory rule, such as the anomaly-score rule 949110, logged Detected, which Prevention mode logs as Blocked; null when any workspace a WAF resource exports its WAF log to couldn't be read
-    - waf_requests_logged_only — Number of requests that matched a rule but were only logged (Log, AnomalyScoring or Matched, and not blocked, would-block or allowed); null when any workspace a WAF resource exports its WAF log to couldn't be read
-    - last_waf_event — Time of the latest WAF log record across all WAF resources (UTC)
+    - waf_events — Number of WAF log records in the window (one per rule a request matched); null when any workspace a WAF resource exports its WAF log to couldn't be read or any such table on a Basic or Auxiliary plan wasn't queried
+    - waf_requests_matched — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id (a record without one counts as its own request); null when any workspace a WAF resource exports its WAF log to couldn't be read or any such table on a Basic or Auxiliary plan wasn't queried
+    - waf_requests_blocked — Number of requests the WAF blocked: Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records, from a policy in Prevention mode; null when any workspace a WAF resource exports its WAF log to couldn't be read or any such table on a Basic or Auxiliary plan wasn't queried
+    - waf_requests_would_block — Number of requests that Prevention mode would have blocked but Detection mode only logged: on Front Door, a policy in Detection mode logged a blocking action (Block, Redirect or a failed JavaScript challenge); on an App Gateway, a mandatory rule, such as the anomaly-score rule 949110, logged Detected, which Prevention mode logs as Blocked; null when any workspace a WAF resource exports its WAF log to couldn't be read or any such table on a Basic or Auxiliary plan wasn't queried
+    - waf_requests_logged_only — Number of requests that matched a rule but were only logged (Log, AnomalyScoring, LogAndScore or Matched, and not blocked, would-block or allowed); null when any workspace a WAF resource exports its WAF log to couldn't be read or any such table on a Basic or Auxiliary plan wasn't queried
+    - last_waf_event — Time of the latest WAF log record across all WAF resources (UTC), taken only from WAF resources whose every WAF log destination was read; null when no WAF resource with every destination read has a record
 
     Do WAF alerts reach someone?
     - waf_alert_rules — Number of alert rules on a WAF metric (WebApplicationFirewallRequestCount, Azwaf*, BlockedCount or MatchedCount) or whose query reads a WAF log; null when the alert rule lists couldn't be read
     - waf_alert_rules_enabled — Number of enabled WAF alert rules; null when the alert rule lists couldn't be read
-    - waf_alert_rules_reaching_person — Number of enabled WAF alert rules that reach a person: an enabled action group with an email, SMS, voice, push, ARM role or ITSM receiver, and no alert processing rule that always suppresses it; null when the alert rule lists couldn't be read
+    - waf_alert_rules_reaching_person — Number of enabled WAF alert rules that reach a person: an enabled action group with an email, SMS, voice, push, ARM role or ITSM receiver, and no alert processing rule that always suppresses it; a processing rule that might suppress it (part of its scope, a condition or a schedule) makes it unknown, and the alert rule isn't counted; null when the alert rule lists couldn't be read
     - waf_resources_with_alert_reaching_person — Number of WAF resources covered by a WAF alert rule that reaches a person; a rule covers a resource when it is scoped to the resource, a resource group or subscription holding it, or (for a log alert) a workspace receiving its WAF log, and its metric or log belongs to that kind of WAF (WebApplicationFirewallRequestCount and the Front Door WAF log for Front Door; the other WAF metrics and logs for App Gateways); null when the alert rule lists couldn't be read
     - waf_resources_without_waf_alert — Number of WAF resources that no enabled WAF alert rule covers; null when the alert rule lists couldn't be read
 
@@ -134,13 +134,13 @@ evidence_set:
     - public_ips_with_attack_alert — Number of attached public IPs covered by an enabled alert rule on IfUnderDDoSAttack or a DDoS log category; null when the alert rule lists couldn't be read
     - public_ips_with_attack_alert_reaching_person — Number of attached public IPs whose attack alert reaches a person; null when the alert rule lists couldn't be read
     - ddos_attack_alert_rules — Number of alert rules on IfUnderDDoSAttack or whose query reads a DDoS log category; null when the alert rule lists couldn't be read
-    - protected_ips_with_attack_alert_reaching_receiver — Number of protected public IPs (either SKU) whose attack alert routes to an enabled receiver; null when no attached IP is known to be protected, because without DDoS Protection the alert can't fire, or when the alert rule lists couldn't be read. An IP whose protection is unknown isn't counted
+    - protected_ips_with_attack_alert_reaching_receiver — Number of protected public IPs (either SKU) whose attack alert routes to an enabled receiver of any type, suppression by alert processing rules not checked; null when no attached IP is known to be protected, because without DDoS Protection the alert can't fire, or when the alert rule lists couldn't be read. An IP whose protection is unknown isn't counted
     - protected_ips_without_attack_alert — Number of protected public IPs (either SKU) with no attack alert; null when no attached IP is known to be protected, when any attached IP's protection is unknown, or when the alert rule lists couldn't be read
     - public_ips_attacked — Number of attached public IPs with at least one hour under attack in the window; null when no attached IP is known to be protected and none showed an attack, because without DDoS Protection the attack metric stays 0, or when the attack metric of any protected IP couldn't be read
     - ddos_mitigations_started — Number of DDoS mitigations started on protected public IPs (either SKU); null when no attached IP is known to be protected, when any protected IP sends no DDoS log category to a workspace or its diagnostic settings couldn't be read, or when any workspace that a protected IP sends DDoS logs to couldn't be read
 
     Which workspaces were read?
-    - log_workspaces — Number of Log Analytics workspaces queried
+    - log_workspaces — Number of Log Analytics workspaces the fetcher tried to read, whatever the outcome; log_workspaces_queried, log_workspaces_not_authorized and log_workspaces_not_found leave out one whose read failed another way
     - log_workspaces_queried — Number of Log Analytics workspaces read
     - log_workspaces_not_authorized — Number of Log Analytics workspaces that refused the read
     - log_workspaces_not_found — Number of Log Analytics workspaces that no longer exist

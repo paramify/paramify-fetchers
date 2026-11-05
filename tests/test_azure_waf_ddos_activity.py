@@ -389,9 +389,10 @@ def test_protected_ip_reads_zero_once_its_logs_are_read():
     assert no_export["ddos_logs_exported"] is False and no_export["mitigations_started"] is None
 
 
-def test_summary_ddos_figures_are_null_without_protected_ips():
+def test_summary_ddos_figures_are_null_without_protected_ips(assert_summary_documented):
     ip = wda.ddos_record(public_ip("Disabled"), DDOS_SETTINGS, ddos_ws(), [], [], {LAW.lower(): True})
     summary = wda.summarize([], [ip], [], [], 30, 0, total_ips=3)
+    assert_summary_documented("azure/waf_ddos_activity", summary)
     assert (summary["public_ips"], summary["internet_facing_public_ips"]) == (3, 1)
     assert summary["public_ips_with_ip_protection"] == 0
     assert summary["protected_ips_without_attack_alert"] is None

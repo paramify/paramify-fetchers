@@ -286,6 +286,15 @@ def test_collects_the_organization_and_exits_zero(tmp_path):
     assert s["pipeline_runs_using_service_connections"] == 3
 
 
+def test_the_summary_matches_the_instructions(assert_summary_documented):
+    methods = sorted({*mod.AUTH_METHODS.values(), *mod.SPN_CREDENTIALS.values(), "service_principal", "unknown"})
+    connections = [{"name": m, "type": "azurerm", "auth_method": None if m == "unknown" else m, "azure": {},
+                    "stored_credential": False, "open_to_all_pipelines": False, "is_ready": True,
+                    "pipeline_runs_in_window": 0, "executions_collected": True, "executions": []} for m in methods]
+    summary = mod.summarize(connections, [], [], [], 30)
+    assert_summary_documented("azure/devops_service_connections", summary)
+
+
 def test_no_credential_or_variable_value_is_written(tmp_path):
     _, _, _, _, path = run(tmp_path)
     text = path.read_text()
