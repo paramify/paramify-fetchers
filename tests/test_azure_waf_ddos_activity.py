@@ -700,9 +700,33 @@ def test_collect_reads_protection_unknown_when_the_network_list_fails():
     results, summary = wda.collect(FakeClient(tables={wda.DIAG_TABLE: "Analytics"}, lists=lists), SUB_ID, c)
     assert not c.ok
     assert results["public_ips"][0]["effective_protection"] == "unknown"
-    assert summary["public_ips_protection_unknown"] == 1 and summary["protected_public_ips"] == 0
+    assert summary["public_ips_protection_unknown"] == 1
+    assert summary["protected_public_ips"] is None and summary["public_ips_with_network_protection"] is None
     assert summary["protected_ips_with_attack_alert_reaching_receiver"] is None
     assert summary["protected_ips_without_attack_alert"] is None
+
+
+@pytest.mark.parametrize("failed", ["networkInterfaces", "loadBalancers"])
+def test_a_failed_nic_or_load_balancer_list_nulls_the_protected_counts(failed):
+    lists = _network_lists(**{failed: azure_rest.ArmError(500, "InternalServerError", "boom")})
+    c = collector()
+    results, summary = wda.collect(FakeClient(tables={wda.DIAG_TABLE: "Analytics"}, lists=lists), SUB_ID, c)
+    assert not c.ok
+    # The IP is still placed through its subnet's back-reference, but the counts can't be complete.
+    assert results["public_ips"][0]["effective_protection"] == "network_protection"
+    assert summary["protected_public_ips"] is None and summary["public_ips_with_network_protection"] is None
+    assert summary["public_ips_with_ip_protection"] == 0
+
+
+def test_a_structural_unknown_keeps_the_protected_counts():
+    lists = _network_lists(loadBalancers=[{"id": LB, "properties": {}}])
+    lists[f"{SUB}/providers/Microsoft.Network/publicIPAddresses"] = [
+        public_ip("Enabled"), {**ip_on(f"{LB}/frontendIPConfigurations/fe"), "id": f"{IP}-lb"}]
+    c = collector()
+    _, summary = wda.collect(FakeClient(tables={wda.DIAG_TABLE: "Analytics"}, lists=lists), SUB_ID, c)
+    assert c.ok, c.failures
+    assert (summary["protected_public_ips"], summary["public_ips_protection_unknown"]) == (1, 1)
+    assert summary["public_ips_with_network_protection"] == 0
 
 
 def test_collect_skips_the_network_lists_when_no_ip_inherits():

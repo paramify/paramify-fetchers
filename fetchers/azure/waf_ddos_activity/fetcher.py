@@ -582,7 +582,7 @@ def _count(items, field, value) -> int:
 
 
 def summarize(waf: list[dict], ips: list[dict], rules: list[dict] | None, workspaces: list[dict], days: int,
-              fd_without_waf: int, total_ips: int) -> dict:
+              fd_without_waf: int, total_ips: int, network_read: bool = True) -> dict:
     exporting = [w for w in waf if w["waf_log_exported"]]
     status = Counter(w["status"] for w in workspaces)
     facing = [i for i in ips if i["attached"]]
@@ -622,8 +622,10 @@ def summarize(waf: list[dict], ips: list[dict], rules: list[dict] | None, worksp
         "public_ips": total_ips,
         "internet_facing_public_ips": len(facing),
         "public_ips_with_ip_protection": sum(1 for i in facing if i["effective_protection"] == IP_PROTECTION),
-        "public_ips_with_network_protection": sum(1 for i in facing if i["effective_protection"] == NETWORK_PROTECTION),
-        "protected_public_ips": len(protected),
+        # A failed network list hides how many inheriting IPs a plan covers.
+        "public_ips_with_network_protection":
+            sum(1 for i in facing if i["effective_protection"] == NETWORK_PROTECTION) if network_read else None,
+        "protected_public_ips": len(protected) if network_read else None,
         "public_ips_protection_unknown": unknown,
         "public_ips_protection_disabled": sum(1 for i in facing if i["protection"] == DISABLED),
         "public_ips_protection_inherited": sum(1 for i in facing if i["protection"] == INHERITED),
@@ -799,9 +801,9 @@ def collect(client, subscription_id: str, collector) -> tuple:
     ips = _provider_list(client, f"{base}/Microsoft.Network/publicIPAddresses", NETWORK_API, "network.publicIPAddresses.list",
                          collector)
     facing = [ip for ip in ips if internet_facing(ip)]
-    resource_vnets, vnets_by_id = {}, {}
+    resource_vnets, vnets_by_id, network_read = {}, {}, True
     if any(ip_coverage(ip, {}, {})["effective_protection"] == UNKNOWN for ip in facing):
-        resource_vnets, vnets_by_id = network_index(client, base, collector)
+        resource_vnets, vnets_by_id, network_read = network_index(client, base, collector)
     covers = {id_key(ip["id"]): ip_coverage(ip, resource_vnets, vnets_by_id) for ip in facing}
     waf_settings = {id_key(r["id"]): _settings(client, r["id"], collector) for r in waf_resources}
     ip_settings = {id_key(ip["id"]): _settings(client, ip["id"], collector) for ip in facing}
@@ -860,19 +862,20 @@ def collect(client, subscription_id: str, collector) -> tuple:
         "queries": filled_queries(fmt),
         "metric_timespan": timespan,
     }
-    return results, summarize(waf_records, ip_records, rule_records, workspace_records, days, fd_without_waf, len(ips))
+    return results, summarize(waf_records, ip_records, rule_records, workspace_records, days, fd_without_waf, len(ips),
+                              network_read)
 
 
 def network_index(client, base: str, collector) -> tuple:
-    """Which VNet each resource sits in, and the VNets by id; a list that fails leaves the IPs it would place unknown."""
+    """Which VNet each resource sits in, the VNets by id, and whether every list was read; a list that fails leaves the
+    IPs it would place unknown."""
     net = f"{base}/Microsoft.Network"
-    vnets = [rest_virtual_network(v) for v in _provider_list(client, f"{net}/virtualNetworks", NETWORK_API,
-                                                             "network.virtualNetworks.list", collector)]
-    nics = [rest_network_interface(n) for n in _provider_list(client, f"{net}/networkInterfaces", NETWORK_API,
-                                                              "network.networkInterfaces.list", collector)]
-    lbs = [rest_load_balancer(lb) for lb in _provider_list(client, f"{net}/loadBalancers", NETWORK_API,
-                                                           "network.loadBalancers.list", collector)]
-    return vnet_by_resource(vnets, nics, lbs), {arm_id_key(v["id"]): v for v in vnets}
+    raw = [_provider_read(client, f"{net}/{kind}", NETWORK_API, f"network.{kind}.list", collector)
+           for kind in ("virtualNetworks", "networkInterfaces", "loadBalancers")]
+    vnets = [rest_virtual_network(v) for v in raw[0] or []]
+    nics = [rest_network_interface(n) for n in raw[1] or []]
+    lbs = [rest_load_balancer(lb) for lb in raw[2] or []]
+    return vnet_by_resource(vnets, nics, lbs), {arm_id_key(v["id"]): v for v in vnets}, all(r is not None for r in raw)
 
 
 def _metric(client, resource_id: str, timespan: str, collector):
