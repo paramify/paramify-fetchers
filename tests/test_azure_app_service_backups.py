@@ -224,7 +224,7 @@ def test_no_restore_point_with_both_reads_ok_misses_the_rpo(monkeypatch):
     assert basic["latest_restore_point"] is None
     assert basic["backed_up"] is False
     assert basic["meets_recovery_point_objective"] is False
-    assert r.summary["apps_missing_recovery_point_objective"] >= 1
+    assert r.summary["apps_missing_recovery_point_objective"] == 2  # web-free and web-basic
 
 
 def test_no_restore_point_with_a_failed_read_stays_unknown(monkeypatch):

@@ -424,6 +424,131 @@ def test_figures_need_every_exporting_workspace():
     assert (ip["mitigations_started"], ip["mitigation_reports"]) == (None, None)
 
 
+# --- Network Protection through the IP's virtual network ---
+
+VNET = f"{RG}/providers/Microsoft.Network/virtualNetworks/vnet1"
+PLAN = f"{RG}/providers/Microsoft.Network/ddosProtectionPlans/plan1"
+NIC = f"{RG}/providers/Microsoft.Network/networkInterfaces/nic1"
+LB = f"{RG}/providers/Microsoft.Network/loadBalancers/lb1"
+AGW_FRONTEND = f"{AGW}/frontendIPConfigurations/f"
+
+
+def vnet(plan=True, configs=(f"{AGW}/gatewayIPConfigurations/g",), nic_configs=()):
+    subnet = {"id": f"{VNET}/subnets/s1", "properties": {
+        "applicationGatewayIPConfigurations": [{"id": c} for c in configs],
+        "ipConfigurations": [{"id": c} for c in nic_configs]}}
+    props = {"subnets": [subnet], "enableDdosProtection": plan}
+    if plan:
+        props["ddosProtectionPlan"] = {"id": PLAN}
+    return {"id": VNET, "name": "vnet1", "properties": props}
+
+
+def ip_on(config_id=AGW_FRONTEND, mode=None, nat=False):
+    props = {"ipAddress": "203.0.113.10"}
+    if mode:
+        props["ddosSettings"] = {"protectionMode": mode}
+    if nat:
+        props["natGateway"] = {"id": f"{RG}/providers/Microsoft.Network/natGateways/nat1"}
+    else:
+        props["ipConfiguration"] = {"id": config_id}
+    return {"id": IP, "name": "ip1", "properties": props}
+
+
+def index(vnets=(), nics=(), lbs=()):
+    flat = [wda.rest_virtual_network(v) for v in vnets]
+    resource_vnets = wda.vnet_by_resource(flat, [wda.rest_network_interface(n) for n in nics],
+                                          [wda.rest_load_balancer(lb) for lb in lbs])
+    return resource_vnets, {v["id"].lower(): v for v in flat}
+
+
+LB_RAW = {"id": LB, "properties": {"backendAddressPools": [{"properties": {
+    "backendIPConfigurations": [{"id": f"{NIC}/ipConfigurations/ipc1"}]}}]}}
+NIC_RAW = {"id": NIC, "properties": {"ipConfigurations": [{"properties": {"subnet": {"id": f"{VNET}/subnets/s1"}}}]}}
+
+
+@pytest.mark.parametrize("ip, networks, effective, vnet_id, plan_id", [
+    (ip_on(), index([vnet()]), "network_protection", VNET, PLAN),
+    (ip_on(mode="VirtualNetworkInherited"), index([vnet(plan=False)]), "none", VNET, None),
+    (ip_on(), index(), "unknown", None, None),
+    (ip_on(mode="Enabled"), index([vnet()]), "ip_protection", None, None),
+    (ip_on(mode="Disabled"), index([vnet()]), "disabled", None, None),
+    (ip_on(nat=True), index([vnet()]), "not_supported", None, None),
+    (ip_on(nat=True, mode="Enabled"), index([vnet()]), "not_supported", None, None),
+    (ip_on(f"{NIC}/ipConfigurations/ipc1"), index([vnet(configs=())], [NIC_RAW]), "network_protection", VNET, PLAN),
+    (ip_on(f"{LB}/frontendIPConfigurations/fe"), index([vnet(configs=(), nic_configs=(f"{NIC}/ipConfigurations/ipc1",))],
+                                                        lbs=[LB_RAW]), "network_protection", VNET, PLAN),
+    (ip_on(f"{LB}/frontendIPConfigurations/fe"), index([vnet()], lbs=[{"id": LB, "properties": {}}]), "unknown", None, None),
+])
+def test_ip_coverage(ip, networks, effective, vnet_id, plan_id):
+    cover = wda.ip_coverage(ip, *networks)
+    assert cover == {"effective_protection": effective, "virtual_network_id": vnet_id,
+                     "virtual_network_ddos_protection_plan_id": plan_id}
+
+
+def network_protected(ip=None, alerts=(), metric=(), read=True):
+    ip = ip or ip_on()
+    return wda.ddos_record(ip, DDOS_SETTINGS, ddos_ws(), list(alerts), list(metric) if metric is not None else None,
+                           {LAW.lower(): read}, wda.ip_coverage(ip, *index([vnet()])))
+
+
+def test_a_network_protected_ip_is_known_protected():
+    rec = network_protected(alerts=[rule([VNET.rsplit("/providers/", 1)[0]], waf=False)])
+    assert rec["effective_protection"] == "network_protection" and rec["ddos_protection_known_on"] is True
+    assert rec["protection"] == wda.INHERITED and rec["virtual_network_id"] == VNET
+    assert rec["attack_alert_can_fire"] is True
+    assert (rec["attack_hours"], rec["mitigations_started"], rec["mitigation_reports"]) == (0, 0, 0)
+
+
+def test_summary_counts_network_protected_ips_in_the_protected_figures():
+    alerted = network_protected(alerts=[rule([RG], waf=False)])
+    unalerted = network_protected({**ip_on(), "id": f"{IP}2"})
+    summary = wda.summarize([], [alerted, unalerted], [rule([RG], waf=False)], [], 30, 0, total_ips=2)
+    assert summary["public_ips_with_ip_protection"] == 0
+    assert (summary["public_ips_with_network_protection"], summary["protected_public_ips"]) == (2, 2)
+    assert summary["public_ips_protection_unknown"] == 0 and summary["public_ips_protection_inherited"] == 2
+    assert summary["protected_ips_with_attack_alert_reaching_receiver"] == 1
+    assert summary["protected_ips_without_attack_alert"] == 1
+    assert (summary["public_ips_attacked"], summary["ddos_mitigations_started"]) == (0, 0)
+
+
+def test_summary_adds_ip_and_network_protection():
+    ip_level = wda.ddos_record({**public_ip("Enabled"), "id": f"{IP}2"}, DDOS_SETTINGS, ddos_ws(), [], [], {LAW.lower(): True})
+    summary = wda.summarize([], [network_protected(), ip_level], [], [], 30, 0, total_ips=2)
+    assert (summary["public_ips_with_ip_protection"], summary["public_ips_with_network_protection"],
+            summary["protected_public_ips"]) == (1, 1, 2)
+
+
+def test_unknown_protection_nulls_the_without_alert_figure():
+    unknown_id = f"{IP}2"
+    mitigated = [{"ResourceId": unknown_id.lower(), "Notifications": 2, "MitigationsStarted": 2, "Reports": 2, "FlowLogRecords": 0}]
+    unknown = wda.ddos_record({**ip_on(), "id": unknown_id}, DDOS_SETTINGS, ddos_ws(mitigated), [], [], {LAW.lower(): True})
+    assert unknown["effective_protection"] == "unknown" and unknown["ddos_protection_known_on"] is None
+    assert unknown["mitigations_started"] == 2
+    summary = wda.summarize([], [network_protected(), unknown], [], [], 30, 0, total_ips=2)
+    assert summary["public_ips_protection_unknown"] == 1 and summary["protected_public_ips"] == 1
+    assert summary["protected_ips_without_attack_alert"] is None
+    # Leaving the unknown IP out would read 0 mitigations though one started.
+    assert summary["ddos_mitigations_started"] is None
+    assert summary["protected_ips_with_attack_alert_reaching_receiver"] == 0
+    only_unknown = wda.summarize([], [unknown], [], [], 30, 0, total_ips=1)
+    assert only_unknown["protected_ips_with_attack_alert_reaching_receiver"] is None
+    assert only_unknown["protected_ips_without_attack_alert"] is None and only_unknown["protected_public_ips"] == 0
+
+
+@pytest.mark.parametrize("unknown_metric", [None, [{"timeseries": [{"data": [{"maximum": 0}]}]}]])
+def test_public_ips_attacked_is_null_while_any_protection_is_unknown(unknown_metric):
+    unknown = wda.ddos_record({**ip_on(), "id": f"{IP}2"}, DDOS_SETTINGS, ddos_ws(), [], unknown_metric, {LAW.lower(): True})
+    assert unknown["effective_protection"] == "unknown"
+    assert wda.summarize([], [network_protected()], [], [], 30, 0, total_ips=1)["public_ips_attacked"] == 0
+    assert wda.summarize([], [network_protected(), unknown], [], [], 30, 0, total_ips=2)["public_ips_attacked"] is None
+
+
+def test_a_network_protected_ip_with_an_unread_metric_reads_attacks_unknown():
+    unread = network_protected(metric=None)
+    assert unread["attack_hours"] is None
+    assert wda.summarize([], [unread], [], [], 30, 0, total_ips=1)["public_ips_attacked"] is None
+
+
 # --- workspace reads and collection ---
 
 class FakeClient:
@@ -560,6 +685,71 @@ def test_collect_wires_waf_ddos_and_alerts(monkeypatch):
     params = client.list_params[f"{IP}/providers/Microsoft.Insights/metrics"]
     assert params["metricnames"] == wda.ATTACK_METRIC and params["aggregation"] == "Maximum"
     assert params["timespan"].endswith("Z") and "+00:00" not in params["timespan"]
+
+
+def _network_lists(**overrides):
+    base = f"{SUB}/providers/Microsoft.Network"
+    lists = {**_lists(), f"{base}/virtualNetworks": [vnet()], f"{base}/networkInterfaces": [], f"{base}/loadBalancers": []}
+    lists.update({f"{base}/{k}": v for k, v in overrides.items()})
+    return lists
+
+
+def test_collect_places_an_inheriting_ip_in_its_network():
+    client = FakeClient(tables={wda.DIAG_TABLE: "Analytics"}, lists=_network_lists())
+    c = collector()
+    results, summary = wda.collect(client, SUB_ID, c)
+    assert c.ok, c.failures
+    ip = results["public_ips"][0]
+    assert (ip["effective_protection"], ip["virtual_network_id"], ip["virtual_network_ddos_protection_plan_id"]) == (
+        "network_protection", VNET, PLAN)
+    assert (summary["public_ips_with_network_protection"], summary["protected_public_ips"]) == (1, 1)
+    assert summary["protected_ips_with_attack_alert_reaching_receiver"] == 1
+    assert summary["protected_ips_without_attack_alert"] == 0
+    assert (summary["public_ips_attacked"], summary["ddos_mitigations_started"]) == (0, 0)
+
+
+def test_collect_reads_protection_unknown_when_the_network_list_fails():
+    lists = _network_lists(virtualNetworks=azure_rest.ArmError(500, "InternalServerError", "boom"))
+    c = collector()
+    results, summary = wda.collect(FakeClient(tables={wda.DIAG_TABLE: "Analytics"}, lists=lists), SUB_ID, c)
+    assert not c.ok
+    assert results["public_ips"][0]["effective_protection"] == "unknown"
+    assert summary["public_ips_protection_unknown"] == 1
+    assert summary["protected_public_ips"] is None and summary["public_ips_with_network_protection"] is None
+    assert summary["protected_ips_with_attack_alert_reaching_receiver"] is None
+    assert summary["protected_ips_without_attack_alert"] is None
+
+
+@pytest.mark.parametrize("failed", ["networkInterfaces", "loadBalancers"])
+def test_a_failed_nic_or_load_balancer_list_nulls_the_protected_counts(failed):
+    lists = _network_lists(**{failed: azure_rest.ArmError(500, "InternalServerError", "boom")})
+    c = collector()
+    results, summary = wda.collect(FakeClient(tables={wda.DIAG_TABLE: "Analytics"}, lists=lists), SUB_ID, c)
+    assert not c.ok
+    # The IP is still placed through its subnet's back-reference, but the counts can't be complete.
+    assert results["public_ips"][0]["effective_protection"] == "network_protection"
+    assert summary["protected_public_ips"] is None and summary["public_ips_with_network_protection"] is None
+    assert summary["public_ips_with_ip_protection"] == 0
+
+
+def test_a_structural_unknown_keeps_the_protected_counts():
+    lists = _network_lists(loadBalancers=[{"id": LB, "properties": {}}])
+    lists[f"{SUB}/providers/Microsoft.Network/publicIPAddresses"] = [
+        public_ip("Enabled"), {**ip_on(f"{LB}/frontendIPConfigurations/fe"), "id": f"{IP}-lb"}]
+    c = collector()
+    _, summary = wda.collect(FakeClient(tables={wda.DIAG_TABLE: "Analytics"}, lists=lists), SUB_ID, c)
+    assert c.ok, c.failures
+    assert (summary["protected_public_ips"], summary["public_ips_protection_unknown"]) == (1, 1)
+    assert summary["public_ips_with_network_protection"] == 0
+
+
+def test_collect_skips_the_network_lists_when_no_ip_inherits():
+    lists = _network_lists()
+    lists[f"{SUB}/providers/Microsoft.Network/publicIPAddresses"] = [public_ip("Enabled")]
+    client = FakeClient(tables={wda.DIAG_TABLE: "Analytics"}, lists=lists)
+    _, summary = wda.collect(client, SUB_ID, collector())
+    assert not any(p.endswith(("/virtualNetworks", "/networkInterfaces", "/loadBalancers")) for p in client.list_params)
+    assert summary["public_ips_with_ip_protection"] == 1 and summary["protected_public_ips"] == 1
 
 
 def test_collect_treats_unregistered_providers_as_empty():

@@ -12,6 +12,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
+  secret and certificate gets `lifetime_days` (end date minus start date, null when
+  either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.
+  A credential counts as beyond the interval when its lifetime, less any 29 February in
+  its span, exceeds it; one with a start date and no end date counts too, as it never
+  expires. The summary adds `credentials_issued_beyond_approved_lifetime`,
+  `credentials_without_lifetime` and `approved_lifetime_days`; both counts read null
+  after a failed or partial applications read, and the first also while any verdict is
+  unknown. The interval is the new `approved_lifetime_days` config field
+  (`AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS`), default 365 (a convention: FedRAMP KSI-SVC-ASM
+  asks for regular rotation and sets no number), capped at 3650; a value that isn't a whole
+  number from 1 up fails the run as `bad_config`. No new calls.
+
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
   a passkey (synced or device-bound), Windows Hello for Business or a macOS platform
@@ -1051,8 +1064,52 @@ schemas and the `paramify` CLI — not the internal code.
   TFVC paths too. PAT scopes: Security (Manage), because Azure DevOps has no
   read-only scope for access control lists (the fetcher only reads), plus
   Identity (Read), Code (Read) and Project and Team (Read).
+- **`azure_devops_permissions` lists who can override check-in validation**
+  (0.1.1 → 0.2.0). `branch_policy_bypass_holders` covers Git only, so a TFVC-only
+  organization had no evidence of who can check in without a gated build. Each
+  Build entry now gets `checkin_validation_override`, true when the entry allows
+  Override check-in validation by build, set on it or inherited from a parent
+  object, and doesn't deny it. The summary adds `checkin_validation_override_grants`,
+  `checkin_validation_override_holders`, `checkin_validation_override_build_services`
+  (the build service accounts and the organization's Project Collection Build
+  Service Accounts group, which hold it by default), and
+  `checkin_validation_override_grants_outside_admin_groups` and
+  `checkin_validation_override_holders_outside_admin_groups`, which leave out the
+  admin groups and those build services. The Project Collection Build Service
+  Accounts group is recognised by its built-in security ID as well as its name, so
+  a project group that takes the name still counts outside. They read null when
+  the Build permissions can't be read, or under a project filter the project list
+  can't; the build-service list and the outside-admin pair also when an identity
+  can't be looked up.
 
 ### Changed
+
+- **`azure_waf_ddos_activity` 0.2.0: DDoS figures include IPs protected by a network-level DDoS plan.**
+  The existing figures `protected_ips_with_attack_alert_reaching_receiver`,
+  `protected_ips_without_attack_alert`, `public_ips_attacked` and
+  `ddos_mitigations_started` now include public IPs that a virtual network's DDoS
+  protection plan (Network Protection) covers. So do the per-IP `attack_alert_can_fire`,
+  `attack_hours` and `mitigations_*`. Before, all of these counted only IPs with IP
+  Protection.
+  - An attached public IP that inherits its protection is now placed in its virtual
+    network, the same way `azure_ddos_protection` places it: the network of its NIC,
+    gateway, firewall or Bastion host, or of a load balancer's backend pool.
+  - Both SKUs give a public IP the same `IfUnderDDoSAttack` metric, the same DDoS
+    log categories and the same mitigations
+    (https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-sku-comparison,
+    https://learn.microsoft.com/en-us/azure/ddos-protection/monitor-ddos-protection-reference).
+  - Each IP gets `effective_protection`, plus `virtual_network_id` and
+    `virtual_network_ddos_protection_plan_id` when it inherits.
+  - The summary adds `public_ips_with_network_protection`, `protected_public_ips`
+    and `public_ips_protection_unknown`. The first two are null when the virtual
+    network, NIC or load balancer list can't be read.
+  - `protected_ips_without_attack_alert`, `public_ips_attacked` and
+    `ddos_mitigations_started` are null when any attached IP's protection is
+    unknown, because that IP may be protected, attacked or mitigated.
+  - An IP on a NAT gateway no longer counts in `public_ips_with_ip_protection`,
+    because neither SKU covers it.
+  - The virtual network, NIC and load balancer lists are read only when some
+    attached IP inherits its protection. They need no access beyond Reader.
 
 - **`azure_policy_compliance` 0.5.0: in-scope compliant counts under
   resource_exclusions.** With patterns set, the fetcher reads every latest
@@ -1656,6 +1713,12 @@ schemas and the `paramify` CLI — not the internal code.
   `apps_missing_recovery_point_objective`, not in `apps_recovery_point_objective_unknown`.
   It stays null when either read failed, or when there is one restore point inside the RPO.
 
+- **`azure_devops_service_connections` 0.1.1: variable groups list their projects.**
+  The per-project variable group list carries no `variableGroupProjectReferences`, so
+  every group's `projects` came back empty. The fetcher now reads each newly seen group
+  by id through its project (`{project}/variablegroups/{id}`) and takes the projects from that read; the `groupIds=` list and the organization-level reads don't return them (measured on a live organization). A group whose
+  by-id read failed has `projects: null` and the failure is recorded.
+
 - **`azure_entra_emergency_accounts` 0.1.1: a synced passkey counts as a phishing-resistant
   method.** `phishing_resistant_method_registered` and
   `emergency_accounts_with_phishing_resistant_method` now count `passKeySynced`
@@ -1852,6 +1915,17 @@ schemas and the `paramify` CLI — not the internal code.
   a batch whose split finds no one is a failure, so its identities read as
   unread and the admin-group figures null, rather than every admin group read
   as an ordinary group.
+- **`azure_devops_permissions` resolves the organization-level groups**
+  (0.1.1 → 0.2.0). Permission entries name the organization's built-in groups,
+  such as Project Collection Administrators, by a template SID, and the
+  identities API answers with the group's own descriptor, so matching rows by
+  descriptor left them unresolved. As looked-up groups with no name they read as
+  ordinary groups, and their high-impact rights counted outside the admin groups.
+  Rows come back in request order, null where a descriptor isn't found, so they
+  are now matched by position; `unresolved_identities` and the outside-admin
+  figures can fall. A row that answers a different descriptor from the one
+  requested in its place leaves that identity unread and is reported as a
+  failure, so a reordered answer can't put one identity's rights on another.
 - **`azure_devops_audit_streams` no longer reads unlisted streams as no
   streams** (0.1.0 → 0.1.1). When the audit streams can't be listed, for
   example a 403 to an identity that may read the audit log but not its streams,

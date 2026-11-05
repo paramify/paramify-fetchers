@@ -158,7 +158,7 @@ evidence_set:
     - recovery_point_objective_hours — Hours: the configured recovery point objective (RPO); null if none is set
     - apps_meeting_recovery_point_objective — Number of web apps whose observed backup interval (the larger of the newest restore point's age and the largest gap, which needs at least two restore points in the window) is within the RPO
     - apps_missing_recovery_point_objective — Number of web apps that miss the RPO: on a Free or Shared tier, no restore point at all on a plan that supports backups (both reads succeeded), newest restore point older than the RPO, or observed backup interval longer than it
-    - apps_recovery_point_objective_unknown — Number of web apps neither meeting nor missing the RPO: a restore point read that failed, or fewer than two restore points in the window with a newest one no older than the RPO. Null when no RPO is set
+    - apps_recovery_point_objective_unknown — Number of web apps neither meeting nor missing the RPO: a restore point or backup history read that failed, an unrecognised plan tier with no restore point, or fewer than two restore points in the window with a newest one no older than the RPO. Null when no RPO is set
     - all_web_apps_meet_recovery_point_objective — True if every web app meets the RPO; false if any misses it, even when others are unknown; null if none misses it but any is unknown, there are no apps, or no RPO is set
 
     Are custom backups set up, succeeding and restore-tested?
