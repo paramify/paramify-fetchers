@@ -1289,12 +1289,13 @@ Summary fields:
 - `resource_groups_at_deployment_history_cap` — List of resource groups at ARM's 800-deployment history limit, where older deployments were deleted, so their changes look direct
 
 **What did people change outside a pipeline?**
-- `changes_with_property_values` — Number of direct-edit and manual-deployment changes that keep each changed property's value before and after; a value is shown only for a list of security settings and tags, plus any `path:` patterns added in the manifest's `value_paths`, and anything that looks like a secret is withheld (null if a change table couldn't be read)
+- `changes_with_property_values` — Number of direct-edit and manual-deployment changes whose property values were read and kept, before and after; a value is shown only for a list of specific security-setting and tag paths, plus any `path:` patterns added in the manifest's `value_paths`, and anything that looks like a secret is withheld first, on every path (null if a change table couldn't be read)
 - `changes_property_values_capped` — Number of direct-edit and manual-deployment changes past the `max_value_changes` limit (500 by default, newest kept first), which name the properties they changed but keep no values (null if a change table couldn't be read)
-- `property_values_shown` — Number of changed property values shown, before and after, on direct-edit and manual-deployment changes (null if a change table couldn't be read)
-- `property_values_withheld_by_reason` — Number of changed property values withheld on direct-edit and manual-deployment changes for each reason; a withheld value shows only its property's path and the reason (null if a change table couldn't be read):
-  - not_allowlisted (the property isn't on the list of settings whose values are shown)
-  - secret (the property's name or its value looks like a secret, such as a password, key, token, connection string or SAS signature; withheld even when the property is on the list)
+- `changes_property_values_unknown` — Number of direct-edit and manual-deployment changes that name changed properties but whose values couldn't be read (null if a change table couldn't be read)
+- `property_values_shown` — Number of changed property values that passed both checks on direct-edit and manual-deployment changes, including any past a change's 25-entry listing (null if a change table couldn't be read, or if any change's values couldn't be read)
+- `property_values_withheld_by_reason` — Number of changed property values withheld on direct-edit and manual-deployment changes for each reason; a withheld value shows only its property's path and the reason (null if a change table couldn't be read, or if any change's values couldn't be read):
+  - secret (the property's path names a secret or free-form content, such as a password, key, token, header, body or environment variable, or its value looks like one, such as a password assignment, Basic or Bearer credential, key, SAS signature or URL with a user; checked first, whatever the list says)
+  - not_allowlisted (not secret-looking, but the property isn't on the list of paths whose values are shown)
 
 
 ### azure_diagnostic_settings
