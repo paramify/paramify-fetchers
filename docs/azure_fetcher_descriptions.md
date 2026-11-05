@@ -338,8 +338,8 @@ Summary fields:
 - `mfa_required_for_azure_management_api` — True if at least one enforced policy requires MFA for all users on Windows Azure Service Management API (the Azure portal, CLI and PowerShell) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. The policy counts even when it lets the user meet a different control instead. Conditions (sign-in, user, insider or service principal risk, client app types, platforms, locations, device filter, authentication flows, application filter) and excluded users, groups, roles and apps aren't checked, so a policy limited by them still counts; `mfa_client_app_types_for_all_users_and_apps` is the strict figure
 
 **Who is left out?**
-- `enforced_policies_with_exclusions` — Number of enforced policies that exclude at least one user, group or directory role (the guest and external user exclusion is not read, so a policy that excludes only guests isn't counted); null if the policies couldn't be read
-- `distinct_excluded_principals` — Number of distinct users, groups and directory roles excluded by at least one enforced policy (not counting the guest and external user exclusion); null if the policies couldn't be read
+- `enforced_policies_with_exclusions` — Number of enforced policies that exclude at least one user, group or directory role (the excludeGuestsOrExternalUsers exclusion is not read, so a policy that excludes only guests or external users isn't counted); null if the policies couldn't be read
+- `distinct_excluded_principals` — Number of distinct users, groups and directory roles excluded by at least one enforced policy (not counting excludeGuestsOrExternalUsers); null if the policies couldn't be read
 
 
 ### azure_entra_dormant_identities
@@ -511,9 +511,9 @@ Summary fields:
 - `dynamic_groups_paused` — Number of dynamic groups whose rule processing is paused, so membership no longer follows the rule
 - `assigned_groups` — Number of groups whose membership isn't set by a rule: members are added and removed by hand, or, for synced groups (included here), managed in on-premises Active Directory
 - `synced_groups` — Number of groups synced from on-premises Active Directory, and managed there
-- `cloud_groups` — Number of groups created in Entra ID rather than synced
+- `cloud_groups` — Number of groups not currently synced from on-premises Active Directory, so a group that was synced and no longer is counts as cloud
 - `hidden_membership_groups` — Number of Microsoft 365 groups whose membership is hidden; their members are listed only with Member.Read.Hidden
-- `hidden_membership_groups_unread` — Number of hidden-membership groups that came back with no members, which Graph also returns without Member.Read.Hidden, so their members read unknown and the member fields leave them out; null if members couldn't be read
+- `hidden_membership_groups_unread` — Number of hidden-membership groups that came back with no members, which Graph also returns without Member.Read.Hidden, so their members read unknown and are left out of every member figure (`total_direct_memberships`, `empty_groups`, `groups_with_guest_members`, `groups_with_disabled_user_members`, `groups_with_nested_groups`, `users_in_role_assignable_groups` and `role_assignable_groups_with_guest_members`), which can then read low; null if members couldn't be read
 
 **Who owns each group?**
 - `groups_with_owners_not_in_graph` — Number of groups whose owners Microsoft Graph doesn't return: synced groups, distribution groups and mail-enabled security groups (created in Exchange); the owner fields leave them out
@@ -859,7 +859,7 @@ Summary fields:
 - `lookback_days` — Days of sign-ins read, ending at the run (7 unless `ENTRA_SIGN_IN_LOOKBACK_DAYS` sets it, at most 30). It should be at least the interval between runs, or some sign-ins are never read
 - `window_start` — Time of the lookback's start, in UTC
 - `window_end` — Time of the lookback's end (the run), in UTC
-- `sign_ins_complete` — True if every sign-in in the lookback was read; false if a read failed part-way or stopped at the limit of about 200,000, and the counts cover only the newest sign-ins read (`window_start` still shows the configured start)
+- `sign_ins_complete` — True if every sign-in in the lookback was read; false if a read failed part-way or stopped at the limit of about 200,000, and the counts cover only the newest sign-ins read (`window_start` still shows the configured start); also false when `sign_in_logs` is not_licensed or not_read
 - `sign_ins_truncated` — True if reading stopped at about 200,000 sign-ins (checked after each page of 1000); false otherwise
 - `total_sign_ins` — Number of interactive sign-ins in the lookback: a user signing in themselves. Non-interactive sign-ins (a client refreshing a token for a user), service principal and managed identity sign-ins aren't read; null if the logs weren't read
 - `successful_sign_ins` — Number of sign-ins that succeeded (error code 0); null if the logs weren't read
@@ -879,9 +879,9 @@ Summary fields:
 - `successful_legacy_authentication_sign_ins` — Number of successful sign-ins from legacy clients that can't do MFA: any client other than a browser, modern mobile and desktop apps or modern clients (Microsoft's own rule), such as IMAP, POP, SMTP or Exchange ActiveSync; a client Graph reports as Unknown isn't counted. A floor: only interactive sign-ins are read, and Microsoft's guidance is to check non-interactive sign-ins for legacy authentication too; null if the logs weren't read
 
 **Which methods were used?**
-- `methods_used` — Number of successful sign-ins that used each authentication method (Password, Authenticator App, SMS, FIDO2 security key and so on); a sign-in using two methods counts under both; null if the logs weren't read
-- `successful_phishing_resistant_sign_ins` — Number of successful sign-ins that used a phishing-resistant method: a FIDO2 security key, a passkey, Windows Hello for Business, a platform credential, or a certificate that alone satisfied MFA (any other method beside it must be phishing-resistant too, and a reused earlier step rules it out). A step that reused an earlier authentication (Previously satisfied, Satisfied by token) never counts, so this is a floor when the earlier factor was phishing-resistant; null if the logs weren't read
-- `users_using_phishing_resistant_methods` — Number of users with at least one successful phishing-resistant sign-in, a floor since a step that reused an earlier authentication never counts; null if the logs weren't read
+- `methods_used` — Number of successful sign-ins that used each authentication method (Password, Authenticator App, SMS, FIDO2 security key and so on); a sign-in using two methods counts under both; only the methods of succeeded steps count, and a step that reused an earlier authentication (Previously satisfied, token reuse) adds none, so the counts can add up to less than `successful_sign_ins`; null if the logs weren't read
+- `successful_phishing_resistant_sign_ins` — Number of successful sign-ins (Windows device logons included) that used a phishing-resistant method: a FIDO2 security key, a passkey, Windows Hello for Business, a platform credential, or a certificate that alone satisfied MFA (any other method beside it must be phishing-resistant too, and a reused earlier step rules it out). A step that reused an earlier authentication (Previously satisfied, Satisfied by token) never counts, so this is a floor when the earlier factor was phishing-resistant; null if the logs weren't read
+- `users_using_phishing_resistant_methods` — Number of users with at least one successful phishing-resistant sign-in (Windows device logons included), a floor since a step that reused an earlier authentication never counts; null if the logs weren't read
 
 **Did Conditional Access apply?**
 - `successful_sign_ins_without_conditional_access` — Number of successful sign-ins to apps (not Windows device logons) that no Conditional Access policy applied to; null if the logs weren't read
@@ -4062,7 +4062,7 @@ Summary fields:
 **Do WAF alerts reach someone?**
 - `waf_alert_rules` — Number of alert rules on a WAF metric (WebApplicationFirewallRequestCount, Azwaf*, BlockedCount or MatchedCount) or whose query reads a WAF log; null when the alert rule lists couldn't be read
 - `waf_alert_rules_enabled` — Number of enabled WAF alert rules; null when the alert rule lists couldn't be read
-- `waf_alert_rules_reaching_person` — Number of enabled WAF alert rules that reach a person: an enabled action group with an email, SMS, voice, push, ARM role or ITSM receiver, and no alert processing rule that always suppresses it (a rule that only sometimes suppresses it isn't checked); null when the alert rule lists couldn't be read
+- `waf_alert_rules_reaching_person` — Number of enabled WAF alert rules that reach a person: an enabled action group with an email, SMS, voice, push, ARM role or ITSM receiver, and no alert processing rule that always suppresses it; a processing rule that might suppress it (part of its scope, a condition or a schedule) makes it unknown, and the alert rule isn't counted; null when the alert rule lists couldn't be read
 - `waf_resources_with_alert_reaching_person` — Number of WAF resources covered by a WAF alert rule that reaches a person; a rule covers a resource when it is scoped to the resource, a resource group or subscription holding it, or (for a log alert) a workspace receiving its WAF log, and its metric or log belongs to that kind of WAF (WebApplicationFirewallRequestCount and the Front Door WAF log for Front Door; the other WAF metrics and logs for App Gateways); null when the alert rule lists couldn't be read
 - `waf_resources_without_waf_alert` — Number of WAF resources that no enabled WAF alert rule covers; null when the alert rule lists couldn't be read
 
@@ -4076,7 +4076,7 @@ Summary fields:
 - `public_ips_with_attack_alert` — Number of attached public IPs covered by an enabled alert rule on IfUnderDDoSAttack or a DDoS log category; null when the alert rule lists couldn't be read
 - `public_ips_with_attack_alert_reaching_person` — Number of attached public IPs whose attack alert reaches a person; null when the alert rule lists couldn't be read
 - `ddos_attack_alert_rules` — Number of alert rules on IfUnderDDoSAttack or whose query reads a DDoS log category; null when the alert rule lists couldn't be read
-- `protected_ips_with_attack_alert_reaching_receiver` — Number of public IPs with IP Protection whose attack alert routes to an enabled receiver of any type, alert processing rules not checked; null when no attached IP has IP Protection, because without DDoS Protection the alert can't fire, or when the alert rule lists couldn't be read
+- `protected_ips_with_attack_alert_reaching_receiver` — Number of public IPs with IP Protection whose attack alert routes to an enabled receiver of any type, suppression by alert processing rules not checked; null when no attached IP has IP Protection, because without DDoS Protection the alert can't fire, or when the alert rule lists couldn't be read
 - `protected_ips_without_attack_alert` — Number of public IPs with IP Protection and no attack alert; null when no attached IP has IP Protection, or when the alert rule lists couldn't be read
 - `public_ips_attacked` — Number of attached public IPs with at least one hour under attack in the window; null when no attached IP has IP Protection and none showed an attack, because without DDoS Protection the attack metric stays 0, or when the attack metric of any IP with IP Protection couldn't be read
 - `ddos_mitigations_started` — Number of DDoS mitigations started on public IPs with IP Protection; null when no attached IP has IP Protection, or any workspace that such an IP sends DDoS logs to couldn't be read, or any such IP exports no DDoS log category or its diagnostic settings couldn't be read
@@ -4989,7 +4989,7 @@ Summary fields:
 - `total_keys` — Number of keys across the in-scope key vaults
 - `enabled_keys` — Number of keys that are enabled
 - `keys_with_readable_rotation_policy` — Number of keys whose rotation policy could be read on either plane ("readable": the plane answered with a policy or with "there is none")
-- `keys_with_rotation_policy` — Number of keys with a rotation policy: any policy the data plane returned counts, including a default one that was never configured
+- `keys_with_rotation_policy` — Number of keys with a rotation policy: any policy the data plane returned counts, including Key Vault's default policy, which has only a Notify action and was never configured
 - `keys_with_rotation_enabled` — Number of keys whose rotation policy has a rotate action
 - `rotation_enabled_percentage` — Percentage of keys with a readable rotation policy that rotate = `keys_with_rotation_enabled` / `keys_with_readable_rotation_policy` × 100 (a whole number, 0–100); 0 when `keys_with_readable_rotation_policy` is 0. Keys whose policy couldn't be read are left out of both
 
@@ -5009,7 +5009,7 @@ Summary fields:
 
 **Are certificates expired or about to expire?**
 - `expired_certificates` — Number of Key Vault certificates past their expiry date when the fetcher ran; only certificates in vaults whose certificates could be listed count (a vault in `certificate_not_authorized_vaults` adds none, even if it holds an expired one), and a certificate with no expiry date is in neither this count nor `certificates_expiring_within_30_days`
-- `certificates_expiring_within_30_days` — Number of Key Vault certificates not yet expired that expire within 30 days (0 to 30 whole days left, with part days dropped, so 30 days 23 hours counts); counts the same certificates as `expired_certificates`
+- `certificates_expiring_within_30_days` — Number of Key Vault certificates not yet expired that expire within 30 days (0 to 30 whole days left, with part days dropped, so 30 days 23 hours counts); counts only certificates in vaults whose certificates could be listed, and only those with an expiry date
 - `expired_app_service_certificates` — Number of App Service certificates past their expiry date when the fetcher ran
 - `app_service_certificates_expiring_within_30_days` — Number of App Service certificates not yet expired that expire within 30 days
 
