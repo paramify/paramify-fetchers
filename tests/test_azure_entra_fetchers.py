@@ -321,6 +321,7 @@ OLD_KIOTA_TEXT = """
     (429, "TooManyRequests", "Too many requests", "rate_limited"),
     (503, "serviceNotAvailable", "Service unavailable", "target_unreachable"),
     (400, "BadRequest", "Invalid filter clause", "partial_failure"),
+    (404, "Request_ResourceNotFound", "Resource does not exist", "partial_failure"),
 ])
 def test_graph_errors_from_older_kiota_are_classified_by_status(status, error_code, message, code):
     text = OLD_KIOTA_TEXT.format(status=status, code=error_code, message=message)
