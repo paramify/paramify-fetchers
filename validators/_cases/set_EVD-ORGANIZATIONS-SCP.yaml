@@ -1,0 +1,23 @@
+# Set-level: every validator naming EVD-ORGANIZATIONS-SCP, combined the way
+# Paramify combines them (ERROR > FAIL > PASS).
+evidence_set: EVD-ORGANIZATIONS-SCP
+cases:
+  - name: full_read
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":[{"Id":"r-root","PolicyTypes":[{"Type":"SERVICE_CONTROL_POLICY","Status":"ENABLED"}]}],"ServiceControlPolicies":[{"Id":"p-FullAWSAccess","Name":"FullAWSAccess","AwsManaged":true,"Targets":[{"TargetId":"r-root"}]},{"Id":"p-deny","Name":"DenyLeaveOrg","AwsManaged":false,"Targets":[{"TargetId":"ou-a"}]}],"OrganizationsInUse":true,"ScpsEnabled":true,"PolicyRead":{"Status":"ok","Reason":null}}]}}'
+
+  - name: member_account_denied
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error_code":"not_authorized"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":null,"ServiceControlPolicies":null,"OrganizationsInUse":true,"ScpsEnabled":null,"PolicyRead":{"Status":"denied","Reason":"list-roots: An error occurred (AccessDeniedException) when calling the ListRoots operation: You don''t have permissions to access this resource."}}]}}'
+
+  - name: denied_even_if_exit_code_is_lost
+    expect: FAIL
+    note: >
+      the in-payload marker fails the set on its own, without relying on the exit code
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":null,"ServiceControlPolicies":null,"OrganizationsInUse":true,"ScpsEnabled":null,"PolicyRead":{"Status":"denied","Reason":"list-roots: An error occurred (AccessDeniedException) when calling the ListRoots operation: You don''t have permissions to access this resource."}}]}}'
+
+  - name: read_ok_zero_scps
+    expect: PASS
+    note: >
+      a real read of an organization with no SCPs is complete evidence; whether it needs guardrails is the assessor's call
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":[{"Id":"r-root","PolicyTypes":[]}],"ServiceControlPolicies":[],"OrganizationsInUse":true,"ScpsEnabled":false,"PolicyRead":{"Status":"ok","Reason":null}}]}}'

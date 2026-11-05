@@ -162,6 +162,8 @@ class ConfigField:
     #: For type `patterns`: the prefixes a pattern may start with (rg for rg:...), and whether one may have none.
     prefixes: Tuple[str, ...] = ()
     bare: bool = True
+    #: For type `patterns`: whether `manifest exclude`/`unexclude` may change it. An allowlist sets False.
+    exclusion: bool = True
 
 
 @dataclass
@@ -330,3 +332,5 @@ class InvocationResult:
     error_code: Optional[str] = None
     # A comparator's inputs, as the runner records them in `metadata.inputs`.
     inputs: Optional[List[Dict[str, Any]]] = None
+    # The pattern lists the fetcher received, per field, for `metadata.config_patterns`; None when it got none.
+    config_patterns: Optional[Dict[str, List[Dict[str, Any]]]] = None

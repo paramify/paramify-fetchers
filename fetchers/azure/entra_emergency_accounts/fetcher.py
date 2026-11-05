@@ -20,6 +20,7 @@ from azure_rest import (  # noqa: E402
     parse_time,
     run_subscription,
 )
+from entra_graph import PHISHING_RESISTANT_METHODS  # noqa: E402
 
 NAME = "azure_entra_emergency_accounts"
 ACCOUNTS_ENV = "ENTRA_EMERGENCY_ACCOUNTS"
@@ -43,11 +44,6 @@ GUEST_USER_TYPES = frozenset({"internalguest", "b2bcollaborationguest"})
 NOT_LICENSED_MARKER = "nonpremiumtenant"
 # Graph's empty sign-in time is 0001-01-01T00:00:00Z.
 EARLIEST_REAL_YEAR = 2000
-# userRegistrationDetails.methodsRegistered values bound to the sign-in origin, so a look-alike site can't relay them.
-PHISHING_RESISTANT_METHODS = frozenset({
-    "fido2securitykey", "windowshelloforbusiness", "passkeydevicebound", "passkeydeviceboundauthenticator",
-    "passkeydeviceboundwindowshello", "macossecureenclavekey",
-})
 # The X.509 method counts as phishing-resistant only when multi-factor by default, as in
 # azure_entra_authentication_policy; binding rules that raise single-factor certificates aren't evaluated.
 X509_CONFIG_PATH = "/policies/authenticationMethodsPolicy/authenticationMethodConfigurations/x509Certificate"

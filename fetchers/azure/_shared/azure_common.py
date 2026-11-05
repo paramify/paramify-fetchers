@@ -232,7 +232,7 @@ _CODE_RULES = (
         "not_authorized",
         ("permissionerror",),
         ("authorizationfailed", "does not have authorization", "forbidden", "(403)",
-         "insufficient privileges", "not authorized"),
+         "insufficient privileges", "not authorized", "accessdenied", "authorization_requestdenied"),
     ),
     (
         "rate_limited",
@@ -271,8 +271,9 @@ def classify_failure_code(failures: List[Dict[str, str]]) -> str:
         return "partial_failure"
     types = {(f.get("type") or "").lower() for f in failures}
     messages = " ".join((f.get("message") or "").lower() for f in failures)
-    # msgraph renders a status as "<message> (status 403)"; the markers use ARM's "(403)".
-    messages = re.sub(r"\(status (\d{3})\)", r"(\1)", messages)
+    # msgraph renders a status as "<message> (status 403)", or "Code: 403" before kiota-abstractions 1.13; the
+    # markers use ARM's "(403)".
+    messages = re.sub(r"\(status (\d{3})\)|\bcode: (\d{3})\b", lambda m: f"({m.group(1) or m.group(2)})", messages)
     for code, type_markers, message_markers in _CODE_RULES:
         if any(marker in t for t in types for marker in type_markers):
             return code

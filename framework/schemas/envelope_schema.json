@@ -53,6 +53,28 @@
               "file": { "type": ["string", "null"], "description": "Path relative to the run directory." }
             }
           }
+        },
+        "config_patterns": {
+          "type": "object",
+          "description": "The pattern lists (`type: patterns` config fields, such as resource_exclusions) the fetcher received, keyed by field: each pattern in manifest order, its reason (null when the manifest gives none), and the manifest layer that set the list. Present only when the fetcher received at least one pattern. See docs/config_injection_guide.md.",
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["pattern", "reason", "source"],
+              "additionalProperties": false,
+              "properties": {
+                "pattern": { "type": "string" },
+                "reason": { "type": ["string", "null"] },
+                "source": {
+                  "type": "string",
+                  "enum": ["entry", "platform", "default"],
+                  "description": "entry: the fetcher's own manifest entry; platform: platforms.<category>.config; default: the field's fetcher.yaml default."
+                }
+              }
+            }
+          }
         }
       }
     },
