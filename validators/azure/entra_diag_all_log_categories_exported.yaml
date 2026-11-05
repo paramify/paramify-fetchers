@@ -4,16 +4,16 @@ type: AUTOMATED
 role: configuration
 statement: >-
   The tenant's Entra ID diagnostic settings and its list of log categories were read with no partial
-  failure, at least one category is exported, and every category the tenant offers is enabled in at
-  least one diagnostic setting (categories_not_exported is an empty list; it is null when the category
-  list can't be read). Supports KSI-MLA-LET for the Entra tenant, taking every available category as
+  failure, the list names at least one category, at least one category is exported, and every
+  category the tenant offers is enabled in at least one diagnostic setting (categories_not_exported is
+  an empty list; it is null when the category list can't be read). An empty category list fails. Supports KSI-MLA-LET for the Entra tenant, taking every available category as
   required. Does not prove: a narrower required list or the organization's documented exclusions (a
   documented exclusion still fails here); where each category goes, which may be storage or an event
   hub rather than a workspace (entra_diag_audit_and_sign_in_logs_to_sentinel checks the key two); or
   that the destinations match an approved inventory.
 
-# categories_not_exported is null when the category list can't be read.
-regex: '"partial_failure":\s*false\b[\s\S]*?"categories_exported":\s*[1-9]\d*,[\s\S]*?"categories_not_exported":\s*\[\s*\]'
+# categories_not_exported is null when the category list can't be read; results sorts before summary.
+regex: '"partial_failure":\s*false\b[\s\S]*?"categories_available":\s*\[\s*"[\s\S]*?"categories_exported":\s*[1-9]\d*,[\s\S]*?"categories_not_exported":\s*\[\s*\]'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
