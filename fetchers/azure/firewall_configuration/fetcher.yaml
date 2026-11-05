@@ -74,7 +74,7 @@ evidence_set:
     Summary fields:
 
     What firewalls and policies exist?
-    - firewalls_read — True if the firewall list was read; false if it failed, and then every firewall count below is 0 and the run fails
+    - firewalls_read — True if the firewall list was read; false if it failed, and then every firewall count and every rule count is null, not 0, and the run fails
     - firewalls — Number of Azure Firewalls in scope
     - firewalls_by_sku_tier — Number of firewalls for each SKU tier (basic, standard, premium, or unknown when the API reports none)
     - firewalls_by_deployment — Number of firewalls for each deployment kind:
@@ -84,7 +84,7 @@ evidence_set:
     - firewalls_with_classic_rules — Number of firewalls whose rules are the rule collections configured on the firewall itself
     - firewalls_without_rules — Number of firewalls with no policy and no classic rule collection; such a firewall denies every flow
     - firewalls_with_rules_unread — Number of firewalls whose policy, or a base policy in its chain, could not be read, so their rule fields read null
-    - firewall_policies_read — True if the policy list was read; false if it failed
+    - firewall_policies_read — True if the policy list was read; false if it failed, and then every policy count and every rule count is null, not 0, and the run fails
     - firewall_policies — Number of Firewall Policies in the subscription and in scope
     - firewall_policies_in_use — Number of those policies attached to at least one firewall
     - firewall_policies_unused — Number of those policies attached to no firewall
@@ -98,9 +98,9 @@ evidence_set:
     - allow_all_network_rules — Number of allow network rules whose sources and destinations are any (*, 0.0.0.0/0 or any) and whose ports are * or together cover 1-65535, in any number of entries or ranges; an IP group adds addresses, so a * beside one is still every address; a rule that carries only ICMP is not counted; such a rule permits every flow; counted regardless of the priority of other rules; null if any rules could not be read
     - network_rules_to_any_destination — Number of allow network rules whose destination is any, whatever the source or ports; null if any rules could not be read
     - application_rules_to_any_fqdn — Number of allow application rules whose target FQDN or URL is * with no FQDN tag or web category narrowing it; such a rule permits web traffic to any destination; null if any rules could not be read
-    - firewalls_enforcing_egress_filtering — Number of firewalls with at least one network or application rule and no allow-all network rule and no any-FQDN application rule in their effective rules (the attached policy and its base policies, or the classic rule collections); a firewall with only DNAT rules or no rules at all does not count; null if any firewall's rules could not be read
+    - firewalls_enforcing_egress_filtering — Number of firewalls with no allow-all network rule and no any-FQDN application rule in their effective rules (the attached policy and its base policies, or the classic rule collections). Azure Firewall denies whatever no rule allows, so a firewall with no rules, or with only DNAT or deny rules, counts: it blocks every outbound flow (firewalls_without_rules lists the ones with no rules, so an idle firewall is still visible). This judges the rules only, not whether traffic reaches the firewall: a subnet whose default route does not lead to it bypasses it, which azure_vnet_egress_routing reports. Null if any firewall's rules could not be read or the firewall list failed
     - firewalls_with_allow_all_rule — Number of firewalls whose effective rules include an allow-all network rule or an any-FQDN application rule; null if any firewall's rules could not be read
-    - egress_filtering_percentage — Percentage of firewalls enforcing egress filtering: firewalls_enforcing_egress_filtering * 100 / firewalls, 0 when there are no firewalls; null if any firewall's rules could not be read
+    - egress_filtering_percentage — Percentage of firewalls enforcing egress filtering: firewalls_enforcing_egress_filtering * 100 / firewalls, 0 when there are no firewalls; null if any firewall's rules could not be read or the firewall list failed
 
     Does the firewall publish anything inbound?
     - dnat_rules — Number of DNAT rules, which translate a firewall public IP and port to an internal address; null if any rules could not be read

@@ -311,7 +311,12 @@ def test_failed_nic_list_leaves_every_path_unknown_and_fails() -> None:
 
 def test_failed_host_list_leaves_every_unreached_vm_unknown_and_fails() -> None:
     results, summary, collector = _collect(_Arm(hosts_fail=True))
-    assert not collector.ok and summary["bastion_hosts"] == 0 and summary["bastion_hosts_read"] is False
+    assert not collector.ok and summary["bastion_hosts_read"] is False
+    # An unread host list is not an empty one: no host count reads as a known 0.
+    for key in ("bastion_hosts", "bastion_hosts_by_sku", "bastion_hosts_with_subnet_nsg",
+                "bastion_hosts_without_subnet_nsg", "bastion_hosts_without_audit_log_export",
+                "bastion_hosts_with_public_ip", "virtual_networks_with_bastion"):
+        assert summary[key] is None, key
     assert summary["in_scope_bastion_hosts"] is None and summary["excluded_bastion_hosts"] is None
     paths = {v["name"]: v["bastion_path"] for v in results["virtual_machines"]}
     assert paths == {"vm-a": bs.UNKNOWN, "vm-spoke": bs.VIA_PEERING, "vm-island": bs.UNKNOWN}
@@ -407,3 +412,20 @@ def test_the_sku_is_read_from_the_top_of_the_resource() -> None:
     assert "sku" not in raw["properties"] and bs.host_record(raw, None, False, [])["sku"] == "basic"
     del raw["sku"]
     assert bs.host_record(raw, None, False, [])["sku"] == "unknown"
+
+
+class _VmListFails(_Arm):
+    def get(self, url, params=None, headers=None, timeout=None):
+        if urlparse(url).path.endswith("/providers/Microsoft.Compute/virtualMachines"):
+            return _Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+        return super().get(url, params, headers, timeout)
+
+
+def test_failed_vm_list_leaves_the_machine_counts_null() -> None:
+    results, summary, collector = _collect(_VmListFails())
+    assert not collector.ok and summary["virtual_machines_read"] is False
+    for key in ("virtual_machines", "virtual_machines_with_unknown_bastion_path", "virtual_machines_without_bastion_path",
+                "bastion_path_percentage", "in_scope_virtual_machines"):
+        assert summary[key] is None, key
+    # The host list was read, so its counts stand.
+    assert summary["bastion_hosts"] == 1

@@ -202,13 +202,16 @@ def _known(items, key) -> Optional[int]:
 
 
 def summarize(hosts: List[Dict[str, Any]], vms: List[Dict[str, Any]], hosts_read: bool, vms_read: bool,
-              vnets_read: bool) -> Dict[str, Any]:
+              vnets_read: bool, vm_list_read: Optional[bool] = None) -> Dict[str, Any]:
+    """vms_read is the machine and interface lists together; vm_list_read the machine list alone (defaults to vms_read).
+    A failed list is not an empty one, so every count that depends on it reads null, never a clean-looking 0."""
+    vm_list_read = vms_read if vm_list_read is None else vm_list_read
     paths = Counter(v["bastion_path"] for v in vms)
     known = hosts_read and vms_read and vnets_read and paths[UNKNOWN] == 0
     with_path = paths[IN_VNET] + paths[VIA_PEERING]
     logs_known = all(h["logs"]["diagnostic_settings_read"] for h in hosts)
     with_subnet = [h for h in hosts if h["subnet_id"]]
-    return {
+    summary = {
         "bastion_hosts_read": hosts_read,
         "bastion_hosts": len(hosts),
         "bastion_hosts_by_sku": sorted_counts(Counter(h["sku"] for h in hosts)),
@@ -239,6 +242,13 @@ def summarize(hosts: List[Dict[str, Any]], vms: List[Dict[str, Any]], hosts_read
         "virtual_machines_with_unknown_bastion_path": paths[UNKNOWN],
         "bastion_path_percentage": coverage_percentage(with_path, len(vms)) if known else None,
     }
+    if not hosts_read:
+        summary.update({k: None for k in summary
+                        if k.startswith("bastion_hosts") and k != "bastion_hosts_read"
+                        or k == "virtual_networks_with_bastion"})
+    if not vm_list_read:
+        summary.update({"virtual_machines": None, "virtual_machines_with_unknown_bastion_path": None})
+    return summary
 
 
 # --- collection ---
@@ -330,7 +340,7 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
                                  for k, v in sorted(foreign.items())},
         "excluded": sorted(excluded_hosts + excluded_vms, key=lambda e: arm_id_key(e.get("id"))),
     }
-    summary = {**summarize(hosts, vms, hosts_read, vms_read and raw_nics is not None, raw_vnets is not None),
+    summary = {**summarize(hosts, vms, hosts_read, vms_read and raw_nics is not None, raw_vnets is not None, vms_read),
                **exclusions.summary(excluded_hosts + excluded_vms, ("bastion_host", "virtual_machine"),
                                     {"bastion_hosts": len(hosts) if hosts_read else None,
                                      "virtual_machines": len(vms) if vms_read else None})}

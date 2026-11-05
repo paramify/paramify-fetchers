@@ -247,9 +247,12 @@ def test_classic_firewall_uses_its_own_rules_and_dns_proxy_property() -> None:
     assert record["rule_logs_exported"] is None and record["logs"]["diagnostic_settings_read"] is False
 
 
-def test_firewall_without_rules_is_not_enforcing_filtering() -> None:
+def test_firewall_without_rules_enforces_filtering_by_default_deny() -> None:
+    # Azure Firewall denies whatever no rule allows, so a firewall with no rules blocks every flow.
     record = fw.firewall_record(raw_firewall(CLASSIC, policy=None), {}, [])
-    assert record["rule_source"] == "none" and record["egress_filtering_enforced"] is False
+    assert record["rule_source"] == "none" and record["egress_filtering_enforced"] is True
+    summary = fw.summarize([record], [], True, True)
+    assert (summary["firewalls_without_rules"], summary["firewalls_enforcing_egress_filtering"]) == (1, 1)
 
 
 def test_hub_firewall_lists_hub_public_and_private_ips() -> None:
@@ -260,10 +263,11 @@ def test_hub_firewall_lists_hub_public_and_private_ips() -> None:
     assert record["private_ip_addresses"] == ["10.9.0.4"]
 
 
-def test_dnat_only_firewall_is_not_enforcing_egress_filtering() -> None:
+def test_dnat_only_firewall_enforces_egress_filtering_by_default_deny() -> None:
+    # DNAT rules only translate inbound traffic; outbound traffic still meets the default deny.
     classic = {"natRuleCollections": CLASSIC_RULES["natRuleCollections"]}
     record = fw.firewall_record(raw_firewall(CLASSIC, policy=None, classic=classic), {}, [])
-    assert record["rule_source"] == "classic" and record["egress_filtering_enforced"] is False
+    assert record["rule_source"] == "classic" and record["egress_filtering_enforced"] is True
 
 
 @pytest.mark.parametrize("ports, allow_all, admin", [
@@ -504,9 +508,17 @@ def test_bare_group_listing_is_completed_with_a_get_per_group() -> None:
 
 def test_failed_firewall_list_fails_the_run_with_nothing_assessed() -> None:
     results, summary, collector = _collect(_Arm(list_fail=True))
-    assert not collector.ok and summary["firewalls_read"] is False and summary["firewalls"] == 0
+    assert not collector.ok and summary["firewalls_read"] is False
     assert summary["in_scope_firewalls"] is None and summary["excluded_firewalls"] is None
     assert summary["firewall_policies_read"] is True
+    # An unread firewall list is not an empty one: no firewall or rule count reads as a known 0.
+    for key in ("firewalls", "firewalls_by_sku_tier", "firewalls_with_policy", "firewalls_enforcing_egress_filtering",
+                "egress_filtering_percentage", "firewalls_with_threat_intel_deny", "firewalls_with_allow_all_rule",
+                "firewalls_without_log_export", "log_categories_exported", "rules", "allow_all_network_rules",
+                "application_rules_to_any_fqdn", "rules_by_type"):
+        assert summary[key] is None, key
+    # The policy list was read, so its counts stand.
+    assert summary["firewall_policies"] == 2
 
 
 def test_unregistered_provider_reads_as_no_firewalls() -> None:
@@ -564,3 +576,39 @@ def test_a_foreign_allow_all_rule_reaches_the_summary_counts() -> None:
     _, summary, collector = _collect(Wide())
     assert collector.ok and summary["firewalls_with_allow_all_rule"] == 2
     assert summary["allow_all_network_rules"] == 2  # the base policy's rule and the foreign policy's rule
+
+
+class _ListsFail(_Arm):
+    """Refuses the firewall list, the policy list, or both."""
+
+    def __init__(self, firewalls_fail=True, policies_fail=True, **kwargs):
+        super().__init__(list_fail=firewalls_fail, **kwargs)
+        self.policies_fail = policies_fail
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        if self.policies_fail and urlparse(url).path.endswith("/providers/Microsoft.Network/firewallPolicies"):
+            return _Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+        return super().get(url, params, headers, timeout)
+
+
+def test_failed_policy_list_leaves_the_policy_and_rule_counts_null() -> None:
+    results, summary, collector = _collect(_ListsFail(firewalls_fail=False))
+    assert not collector.ok and summary["firewall_policies_read"] is False and summary["firewalls"] == 2
+    for key in ("firewall_policies", "firewall_policies_in_use", "firewall_policies_unused",
+                "firewall_policies_with_base_policy", "firewall_policies_with_rules_unread", "rules",
+                "allow_all_network_rules"):
+        assert summary[key] is None, key
+
+
+def test_failed_policy_list_with_no_firewalls_leaves_rule_counts_null() -> None:
+    results, summary, collector = _collect(_ListsFail(firewalls_fail=False, firewalls=[]))
+    assert summary["firewalls"] == 0 and summary["rules"] is None and summary["allow_all_network_rules"] is None
+
+
+def test_both_lists_failed_reads_nothing_as_zero() -> None:
+    results, summary, collector = _collect(_ListsFail())
+    assert not collector.ok
+    assert (summary["firewalls_read"], summary["firewall_policies_read"]) == (False, False)
+    zeros = {k: v for k, v in summary.items() if not isinstance(v, bool) and v in (0, {}, [])
+             and not k.startswith(("excluded_", "resource_exclusion"))}
+    assert zeros == {}, zeros

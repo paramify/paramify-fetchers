@@ -296,8 +296,9 @@ def firewall_record(raw: Dict[str, Any], policies: Dict[str, Dict[str, Any]], se
     if dig(props, "hubIPAddresses", "privateIPAddress"):
         private_ips.add(props["hubIPAddresses"]["privateIPAddress"])
     findings = rule_findings(rules)
-    outbound = None if rules is None else sum(1 for r in rules if r["rule_type"] in (NETWORK_RULE, APPLICATION_RULE))
-    enforcing = None if rules is None else bool(outbound) and findings["allow_all_network_rules"] == 0 \
+    # Azure Firewall denies whatever no rule allows, so a firewall with no allow-all network rule and no any-FQDN
+    # application rule filters egress, including one with no rules or only DNAT rules (it denies every flow).
+    enforcing = None if rules is None else findings["allow_all_network_rules"] == 0 \
         and findings["application_rules_to_any_fqdn"] == 0
     # Once a policy is attached Azure ignores the firewall's own settings, so an unread policy leaves them unknown.
     settings_known = effective is not None or not policy_id
@@ -358,7 +359,9 @@ def summarize(firewalls: List[Dict[str, Any]], policies: List[Dict[str, Any]], f
     rules_known = all(f["rules_read"] for f in firewalls)
     all_rules = [r for p in policies + foreign_policies if p["rules_read"] for r in p["rules"]] + \
                 [r for f in firewalls if f["rule_source"] == "classic" for r in f["classic_rules"]]
-    findings = rule_findings(all_rules if (rules_known and all(p["rules_read"] for p in policies + foreign_policies)) else None)
+    # The rule counts cover every firewall's classic rules and every policy's rules, so either list failing leaves them partial.
+    findings = rule_findings(all_rules if (firewalls_read and policies_read and rules_known
+                                           and all(p["rules_read"] for p in policies + foreign_policies)) else None)
     enforcing = _known(firewalls, "egress_filtering_enforced")
     settings_known = all(f["settings_read"] for f in firewalls)
     # Every documented mode is listed, at 0 when no firewall has it, so a missing key never has to be read as 0.
@@ -370,7 +373,7 @@ def summarize(firewalls: List[Dict[str, Any]], policies: List[Dict[str, Any]], f
     def setting(predicate) -> Optional[int]:
         return sum(1 for f in firewalls if predicate(f)) if settings_known else None
 
-    return {
+    summary = {
         "firewalls_read": firewalls_read,
         "firewalls": len(firewalls),
         "firewalls_by_sku_tier": sorted_counts(Counter(_lower(f.get("sku_tier")) or "unknown" for f in firewalls)),
@@ -407,6 +410,14 @@ def summarize(firewalls: List[Dict[str, Any]], policies: List[Dict[str, Any]], f
         else sum(1 for f in firewalls if not f["logs"]["destinations"]),
         "log_categories_exported": sorted({c for f in firewalls for c in (f["logs"]["categories"] or [])}),
     }
+    # A failed list is not an empty one: every count that depends on it reads null, never a clean-looking 0.
+    if not firewalls_read:
+        summary.update({k: None for k in summary
+                        if (k == "firewalls" or k.startswith("firewalls_") or k == "log_categories_exported"
+                            or k == "egress_filtering_percentage") and k != "firewalls_read"})
+    if not policies_read:
+        summary.update({k: None for k in summary if k.startswith("firewall_policies") and k != "firewall_policies_read"})
+    return summary
 
 
 # --- collection ---

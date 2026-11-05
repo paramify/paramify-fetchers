@@ -48,7 +48,11 @@ schemas and the `paramify` CLI — not the internal code.
   DNAT rules to port 22 or 3389 (published or translated) or from any source,
   counts rules from a policy in another subscription that a firewall here uses,
   and judges per firewall
-  whether egress filtering is enforced. A policy or base policy in another
+  whether its rules filter egress: no allow-all network rule and no any-FQDN
+  application rule, so a firewall with no rules counts, since Azure Firewall
+  denies whatever no rule allows. Routing is not checked here
+  (`azure_vnet_egress_routing` reports it). A failed firewall or policy list
+  leaves the counts that depend on it null, not 0. A policy or base policy in another
   subscription is read when the credential may; otherwise that firewall's rule
   and setting fields read null, never false. Resource exclusions apply to
   firewalls and policies. KSI-CNA-RNT, CNA-ULN, CNA-MAT, MLA-LET.
@@ -63,7 +67,8 @@ schemas and the `paramify` CLI — not the internal code.
   subscription when the credential may list them. Only hosts in the Succeeded
   state with a known SKU count as a path. A path that cannot be decided reads
   unknown and nulls the coverage counts, and unread interface data nulls the
-  public IP and path counts. KSI-CNA-RNT, CNA-MAT, MLA-LET.
+  public IP and path counts. A failed host or machine list leaves its counts
+  null, not 0. KSI-CNA-RNT, CNA-MAT, MLA-LET.
 - **`azure_resource_locks`** (`EVD-AZURE-RESOURCE-LOCKS`): every management lock
   in the subscription with its level, scope and scope kind, and for each resource
   of a protected type (Log Analytics workspaces, Backup vaults, Recovery Services
