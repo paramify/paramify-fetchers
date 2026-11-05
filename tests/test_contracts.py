@@ -227,6 +227,7 @@ def test_instructions_open_with_the_entry_path() -> None:
 TEXT_FORMAT_FETCHERS = (
     "azure/alert_rules",
     "azure/app_service_backups",
+    "azure/backup_vault_protection",
     "azure/change_work_items",
     "azure/devops_identities",
     "azure/devops_service_connections",
@@ -243,6 +244,7 @@ TEXT_FORMAT_FETCHERS = (
     "azure/service_health_advisories",
     "azure/sql_managed_instance_configuration",
     "azure/waf_ddos_activity",
+    "azure/zone_redundancy",
     "oci",
 )
 # Fetchers whose instructions listed summary fields before their tests checked them; each leaves once its tests
