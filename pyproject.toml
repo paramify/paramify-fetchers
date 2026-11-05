@@ -31,8 +31,10 @@ dependencies = [
 # same app on 1.x.
 tui = ["textual>=8,<9"]
 checkov = ["checkov"]
-# defusedxml is here so the qualys tests run in CI's `.[dev,tui]` job rather than skip.
-dev = ["pytest", "pytest-xdist", "ruff", "mypy", "defusedxml"]
+# cryptography: tests/test_azure_entra_authentication_policy.py builds test
+# certificates with it, and the `test` job installs dev but not the azure extra.
+# defusedxml: the qualys tests need it, and the same `test` job runs them.
+dev = ["pytest", "pytest-xdist", "ruff", "mypy", "cryptography>=42.0.0,<51", "defusedxml"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every
 # one producing wrong or empty evidence rather than an error. Keep the two files
@@ -51,6 +53,8 @@ azure = [
     "azure-mgmt-security>=7.0.0,<8",
     "azure-mgmt-authorization>=4.0.0,<5",
     "msgraph-sdk>=1.61.0,<2",
+    # Reads the subject and expiry of the CAs trusted for certificate sign-in.
+    "cryptography>=42.0.0,<51",
     "azure-mgmt-sql>=4.0.0,<5",
     "azure-mgmt-rdbms>=10.1.1,<11",
     "azure-mgmt-postgresqlflexibleservers>=2.0.0,<3",
