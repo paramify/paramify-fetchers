@@ -51,6 +51,8 @@ NAMESPACES = {
 }
 HIGH_IMPACT = {name.lower(): actions for name, actions in NAMESPACES.items()}
 BYPASS_ACTIONS = {("git repositories", "policyexempt"), ("git repositories", "pullrequestbypasspolicy")}
+CHECKIN_OVERRIDE = "overridebuildcheckinvalidation"
+BUILD_SERVICE_GROUP = "project collection build service accounts"
 ADMIN_GROUPS = {
     "project collection administrators", "project collection service accounts",
     "project collection build administrators", "project administrators", "build administrators",
@@ -80,8 +82,9 @@ NOT_COLLECTED = {
                       "id; the pipelines and service-connections evidence carries the same ids.",
     "other_namespaces": "Permissions in namespaces other than those listed in results.namespaces (work items, "
                         "boards, wiki, dashboards, analytics, agent pools).",
-    "inherited_grants": "High-impact rights are flagged where they are set explicitly; a right only inherited from "
-                        "a parent token is shown on that parent.",
+    "inherited_grants": "High-impact rights are flagged where they are set explicitly, and the check-in validation "
+                        "override also where an entry inherits it; a right only inherited from a parent token, on "
+                        "an object with no entry of its own for that identity, is shown on that parent.",
 }
 
 logger = logging.getLogger(NAME)
@@ -194,7 +197,7 @@ def batches(descriptors: List[str]) -> List[List[str]]:
 
 
 def read_identities(client, batch: List[str], split: bool = False) -> List[Any]:
-    """One batch; a 404 is split until it names one descriptor, which then reads as not found.
+    """One batch, a row or None per descriptor; a 404 is split until it names one descriptor, which reads as not found.
 
     A 404 that hides a refusal raises, and so does a batch whose split finds no one, so it reads as unread.
     """
@@ -205,10 +208,10 @@ def read_identities(client, batch: List[str], split: bool = False) -> List[Any]:
         if exc.status != 404 or exc.failure_code == "not_authorized":
             raise
         if len(batch) == 1:
-            return []
+            return [None]
         half = len(batch) // 2
         rows = read_identities(client, batch[:half], True) + read_identities(client, batch[half:], True)
-        if not rows and not split:
+        if not any(rows) and not split:
             raise
         return rows
 
@@ -222,6 +225,10 @@ def resolve(client, collector, descriptors: List[str]) -> Tuple[Dict[str, Dict[s
                     lambda batch=batch: read_identities(client, batch))
         if rows is None:
             unread |= {d.lower() for d in batch}
+        # Rows keep request order, and an organization group's template SID answers with its own, so match by position.
+        if rows and len(rows) == len(batch):
+            found.update((d.lower(), row) for d, row in zip(batch, rows) if isinstance(row, dict))
+            continue
         for row in rows or []:
             if isinstance(row, dict) and row.get("descriptor"):
                 descriptor = row["descriptor"]
@@ -321,6 +328,10 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         extended = ace.get("extendedInfo") if isinstance(ace.get("extendedInfo"), dict) else {}
         allow, deny = ace.get("allow") or 0, ace.get("deny") or 0
         allowed = bits(allow & ~deny, actions)
+        # An explicit deny beats an inherited allow; effectiveAllow also reflects group membership, so it isn't used.
+        inherited = (extended.get("inheritedAllow") or 0) & ~(extended.get("inheritedDeny") or 0)
+        override = key == "build" and any(a.lower() == CHECKIN_OVERRIDE
+                                          for a in bits((allow | inherited) & ~deny, actions))
         high = sorted(a for a in allowed if a.lower() in HIGH_IMPACT[key])
         who = identities.get(str(ace.get("descriptor")))
         admin = (who or {}).get("admin_group")
@@ -345,9 +356,11 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
             "high_impact_from_defaults": default,
             "high_impact_outside_admin_groups": ((None if admin is None or default is None else not admin)
                                                  if high and not default else False),
+            "checkin_validation_override": override,
         })
     entries.sort(key=lambda e: (str(e["namespace"]).lower(), e["token"], str((e["identity"] or {}).get("name") or "")))
     git = [n for n in namespace_records if str(n["name"]).lower() == "git repositories"]
+    build = [n for n in namespace_records if str(n["name"]).lower() == "build"]
     results = {
         "namespaces": namespace_records,
         "namespaces_not_found": None if listed is None else sorted(n for n in NAMESPACES if n.lower() not in found_names),
@@ -359,11 +372,21 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         complete=listed is not None and all(n["acls_read"] for n in namespace_records) and bool(projects or not narrowed),
         git_repositories=git_repositories,
         git_read=bool(git) and all(n["acls_read"] for n in git),
+        build_read=bool(build) and all(n["acls_read"] for n in build) and bool(projects or not narrowed),
+        org=client.org,
     )
 
 
+def build_service(identity: Optional[Dict[str, Any]], org: str) -> bool:
+    """A build service account (the organization's or a project's), or the organization's group that holds them."""
+    identity = identity or {}
+    if identity.get("kind") == "group":
+        return str(identity.get("name") or "").lower() == f"[{org}]\\{BUILD_SERVICE_GROUP}".lower()
+    return identity.get("kind") == "service_identity" and ":build:" in str(identity.get("descriptor") or "").lower()
+
+
 def summarize(entries, identities, namespaces, acls_off: int, not_found: Optional[List[str]], *, complete: bool,
-              git_repositories: Optional[int], git_read: bool) -> Dict[str, Any]:
+              git_repositories: Optional[int], git_read: bool, build_read: bool, org: str) -> Dict[str, Any]:
     """Counts read null when a namespace (or, for the admin-group split, an identity) couldn't be read."""
     def name(identity):
         return (identity or {}).get("name") or (identity or {}).get("descriptor")
@@ -382,6 +405,11 @@ def summarize(entries, identities, namespaces, acls_off: int, not_found: Optiona
     rights = Counter(f"{e['namespace']}: {a}" for e in outside for a in e["high_impact_allowed"])
     bypass = [e for e in entries
               if any((str(e["namespace"]).lower(), a.lower()) in BYPASS_ACTIONS for a in e["high_impact_allowed"])]
+    override = [e for e in entries if e["checkin_validation_override"]]
+    override_services = [e for e in override if build_service(e["identity"], org)]
+    override_others = [e for e in override if not build_service(e["identity"], org)]
+    override_known = build_read and all((e["identity"] or {}).get("admin_group") is not None for e in override_others)
+    override_outside = [e for e in override_others if not (e["identity"] or {}).get("admin_group")]
     return {
         "namespaces_collected": sum(1 for n in namespaces if n["acls_read"]),
         "namespaces_not_found": not_found,
@@ -402,6 +430,11 @@ def summarize(entries, identities, namespaces, acls_off: int, not_found: Optiona
         "identities_with_high_impact_rights_from_defaults": known(names(defaults), admins_known),
         "git_repositories": git_repositories,
         "branch_policy_bypass_holders": names(bypass) if git_read and git_repositories else None,
+        "checkin_validation_override_grants": len(override) if build_read else None,
+        "checkin_validation_override_holders": names(override) if build_read else None,
+        "checkin_validation_override_build_services": names(override_services) if build_read else None,
+        "checkin_validation_override_grants_outside_admin_groups": len(override_outside) if override_known else None,
+        "checkin_validation_override_holders_outside_admin_groups": names(override_outside) if override_known else None,
         "not_collected": dict(NOT_COLLECTED),
     }
 

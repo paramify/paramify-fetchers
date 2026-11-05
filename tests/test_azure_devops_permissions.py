@@ -134,15 +134,22 @@ def err(status, message, type_key="Exception"):
     return Resp(status, {"$id": "1", "message": message, "typeKey": type_key, "errorCode": 0})
 
 
-def identities(params):
+# An organization-level group appears in ACLs under a template SID; the identities API answers with its own.
+ANSWERED_AS = {PCA: "Microsoft.TeamFoundation.Identity;S-1-9-1-4242-0-0-0-0-1"}
+
+
+def identities(params, nulls=True):
+    """Rows in request order, null for a descriptor that isn't found, as Azure DevOps answers."""
     rows = []
     for descriptor in params["descriptors"].split(","):
         if descriptor in IDENTITIES:
             name, subject, group = IDENTITIES[descriptor]
-            rows.append({"id": f"id-{subject}", "descriptor": descriptor, "subjectDescriptor": subject,
-                         "providerDisplayName": name, "isContainer": group, "isActive": True,
-                         "properties": {"SchemaClassName": {"$type": "System.String",
-                                                            "$value": "Group" if group else "User"}}})
+            rows.append({"id": f"id-{subject}", "descriptor": ANSWERED_AS.get(descriptor, descriptor),
+                         "subjectDescriptor": subject, "providerDisplayName": name, "isContainer": group,
+                         "isActive": True, "properties": {"SchemaClassName": {"$type": "System.String",
+                                                                              "$value": "Group" if group else "User"}}})
+        elif nulls:
+            rows.append(None)
     return Resp(body={"count": len(rows), "value": rows})
 
 
@@ -223,6 +230,8 @@ def test_collects_the_organization_and_exits_zero(tmp_path):
         "Build: EditBuildDefinition": 1, "Collection: GENERIC_WRITE": 1, "Git Repositories: PolicyExempt": 1,
         "ServiceEndpoints: Administer": 1, "VersionControlItems: CheckinOther": 1}
     assert s["branch_policy_bypass_holders"] == ["Alice"]
+    assert s["checkin_validation_override_grants"] == 0 and s["checkin_validation_override_holders"] == []
+    assert s["checkin_validation_override_grants_outside_admin_groups"] == 0
 
 
 def test_scopes_by_namespace(tmp_path):
@@ -384,7 +393,8 @@ def test_a_failed_namespace_list_leaves_every_count_unknown(tmp_path):
     assert code == 1 and s["namespaces_collected"] == 0
     assert s["namespaces_not_found"] is None and s["namespaces_not_read"] is None
     assert all(s[k] is None for k in ("acls_total", "entries_total", "high_impact_grants",
-                                      "high_impact_grants_outside_admin_groups", "branch_policy_bypass_holders"))
+                                      "high_impact_grants_outside_admin_groups", "branch_policy_bypass_holders",
+                                      *OVERRIDE_FIELDS))
 
 
 def contributors_build_acls(*aces):
@@ -471,6 +481,7 @@ def test_a_project_filter_without_the_project_list_leaves_the_repository_count_u
     code, evidence, _, _ = run(tmp_path, fake)
     s = evidence["summary"]
     assert code == 1 and s["git_repositories"] is None and s["branch_policy_bypass_holders"] is None
+    assert all(s[k] is None for k in OVERRIDE_FIELDS)
 
 
 def test_refused_identity_lookup_leaves_the_admin_split_unknown(tmp_path):
@@ -487,6 +498,110 @@ def test_refused_identity_lookup_leaves_the_admin_split_unknown(tmp_path):
     pca = entry(evidence, "AuditLog", "AllPermissions", PCA)
     assert pca["identity"]["kind"] == "group" and pca["identity"]["admin_group"] is None
     assert pca["high_impact_outside_admin_groups"] is None
+
+
+def test_an_organization_group_named_by_its_template_sid_resolves_by_position(tmp_path):
+    _, evidence, _, _ = run(tmp_path)
+    pca = entry(evidence, "AuditLog", "AllPermissions", PCA)
+    assert pca["identity"]["name"] == "[contoso]\\Project Collection Administrators"
+    assert pca["identity"]["admin_group"] is True and pca["high_impact_outside_admin_groups"] is False
+    assert evidence["summary"]["unresolved_identities"] == 1
+
+
+def test_rows_that_drop_the_unfound_are_matched_by_descriptor(tmp_path):
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = lambda params: identities(params, nulls=False)
+    _, evidence, _, _ = run(tmp_path, fake)
+    assert entry(evidence, "Build", f"{WEB}/12", SP)["identity"]["name"] == "deploy-automation"
+    assert evidence["summary"]["unresolved_identities"] == 2  # the template SID can't be matched this way
+
+
+OVERRIDE_FIELDS = ("checkin_validation_override_grants", "checkin_validation_override_holders",
+                   "checkin_validation_override_build_services",
+                   "checkin_validation_override_grants_outside_admin_groups",
+                   "checkin_validation_override_holders_outside_admin_groups")
+PROJECT_BUILD_SERVICE = f"Microsoft.TeamFoundation.ServiceIdentity;f0e1d2c3-0000-0000-0000-000000000000:Build:{WEB}"
+BUILD_SERVICE_ACCOUNTS = "Microsoft.TeamFoundation.Identity;S-1-9-1-0-0-0-1-1"
+OVERRIDERS = "Microsoft.TeamFoundation.Identity;S-1-9-2-7-7"
+GATED_LEADS = "Microsoft.TeamFoundation.Identity;S-1-9-2-8-8"
+LOOKALIKE = "Microsoft.TeamFoundation.Identity;S-1-9-2-9-9"
+
+
+def override_ace(descriptor, allow=0, deny=0, inherited=0):
+    a = ace(descriptor, allow, deny)
+    a["extendedInfo"]["inheritedAllow"] = inherited
+    return a
+
+
+@pytest.fixture
+def override_acls(monkeypatch):
+    monkeypatch.setitem(IDENTITIES, PROJECT_BUILD_SERVICE, ("Web Build Service (contoso)", "svc.web", False))
+    monkeypatch.setitem(IDENTITIES, BUILD_SERVICE_ACCOUNTS,
+                        ("[contoso]\\Project Collection Build Service Accounts", "vssgp.pcbsa", True))
+    monkeypatch.setitem(IDENTITIES, OVERRIDERS, ("[Web]\\Release Engineers", "vssgp.re", True))
+    monkeypatch.setitem(IDENTITIES, GATED_LEADS, ("[Web]\\Gated Leads", "vssgp.gl", True))
+    monkeypatch.setitem(IDENTITIES, LOOKALIKE, ("[Web]\\Project Collection Build Service Accounts", "vssgp.la", True))
+    override, view = bit("Build", "OverrideBuildCheckInValidation"), bit("Build", "ViewBuilds")
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = Resp(body={"value": [
+        acl(WEB, override_ace(PCA, override | view), override_ace(PROJECT_BUILD_SERVICE, override),
+            override_ace(BUILD_SERVICE_ACCOUNTS, override), override_ace(OVERRIDERS, override),
+            override_ace(LOOKALIKE, override), override_ace(WPA, view)),
+        acl(f"{WEB}/Gated", override_ace(OVERRIDERS, deny=override, inherited=override),
+            override_ace(GATED_LEADS, override)),
+        acl(f"{WEB}/Open", override_ace(OVERRIDERS, view, inherited=override)),
+    ]})
+    return fake
+
+
+def test_check_in_validation_override_holders(tmp_path, override_acls):
+    code, evidence, _, _ = run(tmp_path, override_acls)
+    assert code == 0
+    assert entry(evidence, "Build", WEB, PCA)["checkin_validation_override"] is True
+    assert entry(evidence, "Build", WEB, WPA)["checkin_validation_override"] is False
+    assert entry(evidence, "Build", f"{WEB}/Open", OVERRIDERS)["checkin_validation_override"] is True  # inherited
+    assert entry(evidence, "Build", f"{WEB}/Gated", OVERRIDERS)["checkin_validation_override"] is False  # denied
+    assert entry(evidence, "Build", f"{WEB}/Gated", GATED_LEADS)["scope"] == "folder"
+    assert not any(e["checkin_validation_override"] for e in evidence["results"]["entries"] if e["namespace"] != "Build")
+    s = evidence["summary"]
+    assert s["checkin_validation_override_grants"] == 7
+    assert s["checkin_validation_override_holders"] == [
+        "[contoso]\\Project Collection Administrators", "[contoso]\\Project Collection Build Service Accounts",
+        "[Web]\\Gated Leads", "[Web]\\Project Collection Build Service Accounts", "[Web]\\Release Engineers",
+        "Web Build Service (contoso)"]
+    assert s["checkin_validation_override_build_services"] == [
+        "[contoso]\\Project Collection Build Service Accounts", "Web Build Service (contoso)"]
+    # The admin groups and build services are left out; a project group named like the organization's is not.
+    assert s["checkin_validation_override_grants_outside_admin_groups"] == 4
+    assert s["checkin_validation_override_holders_outside_admin_groups"] == [
+        "[Web]\\Gated Leads", "[Web]\\Project Collection Build Service Accounts", "[Web]\\Release Engineers"]
+
+
+def test_an_unread_identity_leaves_the_override_split_unknown(tmp_path, override_acls):
+    override_acls.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = err(401, "TF400813: not authorized.")
+    code, evidence, _, _ = run(tmp_path, override_acls)
+    s = evidence["summary"]
+    assert code == 1 and s["checkin_validation_override_grants"] == 7
+    assert s["checkin_validation_override_build_services"] == [PROJECT_BUILD_SERVICE]
+    assert s["checkin_validation_override_grants_outside_admin_groups"] is None
+    assert s["checkin_validation_override_holders_outside_admin_groups"] is None
+
+
+def test_a_failed_build_acl_read_leaves_the_override_fields_unknown(tmp_path, override_acls):
+    override_acls.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = err(500, "boom")
+    code, evidence, _, _ = run(tmp_path, override_acls)
+    s = evidence["summary"]
+    assert code == 1 and all(s[k] is None for k in OVERRIDE_FIELDS)
+    assert s["branch_policy_bypass_holders"] == ["Alice"]
+
+
+def test_a_missing_build_namespace_leaves_the_override_fields_unknown(tmp_path):
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/securitynamespaces")] = Resp(body={"value": [
+        {"namespaceId": i, "name": n, "displayName": n, "actions": a} for i, n, a in NAMESPACES if n != "Build"]})
+    _, evidence, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert "Build" in s["namespaces_not_found"] and all(s[k] is None for k in OVERRIDE_FIELDS)
 
 
 def test_two_people_with_one_display_name_both_appear(tmp_path, monkeypatch):
