@@ -304,6 +304,37 @@ def test_graph_status_text_is_classified_like_arm(status, code):
     assert mfa_status.classify_failure_code(failures) == code
 
 
+# kiota-abstractions before 1.13 rendered an ODataError without "(status N)".
+OLD_KIOTA_TEXT = """
+        APIError
+        Code: {status}
+        message: None
+        error: MainError(code='{code}', message='{message}')
+        """
+
+
+@pytest.mark.parametrize("status, error_code, message, code", [
+    (403, "Authorization_RequestDenied", "Insufficient privileges to complete the operation.", "not_authorized"),
+    (403, "accessDenied", "Access denied", "not_authorized"),
+    (403, "Forbidden", "Attempted to perform an unauthorized operation.", "not_authorized"),
+    (403, "UnknownError", "", "not_authorized"),
+    (429, "TooManyRequests", "Too many requests", "rate_limited"),
+    (503, "serviceNotAvailable", "Service unavailable", "target_unreachable"),
+    (400, "BadRequest", "Invalid filter clause", "partial_failure"),
+    (404, "Request_ResourceNotFound", "Resource does not exist", "partial_failure"),
+])
+def test_graph_errors_from_older_kiota_are_classified_by_status(status, error_code, message, code):
+    text = OLD_KIOTA_TEXT.format(status=status, code=error_code, message=message)
+    failures = [{"operation": "graph.op", "type": "ODataError", "message": text}]
+    assert mfa_status.classify_failure_code(failures) == code
+
+
+@pytest.mark.parametrize("message", ["Authorization_RequestDenied: no", "accessDenied"])
+def test_graph_denial_codes_alone_classify_not_authorized(message):
+    failures = [{"operation": "graph.op", "type": "ODataError", "message": message}]
+    assert mfa_status.classify_failure_code(failures) == "not_authorized"
+
+
 def _mfa_graph():
     graph = FakeGraph(roles=[], role_members={}, group_members={})
     graph.organization = Builder([ns(id="t-1", display_name="Contoso", verified_domains=[])])

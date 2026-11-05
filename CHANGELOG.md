@@ -1655,6 +1655,15 @@ schemas and the `paramify` CLI — not the internal code.
   of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
   refused, throttled or unreachable failed as `partial_failure`. These now read
   `not_authorized`, `rate_limited` and `target_unreachable`.
+- **A Microsoft Graph 403 reads `not_authorized` with older msgraph
+  dependencies too.** `classify_failure_code` in `_shared/azure_common.py`
+  read msgraph's `(status 403)` but not the `Code: 403` that
+  microsoft-kiota-abstractions before 1.13 prints, which the msgraph-sdk floor
+  still allows. A Graph permission denial whose message named no other marker,
+  such as `accessDenied` or an empty `UnknownError`, was reported as
+  `partial_failure`. `Code: NNN` now classifies like `(NNN)`, and
+  `accessDenied` and `Authorization_RequestDenied` read `not_authorized`. With
+  kiota-abstractions 1.13 or later nothing changes.
 - **`azure_devops_permissions` resolves every identity in a large
   organization** (0.1.0 → 0.1.1). Identities were looked up 50 descriptors per
   request, and Azure DevOps answers 404 when that query string runs to several
