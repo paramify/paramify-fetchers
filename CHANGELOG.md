@@ -12,6 +12,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`aws_organizations_scp` can record the SCPs that apply to each account.**
+  Set `effective_scp_accounts` (env `SCP_EFFECTIVE_ACCOUNTS`) to comma-separated
+  account IDs, or `all`. For each account the fetcher records
+  `EffectiveScps: [{AccountId, IsManagementAccount, Status, Reason, Path,
+  Policies}]`, each policy tagged with the level it is attached to. A named
+  account walks `list-parents` up to the root. `all` walks the organization from
+  the root down, two calls per root or OU, so the cost does not grow with the
+  number of accounts. It reuses the targets already collected, so a full read
+  adds only the parent lookups. An account that cannot be read gets its own
+  status and does not stop the others. Off by default.
+
 - **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
   Unhealthy assessment reports `days_open` (from `status_change_date`, null when
   missing; it starts again at 0 when a finding turns Healthy and then Unhealthy
@@ -396,6 +407,23 @@ schemas and the `paramify` CLI — not the internal code.
   In the seventeen fetchers above, from `azure_cosmosdb_configuration` on, a
   list that couldn't be read leaves the `in_scope_*` and `excluded_*` counts of
   its kind null, not 0.
+
+  The same for the two AI fetchers below. Their `resource_exclusions` is a
+  `type: patterns` list in the manifest (`rg:`, `location:` or `id:`, never bare,
+  each pattern with an optional reason), like the fields above.
+  - `azure_ai_hub_configuration` 0.2.0: hubs, projects and other Machine
+    Learning workspaces; an excluded workspace's connections, datastores,
+    endpoints, computes and diagnostic settings are not read, and every project
+    of an excluded hub leaves with it (named in `matched_id`). A workspace list
+    that could not be read (refused, or no credential or subscription) makes
+    every count null, `in_scope_*`, `excluded_*` and `total_*` included, rather
+    than 0.
+  - `azure_ai_services_configuration` 0.2.0: AI services accounts and AI Search
+    services; an excluded account's deployments, content filter policies,
+    projects, connections and diagnostic settings are not read. An `id:` naming
+    a project under an account matches nothing. An account or search service
+    list that could not be read (refused, or no credential or subscription)
+    makes the counts of that kind null, not 0.
 - **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or
@@ -1515,6 +1543,23 @@ schemas and the `paramify` CLI — not the internal code.
   null, not an empty list, when the methods policy can't be read.
 
 ### Fixed
+
+- **`aws_organizations_scp` no longer reports a denied read as "no SCPs"**
+  (0.2.0 → 0.3.0). From a member account that is neither the management
+  account nor a delegated administrator, `describe-organization` succeeds
+  but every SCP call is AccessDenied, and the evidence still said
+  `"Roots": [], "ServiceControlPolicies": []`. A list that could not be read
+  is now `null`, and a new `PolicyRead` block says whether the SCPs were read:
+  `{"Status": "ok" | "not_enabled" | "denied" | "error", "Reason": ...}`. An
+  empty list now only ever means the organization has no SCPs. Also new:
+  `ScpsEnabled` (whether the SCP policy type is enabled on the root) and
+  `OrganizationsInUse: true` on the in-use path; an SCP whose targets could not
+  be read has `Targets: null`, and an unreadable organization is
+  `Organization: null`. Existing keys keep their order. The exit code is
+  unchanged. `fetchers/aws/README.md` now documents the two ways to run it
+  from a non-management account: a read-only delegation policy, or a profile
+  that assumes a role in the management account. The 0.2.0 evidence sample is
+  removed until it is captured again.
 
 - **`azure_entra_privileged_roles` 0.2.0 counts service principals that hold a
   role.** On a real tenant, Microsoft Graph v1.0 `/directoryRoles/{id}/members`
