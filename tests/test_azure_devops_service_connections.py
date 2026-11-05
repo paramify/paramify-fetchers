@@ -154,15 +154,29 @@ def execution(id_, plan, definition, owner_id, owner_name, start, result="succee
             "_links": {"web": {"href": f"https://dev.azure.com/contoso/{project}/{kind}{owner_id}"}}}}}
 
 
+WEB_GROUPS = [
+    {"id": 1, "type": "Vsts", "name": "app-settings",
+     "variables": {"DbPassword": {"value": None, "isSecret": True},
+                   "ApiKey": {"value": SECRET_VALUE, "isSecret": True},
+                   "Region": {"value": PLAIN_VALUE}},
+     "createdOn": ago(days=400), "modifiedOn": ago(days=10),
+     "modifiedBy": {"id": "u2", "displayName": "Bo Builder", "uniqueName": "bo@example.com"},
+     "variableGroupProjectReferences": [project_ref(WEB, "Web")]},
+    KV_GROUP,
+]
+
+
 def groups_route(items):
-    """Like Azure DevOps: the project list has no project references; a read by id does."""
+    """Like Azure DevOps: the project list (with or without groupIds=) has no project references; a by-id read does."""
     def route(params):
-        if "groupIds" in params:
-            wanted = params["groupIds"].split(",")
-            return Resp(body={"value": [g for g in items if str(g["id"]) in wanted]})
         return Resp(body={"value": [{k: v for k, v in g.items() if k != "variableGroupProjectReferences"}
                                     for g in items]})
     return route
+
+
+def group_by_id_routes(fake, project, items):
+    for g in items:
+        fake.routes[f"/contoso/{project}/_apis/distributedtask/variablegroups/{g['id']}"] = Resp(body=g)
 
 
 class FakeADO:
@@ -208,17 +222,10 @@ class FakeADO:
                 execution(700, "Build", (12, "web-ci"), 1000, "2026.1000", ago(days=200)),
             ]}),
             f"/contoso/{WEB}/_apis/serviceendpoint/{GENERIC_ID}/executionhistory": Resp(body={"value": []}),
-            f"/contoso/{WEB}/_apis/distributedtask/variablegroups": groups_route([
-                {"id": 1, "type": "Vsts", "name": "app-settings",
-                 "variables": {"DbPassword": {"value": None, "isSecret": True},
-                               "ApiKey": {"value": SECRET_VALUE, "isSecret": True},
-                               "Region": {"value": PLAIN_VALUE}},
-                 "createdOn": ago(days=400), "modifiedOn": ago(days=10),
-                 "modifiedBy": {"id": "u2", "displayName": "Bo Builder", "uniqueName": "bo@example.com"},
-                 "variableGroupProjectReferences": [project_ref(WEB, "Web")]},
-                KV_GROUP,
-            ]),
+            f"/contoso/{WEB}/_apis/distributedtask/variablegroups": groups_route(WEB_GROUPS),
             f"/contoso/{OPS}/_apis/distributedtask/variablegroups": groups_route([KV_GROUP]),
+            **{f"/contoso/{WEB}/_apis/distributedtask/variablegroups/{g['id']}": Resp(body=g) for g in WEB_GROUPS},
+            f"/contoso/{OPS}/_apis/distributedtask/variablegroups/2": Resp(body=KV_GROUP),
             f"/contoso/{WEB}/_apis/distributedtask/securefiles": Resp(body={"value": [
                 {"id": "f1", "name": "signing.pfx", "createdOn": ago(days=30), "modifiedOn": ago(days=30),
                  "ticket": f"download-ticket-{MARK}", "properties": {"x": "y"}}]}),
@@ -557,21 +564,27 @@ def test_variable_groups_list_the_projects_that_share_them(tmp_path):
     groups = {g["name"]: g for g in evidence["results"]["variable_groups"]}
     assert [p["name"] for p in groups["kv-secrets"]["projects"]] == ["Ops", "Web"]
     assert [p["name"] for p in groups["app-settings"]["projects"]] == ["Web"]
-    assert any(p.get("groupIds") for _, path, p in fake.calls if path.endswith("/variablegroups"))
+
+
+def test_project_references_come_from_the_project_scoped_by_id_read(tmp_path):
+    # Measured live: the list (with or without groupIds=) returns no references, and the org-level reads find nothing.
+    fake = FakeADO()
+    run(tmp_path, fake)
+    paths = [path for _, path, _ in fake.calls if "/variablegroups" in path]
+    assert f"/contoso/{WEB}/_apis/distributedtask/variablegroups/1" in paths
+    assert not any(p.get("groupIds") for _, path, p in fake.calls)
+    assert not any(path.startswith("/contoso/_apis/") for path in paths)
 
 
 def test_failed_by_id_read_leaves_projects_unknown(tmp_path):
     fake = FakeADO()
-    items = [{"id": 1, "type": "Vsts", "name": "app-settings", "variables": {}}]
-
-    def route(params):
-        return err(500, "boom", "Exception") if "groupIds" in params else Resp(body={"value": items})
-
-    fake.routes[f"/contoso/{WEB}/_apis/distributedtask/variablegroups"] = route
-    fake.routes[f"/contoso/{OPS}/_apis/distributedtask/variablegroups"] = Resp(body={"value": []})
+    del fake.routes[f"/contoso/{WEB}/_apis/distributedtask/variablegroups/1"]
+    fake.routes[f"/contoso/{WEB}/_apis/distributedtask/variablegroups/1"] = err(500, "boom", "Exception")
     _, evidence, _, _, _ = run(tmp_path, fake)
-    assert evidence["results"]["variable_groups"][0]["projects"] is None
-    assert any("byIds" in f["operation"] for f in evidence["metadata"]["api_failures"])
+    groups = {g["name"]: g for g in evidence["results"]["variable_groups"]}
+    assert groups["app-settings"]["projects"] is None
+    assert groups["kv-secrets"]["projects"] is not None
+    assert any("variablegroups.get" in f["operation"] for f in evidence["metadata"]["api_failures"])
 
 
 def test_variable_groups_count_secrets_and_key_vault_expiry(tmp_path):
@@ -599,6 +612,7 @@ def test_a_disabled_expired_key_vault_secret_is_not_counted_as_expired(tmp_path)
         "value": None, "isSecret": True, "enabled": False, "contentType": "", "expires": ago(days=60)}}}
     fake.routes[f"/contoso/{WEB}/_apis/distributedtask/variablegroups"] = groups_route([group])
     fake.routes[f"/contoso/{OPS}/_apis/distributedtask/variablegroups"] = groups_route([group])
+    group_by_id_routes(fake, WEB, [group])
     _, evidence, _, _, _ = run(tmp_path, fake)
     kv = next(g for g in evidence["results"]["variable_groups"] if g["name"] == "kv-secrets")
     assert [s["name"] for s in kv["key_vault_secrets"]] == ["old-sql-admin", "sql-admin", "storage-key"]
