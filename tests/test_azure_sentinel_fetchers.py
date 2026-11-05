@@ -530,12 +530,10 @@ def test_data_sources_defender_xdr_link_needs_every_mtp_alerts_value_carried(azu
 
 def test_data_sources_configured_without_data_leaves_out_unconnected_and_quiet(azure, tmp_path):
     alert_only_workspace(azure, "Disabled")
-    # Installed from Content Hub with no connection, and not alert-only; and one connected to a filtered query on a
-    # Basic-plan table with data, which only another /search scan could answer.
+    # Installed from Content Hub with no connection, and not alert-only; and one connected to a Basic-plan table.
     azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"] += [
         ui_connector("AzureActiveDirectory", [("AuditLogs", "AuditLogs")]),
-        ui_connector("AzureStorage", [("StorageBlobLogs (reads)", 'StorageBlobLogs | where Category == "StorageRead"')])]
-    azure.queries.insert(0, ("['StorageBlobLogs']", table(["LastIngested", "Records"], [[iso(NOW), 7]])))
+        ui_connector("AzureStorage", [("StorageBlobLogs", "StorageBlobLogs")])]
     azure.arm[(f"{SI_A}/dataConnectors", "2025-09-01")]["value"].append(
         {"id": f"{SI_A}/dataConnectors/storage", "name": "storage", "kind": "AzureStorage", "properties": {}})
     code, ev = run("sentinel_data_sources", tmp_path)
@@ -646,14 +644,17 @@ def test_data_sources_parser_union_and_basic_table_queries(azure, tmp_path):
     assert code == 0 and "SophosXGFirewall" in union and "WizIssues_CL" in union and "StorageBlobLogs" not in union
     assert by_id["SophosXGFirewall"]["connected"] is True and by_id["Wiz"]["connected"] is True
     assert by_id["Wiz"]["data_types"][0]["table"] is None
-    # A Basic-plan table is read through /search, never /query; this one received nothing.
-    assert by_id["AzureStorage"]["connected"] is False and ws["tables_searched"] == ["StorageBlobLogs"]
+    # A Basic-plan table can't be read with /query, and /search is off by default, so it is unmeasured rather than empty.
+    assert by_id["AzureStorage"]["connected"] is None and ws["tables_not_measured"] == ["StorageBlobLogs"]
+    assert ws["tables_searched"] == [] and not azure.params and ev["summary"]["basic_logs_lookback_hours"] == 0
     assert by_id["Broken"]["connected"] is None and any("connector Broken" in n for n in ws["notes"])
-    assert "Broken" not in ws["connectors_not_connected"] and "AzureStorage" in ws["connectors_not_connected"]
+    assert "Broken" not in ws["connectors_not_connected"] and "AzureStorage" not in ws["connectors_not_connected"]
 
 
-def basic_tables_workspace(azure):
+def basic_tables_workspace(azure, monkeypatch, hours="336"):
     """Connectors on a Basic table, bare and filtered, and on an Auxiliary one; only the Basic table has data."""
+    if hours is not None:
+        monkeypatch.setenv("BASIC_LOGS_LOOKBACK_HOURS", hours)
     azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [
         ui_connector("AzureStorage", [("StorageBlobLogs", "StorageBlobLogs")]),
         ui_connector("StorageReads", [("StorageBlobLogs (reads)", 'StorageBlobLogs | where Category == "StorageRead"')]),
@@ -666,18 +667,39 @@ def search_calls(azure):
     return [q for _, url, q in azure.calls if url.endswith("/search")]
 
 
-def test_data_sources_measures_basic_and_auxiliary_tables_through_search(azure, tmp_path):
-    basic_tables_workspace(azure)
+def test_data_sources_basic_and_auxiliary_tables_are_not_measured_by_default(azure, tmp_path, monkeypatch):
+    basic_tables_workspace(azure, monkeypatch, hours=None)
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert code == 0 and ev["metadata"]["partial_failure"] is False and not search_calls(azure)
+    # Not measured is a choice, not a failure: the count stands, without these tables.
+    assert ws["tables_not_measured"] == ["AppLogs_CL", "StorageBlobLogs"]
+    assert (ws["tables_searched"], ws["tables_search_failed"], ws["sources_ingesting"]) == ([], [], 2)
+    assert all(by_id[i]["connected"] is None for i in ("AzureStorage", "StorageReads", "AppLogs"))
+    assert ev["summary"]["basic_logs_lookback_hours"] == 0 and ev["summary"]["min_sources_ingesting"] == 2
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "lots"])
+def test_data_sources_search_stays_off_unless_hours_are_positive(azure, tmp_path, monkeypatch, value):
+    basic_tables_workspace(azure, monkeypatch, hours=value)
+    code, ev = run("sentinel_data_sources", tmp_path)
+    assert code == 0 and not search_calls(azure) and ev["summary"]["basic_logs_lookback_hours"] == 0
+
+
+def test_data_sources_measures_basic_and_auxiliary_tables_through_search(azure, tmp_path, monkeypatch, assert_summary_documented):
+    basic_tables_workspace(azure, monkeypatch)
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
     by_id = {c["id"]: c for c in ws["connectors"]}
     assert code == 0 and ev["metadata"]["partial_failure"] is False
     # One table per search, asking only for the newest record and a count over the window, timespan in the URL.
     query = MODS["sentinel_data_sources"].SEARCH_QUERY
-    assert search_calls(azure) == [query.format(table=t, days=14) for t in ("AppLogs_CL", "StorageBlobLogs")]
-    assert [(url.split("/")[-2:], params) for url, params in azure.params] == [(["cust-a", "search"], {"timespan": "P14D"})] * 2
+    assert search_calls(azure) == [query.format(table=t, hours=336) for t in ("AppLogs_CL", "StorageBlobLogs")]
+    assert [(url.split("/")[-2:], params) for url, params in azure.params] == [(["cust-a", "search"], {"timespan": "PT336H"})] * 2
     assert not any("StorageBlobLogs" in q or "AppLogs_CL" in q for _, url, q in azure.calls if url.endswith("/query"))
-    assert ws["tables_searched"] == ["AppLogs_CL", "StorageBlobLogs"] and ws["tables_not_measured"] == []
+    assert ws["tables_searched"] == ["AppLogs_CL", "StorageBlobLogs"]
+    assert ws["tables_not_measured"] == [] and ws["tables_search_failed"] == []
     tables = {t["table"]: t for t in ws["tables"]}
     assert (tables["StorageBlobLogs"]["plan"], tables["StorageBlobLogs"]["records"]) == ("Basic", 7)
     assert tables["AzureActivity"]["plan"] == "Analytics" and "AppLogs_CL" not in tables
@@ -687,32 +709,50 @@ def test_data_sources_measures_basic_and_auxiliary_tables_through_search(azure, 
     # A filtered query on a Basic table with data would need another billed scan, so it stays unmeasured.
     assert by_id["StorageReads"]["connected"] is None and "StorageReads" not in ws["connectors_not_connected"]
     assert by_id["AppLogs"]["connected"] is False and "AppLogs" in ws["connectors_not_connected"]
+    assert ev["summary"]["basic_logs_lookback_hours"] == 336
+    assert_summary_documented("azure/sentinel_data_sources", ev["summary"])
 
 
-def test_data_sources_failed_search_is_unknown(azure, tmp_path):
-    basic_tables_workspace(azure)
+def test_data_sources_failed_search_is_unknown(azure, tmp_path, monkeypatch):
+    basic_tables_workspace(azure, monkeypatch)
     azure.queries.insert(0, ("['StorageBlobLogs']", Resp(403, {"error": {"code": "Forbidden", "message": "no"}})))
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
     by_id = {c["id"]: c for c in ws["connectors"]}
     assert code == 1 and ev["metadata"]["partial_failure"] is True
-    assert ws["tables_not_measured"] == ["StorageBlobLogs"] and ws["tables_searched"] == ["AppLogs_CL"]
+    assert ws["tables_search_failed"] == ["StorageBlobLogs"] and ws["tables_not_measured"] == ["StorageBlobLogs"]
+    assert ws["tables_searched"] == ["AppLogs_CL"]
     assert by_id["AzureStorage"]["connected"] is None and by_id["StorageReads"]["connected"] is None
     # The table could be a source, so the count is unknown, not 2.
     assert ws["sources_ingesting"] is None and ev["summary"]["min_sources_ingesting"] is None
     assert ev["summary"]["workspaces_with_no_sources"] == 0
 
 
-@pytest.mark.parametrize("records, measured", [(0, False), (5, True)])
-def test_data_sources_search_reaches_back_30_days(azure, tmp_path, monkeypatch, records, measured):
-    monkeypatch.setenv("SENTINEL_INGESTION_WINDOW_DAYS", "45")
+def test_data_sources_search_without_table_plans_is_unknown(azure, tmp_path, monkeypatch):
+    monkeypatch.setenv("BASIC_LOGS_LOOKBACK_HOURS", "336")
+    azure.arm[(f"{WS_A}/tables", "2023-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    # With the search on, unread plans could hide a Basic or Auxiliary source.
+    assert code == 1 and not search_calls(azure) and ws["sources_ingesting"] is None
+
+
+@pytest.mark.parametrize("window, hours, records, measured, span", [
+    ("14", "24", 0, False, 24),     # less than the window: nothing found says nothing about the rest
+    ("14", "24", 5, True, 24),
+    ("14", "9999", 0, True, 336),   # capped at the window, which it then covers
+    ("45", "9999", 0, False, 720),  # capped at the 30 days /search reaches
+])
+def test_data_sources_search_span(azure, tmp_path, monkeypatch, window, hours, records, measured, span):
+    monkeypatch.setenv("SENTINEL_INGESTION_WINDOW_DAYS", window)
+    monkeypatch.setenv("BASIC_LOGS_LOOKBACK_HOURS", hours)
     azure.queries.insert(0, ("/search", table(["LastIngested", "Records"], [[iso(NOW) if records else None, records]])))
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
-    assert code == 0 and azure.params[0][1] == {"timespan": "P30D"} and "ago(30d)" in search_calls(azure)[0]
-    # Nothing in 30 days says nothing about days 31 to 45.
-    assert ws["tables_not_measured"] == ([] if measured else ["StorageBlobLogs"])
-    assert ws["sources_ingesting"] == (3 if measured else None)
+    assert code == 0 and azure.params[0][1] == {"timespan": f"PT{span}H"} and f"ago({span}h)" in search_calls(azure)[0]
+    assert ws["tables_not_measured"] == ([] if measured else ["StorageBlobLogs"]) and ws["tables_search_failed"] == []
+    # Not measured over the window is not a failure, so the count stands.
+    assert ws["sources_ingesting"] == (3 if records else 2) and ev["summary"]["basic_logs_lookback_hours"] == span
 
 
 def test_data_sources_entra_id_protection_and_grouped_built_ins(azure, tmp_path):
@@ -793,8 +833,8 @@ def test_data_sources_incomplete_listings_read_null(azure, tmp_path):
     assert (ws["connectors_total"], ws["connectors_connected"], ws["connectors_not_connected"], ws["connectors_quiet"],
             ws["connectors_configured_without_data"]) == (None, None, None, None, None)
     assert ws["data_connectors_total"] is None and ws["tables_not_measured"] is None and ws["tables_searched"] is None
-    # Without the plans, a Basic or Auxiliary source could be missing from the count.
-    assert ws["sources_ingesting"] is None and ws["source_tables"] == ["AzureActivity", "SecurityAlert (Microsoft Defender Advanced Threat Protection)"]
+    # With /search off, Basic and Auxiliary tables never count, so missing plans hide no source.
+    assert ws["sources_ingesting"] == 2
     # Without the table plans, no data can't be told from a Basic table.
     assert all(c["connected"] is None for c in ws["connectors"])
     assert {k: ev["summary"][k] for k in ("data_connectors_total", "connectors_connected", "connectors_not_connected",
@@ -803,7 +843,8 @@ def test_data_sources_incomplete_listings_read_null(azure, tmp_path):
         "connectors_configured_without_data": None}
 
 
-def test_data_sources_unknown_ingestion_reads_null(azure, tmp_path):
+def test_data_sources_unknown_ingestion_reads_null(azure, tmp_path, monkeypatch):
+    monkeypatch.setenv("BASIC_LOGS_LOOKBACK_HOURS", "336")
     azure.queries[0] = ("union withsource=ParamifySourceTable", Resp(403, {"error": {"code": "Forbidden", "message": "no"}}))
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)

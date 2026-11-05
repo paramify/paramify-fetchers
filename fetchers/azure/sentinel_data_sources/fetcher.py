@@ -64,10 +64,11 @@ QUERY_BATCH = 100
 _LET = re.compile(r"\s*let\b")
 # Basic and Auxiliary tables answer only /search: union * on /query skips them, and naming one fails to resolve.
 QUERYABLE_PLAN = "Analytics"
-# /search bills per GB scanned over the time range, so each table is asked for nothing more than this.
-SEARCH_QUERY = "['{table}'] | where TimeGenerated > ago({days}d) | summarize LastIngested = max(TimeGenerated), Records = count()"
+# Off (0) by default: /search bills per GB scanned over the time range, so each table is asked for nothing more than this.
+BASIC_LOOKBACK_ENV = "BASIC_LOGS_LOOKBACK_HOURS"
+SEARCH_QUERY = "['{table}'] | where TimeGenerated > ago({hours}h) | summarize LastIngested = max(TimeGenerated), Records = count()"
 # How far back /search reads a Basic table; older data needs a search job.
-SEARCH_MAX_DAYS = 30
+SEARCH_MAX_HOURS = 30 * 24
 
 # Connection kinds whose Content Hub definition has another id: this kind is Entra ID Protection, not the Entra ID logs connector.
 KIND_DEFINITION = {"AzureActiveDirectory": "AzureActiveDirectoryIdentityProtection"}
@@ -147,21 +148,25 @@ def project_tables(
     return sorted(tables, key=lambda t: t["table"].lower())
 
 
-def search_tables(client, ws: Dict[str, Any], names: List[str], days: int, collector) -> Dict[str, Optional[Dict[str, Any]]]:
-    """Each Basic or Auxiliary table's last ingestion and count; None when its search failed, or found nothing but couldn't cover the window."""
-    span = min(days, SEARCH_MAX_DAYS)
+def search_hours(days: int) -> int:
+    """Hours of each Basic or Auxiliary table to search, capped at the window and at what /search reaches; 0 is off."""
+    return min(int_config(BASIC_LOOKBACK_ENV, 0), days * 24, SEARCH_MAX_HOURS)
+
+
+def search_tables(client, ws: Dict[str, Any], names: List[str], hours: int, days: int, collector) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Each Basic or Auxiliary table's last ingestion and count, None when its search failed; one with nothing in less than the window is left out, not measured."""
     out: Dict[str, Optional[Dict[str, Any]]] = {}
     for name in names:
         rows = collector.guard(
             f"loganalytics.search({name}, {ws['name']})",
-            lambda name=name: client.search(ws["customer_id"], SEARCH_QUERY.format(table=name, days=span), iso_duration_days(span)),
+            lambda name=name: client.search(ws["customer_id"], SEARCH_QUERY.format(table=name, hours=hours), f"PT{hours}H"),
         )
-        if rows is None:
-            out[name] = None
-            continue
         row = rows[0] if rows else {}
         records = row.get("Records") or 0
-        out[name] = {"LastIngested": row.get("LastIngested"), "Records": records} if records or span == days else None
+        if rows is None:
+            out[name] = None
+        elif records or hours == days * 24:
+            out[name] = {"LastIngested": row.get("LastIngested"), "Records": records}
     return out
 
 
@@ -414,8 +419,11 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     else:
         collector.record(f"workspace customerId ({ws['name']})", LookupError("workspace has no customerId to query"))
 
+    hours = search_hours(days)
     other_plans = sorted(n for n, p in (plans or {}).items() if p != QUERYABLE_PLAN)
-    searched = search_tables(client, ws, other_plans, days, collector) if rows is not None else {}
+    searched = search_tables(client, ws, other_plans, hours, days, collector) if rows is not None and hours else {}
+    searched_ok = frozenset(n for n, s in searched.items() if s)
+    search_failed = sorted(n for n, s in searched.items() if s is None)
     tables = project_tables(rows, plans, searched) if rows is not None else None
     alert_rows = None
     if any(t["table"] == ALERTS_TABLE for t in tables or []):
@@ -437,7 +445,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     found: Optional[Dict[Tuple[int, int], Any]] = {}
     if tables is not None:
         ingested = {t["table"]: t["last_ingested"] for t in tables}
-        known, pending = last_data_queries(catalog, ingested, plans, frozenset(n for n, s in searched.items() if s))
+        known, pending = last_data_queries(catalog, ingested, plans, searched_ok)
         found = collector.guard(
             f"loganalytics.query(connector last data, {ws['name']})",
             lambda: run_last_data(client, ws["customer_id"], pending, days, notes),
@@ -481,12 +489,13 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             sum(1 for h in health if health_rank(h["status"]) >= HEALTH_RANK["warning"]) if health is not None else None
         ),
         "tables": tables,
-        "tables_searched": sorted(n for n, s in searched.items() if s) if plans is not None else None,
-        "tables_not_measured": [n for n in other_plans if not searched.get(n)] if plans is not None else None,
+        "tables_searched": sorted(searched_ok) if plans is not None else None,
+        "tables_search_failed": search_failed if plans is not None else None,
+        "tables_not_measured": [n for n in other_plans if n not in searched_ok] if plans is not None else None,
         "source_tables": sources if tables is not None else None,
-        # A source on an unread plan or an unsearched table could be missing.
+        # With the search on, a failed search or unread plans could hide a source.
         "sources_ingesting": (
-            len(sources) if tables is not None and plans is not None and all(searched.get(n) for n in other_plans) else None
+            len(sources) if tables is not None and not (hours and (plans is None or search_failed)) else None
         ),
         "alert_products": products if tables is not None else None,
         "non_source_tables": [t["table"] for t in tables or [] if not t["counts_as_source"] and t["table"] != ALERTS_TABLE],
@@ -509,6 +518,7 @@ def _strict_total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]
 def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
     counts: List[int] = [w["sources_ingesting"] for w in workspaces if w.get("sources_ingesting") is not None]
     return {
+        "basic_logs_lookback_hours": search_hours(int_config(WINDOW_ENV, DEFAULT_WINDOW_DAYS)),
         "min_sources_ingesting": min(counts) if counts else None,
         "workspaces_with_2plus_sources": sum(1 for c in counts if c >= 2),
         "workspaces_with_no_sources": sum(1 for c in counts if c == 0),

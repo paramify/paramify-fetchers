@@ -12,22 +12,33 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables are measured.**
-  The query API refuses these tables, so each one is now read through the
-  Log Analytics `/search` endpoint (`AzureRestClient.search()`), one table at a
-  time, for its newest record time and record count over the ingestion window.
-  `/search` bills per GB scanned in that window, so the query asks for nothing
-  else, and it reaches back at most 30 days: with a longer window, a table with
-  no record in 30 days reads unmeasured. A table with data joins `tables`, with
-  a new `plan` field on every table, and counts as a source, so
-  `sources_ingesting` and `min_sources_ingesting` can rise. A connector whose
-  data type is the whole table now reads connected or not connected instead of
-  unmeasured; one that filters a Basic or Auxiliary table with data stays
-  unmeasured, since answering it would bill another scan. Each workspace gains
-  `tables_searched`, and `tables_not_measured` now lists only the tables that
-  couldn't be searched. A failed search leaves its table unmeasured and fails
-  the run. `sources_ingesting` reads null when any table couldn't be searched
-  or the table plans couldn't be read, since a source could be missing.
+- **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables can be measured.**
+  The query API refuses these tables. Set `basic_logs_lookback_hours`
+  (`BASIC_LOGS_LOOKBACK_HOURS`, as `azure_resource_diagnostic_settings` names
+  it) above 0, and each one is read through the Log Analytics `/search` endpoint
+  (`AzureRestClient.search()`), one table at a time, for its newest record time
+  and record count over that many hours. The hours are capped at the ingestion
+  window and at the 720 `/search` reaches. The setting is off (0) by default,
+  because `/search` bills per GB scanned, so the query asks for nothing else. A
+  value that isn't a whole number leaves it off, with a warning. Off, nothing
+  changes from 0.3.0: these tables are not measured (which is not unknown),
+  aren't counted as sources, and leave their connectors unmeasured. On:
+  - **A table with data** joins `tables` and counts as a source, so
+    `sources_ingesting` and `min_sources_ingesting` can rise.
+  - **Connectors.** A connector whose data type is the whole table reads
+    connected or not connected. One that filters a table with data stays
+    unmeasured, since answering it would bill another scan.
+  - **An empty table** is measured only when the search covers the whole
+    window. With fewer hours, it stays not measured.
+  - **A failed search** leaves its table unmeasured, lists it in
+    `tables_search_failed` and fails the run. `sources_ingesting` then reads
+    null, as it does when the table plans couldn't be read.
+
+  Every table gains a `plan` field. Each workspace gains `tables_searched` and
+  `tables_search_failed`. `tables_not_measured` lists the Basic and Auxiliary
+  tables that weren't measured, for whatever reason. The summary gains
+  `basic_logs_lookback_hours`, the hours actually searched, and the fetcher's
+  tests now check every summary field against its instructions.
 
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
