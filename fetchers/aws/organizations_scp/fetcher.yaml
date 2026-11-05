@@ -19,7 +19,7 @@ config_schema:
     type: string
     default: ""
     env: SCP_EFFECTIVE_ACCOUNTS
-    description: Comma-separated AWS account IDs, or `all` for every account in the organization. For each, records the SCPs attached to the account, each OU above it and the root (EffectiveScps). Empty (the default) turns this off. `all` makes one list-parents call per account.
+    description: Comma-separated AWS account IDs, or `all` for every account in the organization. For each, records the SCPs attached to the account, each OU above it and the root (EffectiveScps). Empty (the default) turns this off. `all` walks the organization from the root down, two calls per root or OU.
 
 target_schema:
   region:
@@ -41,4 +41,4 @@ ksis:
 evidence_set:
   reference_id: EVD-ORGANIZATIONS-SCP
   name: Organizations Service Control Policies
-  instructions: 'Script: aws/organizations_scp/fetcher.sh. Commands executed: aws organizations describe-organization, aws organizations list-roots, aws organizations list-policies --filter SERVICE_CONTROL_POLICY, aws organizations describe-policy, aws organizations list-targets-for-policy (plus list-accounts, list-parents, list-policies-for-target when effective_scp_accounts is set). PolicyRead.Status denied or error means the SCPs could not be read.'
+  instructions: 'Script: aws/organizations_scp/fetcher.sh. Commands executed: aws organizations describe-organization, aws organizations list-roots, aws organizations list-policies --filter SERVICE_CONTROL_POLICY, aws organizations describe-policy, aws organizations list-targets-for-policy (plus list-parents, list-accounts, list-accounts-for-parent, list-organizational-units-for-parent and list-policies-for-target when effective_scp_accounts is set). PolicyRead.Status denied or error means the SCPs could not be read.'

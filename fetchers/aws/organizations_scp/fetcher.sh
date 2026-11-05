@@ -151,7 +151,7 @@ SCPS_LISTED=false
 policies=$(aws organizations list-policies --filter SERVICE_CONTROL_POLICY --query 'Policies[*].[Id,Arn,Name,AwsManaged]' --output json 2>"$_CALL_ERR")
 if [ $? -ne 0 ]; then
     _policy_read_failed "list-policies (SERVICE_CONTROL_POLICY)" "$_CALL_ERR"
-    log_error "Failed to list service control policies: $POLICY_READ_REASON"
+    log_error "Failed to list service control policies: $(_read_reason "list-policies" "$_CALL_ERR")"
 else
     SCPS_LISTED=true
     # describe-policy and list-targets-for-policy are genuinely one call each per
@@ -222,10 +222,14 @@ jq --slurpfile org "$_ORG_JSON" --slurpfile docs "$_ITEMS_JSON" --slurpfile targ
 # root: walk list-parents up to the root and collect the SCPs at every level.
 #
 # The SCPs attached at a level come from the list-targets-for-policy results
-# already collected above when every SCP read succeeded, so a full read costs
-# only the list-parents walk. Otherwise each level is asked directly with
+# already collected above when every SCP's targets were read, so a full read
+# costs only the parent lookups. Otherwise each level is asked directly with
 # list-policies-for-target. Parents and per-level answers are cached by id, so
 # an OU shared by 500 accounts is looked up once.
+#
+# For `all`, the parents are filled in from the top of the tree down first: two
+# calls per root or OU, however many accounts it holds, instead of one
+# list-parents call per account.
 #
 # One account that cannot be read does not cost the others: it gets its own
 # Status/Reason and null Path/Policies, and the run still exits 1.
@@ -239,9 +243,11 @@ if [ -n "$EFFECTIVE_SPEC" ]; then
     MANAGEMENT_ACCOUNT_ID="$(echo "$organization" | jq -r '.MasterAccountId // ""' 2>/dev/null)"
 
     # Every SCP's targets were read, so "which SCPs are attached to X" can be
-    # answered from them: {target id: [{Id, Name}]}.
+    # answered from them: {target id: [{Id, Name}]}. A failed describe-policy
+    # does not matter here; only a missing target list does.
     USE_TARGET_MAP=false
-    if [ "$POLICY_READ_STATUS" = "ok" ] && [ "$SCPS_LISTED" = "true" ]; then
+    if [ "$SCPS_LISTED" = "true" ] && \
+       [ "$(jq '.results[-1].ServiceControlPolicies | all(.Targets != null)' "$OUTPUT_JSON")" = "true" ]; then
         USE_TARGET_MAP=true
         jq -c '.results[-1].ServiceControlPolicies
                | reduce .[] as $p ({}; reduce ($p.Targets // [])[] as $t (.;
@@ -258,6 +264,43 @@ if [ -n "$EFFECTIVE_SPEC" ]; then
         fi
     }
 
+    # _prefill_parents -- for `all`: walk from each root down and cache the
+    # parent of every OU and account, so the loop below makes no list-parents
+    # call for an account the walk reached. A failed call is recorded, and the
+    # accounts under that parent are left uncached: the loop then asks
+    # list-parents for each of them, as for a named account.
+    _prefill_parents() {
+        local root_ids parent parent_type ous accts child
+        root_ids="$(printf '%s' "$roots" | jq -r '.[]?.Id' 2>/dev/null)"
+        set -- $root_ids
+        while [ $# -gt 0 ]; do
+            parent="$1"; shift
+            case " $(printf '%s' "$root_ids" | tr '\n' ' ') " in
+                *" $parent "*) parent_type="ROOT" ;;
+                *) parent_type="ORGANIZATIONAL_UNIT" ;;
+            esac
+
+            if accts=$(aws organizations list-accounts-for-parent --parent-id "$parent" --query 'Accounts[].Id' --output json 2>"$_CALL_ERR"); then
+                for child in $(printf '%s' "$accts" | jq -r '.[]?' 2>/dev/null); do
+                    printf '%s %s\n' "$parent" "$parent_type" > "$_CACHE_DIR/parent_$child"
+                done
+            else
+                echo "aws organizations list-accounts-for-parent ($parent) failed" >> "$_FAILURE_LOG"
+            fi
+
+            if ous=$(aws organizations list-organizational-units-for-parent --parent-id "$parent" --query 'OrganizationalUnits[].Id' --output json 2>"$_CALL_ERR"); then
+                for child in $(printf '%s' "$ous" | jq -r '.[]?' 2>/dev/null); do
+                    # A tree has no cycles; this guard keeps a bad answer from looping.
+                    [ -f "$_CACHE_DIR/parent_$child" ] && continue
+                    printf '%s %s\n' "$parent" "$parent_type" > "$_CACHE_DIR/parent_$child"
+                    set -- "$@" "$child"
+                done
+            else
+                echo "aws organizations list-organizational-units-for-parent ($parent) failed" >> "$_FAILURE_LOG"
+            fi
+        done
+    }
+
     accounts=""
     case "$(printf '%s' "$EFFECTIVE_SPEC" | tr '[:upper:]' '[:lower:]')" in
         all)
@@ -272,6 +315,7 @@ if [ -n "$EFFECTIVE_SPEC" ]; then
                 EFFECTIVE_LISTED=false
             else
                 accounts="$(printf '%s' "$listed" | jq -r '.[]?' 2>/dev/null)"
+                _prefill_parents
             fi
             ;;
         *)

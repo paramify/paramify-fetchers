@@ -35,7 +35,7 @@ args = sys.argv[1:]
 with open(os.environ["FAKE_AWS_LOG"], "a") as f:
     f.write(" ".join(args) + "\n")
 key = " ".join(args[:2])
-for flag in ("--policy-id", "--child-id", "--target-id"):
+for flag in ("--policy-id", "--child-id", "--target-id", "--parent-id"):
     if flag in args:
         key += " " + args[args.index(flag) + 1]
 responses = json.load(open(os.environ["FAKE_AWS_RESPONSES"]))
@@ -86,6 +86,13 @@ def _full_org() -> dict:
         "organizations list-parents ou-a": "r-root\tROOT",
         "organizations list-parents 111111111111": "r-root\tROOT",
         "organizations list-accounts": ["111111111111", "333333333333", "444444444444"],
+        # The same tree, top down, for `all`.
+        "organizations list-accounts-for-parent r-root": ["111111111111"],
+        "organizations list-accounts-for-parent ou-a": ["444444444444"],
+        "organizations list-accounts-for-parent ou-b": ["333333333333"],
+        "organizations list-organizational-units-for-parent r-root": ["ou-a"],
+        "organizations list-organizational-units-for-parent ou-a": ["ou-b"],
+        "organizations list-organizational-units-for-parent ou-b": [],
     }
 
 
@@ -239,6 +246,42 @@ def test_effective_all_enumerates_accounts_and_flags_the_management_account(tmp_
     assert ids == ["111111111111", "333333333333", "444444444444"]
     mgmt = rec["EffectiveScps"][0]
     assert mgmt["IsManagementAccount"] is True  # SCPs do not apply to it
+
+
+def test_effective_all_walks_the_tree_top_down_not_one_call_per_account(tmp_path):
+    r, rec, calls = _run(tmp_path, _full_org(), SCP_EFFECTIVE_ACCOUNTS="all")
+    assert r.returncode == 0, r.stderr
+    by_id = {a["AccountId"]: a for a in rec["EffectiveScps"]}
+    assert [lvl["Id"] for lvl in by_id["333333333333"]["Path"]] == ["333333333333", "ou-b", "ou-a", "r-root"]
+    assert [lvl["Id"] for lvl in by_id["444444444444"]["Path"]] == ["444444444444", "ou-a", "r-root"]
+    assert [lvl["Id"] for lvl in by_id["111111111111"]["Path"]] == ["111111111111", "r-root"]
+    # Two calls per root or OU (three of them), and no list-parents at all.
+    assert not any("list-parents" in c for c in calls)
+    assert sum("list-accounts-for-parent" in c for c in calls) == 3
+    assert sum("list-organizational-units-for-parent" in c for c in calls) == 3
+
+
+def test_effective_all_falls_back_to_list_parents_under_a_failed_branch(tmp_path):
+    responses = _full_org()
+    responses["organizations list-accounts-for-parent ou-a"] = {"error": "ThrottlingException", "message": "Rate exceeded"}
+    r, rec, calls = _run(tmp_path, responses, SCP_EFFECTIVE_ACCOUNTS="all")
+    assert r.returncode == 1  # the failed call is still a failed call
+    by_id = {a["AccountId"]: a for a in rec["EffectiveScps"]}
+    assert all(a["Status"] == "ok" for a in by_id.values())
+    assert [lvl["Id"] for lvl in by_id["444444444444"]["Path"]] == ["444444444444", "ou-a", "r-root"]
+    # Only the account the walk missed is asked for its parent.
+    assert [c for c in calls if "list-parents" in c] == ["organizations list-parents --child-id 444444444444 --query Parents[0].[Id,Type] --output text"]
+
+
+def test_effective_uses_collected_targets_even_if_one_describe_policy_failed(tmp_path):
+    responses = _full_org()
+    responses["organizations describe-policy p-deny"] = {"error": "ServiceException", "message": "try again"}
+    r, rec, calls = _run(tmp_path, responses, SCP_EFFECTIVE_ACCOUNTS="444444444444")
+    assert r.returncode == 1
+    assert rec["PolicyRead"]["Status"] == "error"
+    (acct,) = rec["EffectiveScps"]
+    assert [(p["Id"], p["AttachedToId"]) for p in acct["Policies"]] == [("p-deny", "ou-a"), ("p-FullAWSAccess", "r-root")]
+    assert not any("list-policies-for-target" in c for c in calls)
 
 
 def test_effective_falls_back_to_per_level_calls_when_targets_were_not_read(tmp_path):

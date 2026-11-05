@@ -14,11 +14,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`aws_organizations_scp` can record the SCPs that apply to each account.**
   Set `effective_scp_accounts` (env `SCP_EFFECTIVE_ACCOUNTS`) to comma-separated
-  account IDs, or `all`. For each account the fetcher walks `list-parents` up
-  to the root and records `EffectiveScps: [{AccountId, IsManagementAccount,
-  Status, Reason, Path, Policies}]`, each policy tagged with the level it is
-  attached to. It reuses the targets already collected, so a full read adds
-  only the parent walk. An account that cannot be read gets its own
+  account IDs, or `all`. For each account the fetcher records
+  `EffectiveScps: [{AccountId, IsManagementAccount, Status, Reason, Path,
+  Policies}]`, each policy tagged with the level it is attached to. A named
+  account walks `list-parents` up to the root. `all` walks the organization from
+  the root down, two calls per root or OU, so the cost does not grow with the
+  number of accounts. It reuses the targets already collected, so a full read
+  adds only the parent lookups. An account that cannot be read gets its own
   status and does not stop the others. Off by default.
 
 - **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each

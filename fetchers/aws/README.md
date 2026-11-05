@@ -52,7 +52,7 @@ Reading service control policies needs more than an IAM policy. `ListRoots`, `Li
 
 So an IAM policy in a plain member account (a shared-services account, say) is not enough on its own: the fetcher reads the organization, then gets AccessDenied on every SCP call. It records that as `PolicyRead.Status: "denied"` with `Roots` and `ServiceControlPolicies` set to `null`, not as an organization with no SCPs, and exits non-zero (`not_authorized`).
 
-Actions the fetcher calls: `organizations:DescribeOrganization`, `ListRoots`, `ListPolicies`, `DescribePolicy`, `ListTargetsForPolicy`. With `effective_scp_accounts` set, it also calls `ListParents`, `ListAccounts` (for `all`) and `ListPoliciesForTarget` (only when a per-policy read failed). The AWS managed policy `AWSOrganizationsReadOnlyAccess` covers all of them.
+Actions the fetcher calls: `organizations:DescribeOrganization`, `ListRoots`, `ListPolicies`, `DescribePolicy`, `ListTargetsForPolicy`. With `effective_scp_accounts` set, it also calls `ListParents`, `ListAccounts`, `ListAccountsForParent` and `ListOrganizationalUnitsForParent` (the last three for `all`), and `ListPoliciesForTarget` (only when a policy's targets could not be read). The AWS managed policy `AWSOrganizationsReadOnlyAccess` covers all of them.
 
 Run it from the management account, or from another account in one of two ways.
 
@@ -74,7 +74,9 @@ Run it from the management account, or from another account in one of two ways.
         "organizations:ListPolicies",
         "organizations:ListPoliciesForTarget",
         "organizations:ListTargetsForPolicy",
-        "organizations:ListAccounts"
+        "organizations:ListAccounts",
+        "organizations:ListAccountsForParent",
+        "organizations:ListOrganizationalUnitsForParent"
       ],
       "Resource": "*"
     }
@@ -106,9 +108,9 @@ Notes:
 
 - SCPs don't affect users or roles in the management account. They apply to every member account, including the root user and accounts that are delegated administrators ([SCPs](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps.html)). In `EffectiveScps`, the management account's entry has `IsManagementAccount: true`.
 - `DescribeEffectivePolicy` does not support SCPs, so `EffectiveScps` is built by walking from each account up to the root and collecting the SCPs attached at every level.
-- `effective_scp_accounts: all` makes one `list-parents` call per account, one at a time. In a very large organization this can run past the runner's default 600s timeout. If it does, list the accounts you need instead.
+- `effective_scp_accounts: all` walks the organization from the root down: two calls for the root and for each OU, however many accounts it holds. A named account makes one `list-parents` call for each level above it that has not been looked up yet.
 - Delegation policies don't accept `NotAction` or `NotResource` (from June 30, 2026). Use the explicit action list above.
-- Not verified against AWS docs: whether wildcard actions (`organizations:List*`) work in a delegation policy, and whether a role ARN works as the `Principal`. The AWS examples use explicit actions and the account. Being a delegated administrator for some *other* AWS service (`register-delegated-administrator`) is a separate mechanism, and we have not confirmed that it allows these reads. Use the delegation policy.
+- Use an explicit action list and the account as the `Principal`, as the AWS examples do. Being a delegated administrator for another AWS service (`register-delegated-administrator`) is a different mechanism. Use the delegation policy above.
 
 ## Wiring into a manifest
 
