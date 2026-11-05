@@ -1511,6 +1511,17 @@ schemas and the `paramify` CLI — not the internal code.
   `profiles_with_waf_in_use_without_waf_log_export` is null unless that profile
   exports its WAF log. The public-cloud output is unchanged apart from the two
   new counts, which are 0 there.
+- **`azure_sentinel_analytics_rules` 0.3.1: a failed SecurityAlert products
+  read is null, and the KSI-IAM-SUS mapping is dropped.** When the SecurityAlert
+  products query failed, enabled incident-creation rules dropped out of
+  `enabled_rules_missing_data` instead of making it unknown. The workspace's
+  `enabled_rules_missing_data` and `enabled_rules_quiet` are now null when that
+  query fails and the workspace has an enabled incident-creation rule. The
+  fetcher no longer maps to KSI-IAM-SUS: a detection rule shows the trigger, not
+  the response to suspicious activity, which `azure_sentinel_automation_rules`
+  covers. The Defender XDR list of products whose alerts it carries now lives in
+  `_shared/sentinel_ingestion.py`, shared with `azure_sentinel_data_sources`;
+  neither fetcher's output changes from the move.
 - **Azure: an invalid lookback or recovery time objective fails as `bad_config`.**
   The messages matched no `bad_config` marker, so `azure_change_provenance` and
   `azure_front_door_origins` reported an invalid lookback as `partial_failure`.
