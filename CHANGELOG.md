@@ -1495,7 +1495,8 @@ schemas and the `paramify` CLI — not the internal code.
   `x509_targeted_users_with_weaker_methods` and
   `x509_targeted_users_with_weak_methods` (SMS or Voice). The user counts are 0 when
   X.509 is off, and null when the policy, the users or a needed group can't be read;
-  the CA counts are null when the CA read fails.
+  the CA counts are null when the CA read fails. `authentication_methods` now reads
+  null, not an empty list, when the methods policy can't be read.
 
 ### Fixed
 

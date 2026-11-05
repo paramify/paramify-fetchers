@@ -281,9 +281,10 @@ def test_x509_off_reads_no_users_and_counts_none_targeted(monkeypatch, tmp_path)
     assert [c for c in calls if c[0] not in ("authorities", "pki")] == []
 
 
-def test_an_unreadable_policy_leaves_the_targets_unknown(monkeypatch, tmp_path):
+def test_an_unreadable_policy_leaves_the_methods_and_targets_unknown(monkeypatch, tmp_path):
     monkeypatch.setattr(ap, "project_methods_policy", lambda model: None)
     _, evidence, calls = run(monkeypatch, tmp_path, CONFIGS)
+    assert evidence["results"]["authentication_methods"] is None
     assert evidence["summary"]["x509_targeted_users"] is None
     assert [c for c in calls if c[0] == "users"] == []
 

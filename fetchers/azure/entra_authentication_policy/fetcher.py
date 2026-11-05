@@ -938,7 +938,7 @@ def main() -> int:
                 if policy is not None
                 else None
             ),
-            "authentication_methods": methods,
+            "authentication_methods": methods if policy is not None else None,
             "security_defaults_enabled": collected.get("security_defaults_enabled"),
             "password_protection": passwords,
             "entra_id_tier": tier,
