@@ -1617,6 +1617,53 @@ schemas and the `paramify` CLI — not the internal code.
   against a production subscription. Existing fields and summary keys are
   unchanged.
 
+- **`azure_entra_authentication_policy` 0.3.0: trusted certificate authorities and
+  certificate mapping.** The fetcher reads the certificate authorities trusted for
+  certificate-based sign-in from the classic store
+  (`GET /organization/{id}/certificateBasedAuthConfiguration`) and the PKI-based
+  trust store (`GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations`
+  and each one's `certificateAuthorities`) into `trusted_certificate_authorities`:
+  trust store, issuer, subject, root or intermediate, revocation list URLs,
+  thumbprint, `not_after` and `days_until_expiry` from the certificate, and
+  `expired` and `has_crl`. Each store's grant is optional: the classic store needs
+  `Organization.Read.All` and the PKI store `PublicKeyInfrastructure.Read.All`.
+  Refused, a store reads `not_authorized` in `certificate_authority_stores` and
+  `classic_store_status` or `pki_store_status`, `classic_store_missing_permission`
+  or `pki_store_missing_permission` names the grant, and the run still succeeds; any
+  other failure fails it. For the PKI store, a
+  cloud without the API (400 or 404) reads `not_available` the same way. The CA list
+  (`trusted_certificate_authorities`) is null unless both stores were read; each
+  store's own CAs are listed under `certificate_authority_stores`, null when that
+  store wasn't read. With the X.509 method enabled it also reads users with
+  their `authorizationInfo` (from the target groups, or from the directory only when
+  X.509 targets all users) and the groups the enabled methods target. It counts every
+  enabled member account X.509 targets, and lists in `x509_certificate_users` the
+  first 100 that fail a check (`x509_certificate_users_truncated` says when more
+  did), each with whether a
+  certificate user binding matches it (`mapping`: `certificate_user_id` when a
+  certificateUserIds binding's field matches the type of one of its ids,
+  `unverified` when only a name binding could, which depends on the certificate, or
+  `none`; `mapped`, `mapped_high_affinity`), the count and types of its
+  certificate user ids (never the values), and the weaker
+  methods (enabled, not phishing-resistant, not X.509 or guest-only email) that
+  still reach it. The X.509 settings list each `certificate_user_bindings` entry.
+  The summary adds `trusted_certificate_authorities`,
+  `expired_certificate_authorities`, `certificate_authorities_expiry_unknown`,
+  `certificate_authorities_without_crl` (a CA in both stores counted once, by
+  thumbprint or, when a certificate can't be read, key identifier; null unless both
+  stores were read), `classic_store_certificate_authorities`,
+  `classic_store_status`, `classic_store_missing_permission`,
+  `pki_store_certificate_authorities`, `pki_store_status`,
+  `pki_store_missing_permission`, `x509_targeted_users`,
+  `x509_targeted_users_unmapped`, `x509_targeted_users_mapping_unverified`,
+  `x509_targeted_users_without_certificate_user_ids`,
+  `x509_targeted_users_with_weaker_methods` and
+  `x509_targeted_users_with_weak_methods` (SMS or Voice) and
+  `x509_certificate_users_truncated`. The user counts are 0 when
+  X.509 is off, and null when the policy, the users or a needed group can't be read;
+  the CA counts are null when the CA read fails. `authentication_methods` now reads
+  null, not an empty list, when the methods policy can't be read.
+
 ### Fixed
 
 - **`azure_entra_emergency_accounts` 0.1.1: a synced passkey counts as a phishing-resistant
