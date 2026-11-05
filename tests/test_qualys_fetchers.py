@@ -125,7 +125,7 @@ def _reset() -> None:
                  ips=["10.0.0.1-10.0.0.10", "10.0.1.5", "10.0.2.0-10.0.2.3"], excluded=["10.0.0.10"],
                  schedules=_schedules(), profiles=_option_profiles(), scans=_scans(),
                  fail={}, throttle={}, wait="0", log=[], bad_next=False, drop_id_min=False, entity=False,
-                 extra_warning=False)
+                 extra_warning=False, no_url=False)
 
 
 class QualysDouble(BaseHTTPRequestHandler):
@@ -156,8 +156,9 @@ class QualysDouble(BaseHTTPRequestHandler):
         base = "https://evil.example" if STATE["bad_next"] else self._base()
         id_min = "" if STATE["drop_id_min"] else f"&id_min={more[0][key]}"
         url = f"{base}{path}?action=list&truncation_limit={STATE['page_size']}{id_min}"
+        url_el = "" if STATE["no_url"] else f"<URL><![CDATA[{url}]]></URL>"
         return page, (f"<WARNING><CODE>1980</CODE><TEXT>{STATE['page_size']} record limit exceeded.</TEXT>"
-                      f"<URL><![CDATA[{url}]]></URL></WARNING>{extra}")
+                      f"{url_el}</WARNING>{extra}")
 
     def do_GET(self) -> None:  # noqa: N802
         url = urlparse(self.path)
@@ -388,6 +389,14 @@ def test_a_later_warning_does_not_drop_the_next_page(qualys: str) -> None:
     ids = [h.findtext("ID") for h in client.records("/api/5.0/fo/asset/host/", {"action": "list"}, "HOST", "op")]
     assert ids == ["101", "102", "103", "104", "105"]
     assert client.pages == 3
+
+
+def test_truncation_without_url_stays_partial_after_a_later_warning(qualys: str) -> None:
+    STATE["no_url"] = STATE["extra_warning"] = True
+    client = QualysClient(qualys, USER, PASSWORD, LOCAL, sleep=lambda s: None)
+    with pytest.raises(QualysError, match="without a next-page URL") as e:
+        list(client.records("/api/5.0/fo/asset/host/", {"action": "list"}, "HOST", "op"))
+    assert e.value.code == "partial_failure"
 
 
 def test_next_page_without_id_min_stops_as_partial(qualys: str) -> None:
