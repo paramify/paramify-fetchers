@@ -1494,7 +1494,8 @@ schemas and the `paramify` CLI — not the internal code.
   `Organization: null`. Existing keys keep their order. The exit code is
   unchanged. `fetchers/aws/README.md` now documents the two ways to run it
   from a non-management account: a read-only delegation policy, or a profile
-  that assumes a role in the management account.
+  that assumes a role in the management account. The 0.2.0 evidence sample is
+  removed until it is captured again.
 
 - **`azure_entra_privileged_roles` 0.2.0 counts service principals that hold a
   role.** On a real tenant, Microsoft Graph v1.0 `/directoryRoles/{id}/members`
