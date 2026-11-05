@@ -302,7 +302,7 @@ Commands Executed:
 - Microsoft Graph `GET /identity/conditionalAccess/policies` — every policy with its state, conditions, grant controls and session controls
 - Microsoft Graph `GET /policies/authenticationStrengthPolicies` (only when a policy uses an authentication strength) — each strength's allowed sign-in method combinations, read as raw JSON because the SDK drops combinations of two methods such as password and SMS
 
-Output: `azure_entra_conditional_access_policies_<tenant>.json` — each Conditional Access policy with its state, the users, groups, roles and apps it includes and excludes, its other conditions (client apps, sign-in, user, insider and service principal risk levels, platforms, locations, device filter, authentication flows), what it grants or blocks and its session controls, and each authentication strength the policies use with its allowed method combinations.
+Output: `azure_entra_conditional_access_policies_<tenant>.json` — each Conditional Access policy with its state, the users, groups, roles and apps it includes and excludes, any application filter that includes or excludes apps by their attributes, its other conditions (client apps, sign-in, user, insider and service principal risk levels, platforms, locations, device filter, authentication flows), what it grants or blocks and its session controls, and each authentication strength the policies use with its allowed method combinations.
 
 Summary fields:
 
@@ -321,7 +321,7 @@ Summary fields:
 - `enforced_policies_with_session_controls` — Number of enforced policies with at least one session control: sign-in frequency, persistent browser session, app-enforced restrictions or Defender for Cloud Apps session control; null if the policies couldn't be read
 
 **Do enforced policies require phishing-resistant MFA?**
-- `authentication_strengths_readable` — True if the authentication strengths the policies use were read with their allowed combinations, or no policy uses one; false if the read failed, and the phishing-resistant figures read null
+- `authentication_strengths_readable` — True if the authentication strengths the policies use were read with their allowed combinations, or no policy uses one; also true when the strengths weren't read because the policies couldn't be read, and authentication_strengths is then null; false if the strengths read failed, and the phishing-resistant figures read null
 - `enforced_policies_requiring_phishing_resistant_mfa` — Number of enforced policies that require phishing-resistant MFA: their authentication strength allows only FIDO2 security keys and passkeys, Windows Hello for Business or multi-factor certificate authentication, and the policy doesn't let the user meet another grant control instead; null if the policies or a policy's strength couldn't be read
 - `enforced_phishing_resistant_mfa_for_all_users_and_apps` — Number of enforced policies that require phishing-resistant MFA for all users on all cloud apps, before any exclusions; null if the policies or a policy's strength couldn't be read
 - `phishing_resistant_mfa_role_template_ids` — List of directory role template ids (Global Administrator is 62e90394-69f5-4237-9190-012177145e10) that an enforced policy requiring phishing-resistant MFA on all cloud apps includes; excluded users and groups aren't checked; null if the policies or a policy's strength couldn't be read
@@ -330,7 +330,7 @@ Summary fields:
 - `enforced_policies_targeting_all_users` — Number of enforced policies that include all users; a policy can still exclude users, groups or roles; null if the policies couldn't be read
 - `enforced_policies_targeting_all_applications` — Number of enforced policies that include all cloud apps; a policy can still exclude apps; null if the policies couldn't be read
 - `enforced_mfa_for_all_users_and_apps` — Number of enforced policies that require MFA for all users on all cloud apps, before any exclusions; null if the policies couldn't be read
-- `mfa_client_app_types_for_all_users_and_apps` — List of client app types (browser, mobileAppsAndDesktopClients, exchangeActiveSync, other) on which enforced policies, taken together, require MFA for all users on all cloud apps. A policy counts when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no sign-in, user, insider or service principal risk, platform, location, device filter or authentication flow condition; a policy for all client app types adds all four. Excluded users, groups and roles aren't checked; null if the policies couldn't be read
+- `mfa_client_app_types_for_all_users_and_apps` — List of client app types (browser, mobileAppsAndDesktopClients, exchangeActiveSync, other) on which enforced policies, taken together, require MFA for all users on all cloud apps. A policy counts when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no application filter, sign-in, user, insider or service principal risk, platform, location, device filter or authentication flow condition; a policy for all client app types adds all four. Excluded users, groups and roles aren't checked; null if the policies couldn't be read
 - `enforced_policies_targeting_legacy_authentication` — Number of enforced policies whose conditions include legacy clients (Exchange ActiveSync or other older clients, which can't prompt for MFA), whether the policy blocks them or requires something else; null if the policies couldn't be read
 
 **Do admin portals and Azure management require MFA?**
@@ -357,7 +357,7 @@ Commands Executed:
 - Microsoft Graph `GET /applications` — when each of this tenant's app registrations was created, for the grace period of a service principal with no creation date of its own
 - Microsoft Graph `GET /reports/servicePrincipalSignInActivities` on the beta endpoint — when each app or managed identity last signed in
 - Microsoft Graph `GET /directoryRoles` and `GET /directoryRoles/{id}/members` (per role) — who holds each directory role now, tenant-wide; eligible (PIM) assignments and roles scoped to an administrative unit aren't read
-- Microsoft Graph `GET /directoryRoles/{id}/members/microsoft.graph.servicePrincipal` (per role) — the service principals holding the role, which the members list leaves out
+- Microsoft Graph `GET /directoryRoles/{id}/members/microsoft.graph.servicePrincipal` (per role) — the service principals holding the role, which v1.0 /members leaves out
 - `GET Microsoft.Authorization/roleDefinitions` and `GET Microsoft.Authorization/roleAssignments` — every active Azure role assignment that applies in the subscription, including those inherited from management groups and made below it, with its role name; eligible (PIM) assignments aren't read
 - Microsoft Graph `GET /groups/{id}/transitiveMembers` on the beta endpoint (per group holding a role) — who holds the role through the group; beta because v1.0 member reads are known to leave out service principals
 - Microsoft Graph `POST /directoryObjects/getByIds` — the service principals holding a role, and which assigned principals no longer exist
@@ -4020,7 +4020,7 @@ Access: Reader on the subscription. Optional: Log Analytics Reader on the worksp
 
 Commands Executed:
 - `GET Microsoft.Cdn/profiles`, then `GET securityPolicies` (per Front Door Standard or Premium profile) — which WAF policies each profile attaches
-- `GET Microsoft.Network/applicationGateways` — gateways on a WAF tier with a WAF policy or the legacy in-gateway WAF configuration
+- `GET Microsoft.Network/applicationGateways` — gateways on a WAF tier with a WAF policy on the gateway, a listener or a path rule, or the legacy in-gateway WAF configuration
 - `GET FrontDoorWebApplicationFirewallPolicies` and `GET ApplicationGatewayWebApplicationFirewallPolicies` — each WAF policy's mode (Prevention or Detection) and state
 - `GET Microsoft.Network/publicIPAddresses` — every public IP, whether it is attached, and its own DDoS protection mode
 - `GET diagnosticSettings` (per WAF resource and per attached public IP) — which workspaces receive the WAF log and the DDoS log categories, and whether a gateway writes resource-specific tables
@@ -4037,11 +4037,11 @@ Summary fields:
 
 **What was checked?**
 - `lookback_days` — Days of WAF and DDoS records and attack metrics read
-- `waf_resources` — Number of WAF resources: Front Door profiles that attach a WAF policy (or whose security policies couldn't be read) and WAF-tier App Gateways with a WAF policy or the legacy WAF configuration
+- `waf_resources` — Number of WAF resources: Front Door profiles that attach a WAF policy (or whose security policies couldn't be read) and WAF-tier App Gateways with a WAF policy on the gateway, a listener or a path rule, or the legacy WAF configuration. Which WAF applies to each listener is shown by `azure_app_gateway_waf`
 - `front_door_waf_resources` — Number of WAF resources that are Front Door profiles
 - `app_gateway_waf_resources` — Number of WAF resources that are App Gateways
 - `front_door_profiles_without_waf` — Number of Front Door Standard and Premium profiles that attach no WAF policy
-- `waf_resources_in_detection_mode` — Number of WAF resources with a policy in Detection mode, which logs matching requests without blocking them
+- `waf_resources_in_detection_mode` — Number of WAF resources with a policy in Detection mode, which logs matching requests without blocking them, including a policy that a gateway's listener or path rule attaches in place of the gateway's
 - `waf_resources_mode_unknown` — Number of WAF resources with no policy in Detection mode where a policy's mode couldn't be read (the profile's security policies or the policy itself couldn't be read)
 
 **Do the WAFs send their logs?**
@@ -4051,13 +4051,13 @@ Summary fields:
 **What did the WAFs do in the window?**
 - `waf_resources_with_waf_events` — Number of WAF resources whose WAF log has records in the window
 - `waf_resources_without_waf_events` — Number of WAF resources that export the WAF log to workspaces that were read and hold no records in the window
-- `waf_resources_waf_log_unknown` — Number of WAF resources that export the WAF log to a workspace that couldn't be read, or to a Basic-plan table that wasn't queried
-- `waf_events` — Number of WAF log records in the window (one per rule a request matched); null when any WAF resource's records couldn't be read
-- `waf_requests_matched` — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id (a record without one counts as its own request); null when any WAF resource's records couldn't be read
-- `waf_requests_blocked` — Number of requests the WAF blocked: Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records, from a policy in Prevention mode; null when any WAF resource's records couldn't be read
-- `waf_requests_would_block` — Number of requests a policy in Detection mode logged with a blocking action (Block, Redirect or a failed JavaScript challenge); Prevention mode would have blocked them, but Detection mode only logs; null when any WAF resource's records couldn't be read
-- `waf_requests_logged_only` — Number of requests that matched a rule but were only logged (Log, AnomalyScoring, Detected or Matched, and not blocked, would-block or allowed); null when any WAF resource's records couldn't be read
-- `last_waf_event` — Time of the latest WAF log record across all WAF resources (UTC)
+- `waf_resources_waf_log_unknown` — Number of WAF resources that export the WAF log to a workspace that couldn't be read, or to a Basic-plan table that wasn't queried, and have no records in the workspaces that were read
+- `waf_events` — Number of WAF log records in the window (one per rule a request matched); null when any workspace a WAF resource exports its WAF log to couldn't be read
+- `waf_requests_matched` — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id (a record without one counts as its own request); null when any workspace a WAF resource exports its WAF log to couldn't be read
+- `waf_requests_blocked` — Number of requests the WAF blocked: Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records, from a policy in Prevention mode; null when any workspace a WAF resource exports its WAF log to couldn't be read
+- `waf_requests_would_block` — Number of requests that Prevention mode would have blocked but Detection mode only logged: on Front Door, a policy in Detection mode logged a blocking action (Block, Redirect or a failed JavaScript challenge); on an App Gateway, a mandatory rule, such as the anomaly-score rule 949110, logged Detected, which Prevention mode logs as Blocked; null when any workspace a WAF resource exports its WAF log to couldn't be read
+- `waf_requests_logged_only` — Number of requests that matched a rule but were only logged (Log, AnomalyScoring, LogAndScore or Matched, and not blocked, would-block or allowed); null when any workspace a WAF resource exports its WAF log to couldn't be read
+- `last_waf_event` — Time of the latest WAF log record across all WAF resources (UTC); null when no record was read
 
 **Do WAF alerts reach someone?**
 - `waf_alert_rules` — Number of alert rules on a WAF metric (WebApplicationFirewallRequestCount, Azwaf*, BlockedCount or MatchedCount) or whose query reads a WAF log; null when the alert rule lists couldn't be read
@@ -4078,11 +4078,11 @@ Summary fields:
 - `ddos_attack_alert_rules` — Number of alert rules on IfUnderDDoSAttack or whose query reads a DDoS log category; null when the alert rule lists couldn't be read
 - `protected_ips_with_attack_alert_reaching_receiver` — Number of public IPs with IP Protection whose attack alert routes to an enabled receiver; null when no attached IP has IP Protection, because without DDoS Protection the alert can't fire, or when the alert rule lists couldn't be read
 - `protected_ips_without_attack_alert` — Number of public IPs with IP Protection and no attack alert; null when no attached IP has IP Protection, or when the alert rule lists couldn't be read
-- `public_ips_attacked` — Number of attached public IPs with at least one hour under attack in the window; null when no attached IP has IP Protection and none showed an attack, because without DDoS Protection the attack metric stays 0
-- `ddos_mitigations_started` — Number of DDoS mitigations started on public IPs with IP Protection; null when no attached IP has IP Protection, or any such IP's DDoS logs couldn't be read
+- `public_ips_attacked` — Number of attached public IPs with at least one hour under attack in the window; null when no attached IP has IP Protection and none showed an attack, because without DDoS Protection the attack metric stays 0, or when the attack metric of any IP with IP Protection couldn't be read
+- `ddos_mitigations_started` — Number of DDoS mitigations started on public IPs with IP Protection; null when no attached IP has IP Protection, or any workspace that such an IP sends DDoS logs to couldn't be read
 
 **Which workspaces were read?**
-- `log_workspaces` — Number of Log Analytics workspaces queried
+- `log_workspaces` — Number of Log Analytics workspaces the fetcher tried to read, whatever the outcome; the three counts below leave out one whose read failed another way
 - `log_workspaces_queried` — Number of Log Analytics workspaces read
 - `log_workspaces_not_authorized` — Number of Log Analytics workspaces that refused the read
 - `log_workspaces_not_found` — Number of Log Analytics workspaces that no longer exist
@@ -5870,18 +5870,18 @@ Short Description: Shows how each Azure DevOps service connection authenticates,
 
 Script: fetchers/azure/devops_service_connections/fetcher.py (uses the shared Azure DevOps client fetchers/azure/_shared/devops_rest.py)
 
-Access: A personal access token per organization (AZURE_DEVOPS_PAT) with Service Connections, Variable Groups, Secure Files, Build, and Project and Team (all Read). With no token set, it signs in with Entra ID instead: the identity needs Reader on the service connections and on the Library.
+Access: A personal access token for the organization with Service Connections, Variable Groups, Secure Files, Build, and Project and Team (all Read), or an Entra identity in the organization with Reader on the service connections and on the Library.
 
 Commands Executed:
-- `GET _apis/connectionData` — identifies the signed-in user (token or Entra ID)
+- `GET _apis/connectionData` — identifies the signed-in user
 - `GET _apis/projects` — lists projects
-- `GET _apis/serviceendpoint/endpoints` (per project) — service connections, failed ones included, with their sign-in scheme and service principal and tenant ids
-- `GET _apis/pipelines/pipelinepermissions/endpoint/{id}` (per connection and project; preview API) — which YAML pipelines may use it
-- `GET _apis/serviceendpoint/{id}/executionhistory` (per connection and project; preview API missing from Microsoft's REST reference) — the runs that used it, newest first
-- `GET _apis/distributedtask/variablegroups` (per project) — variable groups, their secret counts and Key Vault links
-- `GET _apis/distributedtask/securefiles` (per project; preview API) — secure files, by name
+- `GET {project}/_apis/serviceendpoint/endpoints` (per project) — service connections, failed ones included, with their sign-in scheme and service principal and tenant ids
+- `GET {project}/_apis/pipelines/pipelinepermissions/endpoint/{id}` (per connection and project; preview API) — which YAML pipelines may use it
+- `GET {project}/_apis/serviceendpoint/{id}/executionhistory` (per connection, through each project that lists it until a read shows another project's runs, as the history then isn't filtered by project; preview API missing from Microsoft's REST reference, so its newest-first order is checked on the whole first page before the read stops early) — the runs that used it, and its last pipeline run, looked for at most 5 pages past the window (each connection's last_pipeline_run_search_stopped is true when the search stopped there without finding one) (order and project filtering unmeasured on a live organization)
+- `GET {project}/_apis/distributedtask/variablegroups` (per project) — variable groups, their secret counts and Key Vault links
+- `GET {project}/_apis/distributedtask/securefiles` (per project; preview API) — secure files, by name
 
-Output: `azure_devops_service_connections_<organization>.json` — each service connection with how it authenticates, its service principal, the pipelines allowed to use it and the runs that used it, plus each variable group's secrets and Key Vault link and each secure file.
+Output: `azure_devops_service_connections_<organization>.json` — each service connection with how it authenticates, its service principal and tenant ids exactly as Azure DevOps gives them, the pipelines allowed to use it and the runs that used it, the connections grouped by service principal to join an Azure change to the run that made it, and each variable group's secret counts and Key Vault link and each secure file, with no credential or secret value.
 
 Summary fields:
 
@@ -5889,23 +5889,17 @@ Summary fields:
 - `lookback_days` — Number of days back the fetcher looks for runs that used a service connection
 - `projects_collected` — Number of projects read
 - `service_connections_total` — Number of service connections, each counted once however many projects share it
-- `service_connections_by_type` — Number of service connections of each type (for example azurerm for Azure Resource Manager, Generic, GitHub, kubernetes)
-- `secure_files_total` — Number of secure files (certificates, keys and other files pipelines download)
+- `projects_with_no_service_connections_listed` — List of projects whose service connection list came back empty. Azure DevOps lists only the connections the identity holds a role on (Reader or above) and refuses nothing when it holds none, so an empty project may have connections the identity can't see; by default only Endpoint Administrators, Endpoint Creators and each connection's creator hold a role
+- `service_connections_by_type` — Number of service connections of each type (for example azurerm for Azure Resource Manager, Generic, GitHub, kubernetes; unknown for a connection with no type)
+- `secure_files_total` — Number of secure files (certificates, keys and other files pipelines download); a project whose secure files couldn't be read adds none, and the count is never null
 
 **How do service connections authenticate?**
-- `service_connections_by_auth_method` — Number of service connections using each sign-in method:
-  - workload_identity_federation (a short-lived token, no stored secret)
-  - managed_identity (the build agent's Azure identity, no stored secret)
-  - github_app (a GitHub App installation, no stored secret)
-  - service_principal_secret (a stored client secret)
-  - service_principal_certificate (a stored certificate)
-  - service_principal (a stored secret or certificate; Azure DevOps didn't say which)
-  - username_password, token, personal_access_token, oauth, certificate, publish_profile, kubernetes (other stored credentials)
-  - none (no sign-in scheme, though the connection can still keep a key such as a NuGet API key), or the raw scheme name for one the fetcher doesn't recognise
+- `service_connections_by_auth_method` — Number of service connections using each sign-in method: workload_identity_federation (a short-lived token, no stored secret), managed_identity (the build agent's Azure identity, no stored secret), github_app (a GitHub App installation, no stored secret), service_principal_secret (a stored client secret), service_principal_certificate (a stored certificate), service_principal (a stored secret or certificate; Azure DevOps didn't say which), username_password, token, personal_access_token, oauth, certificate, publish_profile and kubernetes (other stored credentials), none (no sign-in scheme, though the connection can still keep a key such as a NuGet API key), unknown (no sign-in scheme given), or the raw scheme name for one the fetcher doesn't recognise
 - `azure_service_connections` — Number of Azure Resource Manager (azurerm) service connections
 - `azure_service_connections_using_workload_identity_federation` — Number of Azure Resource Manager service connections that use workload identity federation
-- `azure_service_connections_with_stored_secret` — List of Azure Resource Manager service connections that hold a stored credential, meaning a secret, certificate, password, token, key, publish profile or kubeconfig kept in Azure DevOps
-- `service_connections_with_stored_credential` — List of service connections of any type that hold a stored credential; a connection with no sign-in scheme counts when it keeps any parameter besides the service principal and tenant ids, and one with a scheme the fetcher doesn't recognise is left out
+- `azure_service_connections_with_stored_secret` — List of Azure Resource Manager service connections that hold a stored credential, meaning a secret, certificate, password, token, key, publish profile or kubeconfig kept in Azure DevOps; one whose credential can't be told is in `service_connections_credential_unknown` instead
+- `service_connections_with_stored_credential` — List of service connections of any type that hold a stored credential; a connection with no sign-in scheme counts when it keeps any parameter besides the service principal and tenant ids
+- `service_connections_credential_unknown` — List of service connections for which the fetcher can't tell whether they hold a stored credential: a sign-in scheme it doesn't recognise, or no sign-in scheme and no parameter besides the service principal and tenant ids. They are in neither stored-credential list, so the two stored-credential lists are complete only when `service_connections_credential_unknown` is empty
 - `service_connections_not_ready` — List of service connections Azure DevOps reports as not ready (creation failed or incomplete)
 
 **Who may use them, and were they used?**
@@ -5921,16 +5915,11 @@ Summary fields:
 - `variable_groups_with_secrets_outside_key_vault` — List of variable groups holding secret variables stored in Azure DevOps itself rather than Key Vault
 - `secret_variables_total` — Number of secret variables across all variable groups, Key Vault-linked secrets included
 - `secret_variables_outside_key_vault` — Number of secret variables stored in Azure DevOps itself rather than Key Vault
-- `key_vault_secrets_expired` — Number of Key Vault-linked secrets whose expiry date, as Azure DevOps last read it, has passed
+- `key_vault_secrets_expired` — Number of enabled Key Vault-linked secrets whose expiry date, as Azure DevOps last read it, has passed; a disabled one, as an old version usually is after rotation, isn't counted
 - `key_vault_secrets_without_expiry` — Number of Key Vault-linked secrets with no expiry date set
 
 **What isn't collected?**
-- `not_collected` — What the fetcher deliberately doesn't collect, by area:
-  - secret values (credentials, secret variables, secure file contents; of a connection's sign-in parameters only the service principal and tenant ids are kept, and its URL is cut to scheme and host);
-  - when a service principal's secret or certificate expires (Azure DevOps doesn't expose it);
-  - which classic pipelines may use a connection (pipeline permissions limit YAML pipelines only);
-  - who holds the User, Creator and Administrator roles on each connection;
-  - projects the identity can't see.
+- `not_collected` — What the fetcher deliberately doesn't collect, by area: secret values (credentials, secret variables and secure file contents; of a connection's sign-in parameters only the service principal and tenant ids are kept, and its URL is cut to scheme and host); when a service principal's secret or certificate expires (Azure DevOps doesn't expose it); which classic pipelines may use a connection (pipeline permissions limit YAML pipelines only); who holds the User, Creator and Administrator roles on each connection; and projects and connections the identity can't see (Azure DevOps lists only the connections it holds a role on, with no refusal for the rest)
 
 
 ### azure_devops_work_items
