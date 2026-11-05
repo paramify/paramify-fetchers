@@ -276,6 +276,9 @@ def pipeline_permissions(body: Any, project: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+GROUP_ID_BATCH = 50
+
+
 def variable_group_record(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Counts and Key Vault metadata only; no variable value is written."""
     variables = raw.get("variables") if isinstance(raw.get("variables"), dict) else {}
@@ -345,9 +348,20 @@ def collect_project(client, collector, project, connections, groups, since) -> D
 
     variable_groups = call(collector, f"distributedtask.variablegroups.list({pname})", SCOPE_VARIABLE_GROUPS,
                            lambda: client.list(f"{pid}/_apis/distributedtask/variablegroups"))
+    fresh = []
     for raw in variable_groups or []:
-        if isinstance(raw, dict) and raw.get("id") is not None:
-            groups.setdefault(raw["id"], variable_group_record(raw))
+        if isinstance(raw, dict) and raw.get("id") is not None and raw["id"] not in groups:
+            groups[raw["id"]] = {**variable_group_record(raw), "projects": None}
+            fresh.append(raw["id"])
+    # The project list carries no project references; the by-id read does.
+    for start in range(0, len(fresh), GROUP_ID_BATCH):
+        ids = fresh[start:start + GROUP_ID_BATCH]
+        detailed = call(collector, f"distributedtask.variablegroups.byIds({pname})", SCOPE_VARIABLE_GROUPS,
+                        lambda ids=ids: client.list(f"{pid}/_apis/distributedtask/variablegroups",
+                                                    params={"groupIds": ",".join(str(i) for i in ids)}))
+        for raw in detailed or []:
+            if isinstance(raw, dict) and raw.get("id") in groups and "variableGroupProjectReferences" in raw:
+                groups[raw["id"]]["projects"] = project_refs(raw["variableGroupProjectReferences"])
 
     files = call(collector, f"distributedtask.securefiles.list({pname})", SCOPE_SECURE_FILES,
                  lambda: client.list(f"{pid}/_apis/distributedtask/securefiles", SECURE_FILES_API))

@@ -1602,6 +1602,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_devops_service_connections` 0.1.1: variable groups list their projects.**
+  The per-project variable group list carries no `variableGroupProjectReferences`, so
+  every group's `projects` came back empty. The fetcher now reads each newly seen group
+  by id (`variablegroups?groupIds=`) and takes the projects from that read. A group whose
+  by-id read failed has `projects: null` and the failure is recorded.
+
 - **`azure_entra_emergency_accounts` 0.1.1: a synced passkey counts as a phishing-resistant
   method.** `phishing_resistant_method_registered` and
   `emergency_accounts_with_phishing_resistant_method` now count `passKeySynced`
