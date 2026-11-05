@@ -12,6 +12,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_defender_plans` 0.3.0: security contacts.** The subscription's Defender for
+  Cloud security contacts: notification addresses, whether a phone is set, whether
+  alert notifications are on and from which minimal severity, and role-based
+  notification. `results.security_contacts` is null (and the run fails) when the list
+  could not be read, and empty when there are none. Maps to KSI-MLA-RVL as well.
 - **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
   secret and certificate gets `lifetime_days` (end date minus start date, null when
   either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.

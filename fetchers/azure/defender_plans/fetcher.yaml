@@ -1,5 +1,5 @@
 name: azure_defender_plans
-version: 0.2.0
+version: 0.3.0
 description: >
   Every Microsoft Defender for Cloud pricing plan on the subscription (Servers,
   Storage Accounts, Containers, SQL, Key Vault, App Services, …) with its pricing
@@ -17,7 +17,12 @@ description: >
   plans that do not cover every resource (an enabled plan Azure reports no
   coverage status for is listed there as unknown, never read as covered), and
   deprecated and inherited plans; it
-  makes no judgement about which plans a system needs. A subscription that never
+  makes no judgement about which plans a system needs. It also reads the
+  subscription's Defender for Cloud security contacts: the notification addresses,
+  whether a phone number is set, whether alert notifications are on and from which
+  minimal severity, and whether owners or other roles are notified. The contact
+  list is null (and the run fails) when it could not be read, and empty when there
+  are none. A subscription that never
   registered the Microsoft.Security resource provider reports
   provider_registration_status: not_registered, which is valid evidence ("not in
   use") rather than a collection failure. Needs Reader (or Security Reader).
@@ -55,6 +60,7 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 ksis:
   - KSI-CNA-EIS      # Automated services persistently assess resource security — which Defender plans are enabled
   - KSI-SVC-EIS      # Evaluate and improve security — the per-plan vulnerability-scanning extensions
+  - KSI-MLA-RVL      # Security contacts: whether Defender alerts are routed to a person (same reading as alert_rules)
 
 evidence_set:
   reference_id: EVD-AZURE-DEFENDER
