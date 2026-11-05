@@ -67,11 +67,12 @@ config_schema:
       insensitive; * matches any run of characters and ? one character; an array
       index such as [0] matches any index; path:* allows every path). Values are
       kept only for direct edits and manual deployments. A path or value that looks
-      like a secret (a password, key, token, connection string, authorization
-      header, app setting or environment variable, or a value shaped like a key,
-      SAS signature, JWT or URL with credentials) is withheld whatever this lists.
-      A pattern without path: fails the run. Each item is a pattern, or a pattern
-      with a reason. Empty: only the built-in list.
+      like a secret (a password, key, token, connection string, header, body, app
+      setting or environment variable, or a value shaped like a key, password
+      assignment, SAS signature, JWT or URL with credentials) is withheld whatever
+      this lists.
+      A pattern without path: fails the run and keeps no values. Each item is a
+      pattern, or a pattern with a reason. Empty: only the built-in list.
 
   max_value_changes:
     type: integer
@@ -190,33 +191,43 @@ evidence_set:
     entry per changed property. A shown value has path, previous_value, new_value
     (Resource Graph's previousValue and newValue; null when the property didn't
     exist), truncated and withheld null. A withheld one has only its path and
-    withheld, the reason: never the value or anything derived from it. A value is
-    shown only when its path is on the allowlist: the built-in security settings
-    (TLS versions, public network access, network ACLs and NSG rules, Key Vault
-    access policies, soft delete and purge protection, local auth, encryption,
-    retention, SKU, location, tags and similar) plus the value_paths patterns. Any
-    other path is withheld as "not_allowlisted". A path named like a secret
-    (password, key, token, connection string, authorization header, app setting,
-    environment variable, SAS, certificate data), unless it ends in one of the
-    listed setting names, or a value that looks like one (key=value pairs such as
-    AccountKey= or sig=, a JWT, a PEM block, a URL with a user and password, a long
-    key-like string, an object with a secret-named key), is withheld as "secret",
-    even on an allowlisted path and under path:*; true and false are always shown.
-    Shown values are cut at 200 characters, and truncated is true when a value was
-    cut or Resource Graph marked it truncated. A change lists at most 25 entries,
-    shown values first, and property_changes_truncated is true when it had more;
-    property_values_withheld counts its withheld values by reason over every
-    changed property, listed or not. Only the newest max_value_changes such changes
-    keep values; the older ones have property_changes and property_values_withheld
-    null and property_changes_truncated true. Every other origin has all three
-    null, and excluded changes carry no values. summary.changes_with_property_values
-    counts the direct and manual_deployment changes that kept values,
+    withheld, the reason: never the value or anything derived from it. The secret
+    check runs first, on every path, whatever the allowlist or value_paths says: a
+    value is withheld as "secret" when any segment of its path names a secret or
+    free-form content (password, pass, pwd, passphrase, secret, token, any name
+    ending in key, keys or key<n>, pin, uri or url, sas…, connection string,
+    credential, authorization, authentication, headers, queries, body, env,
+    environment variables, app settings, args, command, custom data, and
+    properties.value), compared without case, _ or -; or when a value looks like
+    one (a name such as password, secret, token, key, sig or code followed by = or
+    :, a --flag naming one, a Basic or Bearer credential, a URL with a user, a JWT,
+    a PEM private key, a short random-looking string, a long key-like string, or an
+    object with a secret-named key). Key Vault access-policy permission names and
+    true or false are never secrets. A value that passes is shown only when its
+    path is on the allowlist: the built-in list of specific paths (TLS versions,
+    public network access, network ACLs and NSG rules, Key Vault access policies,
+    soft delete and purge protection, local auth, encryption, retention, the
+    resource's own state, status and provisioning state, SKU, location and tags)
+    plus the value_paths patterns; any other path is withheld as
+    "not_allowlisted". Shown values are cut at 200 characters, and truncated is
+    true when a value was cut or Resource Graph marked it truncated. A change lists
+    at most 25 entries, shown values first, and property_changes_truncated is true
+    when it had more; property_value_counts counts its values shown,
+    not_allowlisted and secret over every changed property, listed or not. When a
+    change names changed properties but its values can't be read, all three are
+    null (unknown). Only the newest max_value_changes such changes keep values; the
+    older ones have property_changes and property_value_counts null and
+    property_changes_truncated true. Every other origin has all three null, and
+    excluded changes carry no values. summary.changes_with_property_values counts
+    the direct and manual_deployment changes whose values were read and kept,
     summary.changes_property_values_capped the ones past max_value_changes,
-    summary.property_values_shown the values shown, and
-    summary.property_values_withheld_by_reason the values withheld, by reason
-    (not_allowlisted, secret); all four are null when a change table couldn't be
-    read. results.property_value_paths_added and results.max_property_value_changes
-    echo the settings.
+    summary.changes_property_values_unknown the ones whose values couldn't be read,
+    summary.property_values_shown the values that passed (shown, or past a
+    change's 25-entry listing), and summary.property_values_withheld_by_reason the
+    values withheld, by reason (not_allowlisted, secret); shown and withheld are
+    null when any change's values couldn't be read, and all five are null when a
+    change table couldn't be read. results.property_value_paths_added and
+    results.max_property_value_changes echo the settings.
     summary.percent_redeployed is deployment plus pipeline changes over deployment,
     pipeline, manual_deployment and direct changes; platform and unattributed
     changes are excluded. summary.percent_redeployed_conservative also counts

@@ -72,42 +72,57 @@ WITHHELD_REASONS = ("not_allowlisted", "secret")
 # Paths (lower case, array indexes as [*]) whose values are shown; value_paths adds path:<glob> patterns.
 VALUE_PATHS = (
     "location", "kind", "sku.*", "identity.type", "zones[*]", "tags.*",
+    "properties.provisioningstate", "properties.state", "properties.status", "properties.enabled",
+    "properties.publicnetworkaccess", "properties.minimumtlsversion", "properties.mintlsversion",
+    "properties.minimaltlsversion", "properties.httpsonly", "properties.supportshttpstrafficonly",
+    "properties.enablehttpstrafficonly", "properties.allowblobpublicaccess", "properties.allowsharedkeyaccess",
+    "properties.allowcrosstenantreplication", "properties.defaulttooauthauthentication", "properties.disablelocalauth",
+    "properties.enablesoftdelete", "properties.softdeleteretentionindays", "properties.enablepurgeprotection",
+    "properties.enablerbacauthorization", "properties.enabledfordeployment", "properties.enabledfortemplatedeployment",
+    "properties.enabledfordiskencryption", "properties.clientcertenabled", "properties.clientcertmode",
+    "properties.restrictoutboundnetworkaccess", "properties.enforcementmode", "properties.retentionindays",
+    "properties.retentiondays", "properties.startipaddress", "properties.endipaddress",
+    "properties.siteconfig.mintlsversion", "properties.siteconfig.scmmintlsversion", "properties.siteconfig.ftpsstate",
+    "properties.siteconfig.http20enabled", "properties.siteconfig.remotedebuggingenabled",
+    "properties.siteconfig.ipsecurityrestrictions[*].*", "properties.siteconfig.scmipsecurityrestrictions[*].*",
     "properties.networkacls.*", "properties.securityrules[*].properties.*",
     "properties.accesspolicies[*].objectid", "properties.accesspolicies[*].tenantid",
-    "properties.accesspolicies[*].permissions.*",
-    "properties.siteconfig.ipsecurityrestrictions[*].*", "properties.siteconfig.scmipsecurityrestrictions[*].*",
-    "properties.encryption.*", "properties.securitysettings.*", "properties.retentionpolicy.*",
+    "properties.accesspolicies[*].permissions.*", "properties.encryption.*", "properties.securitysettings.*",
+    "properties.retentionpolicy.*", "properties.deleteretentionpolicy.*", "properties.containerdeleteretentionpolicy.*",
 )
-# Settings shown under whatever path they sit.
-VALUE_LEAVES = frozenset({
-    "publicnetworkaccess", "minimumtlsversion", "mintlsversion", "minimaltlsversion", "scmmintlsversion",
-    "ftpsstate", "httpsonly", "supportshttpstrafficonly", "enablehttpstrafficonly", "http20enabled",
-    "allowblobpublicaccess", "allowsharedkeyaccess", "allowcrosstenantreplication", "defaulttooauthauthentication",
-    "disablelocalauth", "enablesoftdelete", "softdeleteretentionindays", "enablepurgeprotection",
-    "enablerbacauthorization", "enabledfordeployment", "enabledfortemplatedeployment", "enabledfordiskencryption",
-    "remotedebuggingenabled", "clientcertenabled", "clientcertmode", "restrictoutboundnetworkaccess",
-    "defaultaction", "bypass", "enforcementmode", "multiuserauthorization", "retentionindays",
-    "startipaddress", "endipaddress", "state", "status", "enabled", "provisioningstate",
-})
-# A path naming a secret is withheld even when allowlisted.
-SECRET_PATH = re.compile(
-    r"password|passwd|pwd\b|secret|token|apikey|api-key|connectionstring|credential|privatekey"
-    r"|accesskey|accountkey|instrumentationkey|sharedaccess|signature|cookie|authorization|authentication|\bsas"
-    r"|pfx|certificatedata|certificateblob|securevalue|securestring|protectedsettings|commandtoexecute"
-    r"|environmentvariables|appsettings|headers|keyvalue|keydata|(^|\.)(primary|secondary)?keys?(\[\*\])?(\.|$)"
+# Path segments, lower case without _ - $ @, that name a secret or hold free-form content that can carry one.
+SECRET_WORD = re.compile(
+    r"password|passwd|passphrase|secret|token|apikey|credential|privatekey|connectionstring|sharedaccess|signature"
+    r"|cookie|certificatedata|certificateblob|securevalue|securestring|protectedsettings|commandtoexecute"
+    r"|customdata|environmentvariables|environmentsettings|appsettings"
+)
+SECRET_SEGMENT = re.compile(
+    r".*(key|keys|key\d+|pwd|pin|uri|url)|(?!bypass$).*pass|sas.*|authorization|authentication|headers|queries"
+    r"|body|env|secrets|args|command"
 )
 # Key Vault access-policy permission lists (permissions.keys[n], permissions.secrets[n]) hold permission names.
 PERMISSION_LIST = re.compile(r"\.permissions\.\w+\[\*\]$")
+_SECRET_NAME = (
+    r"password|passwd|passphrase|pwd|pass|secret|token|api[_-]?key|access[_-]?key|account[_-]?key"
+    r"|sharedaccesskey|sharedaccesssignature|instrumentationkey|subscription[_-]key|functions[_-]key"
+    r"|credential|sig|code|key|auth"
+)
 SECRET_VALUE = re.compile(
-    r"-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE)|\beyJ[\w-]{8,}\.[\w-]{8,}|://[^/\s:@]+:[^/\s@]+@"
-    r"|(^|[?&;\s\"'{,])(accountkey|sharedaccesskey|sharedaccesssignature|instrumentationkey|password|pwd|secret"
-    r"|token|access_token|client_secret|apikey|api-key|api_key|subscription-key|sig|code|key)[\"']?\s*[=:]",
+    r"-----BEGIN [A-Z0-9 ]*(PRIVATE KEY|CERTIFICATE)"
+    r"|\beyJ[\w-]{8,}\.[\w-]{8,}"
+    r"|://[^/\s@]+@"
+    rf"|({_SECRET_NAME})[\"']?\s*[=:]"
+    rf"|--?[\w-]*({_SECRET_NAME})[\w-]*(\s+|=)\S"
+    r"|\b(basic|bearer|digest|negotiate)\s+[\w.~+/=-]{6,}",
     re.IGNORECASE,
 )
 LONG_TOKEN = re.compile(r"[A-Za-z0-9+/=_-]{32,}")
 _GUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
 _KEBAB = re.compile(r"[a-z0-9]+(-[a-z0-9]+)+")
 _ARM_PATH = re.compile(r"/(subscriptions|resourcegroups|providers)/", re.IGNORECASE)
+_ARM_ID = re.compile(r"/(subscriptions|providers)/[^?#=&\s]*", re.IGNORECASE)
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
+_ISO_TIME = re.compile(r"\d{4}-\d{2}-\d{2}([T ][\d:.]+)?(Z|[+-]\d{2}:?\d{2})?")
 _INDEX = re.compile(r"\[\d+\]")
 
 _DURATION = re.compile(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?)?$")
@@ -177,22 +192,45 @@ class ValuePaths:
             collector.record(f"config {self.ENV}", ValueError(
                 f"invalid setting value_paths pattern {pattern!r}: write path: and a property path glob after it"))
 
-    def allows(self, path: str):
-        """"setting" for a listed setting name, "path" for a glob match, None otherwise."""
-        norm = normalize_path(path)
-        if norm.rsplit(".", 1)[-1].split("[", 1)[0] in VALUE_LEAVES:
-            return "setting"
-        return "path" if self._globs.fullmatch(norm) else None
+    def allows(self, path: str) -> bool:
+        return bool(self._globs.fullmatch(normalize_path(path)))
+
+
+def secret_name(path: str) -> bool:
+    """Whether any segment of the path names a secret or free-form content, such as api_key, env or headers."""
+    norm = normalize_path(path)
+    if norm == "properties.value":
+        return True
+    segments = norm.split(".")
+    if PERMISSION_LIST.search(norm):
+        segments = segments[:-1]
+    for segment in segments:
+        word = re.sub(r"\[\*\]|[_\-$@]", "", segment)
+        if SECRET_WORD.search(word) or SECRET_SEGMENT.fullmatch(word):
+            return True
+    return False
+
+
+def random_token(token: str) -> bool:
+    """A short secret: three or more character classes that keep switching, unlike names, ids and dates."""
+    if len(token) < 12 or any(p.fullmatch(token) for p in (_GUID, _EMAIL, _ISO_TIME)) or _ARM_ID.fullmatch(token):
+        return False
+    kinds = [0 if c.isupper() else 1 if c.islower() else 2 if c.isdigit() else 3 for c in token]
+    if len(set(kinds)) < 3:
+        return False
+    return sum(a != b for a, b in zip(kinds, kinds[1:])) / (len(kinds) - 1) >= 0.4
 
 
 def looks_secret(value: str) -> bool:
     if SECRET_VALUE.search(value):
         return True
     # An object or array value is read as paths too, so {"password": …} is caught by its key.
-    if value[:1] in "{[" and SECRET_PATH.search(re.sub(r"[^a-z0-9_\-]+", ".", value.lower())):
+    if (value.lstrip()[:1] in ("{", "[") or "{" in value) and secret_name(re.sub(r"[^a-z0-9_\-]+", ".", value.lower())):
         return True
-    if re.fullmatch(r"/(subscriptions|providers)/[^?#=&\s]*", value, re.IGNORECASE):
+    if _ARM_ID.fullmatch(value):
         return False
+    if any(random_token(t) for t in value.split()):
+        return True
     for run in LONG_TOKEN.findall(value):
         if _GUID.fullmatch(run) or _KEBAB.fullmatch(run) or run.isdigit() or _ARM_PATH.search(run):
             continue
@@ -202,42 +240,38 @@ def looks_secret(value: str) -> bool:
 
 
 def withheld_reason(path: str, before, after, paths: ValuePaths):
-    """None when the values may be shown; a boolean is never a secret, whatever its path is called."""
-    allowed = paths.allows(path)
-    if not allowed:
-        return "not_allowlisted"
+    """The secret check runs first on every path, whatever the allowlist says; a boolean is never a secret."""
     values = [v for v in (before, after) if v is not None]
-    if all(v.lower() in ("true", "false") for v in values):
-        return None
-    norm = normalize_path(path)
-    named = allowed == "path" and SECRET_PATH.search(norm) and not PERMISSION_LIST.search(norm)
-    if named or any(looks_secret(v) for v in values):
+    boolean = all(v.lower() in ("true", "false") for v in values)
+    if (secret_name(path) and not boolean) or any(looks_secret(v) for v in values):
         return "secret"
-    return None
+    return None if paths.allows(path) else "not_allowlisted"
 
 
 def _text(value):
     return value if value is None or isinstance(value, str) else json.dumps(value, sort_keys=True)
 
 
-def property_changes(raw, paths: ValuePaths) -> tuple[list, bool, dict]:
-    """Each changed property's values, or its path and why they were withheld; shown values first. Also the
-    withheld counts by reason, over every changed property."""
+def property_changes(raw, changed, paths: ValuePaths):
+    """(entries, truncated, counts): each changed property's values, or its path and why they were withheld, shown
+    values first; counts cover every changed property. All three are None when properties changed but the values
+    couldn't be read."""
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
         except ValueError:
-            raw = None
-    withheld = dict.fromkeys(WITHHELD_REASONS, 0)
-    if not isinstance(raw, dict):
-        return [], False, withheld
+            raw = False
+    if raw is None or raw == {}:
+        return (None, None, None) if changed else ([], False, {"shown": 0, **dict.fromkeys(WITHHELD_REASONS, 0)})
+    if not isinstance(raw, dict) or not all(isinstance(d, dict) for d in raw.values()):
+        return None, None, None
+    counts = {"shown": 0, **dict.fromkeys(WITHHELD_REASONS, 0)}
     entries = []
     for path, detail in raw.items():
-        detail = detail if isinstance(detail, dict) else {}
         before, after = _text(detail.get("previousValue")), _text(detail.get("newValue"))
         reason = withheld_reason(str(path), before, after, paths)
+        counts[reason or "shown"] += 1
         if reason:
-            withheld[reason] += 1
             entries.append({"path": str(path), "withheld": reason})
             continue
         cut = str(detail.get("isTruncated") or "").lower() == "true" or any(
@@ -246,12 +280,12 @@ def property_changes(raw, paths: ValuePaths) -> tuple[list, bool, dict]:
         entries.append({"path": str(path), "previous_value": before, "new_value": after, "truncated": cut,
                         "withheld": None})
     entries.sort(key=lambda e: (e["withheld"] is not None, e["path"]))
-    return entries[:MAX_VALUES_PER_CHANGE], len(entries) > MAX_VALUES_PER_CHANGE, withheld
+    return entries[:MAX_VALUES_PER_CHANGE], len(entries) > MAX_VALUES_PER_CHANGE, counts
 
 
 def change_record(row: dict, table: str, paths: ValuePaths = None) -> dict:
     props = row.get("changedProperties")
-    values, values_cut, withheld = property_changes(row.get("changes"), paths or ValuePaths())
+    values, values_cut, counts = property_changes(row.get("changes"), props, paths or ValuePaths())
     return {
         "change_id": row.get("changeId") or None,
         "table": table,
@@ -269,7 +303,7 @@ def change_record(row: dict, table: str, paths: ValuePaths = None) -> dict:
         "changed_properties": sorted(props) if isinstance(props, list) else [],
         "property_changes": values,
         "property_changes_truncated": values_cut,
-        "property_values_withheld": withheld,
+        "property_value_counts": counts,
     }
 
 
@@ -282,12 +316,12 @@ def keep_values(changes: list, limit: int) -> list:
     out = []
     for c in changes:
         if id(c) in kept:
-            out.append({**c, "property_changes": c.get("property_changes") or [],
-                        "property_changes_truncated": bool(c.get("property_changes_truncated")),
-                        "property_values_withheld": c.get("property_values_withheld")
-                        or dict.fromkeys(WITHHELD_REASONS, 0)})
+            # As read: null, not empty, when the values couldn't be read.
+            out.append({**c, "property_changes": c.get("property_changes"),
+                        "property_changes_truncated": c.get("property_changes_truncated"),
+                        "property_value_counts": c.get("property_value_counts")})
         else:
-            out.append({**c, "property_changes": None, "property_values_withheld": None,
+            out.append({**c, "property_changes": None, "property_value_counts": None,
                         "property_changes_truncated": True if id(c) in capped else None})
     return out
 
@@ -414,6 +448,25 @@ def split_changes(changes: list, exclusions: ResourceExclusions) -> tuple[list, 
     return kept, excluded
 
 
+def value_summary(changes: list) -> dict:
+    """Value counts over the direct and manual-deployment changes; shown and withheld are null when any of their
+    values couldn't be read."""
+    eligible = [c for c in changes if c["origin"] in VALUE_ORIGINS]
+    read = [c for c in eligible if c.get("property_changes") is not None]
+    capped = [c for c in eligible if c.get("property_changes") is None and c.get("property_changes_truncated")]
+    unknown = len(eligible) - len(read) - len(capped)
+    total = Counter()
+    for c in read:
+        total.update(c.get("property_value_counts") or {})
+    return {
+        "changes_with_property_values": len(read),
+        "changes_property_values_capped": len(capped),
+        "changes_property_values_unknown": unknown,
+        "property_values_shown": None if unknown else total["shown"],
+        "property_values_withheld_by_reason": None if unknown else {r: total[r] for r in WITHHELD_REASONS},
+    }
+
+
 def summarize(changes: list, deployments: list, at_cap: list, groups=None) -> dict:
     """`groups` is the lower-cased resource groups that still exist, or None when they could not be listed."""
     origins = Counter(c["origin"] for c in changes)
@@ -445,21 +498,7 @@ def summarize(changes: list, deployments: list, at_cap: list, groups=None) -> di
         "direct_changes_in_deleted_resource_groups": None if groups is None else sum(
             1 for c in direct if c["resource_group"] and c["resource_group"].lower() not in groups
         ),
-        "changes_with_property_values": sum(
-            1 for c in changes if c["origin"] in VALUE_ORIGINS and c.get("property_changes") is not None
-        ),
-        "changes_property_values_capped": sum(
-            1 for c in changes if c["origin"] in VALUE_ORIGINS and c.get("property_changes") is None
-        ),
-        "property_values_shown": sum(
-            1 for c in changes if c["origin"] in VALUE_ORIGINS
-            for e in c.get("property_changes") or [] if e["withheld"] is None
-        ),
-        "property_values_withheld_by_reason": {
-            reason: sum((c.get("property_values_withheld") or {}).get(reason, 0)
-                        for c in changes if c["origin"] in VALUE_ORIGINS and c.get("property_changes") is not None)
-            for reason in WITHHELD_REASONS
-        },
+        **value_summary(changes),
         "deployments_in_history": len(deployments),
         "deployments_matched_to_changes": len({c["deployment_id"] for c in changes if c["deployment_id"]}),
         "resource_groups_at_deployment_history_cap": at_cap,
@@ -579,6 +618,9 @@ def main() -> int:
     paths = ValuePaths.from_env()
     paths.record_invalid(collector)
     value_limit = max_value_changes(collector)
+    # As with an invalid limit, a bad value_paths pattern keeps no values rather than guess at the list.
+    if paths.invalid:
+        value_limit = 0
 
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
@@ -586,7 +628,7 @@ def main() -> int:
 
     changes, sources, deployments, at_cap, groups = [], {}, [], [], None
     if subscription_id and cred is not None:
-        changes, sources = collect_changes(subscription_id, cred, days, collector)
+        changes, sources = collect_changes(subscription_id, cred, days, collector, paths)
         deployments, at_cap, groups = collect_deployments(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
@@ -607,9 +649,8 @@ def main() -> int:
     counts = exclusions.summary(excluded, ("change",), {"changes": len(in_scope)})
     # Unknown, not none, when a change table wasn't read.
     if set(sources) != set(CHANGE_TABLES):
-        counts.update(excluded_changes=None, in_scope_changes=None, changes_with_property_values=None,
-                      changes_property_values_capped=None, property_values_shown=None,
-                      property_values_withheld_by_reason=None)
+        counts.update(excluded_changes=None, in_scope_changes=None,
+                      **dict.fromkeys(value_summary([]), None))
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
