@@ -73,10 +73,38 @@ def _launch(argv: list, ready: str, cwd: Path, env: dict, size: tuple) -> tuple:
     ],
     ids=["paramify-tui", "module-manifest", "module-welcome"],
 )
-def test_launch_and_quit(argv, ready, demo_workspace, cli_tools, tui_size):
+def test_launch_and_quit(argv, ready, demo_workspace, no_network, cli_tools, tui_size):
     exe = {"paramify": cli_tools.paramify(), "python": sys.executable}[argv[0]]
     code, seen, screen = _launch([exe, *argv[1:]], ready, demo_workspace.root, cli_tools.offline_env(), tui_size)
     tail = screen[-2000:]
     assert seen, f"{ready!r} never appeared within {TIMEOUT:.0f}s:\n{tail}"
     assert code == 0, f"exit code {code}:\n{tail}"
     assert "Traceback" not in screen, tail
+
+
+# Local addresses only, so a missing guard fails the assertion, not the network.
+_PROBE = """\
+import socket
+udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+calls = {
+    "getaddrinfo": lambda: socket.getaddrinfo("localhost", 9),
+    "connect": lambda: socket.socket().connect(("127.0.0.1", 9)),
+    "sendto": lambda: udp.sendto(b"x", ("127.0.0.1", 9)),
+    "sendmsg": lambda: udp.sendmsg([b"x"], [], 0, ("127.0.0.1", 9)),
+}
+for name, call in calls.items():
+    try:
+        call()
+    except OSError as exc:
+        print(name, exc)
+"""
+
+
+def test_a_launched_child_has_the_network_guard(demo_workspace, no_network, cli_tools):
+    proc = subprocess.run([sys.executable, "-c", _PROBE], cwd=demo_workspace.root, env=cli_tools.offline_env(),
+                          capture_output=True, text=True, timeout=TIMEOUT)
+    names = ("getaddrinfo", "connect", "sendto", "sendmsg")
+    assert proc.stdout.splitlines() == [f"{n} network blocked by tests/conftest.py no_network" for n in names], (
+        proc.stdout + proc.stderr)
+    assert len(no_network.log.read_text().splitlines()) == len(names)
+    no_network.log.unlink()  # expected attempts
