@@ -323,23 +323,23 @@ Summary fields:
 **Do enforced policies require phishing-resistant MFA?**
 - `authentication_strengths_readable` — True if the authentication strengths the policies use were read with their allowed combinations, or no policy uses one; also true when the strengths weren't read because the policies couldn't be read, and authentication_strengths is then null; false if the strengths read failed, and the phishing-resistant figures read null
 - `enforced_policies_requiring_phishing_resistant_mfa` — Number of enforced policies that require phishing-resistant MFA: their authentication strength allows only FIDO2 security keys and passkeys, Windows Hello for Business or multi-factor certificate authentication, and the policy doesn't let the user meet another grant control instead; null if the policies or a policy's strength couldn't be read
-- `enforced_phishing_resistant_mfa_for_all_users_and_apps` — Number of enforced policies that require phishing-resistant MFA for all users on all cloud apps, before any exclusions; null if the policies or a policy's strength couldn't be read
-- `phishing_resistant_mfa_role_template_ids` — List of directory role template ids (Global Administrator is 62e90394-69f5-4237-9190-012177145e10) that an enforced policy requiring phishing-resistant MFA on all cloud apps includes; excluded users and groups aren't checked; null if the policies or a policy's strength couldn't be read
+- `enforced_phishing_resistant_mfa_for_all_users_and_apps` — Number of enforced policies that require phishing-resistant MFA for all users on all cloud apps, before any exclusions; Conditions (sign-in, user, insider or service principal risk, client app types, platforms, locations, device filter, authentication flows, application filter) and excluded apps aren't checked, so a policy limited by them still counts; `mfa_client_app_types_for_all_users_and_apps` is the strict figure; null if the policies or a policy's strength couldn't be read
+- `phishing_resistant_mfa_role_template_ids` — List of directory role template ids (Global Administrator is 62e90394-69f5-4237-9190-012177145e10) that an enforced policy requiring phishing-resistant MFA on all cloud apps includes; excluded users, groups and roles aren't checked, and a policy's conditions aren't either (see `mfa_client_app_types_for_all_users_and_apps` for the strict figure); null if the policies or a policy's strength couldn't be read
 
 **How widely do enforced policies apply?**
 - `enforced_policies_targeting_all_users` — Number of enforced policies that include all users; a policy can still exclude users, groups or roles; null if the policies couldn't be read
 - `enforced_policies_targeting_all_applications` — Number of enforced policies that include all cloud apps; a policy can still exclude apps; null if the policies couldn't be read
-- `enforced_mfa_for_all_users_and_apps` — Number of enforced policies that require MFA for all users on all cloud apps, before any exclusions; null if the policies couldn't be read
+- `enforced_mfa_for_all_users_and_apps` — Number of enforced policies that require MFA for all users on all cloud apps, before any exclusions, even when the policy lets the user meet a different control instead; Conditions (sign-in, user, insider or service principal risk, client app types, platforms, locations, device filter, authentication flows, application filter) and excluded apps aren't checked, so a policy limited by them still counts; `mfa_client_app_types_for_all_users_and_apps` is the strict figure; null if the policies couldn't be read
 - `mfa_client_app_types_for_all_users_and_apps` — List of client app types (browser, mobileAppsAndDesktopClients, exchangeActiveSync, other) on which enforced policies, taken together, require MFA for all users on all cloud apps. A policy counts when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no application filter, sign-in, user, insider or service principal risk, platform, location, device filter or authentication flow condition; a policy for all client app types adds all four. Excluded users, groups and roles aren't checked; null if the policies couldn't be read
-- `enforced_policies_targeting_legacy_authentication` — Number of enforced policies whose conditions include legacy clients (Exchange ActiveSync or other older clients, which can't prompt for MFA), whether the policy blocks them or requires something else; null if the policies couldn't be read
+- `enforced_policies_targeting_legacy_authentication` — Number of enforced policies whose conditions name legacy clients (Exchange ActiveSync or other older clients, which can't prompt for MFA; a policy for all client app types names none and isn't counted), whether the policy blocks them or requires something else; null if the policies couldn't be read
 
 **Do admin portals and Azure management require MFA?**
-- `mfa_required_for_admin_portals` — True if at least one enforced policy requires MFA for all users on Microsoft Admin Portals (the Microsoft admin centers) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. Excluded users, groups, roles and apps aren't checked
-- `mfa_required_for_azure_management_api` — True if at least one enforced policy requires MFA for all users on Windows Azure Service Management API (the Azure portal, CLI and PowerShell) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. Excluded users, groups, roles and apps aren't checked
+- `mfa_required_for_admin_portals` — True if at least one enforced policy requires MFA for all users on Microsoft Admin Portals (the Microsoft admin centers) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. The policy counts even when it lets the user meet a different control instead. Conditions (sign-in, user, insider or service principal risk, client app types, platforms, locations, device filter, authentication flows, application filter) and excluded users, groups, roles and apps aren't checked, so a policy limited by them still counts; `mfa_client_app_types_for_all_users_and_apps` is the strict figure
+- `mfa_required_for_azure_management_api` — True if at least one enforced policy requires MFA for all users on Windows Azure Service Management API (the Azure portal, CLI and PowerShell) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. The policy counts even when it lets the user meet a different control instead. Conditions (sign-in, user, insider or service principal risk, client app types, platforms, locations, device filter, authentication flows, application filter) and excluded users, groups, roles and apps aren't checked, so a policy limited by them still counts; `mfa_client_app_types_for_all_users_and_apps` is the strict figure
 
 **Who is left out?**
-- `enforced_policies_with_exclusions` — Number of enforced policies that exclude at least one user, group or directory role; null if the policies couldn't be read
-- `distinct_excluded_principals` — Number of distinct users, groups and directory roles excluded by at least one enforced policy; null if the policies couldn't be read
+- `enforced_policies_with_exclusions` — Number of enforced policies that exclude at least one user, group or directory role (the guest and external user exclusion is not read, so a policy that excludes only guests isn't counted); null if the policies couldn't be read
+- `distinct_excluded_principals` — Number of distinct users, groups and directory roles excluded by at least one enforced policy (not counting the guest and external user exclusion); null if the policies couldn't be read
 
 
 ### azure_entra_dormant_identities
@@ -380,16 +380,16 @@ Summary fields:
 - `service_principals_holding_roles` — Number of service principals (apps and managed identities) holding a directory role or an Azure role in the subscription; null if the roles or the lookup weren't read
 
 **Who holds a role?**
-- `users_holding_roles` — Number of users holding a directory role or an Azure role in the subscription, directly or through a group; null if the users or the roles weren't read
+- `users_holding_roles` — Number of users holding a directory role or an Azure role in the subscription, directly or through a group; only active assignments count (a role an identity is only eligible for through PIM, or one scoped to an administrative unit, isn't read); null if the users or the roles weren't read
 - `users_holding_directory_roles` — Number of users holding a directory role, directly or through a role-assignable group; null if the users or the directory roles weren't read
-- `users_holding_privileged_directory_roles` — Number of users holding a directory role that grants tenant-wide administrative power (the list shared with `azure_entra_privileged_roles`); null if the users or the directory roles weren't read
+- `users_holding_privileged_directory_roles` — Number of users holding a directory role on the privileged list shared with `azure_entra_privileged_roles`, which holds tenant-wide administrative roles and also read-only ones such as Global Reader and Security Reader, and Billing Administrator; null if the users or the directory roles weren't read
 - `users_holding_azure_roles` — Number of users holding an Azure role that applies in the subscription, directly or through a group; null if the users or the Azure roles weren't read
 - `service_principals_holding_directory_roles` — Number of service principals holding a directory role; null if the directory roles or the lookup weren't read
 - `service_principals_holding_azure_roles` — Number of service principals holding an Azure role that applies in the subscription; null if the Azure roles or the lookup weren't read
 
 **Are enabled accounts in use?**
 - `enabled_users` — Number of users whose account is enabled; null if the user list wasn't read
-- `guest_users` — Number of guest (external) users; null if the user list wasn't read
+- `guest_users` — Number of users whose user type is Guest (an external user whose user type is Member isn't counted); null if the user list wasn't read
 - `dormant_users` — Number of dormant users: enabled, with no successful sign-in in the last `dormant_after_days` days, or with none at all and created more than that many days ago; null if sign-in activity wasn't read
 - `users_never_signed_in` — Number of users with no sign-in attempt on record, successful or not, including new and disabled accounts; null if sign-in activity wasn't read
 - `dormant_service_principals_holding_roles` — Number of enabled role-holding service principals with no sign-in as a client (app-only or on behalf of a user) in the last `dormant_after_days` days, or with none on record and created more than that many days ago; the creation date comes from the service principal, else its app registration in this tenant; a principal with neither gets no grace, or reads unknown if the app registrations couldn't be read. One with no sign-in as a client on record counts only if it's an app registered in this tenant; the enabled rest are unknown. Null if the report, the roles or the lookup weren't read
@@ -4040,29 +4040,29 @@ Summary fields:
 - `waf_resources` — Number of WAF resources: Front Door profiles that attach a WAF policy (or whose security policies couldn't be read) and WAF-tier App Gateways with a WAF policy on the gateway, a listener or a path rule, or the legacy WAF configuration. Which WAF applies to each listener is shown by `azure_app_gateway_waf`
 - `front_door_waf_resources` — Number of WAF resources that are Front Door profiles
 - `app_gateway_waf_resources` — Number of WAF resources that are App Gateways
-- `front_door_profiles_without_waf` — Number of Front Door Standard and Premium profiles that attach no WAF policy
-- `waf_resources_in_detection_mode` — Number of WAF resources with a policy in Detection mode, which logs matching requests without blocking them, including a policy that a gateway's listener or path rule attaches in place of the gateway's
+- `front_door_profiles_without_waf` — Number of Front Door Standard and Premium profiles that attach no WAF policy; classic Front Door isn't read and is in no figure
+- `waf_resources_in_detection_mode` — Number of WAF resources with a policy in Detection mode, which logs matching requests without blocking them, including a policy that a gateway's listener or path rule attaches in place of the gateway's; a disabled policy in Prevention mode is in neither this count nor `waf_resources_mode_unknown`
 - `waf_resources_mode_unknown` — Number of WAF resources with no policy in Detection mode where a policy's mode couldn't be read (the profile's security policies or the policy itself couldn't be read)
 
 **Do the WAFs send their logs?**
 - `waf_resources_exporting_waf_log` — Number of WAF resources with a diagnostic setting that sends the WAF log to a workspace, by name or through allLogs
-- `waf_resources_without_waf_log_export` — Number of WAF resources whose diagnostic settings send the WAF log nowhere
+- `waf_resources_without_waf_log_export` — Number of WAF resources whose diagnostic settings send the WAF log nowhere; a resource whose diagnostic settings couldn't be read is in neither this count nor `waf_resources_exporting_waf_log`, and its event counts read 0, not null
 
 **What did the WAFs do in the window?**
 - `waf_resources_with_waf_events` — Number of WAF resources whose WAF log has records in the window
 - `waf_resources_without_waf_events` — Number of WAF resources that export the WAF log to workspaces that were read and hold no records in the window
 - `waf_resources_waf_log_unknown` — Number of WAF resources that export the WAF log to a workspace that couldn't be read, or to a Basic-plan table that wasn't queried, and have no records in the workspaces that were read
-- `waf_events` — Number of WAF log records in the window (one per rule a request matched); null when any workspace a WAF resource exports its WAF log to couldn't be read
-- `waf_requests_matched` — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id (a record without one counts as its own request); null when any workspace a WAF resource exports its WAF log to couldn't be read
-- `waf_requests_blocked` — Number of requests the WAF blocked: Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records, from a policy in Prevention mode; null when any workspace a WAF resource exports its WAF log to couldn't be read
-- `waf_requests_would_block` — Number of requests that Prevention mode would have blocked but Detection mode only logged: on Front Door, a policy in Detection mode logged a blocking action (Block, Redirect or a failed JavaScript challenge); on an App Gateway, a mandatory rule, such as the anomaly-score rule 949110, logged Detected, which Prevention mode logs as Blocked; null when any workspace a WAF resource exports its WAF log to couldn't be read
-- `waf_requests_logged_only` — Number of requests that matched a rule but were only logged (Log, AnomalyScoring, LogAndScore or Matched, and not blocked, would-block or allowed); null when any workspace a WAF resource exports its WAF log to couldn't be read
-- `last_waf_event` — Time of the latest WAF log record across all WAF resources (UTC); null when no record was read
+- `waf_events` — Number of WAF log records in the window (one per rule a request matched); null when any workspace a WAF resource exports its WAF log to couldn't be read or any such table on a Basic or Auxiliary plan wasn't queried
+- `waf_requests_matched` — Number of requests that matched a WAF rule, each request counted once by its tracking reference or transaction id (a record without one counts as its own request); null when any workspace a WAF resource exports its WAF log to couldn't be read or any such table on a Basic or Auxiliary plan wasn't queried
+- `waf_requests_blocked` — Number of requests the WAF blocked: Block, Blocked, Redirect or a failed JavaScript challenge on any of the request's records, from a policy in Prevention mode; null when any workspace a WAF resource exports its WAF log to couldn't be read or any such table on a Basic or Auxiliary plan wasn't queried
+- `waf_requests_would_block` — Number of requests that Prevention mode would have blocked but Detection mode only logged: on Front Door, a policy in Detection mode logged a blocking action (Block, Redirect or a failed JavaScript challenge); on an App Gateway, a mandatory rule, such as the anomaly-score rule 949110, logged Detected, which Prevention mode logs as Blocked; null when any workspace a WAF resource exports its WAF log to couldn't be read or any such table on a Basic or Auxiliary plan wasn't queried
+- `waf_requests_logged_only` — Number of requests that matched a rule but were only logged (Log, AnomalyScoring, LogAndScore or Matched, and not blocked, would-block or allowed); null when any workspace a WAF resource exports its WAF log to couldn't be read or any such table on a Basic or Auxiliary plan wasn't queried
+- `last_waf_event` — Time of the latest WAF log record across all WAF resources (UTC), taken only from WAF resources whose every WAF log destination was read; null when no such resource has a record
 
 **Do WAF alerts reach someone?**
 - `waf_alert_rules` — Number of alert rules on a WAF metric (WebApplicationFirewallRequestCount, Azwaf*, BlockedCount or MatchedCount) or whose query reads a WAF log; null when the alert rule lists couldn't be read
 - `waf_alert_rules_enabled` — Number of enabled WAF alert rules; null when the alert rule lists couldn't be read
-- `waf_alert_rules_reaching_person` — Number of enabled WAF alert rules that reach a person: an enabled action group with an email, SMS, voice, push, ARM role or ITSM receiver, and no alert processing rule that always suppresses it; null when the alert rule lists couldn't be read
+- `waf_alert_rules_reaching_person` — Number of enabled WAF alert rules that reach a person: an enabled action group with an email, SMS, voice, push, ARM role or ITSM receiver, and no alert processing rule that always suppresses it (a rule that only sometimes suppresses it isn't checked); null when the alert rule lists couldn't be read
 - `waf_resources_with_alert_reaching_person` — Number of WAF resources covered by a WAF alert rule that reaches a person; a rule covers a resource when it is scoped to the resource, a resource group or subscription holding it, or (for a log alert) a workspace receiving its WAF log, and its metric or log belongs to that kind of WAF (WebApplicationFirewallRequestCount and the Front Door WAF log for Front Door; the other WAF metrics and logs for App Gateways); null when the alert rule lists couldn't be read
 - `waf_resources_without_waf_alert` — Number of WAF resources that no enabled WAF alert rule covers; null when the alert rule lists couldn't be read
 
@@ -4076,13 +4076,13 @@ Summary fields:
 - `public_ips_with_attack_alert` — Number of attached public IPs covered by an enabled alert rule on IfUnderDDoSAttack or a DDoS log category; null when the alert rule lists couldn't be read
 - `public_ips_with_attack_alert_reaching_person` — Number of attached public IPs whose attack alert reaches a person; null when the alert rule lists couldn't be read
 - `ddos_attack_alert_rules` — Number of alert rules on IfUnderDDoSAttack or whose query reads a DDoS log category; null when the alert rule lists couldn't be read
-- `protected_ips_with_attack_alert_reaching_receiver` — Number of public IPs with IP Protection whose attack alert routes to an enabled receiver; null when no attached IP has IP Protection, because without DDoS Protection the alert can't fire, or when the alert rule lists couldn't be read
+- `protected_ips_with_attack_alert_reaching_receiver` — Number of public IPs with IP Protection whose attack alert routes to an enabled receiver of any type, alert processing rules not checked; null when no attached IP has IP Protection, because without DDoS Protection the alert can't fire, or when the alert rule lists couldn't be read
 - `protected_ips_without_attack_alert` — Number of public IPs with IP Protection and no attack alert; null when no attached IP has IP Protection, or when the alert rule lists couldn't be read
 - `public_ips_attacked` — Number of attached public IPs with at least one hour under attack in the window; null when no attached IP has IP Protection and none showed an attack, because without DDoS Protection the attack metric stays 0, or when the attack metric of any IP with IP Protection couldn't be read
-- `ddos_mitigations_started` — Number of DDoS mitigations started on public IPs with IP Protection; null when no attached IP has IP Protection, or any workspace that such an IP sends DDoS logs to couldn't be read
+- `ddos_mitigations_started` — Number of DDoS mitigations started on public IPs with IP Protection; null when no attached IP has IP Protection, or any workspace that such an IP sends DDoS logs to couldn't be read, or any such IP exports no DDoS log category or its diagnostic settings couldn't be read
 
 **Which workspaces were read?**
-- `log_workspaces` — Number of Log Analytics workspaces the fetcher tried to read, whatever the outcome; the three counts below leave out one whose read failed another way
+- `log_workspaces` — Number of Log Analytics workspaces the fetcher tried to read, whatever the outcome; `log_workspaces_queried`, `log_workspaces_not_authorized` and `log_workspaces_not_found` leave out one whose read failed another way
 - `log_workspaces_queried` — Number of Log Analytics workspaces read
 - `log_workspaces_not_authorized` — Number of Log Analytics workspaces that refused the read
 - `log_workspaces_not_found` — Number of Log Analytics workspaces that no longer exist
@@ -4986,17 +4986,17 @@ Summary fields:
 - `in_scope_app_service_certificates` — Number of App Service certificates read and in scope
 
 **Do keys rotate?**
-- `total_keys` — Number of keys across all key vaults
+- `total_keys` — Number of keys across the in-scope key vaults
 - `enabled_keys` — Number of keys that are enabled
 - `keys_with_readable_rotation_policy` — Number of keys whose rotation policy could be read on either plane ("readable": the plane answered with a policy or with "there is none")
-- `keys_with_rotation_policy` — Number of keys with a rotation policy
+- `keys_with_rotation_policy` — Number of keys with a rotation policy: any policy the data plane returned counts, including a default one that was never configured
 - `keys_with_rotation_enabled` — Number of keys whose rotation policy has a rotate action
 - `rotation_enabled_percentage` — Percentage of keys with a readable rotation policy that rotate = `keys_with_rotation_enabled` / `keys_with_readable_rotation_policy` × 100 (a whole number, 0–100); 0 when `keys_with_readable_rotation_policy` is 0. Keys whose policy couldn't be read are left out of both
 
 **Do keys and secrets expire?**
 - `keys_with_expiration` — Number of keys with an expiration date set
 - `key_expiration_percentage` — Percentage of keys with an expiration date = `keys_with_expiration` / `total_keys` × 100 (a whole number, 0–100); 0 when `total_keys` is 0
-- `total_secrets` — Number of secrets across all key vaults
+- `total_secrets` — Number of secrets across the in-scope key vaults
 - `enabled_secrets` — Number of secrets that are enabled
 - `secrets_with_expiration` — Number of secrets with an expiration date set
 - `secret_expiration_percentage` — Percentage of secrets with an expiration date = `secrets_with_expiration` / `total_secrets` × 100 (a whole number, 0–100); 0 when `total_secrets` is 0
@@ -5008,13 +5008,13 @@ Summary fields:
 - `certificate_auto_renew_percentage` — Percentage of Key Vault certificates with a readable policy that auto-renew = `certificates_with_auto_renew` / `certificates_with_readable_policy` × 100 (a whole number, 0–100); 0 when `certificates_with_readable_policy` is 0. Certificates whose policy couldn't be read, and vaults that refused the list, are left out of both
 
 **Are certificates expired or about to expire?**
-- `expired_certificates` — Number of Key Vault certificates past their expiry date when the fetcher ran
-- `certificates_expiring_within_30_days` — Number of Key Vault certificates not yet expired that expire within 30 days (0 to 30 whole days left, with part days dropped, so 30 days 23 hours counts)
+- `expired_certificates` — Number of Key Vault certificates past their expiry date when the fetcher ran; only certificates in vaults whose certificates could be listed count (a vault in `certificate_not_authorized_vaults` adds none, even if it holds an expired one), and a certificate with no expiry date is in neither this count nor `certificates_expiring_within_30_days`
+- `certificates_expiring_within_30_days` — Number of Key Vault certificates not yet expired that expire within 30 days (0 to 30 whole days left, with part days dropped, so 30 days 23 hours counts); counts the same certificates as `expired_certificates`
 - `expired_app_service_certificates` — Number of App Service certificates past their expiry date when the fetcher ran
 - `app_service_certificates_expiring_within_30_days` — Number of App Service certificates not yet expired that expire within 30 days
 
 **Where do App Service certificates come from?**
-- `total_app_service_certificates` — Number of App Service certificates in the subscription
+- `total_app_service_certificates` — Number of App Service certificates in scope (not taken out by a resource_exclusions pattern)
 - `app_service_certificates_by_source` — Number of App Service certificates from each source, with every source listed and 0 when it has none:
   - key_vault (synced from a Key Vault secret; the record's key_vault_certificate_auto_renew is that vault certificate's auto-renew, or null when the vault's certificates or that certificate's policy couldn't be read, the vault is not in this subscription, or it holds no certificate of that name, as for an App Service Certificate order)
   - managed (an App Service managed certificate, recognised by its canonical name or domain validation method; App Service renews it)
@@ -5650,15 +5650,15 @@ Summary fields:
 **Are unused accounts removed?**
 - `inactivity_threshold_days` — Number of days without access after which a person counts as inactive (90 unless `inactive_days` sets it)
 - `last_access_collected` — True if the user entitlements, which hold access levels and last access, were read; false if not
-- `inactive_users` — List of inactive people: people who can still sign in but whose last access, or the day they were added if they never signed in, is older than `inactivity_threshold_days`; null if the user entitlements couldn't be read
+- `inactive_users` — List of inactive people with a user entitlement (a person with none, shown as unknown in `users_by_access_level`, is never judged): people who can still sign in but whose last access, or the day they were added if they never signed in, is older than `inactivity_threshold_days`; null if the user entitlements couldn't be read
 - `users_never_accessed` — List of people who have never signed in to the organization (Azure DevOps records their last access as 0001-01-01); null if the user entitlements couldn't be read
 
 **Who holds privileged access?**
 - `privileged_groups` — Number of privileged groups found, meaning the Azure DevOps groups named Project Collection Administrators, Project Collection Service Accounts, Project Collection Build Administrators, and each project's Project Administrators, Build Administrators, Release Administrators and Endpoint Administrators; null if the groups couldn't be read
-- `privileged_groups_not_fully_read` — List of privileged groups whose own members, or a nested group's members, couldn't be read, so the member list may be short; null if the groups couldn't be read
+- `privileged_groups_not_fully_read` — List of privileged groups whose own members, or a nested group's members, couldn't be read, or that nests a group that is never read (a computed or enterprise-level group, which `groups_not_read` doesn't list), so the member list may be short; null if the groups couldn't be read
 - `privileged_members_by_group` — Number of effective members for each privileged group, meaning the identities in it directly or through nested Azure DevOps or Entra groups; null if the groups couldn't be read
 - `privileged_identities` — Number of distinct identities (people, service principals, service identities and Azure DevOps system identities) that are effective members of at least one privileged group; null if the groups couldn't be read
-- `privileged_users` — List of people who are effective members of at least one privileged group; null if the groups couldn't be read
+- `privileged_users` — List of people who are effective members of at least one privileged group; may be short when a group's members couldn't be read (see `privileged_groups_not_fully_read`), and is null if the groups couldn't be read
 - `privileged_service_principals` — List of service principals and managed identities that are effective members of at least one privileged group; null if the groups couldn't be read
 - `privileged_identities_only_through_entra_groups` — Number of identities that hold every privileged group they're in only through an Entra group, with no path through Azure DevOps groups alone; null if the groups couldn't be read
 - `entra_groups_granting_privilege` — List of Entra groups on the way to a privileged group; Azure DevOps records only the members it has seen, so check these in Entra ID for full membership and PIM; null if the groups couldn't be read
@@ -5894,20 +5894,35 @@ Summary fields:
 - `secure_files_total` — Number of secure files (certificates, keys and other files pipelines download); a project whose secure files couldn't be read adds none, and the count is never null
 
 **How do service connections authenticate?**
-- `service_connections_by_auth_method` — Number of service connections using each sign-in method: workload_identity_federation (a short-lived token, no stored secret), managed_identity (the build agent's Azure identity, no stored secret), github_app (a GitHub App installation, no stored secret), service_principal_secret (a stored client secret), service_principal_certificate (a stored certificate), service_principal (a stored secret or certificate; Azure DevOps didn't say which), username_password, token, personal_access_token, oauth, certificate, publish_profile and kubernetes (other stored credentials), none (no sign-in scheme, though the connection can still keep a key such as a NuGet API key), unknown (no sign-in scheme given), or the raw scheme name for one the fetcher doesn't recognise
+- `service_connections_by_auth_method` — Number of service connections using each sign-in method, with the lowercased raw scheme name for one the fetcher doesn't recognise:
+  - workload_identity_federation (a short-lived token, no stored secret)
+  - managed_identity (the build agent's Azure identity, no stored secret)
+  - github_app (a GitHub App installation, no stored secret)
+  - service_principal_secret (a stored client secret)
+  - service_principal_certificate (a stored certificate)
+  - service_principal (a stored secret or certificate; Azure DevOps didn't say which)
+  - username_password (another stored credential)
+  - token (another stored credential)
+  - personal_access_token (another stored credential)
+  - oauth (another stored credential)
+  - certificate (another stored credential)
+  - publish_profile (another stored credential)
+  - kubernetes (another stored credential)
+  - none (the sign-in scheme is None, though the connection can still keep a key such as a NuGet API key)
+  - unknown (no sign-in scheme at all)
 - `azure_service_connections` — Number of Azure Resource Manager (azurerm) service connections
 - `azure_service_connections_using_workload_identity_federation` — Number of Azure Resource Manager service connections that use workload identity federation
 - `azure_service_connections_with_stored_secret` — List of Azure Resource Manager service connections that hold a stored credential, meaning a secret, certificate, password, token, key, publish profile or kubeconfig kept in Azure DevOps; one whose credential can't be told is in `service_connections_credential_unknown` instead
-- `service_connections_with_stored_credential` — List of service connections of any type that hold a stored credential; a connection with no sign-in scheme counts when it keeps any parameter besides the service principal and tenant ids
-- `service_connections_credential_unknown` — List of service connections for which the fetcher can't tell whether they hold a stored credential: a sign-in scheme it doesn't recognise, or no sign-in scheme and no parameter besides the service principal and tenant ids. They are in neither stored-credential list, so the two stored-credential lists are complete only when `service_connections_credential_unknown` is empty
+- `service_connections_with_stored_credential` — List of service connections of any type that hold a stored credential; a connection whose sign-in scheme is None counts when it keeps any parameter besides the service principal and tenant ids
+- `service_connections_credential_unknown` — List of service connections for which the fetcher can't tell whether they hold a stored credential: a sign-in scheme it doesn't recognise, no sign-in scheme at all (whatever its parameters), or the scheme None and no parameter besides the service principal and tenant ids. They are in neither stored-credential list, so the two stored-credential lists are complete only when `service_connections_credential_unknown` is empty
 - `service_connections_not_ready` — List of service connections Azure DevOps reports as not ready (creation failed or incomplete)
 
 **Who may use them, and were they used?**
 - `service_connections_open_to_all_pipelines` — List of service connections that any YAML pipeline in at least one project may use without being authorised one by one (classic pipelines aren't limited by this); a connection whose pipeline permissions couldn't be read in some project, and that isn't open in another, is left out and the run reports the failure
 - `service_principals` — Number of distinct service principals behind the service connections, told apart by tenant id and app id, both compared ignoring case and surrounding spaces
 - `service_connections_used_in_window` — Number of service connections used by at least one pipeline run in the lookback period; a pipeline run is a build or a classic release, and the records a release logs for each of its stages count as one run
-- `service_connections_unused_in_window` — List of service connections whose history was read in every project and shows no pipeline run in the lookback period
-- `pipeline_runs_using_service_connections` — Number of pipeline runs in the lookback period that used at least one service connection, each run counted once however many connections or stages it used
+- `service_connections_unused_in_window` — List of service connections whose history was read in every project and shows no pipeline run in the lookback period; a history read counts as read even when it stopped at the cap of 50 pages of 100 records per project, so a connection whose records aren't newest-first, or whose recent runs lie past the cap, can be listed as unused
+- `pipeline_runs_using_service_connections` — Number of pipeline runs in the lookback period that used at least one service connection, each run counted once however many connections or stages it used; a connection's history is read to at most 50 pages of 100 records per project, so a connection with more records than that in the window is undercounted
 
 **Are pipeline secrets kept in Key Vault?**
 - `variable_groups_total` — Number of variable groups, each counted once however many projects share it
@@ -5919,7 +5934,12 @@ Summary fields:
 - `key_vault_secrets_without_expiry` — Number of Key Vault-linked secrets with no expiry date set
 
 **What isn't collected?**
-- `not_collected` — What the fetcher deliberately doesn't collect, by area: secret values (credentials, secret variables and secure file contents; of a connection's sign-in parameters only the service principal and tenant ids are kept, and its URL is cut to scheme and host); when a service principal's secret or certificate expires (Azure DevOps doesn't expose it); which classic pipelines may use a connection (pipeline permissions limit YAML pipelines only); who holds the User, Creator and Administrator roles on each connection; and projects and connections the identity can't see (Azure DevOps lists only the connections it holds a role on, with no refusal for the rest)
+- `not_collected` — What the fetcher deliberately doesn't collect, with a note for each area:
+  - secret_values (credentials, secret variables and secure file contents are never read; of a connection's sign-in parameters only the service principal and tenant ids are kept, and its URL is cut to scheme and host)
+  - secret_expiry (when a service principal's secret or certificate expires, which Azure DevOps doesn't expose)
+  - classic_pipeline_authorization (which classic pipelines may use a connection, since pipeline permissions limit YAML pipelines only)
+  - connection_roles (who holds the User, Creator and Administrator roles on each connection)
+  - projects_not_visible (projects and connections the identity can't see, since Azure DevOps lists only the connections it holds a role on and refuses nothing for the rest)
 
 
 ### azure_devops_work_items
