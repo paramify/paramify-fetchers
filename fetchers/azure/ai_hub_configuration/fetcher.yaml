@@ -1,5 +1,5 @@
 name: azure_ai_hub_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   Inventories Azure AI hubs, AI projects and the other Azure Machine Learning workspaces
   (Microsoft.MachineLearningServices/workspaces) in the subscription. For every workspace: how
@@ -12,6 +12,31 @@ description: >
   exposure, whether diagnostic logs are exported, and every connection to another service with
   whether the connection holds a stored secret.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching hub, project or other workspace is listed under excluded with the
+      pattern and left out of every count and verdict; its datastores, endpoints,
+      computes, connections and diagnostic settings are not read. Every project of an
+      excluded hub leaves with it, in any resource group, with reason hub_excluded and the
+      hub in matched_id. An id: pattern reaches only a hub, project or other workspace; one
+      naming a datastore, endpoint, compute or connection matches nothing and is listed
+      among the unmatched patterns. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -101,6 +126,11 @@ evidence_set:
     count as two. diagnostic_logs_exported is true when a diagnostic setting with a destination enables
     any log category or category group (workspaces offer about 27), with exported_log_categories and
     exported_log_category_groups naming them, and null when settings could not be read. A summary with total_endpoints or total_computes 0 proves
-    nothing about endpoint or compute exposure: there is nothing deployed yet. Lists that could not be read are null and set metadata.partial_failure.
+    nothing about endpoint or compute exposure: there is nothing deployed yet. A per-workspace list that could not be read is null and sets metadata.partial_failure. When the workspace list itself was not read (a refused call, or no credential or subscription), results.workspaces stays empty and every summary count is null.
     provider_registration_status (registered / not_registered / unknown) is the
     Microsoft.MachineLearningServices resource provider's state.
+    Workspaces the resource_exclusions patterns take out are listed under excluded instead of workspaces.
+    resource_exclusion_patterns lists the configured patterns, empty when none are set; resource_exclusion_patterns_unmatched the ones that matched no
+    workspace, such as a mistyped name; excluded_hubs, excluded_projects and excluded_other_workspaces count the workspaces left out of scope because a
+    pattern matched their resource group, region or id, or their hub was excluded; in_scope_hubs, in_scope_projects and in_scope_other_workspaces count
+    those read and in scope. These counts and every total_* and per-workspace count are null when the workspace list could not be read; 0 means the patterns took out every workspace, which a check can catch by requiring more than 0.
