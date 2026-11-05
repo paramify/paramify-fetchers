@@ -2,8 +2,8 @@ name: azure_devops_permissions
 version: 0.2.0
 description: >-
   Shows which identities and groups hold which Azure DevOps permissions at each
-  scope, allowed or denied, flags high-impact rights held outside the admin
-  groups, and lists who can override check-in validation.
+  scope, flags high-impact rights held outside the admin groups, and lists
+  who can override check-in validation.
 category: azure
 
 supports_targets: true
@@ -104,8 +104,8 @@ evidence_set:
     - checkin_validation_override_grants — Number of permission entries in the Build namespace that allow overriding check-in validation, set on the entry or inherited from a parent object and not denied on the entry; this right lets someone check in to TFVC without a gated build first building the change; null if the Build permissions couldn't be read or, under a project filter, the project list couldn't be read
     - checkin_validation_override_holders — List of users, groups and service accounts named in the entries checkin_validation_override_grants counts; null if the Build permissions couldn't be read or, under a project filter, the project list couldn't be read
     - checkin_validation_override_build_services — List of the build service accounts, the organization's and each project's, and the organization's Project Collection Build Service Accounts group, named in the entries checkin_validation_override_grants counts; Azure DevOps grants them this right by default, since a gated build checks the change in as its build service; null if the Build permissions couldn't be read or, under a project filter, the project list couldn't be read
-    - checkin_validation_override_grants_outside_admin_groups — Number of the entries checkin_validation_override_grants counts that name neither an admin group (as high_impact_grants_outside_admin_groups defines them) nor one of the build services checkin_validation_override_build_services lists; null if the Build permissions couldn't be read, an identity in those entries couldn't be looked up or, under a project filter, the project list couldn't be read
-    - checkin_validation_override_holders_outside_admin_groups — List of users, groups and service accounts named in the entries checkin_validation_override_grants_outside_admin_groups counts; null if the Build permissions couldn't be read, an identity in those entries couldn't be looked up or, under a project filter, the project list couldn't be read
+    - checkin_validation_override_grants_outside_admin_groups — Number of the entries checkin_validation_override_grants counts that name neither an admin group (as high_impact_grants_outside_admin_groups defines them) nor one of the build services checkin_validation_override_build_services lists; null if the Build permissions couldn't be read, an identity in an entry that allows overriding check-in validation couldn't be looked up or, under a project filter, the project list couldn't be read
+    - checkin_validation_override_holders_outside_admin_groups — List of users, groups and service accounts named in the entries checkin_validation_override_grants_outside_admin_groups counts; null if the Build permissions couldn't be read, an identity in an entry that allows overriding check-in validation couldn't be looked up or, under a project filter, the project list couldn't be read
 
     What isn't collected?
     - not_collected — What the fetcher deliberately doesn't collect, by area: who is in each group (see the identities evidence); resource names (repositories, pipelines, environments and connections appear by id); namespaces outside the delivery platform (work items, boards, wiki, dashboards, analytics, agent pools); and rights only inherited from a parent object, which are flagged on that parent (the check-in validation override is also counted where an entry inherits it)
