@@ -1,0 +1,54 @@
+display_name: Qualys
+description: >-
+  Read-only VMDR vulnerabilities with required QVS/CISA enrichment and STIG
+  policy posture reports for Paramify assessments. Uses the Qualys FO APIs.
+secrets:
+  - name: username
+    env: QUALYS_USERNAME
+    description: Qualys API-enabled user's username with read access to the intended assets and policies.
+  - name: password
+    env: QUALYS_PASSWORD
+    description: Qualys API user's password.
+requires:
+  python_packages: [requests, defusedxml]
+config_schema:
+  api_url:
+    type: string
+    required: true
+    env: QUALYS_API_URL
+    description: HTTPS origin for your Qualys API platform, without a path. No default platform is assumed.
+  private_cloud_host:
+    type: string
+    required: false
+    env: QUALYS_PRIVATE_CLOUD_HOST
+    description: Explicitly allowed API hostname for a Qualys private cloud platform.
+  page_size:
+    type: integer
+    default: 1000
+    env: QUALYS_PAGE_SIZE
+    description: Hosts per VMDR page or postures per STIG page (1–10000).
+  max_pages:
+    type: integer
+    default: 10000
+    env: QUALYS_MAX_PAGES
+    description: Maximum pages per collection (1–100000). Exceeding it fails collection.
+  max_records:
+    type: integer
+    default: 500000
+    env: QUALYS_MAX_RECORDS
+    description: Maximum output rows per invocation (1–10000000). Exceeding it fails collection.
+  retries:
+    type: integer
+    default: 3
+    env: QUALYS_RETRIES
+    description: Retries per request for transient failures (0–10).
+  min_request_interval:
+    type: integer
+    default: 1
+    env: QUALYS_MIN_REQUEST_INTERVAL
+    description: Minimum seconds between request starts (0–60). Requests run sequentially.
+  allow_empty:
+    type: boolean
+    default: false
+    env: QUALYS_ALLOW_EMPTY
+    description: Explicitly permit a valid zero-result collection. Missing or malformed responses always fail.

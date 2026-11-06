@@ -25,6 +25,13 @@ schemas and the `paramify` CLI — not the internal code.
   asks for regular rotation and sets no number), capped at 3650; a value that isn't a whole
   number from 1 up fails the run as `bad_config`. No new calls.
 
+- **Qualys issue reports:** `qualys_vmdr_vulnerability_findings` collects
+  complete scoped VMDR detections with mandatory KnowledgeBase and QVS/CISA
+  enrichment. `qualys_stig_compliance_report` collects all evaluated postures
+  for each selected STIG policy, preserving results and exceptions. Both use
+  documented CSV intake contracts, complete pagination, and atomic report
+  publication; setup and synthetic examples live under `fetchers/qualys/`.
+
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
   a passkey (synced or device-bound), Windows Hello for Business or a macOS platform
