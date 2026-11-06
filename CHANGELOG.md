@@ -81,6 +81,50 @@ schemas and the `paramify` CLI — not the internal code.
   that have zones, and reports the regions in use, `multi_region`, and the resources
   sitting in regions with no zones. A failed Resource Graph query leaves every
   count from the resources null, not 0. Reader is enough.
+- **`azure_firewall_configuration`** (`EVD-AZURE-FIREWALL-CONFIGURATION`): every
+  Azure Firewall and Firewall Policy with its rule collection groups and rules
+  (the classic rule collections on a firewall without a policy too), the policy
+  chain a firewall inherits through base policies, threat intelligence mode,
+  IDPS, TLS inspection, DNS proxy, management IP configuration, public and
+  private IPs, and which rule and threat log categories its diagnostic settings
+  export. Flags allow-all network rules, allow-any-FQDN application rules and
+  DNAT rules to port 22 or 3389 (published or translated) or from any source,
+  counts rules from a policy in another subscription that a firewall here uses,
+  and judges per firewall
+  whether its rules filter egress: no network rule open to any destination on
+  every port, whatever its source (`egress_open_network_rules`, so a rule from
+  10.0.0.0/8 counts), and no any-FQDN application rule, so a firewall with no
+  rules counts, since Azure Firewall
+  denies whatever no rule allows. Routing is not checked here
+  (`azure_vnet_egress_routing` reports it). A failed firewall or policy list
+  leaves the counts that depend on it null, not 0. A policy or base policy in another
+  subscription is read when the credential may; otherwise that firewall's rule
+  and setting fields read null, never false. Resource exclusions apply to
+  firewalls and policies. KSI-CNA-RNT, CNA-ULN, CNA-MAT, MLA-LET.
+- **`azure_bastion_configuration`** (`EVD-AZURE-BASTION-CONFIGURATION`): every
+  Bastion host's SKU, scale units, shareable links, IP connect, native client
+  tunneling, file copy, copy-paste, Kerberos, session recording, private-only
+  mode, IP allow-list, zones, whether its subnet has a network security group and
+  whether BastionAuditLogs is exported; and for every virtual machine whether a
+  Bastion reaches it in its own virtual network or through a connected peering
+  whose link on the Bastion's side allows virtual network access (Developer SKU
+  hosts do not reach peered networks), including Bastion hosts in a peered
+  subscription when the credential may list them. Only hosts in the Succeeded
+  state with a known SKU count as a path. A path that cannot be decided reads
+  unknown and nulls the coverage counts, and unread interface data nulls the
+  public IP and path counts. A failed host or machine list leaves its counts
+  null, not 0. KSI-CNA-RNT, CNA-MAT, MLA-LET.
+- **`azure_resource_locks`** (`EVD-AZURE-RESOURCE-LOCKS`): every management lock
+  in the subscription with its level, scope and scope kind, and for each resource
+  of a protected type (Log Analytics workspaces, Backup vaults, Recovery Services
+  vaults, key vaults and storage accounts by default; `AZURE_LOCK_PROTECTED_TYPES`
+  overrides, accepting nested types such as `microsoft.sql/servers/databases`;
+  an entry that is not provider/type, or a setting with no entry, fails the run as
+  `bad_config`, and a type that matches nothing is listed in
+  `protected_resource_types_unmatched`) whether a CanNotDelete or ReadOnly lock on
+  the resource, its resource group or the subscription is in effect. Lock fields
+  read null when the lock list was not read. KSI-MLA-ALA, RPL-ABO, CNA-DFP.
+
 - **`azure_pim_activations`** (`EVD-AZURE-PIM-ACTIVATIONS`): Azure resource PIM
   activity on the subscription. Every role assignment schedule request Azure
   still holds at the subscription and below (self-activations, admin

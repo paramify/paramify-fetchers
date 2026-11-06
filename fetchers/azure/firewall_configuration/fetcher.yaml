@@ -1,0 +1,139 @@
+name: azure_firewall_configuration
+version: 0.1.0
+description: >-
+  Shows what each Azure Firewall allows and denies, whether threat intelligence, IDPS, TLS inspection and DNS proxy are on, and whether its logs are exported.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_firewall_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id holding the firewalls (often a hub subscription). Optional —
+      omit to use the first enabled subscription the ambient credential can see.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope,
+      as case-insensitive glob patterns listed in the manifest, each with
+      a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as
+      usgovvirginia; a resource with no location never matches one) or
+      id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching firewall or Firewall Policy is listed under excluded with the pattern and left out of every count and judgement; a policy in another subscription that only an excluded firewall references is not read, while a Firewall Policy in this subscription is excluded only by a pattern that matches it. A pattern that matches nothing is reported; a bare pattern fails the run.
+
+secrets: []          # DefaultAzureCredential only - see _categories/azure.yaml
+
+ksis:
+  - KSI-CNA-RNT   # outbound and inbound traffic limited by the firewall's rules
+  - KSI-CNA-ULN   # logical networking enforces traffic flow controls
+  - KSI-CNA-MAT   # threat intelligence, IDPS and TLS inspection reduce the attack surface
+  - KSI-MLA-LET   # firewall rule and threat logs exported for review
+
+evidence_set:
+  reference_id: EVD-AZURE-FIREWALL-CONFIGURATION
+  name: Azure Firewall Configuration
+  instructions: |
+    Script: azure/firewall_configuration/fetcher.py
+
+    Access: Reader on the subscription. Optional: Reader on another subscription that holds a Firewall Policy a firewall uses or a base policy a policy inherits from; without it that policy reads unread, the firewall's rule fields read null, and the run succeeds. A subscription that never registered Microsoft.Network reads as having no firewalls.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.Network/azureFirewalls — every firewall with its SKU, deployment, IP configurations, forced tunneling, attached Firewall Policy and the classic rule collections configured on the firewall itself
+    - GET Microsoft.Network/firewallPolicies — every Firewall Policy with its threat intelligence mode and allowlist, IDPS, DNS, TLS inspection, insights, base policy and the firewalls using it
+    - GET firewallPolicies/{policy} (per policy a firewall or policy references outside the subscription) — the policy's settings, when the credential can read it
+    - GET firewallPolicies/{policy}/ruleCollectionGroups (per policy) — every rule collection and rule, and GET ruleCollectionGroups/{group} when a listing leaves the collections out
+    - GET Microsoft.Insights/diagnosticSettings (per firewall) — which log categories go to which workspace, storage account or event hub
+
+    Output: azure_firewall_configuration_<subscription>.json — each firewall with its effective settings, its policy chain and rule findings, and its log export; each Firewall Policy with its settings and every rule; the policies read from other subscriptions; and the resources left out of scope.
+
+    Summary fields:
+
+    What firewalls and policies exist?
+    - firewalls_read — True if the firewall list was read; false if it failed, and then every firewall count and every rule count is null, not 0, and the run fails
+    - firewalls — Number of Azure Firewalls in scope
+    - firewalls_by_sku_tier — Number of firewalls for each SKU tier (basic, standard, premium, or unknown when the API reports none)
+    - firewalls_by_deployment — Number of firewalls for each deployment kind:
+      - virtual_network (deployed into a virtual network's AzureFirewallSubnet)
+      - virtual_hub (deployed into a Virtual WAN hub)
+    - firewalls_with_policy — Number of firewalls whose rules come from an attached Firewall Policy
+    - firewalls_with_classic_rules — Number of firewalls whose rules are the rule collections configured on the firewall itself
+    - firewalls_without_rules — Number of firewalls with no policy and no classic rule collection; such a firewall denies every flow
+    - firewalls_with_rules_unread — Number of firewalls whose policy, or a base policy in its chain, could not be read, so their rule fields read null
+    - firewall_policies_read — True if the policy list was read; false if it failed, and then every policy count and every rule count is null, not 0, and the run fails
+    - firewall_policies — Number of Firewall Policies in the subscription and in scope
+    - firewall_policies_in_use — Number of those policies attached to at least one firewall
+    - firewall_policies_unused — Number of those policies attached to no firewall
+    - firewall_policies_with_base_policy — Number of those policies that inherit rules from a base policy
+    - firewall_policies_with_rules_unread — Number of those policies whose rule collection groups could not be read
+
+    What do the rules allow?
+    - rules — Number of rules across every in-scope policy, every policy from another subscription that a firewall or policy here references and that could be read, and every classic rule collection, each policy counted once; null if any policy's or firewall's rules could not be read
+    - rules_by_type — Number of rules for each type (network, application, nat); null if any rules could not be read
+    - rules_by_action — Number of rules for each action (allow, deny, dnat); null if any rules could not be read
+    - allow_all_network_rules — Number of allow network rules whose sources and destinations are any (*, 0.0.0.0/0 or any) and whose ports are * or together cover 1-65535, in any number of entries or ranges; an IP group adds addresses, so a * beside one is still every address; a rule that carries only ICMP is not counted; such a rule permits every flow; counted regardless of the priority of other rules; null if any rules could not be read
+    - network_rules_to_any_destination — Number of allow network rules whose destination is any, whatever the source or ports; null if any rules could not be read
+    - egress_open_network_rules — Number of allow network rules whose destination is any and whose ports are * or together cover 1-65535 (not ICMP only), whatever the source: each lets its sources, such as 10.0.0.0/8 or a single subnet, out to anywhere unfiltered; null if any rules could not be read
+    - application_rules_to_any_fqdn — Number of allow application rules whose target FQDN or URL is * with no FQDN tag or web category narrowing it; such a rule permits web traffic to any destination; null if any rules could not be read
+    - firewalls_enforcing_egress_filtering — Number of firewalls with no egress-open network rule (see egress_open_network_rules) and no any-FQDN application rule in their effective rules (the attached policy and its base policies, or the classic rule collections). Azure Firewall denies whatever no rule allows, so a firewall with no rules, or only DNAT or deny rules, counts (firewalls_without_rules lists those with no rules). This judges the rules only, not whether traffic reaches the firewall: a subnet whose default route bypasses it is reported by azure_vnet_egress_routing. Null if any firewall's rules could not be read or the firewall list failed
+    - firewalls_with_allow_all_rule — Number of firewalls whose effective rules include an allow-all network rule or an any-FQDN application rule; null if any firewall's rules could not be read
+    - egress_filtering_percentage — Percentage of firewalls enforcing egress filtering: firewalls_enforcing_egress_filtering * 100 / firewalls, 0 when there are no firewalls; null if any firewall's rules could not be read or the firewall list failed
+
+    Does the firewall publish anything inbound?
+    - dnat_rules — Number of DNAT rules, which translate a firewall public IP and port to an internal address; null if any rules could not be read
+    - dnat_rules_to_admin_ports — Number of DNAT rules whose destination ports or translated port include 22 or 3389, as a port or inside a range, which publish SSH or RDP; null if any rules could not be read
+    - dnat_rules_from_any_source — Number of DNAT rules whose source is any, so the whole internet can reach the translated address; null if any rules could not be read
+
+    Is threat protection on?
+    - firewalls_with_settings_unread — Number of firewalls whose attached policy could not be read, so their threat intelligence, IDPS, TLS inspection and DNS proxy fields read null or unknown; once a policy is attached the firewall's own settings no longer apply
+    - firewalls_by_threat_intel_mode — Number of firewalls for each threat intelligence mode in effect, from the policy when one is attached and otherwise from the firewall:
+      - alert (known malicious addresses and domains are logged, not blocked)
+      - deny (known malicious addresses and domains are blocked)
+      - off (threat intelligence is not applied)
+      - unknown (the attached policy could not be read, or the firewall reports no mode)
+    - firewalls_with_threat_intel_deny — Number of firewalls whose threat intelligence mode is deny; null if any firewall's policy could not be read
+    - firewalls_with_idps_deny — Number of firewalls whose policy sets IDPS to deny; IDPS needs the Premium tier; null if any firewall's policy could not be read
+    - firewalls_with_idps_alert_only — Number of firewalls whose policy sets IDPS to alert, so signatures are logged but not blocked; null if any firewall's policy could not be read
+    - firewalls_without_idps — Number of firewalls with IDPS off, with no policy, or on a tier without IDPS; null if any firewall's policy could not be read
+    - firewalls_with_tls_inspection — Number of firewalls whose policy has a TLS inspection certificate authority configured; null if any firewall's policy could not be read
+    - firewalls_with_dns_proxy — Number of firewalls that proxy DNS, which FQDN-based network rules need to resolve consistently; null if any firewall's policy could not be read
+    - firewalls_with_management_ip — Number of firewalls with a management IP configuration, which forced tunneling and the Basic tier both require; it does not by itself show that internet traffic is forced to another hop
+    - firewalls_with_public_ip — Number of firewalls with at least one public IP address
+
+    Are firewall logs kept?
+    - firewalls_exporting_rule_logs — Number of firewalls whose diagnostic settings export a network, application or NAT rule log category; null if any firewall's diagnostic settings could not be read
+    - firewalls_exporting_threat_logs — Number of firewalls whose diagnostic settings export the resource-specific threat intelligence or IDPS signature log category (AZFWThreatIntel, AZFWIdpsSignature); the legacy rule categories also carry threat intelligence hits inside the rule log; null if any firewall's diagnostic settings could not be read
+    - firewalls_without_log_export — Number of firewalls with no diagnostic setting that sends any enabled log anywhere; null if any firewall's diagnostic settings could not be read
+    - log_categories_exported — List of the firewall log categories exported by at least one firewall; a setting that exports the allLogs group counts for every category, and any other category group is listed as group:<name> without claiming the categories inside it
+
+    What was left out of scope?
+    - resource_exclusion_patterns — List of the resource_exclusions patterns as given
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name
+    - excluded_firewalls — Number of firewalls a pattern took out of scope; null if the firewall list was not read
+    - excluded_firewall_policies — Number of firewall policies a pattern took out of scope; null if the policy list was not read
+    - in_scope_firewalls — Number of firewalls assessed; null if the firewall list was not read
+    - in_scope_firewall_policies — Number of firewall policies assessed; null if the policy list was not read
