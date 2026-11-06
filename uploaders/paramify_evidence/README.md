@@ -7,10 +7,10 @@
 
 Pushes envelope-wrapped evidence from a run directory to Paramify. A **separate
 stage** from collection: it reads a completed `evidence/run-<timestamp>/` and
-sends the files of each fetcher entry to a Paramify evidence set as one batch. It
+sends the files of each fetcher entry to a Paramify evidence set as one batch.
+When an entry cannot go in a batch, it sends the entry direct, as before batches. It
 never runs fetchers and never touches fetcher source credentials. You can point
-it at an old run, and uploading a run again changes nothing. It needs Paramify
-API 0.14.0 or later.
+it at an old run, and uploading a run again changes nothing.
 
 ## Paramify API key
 
@@ -57,9 +57,11 @@ For each fetcher entry in the run the upload:
 5. **delivers** one batch with every file of the entry, then submits it. A
    temporary failure leaves the batch open. Run the same upload again to resume
    it. A file that fails for good is dropped and named, and the rest goes in.
+   Otherwise the upload sends the files direct. See
+   [when a batch cannot be used](../../docs/uploader_guide.md#when-a-batch-cannot-be-used).
 
-A refusal or failure stops that entry only. The stack, `approval` and
-`no_request` settings are in the run manifest under `run.paramify`. See
+A refusal or failure stops that entry only. The stack, `approval`, `delivery`
+and `no_request` settings are in the run manifest under `run.paramify`. See
 [the uploader guide](../../docs/uploader_guide.md#how-a-run-is-delivered).
 
 Tying evidence sets to controls/solution-capabilities is done in Paramify (manual

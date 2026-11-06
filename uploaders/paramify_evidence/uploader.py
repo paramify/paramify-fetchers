@@ -4,7 +4,8 @@
 This path-loaded script is kept so existing schedules and imports keep working.
 It no longer uploads anything itself: `upload_run` and `main` hand the run to
 the same plan/apply engine `paramify upload` uses (framework/api.upload_run),
-which sends one batch per fetcher entry and needs Paramify API 0.14.0 or later.
+which sends one batch per fetcher entry, or sends the entry direct when a batch
+cannot be used.
 
 Auth: PARAMIFY_UPLOAD_API_TOKEN (source-agnostic env — .env, secret manager, CI).
 """

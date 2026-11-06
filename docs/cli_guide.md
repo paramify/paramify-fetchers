@@ -211,8 +211,10 @@ paramify upload                     # upload the latest run (get-or-create evide
 
 `paramify upload` takes an optional run directory. The default is the latest
 run under `--output-dir`. It sends one batch for each fetcher entry in the run.
-The batch goes through the channel of the evidence set when the set has one. It
-needs Paramify API 0.14.0 or later.
+The batch goes through the channel of the evidence set when the set has one.
+When a batch cannot be used, the upload sends the entry
+[direct](uploader_guide.md#when-a-batch-cannot-be-used), the way it did before
+batches.
 
 | Flag | Effect |
 |---|---|
@@ -222,10 +224,10 @@ needs Paramify API 0.14.0 or later.
 | `--with-validators` | Syncs validators for the evidence sets of the run before the batches go out. If the sync fails, the upload sends no batch. With `--dry-run`, it only names the sync it would do. |
 | `--no-tags` | Skips the default custom tags for this upload. |
 | `--config`, `-f`, `-o` | Choose the uploader config, the manifest, and the output directory. |
-| `--json` | Prints the summary: the legacy counts, plus `dropped`, `plan`, `entries`, `outcomes` and, with `--with-validators`, `validators`. |
+| `--json` | Prints the summary: the legacy counts, plus `dropped`, `plan`, `entries`, `outcomes`, `batches` and, with `--with-validators`, `validators`. |
 
 Set the stack in the manifest under `run.paramify` (`stack`, `stack_name`,
-`approval`, `no_request`). An entry can set the same keys in its own `paramify`
+`approval`, `delivery`, `no_request`). An entry can set the same keys in its own `paramify`
 block. List the stacks in the workspace with `paramify stacks`. Write one into a
 manifest with `paramify manifest set-stack MANIFEST STACK [--fetcher NAME]`.
 With a token, the command looks up the stack and stores its id and name. Check

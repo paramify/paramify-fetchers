@@ -4,7 +4,9 @@
 files of each fetcher entry as one batch on that fetcher's evidence set. The
 upload creates the set the first time it sees it. You can then sync each
 fetcher's script and validators to the same set, and check the evidence in the
-app. This needs Paramify API 0.14.0 or later.
+app. When the workspace cannot use batches, the upload sends each file direct,
+as it did before batches. See
+[When a batch cannot be used](#when-a-batch-cannot-be-used).
 
 ![Flow: an API key and a completed run, then preview, upload, and the optional syncs, then check the evidence set and its JSON in Paramify](img/uploader/flow.svg)
 
@@ -120,9 +122,10 @@ Channels exist only in the Paramify app. The upload never creates one.
 **The artifact request.** On a channel, the batch goes to the current artifact
 request. If there is none, it goes to the most recent past request and the plan
 warns of a late submission. If the channel has no request at all, the upload
-refuses that entry. To send the batch to the evidence set instead, set
-`no_request: evidence` on the entry. Those artifacts do not count toward the
-solution capability.
+sends the entry direct. See
+[When a batch cannot be used](#when-a-batch-cannot-be-used). To send a batch to
+the evidence set instead, set `no_request: evidence` on the entry. Those
+artifacts do not count toward the solution capability.
 
 **A refusal stops one entry.** The other entries still upload. Each refusal says
 what to change. The run exits 1, and `upload_log.json` shows the entry as
@@ -145,7 +148,7 @@ run:
       paramify:
         stack: GovCloud
         approval: MANUAL
-        no_request: evidence
+        no_request: refuse
 ```
 
 | Key | Values | Meaning |
@@ -153,7 +156,8 @@ run:
 | `stack` | stack id or name | The stack whose channel receives the batch. |
 | `stack_name` | text | A label. The plan warns when it no longer matches the workspace. |
 | `approval` | `MANUAL`, `SUBMISSION_WITH_PASSING_VALIDATORS`, `SUBMISSION` | How Paramify approves batches on a set this upload creates. |
-| `no_request` | `refuse` (default), `evidence` | What to do when a channel has no artifact request. |
+| `no_request` | `direct` (default), `evidence`, `refuse` | What to do when a channel has no artifact request. |
+| `delivery` | `auto` (default), `direct` | `direct` sends the entry direct, with no batch. |
 
 `paramify run` writes each entry's settings into the run's `_run_metadata.json`.
 The upload reads them from there. A manifest that changes after the run does not
@@ -163,6 +167,63 @@ List the stacks with `paramify stacks`. Store one in a manifest with
 `paramify manifest set-stack MANIFEST STACK`. Add `--fetcher NAME` to set it for
 one entry. To override the stack for one upload, run
 `paramify upload --stack STACK`.
+
+### When a batch cannot be used
+
+Some entries cannot go in a batch. The upload then sends them direct. Direct is
+the route the uploader used before batches. It sends each file to the evidence
+set. It makes no batch, no submit and no approval. It keeps the channel and
+stack routing, so each file carries the id of the channel. It also keeps the
+run identity, so you can upload the same run again and nothing goes twice.
+
+The upload sends an entry direct in these cases:
+
+| Case | Plan reason |
+|---|---|
+| The workspace does not have batches. The API answers 403 `Artifact requests are not enabled for this workspace.`, or 404. | `batches are off for this workspace` |
+| The channel has no artifact request, and `no_request` is `direct`. | `<channel> has no artifact request` |
+| The entry sets `delivery: direct`. | `delivery: direct` |
+
+When the workspace does not have batches, the plan starts with one note:
+`batches are off for this workspace (<detail>); every entry is sent direct, as
+before batches`. `<detail>` is the message of the API, or `the API has no batch
+routes` for a 404. The upload reads no artifact request and no batch after the
+check. An offline `--dry-run` makes no check and shows no note.
+
+Each direct entry shows a line like this in the plan:
+`deliver 2 files to EVD-12 direct (channel CH-1): batches are off for this workspace`.
+A set with no channel shows `(no channel)`. A channel with no request also gives
+the warning `<channel> has no artifact request; sent direct, as before batches`.
+
+Set the behavior in the manifest, on `run.paramify` or on one entry:
+
+```yaml
+run:
+  paramify:
+    delivery: auto          # the default: use a batch when one is possible
+    no_request: direct      # the default: send direct when the channel has no request
+  fetchers:
+    - use: aws_iam_mfa
+      paramify:
+        delivery: direct    # always send this entry direct
+    - use: okta_phishing_resistant_mfa
+      paramify:
+        no_request: refuse  # refuse this entry instead
+```
+
+| `no_request` | Result when the channel has no artifact request |
+|---|---|
+| `direct` (default) | Sends the entry direct, with a warning. |
+| `evidence` | Sends a batch to the evidence set. These artifacts do not count toward the solution capability. |
+| `refuse` | Refuses the entry. |
+
+The result and `upload_log.json` record each entry's `mode`: `batch` or
+`direct`. A direct entry has no batch id. A temporary failure holds only that
+file, and the next upload sends only that file. A direct artifact is not on a
+batch. Paramify decides whether it counts toward the solution capability.
+
+When a workspace gets batches later, the files that the upload sent direct read
+as delivered. A new run goes in a batch.
 
 ### Approval mode
 
@@ -208,9 +269,11 @@ runs.
 - `plan`: the actions the upload planned.
 - `entries`: one record for each fetcher entry, with its `state`
   (`planned` for a dry run, then `delivered`, `delivered_with_drops`, `held`,
-  `refused`, `failed` or `noop`), batch id, status, stack, channel and artifact
-  request.
+  `refused`, `failed` or `noop`), `mode` (`batch` or `direct`), batch id,
+  status, stack, channel and artifact request.
 - `outcomes`: what each action did.
+- `batches`: whether the workspace has batches, as `{"available": true or
+  false, "reason": text or null}`. `reason` is null in a dry run.
 - `validators`: the validator sync summary, when you pass `--with-validators`.
   With `--dry-run`, it names the sync that the upload would do.
 
@@ -282,8 +345,8 @@ results, see [verify validators](suggest_validator_guide.md#5-verify-in-paramify
 | `No run under ./evidence that collected evidence.` | Your manifest writes elsewhere. Add `-f <manifest>`, or pass the run directory. |
 | `… has 3 channels and no stack is configured` | The upload does not guess a channel. Set the stack: `paramify manifest set-stack`, or `paramify upload --stack`. The message lists the stacks. |
 | `… has no channel on stack …` | Create a channel for that stack on the evidence set in the app, or choose another stack. |
-| `no current or past artifact request on channel …` | Create an artifact request on the channel in the app, or set `no_request: evidence` on that entry. |
-| `this workspace's API has no batches; 0.14.0 or later is required` | The workspace runs an older Paramify API. Upload to a workspace on 0.14.0 or later. |
+| `no current or past artifact request on channel …` | This appears only with `no_request: refuse`. Create an artifact request on the channel in the app, or remove `no_request: refuse` from this entry to send it direct. |
+| `batches are off for this workspace (…); every entry is sent direct, as before batches` | This is a note, not an error. The workspace has no batches, so the upload sends every entry direct. |
 | An entry shows `held` | A temporary failure stopped the batch. Run the same upload again. |
 | A file shows `blocked by the production WAF` | The evidence holds a string the WAF rejects (`../`, `/bin/sh`, `<script`). The upload sent the rest. Remove the string and collect again. |
 | Validators attach to `EVD-…`, not your remapped set | Validator sync uses the registry's reference IDs. Attach them on the set's **Validators** tab → **Manage Selection**. |

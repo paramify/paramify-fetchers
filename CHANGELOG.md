@@ -26,15 +26,24 @@ schemas and the `paramify` CLI — not the internal code.
   current artifact request. A set with no channel gets the batch on the set. A
   set with several channels no longer fails: the upload uses the channel on the
   stack of the entry. It refuses one entry, and gives the fix, when no stack is
-  set, the stack is unknown, no channel is on that stack, or no artifact request
-  exists. `no_request: evidence` sends the batch to the set instead. A temporary
+  set, the stack is unknown, or no channel is on that stack. `no_request:
+  evidence` sends the batch to the set instead. A temporary
   failure holds the batch open, and the same upload resumes it. A file that
   fails for good is dropped and named, and the rest goes in. Uploading the same
   run again changes nothing, also for a run that the earlier uploader sent
   before batches. When the API refuses a write (400, 405, 415, 422) for one
   set or batch, only that entry fails. Only a 401 or 403 stops the upload. A
-  refused tag is a warning. This needs Paramify API 0.14.0 or later. An older
-  workspace stops with an error before anything is planned.
+  refused tag is a warning. Batches need Paramify API 0.14.0 or later. A workspace
+  without them gets direct delivery (see below).
+- **`delivery: auto | direct`** in the `paramify` block of the manifest, on the
+  run or on one entry. `direct` sends the entry the way the uploader sent it
+  before batches. `auto` is the default.
+- **`no_request: direct`, now the default.** When a channel has no artifact
+  request, the upload sends the entry direct and warns. `evidence` and `refuse`
+  still work.
+- **Direct delivery in the upload result.** Each entry has a `mode` (`batch` or
+  `direct`). The summary has `batches`, which says whether the workspace has
+  batches and why not. In a dry run, `reason` is null.
 - **`paramify upload --plan`** reads the workspace and changes nothing. It
   prints the plan. For each entry it shows the set, stack, channel and artifact
   request, and whether the batch is new, resumed or done. It also shows dropped
@@ -567,6 +576,10 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **Entries that cannot use a batch are sent direct.** The uploader sends them
+  the way it sent them before batches, instead of refusing them. This covers a
+  workspace without batches, a channel with no artifact request, and
+  `delivery: direct`.
 - **Upload result shape.** The `--json` summary and `upload_log.json` keep
   `uploaded`, `skipped_duplicate`, `skipped_failed`, `errors` and `ok` for one
   release. So do the `upload_start`, `upload_file` and `upload_complete` events.
