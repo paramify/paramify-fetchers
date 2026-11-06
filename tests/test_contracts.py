@@ -19,6 +19,7 @@ Run: ``pytest tests/test_contracts.py`` (needs an editable install:
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -223,10 +224,88 @@ def test_instructions_open_with_the_entry_path() -> None:
 # add a category (or category/short_name) once its fetchers are converted.
 # --------------------------------------------------------------------------- #
 
-TEXT_FORMAT_FETCHERS = ("azure/alert_rules", "azure/change_work_items", "azure/entra_risky_users",
-                        "azure/sentinel_playbooks", "azure/service_availability",
-                        "azure/service_health_advisories", "azure/sql_managed_instance_configuration", "oci")
+TEXT_FORMAT_FETCHERS = (
+    "azure/alert_rules",
+    "azure/app_service_backups",
+    "azure/backup_vault_protection",
+    "azure/bastion_configuration",
+    "azure/change_work_items",
+    "azure/devops_identities",
+    "azure/devops_service_connections",
+    "azure/entra_access_reviews",
+    "azure/entra_conditional_access_policies",
+    "azure/entra_dormant_identities",
+    "azure/entra_groups",
+    "azure/entra_pim_assignments",
+    "azure/entra_risky_users",
+    "azure/entra_sign_ins",
+    "azure/firewall_configuration",
+    "azure/key_vault_key_rotation",
+    "azure/resource_locks",
+    "azure/sentinel_playbooks",
+    "azure/service_availability",
+    "azure/service_health_advisories",
+    "azure/sql_managed_instance_configuration",
+    "azure/waf_ddos_activity",
+    "azure/zone_redundancy",
+    "oci",
+)
+# Fetchers whose instructions listed summary fields before their tests checked them; each leaves once its tests
+# call assert_summary_documented, and SUMMARY_DOCS_PENDING_MAX drops with it. A new fetcher calls the fixture instead.
+SUMMARY_DOCS_PENDING = (
+    "azure/alert_rules",
+    "azure/app_gateway_backend_tls",
+    "azure/app_gateway_tls_listeners",
+    "azure/app_gateway_waf",
+    "azure/app_service_configuration",
+    "azure/app_service_deployments",
+    "azure/change_work_items",
+    "azure/ddos_protection",
+    "azure/devops_permissions",
+    "azure/devops_work_items",
+    "azure/dns_configuration",
+    "azure/entra_emergency_accounts",
+    "azure/entra_risky_users",
+    "azure/entra_service_principals",
+    "azure/front_door_origins",
+    "azure/front_door_tls",
+    "azure/front_door_waf_coverage",
+    "azure/monitor_fired_alerts",
+    "azure/network_flow_logs",
+    "azure/network_traffic_activity",
+    "azure/rbac_role_assignments",
+    "azure/resource_diagnostic_settings",
+    "azure/sentinel_analytics_rules",
+    "azure/sentinel_data_sources",
+    "azure/sentinel_incidents",
+    "azure/sentinel_playbooks",
+    "azure/service_availability",
+    "azure/service_health_advisories",
+    "azure/service_log_records",
+    "azure/sql_managed_instance_configuration",
+    "azure/storage_encryption_status",
+    "azure/virtual_wan_configuration",
+    "azure/vpn_gateway_configuration",
+    "oci/audit_logging_events",
+    "oci/bastion_sessions",
+    "oci/block_volume_encryption",
+    "oci/certificates",
+    "oci/cloud_guard_posture",
+    "oci/compute_instances",
+    "oci/data_service_exposure",
+    "oci/dependency_vulnerabilities",
+    "oci/iam_password_policy",
+    "oci/iam_policies",
+    "oci/iam_users_credentials",
+    "oci/network_exposure",
+    "oci/object_storage_buckets",
+    "oci/vault_keys",
+    "oci/zpr_policies",
+)
+SUMMARY_DOCS_PENDING_MAX = 48
 MAX_DESCRIPTION_WORDS = 30
+MAX_INSTRUCTIONS_CHARS = 20_000
+MAX_FIELD_LINE_CHARS = 800
 FIELD_LINE = re.compile(r"^- (\S+) — \S")
 BREAKDOWN_LINE = re.compile(r"^  - \S+ \(\S.*\)$")
 COMMAND_LINE = re.compile(r"^- \S.* — \S")
@@ -263,6 +342,8 @@ def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
     text = es.get("instructions") or ""
     if "`" in text or "**" in text:
         problems.append("instructions use markdown (backticks or **); Paramify shows them as typed")
+    problems += [f"summary field line has {len(ln)} characters; at most {MAX_FIELD_LINE_CHARS}: {ln[:40]!r}"
+                 for ln in text.splitlines() if FIELD_LINE.match(ln) and len(ln) > MAX_FIELD_LINE_CHARS]
     blocks = [b.split("\n") for b in text.strip("\n").split("\n\n")]
     labels = [b[0] for b in blocks]
     if labels[0] != _script_line(yaml_path, spec):
@@ -324,6 +405,82 @@ def test_converted_fetcher_text_follows_the_format(yaml_path: Path) -> None:
     assert not problems, f"{_short(yaml_path)}:\n  " + "\n  ".join(problems)
 
 
+def _oversized(spec: dict) -> int | None:
+    n = len((spec.get("evidence_set") or {}).get("instructions") or "")
+    return n if n > MAX_INSTRUCTIONS_CHARS else None
+
+
+def test_instructions_fit_the_size_limit() -> None:
+    bad = [f"{_short(y)}: {n} characters" for y in FETCHER_YAMLS if (n := _oversized(yaml.safe_load(y.read_text())))]
+    assert not bad, f"instructions over {MAX_INSTRUCTIONS_CHARS} characters:\n" + "\n".join(bad)
+
+
+def test_size_limit_catches_long_instructions() -> None:
+    assert _oversized({"evidence_set": {"instructions": "x" * MAX_INSTRUCTIONS_CHARS}}) is None
+    assert _oversized({"evidence_set": {"instructions": "x" * (MAX_INSTRUCTIONS_CHARS + 1)}}) == MAX_INSTRUCTIONS_CHARS + 1
+
+
+def _documents_summary(yaml_path: Path) -> bool:
+    return "Summary fields:" in ((yaml.safe_load(yaml_path.read_text()).get("evidence_set") or {})
+                                 .get("instructions") or "")
+
+
+def _summary_checks(source: str) -> set[str]:
+    """Fetcher paths given as a literal first argument to assert_summary_documented; comments and strings don't count."""
+    return {
+        node.args[0].value for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call) and node.args
+        and getattr(node.func, "id", getattr(node.func, "attr", None)) == "assert_summary_documented"
+        and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+    }
+
+
+def test_documented_summaries_are_checked_against_the_code() -> None:
+    """Every fetcher whose instructions list summary fields has a test passing a full summary to
+    assert_summary_documented("<category>/<name>", summary), unless it is on SUMMARY_DOCS_PENDING."""
+    checked = set().union(*(_summary_checks(p.read_text()) for p in (REPO_ROOT / "tests").rglob("test_*.py")))
+    documented = {_short(y) for y in FETCHER_YAMLS if _documents_summary(y)}
+    missing = sorted(documented - checked - set(SUMMARY_DOCS_PENDING))
+    assert not missing, "no test calls assert_summary_documented for:\n" + "\n".join(missing)
+    done = sorted(checked & set(SUMMARY_DOCS_PENDING))
+    assert not done, f"remove from SUMMARY_DOCS_PENDING, their tests now check the summary: {done}"
+    stale = sorted(set(SUMMARY_DOCS_PENDING) - documented)
+    assert not stale, f"SUMMARY_DOCS_PENDING names fetchers that list no summary fields: {stale}"
+    assert len(SUMMARY_DOCS_PENDING) == SUMMARY_DOCS_PENDING_MAX, (
+        f"SUMMARY_DOCS_PENDING has {len(SUMMARY_DOCS_PENDING)} entries; set SUMMARY_DOCS_PENDING_MAX to match when one "
+        "leaves. A new fetcher calls the fixture instead of joining the list.")
+
+
+def test_summary_check_finds_only_real_calls() -> None:
+    source = (
+        'assert_summary_documented("a/real", s)\n'
+        '# assert_summary_documented("a/commented", s)\n'
+        '"""assert_summary_documented("a/docstring", s)"""\n'
+        'fetcher = "a/variable"\nassert_summary_documented(fetcher, s)\n'
+    )
+    assert _summary_checks(source) == {"a/real"}
+
+
+@pytest.mark.parametrize(("change", "problem"), [
+    (lambda s: s, None),
+    (lambda s: {**s, "new_field": 1}, "not in the instructions: new_field"),
+    (lambda s: {k: v for k, v in s.items() if k != "eligible_assignments"},
+     "in the instructions but not the summary: eligible_assignments"),
+    (lambda s: {**s, "active_privileged_by_standing": {**s["active_privileged_by_standing"], "other": 1}},
+     "value 'other' is not listed under it"),
+    (lambda s: {**s, "active_privileged_by_standing": {"permanent": 1, "pim_activated": 0}},
+     "value 'time_bound' is listed but not in the summary"),
+])
+def test_summary_check_catches_each_drift(change, problem, assert_summary_documented, documented_summary) -> None:
+    fetcher = "azure/entra_pim_assignments"  # a variable, so this call isn't counted as that fetcher's check
+    summary = change({k: {v: 0 for v in values} if values else 0 for k, values in documented_summary(fetcher).items()})
+    if problem is None:
+        assert_summary_documented(fetcher, summary)
+    else:
+        with pytest.raises(AssertionError, match=re.escape(problem)):
+            assert_summary_documented(fetcher, summary)
+
+
 _ALERT_RULES_YAML = FETCHERS_ROOT / "azure" / "alert_rules" / "fetcher.yaml"
 _GOOD_TEXT = """Script: azure/alert_rules/fetcher.py
 
@@ -359,6 +516,7 @@ _BREAKDOWN = "for each kind:\n  - metric (a metric alert rule)\n  - log (a log s
     ("Script: azure/alert_rules/fetcher.py", "Script: fetcher.py", None, "do not open with"),
     ("metric alert rules\n", "`metric` alert rules\n", None, "markdown"),
     ("Which rules exist?", "Which rules exist", None, "must start with a question"),
+    ("Number of alert rules\n", "Number of alert rules" + " x" * 400 + "\n", None, "summary field line has"),
     (None, None, "Shows rules. And more.", "evidence_set.description is not one sentence"),
 ])
 def test_text_format_check_catches_each_break(old, new, es_description, problem) -> None:

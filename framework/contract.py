@@ -162,6 +162,8 @@ class ConfigField:
     #: For type `patterns`: the prefixes a pattern may start with (rg for rg:...), and whether one may have none.
     prefixes: Tuple[str, ...] = ()
     bare: bool = True
+    #: For type `patterns`: whether `manifest exclude`/`unexclude` may change it. An allowlist sets False.
+    exclusion: bool = True
 
 
 @dataclass

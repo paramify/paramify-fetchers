@@ -104,7 +104,7 @@ SEPT = datetime(2026, 9, 30, 17, 0, tzinfo=timezone.utc)
 AUG = datetime(2026, 8, 31, 17, 0, tzinfo=timezone.utc)
 
 
-def test_the_policy_is_monthly_default_deny_and_auto_apply():
+def test_the_policy_is_monthly_default_deny_and_auto_apply(assert_summary_documented):
     good = _definition("d-good", "Finance monthly")
     weekly = _definition("d-weekly", "Admins weekly", pattern="weekly")
     quarterly = _definition("d-quarterly", "Quarterly", interval=3)
@@ -114,6 +114,7 @@ def test_the_policy_is_monthly_default_deny_and_auto_apply():
     ended = _definition("d-ended", "Old series", status="Completed", interval=3)
     defs = [good, weekly, quarterly, approve, manual, one_time, ended]
     results, summary = ar.build(defs, {d["id"]: [] for d in defs}, {}, [], NOW)
+    assert_summary_documented("azure/entra_access_reviews", summary)
 
     by_id = {r["id"]: r for r in results["review_definitions"]}
     assert by_id["d-good"]["recurrence_period_days"] == 30

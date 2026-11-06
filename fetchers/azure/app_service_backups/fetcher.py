@@ -290,10 +290,12 @@ def observed_restore_points(points: list, now: datetime, window_hours: int) -> d
     }
 
 
-def meets_objective(supported, age, effective, rpo):
+def meets_objective(supported, age, effective, rpo, reads_complete=False):
     if rpo is None:
         return None
     if supported is False or (age is not None and age > rpo):
+        return False
+    if supported and age is None and reads_complete:
         return False
     return None if effective is None else effective <= rpo
 
@@ -364,7 +366,11 @@ def app_record(site: dict, times, history, config, config_status, settings: dict
         "effective_backup_interval_hours": effective,
         "configured_backup_interval_hours": min(configured_intervals) if configured_intervals else None,
         "meets_recovery_point_objective": meets_objective(
-            supported, age, effective, settings["recovery_point_objective_hours"]
+            supported,
+            age,
+            effective,
+            settings["recovery_point_objective_hours"],
+            times is not None and history is not None,
         ),
     }
 

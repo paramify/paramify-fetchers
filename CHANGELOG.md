@@ -20,6 +20,20 @@ schemas and the `paramify` CLI — not the internal code.
   notifications, and `github_repository_inventory`. One target per
   organization, on github.com, GHE.com or GitHub Enterprise Server. See
   `fetchers/github/README.md`.
+
+- **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
+  secret and certificate gets `lifetime_days` (end date minus start date, null when
+  either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.
+  A credential counts as beyond the interval when its lifetime, less any 29 February in
+  its span, exceeds it; one with a start date and no end date counts too, as it never
+  expires. The summary adds `credentials_issued_beyond_approved_lifetime`,
+  `credentials_without_lifetime` and `approved_lifetime_days`; both counts read null
+  after a failed or partial applications read, and the first also while any verdict is
+  unknown. The interval is the new `approved_lifetime_days` config field
+  (`AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS`), default 365 (a convention: FedRAMP KSI-SVC-ASM
+  asks for regular rotation and sets no number), capped at 3650; a value that isn't a whole
+  number from 1 up fails the run as `bad_config`. No new calls.
+
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
   a passkey (synced or device-bound), Windows Hello for Business or a macOS platform
@@ -46,6 +60,94 @@ schemas and the `paramify` CLI — not the internal code.
   adds only the parent lookups. An account that cannot be read gets its own
   status and does not stop the others. Off by default.
 
+- **`azure_backup_vault_protection`** (`EVD-AZURE-BACKUP-VAULT-PROTECTION`): every
+  Backup vault (Microsoft.DataProtection, the vault type `azure_backup_recovery_status`
+  does not read) with its vault store redundancy, soft delete, immutability,
+  cross-region restore and Resource Guard settings; each policy's backup interval
+  and longest retention against a threshold (default 30 days); and each backup
+  instance's protection state, protection error and newest recovery point, judged
+  against a window (default 48 hours), twice its policy's own interval
+  (`recovery_point_overdue`) and an optional recovery point objective. Recovery
+  points are read within a lookback (default 35 days) with a date filter, and
+  without one when the cloud refuses it. Operational (continuous) blob backup,
+  which lists no recovery points, is reported as not applicable rather than as not
+  backed up. The API version is the newest stable one the cloud lists at or below
+  2025-07-01, so Azure Government runs without a pinned variant. A failed vault,
+  policy or instance list leaves the counts that depend on it null, not 0, and an
+  instance whose retention can't be read leaves `retention_threshold_percentage`
+  null. Reader is enough.
+- **`azure_zone_redundancy`** (`EVD-AZURE-ZONE-REDUNDANCY`): one Resource Graph
+  query over scale sets, VMs, disks, AKS clusters (per node pool), application
+  gateways, load balancers (per frontend, public ones through their public IP),
+  public IPs, NAT gateways, firewalls, Bastion hosts, Redis caches, storage
+  accounts, App Service plans, Backup and Recovery Services vaults, Cosmos DB
+  accounts (per replica), PostgreSQL and MySQL flexible servers and SQL databases,
+  each classified zone_redundant, zonal, regional, mixed or unknown, with a
+  geo-redundancy flag where the service has one. The subscription's region list
+  gives each region's availability zones and paired region, so the summary
+  measures zone redundancy only against resources of a type that has a
+  zone-redundant mode (not single VMs, disks, NAT gateways or Basic SKUs) in regions
+  that have zones, and reports the regions in use, `multi_region`, and the resources
+  sitting in regions with no zones. A failed Resource Graph query leaves every
+  count from the resources null, not 0. Reader is enough.
+- **`azure_firewall_configuration`** (`EVD-AZURE-FIREWALL-CONFIGURATION`): every
+  Azure Firewall and Firewall Policy with its rule collection groups and rules
+  (the classic rule collections on a firewall without a policy too), the policy
+  chain a firewall inherits through base policies, threat intelligence mode,
+  IDPS, TLS inspection, DNS proxy, management IP configuration, public and
+  private IPs, and which rule and threat log categories its diagnostic settings
+  export. Flags allow-all network rules, allow-any-FQDN application rules and
+  DNAT rules to port 22 or 3389 (published or translated) or from any source,
+  counts rules from a policy in another subscription that a firewall here uses,
+  and judges per firewall
+  whether its rules filter egress: no network rule open to any destination on
+  every port, whatever its source (`egress_open_network_rules`, so a rule from
+  10.0.0.0/8 counts), and no any-FQDN application rule, so a firewall with no
+  rules counts, since Azure Firewall
+  denies whatever no rule allows. Routing is not checked here
+  (`azure_vnet_egress_routing` reports it). A failed firewall or policy list
+  leaves the counts that depend on it null, not 0. A policy or base policy in another
+  subscription is read when the credential may; otherwise that firewall's rule
+  and setting fields read null, never false. Resource exclusions apply to
+  firewalls and policies. KSI-CNA-RNT, CNA-ULN, CNA-MAT, MLA-LET.
+- **`azure_bastion_configuration`** (`EVD-AZURE-BASTION-CONFIGURATION`): every
+  Bastion host's SKU, scale units, shareable links, IP connect, native client
+  tunneling, file copy, copy-paste, Kerberos, session recording, private-only
+  mode, IP allow-list, zones, whether its subnet has a network security group and
+  whether BastionAuditLogs is exported; and for every virtual machine whether a
+  Bastion reaches it in its own virtual network or through a connected peering
+  whose link on the Bastion's side allows virtual network access (Developer SKU
+  hosts do not reach peered networks), including Bastion hosts in a peered
+  subscription when the credential may list them. Only hosts in the Succeeded
+  state with a known SKU count as a path. A path that cannot be decided reads
+  unknown and nulls the coverage counts, and unread interface data nulls the
+  public IP and path counts. A failed host or machine list leaves its counts
+  null, not 0. KSI-CNA-RNT, CNA-MAT, MLA-LET.
+- **`azure_resource_locks`** (`EVD-AZURE-RESOURCE-LOCKS`): every management lock
+  in the subscription with its level, scope and scope kind, and for each resource
+  of a protected type (Log Analytics workspaces, Backup vaults, Recovery Services
+  vaults, key vaults and storage accounts by default; `AZURE_LOCK_PROTECTED_TYPES`
+  overrides, accepting nested types such as `microsoft.sql/servers/databases`;
+  an entry that is not provider/type, or a setting with no entry, fails the run as
+  `bad_config`, and a type that matches nothing is listed in
+  `protected_resource_types_unmatched`) whether a CanNotDelete or ReadOnly lock on
+  the resource, its resource group or the subscription is in effect. Lock fields
+  read null when the lock list was not read. KSI-MLA-ALA, RPL-ABO, CNA-DFP.
+
+- **`azure_pim_activations`** (`EVD-AZURE-PIM-ACTIVATIONS`): Azure resource PIM
+  activity on the subscription. Every role assignment schedule request Azure
+  still holds at the subscription and below (self-activations, admin
+  assignments, extensions, renewals and removals) with its requester, role,
+  scope, requested duration, justification, ticket, approval and outcome, and
+  the activations in force now. Counts self-activations by role, scope level
+  and outcome, those without a justification, ticket or approval, activations
+  of Owner, Contributor, User Access Administrator and RBAC Administrator,
+  admin assignments that grant standing access, and the oldest and newest
+  request seen. A tenant without PIM (a 400 with the error code
+  AadPremiumLicenseRequired or TenantNotOnboarded) reports `pim_available`
+  false rather than failing; any other failed list leaves its counts null and
+  fails the run, and `pim_available` is null when both lists fail. Reader is
+  enough. KSI-IAM-JIT, CMT-LMC.
 - **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
   Unhealthy assessment reports `days_open` (from `status_change_date`, null when
   missing; it starts again at 0 when a finding turns Healthy and then Unhealthy
@@ -88,6 +190,58 @@ schemas and the `paramify` CLI — not the internal code.
   a name fails the run with `bad_config`, since the type meant would need no
   approval: before anything is read when `CHANGE_RECORD_TYPES` is set, and
   otherwise after the comparison, whose file is still written.
+- **`azure_change_provenance` 0.3.0: before and after values for direct edits
+  and manual deployments.** Each such change carries `property_changes`, one
+  entry per changed property from Resource Graph's `changes`. A shown entry has
+  `path`, `previous_value`, `new_value` and `truncated`. A withheld one has only
+  `path` and `withheld`, the reason, and never the value or anything derived
+  from it.
+  - Values are shown only for an allowlist of security settings and tags. The
+    new `value_paths` setting adds to it: a pattern list (`type: patterns`) set
+    in the manifest as `path:<glob>` items, such as `path:properties.siteConfig.*`
+    or `path:*`, with `paramify manifest set-config`. Like the exclusion lists,
+    it takes no `${env:}`. It is marked `exclusion: false`, so
+    `paramify manifest exclude` and `unexclude` never edit it, and an exclude
+    can't widen what's shown. A pattern without `path:` fails the run as
+    `bad_config` and keeps no values. Any other path is
+    withheld as `not_allowlisted`.
+  - The secret check runs first, on every path, whatever the allowlist says. A
+    value is withheld as `secret` when a path segment names a secret or
+    free-form content (password, pass, passphrase, passcode, secret, token, any
+    name ending in key or key<n>, pwd, pw, pin, uri or url, key data, key value,
+    pfx, psk, connection string, authorization, headers, queries, body, env, app
+    settings, args, custom data), compared without case, `_` or `-`. It is also
+    withheld when the value, as written or URL-decoded (repeatedly, up to four
+    times), looks like one: a secret word anywhere in its text
+    (`name: DB_PASSWORD`, `Password123!`),
+    `NAME_PASSWORD=`, `pin=`, `pw=`, `--password x`, `Basic`/`Bearer`
+    credentials, a URL with a user, a JWT, a PEM private key, a short
+    random-looking string, or a long key-like string. The built-in allowlist
+    names specific paths, so a setting name such as `status` is shown only on its
+    own resource path.
+  - Two things can't be caught: a short password with nothing marking it, such
+    as one alone in a tag, and, under `path:*`, free-form content whose names
+    don't mark a secret (a generic parameter, setting or variable value, or a
+    script). `path:*` shows whatever such content holds, so it is the
+    operator's risk.
+  - Values are cut at 200 characters, and a change lists at most 25 entries
+    (`property_changes_truncated`). `property_value_counts` counts its values
+    shown, not allowlisted and secret, over every changed property. Values that
+    can't be read are null (unknown), not empty.
+  - Only the newest `max_value_changes` such changes keep values
+    (`AZURE_CHANGE_MAX_VALUE_CHANGES`, default 500, 0 for none). An invalid
+    setting fails the run as `bad_config` and keeps none.
+  - The summary adds `changes_with_property_values`,
+    `changes_property_values_capped`, `changes_property_values_unknown`,
+    `property_values_shown` and `property_values_withheld_by_reason`. Shown and
+    withheld are null when any change's values couldn't be read, and all five are
+    null when a change table couldn't be read. Changes with any other origin, and excluded changes, carry no
+    values.
+- **Pattern-list fields take `exclusion: false`.** It marks a `type: patterns`
+  field that shows more as it grows, such as an allowlist.
+  `paramify manifest exclude` and `unexclude` never pick it, even with
+  `--field`, so an exclude can't widen it. Set it with `set-config` or in the
+  manifest. Every existing pattern list keeps the default, `true`.
 - **`azure_devops_service_connections`** (`EVD-AZURE-DEVOPS-SERVICE-CONNECTIONS`):
   how an Azure DevOps organization's pipelines hold their secrets, and which runs
   used each service connection. Per connection, once however many projects share
@@ -1007,8 +1161,52 @@ schemas and the `paramify` CLI — not the internal code.
   TFVC paths too. PAT scopes: Security (Manage), because Azure DevOps has no
   read-only scope for access control lists (the fetcher only reads), plus
   Identity (Read), Code (Read) and Project and Team (Read).
+- **`azure_devops_permissions` lists who can override check-in validation**
+  (0.1.1 → 0.2.0). `branch_policy_bypass_holders` covers Git only, so a TFVC-only
+  organization had no evidence of who can check in without a gated build. Each
+  Build entry now gets `checkin_validation_override`, true when the entry allows
+  Override check-in validation by build, set on it or inherited from a parent
+  object, and doesn't deny it. The summary adds `checkin_validation_override_grants`,
+  `checkin_validation_override_holders`, `checkin_validation_override_build_services`
+  (the build service accounts and the organization's Project Collection Build
+  Service Accounts group, which hold it by default), and
+  `checkin_validation_override_grants_outside_admin_groups` and
+  `checkin_validation_override_holders_outside_admin_groups`, which leave out the
+  admin groups and those build services. The Project Collection Build Service
+  Accounts group is recognised by its built-in security ID as well as its name, so
+  a project group that takes the name still counts outside. They read null when
+  the Build permissions can't be read, or under a project filter the project list
+  can't; the build-service list and the outside-admin pair also when an identity
+  can't be looked up.
 
 ### Changed
+
+- **`azure_waf_ddos_activity` 0.2.0: DDoS figures include IPs protected by a network-level DDoS plan.**
+  The existing figures `protected_ips_with_attack_alert_reaching_receiver`,
+  `protected_ips_without_attack_alert`, `public_ips_attacked` and
+  `ddos_mitigations_started` now include public IPs that a virtual network's DDoS
+  protection plan (Network Protection) covers. So do the per-IP `attack_alert_can_fire`,
+  `attack_hours` and `mitigations_*`. Before, all of these counted only IPs with IP
+  Protection.
+  - An attached public IP that inherits its protection is now placed in its virtual
+    network, the same way `azure_ddos_protection` places it: the network of its NIC,
+    gateway, firewall or Bastion host, or of a load balancer's backend pool.
+  - Both SKUs give a public IP the same `IfUnderDDoSAttack` metric, the same DDoS
+    log categories and the same mitigations
+    (https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-sku-comparison,
+    https://learn.microsoft.com/en-us/azure/ddos-protection/monitor-ddos-protection-reference).
+  - Each IP gets `effective_protection`, plus `virtual_network_id` and
+    `virtual_network_ddos_protection_plan_id` when it inherits.
+  - The summary adds `public_ips_with_network_protection`, `protected_public_ips`
+    and `public_ips_protection_unknown`. The first two are null when the virtual
+    network, NIC or load balancer list can't be read.
+  - `protected_ips_without_attack_alert`, `public_ips_attacked` and
+    `ddos_mitigations_started` are null when any attached IP's protection is
+    unknown, because that IP may be protected, attacked or mitigated.
+  - An IP on a NAT gateway no longer counts in `public_ips_with_ip_protection`,
+    because neither SKU covers it.
+  - The virtual network, NIC and load balancer lists are read only when some
+    attached IP inherits its protection. They need no access beyond Reader.
 
 - **`azure_policy_compliance` 0.5.0: in-scope compliant counts under
   resource_exclusions.** With patterns set, the fetcher reads every latest
@@ -1556,7 +1754,67 @@ schemas and the `paramify` CLI — not the internal code.
   against a production subscription. Existing fields and summary keys are
   unchanged.
 
+- **`azure_entra_authentication_policy` 0.3.0: trusted certificate authorities and
+  certificate mapping.** The fetcher reads the certificate authorities trusted for
+  certificate-based sign-in from the classic store
+  (`GET /organization/{id}/certificateBasedAuthConfiguration`) and the PKI-based
+  trust store (`GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations`
+  and each one's `certificateAuthorities`) into `trusted_certificate_authorities`:
+  trust store, issuer, subject, root or intermediate, revocation list URLs,
+  thumbprint, `not_after` and `days_until_expiry` from the certificate, and
+  `expired` and `has_crl`. Each store's grant is optional: the classic store needs
+  `Organization.Read.All` and the PKI store `PublicKeyInfrastructure.Read.All`.
+  Refused, a store reads `not_authorized` in `certificate_authority_stores` and
+  `classic_store_status` or `pki_store_status`, `classic_store_missing_permission`
+  or `pki_store_missing_permission` names the grant, and the run still succeeds; any
+  other failure fails it. For the PKI store, a
+  cloud without the API (400 or 404) reads `not_available` the same way. The CA list
+  (`trusted_certificate_authorities`) is null unless both stores were read; each
+  store's own CAs are listed under `certificate_authority_stores`, null when that
+  store wasn't read. With the X.509 method enabled it also reads users with
+  their `authorizationInfo` (from the target groups, or from the directory only when
+  X.509 targets all users) and the groups the enabled methods target. It counts every
+  enabled member account X.509 targets, and lists in `x509_certificate_users` the
+  first 100 that fail a check (`x509_certificate_users_truncated` says when more
+  did), each with whether a
+  certificate user binding matches it (`mapping`: `certificate_user_id` when a
+  certificateUserIds binding's field matches the type of one of its ids,
+  `unverified` when only a name binding could, which depends on the certificate, or
+  `none`; `mapped`, `mapped_high_affinity`), the count and types of its
+  certificate user ids (never the values), and the weaker
+  methods (enabled, not phishing-resistant, not X.509 or guest-only email) that
+  still reach it. The X.509 settings list each `certificate_user_bindings` entry.
+  The summary adds `trusted_certificate_authorities`,
+  `expired_certificate_authorities`, `certificate_authorities_expiry_unknown`,
+  `certificate_authorities_without_crl` (a CA in both stores counted once, by
+  thumbprint or, when a certificate can't be read, key identifier; null unless both
+  stores were read), `classic_store_certificate_authorities`,
+  `classic_store_status`, `classic_store_missing_permission`,
+  `pki_store_certificate_authorities`, `pki_store_status`,
+  `pki_store_missing_permission`, `x509_targeted_users`,
+  `x509_targeted_users_unmapped`, `x509_targeted_users_mapping_unverified`,
+  `x509_targeted_users_without_certificate_user_ids`,
+  `x509_targeted_users_with_weaker_methods` and
+  `x509_targeted_users_with_weak_methods` (SMS or Voice) and
+  `x509_certificate_users_truncated`. The user counts are 0 when
+  X.509 is off, and null when the policy, the users or a needed group can't be read;
+  the CA counts are null when the CA read fails. `authentication_methods` now reads
+  null, not an empty list, when the methods policy can't be read.
+
 ### Fixed
+
+- **`azure_app_service_backups` 0.3.1: an app with no restore point misses the RPO.**
+  On a plan that supports backups, an app with no restore point at all, when both the
+  restore-point read and the backup-history read succeeded, now reads
+  `meets_recovery_point_objective: false` and counts in
+  `apps_missing_recovery_point_objective`, not in `apps_recovery_point_objective_unknown`.
+  It stays null when either read failed, or when there is one restore point inside the RPO.
+
+- **`azure_devops_service_connections` 0.1.1: variable groups list their projects.**
+  The per-project variable group list carries no `variableGroupProjectReferences`, so
+  every group's `projects` came back empty. The fetcher now reads each newly seen group
+  by id through its project (`{project}/variablegroups/{id}`) and takes the projects from that read; the `groupIds=` list and the organization-level reads don't return them (measured on a live organization). A group whose
+  by-id read failed has `projects: null` and the failure is recorded.
 
 - **`azure_entra_emergency_accounts` 0.1.1: a synced passkey counts as a phishing-resistant
   method.** `phishing_resistant_method_registered` and
@@ -1754,6 +2012,17 @@ schemas and the `paramify` CLI — not the internal code.
   a batch whose split finds no one is a failure, so its identities read as
   unread and the admin-group figures null, rather than every admin group read
   as an ordinary group.
+- **`azure_devops_permissions` resolves the organization-level groups**
+  (0.1.1 → 0.2.0). Permission entries name the organization's built-in groups,
+  such as Project Collection Administrators, by a template SID, and the
+  identities API answers with the group's own descriptor, so matching rows by
+  descriptor left them unresolved. As looked-up groups with no name they read as
+  ordinary groups, and their high-impact rights counted outside the admin groups.
+  Rows come back in request order, null where a descriptor isn't found, so they
+  are now matched by position; `unresolved_identities` and the outside-admin
+  figures can fall. A row that answers a different descriptor from the one
+  requested in its place leaves that identity unread and is reported as a
+  failure, so a reordered answer can't put one identity's rights on another.
 - **`azure_devops_audit_streams` no longer reads unlisted streams as no
   streams** (0.1.0 → 0.1.1). When the audit streams can't be listed, for
   example a 403 to an identity that may read the audit log but not its streams,

@@ -193,10 +193,11 @@ def _collect(monkeypatch, client):
     return results, summary, collector
 
 
-def test_inactive_guest_and_deleted_role_holders(monkeypatch):
+def test_inactive_guest_and_deleted_role_holders(monkeypatch, assert_summary_documented):
     results, s, collector = _collect(monkeypatch, FakeClient(*_tenant()))
 
     assert collector.failures == []
+    assert_summary_documented("azure/entra_dormant_identities", s)
     assert s["users_readable"] is True and s["applications_readable"] is True
     assert s["user_sign_in_activity"] == s["service_principal_sign_in_activity"] == "read"
     assert s["dormant_after_days"] == 90
