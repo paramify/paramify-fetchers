@@ -15,6 +15,7 @@ when agents are. Extensions come from a per-VM virtual_machine_extensions.list()
 import logging
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -390,8 +391,8 @@ AUTOMATIC_PATCH_MODES = {"automaticbyplatform", "automaticbyos"}
 def patch_settings_record(settings) -> dict:
     """Normalize the projected patch settings and derive the two readings a reviewer wants.
 
-    `platform_managed_patching` is True for AutomaticByPlatform or AutomaticByOS, False
-    for Manual or ImageDefault, and None when Azure returned no patch mode: an absent
+    `automatic_patching` is True for AutomaticByPlatform (Azure orchestrates the updates) or
+    AutomaticByOS (Windows Update installs them in the guest), False for Manual or ImageDefault, and None when Azure returned no patch mode: an absent
     setting is "unknown", never "manual". `assessment_automatic` reads the same way.
     """
     settings = settings if isinstance(settings, dict) else {}
@@ -403,7 +404,7 @@ def patch_settings_record(settings) -> dict:
         "patch_mode": mode,
         "assessment_mode": assessment,
         "bypass_platform_safety_checks_on_user_schedule": settings.get("bypass_platform_safety_checks_on_user_schedule"),
-        "platform_managed_patching": (None if mode is None else str(mode).lower() in AUTOMATIC_PATCH_MODES),
+        "automatic_patching": (None if mode is None else str(mode).lower() in AUTOMATIC_PATCH_MODES),
         "assessment_automatic": (None if assessment is None else str(assessment).lower() == "automaticbyplatform"),
     }
 
@@ -561,15 +562,14 @@ def summarize_patching(virtual_machines: list[dict], scale_sets: list[dict]) -> 
     def counts(records: list[dict], prefix: str) -> dict:
         ps = [r.get("patch_settings") or {} for r in records]
         return {
-            f"{prefix}_platform_managed_patching": sum(1 for p in ps if p.get("platform_managed_patching") is True),
-            f"{prefix}_manual_or_image_default_patching": sum(
-                1 for p in ps if p.get("platform_managed_patching") is False),
-            f"{prefix}_patch_mode_unknown": sum(1 for p in ps if p.get("platform_managed_patching") is None),
+            f"{prefix}_automatic_patching": sum(1 for p in ps if p.get("automatic_patching") is True),
+            f"{prefix}_manual_or_image_default_patching": sum(1 for p in ps if p.get("automatic_patching") is False),
+            f"{prefix}_patch_mode_unknown": sum(1 for p in ps if p.get("automatic_patching") is None),
             f"{prefix}_automatic_patch_assessment": sum(1 for p in ps if p.get("assessment_automatic") is True),
             f"{prefix}_patch_assessment_unknown": sum(1 for p in ps if p.get("assessment_automatic") is None),
-            f"{prefix}_patch_modes": dict(sorted(
-                {str(p.get("patch_mode")): sum(1 for q in ps if q.get("patch_mode") == p.get("patch_mode"))
-                 for p in ps if p.get("patch_mode") is not None}.items())),
+            # Which automatic mode: AutomaticByPlatform (Azure) vs AutomaticByOS (Windows Update in the guest).
+            f"{prefix}_patch_modes": dict(sorted(Counter(
+                str(p["patch_mode"]) for p in ps if p.get("patch_mode") is not None).items())),
         }
     return {**counts(virtual_machines, "vms"), **counts(scale_sets, "scale_sets")}
 

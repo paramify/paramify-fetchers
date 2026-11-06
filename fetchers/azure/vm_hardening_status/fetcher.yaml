@@ -11,7 +11,9 @@ description: >
   ids, and the OS patch settings of every VM and scale set: patch mode
   (AutomaticByPlatform, AutomaticByOS, Manual or ImageDefault), assessment mode,
   and whether platform safety checks are bypassed on a user schedule, read as
-  platform_managed_patching and assessment_automatic. A VM whose OS returns no
+  automatic_patching (AutomaticByPlatform, where Azure orchestrates updates, or
+  AutomaticByOS, where Windows Update installs them in the guest; patch_modes
+  tells the two apart) and assessment_automatic. A VM whose OS returns no
   patch settings reads null (unknown), never Manual, and the summary counts
   unknown apart. Scale-set members are cross-referenced to their scale set.
 category: azure
