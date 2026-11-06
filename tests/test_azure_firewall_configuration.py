@@ -135,6 +135,30 @@ def test_allow_all_needs_any_source_any_destination_and_any_port() -> None:
     assert denied["allow_all"] is False and denied["to_any_destination"] is False
 
 
+@pytest.mark.parametrize("sources, ports, protocols, egress_open, allow_all", [
+    (["*"], ["*"], ["TCP"], True, True),
+    (["10.0.0.0/8"], ["*"], ["TCP"], True, False),       # every internal source out to anywhere
+    (["10.1.2.0/24"], ["1-65535"], ["Any"], True, False),  # one subnet out to anywhere is still unfiltered egress
+    (["10.0.0.0/8"], ["443"], ["TCP"], False, False),     # one port is filtering
+    (["10.0.0.0/8"], ["*"], ["ICMP"], False, False),      # ICMP only carries no data flow
+])
+def test_a_network_rule_open_to_any_destination_and_port_breaks_egress_whatever_its_source(
+        sources, ports, protocols, egress_open, allow_all) -> None:
+    rule = fw.rule_record(net_rule("r", sources, ["*"], ports, protocols), group="g", group_priority=1,
+                          collection=filter_collection("c", "Allow", []), rule_type=fw.NETWORK_RULE, action=fw.ALLOW)
+    assert (rule["egress_open"], rule["allow_all"]) == (egress_open, allow_all)
+
+
+def test_a_private_source_rule_to_anywhere_means_the_firewall_does_not_filter_egress() -> None:
+    classic = {"networkRuleCollections": [{"name": "out", "properties": {"priority": 100, "action": {"type": "Allow"},
+               "rules": [{"name": "all-out", "protocols": ["Any"], "sourceAddresses": ["10.0.0.0/8"],
+                          "destinationAddresses": ["*"], "destinationPorts": ["*"]}]}}]}
+    record = fw.firewall_record(raw_firewall(CLASSIC, policy=None, classic=classic), {}, [])
+    assert record["rule_summary"]["allow_all_network_rules"] == 0
+    assert record["rule_summary"]["egress_open_network_rules"] == 1
+    assert record["egress_filtering_enforced"] is False
+
+
 def test_application_rule_to_any_fqdn_only_when_nothing_scopes_it() -> None:
     col = filter_collection("c", "Allow", [])
     wide = fw.rule_record(app_rule("r", ["10.0.0.0/8"], fqdns=["*"]), group="g", group_priority=1, collection=col,
@@ -168,7 +192,8 @@ def test_policy_rules_carry_group_and_collection_and_nat_action() -> None:
         (fw.NETWORK_RULE, fw.ALLOW, "g1", 100), (fw.NAT_RULE, fw.DNAT, "g1", 200)]
     assert fw.rule_findings(rules) == {
         "rules": 2, "rules_by_type": {"nat": 1, "network": 1}, "rules_by_action": {"allow": 1, "dnat": 1},
-        "allow_all_network_rules": 0, "network_rules_to_any_destination": 0, "application_rules_to_any_fqdn": 0,
+        "allow_all_network_rules": 0, "network_rules_to_any_destination": 0, "egress_open_network_rules": 0,
+        "application_rules_to_any_fqdn": 0,
         "dnat_rules": 1, "dnat_rules_to_admin_ports": 1, "dnat_rules_from_any_source": 1}
 
 

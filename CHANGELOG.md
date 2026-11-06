@@ -91,8 +91,10 @@ schemas and the `paramify` CLI — not the internal code.
   DNAT rules to port 22 or 3389 (published or translated) or from any source,
   counts rules from a policy in another subscription that a firewall here uses,
   and judges per firewall
-  whether its rules filter egress: no allow-all network rule and no any-FQDN
-  application rule, so a firewall with no rules counts, since Azure Firewall
+  whether its rules filter egress: no network rule open to any destination on
+  every port, whatever its source (`egress_open_network_rules`, so a rule from
+  10.0.0.0/8 counts), and no any-FQDN application rule, so a firewall with no
+  rules counts, since Azure Firewall
   denies whatever no rule allows. Routing is not checked here
   (`azure_vnet_egress_routing` reports it). A failed firewall or policy list
   leaves the counts that depend on it null, not 0. A policy or base policy in another

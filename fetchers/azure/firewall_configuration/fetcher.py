@@ -129,7 +129,10 @@ def rule_record(raw: Dict[str, Any], *, group: Optional[str], group_priority: Op
         # An ICMP-only rule carries port * but opens no TCP or UDP flow.
         carries_data = not protocols or any(str(p).upper() != "ICMP" for p in protocols)
         record["to_any_destination"] = action == ALLOW and any_destination
-        record["allow_all"] = action == ALLOW and any_source and any_destination and _any_port(ports) and carries_data
+        # Open to any destination on every port: for egress it lets its sources out unfiltered, whatever they are
+        # (10.0.0.0/8 or one subnet as much as *), so it breaks the egress verdict even when it is not allow_all.
+        record["egress_open"] = action == ALLOW and any_destination and _any_port(ports) and carries_data
+        record["allow_all"] = record["egress_open"] and any_source
     elif rule_type == APPLICATION_RULE:
         # A "*" target with no tag or category scoping it lets any web destination through.
         record["to_any_fqdn"] = action == ALLOW and ("*" in target_fqdns or "*" in target_urls) \
@@ -175,7 +178,8 @@ def classic_rules(firewall_props: Dict[str, Any]) -> List[Dict[str, Any]]:
 def rule_findings(rules: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
     if rules is None:
         return {"rules": None, "rules_by_type": None, "rules_by_action": None, "allow_all_network_rules": None,
-                "network_rules_to_any_destination": None, "application_rules_to_any_fqdn": None,
+                "network_rules_to_any_destination": None, "egress_open_network_rules": None,
+                "application_rules_to_any_fqdn": None,
                 "dnat_rules": None, "dnat_rules_to_admin_ports": None, "dnat_rules_from_any_source": None}
     dnat = [r for r in rules if r["rule_type"] == NAT_RULE]
     return {
@@ -184,6 +188,7 @@ def rule_findings(rules: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
         "rules_by_action": sorted_counts(Counter(r["action"] for r in rules)),
         "allow_all_network_rules": sum(1 for r in rules if r.get("allow_all")),
         "network_rules_to_any_destination": sum(1 for r in rules if r.get("to_any_destination")),
+        "egress_open_network_rules": sum(1 for r in rules if r.get("egress_open")),
         "application_rules_to_any_fqdn": sum(1 for r in rules if r.get("to_any_fqdn")),
         "dnat_rules": len(dnat),
         "dnat_rules_to_admin_ports": sum(1 for r in dnat if r.get("to_admin_port")),
@@ -298,7 +303,7 @@ def firewall_record(raw: Dict[str, Any], policies: Dict[str, Dict[str, Any]], se
     findings = rule_findings(rules)
     # Azure Firewall denies whatever no rule allows, so a firewall with no allow-all network rule and no any-FQDN
     # application rule filters egress, including one with no rules or only DNAT rules (it denies every flow).
-    enforcing = None if rules is None else findings["allow_all_network_rules"] == 0 \
+    enforcing = None if rules is None else findings["egress_open_network_rules"] == 0 \
         and findings["application_rules_to_any_fqdn"] == 0
     # Once a policy is attached Azure ignores the firewall's own settings, so an unread policy leaves them unknown.
     settings_known = effective is not None or not policy_id

@@ -236,8 +236,9 @@ def summarize(hosts: List[Dict[str, Any]], vms: List[Dict[str, Any]], hosts_read
         "virtual_machines": len(vms),
         "virtual_machines_with_public_ip": None if (not vms_read or any(not v["network_interfaces_read"] for v in vms))
         else sum(1 for v in vms if v["public_ip_ids"]),
-        "virtual_machines_with_bastion_in_vnet": paths[IN_VNET] if vms_read else None,
-        "virtual_machines_with_bastion_via_peering": paths[VIA_PEERING] if vms_read else None,
+        # An in-VNet path needs the host list; a peering path needs the host and virtual network lists too.
+        "virtual_machines_with_bastion_in_vnet": paths[IN_VNET] if vms_read and hosts_read else None,
+        "virtual_machines_with_bastion_via_peering": paths[VIA_PEERING] if vms_read and hosts_read and vnets_read else None,
         "virtual_machines_without_bastion_path": paths[NONE] if known else None,
         "virtual_machines_with_unknown_bastion_path": paths[UNKNOWN],
         "bastion_path_percentage": coverage_percentage(with_path, len(vms)) if known else None,

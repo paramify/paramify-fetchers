@@ -429,3 +429,16 @@ def test_failed_vm_list_leaves_the_machine_counts_null() -> None:
         assert summary[key] is None, key
     # The host list was read, so its counts stand.
     assert summary["bastion_hosts"] == 1
+
+
+def test_failed_host_list_nulls_the_in_vnet_and_peering_counts() -> None:
+    results, summary, collector = _collect(_Arm(hosts_fail=True))
+    assert summary["virtual_machines_with_bastion_in_vnet"] is None
+    assert summary["virtual_machines_with_bastion_via_peering"] is None
+
+
+def test_failed_vnet_list_nulls_the_peering_count_but_not_the_in_vnet_count() -> None:
+    results, summary, collector = _collect(_Arm(vnets_fail=True))
+    assert not collector.ok
+    assert summary["virtual_machines_with_bastion_via_peering"] is None
+    assert summary["virtual_machines_with_bastion_in_vnet"] == 1
