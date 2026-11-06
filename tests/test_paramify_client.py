@@ -207,6 +207,19 @@ def test_delivery_capability_flag_off():
     assert cap.reason == "Artifact requests are not enabled for this workspace."
 
 
+def test_delivery_capability_reworded_flag_off_keeps_the_servers_message():
+    body = '{"requestId":"r-2","error":{"message":"Batches are not enabled here","path":"/api/v0/batches"}}'
+    c, _, _ = make([FakeResponse(403, text=body)])
+    assert delivery_capability(c) == Capability(False, "Batches are not enabled here")
+
+
+def test_delivery_capability_flag_off_without_a_json_body_keeps_the_whole_message():
+    c, _, _ = make([FakeResponse(403, text="Batches NOT ENABLED")])
+    cap = delivery_capability(c)
+    assert cap.batches is False
+    assert cap.reason == "GET /batches failed (HTTP 403: Batches NOT ENABLED)"
+
+
 def test_delivery_capability_other_403_raises():
     c, _, _ = make([FakeResponse(403, text='{"error":{"message":"Insufficient scope"}}')])
     with pytest.raises(ApiError) as ei:

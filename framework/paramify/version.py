@@ -1,4 +1,5 @@
 """API capability check: batches arrived in Paramify API 0.14.0, behind a workspace flag."""
+import json
 from dataclasses import dataclass
 from typing import Optional
 
@@ -18,7 +19,10 @@ class Capability:
 
 
 def delivery_capability(client: Client) -> Capability:
-    """Can this workspace take batches? Any error other than "no routes" or "flag off" is raised."""
+    """Can this workspace take batches? Any error other than "no routes" or "flag off" is raised.
+
+    Flag off is a 403 with the known text, or any 403 that says "not enabled".
+    """
     try:
         client.get("/batches", {"pageSize": 1})
     except ApiError as exc:
@@ -26,6 +30,21 @@ def delivery_capability(client: Client) -> Capability:
             return Capability(False, NO_ROUTES)
         if exc.status == 403 and FLAG_OFF in exc.message:
             return Capability(False, FLAG_OFF)
+        if exc.status == 403 and "not enabled" in exc.message.lower():
+            return Capability(False, _server_message(exc.message))
         raise
     return Capability(True, None)
+
+
+def _server_message(message: str) -> str:
+    """The `error.message` of the JSON body in an ApiError message, else the whole message."""
+    start, end = message.find("{"), message.rfind("}")
+    if start != -1 and end > start:
+        try:
+            text = json.loads(message[start:end + 1])["error"]["message"]
+        except (ValueError, KeyError, TypeError):
+            text = None
+        if isinstance(text, str) and text:
+            return text
+    return message
 
