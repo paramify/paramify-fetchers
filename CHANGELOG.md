@@ -25,8 +25,9 @@ schemas and the `paramify` CLI — not the internal code.
   cap on the listed findings (`AZURE_VULN_MAX_FINDINGS`, most severe first) never
   changes a count. No sub-assessments reads as zero with
   `findings_source_present: false`; a failed read leaves its section null and
-  fails the run. Reader on the subscription is enough. Maps to KSI-SCR-MON,
-  KSI-SVC-PRR and KSI-PIY-RVD.
+  fails the run. Reader on the subscription is enough. Ages count from each
+  CVE's published date, not from first detection, which sub-assessments do not
+  carry. Maps to KSI-SCR-MON and KSI-SVC-EIS.
 - **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables can be measured.**
   The query API refuses these tables. Set `basic_logs_lookback_hours`
   (`BASIC_LOGS_LOOKBACK_HOURS`, as `azure_resource_diagnostic_settings` names
