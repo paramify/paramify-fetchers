@@ -126,3 +126,18 @@ def test_unexpected_shape_is_a_recorded_failure(monkeypatch):
 def test_unregistered_provider_is_empty_not_a_failure(monkeypatch):
     out, collector, _ = _run(monkeypatch, {URL: RuntimeError("(409) MissingSubscriptionRegistration: subscription not registered")})
     assert out == [] and collector.ok
+
+
+def test_endless_paging_stops_at_the_page_limit(monkeypatch):
+    monkeypatch.setattr(dp, "MAX_PAGES", 3)
+    pages = {URL: {"value": [contact(name="p0")], "nextLink": "n1"}}
+    for i in range(1, 10):
+        pages[f"n{i}"] = {"value": [contact(name=f"p{i}")], "nextLink": f"n{i + 1}"}
+    out, collector, calls = _run(monkeypatch, pages)
+    assert out is None and not collector.ok and len(calls) == 3
+
+
+def test_a_repeated_next_link_is_a_recorded_failure(monkeypatch):
+    out, collector, _ = _run(monkeypatch, {URL: {"value": [contact(name="a")], "nextLink": "loop"},
+                                           "loop": {"value": [], "nextLink": "loop"}})
+    assert out is None and not collector.ok

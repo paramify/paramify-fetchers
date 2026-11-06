@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
-from arm_rest import arm_rest_client, get_json  # noqa: E402
+from arm_rest import MAX_PAGES, arm_rest_client, get_json  # noqa: E402
 from azure_common import (  # noqa: E402
     Collector,
     arm_client_kwargs,
@@ -390,13 +390,16 @@ def collect_security_contacts(subscription_id, cred, collector: Collector) -> li
            f"?api-version={SECURITY_CONTACTS_API}")
     items: list = []
     seen: set = set()
+    pages = 0
     try:
         while url:
             body = get_json(client, url)
+            pages += 1
             items.extend(security_contact_items(body))
             url = body.get("nextLink") if isinstance(body, dict) else None
-            if url in seen:
-                raise RuntimeError("securityContacts paging repeated a nextLink")
+            # The same bound arm_rest.list_all uses: a repeated or endless nextLink is a failure, not a hang.
+            if url and (url in seen or pages >= MAX_PAGES):
+                raise RuntimeError(f"securityContacts paging did not terminate after {pages} page(s)")
             if url:
                 seen.add(url)
     except Exception as exc:  # noqa: BLE001 (boundary: classify, do not crash the run)
