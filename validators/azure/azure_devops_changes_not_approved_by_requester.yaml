@@ -3,14 +3,19 @@ name: Azure DevOps Change Items Not Approved by Their Requester
 type: AUTOMATED
 role: configuration
 statement: >-
-  Every collected change item's state history and comments were read, at least one change item has
-  an approval in effect, and no change item's approval in effect was given by the person who created
-  it (change_items_approved_by_requester is an empty list; it is null when an item's history or
-  comments couldn't be read). Supports KSI-CMT-LMC with separation between who asks for a change and
-  who approves it. Does not prove: that every finished change item was approved; that the approver
-  is authorized; that the change's author didn't approve it (change_items_approved_by_change_author);
-  approval timing; work items of other types or in projects the collecting identity can't see; or
-  that Azure changes are recorded by these items (the comparator's validators).
+  Every collected work item's state history and comments were read (approval_history_collected is
+  true), at least one change record has an approval in effect, and no change record's approval in
+  effect was given by the person who created it (change_items_approved_by_requester is an empty list;
+  it is null when an item's history or comments couldn't be read). Supports KSI-CMT-LMC with
+  separation between who asks for a change and who approves it. Does not prove: that every finished
+  change record was approved; that the approver is authorized; that the change's author didn't
+  approve it (change_items_approved_by_change_author); approval timing; that the fetcher's
+  approval_pattern, or its approval_mentions setting when on, matches only real approvals, since a
+  comment counts as approval by those settings (results.selection shows them); that a later
+  self-approval is absent, since only the approval in effect (the first since any withdrawal) is
+  judged, so a requester approving after an earlier approval isn't seen; work items of other types
+  or in projects the collecting identity can't see; or that Azure changes are recorded by these
+  items (the comparator's validators).
 
 regex: '"summary":\s*\{(?=[\s\S]*?"approval_history_collected":\s*true\b)(?=[\s\S]*?"change_items_approved":\s*[1-9]\d*)(?=[\s\S]*?"change_items_approved_by_requester":\s*\[\s*\])'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
