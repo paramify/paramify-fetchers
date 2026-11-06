@@ -239,7 +239,8 @@ def _int(value: Any) -> Any:
 
 
 def comment_text(raw: Any, mentions: bool = False) -> str:
-    """Plain text without quoted text (a blockquote, or a line starting ">"); mentions: @mention, a line's first dropped."""
+    """Plain text without quoted text (a blockquote, or a line starting ">"); with mentions, each reads @mention
+    and the ones a line starts with are dropped."""
     text, before = str(raw or ""), None
     if mentions:
         text = MENTION_LINK.sub(f" {MENTION} ", text)
