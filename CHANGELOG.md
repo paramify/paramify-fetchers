@@ -1296,6 +1296,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The uploader guide explains the collection frequency of an evidence set.**
+  A new section in [`docs/uploader_guide.md`](docs/uploader_guide.md#set-the-collection-frequency)
+  gives the default (`THREE_DAY`), the values, and how to set `frequency` in
+  `upload.yaml`. It tells you that the upload writes the frequency only when it
+  creates a set, and it gives a loop that changes the sets that exist through
+  the API.
+
 - **`azure_waf_ddos_activity` 0.2.0: DDoS figures include IPs protected by a network-level DDoS plan.**
   The existing figures `protected_ips_with_attack_alert_reaching_receiver`,
   `protected_ips_without_attack_alert`, `public_ips_attacked` and
