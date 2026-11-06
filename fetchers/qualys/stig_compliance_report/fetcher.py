@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
-from qualys_client import QualysError, build_client, env_bool, report_failure
+from qualys_report_client import QualysError, build_client, env_bool, report_failure
 from reports import STIG_COLUMNS, collect_stig, write_report
 
 

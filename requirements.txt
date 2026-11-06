@@ -145,5 +145,6 @@ google-cloud-api-keys
 # SDK is generated from one spec and ships all clients in the single `oci` package.
 oci
 
-# Qualys XML response parser
-defusedxml>=0.7.1,<1
+# Qualys category (fetchers/qualys/*) — the VM/PC API answers in XML that names an
+# external DTD; defusedxml parses it with entities and external references refused.
+defusedxml

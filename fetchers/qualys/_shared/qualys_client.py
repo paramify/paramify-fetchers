@@ -1,351 +1,276 @@
-"""Read-only Qualys FO API client. Never returns a successful partial collection."""
+"""Qualys VM/PC API client: Basic auth, hardened XML parsing, retries and WARNING/URL paging."""
 
 from __future__ import annotations
 
-import logging
+import io
+import ipaddress
 import os
-import re
-import sys
+import random
 import time
-from email.utils import parsedate_to_datetime
-from pathlib import Path
-from urllib.parse import parse_qsl, urljoin, urlsplit
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional
+from urllib.parse import parse_qs, urlsplit
 
 import requests
-from defusedxml import DefusedXmlException
-from defusedxml import ElementTree as SafeET
-from defusedxml.ElementTree import ParseError
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
-from fetcher_status import report_failure  # noqa: E402, F401
+if TYPE_CHECKING:
+    from xml.etree.ElementTree import Element
 
-DETECTIONS = "/api/2.0/fo/asset/host/vm/detection/"
-KNOWLEDGE_BASE = "/api/2.0/fo/knowledge_base/vuln/"
-QVS = "/api/2.0/fo/knowledge_base/qvs/"
-POLICIES = "/api/2.0/fo/compliance/policy/"
-POSTURE = "/api/2.0/fo/compliance/posture/info/"
-ENDPOINTS = {DETECTIONS, KNOWLEDGE_BASE, QVS, POLICIES, POSTURE}
+try:
+    from defusedxml import DefusedXmlException
+    from defusedxml import ElementTree as SafeET
+    from defusedxml.ElementTree import ParseError
+except ImportError:  # reported as bad_config when the client is built
+    SafeET = None
+    DefusedXmlException = ParseError = Exception  # type: ignore[assignment,misc]
 
+TIMEOUT = (30, 600)
+MAX_ATTEMPTS = 5
+BACKOFF_BASE_S = 2.0
+BACKOFF_CAP_S = 60.0
+MAX_WAIT_S = 300
+MAX_PAGES = 10_000
+REQUESTED_WITH = "paramify-fetchers"
 
-# Adapted from Connor Dalton (@Controgon), paramify/paramify-fetchers#289,
-# commit 5ce1171d097e130bf8f433894332191cb3934f56 (GPL-3.0-only).
-# Retain bounded responses and sanitized diagnostics for assessment reports.
-QUALYS_DOMAINS = (
-    "qualys.com",
-    "qualys.us",
-    "qualys.eu",
-    "qualys.it",
-    "qualys.in",
-    "qualys.ca",
-    "qualys.ae",
-    "qualys.co.uk",
-    "qualys.com.au",
-    "qualysksa.com",
-)
+PLATFORMS = {
+    "qualysapi.qualys.com": "US1",
+    "qualysapi.qg2.apps.qualys.com": "US2",
+    "qualysapi.qg3.apps.qualys.com": "US3",
+    "qualysapi.qg4.apps.qualys.com": "US4",
+    "qualysapi.gov1.qualys.us": "GOV1",
+    "qualysapi.qualys.eu": "EU1",
+    "qualysapi.qg2.apps.qualys.eu": "EU2",
+    "qualysapi.qg3.apps.qualys.it": "EU3",
+    "qualysapi.qg1.apps.qualys.in": "IN1",
+    "qualysapi.qg1.apps.qualys.ca": "CA1",
+    "qualysapi.qg1.apps.qualys.ae": "AE1",
+    "qualysapi.qg1.apps.qualys.co.uk": "UK1",
+    "qualysapi.qg1.apps.qualys.com.au": "AU1",
+    "qualysapi.qg1.apps.qualysksa.com": "KSA1",
+}
+QUALYS_DOMAINS = ("qualys.com", "qualys.us", "qualys.eu", "qualys.it", "qualys.in", "qualys.ca", "qualys.ae",
+                  "qualys.co.uk", "qualys.com.au", "qualysksa.com")
+
 RETRY_CODES = {"1920", "1960", "1965", "1981", "1999"}
-
-
-def platform_host(host: str) -> bool:
-    rest = host.removeprefix("qualysapi.")
-    return rest != host and any(
-        rest == d or rest.endswith(f".{d}") for d in QUALYS_DOMAINS
-    )
-
-
-def error_category(status: int, code: str) -> str:
-    if status == 401 or code in {"2000", "2002", "2011"}:
-        return "auth_failed"
-    if code == "2003" or status == 400:
-        return "bad_config"
-    if status == 403 or code == "2012":
-        return "not_authorized"
-    return "partial_failure"
+HINTS = {
+    "2000": "check QUALYS_USERNAME and QUALYS_PASSWORD; SSO users cannot use the API with a password",
+    "2002": "the Qualys user account is inactive",
+    "2003": "the subscription's registration is not complete; log in to the Qualys UI once with this user",
+    "2011": "the user needs SecureID, which blocks API access",
+    "2012": "the subscription's licence does not allow this API",
+}
 
 
 class QualysError(Exception):
-    def __init__(self, message: str, code: str = "partial_failure"):
+    """A failed Qualys call. `code` is one of fetcher_status.STATUS_CODES."""
+
+    def __init__(self, message: str, code: str = "partial_failure", operation: str = "",
+                 qualys_code: Optional[str] = None) -> None:
         super().__init__(message)
         self.code = code
+        self.operation = operation
+        self.qualys_code = qualys_code
 
 
-def value(node, path: str, required: bool = False) -> str:
-    result = (node.findtext(path) or "").strip()
-    if required and not result:
-        raise QualysError(f"Qualys response is missing required field {path}")
-    return result
+def text(elem: Optional[Element], path: str) -> Optional[str]:
+    """Stripped text at `path` under `elem`, or None when absent or empty."""
+    if elem is None:
+        return None
+    found = elem.find(path)
+    if found is None or found.text is None:
+        return None
+    value = found.text.strip()
+    return value or None
 
 
-def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+def _loopback(host: str) -> bool:
+    if host == "localhost":
+        return True
     try:
-        result = int(os.environ.get(name, str(default)))
+        return ipaddress.ip_address(host).is_loopback
     except ValueError:
-        raise QualysError(f"{name} must be an integer", "bad_config") from None
-    if not minimum <= result <= maximum:
+        return False
+
+
+def _qualys_platform_host(host: str) -> bool:
+    rest = host.removeprefix("qualysapi.")
+    return rest != host and any(rest == d or rest.endswith(f".{d}") for d in QUALYS_DOMAINS)
+
+
+def normalize_api_url(raw: str, private_host: Optional[str] = None) -> str:
+    """scheme://host[:port] of a Qualys API server, or of the one private cloud host named; https only, except loopback."""
+    parts = urlsplit(raw.strip())
+    host = (parts.hostname or "").lower()
+    if not host:
+        raise QualysError(f"QUALYS_API_URL {raw!r} is not a URL", "bad_config", "configuration")
+    if parts.username or parts.password:
+        raise QualysError("QUALYS_API_URL must not carry credentials", "bad_config", "configuration")
+    if parts.scheme != "https" and not (parts.scheme == "http" and _loopback(host)):
+        raise QualysError("QUALYS_API_URL must use https", "bad_config", "configuration")
+    if host.startswith("qualysguard."):
         raise QualysError(
-            f"{name} must be between {minimum} and {maximum}", "bad_config"
-        )
-    return result
-
-
-def env_bool(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name, str(default)).lower().strip()
-    if raw not in {"true", "false"}:
-        raise QualysError(f"{name} must be true or false", "bad_config")
-    return raw == "true"
-
-
-def id_list(raw: str) -> str:
-    if raw and not re.fullmatch(
-        r"[1-9]\d*(?:-[1-9]\d*)?(?:,[1-9]\d*(?:-[1-9]\d*)?)*", raw
-    ):
+            f"QUALYS_API_URL {host} is the Qualys web UI; use the API server URL "
+            "(qualysapi.…, shown under Help > About in the Qualys UI)", "bad_config", "configuration")
+    if not (_qualys_platform_host(host) or host == (private_host or "").strip().lower()):
         raise QualysError(
-            "IDs must be comma-separated positive integers or ranges", "bad_config"
-        )
-    for item in raw.split(",") if raw else []:
-        if "-" in item and int(item.split("-")[0]) > int(item.split("-")[1]):
-            raise QualysError("ID ranges must be ascending", "bad_config")
-    return raw
+            f"QUALYS_API_URL host {host} is not a Qualys platform API server (qualysapi.… on a Qualys domain); "
+            "for a Qualys private cloud platform, also set QUALYS_PRIVATE_CLOUD_HOST to its API host",
+            "bad_config", "configuration")
+    return f"{parts.scheme}://{parts.netloc.lower()}"
 
 
-def parse_xml(body: bytes):
-    # Qualys uses an external DOCTYPE. Allow its declaration without fetching
-    # it; defusedxml explicitly refuses entities and external references.
-    try:
-        decoded = body.decode("utf-8-sig")
-        if "\x00" in decoded or "<!ENTITY" in decoded:
-            raise ValueError
-        return SafeET.fromstring(
-            decoded, forbid_dtd=False, forbid_entities=True, forbid_external=True
-        )
-    except (UnicodeError, ParseError, DefusedXmlException, ValueError):
-        raise QualysError("Qualys returned invalid or unsafe XML") from None
+def _same_origin(a: str, b: str) -> bool:
+    pa, pb = urlsplit(a), urlsplit(b)
+    default = {"https": 443, "http": 80}
+    return (pa.scheme, pa.hostname, pa.port or default.get(pa.scheme)) == \
+        (pb.scheme, pb.hostname, pb.port or default.get(pb.scheme))
 
 
 class QualysClient:
-    def __init__(
-        self,
-        base_url: str,
-        username: str,
-        password: str,
-        *,
-        private_host: str = "",
-        page_size: int = 1000,
-        max_pages: int = 10000,
-        max_records: int = 500000,
-        retries: int = 3,
-        interval: int = 1,
-        session=None,
-        sleep=time.sleep,
-    ):
-        parts = urlsplit(base_url)
-        if (
-            parts.scheme != "https"
-            or not parts.hostname
-            or parts.username
-            or parts.password
-            or parts.path not in {"", "/"}
-            or parts.query
-            or parts.fragment
-        ):
-            raise QualysError(
-                "QUALYS_API_URL must be an HTTPS origin without credentials or a path",
-                "bad_config",
-            )
-        host = parts.hostname.lower()
-        if host.startswith("qualysguard.") or not (
-            platform_host(host) or host == private_host.strip().lower()
-        ):
-            raise QualysError(
-                "QUALYS_API_URL must name a Qualys API host; explicitly configure "
-                "QUALYS_PRIVATE_CLOUD_HOST for a private cloud endpoint",
-                "bad_config",
-            )
-        if not username or not password:
-            raise QualysError(
-                "QUALYS_USERNAME and QUALYS_PASSWORD are required", "bad_config"
-            )
-        self.base_url = base_url.rstrip("/")
-        self.page_size = page_size
-        self.max_pages = max_pages
-        self.max_records = max_records
-        self.retries = retries
-        self.interval = interval
+    def __init__(self, base_url: str, username: str, password: str, private_host: Optional[str] = None,
+                 session: Optional[requests.Session] = None,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
+        if SafeET is None:
+            raise QualysError("defusedxml is not installed (pip install defusedxml)", "bad_config", "configuration")
+        self.base_url = normalize_api_url(base_url, private_host)
+        self.username = username
+        self.password = password
         self.session = session or requests.Session()
-        self.session.auth = (username, password)
-        self.session.headers.update({"X-Requested-With": "paramify-fetchers"})
         self.sleep = sleep
-        self._last_request = None
+        self.pages = 0
 
-    def close(self):
-        self.session.close()
+    @classmethod
+    def from_env(cls) -> "QualysClient":
+        url = os.environ.get("QUALYS_API_URL", "").strip()
+        username = os.environ.get("QUALYS_USERNAME", "").strip()
+        password = os.environ.get("QUALYS_PASSWORD", "")
+        missing = [n for n, v in (("QUALYS_API_URL", url), ("QUALYS_USERNAME", username),
+                                  ("QUALYS_PASSWORD", password)) if not v]
+        if missing:
+            raise QualysError(f"{', '.join(missing)} not set", "bad_config", "configuration")
+        return cls(url, username, password, os.environ.get("QUALYS_PRIVATE_CLOUD_HOST"))
 
-    def request(self, path: str, params: dict) -> bytes:
-        if path not in ENDPOINTS or params.get("action") != "list":
-            raise QualysError(
-                "Only supported Qualys list operations are allowed", "bad_config"
-            )
-        for attempt in range(self.retries + 1):
-            if self._last_request is not None:
-                self.sleep(
-                    max(0, self.interval - (time.monotonic() - self._last_request))
-                )
-            self._last_request = time.monotonic()
-            retry_code = "partial_failure"
-            headers = {}
-            try:
-                with self.session.get(
-                    self.base_url + path,
-                    params=params,
-                    timeout=(10, 120),
-                    allow_redirects=False,
-                    stream=True,
-                ) as response:
-                    status = response.status_code
-                    headers = response.headers
-                    chunks, size = [], 0
-                    for chunk in response.iter_content(1024 * 1024):
-                        size += len(chunk)
-                        if size > 64 * 1024 * 1024:
-                            raise QualysError(
-                                "Qualys page exceeds 64 MiB; reduce page_size"
-                            )
-                        chunks.append(chunk)
-                    body = b"".join(chunks)
-                    code, wait_hint = "", None
-                    if body.lstrip().startswith(b"<"):
-                        try:
-                            root = parse_xml(body)
-                        except QualysError:
-                            if status == 200:
-                                raise
-                        else:
-                            if root.tag == "SIMPLE_RETURN":
-                                code = value(root, "RESPONSE/CODE")
-                                for item in root.iter("ITEM"):
-                                    if value(item, "KEY") == "SECONDS_TO_WAIT":
-                                        wait_hint = value(item, "VALUE")
-                                if not code:
-                                    raise QualysError(
-                                        "Qualys returned an error without a code"
-                                    )
-                    # Qualys overloads HTTP 409; inspect its API code before
-                    # deciding whether this is throttling or a permanent error.
-                    if code in RETRY_CODES or status in {202, 429, 500, 502, 503, 504}:
-                        retry_code = (
-                            "rate_limited"
-                            if code in {"1920", "1960", "1965"} or status == 429
-                            else "partial_failure"
-                        )
-                        if wait_hint is not None:
-                            headers = {**headers, "X-RateLimit-ToWait-Sec": wait_hint}
-                    elif code or status != 200:
-                        # Never include the server's TEXT/body: it may contain
-                        # credentials or scanner evidence.
-                        raise QualysError(
-                            f"Qualys request failed at {path} (HTTP {status}, code {code or 'none'})",
-                            error_category(status, code),
-                        )
-                    else:
-                        if not body.strip():
-                            raise QualysError("Qualys returned an empty response")
-                        return body
-            except requests.RequestException:
-                # Exception strings can include credentials, URLs, or response data.
-                retry_code = "target_unreachable"
-            if attempt == self.retries:
-                raise QualysError(
-                    f"Qualys request failed after {attempt + 1} attempts at {path}",
-                    retry_code,
-                )
-            wait = 2**attempt
-            for header in ("Retry-After", "X-RateLimit-ToWait-Sec"):
-                raw = headers.get(header, "0")
-                try:
-                    delay = int(raw)
-                except (TypeError, ValueError):
-                    try:
-                        delay = parsedate_to_datetime(raw).timestamp() - time.time()
-                    except (TypeError, ValueError, OverflowError):
-                        delay = 0
-                wait = max(wait, delay)
-            if wait > 60:
-                raise QualysError(
-                    "Qualys retry delay exceeds 60 seconds; retry the run later",
-                    retry_code,
-                )
-            logging.warning(
-                "Retrying Qualys %s request in %.1f seconds", retry_code, wait
-            )
-            self.sleep(wait)
-        raise AssertionError("unreachable")
+    @property
+    def platform(self) -> str:
+        host = urlsplit(self.base_url).hostname or ""
+        return PLATFORMS.get(host, "private_or_unlisted")
 
-    def xml(self, path: str, params: dict, root_name: str):
-        root = parse_xml(self.request(path, params))
-        response = root.find("RESPONSE")
-        if root.tag != root_name or response is None or not value(response, "DATETIME"):
-            raise QualysError(f"Unexpected Qualys response structure at {path}")
-        return response
-
-    def next_params(self, response, path: str, original: dict) -> dict | None:
-        warnings = response.findall(".//WARNING")
-        if not warnings:
+    @staticmethod
+    def _seconds(value: Optional[str]) -> Optional[float]:
+        try:
+            return float(value) if value else None
+        except ValueError:
             return None
-        if len(warnings) != 1 or value(warnings[0], "CODE") != "1980":
-            raise QualysError(
-                "Qualys returned an unhandled warning; collection may be incomplete"
-            )
-        url = value(warnings[0], "URL", required=True)
-        parts = urlsplit(urljoin(self.base_url + path, url))
-        base = urlsplit(self.base_url)
-        if (
-            parts.scheme != base.scheme
-            or parts.netloc != base.netloc
-            or parts.path != path
-            or parts.fragment
-            or parts.username
-            or parts.password
-        ):
-            raise QualysError("Qualys pagination URL changed origin or endpoint")
-        pairs = parse_qsl(parts.query, keep_blank_values=True)
-        query = dict(pairs)
-        if len(query) != len(pairs) or not re.fullmatch(
-            r"[1-9]\d*", query.get("id_min", "")
-        ):
-            raise QualysError("Qualys pagination URL has an invalid cursor")
-        # Only the cursor can change. Reapply all original scope/status fields,
-        # including ones absent from the server's continuation URL.
-        for key, val in query.items():
-            if key != "id_min" and (key not in original or str(original[key]) != val):
-                raise QualysError("Qualys pagination URL changed the requested scope")
-        return {**original, "id_min": query["id_min"]}
 
-    def pages(self, path: str, params: dict, root_name: str):
-        original = {"action": "list", **params}
-        current = original
-        previous_cursor = 0
-        for _ in range(self.max_pages):
-            response = self.xml(path, current, root_name)
-            following = self.next_params(response, path, original)
-            yield response
-            if following is None:
+    def _error_detail(self, body: bytes, headers: Any) -> tuple[Optional[str], str, Optional[float]]:
+        code, message, wait = None, "", None
+        try:
+            root = SafeET.fromstring(body, forbid_dtd=False)
+            code = text(root, ".//CODE")
+            message = text(root, ".//TEXT") or ""
+            for item in root.iter("ITEM"):
+                if text(item, "KEY") == "SECONDS_TO_WAIT":
+                    wait = self._seconds(text(item, "VALUE"))
+        except (ParseError, DefusedXmlException):
+            message = body[:200].decode("utf-8", "replace")
+        if wait is None:
+            wait = self._seconds(headers.get("X-RateLimit-ToWait-Sec"))
+        return code, " ".join(message.split()), wait
+
+    @staticmethod
+    def _classify(status: int, code: Optional[str]) -> tuple[bool, str]:
+        if code in RETRY_CODES or status in (202, 429, 500, 502, 503, 504):
+            return True, "rate_limited" if code in {"1920", "1960", "1965"} or status == 429 else "target_unreachable"
+        if status == 401 or code in {"2000", "2002", "2011"}:
+            return False, "auth_failed"
+        if code == "2003" or status == 400:
+            return False, "bad_config"
+        if status == 403 or code == "2012":
+            return False, "not_authorized"
+        return False, "internal_error"
+
+    def _backoff(self, attempt: int) -> float:
+        return min(BACKOFF_CAP_S, BACKOFF_BASE_S * 2 ** (attempt - 1)) + random.uniform(0, 1)
+
+    def get(self, url: str, params: Optional[dict], operation: str) -> bytes:
+        """GET one page; retries throttling and transient errors; raises QualysError otherwise."""
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                resp = self.session.get(
+                    url, params=params, auth=(self.username, self.password),
+                    headers={"X-Requested-With": REQUESTED_WITH}, timeout=TIMEOUT, allow_redirects=False)
+            except (requests.ConnectionError, requests.Timeout) as e:
+                if attempt == MAX_ATTEMPTS:
+                    raise QualysError(f"{operation}: could not reach {self.base_url}: {type(e).__name__}",
+                                      "target_unreachable", operation) from e
+                self.sleep(self._backoff(attempt))
+                continue
+            if resp.status_code == 200:
+                return resp.content
+            if 300 <= resp.status_code < 400:
+                raise QualysError(
+                    f"{operation}: HTTP {resp.status_code} redirect; QUALYS_API_URL should be the API server URL",
+                    "bad_config", operation)
+            code, message, wait = self._error_detail(resp.content, resp.headers)
+            retry, status_code = self._classify(resp.status_code, code)
+            if retry and attempt < MAX_ATTEMPTS:
+                delay = wait if wait is not None else self._backoff(attempt)
+                if delay > MAX_WAIT_S:
+                    raise QualysError(f"{operation}: Qualys asks to wait {delay:.0f}s (limit {MAX_WAIT_S}s): {message}",
+                                      "rate_limited", operation, code)
+                self.sleep(delay)
+                continue
+            hint = f" ({HINTS[code]})" if code in HINTS else ""
+            raise QualysError(f"{operation}: HTTP {resp.status_code}, Qualys code {code}: {message}{hint}",
+                              status_code, operation, code)
+        raise QualysError(f"{operation}: no response after {MAX_ATTEMPTS} attempts", "target_unreachable", operation)
+
+    def records(self, path: str, params: dict[str, Any], record_tag: str | tuple[str, ...],
+                operation: str) -> Iterator[Element]:
+        """Every `record_tag` element across all pages, to the last RESPONSE/WARNING/URL.
+
+        Each next page re-sends `params` with the id_min from WARNING/URL, so a next-page URL that drops a
+        filter never widens or narrows the list. Read each element before the next iteration; it is cleared.
+        """
+        tags = (record_tag,) if isinstance(record_tag, str) else record_tag
+        url = f"{self.base_url}{path}"
+        query = dict(params)
+        seen: set[str] = set()
+        pages = 0
+        while True:
+            pages += 1
+            if pages > MAX_PAGES:
+                raise QualysError(f"{operation}: paging did not end after {MAX_PAGES} pages", "internal_error", operation)
+            body = self.get(url, query, operation)
+            self.pages += 1
+            if b"<SIMPLE_RETURN" in body[:4096]:
+                code, message, _ = self._error_detail(body, {})
+                raise QualysError(f"{operation}: Qualys returned code {code}: {message}",
+                                  self._classify(200, code)[1], operation, code)
+            next_url: Optional[str] = None
+            truncated = False
+            try:
+                for _, elem in SafeET.iterparse(io.BytesIO(body), events=("end",), forbid_dtd=False):
+                    if elem.tag in tags:
+                        yield elem
+                        elem.clear()
+                    elif elem.tag == "WARNING":
+                        url_here = text(elem, "URL")
+                        truncated = truncated or text(elem, "CODE") == "1980" or url_here is not None
+                        next_url = next_url or url_here
+            except (ParseError, DefusedXmlException) as e:
+                raise QualysError(f"{operation}: response could not be parsed safely: {e}", "internal_error",
+                                  operation) from e
+            if truncated and not next_url:
+                raise QualysError(f"{operation}: Qualys truncated the list without a next-page URL",
+                                  "partial_failure", operation)
+            if not next_url:
                 return
-            cursor = int(following["id_min"])
-            if cursor <= previous_cursor:
-                raise QualysError("Qualys pagination cursor did not advance")
-            previous_cursor = cursor
-            current = following
-        raise QualysError("Qualys page limit reached; no complete report available")
-
-
-def build_client() -> QualysClient:
-    return QualysClient(
-        os.environ.get("QUALYS_API_URL", ""),
-        os.environ.get("QUALYS_USERNAME", ""),
-        os.environ.get("QUALYS_PASSWORD", ""),
-        private_host=os.environ.get("QUALYS_PRIVATE_CLOUD_HOST", ""),
-        page_size=env_int("QUALYS_PAGE_SIZE", 1000, 1, 10000),
-        max_pages=env_int("QUALYS_MAX_PAGES", 10000, 1, 100000),
-        max_records=env_int("QUALYS_MAX_RECORDS", 500000, 1, 10000000),
-        retries=env_int("QUALYS_RETRIES", 3, 0, 10),
-        interval=env_int("QUALYS_MIN_REQUEST_INTERVAL", 1, 0, 60),
-    )
+            if not (_same_origin(next_url, self.base_url) and urlsplit(next_url).path.rstrip("/") == path.rstrip("/")):
+                raise QualysError(f"{operation}: next-page URL points outside {self.base_url}{path}; not followed",
+                                  "internal_error", operation)
+            id_min = (parse_qs(urlsplit(next_url).query).get("id_min") or [""])[0]
+            if not id_min or id_min in seen:
+                raise QualysError(f"{operation}: next-page URL has no new id_min; paging stopped",
+                                  "partial_failure", operation)
+            seen.add(id_min)
+            query = {**params, "id_min": id_min}

@@ -12,6 +12,97 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables can be measured.**
+  The query API refuses these tables. Set `basic_logs_lookback_hours`
+  (`BASIC_LOGS_LOOKBACK_HOURS`, as `azure_resource_diagnostic_settings` names
+  it) above 0, and each one is read through the Log Analytics `/search` endpoint
+  (`AzureRestClient.search()`), one table at a time, for its newest record time
+  and record count over that many hours. The hours are capped at the ingestion
+  window and at the 720 `/search` reaches. The setting is off (0) by default,
+  because `/search` bills per GB scanned, so the query asks for nothing else. A
+  value of 0 or less leaves it off, and so does one that isn't a whole number,
+  with a warning. Off, nothing changes from 0.3.0: these tables are not
+  measured (which is not unknown), aren't counted as sources, and leave their
+  connectors unmeasured. On:
+  - **A table with data** joins `tables` and counts as a source, so
+    `sources_ingesting` and `min_sources_ingesting` can rise.
+  - **Connectors.** A connector whose data type is the whole table reads
+    connected or not connected. One that filters a table with data stays
+    unmeasured, since answering it would bill another scan.
+  - **An empty table** is measured only when the search covers the whole
+    window (an ingestion window of 30 days or less, since `/search` reaches 30
+    days). With fewer hours, it stays not measured.
+  - **A table new to the Auxiliary plan.** After a table is created on, or
+    switched to, the Auxiliary plan, a search spanning the date its lake data
+    starts answers with a `PartialLakeDataWarning`, until that date is older
+    than the hours searched (up to the whole window). The table is then
+    searched again in two parts, cut exactly at that date, and the answers are
+    combined (newest record time, summed count), with the date in the table's
+    new `lake_data_start` field. If `/search` includes both ends of an
+    interval, a record stamped exactly at that date counts in both parts; only
+    the table's `records` can be off by it. When the warning names no date,
+    names two different dates or names one outside the hours searched, or when
+    a part still warns, the first answer's newest record time stands, its count
+    reads null, and a table with nothing found is not measured. Either way the
+    workspace's `notes` say so.
+  - **A failed search**, or one that returns no result row, leaves its table
+    unmeasured, lists it in `tables_search_failed` and fails the run. Any
+    partial error other than that warning counts as failed. `sources_ingesting`
+    then reads null, as it does when the table plans couldn't be read.
+
+  Every table gains a `plan` field. Each workspace gains `tables_searched` and
+  `tables_search_failed`. `tables_not_measured` lists the Basic and Auxiliary
+  tables that weren't measured, for whatever reason. The summary gains
+  `basic_logs_lookback_hours`, the hours each table is searched over (0 when
+  off), and the fetcher's tests now check every summary field against its
+  instructions. The shared Azure query client's `QueryError` now carries the
+  error's `details[]` and a partial error's result. Its message is unchanged,
+  so every check that reads it (a missing table, the failure codes) reads the
+  same.
+
+- **Qualys VMDR fetchers, a new `qualys` category.** Four evidence fetchers read
+  the Qualys VM/PC XML API with one read-only API user (Basic auth, the
+  `X-Requested-With` header Qualys requires):
+  - `qualys_scan_coverage`: each host's last vulnerability scan and last
+    authenticated scan against `scan_window_days` (default 31, so a monthly scan
+    counts as within it), the subscription IPs that have no host record, and
+    excluded IPs. IPv4 is counted by address and IPv6 by range, so one IPv6 /64
+    can't swamp the count, and excluded addresses are not counted as gaps.
+  - `qualys_scan_schedules`: active scan schedules and their longest gap between
+    runs, whether each option profile enables authentication, and how the scans
+    launched in the window ended.
+  - `qualys_vulnerability_findings`: open detections (New, Active, Re-Opened) by
+    severity and type, with each one's age against `remediation_days`. The age
+    counts from the last reopening when Qualys reopened a detection, and from
+    first found otherwise. Ignored and disabled detections are counted, not
+    dropped.
+  - `qualys_vulnerability_remediation`: detections fixed within the lookback,
+    fixed within or after their timeframe, and the detections reopened in it
+    whatever their status now (Qualys sets a reopened detection to Active at its
+    next scan).
+
+  `QUALYS_API_URL` is required with no default, because subscriptions live on
+  different platforms (US1–US4, GOV1, EU and others). Credentials go only to a
+  `qualysapi.` host on a Qualys domain, or to the private cloud host named in
+  `QUALYS_PRIVATE_CLOUD_HOST`; any other URL fails as `bad_config` before a
+  request is sent. A Reader sees only the hosts in its asset groups, so every
+  fetcher records whether the API user sees the built-in All group
+  (`scope_all`). The shared client branches on the Qualys
+  error code rather than the HTTP status, because 409 covers rate and concurrency
+  limits, an unfinished registration and SecureID. It retries only the limits.
+  Each next page re-sends the original filters with the `id_min` from Qualys's
+  next-page URL, and refuses a URL on another host. A page that fails means the
+  run writes no summary. Responses are parsed with `defusedxml`. It is a new
+  dependency, in the new `qualys` extra and in `dev`. The `remediation_days`
+  default (`5:30,4:30,3:90,2:180,1:180`) follows FedRAMP's historical
+  continuous-monitoring timeframes as a convention; set your own policy's values.
+  Raw scan output (`RESULTS`) is never requested, and option profiles keep only
+  their title and authentication types. The fetchers are tested against a double
+  built from the documented API shapes, not a live subscription; the points
+  taken from the guide alone (All-group scope, tracking-method values, the option
+  profile authentication element, schedule `ACTIVE` values) are stated as
+  assumptions in each fetcher's instructions.
+
 - **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
   secret and certificate gets `lifetime_days` (end date minus start date, null when
   either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.
@@ -88,6 +179,64 @@ schemas and the `paramify` CLI — not the internal code.
   that have zones, and reports the regions in use, `multi_region`, and the resources
   sitting in regions with no zones. A failed Resource Graph query leaves every
   count from the resources null, not 0. Reader is enough.
+- **`azure_firewall_configuration`** (`EVD-AZURE-FIREWALL-CONFIGURATION`): every
+  Azure Firewall and Firewall Policy with its rule collection groups and rules
+  (the classic rule collections on a firewall without a policy too), the policy
+  chain a firewall inherits through base policies, threat intelligence mode,
+  IDPS, TLS inspection, DNS proxy, management IP configuration, public and
+  private IPs, and which rule and threat log categories its diagnostic settings
+  export. Flags allow-all network rules, allow-any-FQDN application rules and
+  DNAT rules to port 22 or 3389 (published or translated) or from any source,
+  counts rules from a policy in another subscription that a firewall here uses,
+  and judges per firewall
+  whether its rules filter egress: no network rule open to any destination on
+  every port, whatever its source (`egress_open_network_rules`, so a rule from
+  10.0.0.0/8 counts), and no any-FQDN application rule, so a firewall with no
+  rules counts, since Azure Firewall
+  denies whatever no rule allows. Routing is not checked here
+  (`azure_vnet_egress_routing` reports it). A failed firewall or policy list
+  leaves the counts that depend on it null, not 0. A policy or base policy in another
+  subscription is read when the credential may; otherwise that firewall's rule
+  and setting fields read null, never false. Resource exclusions apply to
+  firewalls and policies. KSI-CNA-RNT, CNA-ULN, CNA-MAT, MLA-LET.
+- **`azure_bastion_configuration`** (`EVD-AZURE-BASTION-CONFIGURATION`): every
+  Bastion host's SKU, scale units, shareable links, IP connect, native client
+  tunneling, file copy, copy-paste, Kerberos, session recording, private-only
+  mode, IP allow-list, zones, whether its subnet has a network security group and
+  whether BastionAuditLogs is exported; and for every virtual machine whether a
+  Bastion reaches it in its own virtual network or through a connected peering
+  whose link on the Bastion's side allows virtual network access (Developer SKU
+  hosts do not reach peered networks), including Bastion hosts in a peered
+  subscription when the credential may list them. Only hosts in the Succeeded
+  state with a known SKU count as a path. A path that cannot be decided reads
+  unknown and nulls the coverage counts, and unread interface data nulls the
+  public IP and path counts. A failed host or machine list leaves its counts
+  null, not 0. KSI-CNA-RNT, CNA-MAT, MLA-LET.
+- **`azure_resource_locks`** (`EVD-AZURE-RESOURCE-LOCKS`): every management lock
+  in the subscription with its level, scope and scope kind, and for each resource
+  of a protected type (Log Analytics workspaces, Backup vaults, Recovery Services
+  vaults, key vaults and storage accounts by default; `AZURE_LOCK_PROTECTED_TYPES`
+  overrides, accepting nested types such as `microsoft.sql/servers/databases`;
+  an entry that is not provider/type, or a setting with no entry, fails the run as
+  `bad_config`, and a type that matches nothing is listed in
+  `protected_resource_types_unmatched`) whether a CanNotDelete or ReadOnly lock on
+  the resource, its resource group or the subscription is in effect. Lock fields
+  read null when the lock list was not read. KSI-MLA-ALA, RPL-ABO, CNA-DFP.
+
+- **`azure_pim_activations`** (`EVD-AZURE-PIM-ACTIVATIONS`): Azure resource PIM
+  activity on the subscription. Every role assignment schedule request Azure
+  still holds at the subscription and below (self-activations, admin
+  assignments, extensions, renewals and removals) with its requester, role,
+  scope, requested duration, justification, ticket, approval and outcome, and
+  the activations in force now. Counts self-activations by role, scope level
+  and outcome, those without a justification, ticket or approval, activations
+  of Owner, Contributor, User Access Administrator and RBAC Administrator,
+  admin assignments that grant standing access, and the oldest and newest
+  request seen. A tenant without PIM (a 400 with the error code
+  AadPremiumLicenseRequired or TenantNotOnboarded) reports `pim_available`
+  false rather than failing; any other failed list leaves its counts null and
+  fails the run, and `pim_available` is null when both lists fail. Reader is
+  enough. KSI-IAM-JIT, CMT-LMC.
 - **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
   Unhealthy assessment reports `days_open` (from `status_change_date`, null when
   missing; it starts again at 0 when a finding turns Healthy and then Unhealthy
@@ -1742,6 +1891,14 @@ schemas and the `paramify` CLI — not the internal code.
   null, not an empty list, when the methods policy can't be read.
 
 ### Fixed
+
+- **`azure_key_vault_key_rotation` 0.5.0: unlisted vaults no longer read as zero expired certificates.**
+  `expired_certificates` and `certificates_expiring_within_30_days` are null when any
+  in-scope vault's certificates could not be listed (refused with 401 or 403, failed, or
+  no data-plane address), where they read 0 and let a check pass with nothing read. A
+  refused list still exits 0 and shows in `certificate_not_authorized_vaults`. New
+  `certificates_without_expiry` counts listed certificates with no expiry date, which
+  are in neither expiry count.
 
 - **`azure_app_service_backups` 0.3.1: an app with no restore point misses the RPO.**
   On a plan that supports backups, an app with no restore point at all, when both the

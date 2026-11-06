@@ -1,7 +1,7 @@
 # qualys_stig_compliance_report
 
 Every evaluated posture for one Qualys STIG policy, joined with host, control,
-technology, and policy metadata. See [platform setup](../README.md) and
+technology, and policy metadata. See [platform setup](../REPORTS.md) and
 [example manifest](../../../examples/qualys_reports.yaml).
 
 Output: `qualys_stig_compliance_report_<policy_id>.csv`. Each target has a unique
@@ -51,7 +51,7 @@ Keep `close_cycle: never` during setup. Only use automatic closure after every
 policy feeding that assessment is represented and server-side result mappings
 have been validated.
 
-See the [observed intake limitations](../README.md#api-compatibility-and-verification):
+See the [observed intake limitations](../REPORTS.md#api-compatibility-and-verification):
 ordinary Passed closed the existing issue and Error/Passed* stayed open, but
 repeating an already-Passed row created another closed issue. Resolve this intake
 behavior before scheduling production uploads; `close_cycle: never` alone does

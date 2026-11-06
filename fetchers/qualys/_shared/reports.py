@@ -17,7 +17,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from qualys_client import (
+from qualys_report_client import (
     DETECTIONS,
     KNOWLEDGE_BASE,
     POLICIES,
