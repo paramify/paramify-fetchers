@@ -119,7 +119,7 @@ def test_stack_without_a_token_takes_typed_text(tmp_path, no_token, run_tui):
 def test_entry_editor_writes_and_clears_paramify_overrides(tmp_path, run_tui):
     path, name = _manifest(tmp_path)
 
-    async def edit(app, pilot, approval, no_request, stack):
+    async def edit(app, pilot, approval, no_request, stack, delivery=BLANK):
         await pilot.press("2")
         await pilot.pause()
         await pilot.press("e")
@@ -129,16 +129,18 @@ def test_entry_editor_writes_and_clears_paramify_overrides(tmp_path, run_tui):
         rows["stack"].query_one(Input).value = stack
         rows["approval"].query_one(Select).value = approval
         rows["no_request"].query_one(Select).value = no_request
+        rows["delivery"].query_one(Select).value = delivery
         await pilot.pause()
         await pilot.press("ctrl+s")
         await _settle(app, pilot)
 
     async def first(app, pilot):
-        await edit(app, pilot, "MANUAL", "evidence", "stk-9")
+        await edit(app, pilot, "MANUAL", "evidence", "stk-9", "direct")
 
     run_tui(first, path)
     entry = _run_block(path)["fetchers"][0]
-    assert entry["paramify"] == {"stack": "stk-9", "approval": "MANUAL", "no_request": "evidence"}
+    assert entry["paramify"] == {"stack": "stk-9", "approval": "MANUAL", "no_request": "evidence",
+                                 "delivery": "direct"}
 
     async def second(app, pilot):
         await edit(app, pilot, BLANK, BLANK, "")

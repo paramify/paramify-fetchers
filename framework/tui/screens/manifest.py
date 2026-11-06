@@ -37,7 +37,8 @@ from framework.tui.modals import (
 )
 
 APPROVALS = ("MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION")
-NO_REQUESTS = ("refuse", "evidence")
+NO_REQUESTS = ("direct", "evidence", "refuse")
+DELIVERIES = ("auto", "direct")
 
 
 def _cell(value) -> str:
@@ -541,6 +542,8 @@ class ManifestPage(ButtonRowNav, Vertical):
              "options": [(v, v) for v in APPROVALS], "required": False, "help": "blank inherits"},
             {"key": "no_request", "label": "no_request", "kind": "select", "value": pf.get("no_request") if pf.get("no_request") in NO_REQUESTS else None,
              "options": [(v, v) for v in NO_REQUESTS], "required": False, "help": "blank inherits"},
+            {"key": "delivery", "label": "delivery", "kind": "select", "value": pf.get("delivery") if pf.get("delivery") in DELIVERIES else None,
+             "options": [(v, v) for v in DELIVERIES], "required": False, "help": "blank inherits"},
         ]
         groups = {"config": config_specs, "secrets": secret_specs, "paramify": paramify_specs}
 
@@ -580,7 +583,7 @@ class ManifestPage(ButtonRowNav, Vertical):
     def _set_entry_paramify(self, entry: dict, values: dict) -> None:
         """Write the entry's `paramify` block from the form; a blank field removes its key."""
         block = dict(entry.get("paramify") or {})
-        for key in ("stack", "approval", "no_request"):
+        for key in ("stack", "approval", "no_request", "delivery"):
             if values.get(key):
                 block[key] = values[key]
             else:

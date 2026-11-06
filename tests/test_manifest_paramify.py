@@ -35,6 +35,24 @@ def test_schema_accepts_paramify_blocks(repo_root):
     assert schema_errors(data, repo_root) == []
 
 
+def test_schema_accepts_delivery_and_direct_no_request(repo_root):
+    data = {"run": {"paramify": {"delivery": "direct", "no_request": "direct"},
+                    "fetchers": [{"use": "x", "paramify": {"delivery": "auto", "no_request": "refuse"}}]}}
+    assert schema_errors(data, repo_root) == []
+
+
+def test_schema_rejects_unknown_delivery(repo_root):
+    data = {"run": {"paramify": {"delivery": "batch"}, "fetchers": [{"use": "x"}]}}
+    errors = schema_errors(data, repo_root)
+    assert errors and any("delivery" in e for e in errors)
+
+
+def test_resolved_paramify_carries_delivery_into_run_metadata(tmp_path, repo_root):
+    m = parse_manifest({"run": {"paramify": {"delivery": "direct"},
+                                "fetchers": [{"use": "x", "paramify": {"no_request": "refuse"}}]}})
+    assert resolved_paramify(m, m.entries[0]) == {"delivery": "direct", "no_request": "refuse"}
+
+
 def test_schema_rejects_unknown_approval(repo_root):
     data = {"run": {"paramify": {"approval": "WHENEVER"}, "fetchers": [{"use": "x"}]}}
     errors = schema_errors(data, repo_root)

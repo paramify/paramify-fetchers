@@ -15,7 +15,8 @@ from framework.run_files import RESERVED_RUN_FILES, is_evidence_file
 from framework.sync.state import RunState
 
 DEFAULT_APPROVAL = "SUBMISSION_WITH_PASSING_VALIDATORS"
-DEFAULT_NO_REQUEST = "refuse"
+DEFAULT_NO_REQUEST = "direct"
+DEFAULT_DELIVERY = "auto"
 
 _ENVELOPE_KEYS = {"schema_version", "metadata", "payload"}
 
@@ -56,6 +57,7 @@ class EntryDesired:
     recorded_batch_id: Optional[str]
     collected_on: Optional[date] = None  # the day the run started (UTC), from _run_metadata.json
     approval_explicit: bool = False  # `approval` came from the manifest, not the default
+    delivery: str = DEFAULT_DELIVERY
 
 
 def is_enveloped(obj: Any) -> bool:
@@ -232,6 +234,7 @@ def desired_from_run(
             stack=stack_override if stack_override else cfg.get("stack"),
             stack_name=None if stack_override else cfg.get("stack_name"),
             no_request=cfg.get("no_request") or DEFAULT_NO_REQUEST,
+            delivery=cfg.get("delivery") or DEFAULT_DELIVERY,
             files=tuple(files),
             recorded_batch_id=state.batch_for(key),
             collected_on=_started_on(run_meta),

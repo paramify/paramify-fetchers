@@ -42,6 +42,7 @@ from framework.sync.model import UNKNOWN, Action, Outcome, Ref, SyncContext
 from framework.sync.providers import waf
 from framework.sync.providers.delivery_routing import (
     DONE,
+    DirectRoute,
     Refusal,
     attribute,
     delivered_before_batches,
@@ -140,6 +141,8 @@ def _route(entry: EntryDesired, obs: EntryObserved, today: date) -> _Route | Ref
     if channel is None or isinstance(channel, Refusal):
         return _Route(None, None, None) if channel is None else channel
     request = resolve_request(entry, channel, obs.requests, obs.current_ids, today)
+    if isinstance(request, DirectRoute):
+        return Refusal(request.reason, "direct delivery arrives in the next change")
     if isinstance(request, Refusal):
         return request
     if request is None:
@@ -295,7 +298,7 @@ class DeliveryProvider:
             obs.requests = reader.artifact_requests(ev.id)
             obs.current_ids = {r.id for r in reader.artifact_requests(ev.id, current=True)}
             request = resolve_request(e, channel, obs.requests, obs.current_ids, self._today())
-            if isinstance(request, Refusal):
+            if isinstance(request, (Refusal, DirectRoute)):
                 return obs
             target = request
         candidates = own_batch_ids(found, e)

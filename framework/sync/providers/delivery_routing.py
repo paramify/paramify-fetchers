@@ -31,6 +31,12 @@ class Refusal:
 
 
 @dataclass(frozen=True)
+class DirectRoute:
+    """The entry goes through the old upload route, not a batch."""
+    reason: str
+
+
+@dataclass(frozen=True)
 class Attribution:
     mine: Optional[Batch]
     earlier_open: List[Tuple[Batch, str]]  # (batch, its run id)
@@ -117,8 +123,11 @@ def resolve_request(
     requests: List[ArtifactRequest],
     current_ids: Set[str],
     today: date,
-) -> ArtifactRequest | Refusal | None:
-    """The current request on the channel, else the latest past one. None: deliver at evidence level."""
+) -> ArtifactRequest | Refusal | DirectRoute | None:
+    """The current request on the channel, else the latest past one.
+
+    With none: `direct` returns a DirectRoute, `evidence` returns None (deliver at evidence level).
+    """
     on_channel = [r for r in requests if r.channel_id == channel.id]
     current = [r for r in on_channel if r.id in current_ids]
     if current:
@@ -128,10 +137,12 @@ def resolve_request(
         return max(past, key=lambda r: r.due_date)
     if entry.no_request == "evidence":
         return None
+    if entry.no_request == "direct":
+        return DirectRoute(f"{channel.reference_id} has no artifact request")
     return Refusal(
         f"no current or past artifact request on channel {channel.reference_id} of {entry.reference_id}",
-        f"create an artifact request on {channel.reference_id} in the app, or set no_request: evidence on "
-        "this entry to deliver at the evidence level (it does not count toward the solution capability)",
+        f"create an artifact request on {channel.reference_id} in the app, or remove no_request: refuse "
+        "from this entry to send it direct",
     )
 
 

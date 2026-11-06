@@ -27,6 +27,7 @@ from framework.sync.model import UNKNOWN, Plan, Ref, SyncContext
 from framework.sync.providers import waf
 from framework.sync.providers.delivery import DeliveryProvider, EntryObserved
 from framework.sync.providers.delivery_routing import (
+    DirectRoute,
     Refusal,
     attribute,
     resolve_channel,
@@ -260,7 +261,7 @@ def test_requests_only_past_is_late(tmp_path):
 def test_requests_none_with_refuse(tmp_path):
     a = plan_one(entry(tmp_path), observed(evidence(CH_P), requests=[AR_FUTURE], current=[]))
     assert a.verb == "refuse" and "CHN-1" in a.summary
-    assert "no_request: evidence" in a.fix
+    assert "remove no_request: refuse" in a.fix
 
 
 def test_requests_none_with_evidence(tmp_path):
@@ -268,6 +269,19 @@ def test_requests_none_with_evidence(tmp_path):
     assert a.verb == "deliver" and a.payload["target"] == "EVIDENCE"
     assert a.payload["evidence_id"] == "ev-1" and a.payload["artifact_request_id"] is None
     assert a.warnings == ["evidence-level batch: does not count toward the solution capability"]
+
+
+def test_resolve_request_none_with_direct_returns_direct_route():
+    e = EntryDesired("k", "k", "R", "EVD-12", {}, None, "MANUAL", None, None, "direct", (), None)
+    assert resolve_request(e, CH_P, [], set(), TODAY) == DirectRoute("CHN-1 has no artifact request")
+
+
+def test_resolve_request_none_with_refuse_refuses():
+    e = EntryDesired("k", "k", "R", "EVD-12", {}, None, "MANUAL", None, None, "refuse", (), None)
+    r = resolve_request(e, CH_P, [], set(), TODAY)
+    assert isinstance(r, Refusal)
+    assert r.fix == ("create an artifact request on CHN-1 in the app, or remove no_request: refuse "
+                     "from this entry to send it direct")
 
 
 def test_resolve_request_is_pure():

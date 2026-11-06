@@ -136,8 +136,15 @@
         },
         "no_request": {
           "enum": [
-            "refuse",
-            "evidence"
+            "direct",
+            "evidence",
+            "refuse"
+          ]
+        },
+        "delivery": {
+          "enum": [
+            "auto",
+            "direct"
           ]
         }
       }

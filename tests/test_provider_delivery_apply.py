@@ -432,7 +432,7 @@ def test_rollover_check_is_skipped_when_resuming(tmp_path):
 def test_rollover_replan_that_refuses_returns_refused(tmp_path):
     fake = FakeParamify()
     ev, old = with_request(fake, requested=date(2026, 10, 1), due=date(2026, 11, 5))
-    h = Harness(fake, two_files(tmp_path))
+    h = Harness(fake, two_files(tmp_path, {"x": {"use": "x", "no_request": "refuse"}}))
     plan = h.plan()
     fake.set_today(date(2026, 11, 10))
     fake._requests.clear()  # the request was deleted: nothing current or past

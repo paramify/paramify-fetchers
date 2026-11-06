@@ -42,7 +42,25 @@ def test_desired_groups_targets_into_one_entry(tmp_path):
     assert e.entry_key == "x" and e.use == "x" and e.run_id == "RID"
     assert [f.original_file_name for f in e.files] == ["a.json", "b.json"]
     assert e.reference_id == "EVD-X" and e.category == "cat"
-    assert e.approval == "SUBMISSION_WITH_PASSING_VALIDATORS" and e.no_request == "refuse"
+    assert e.approval == "SUBMISSION_WITH_PASSING_VALIDATORS" and e.no_request == "direct"
+
+
+def test_entry_delivery_defaults_to_auto(tmp_path):
+    build(tmp_path, {"a.json": env()}, [inv("x", ["a.json"])], {"x": {"use": "x"}})
+    [e] = desired_from_run(tmp_path, {})
+    assert e.delivery == "auto"
+
+
+def test_entry_no_request_defaults_to_direct(tmp_path):
+    build(tmp_path, {"a.json": env()}, [inv("x", ["a.json"])])
+    [e] = desired_from_run(tmp_path, {})
+    assert e.no_request == "direct"
+
+
+def test_entry_delivery_direct_from_run_metadata(tmp_path):
+    build(tmp_path, {"a.json": env()}, [inv("x", ["a.json"])], {"x": {"use": "x", "delivery": "direct"}})
+    [e] = desired_from_run(tmp_path, {})
+    assert e.delivery == "direct"
 
 
 def test_desired_two_entries_same_use(tmp_path):
