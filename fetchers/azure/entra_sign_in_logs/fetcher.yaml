@@ -52,19 +52,36 @@ config_schema:
     required: false
     env: ENTRA_LOG_USERS
     description: >
-      Comma-separated user principal names to limit the sign-in evidence to, such
-      as the administrators of one authorization boundary. Optional — omit for
-      every user in the tenant. With app_ids also set, a sign-in must match both.
-      The policy change evidence is never scoped. A value that is not a user
+      Comma-separated user principal names to limit the user sign-in evidence
+      (interactive and non-interactive) to, such as the administrators of one
+      authorization boundary. Optional — omit for every user in the tenant. With
+      app_ids also set, a sign-in must match both. Service-principal sign-ins and
+      the policy change evidence are never scoped by it. A value that is not a user
       principal name fails the run as bad_config.
   app_ids:
     type: string
     required: false
     env: ENTRA_LOG_APP_IDS
     description: >
-      Comma-separated application (client) ids to limit the sign-in evidence to,
-      such as a system's portals. Optional — omit for every app. A value that is
-      not a GUID fails the run as bad_config.
+      Comma-separated application (client) ids of the apps signed in to, to limit
+      the user sign-in evidence (interactive and non-interactive) to, such as a
+      system's portals. Optional — omit for every app. Leave it empty to keep every
+      sign-in of the scoped users: a sign-in to an app not listed is left out, with
+      no warning. It never applies to service-principal sign-ins; use
+      service_principal_app_ids for those. A value that is not a GUID fails the run
+      as bad_config.
+  service_principal_app_ids:
+    type: string
+    required: false
+    env: ENTRA_LOG_SERVICE_PRINCIPAL_APP_IDS
+    description: >
+      Comma-separated application (client) ids of the service principals to limit
+      the service-principal sign-in evidence to, such as one system's workload
+      identities. Optional; omit for every service principal. Kept apart from
+      app_ids because in a service-principal sign-in the app id names the principal
+      itself, while in a user sign-in it names the app signed in to; it never
+      narrows the user sign-ins. A value that is not a GUID fails the run as
+      bad_config.
   max_rows:
     type: integer
     required: false
@@ -109,7 +126,8 @@ evidence_set:
     - workspaces_collected — Number of Log Analytics workspaces read in the subscription
     - lookback_days — How many days of logs were summarized (lookback_days setting, default 30)
     - scope_users — List of the user principal names the sign-in evidence is limited to; empty means every user
-    - scope_app_ids — List of the application ids the sign-in evidence is limited to; empty means every app
+    - scope_app_ids — List of the application ids the user sign-in evidence (interactive and non-interactive) is limited to; empty means every app
+    - scope_service_principal_app_ids — List of the service-principal application ids the service-principal sign-in evidence is limited to; empty means every service principal
     - workspaces_with_sign_in_logs — Number of workspaces holding the SigninLogs table; the sign-in counts below are summed across them, so name one with the workspaces target field when Entra exports to several
     - sign_in_logs_workspaces — List of the names of those workspaces
     - sign_in_logs_read — True if every such workspace's sign-in queries succeeded; false if there is none, a query failed, or a workspace's table lookup failed, and then every sign-in field below is null
@@ -156,7 +174,7 @@ evidence_set:
     Which service principals signed in (counts per principal, no IPs or resources copied)?
     - workspaces_with_service_principal_sign_in_logs — Number of workspaces holding the AADServicePrincipalSignInLogs table
     - service_principal_sign_in_logs_read — True if every such workspace's queries succeeded; false if there is none, a query failed, or a table lookup failed, and then the service_principal_* fields are null
-    - service_principal_sign_ins — Number of service-principal sign-ins in the lookback, limited by the app-id scope only (service principals have no user principal name)
+    - service_principal_sign_ins — Number of service-principal sign-ins in the lookback, limited by the service_principal_app_ids scope only (the user and app_ids scopes never apply)
     - service_principal_succeeded — Number with ResultType 0
     - service_principal_failed — Number with any other ResultType
     - service_principal_principals_signed_in — Number of distinct service principals with at least one successful sign-in

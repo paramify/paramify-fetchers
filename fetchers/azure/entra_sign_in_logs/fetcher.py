@@ -30,6 +30,9 @@ logger = logging.getLogger(NAME)
 LOOKBACK_ENV = "ENTRA_LOG_LOOKBACK_DAYS"
 USERS_ENV = "ENTRA_LOG_USERS"
 APPS_ENV = "ENTRA_LOG_APP_IDS"
+# Service principals are scoped apart: in their sign-ins AppId is the principal itself, while in a
+# user's sign-in it is the app signed in to, so one list cannot narrow both without dropping one.
+SERVICE_PRINCIPAL_APPS_ENV = "ENTRA_LOG_SERVICE_PRINCIPAL_APP_IDS"
 MAX_ROWS_ENV = "ENTRA_LOG_MAX_ROWS"
 DEFAULT_LOOKBACK_DAYS = 30
 DEFAULT_MAX_ROWS = 500
@@ -80,22 +83,27 @@ def _list_env(env: str) -> List[str]:
 
 
 def settings_from_env(collector: Optional[Collector] = None) -> Dict[str, Any]:
-    """Lookback, row cap and the optional user / app scope; a value that could break the query fails as bad_config."""
+    """Lookback, row cap, the optional user / app scope for user sign-ins and the optional service-principal scope;
+    a value that could break the query fails as bad_config."""
     users = [u.lower() for u in _list_env(USERS_ENV)]
     apps = [a.lower() for a in _list_env(APPS_ENV)]
+    sp_apps = [a.lower() for a in _list_env(SERVICE_PRINCIPAL_APPS_ENV)]
     bad_users = [u for u in users if not _UPN.match(u)]
     bad_apps = [a for a in apps if not _GUID.match(a)]
-    if (bad_users or bad_apps) and collector is not None:
+    bad_sp_apps = [a for a in sp_apps if not _GUID.match(a)]
+    if (bad_users or bad_apps or bad_sp_apps) and collector is not None:
         # The values stay out of the message: they are untrusted text and would be matched against the failure codes.
-        collector.record(f"config {USERS_ENV}/{APPS_ENV}", ValueError(
-            f"invalid setting {USERS_ENV}/{APPS_ENV}: {len(bad_users)} entry(ies) in {USERS_ENV} are not user principal names and "
-            f"{len(bad_apps)} in {APPS_ENV} are not GUIDs"))
+        collector.record(f"config {USERS_ENV}/{APPS_ENV}/{SERVICE_PRINCIPAL_APPS_ENV}", ValueError(
+            f"invalid setting {USERS_ENV}/{APPS_ENV}/{SERVICE_PRINCIPAL_APPS_ENV}: {len(bad_users)} entry(ies) in {USERS_ENV} "
+            f"are not user principal names, {len(bad_apps)} in {APPS_ENV} and {len(bad_sp_apps)} in "
+            f"{SERVICE_PRINCIPAL_APPS_ENV} are not GUIDs"))
     return {
         "lookback_days": int_config(LOOKBACK_ENV, DEFAULT_LOOKBACK_DAYS),
         "max_rows": int_config(MAX_ROWS_ENV, DEFAULT_MAX_ROWS),
         "users": [u for u in users if _UPN.match(u)],
         "app_ids": [a for a in apps if _GUID.match(a)],
-        "scope_invalid": bool(bad_users or bad_apps),
+        "service_principal_app_ids": [a for a in sp_apps if _GUID.match(a)],
+        "scope_invalid": bool(bad_users or bad_apps or bad_sp_apps),
     }
 
 
@@ -104,7 +112,8 @@ def _dynamic(values: List[str]) -> str:
 
 
 def scope_filter(settings: Dict[str, Any]) -> str:
-    """KQL filter for the configured users and apps (both must match when both are set); empty when unscoped."""
+    """KQL filter for user sign-ins (interactive and non-interactive) by the configured users and the apps signed in to
+    (both must match when both are set); empty when unscoped. Service-principal sign-ins use service_principal_filter."""
     parts = []
     if settings["users"]:
         parts.append(f"| where tolower(UserPrincipalName) in ({_dynamic(settings['users'])}) ")
@@ -198,10 +207,12 @@ def single_factor_query(settings: Dict[str, Any]) -> str:
     )
 
 
-def _app_filter(settings: Dict[str, Any]) -> str:
-    """The app-id half of the scope only: service-principal sign-ins carry no user principal name."""
-    if settings["app_ids"]:
-        return f"| where tolower(tostring(AppId)) in ({_dynamic(settings['app_ids'])}) "
+def service_principal_filter(settings: Dict[str, Any]) -> str:
+    """KQL filter for the configured service principals by their own app id; empty when unscoped. The user scope
+    and the user-sign-in app scope never apply here: a service principal has no user principal name, and its
+    AppId names the principal, not an app it signed in to."""
+    if settings["service_principal_app_ids"]:
+        return f"| where tolower(tostring(AppId)) in ({_dynamic(settings['service_principal_app_ids'])}) "
     return ""
 
 
@@ -231,7 +242,7 @@ def service_principal_overview_query(settings: Dict[str, Any]) -> str:
     """Counts over service-principal (application) sign-ins in scope; one row."""
     return (
         f"{SERVICE_PRINCIPAL_TABLE} | where TimeGenerated > ago({settings['lookback_days']}d) "
-        + _app_filter(settings)
+        + service_principal_filter(settings)
         + "| extend Ok = tostring(ResultType) == '0' "
         "| summarize SignIns = count(), Succeeded = countif(Ok), Failed = countif(not(Ok)), "
         "Principals = dcountif(tostring(ServicePrincipalId), Ok), "
@@ -243,7 +254,7 @@ def service_principal_list_query(settings: Dict[str, Any]) -> str:
     """One row per service principal that signed in: id, name, app id, counts and last sign-in (no IPs, no resources)."""
     return (
         f"{SERVICE_PRINCIPAL_TABLE} | where TimeGenerated > ago({settings['lookback_days']}d) "
-        + _app_filter(settings)
+        + service_principal_filter(settings)
         + "| extend Ok = tostring(ResultType) == '0' "
         "| summarize SignIns = count(), Succeeded = countif(Ok), Failed = countif(not(Ok)), LastSignIn = max(TimeGenerated) "
         "by ServicePrincipalId = tostring(ServicePrincipalId), ServicePrincipalName = tostring(ServicePrincipalName), "
@@ -542,6 +553,7 @@ def summarize(workspaces: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dic
         "lookback_days": settings["lookback_days"],
         "scope_users": settings["users"],
         "scope_app_ids": settings["app_ids"],
+        "scope_service_principal_app_ids": settings["service_principal_app_ids"],
         "workspaces_with_sign_in_logs": len(with_logs),
         "sign_in_logs_workspaces": [w.get("name") for w in with_logs],
         "sign_in_logs_read": sign_ins_read,

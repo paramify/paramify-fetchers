@@ -23,10 +23,13 @@ azure_rest = sys.modules["azure_rest"]
 azure_common = sys.modules["azure_common"]
 
 APP = "2b0f4b7e-1c1d-4c3b-9a55-0e7a5b1c2d3e"
-SETTINGS = {"lookback_days": 30, "max_rows": 2, "users": [], "app_ids": [], "scope_invalid": False}
+# A synthetic service principal's own app id: never an app a user signs in to.
+SP_APP = "7d3c9a10-5e2f-4b8a-8c61-3f0e9d2a4b5c"
+SETTINGS = {"lookback_days": 30, "max_rows": 2, "users": [], "app_ids": [], "service_principal_app_ids": [],
+            "scope_invalid": False}
 
 ENVS = ("AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID", "AZURE_ENVIRONMENT", "SENTINEL_WORKSPACES",
-        sl.LOOKBACK_ENV, sl.USERS_ENV, sl.APPS_ENV, sl.MAX_ROWS_ENV)
+        sl.LOOKBACK_ENV, sl.USERS_ENV, sl.APPS_ENV, sl.SERVICE_PRINCIPAL_APPS_ENV, sl.MAX_ROWS_ENV)
 
 
 @pytest.fixture(autouse=True)
@@ -40,16 +43,21 @@ def clean_env(monkeypatch):
 def test_scope_values_are_validated_and_lowercased(monkeypatch):
     monkeypatch.setenv(sl.USERS_ENV, "Admin@Contoso.com, o'brien@contoso.com")
     monkeypatch.setenv(sl.APPS_ENV, APP.upper())
+    monkeypatch.setenv(sl.SERVICE_PRINCIPAL_APPS_ENV, f" {SP_APP.upper()} ,")
     collector = azure_common.Collector(sl.logger)
     settings = sl.settings_from_env(collector)
-    assert (settings["users"], settings["app_ids"], settings["scope_invalid"], collector.ok) == (
-        ["admin@contoso.com", "o'brien@contoso.com"], [APP], False, True)
+    assert (settings["users"], settings["app_ids"], settings["service_principal_app_ids"], settings["scope_invalid"],
+            collector.ok) == (["admin@contoso.com", "o'brien@contoso.com"], [APP], [SP_APP], False, True)
     kql = sl.scope_filter(settings)
     assert 'in (dynamic(["admin@contoso.com", "o\'brien@contoso.com"]))' in kql and f'in (dynamic(["{APP}"]))' in kql
+    assert SP_APP not in kql, "the service-principal scope never narrows user sign-ins"
+    sp_kql = sl.service_principal_filter(settings)
+    assert f'in (dynamic(["{SP_APP}"]))' in sp_kql and APP not in sp_kql and "admin@contoso.com" not in sp_kql
 
 
 @pytest.mark.parametrize("env, value", [
     (sl.USERS_ENV, 'x" or 1==1 //'), (sl.USERS_ENV, "a\\b@contoso.com"), (sl.APPS_ENV, "not-a-guid"),
+    (sl.SERVICE_PRINCIPAL_APPS_ENV, 'x" or 1==1 //'),
     (sl.USERS_ENV, "forbidden throttle timed out"),  # words that match other failure codes stay out of the message
 ])
 def test_a_scope_value_that_could_break_the_query_fails_as_bad_config(monkeypatch, env, value):
@@ -57,6 +65,7 @@ def test_a_scope_value_that_could_break_the_query_fails_as_bad_config(monkeypatc
     collector = azure_common.Collector(sl.logger)
     settings = sl.settings_from_env(collector)
     assert settings["scope_invalid"] and value.lower() not in sl.scope_filter(settings)
+    assert value.lower() not in sl.service_principal_filter(settings)
     assert value not in collector.failures[0]["message"]
     assert azure_common.classify_failure_code(collector.failures) == "bad_config"
 
@@ -345,19 +354,45 @@ def test_non_interactive_and_service_principal_tables_are_counted_not_copied(arm
 
 
 def test_service_principal_list_asks_for_one_row_more_than_the_cap():
-    settings = {"lookback_days": 30, "max_rows": 2, "users": [], "app_ids": [], "scope_invalid": False}
-    assert sl.service_principal_list_query(settings).endswith("| take 3")
+    assert sl.service_principal_list_query(SETTINGS).endswith("| take 3")
 
 
-def test_service_principal_queries_take_only_the_app_scope(arm, tmp_path, monkeypatch):
+def test_service_principal_queries_take_only_their_own_scope(arm, tmp_path, monkeypatch):
+    """The user scope and app_ids narrow user sign-ins only; service_principal_app_ids narrows service principals only."""
     monkeypatch.setenv(sl.USERS_ENV, "admin@contoso.com")
     monkeypatch.setenv(sl.APPS_ENV, APP)
+    monkeypatch.setenv(sl.SERVICE_PRINCIPAL_APPS_ENV, SP_APP)
     session = arm()
     assert sl.main() == 0
     sp = [q for q in session.queries if q.startswith("AADServicePrincipalSignInLogs")]
-    ni = [q for q in session.queries if q.startswith("AADNonInteractiveUserSignInLogs")]
-    assert sp and all("UserPrincipalName" not in q and APP in q for q in sp)
-    assert ni and all("admin@contoso.com" in q and APP in q for q in ni)
+    users = [q for q in session.queries if q.startswith(("SigninLogs", "AADNonInteractiveUserSignInLogs"))]
+    assert sp and all(SP_APP in q and APP not in q and "UserPrincipalName" not in q for q in sp)
+    assert users and all("admin@contoso.com" in q and APP in q and SP_APP not in q for q in users)
+    summary = _evidence(tmp_path)["summary"]
+    assert (summary["scope_users"], summary["scope_app_ids"], summary["scope_service_principal_app_ids"]) == (
+        ["admin@contoso.com"], [APP], [SP_APP])
+
+
+def test_scoping_service_principals_keeps_every_app_the_scoped_users_signed_in_to(arm, tmp_path, monkeypatch):
+    """The reason the scopes are separate: narrowing service principals to their own app ids must not drop the
+    scoped administrators' sign-ins to the portal, the CLI or any other app."""
+    monkeypatch.setenv(sl.USERS_ENV, "admin@contoso.com")
+    baseline = arm()
+    assert sl.main() == 0
+    before = _evidence(tmp_path)["summary"]
+    monkeypatch.setenv(sl.SERVICE_PRINCIPAL_APPS_ENV, SP_APP)
+    scoped = arm()
+    assert sl.main() == 0
+    after = _evidence(tmp_path)["summary"]
+    user_tables = ("SigninLogs", "AADNonInteractiveUserSignInLogs")
+    assert [q for q in scoped.queries if q.startswith(user_tables)] == [
+        q for q in baseline.queries if q.startswith(user_tables)], "user sign-in queries must not change"
+    assert all("AppId) in" not in q and "AppId)) in" not in q for q in scoped.queries if q.startswith(user_tables))
+    for key in ("sign_ins", "sign_ins_succeeded", "succeeded_multi_factor", "users_signed_in", "non_interactive_sign_ins"):
+        assert after[key] == before[key] is not None, key
+    assert all(SP_APP in q for q in scoped.queries if q.startswith("AADServicePrincipalSignInLogs"))
+    assert after["scope_app_ids"] == [] and after["scope_service_principal_app_ids"] == [SP_APP]
+
 
 
 def test_a_refused_query_leaves_the_new_counts_null(arm, tmp_path):
