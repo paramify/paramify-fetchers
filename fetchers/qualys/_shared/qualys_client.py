@@ -7,19 +7,14 @@ import os
 import re
 import sys
 import time
-from typing import TYPE_CHECKING
-
-from defusedxml import DefusedXmlException
-from defusedxml import ElementTree as SafeET
-from defusedxml.ElementTree import ParseError
-
-if TYPE_CHECKING:
-    from xml.etree import ElementTree as ET
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import parse_qsl, urljoin, urlsplit
 
 import requests
+from defusedxml import DefusedXmlException
+from defusedxml import ElementTree as SafeET
+from defusedxml.ElementTree import ParseError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 from fetcher_status import report_failure  # noqa: E402, F401
@@ -73,7 +68,7 @@ class QualysError(Exception):
         self.code = code
 
 
-def value(node: ET.Element, path: str, required: bool = False) -> str:
+def value(node, path: str, required: bool = False) -> str:
     result = (node.findtext(path) or "").strip()
     if required and not result:
         raise QualysError(f"Qualys response is missing required field {path}")
@@ -112,14 +107,16 @@ def id_list(raw: str) -> str:
     return raw
 
 
-def parse_xml(body: bytes) -> ET.Element:
-    # Qualys uses an external DOCTYPE; ElementTree never fetches it. Reject
-    # internal entities and non-UTF-8 XML before parsing untrusted responses.
+def parse_xml(body: bytes):
+    # Qualys uses an external DOCTYPE. Allow its declaration without fetching
+    # it; defusedxml explicitly refuses entities and external references.
     try:
         decoded = body.decode("utf-8-sig")
         if "\x00" in decoded or "<!ENTITY" in decoded:
             raise ValueError
-        return SafeET.fromstring(decoded, forbid_dtd=False)
+        return SafeET.fromstring(
+            decoded, forbid_dtd=False, forbid_entities=True, forbid_external=True
+        )
     except (UnicodeError, ParseError, DefusedXmlException, ValueError):
         raise QualysError("Qualys returned invalid or unsafe XML") from None
 
@@ -282,16 +279,14 @@ class QualysClient:
             self.sleep(wait)
         raise AssertionError("unreachable")
 
-    def xml(self, path: str, params: dict, root_name: str) -> ET.Element:
+    def xml(self, path: str, params: dict, root_name: str):
         root = parse_xml(self.request(path, params))
         response = root.find("RESPONSE")
         if root.tag != root_name or response is None or not value(response, "DATETIME"):
             raise QualysError(f"Unexpected Qualys response structure at {path}")
         return response
 
-    def next_params(
-        self, response: ET.Element, path: str, original: dict
-    ) -> dict | None:
+    def next_params(self, response, path: str, original: dict) -> dict | None:
         warnings = response.findall(".//WARNING")
         if not warnings:
             return None
