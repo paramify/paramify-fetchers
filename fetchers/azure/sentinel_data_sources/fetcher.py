@@ -176,9 +176,10 @@ def first_row(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return rows[0]
 
 
-def search_table(client, customer_id: str, name: str, hours: int, end: datetime, notes: List[str]) -> Dict[str, Any]:
+def search_table(client, customer_id: str, name: str, hours: int, notes: List[str]) -> Dict[str, Any]:
     """{} when not measured; a warning that the window spans the lake start is answered by searching each side of it."""
     query = SEARCH_QUERY.format(table=name, hours=hours)
+    end = datetime.now(timezone.utc).replace(microsecond=0)  # per table, so a slow earlier search doesn't shift this one's halves
     try:
         row = first_row(client.search(customer_id, query, f"PT{hours}H"))
         return {"LastIngested": row.get("LastIngested"), "Records": row.get("Records") or 0, "lake_data_start": None}
@@ -212,12 +213,11 @@ def search_table(client, customer_id: str, name: str, hours: int, end: datetime,
 def search_tables(client, ws: Dict[str, Any], names: List[str], hours: int, days: int, collector,
                   notes: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
     """Each Basic or Auxiliary table's last ingestion and count, None when its search failed; one not measured is left out."""
-    end = datetime.now(timezone.utc).replace(microsecond=0)
     out: Dict[str, Optional[Dict[str, Any]]] = {}
     for name in names:
         result = collector.guard(
             f"loganalytics.search({name}, {ws['name']})",
-            lambda name=name: search_table(client, ws["customer_id"], name, hours, end, notes),
+            lambda name=name: search_table(client, ws["customer_id"], name, hours, notes),
         )
         if result is None:
             out[name] = None

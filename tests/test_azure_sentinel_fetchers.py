@@ -803,7 +803,7 @@ def test_query_error_details_leave_the_message_and_its_readers_as_they_were(azur
       ("PartialLakeDataWarning", "… starting from 2026-01-02T03:04:05.678Z. …")], True, None),
     ([("PartialLakeDataWarning", f"… starting from {LAKE_START}. …"), ("EngineError", "boom")], False, None),
     ([], False, None),
-])
+], ids=["one-date", "no-date", "two-dates", "other-code", "no-details"])
 def test_data_sources_reads_the_lake_warning(details, warning_only, start):
     m = MODS["sentinel_data_sources"]
     exc = azure_rest.QueryError("PartialError", "There were some errors", details)
@@ -819,7 +819,7 @@ def split_spans(azure, name):
 @pytest.mark.parametrize("before, after, records, last", [
     ([[None, 0]], [[None, 0]], 0, None),  # created at the lake start: nothing before it, and nothing since
     ([[iso(NOW - timedelta(days=3)), 2]], [[iso(NOW - timedelta(hours=1)), 3]], 5, iso(NOW - timedelta(hours=1))),
-])
+], ids=["empty", "data-both-sides"])
 def test_data_sources_splits_a_search_at_the_lake_data_start(azure, tmp_path, monkeypatch, before, after, records, last):
     basic_tables_workspace(azure, monkeypatch)
     azure.queries.insert(0, ("['AppLogs_CL']", [lake_warning([[None, 0]]), table(["LastIngested", "Records"], before),
@@ -846,7 +846,8 @@ def test_data_sources_splits_a_search_at_the_lake_data_start(azure, tmp_path, mo
     assert any("AppLogs_CL: searched in two parts" in n for n in ws["notes"])
 
 
-@pytest.mark.parametrize("spanning, measured", [([[iso(NOW - timedelta(hours=1)), 4]], True), ([[None, 0]], False)])
+@pytest.mark.parametrize("spanning, measured", [([[iso(NOW - timedelta(hours=1)), 4]], True), ([[None, 0]], False)],
+                         ids=["with-data", "empty"])
 def test_data_sources_split_that_still_warns_keeps_only_what_is_certain(azure, tmp_path, monkeypatch, spanning, measured):
     basic_tables_workspace(azure, monkeypatch)
     azure.queries.insert(0, ("['AppLogs_CL']", [lake_warning(spanning), lake_warning([[None, 0]]), table(["LastIngested", "Records"], [[None, 0]])]))
@@ -868,6 +869,24 @@ def test_data_sources_split_that_still_warns_keeps_only_what_is_certain(azure, t
     assert any("AppLogs_CL: a search spanning its lake data start" in n for n in ws["notes"])
 
 
+def test_data_sources_each_table_splits_up_to_the_time_its_own_search_ran(azure, tmp_path, monkeypatch):
+    basic_tables_workspace(azure, monkeypatch)
+    for name in ("StorageBlobLogs", "AppLogs_CL"):
+        azure.queries.insert(0, (f"['{name}']", [lake_warning([[None, 0]], table_name=name), table(["LastIngested", "Records"], [[None, 0]]),
+                                                 table(["LastIngested", "Records"], [[None, 0]])]))
+    clock = iter(datetime.now(timezone.utc) + timedelta(minutes=10 * i) for i in range(100))
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return next(clock)
+
+    monkeypatch.setattr(MODS["sentinel_data_sources"], "datetime", Clock)
+    code, _ = run("sentinel_data_sources", tmp_path)
+    ends = {name: azure_rest.parse_time(split_spans(azure, name)[2].split("/")[1]) for name in ("StorageBlobLogs", "AppLogs_CL")}
+    assert code == 0 and abs(ends["AppLogs_CL"] - ends["StorageBlobLogs"]) == timedelta(minutes=10)  # one clock read per table
+
+
 @pytest.mark.parametrize("answers, tries", [
     ([lake_warning([[None, 0]], extra=[{"code": "EngineError", "message": "boom"}])], 1),  # not warning-only
     ([Resp(200, {**table(["LastIngested", "Records"], [[None, 0]]),
@@ -883,7 +902,8 @@ def test_data_sources_other_partial_errors_still_fail_the_search(azure, tmp_path
     assert ws["tables_search_failed"] == ["AppLogs_CL"] and ws["sources_ingesting"] is None
 
 
-@pytest.mark.parametrize("start", [None, iso(NOW - timedelta(days=30))[:-4] + "Z"])
+@pytest.mark.parametrize("start", [None, iso(NOW - timedelta(days=30))[:-4] + "Z"],
+                         ids=["no-date", "date-before-the-window"])
 def test_data_sources_lake_warning_without_a_date_in_the_window_is_not_split(azure, tmp_path, monkeypatch, start):
     basic_tables_workspace(azure, monkeypatch)
     warning = lake_warning([[None, 0]], start=start or "")

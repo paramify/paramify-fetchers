@@ -65,7 +65,8 @@ config_schema:
       at the 720 (30 days) /search reaches. With fewer hours than the window, a
       table with no record in them stays not measured, since it may have
       received data earlier in the window; set ingestion_window_days × 24 to
-      measure every such table. A value of 0 or less leaves the search off, and
+      measure every such table (only for an ingestion window of 30 days or
+      less, since the hours are capped at 720). A value of 0 or less leaves the search off, and
       so does one that isn't a whole number, with a warning. After a table is
       created on, or switched to, the Auxiliary plan, a search spanning the date
       its lake data starts may be partial, until that date is older than the

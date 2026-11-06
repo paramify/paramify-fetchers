@@ -30,7 +30,8 @@ schemas and the `paramify` CLI — not the internal code.
     connected or not connected. One that filters a table with data stays
     unmeasured, since answering it would bill another scan.
   - **An empty table** is measured only when the search covers the whole
-    window. With fewer hours, it stays not measured.
+    window (an ingestion window of 30 days or less, since `/search` reaches 30
+    days). With fewer hours, it stays not measured.
   - **A table new to the Auxiliary plan.** After a table is created on, or
     switched to, the Auxiliary plan, a search spanning the date its lake data
     starts answers with a `PartialLakeDataWarning`, until that date is older
