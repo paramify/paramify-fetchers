@@ -228,3 +228,30 @@ def test_no_secret_like_fields_are_copied():
     raw["properties"]["expandedProperties"]["principal"]["password"] = "nope"
     r = pa.request_record(raw, SUB)
     assert "should-not-appear" not in str(r) and "nope" not in str(r)
+
+
+def test_both_lists_failed_leaves_pim_available_unknown():
+    err = ArmError(500, "InternalServerError", "boom")
+    _, summary, collector = run(FakeClient(fail={"roleAssignmentScheduleRequests": err,
+                                                 "roleAssignmentScheduleInstances": err}))
+    assert not collector.ok and summary["pim_available"] is None
+    assert summary["requests_total"] is None and summary["currently_active_activations"] is None
+
+
+@pytest.mark.parametrize("code, message", [
+    ("InvalidFilter", "The filter is not supported for premium accounts"),
+    ("BadRequest", "The license check service is unavailable"),
+])
+def test_an_unrelated_400_mentioning_a_licence_or_premium_is_a_failure(code, message):
+    err = ArmError(400, code, message)
+    _, summary, collector = run(FakeClient(fail={"roleAssignmentScheduleRequests": err,
+                                                 "roleAssignmentScheduleInstances": err}))
+    assert not collector.ok and summary["pim_available"] is None and summary["requests_total"] is None
+
+
+def test_the_licence_codes_still_read_as_no_pim():
+    for code in ("AadPremiumLicenseRequired", "TenantNotOnboarded"):
+        err = ArmError(400, code, "not available")
+        _, summary, collector = run(FakeClient(fail={"roleAssignmentScheduleRequests": err,
+                                                     "roleAssignmentScheduleInstances": err}))
+        assert collector.ok and summary["pim_available"] is False, code

@@ -63,6 +63,8 @@ evidence_set:
     principal, role and scope names) and roleAssignmentScheduleInstances
     (filtered to assignmentType Activated for the activations in force).
     Read-only; Reader on the subscription is enough, no Microsoft Graph
-    permission is needed. A 400 carrying a licence marker means the tenant has
-    no PIM and is reported as pim_available false; any other failed list
-    leaves its summary keys null and fails the run.
+    permission is needed. A 400 whose error code is AadPremiumLicenseRequired
+    or TenantNotOnboarded means the tenant has no PIM and is reported as
+    pim_available false; any other failed list leaves its summary keys null
+    and fails the run, and when both lists fail that way pim_available is
+    null.

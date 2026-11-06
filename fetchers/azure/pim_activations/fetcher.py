@@ -49,8 +49,10 @@ OVER_BROAD_BUILTIN_ROLES = {
     "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9": "User Access Administrator",
     "f58310d9-a9f6-439a-9e8d-f62e7b41a168": "Role Based Access Control Administrator",
 }
-# Without Entra ID P2 or ID Governance the PIM lists answer 400 with one of these: a state, not a failure.
-PIM_UNAVAILABLE_MARKERS = ("aadpremiumlicenserequired", "tenantnotonboarded", "licens", "premium")
+# Without Entra ID P2 or ID Governance the PIM lists answer 400 with one of these error codes: a state, not a
+# failure. Only the code is matched, never the message, so an unrelated 400 that mentions a licence or "premium"
+# stays a recorded failure instead of reading as "no PIM".
+PIM_UNAVAILABLE_CODES = ("aadpremiumlicenserequired", "tenantnotonboarded")
 SELF_ACTIVATION = "SelfActivate"
 ADMIN_ASSIGN = "AdminAssign"
 # Outcomes a request can end in (the Status enum of the 2020-10-01 API); anything else is reported as it came back.
@@ -70,8 +72,8 @@ logger = logging.getLogger(NAME)
 
 
 def pim_unavailable(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    return isinstance(exc, ArmError) and exc.status == 400 and any(m in text for m in PIM_UNAVAILABLE_MARKERS)
+    code = (getattr(exc, "code", None) or "").lower()
+    return isinstance(exc, ArmError) and exc.status == 400 and any(code.startswith(c) for c in PIM_UNAVAILABLE_CODES)
 
 
 def _iso(value: Any) -> Optional[str]:
@@ -284,6 +286,9 @@ def collect(client, subscription_id: str, collector) -> tuple:
     raw_instances = _list("roleAssignmentScheduleInstances")
     if raw_requests == "unavailable" or raw_instances == "unavailable":
         pim_available = False
+    elif raw_requests is None and raw_instances is None:
+        # Both lists failed for another reason: whether PIM is in use is unknown, not true.
+        pim_available = None
     requests = None
     if isinstance(raw_requests, list):
         requests = sorted((request_record(r, subscription_id) for r in raw_requests),
