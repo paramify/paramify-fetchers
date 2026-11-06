@@ -10,7 +10,57 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Breaking
+
+- **Inventory records must carry a `source` object.** Each item of
+  `payload.data` now requires `source`: the asset exactly as the source API
+  returned it, with no field dropped. Existing inventory fetchers must add
+  `source` to each item. If they do not, the inventory is incomplete, and
+  `paramify upload` does not send it. The inventory template shows how.
+
 ### Added
+
+- **Evidence uploads go out as batches.** `paramify upload` now sends the files
+  of each fetcher entry as one batch. Paramify submits and approves a batch as
+  one unit. The batch goes through the channel of the evidence set, on the
+  current artifact request. A set with no channel gets the batch on the set. A
+  set with several channels no longer fails: the upload uses the channel on the
+  stack of the entry. It refuses one entry, and gives the fix, when no stack is
+  set, the stack is unknown, or no channel is on that stack. `no_request:
+  evidence` sends the batch to the set instead. A temporary failure holds the
+  batch open, and the same upload resumes it. A file that fails for good is
+  dropped and named, and the rest goes in. Uploading the same run again changes
+  nothing, also for a run that the earlier uploader sent before batches. When
+  the API refuses a write (400, 405, 415, 422) for one set or batch, only that
+  entry fails. Only a 401 or 403 stops the upload. A refused tag is a warning.
+  Batches need Paramify API 0.14.0 or later. An entry that cannot use a batch
+  is sent direct, the way the uploader sent it before batches. This covers a
+  workspace without batches, a channel with no artifact request, and
+  `delivery: direct`.
+- **`delivery: auto | direct`** in the `paramify` block of the manifest, on the
+  run or on one entry. `direct` sends the entry the way the uploader sent it
+  before batches. `auto` is the default.
+- **`no_request: direct`, now the default.** When a channel has no artifact
+  request, the upload sends the entry direct and warns. `evidence` and `refuse`
+  still work.
+- **Direct delivery in the upload result.** Each entry has a `mode` (`batch`,
+  `direct`, or null for an entry the upload did not route). The summary has
+  `batches`, which says whether the workspace has batches and why not. In a dry
+  run, `batches` is null. It is also null when the check for batches failed.
+- **`paramify upload --plan`** reads the workspace and changes nothing. It
+  prints the plan. For each entry it shows the set, stack, channel and artifact
+  request, and whether the batch is new, resumed or done. It also shows dropped
+  files and open batches from earlier runs. `--dry-run` stays offline and needs
+  no token.
+- **`paramify upload --stack`, `paramify stacks`, `paramify manifest set-stack`,
+  and the `run.paramify` manifest keys.** `run.paramify` and the `paramify`
+  block of each entry hold `stack`, `stack_name`, `approval` and `no_request`.
+  `paramify run` records them for each entry in `_run_metadata.json`, and the
+  upload reads them from there. `paramify stacks` lists the stacks in the
+  workspace. `manifest set-stack MANIFEST STACK [--fetcher NAME]` stores a
+  stack. `paramify validate --online` checks stack ids.
+- **`plan` event.** `upload_run` emits `plan` after planning, beside
+  `upload_start`, `upload_file` and `upload_complete`.
 
 - **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
   secret and certificate gets `lifetime_days` (end date minus start date, null when
@@ -1129,6 +1179,34 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **Upload result shape.** The `--json` summary and `upload_log.json` keep
+  `uploaded`, `skipped_duplicate`, `skipped_failed`, `errors` and `ok` for one
+  release. So do the `upload_start`, `upload_file` and `upload_complete` events.
+  `results` no longer holds `evidence_id`, `artifact_id` or `channel_id` for each
+  file. The summary and the log add `dropped`, `plan`, `entries` and
+  `outcomes`. Each entry has a state, batch, stack, channel and artifact
+  request, and its state is `planned` for a dry run. With `--with-validators`
+  they add `validators`. A dry run with `--with-validators` names the sync it
+  would do and syncs nothing. `dropped` counts the files that the upload
+  dropped. `errors` does not count them, so `ok` is true only when `errors` is
+  0. A dropped file has the outcome `dropped` in `results` and does not change
+  the exit code. A file that is unreadable, not an envelope, or has no complete
+  evidence set still counts in `errors` and makes `ok` false, as before. The
+  other files of the entry still go in.
+- **New evidence sets get the approval mode
+  `SUBMISSION_WITH_PASSING_VALIDATORS`** (was the API default, `SUBMISSION`).
+  Set `approval` in the manifest to choose another. The upload never changes an
+  existing set.
+- **Run ids gain a 4-hex suffix** (`run-2026-11-01T02-00-00Z-a1b2`). Two runs
+  that start together no longer share a directory. Readers accept both forms.
+- **`--with-validators` now runs before delivery.** A new set has its validators
+  before its first batch goes in. If the validator sync fails, the upload sends
+  no batch for any entry of the run, and the run exits 1.
+- **`deploy/run-and-upload.sh` uploads the run it just collected.** It reads the
+  run directory from `paramify run --json` and no longer takes the newest run on
+  disk. An optional second argument names the stack. It writes one line for each
+  fetcher run to stderr: the entry, the target, the exit code and the last error
+  line. `./run_and_upload.sh` does the same.
 - **`azure_waf_ddos_activity` 0.2.0: DDoS figures include IPs protected by a network-level DDoS plan.**
   The existing figures `protected_ips_with_attack_alert_reaching_receiver`,
   `protected_ips_without_attack_alert`, `public_ips_attacked` and
@@ -2148,6 +2226,13 @@ schemas and the `paramify` CLI — not the internal code.
   provides.
   Other existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
   evidenceable.
+
+### Deprecated
+
+- **`uploaders/paramify_evidence/uploader.py`.** It still works and keeps its
+  flags. It now hands the run to the same engine as `paramify upload`, prints a
+  deprecation notice, and writes the notice under `deprecations` in
+  `upload_log.json`. Use `paramify upload`.
 
 ## [0.6.0-beta] - 2026-10-23
 

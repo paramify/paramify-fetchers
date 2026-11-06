@@ -29,7 +29,8 @@ _spec.loader.exec_module(uploader)
 
 
 def _records(n: int) -> list:
-    return [{"unique_asset_identifier": f"arn:aws:ec2:us-east-2:1:instance/i-{i}", "name": f"vm{i}"}
+    return [{"unique_asset_identifier": f"arn:aws:ec2:us-east-2:1:instance/i-{i}", "name": f"vm{i}",
+             "source": {"InstanceId": f"i-{i}", "Extra": {"kept": True}}}
             for i in range(n)]
 
 
@@ -109,8 +110,11 @@ def test_an_empty_inventory_is_not_complete():
 @pytest.mark.parametrize("payload, needle", [
     ({"records_included": True}, "'data' is a required property"),
     ({"data": [], "records_included": "yes"}, "is not of type 'boolean'"),
-    (_payload(records=[{"name": "no id"}]), "'unique_asset_identifier' is a required property"),
-    (_payload(records=[{"unique_asset_identifier": ""}]), "payload.data[0].unique_asset_identifier"),
+    (_payload(records=[{"name": "no id", "source": {}}]), "'unique_asset_identifier' is a required property"),
+    (_payload(records=[{"unique_asset_identifier": "", "source": {}}]), "payload.data[0].unique_asset_identifier"),
+    (_payload(records=[{"unique_asset_identifier": "a"}]), "data[0]: missing source"),
+    (_payload(records=[{"unique_asset_identifier": "a", "source": "raw"}]), "data[0]: source must be an object"),
+    (_payload(records=[{"unique_asset_identifier": "a", "source": None}]), "data[0]: source must be an object"),
     ({"data": _records(1), "records_included": False}, "payload.data"),
     (_payload(records=_records(1) * 2), "repeat a unique_asset_identifier"),
 ])
@@ -121,8 +125,19 @@ def test_contract_breaks_are_named(payload, needle):
     assert any(needle in p for p in block["problems"]), block["problems"]
 
 
+def test_an_empty_source_object_is_valid():
+    block = inventory.check(_payload(records=[{"unique_asset_identifier": "a", "source": {}}]), 0)
+    assert block["complete"] is True
+    assert "problems" not in block
+
+
+def test_a_missing_source_is_reported_exactly():
+    assert inventory.payload_problems(_payload(records=[{"unique_asset_identifier": "a"}])) == [
+        "data[0]: missing source"]
+
+
 def test_a_systematic_break_is_summarised_not_listed_per_record():
-    block = inventory.check(_payload(records=[{"name": str(i)} for i in range(500)]), 0)
+    block = inventory.check(_payload(records=[{"name": str(i), "source": {}} for i in range(500)]), 0)
     assert len(block["problems"]) == 6
     assert block["problems"][-1] == "... and 495 more"
 
@@ -223,3 +238,32 @@ def test_plain_evidence_gets_no_inventory_verdict(tmp_path):
     run_dir = _run(tmp_path)
     assert "inventory" not in _envelope(run_dir)["metadata"]
     assert _dry_upload(run_dir)["outcome"] == "would_upload"
+
+
+# --------------------------------------------------------------------------- #
+# The template
+# --------------------------------------------------------------------------- #
+
+def test_template_record_carries_the_source_record_verbatim(monkeypatch):
+    # The template sits one level above where a real fetcher lives, so its
+    # relative path to the shared helper does not resolve here.
+    monkeypatch.syspath_prepend(str(REPO_ROOT / "fetchers" / "_lib"))
+    spec = importlib.util.spec_from_file_location(
+        "template_inventory_under_test", REPO_ROOT / "fetchers" / "_template_inventory" / "fetcher.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    raw = {"id": "a-1", "name": "vm", "type": "vm", "nested": {"keep": [1, 2]}, "unlisted": "x"}
+    expected = json.loads(json.dumps(raw))
+    rec = mod.record(raw)
+    assert rec["source"] == expected
+    assert inventory.payload_problems({"data": [rec], "records_included": True}) == []
+
+
+def test_authoring_guidance_names_the_required_source_record():
+    """The fetcher schema's `kind` text and the create-fetcher skill both state the rule."""
+    kind = json.loads((SCHEMAS / "fetcher_schema.json").read_text())["properties"]["kind"]["description"]
+    assert "`source`" in kind and "verbatim" in kind
+    skill = (REPO_ROOT / ".claude" / "skills" / "create-fetcher" / "SKILL.md").read_text()
+    start = skill.index("→ INVENTORY")
+    inventory_step = skill[start:skill.index("COMPARATOR", start)]
+    assert "`source`" in inventory_step and "verbatim" in inventory_step

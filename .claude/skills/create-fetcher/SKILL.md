@@ -75,8 +75,11 @@ this one cannot reach (Phase 4).
      `fetchers/_template_inventory/` (not `_template/`) and read its README
      and `framework/schemas/inventory_schema.json`. It is an evidence fetcher with
      `kind: inventory`, a required `evidence_set`, and a payload of `data`
-     (one record per asset, each with a unique `unique_asset_identifier`) plus
-     `records_included`. All or nothing: any failed page or unreadable asset
+     (one record per asset, each with a unique `unique_asset_identifier` and a
+     required `source` object: the asset verbatim, exactly as the source API
+     returned it, with no field dropped) plus `records_included`. A record
+     without `source` makes the inventory incomplete, and the upload does not
+     send it. All or nothing: any failed page or unreadable asset
      writes `data: []`, `records_included: false` and exits non-zero. Everything
      below applies. In the Phase 4 smoke test, also check the envelope's
      `metadata.inventory.complete` is true. Test the failure paths, not only the

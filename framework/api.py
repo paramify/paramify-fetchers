@@ -22,6 +22,7 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
 import tempfile
@@ -29,10 +30,11 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 import yaml
+from dotenv import load_dotenv
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
@@ -63,30 +65,28 @@ from framework.issue_reports import (
 )
 from framework.issue_reports import read_index as read_issue_report_index
 from framework.issue_reports import record_outputs as record_issue_reports
+from framework.paramify.client import base_url_error
 from framework.paramify_auth import (
     BASE_URL_ENV,
     READ_TOKEN_ENV,
     UPLOAD_TOKEN_ENV,
     describe_base_url,
+    missing_token_error,
     resolve_base_url,
     resolve_upload_token,
 )
 from framework.probe import probe_categories
+from framework.run_files import is_evidence_file
 from framework.runner import dependency_graph, manifest_loader
 from framework.secret_resolver import (
     is_env_ref_attempt,
     is_partial_env_ref,
     view_runtime_value,
 )
+from framework.sync import upload as _sync_upload
+from framework.sync.model import Plan
 
-
-def _missing_token_error() -> str:
-    """One wording for the missing-token error, since three call sites raise it."""
-    return (
-        f"{UPLOAD_TOKEN_ENV} is not set (or {READ_TOKEN_ENV} as a fallback). "
-        f"Set it in the environment by any means — export, .env, secret manager, "
-        f"CI secret — or run `paramify doctor <manifest>` to check before a run."
-    )
+_missing_token_error = missing_token_error
 
 _STDERR_TAIL_CHARS = 4000
 
@@ -840,30 +840,56 @@ def add_entry(m: dict, use: str, fetchers: Optional[Mapping[str, Any]] = None) -
     return added
 
 
-def remove_entry(m: dict, use: str) -> dict:
+def remove_entry(m: dict, use: str, entry_key: Optional[str] = None) -> dict:
+    """Remove every entry that uses `use`, or, given `entry_key` (`x#1`), only that entry."""
     run = _run(m)
-    run["fetchers"] = [e for e in _entries(m) if e.get("use") != use]
+    if entry_key is None:
+        run["fetchers"] = [e for e in _entries(m) if e.get("use") != use]
+        return m
+    hit = next((e for k, e in _keyed_entries(m) if k == entry_key), None)
+    run["fetchers"] = [e for e in _entries(m) if e is not hit]
     return m
 
 
-def set_fetcher_config(m: dict, use: str, key: str, value: Any) -> dict:
-    _ensure_entry(m, use).setdefault("config", {})[key] = value
+def _existing_entry(m: dict, use: str, entry_key: Optional[str]) -> Optional[dict]:
+    """The entry named by `entry_key`, else the first using `use`; None when absent."""
+    if entry_key is None:
+        return _find_entry(m, use)
+    return next((e for k, e in _keyed_entries(m) if k == entry_key), None)
+
+
+def _entry_for(m: dict, use: str, entry_key: Optional[str]) -> dict:
+    """The entry to write: the one named by `entry_key` (`x`, `x#1`) when given, else the
+    first entry using `use` (created when missing)."""
+    if entry_key is None:
+        return _ensure_entry(m, use)
+    hit = next((e for k, e in _keyed_entries(m) if k == entry_key), None)
+    if hit is None:
+        raise ValueError(f"no entry {entry_key!r} in the manifest")
+    return hit
+
+
+def set_fetcher_config(m: dict, use: str, key: str, value: Any, entry_key: Optional[str] = None) -> dict:
+    _entry_for(m, use, entry_key).setdefault("config", {})[key] = value
     return m
 
 
-def set_secret(m: dict, use: str, name: str, env_var: str) -> dict:
+def set_secret(m: dict, use: str, name: str, env_var: str, entry_key: Optional[str] = None) -> dict:
     """Set a (non-per-target) secret reference for a fetcher entry. Stores a
-    ${env:VAR} reference — never the secret value."""
-    _ensure_entry(m, use).setdefault("secrets", {})[name] = f"${{env:{env_var}}}"
+    ${env:VAR} reference — never the secret value. `entry_key` (`x#1`) picks one of
+    several entries that use the same fetcher."""
+    _entry_for(m, use, entry_key).setdefault("secrets", {})[name] = f"${{env:{env_var}}}"
     return m
 
 
 def add_target(
-    m: dict, use: str, values: Dict[str, Any], secret_env: Optional[Dict[str, str]] = None
+    m: dict, use: str, values: Dict[str, Any], secret_env: Optional[Dict[str, str]] = None,
+    entry_key: Optional[str] = None,
 ) -> dict:
     """Append a fanout target. secret_env maps per_target secret name -> ENV_VAR;
-    each is stored as a ${env:VAR} reference."""
-    entry = _ensure_entry(m, use)
+    each is stored as a ${env:VAR} reference. `entry_key` (`x#1`) picks one of
+    several entries that use the same fetcher."""
+    entry = _entry_for(m, use, entry_key)
     target = dict(values)
     if secret_env:
         target["secrets"] = {n: f"${{env:{v}}}" for n, v in secret_env.items()}
@@ -874,15 +900,17 @@ def add_target(
 def set_target(
     m: dict, use: str, index: int, values: Dict[str, Any],
     secret_env: Optional[Dict[str, str]] = None,
+    entry_key: Optional[str] = None,
 ) -> dict:
     """Replace the fanout target at `index`. Raises IndexError if it is not there.
 
     A replace rather than a merge: the editor hands back every field it showed,
     and a field the user cleared has to actually clear. Per-target secrets are
     preserved when `secret_env` is None, because the editor can show a target's
-    values without touching credentials it never displayed.
+    values without touching credentials it never displayed. `entry_key` (`x#1`)
+    picks one of several entries that use the same fetcher.
     """
-    entry = _find_entry(m, use)
+    entry = _existing_entry(m, use, entry_key)
     targets = (entry or {}).get("targets") or []
     if not 0 <= index < len(targets):
         raise IndexError(f"{use} has no target at index {index}")
@@ -896,10 +924,11 @@ def set_target(
     return m
 
 
-def remove_target(m: dict, use: str, index: int) -> dict:
+def remove_target(m: dict, use: str, index: int, entry_key: Optional[str] = None) -> dict:
     """Remove the fanout target at `index` from a fetcher entry. No-op if the
-    entry or index does not exist."""
-    entry = _find_entry(m, use)
+    entry or index does not exist. `entry_key` (`x#1`) picks one of several
+    entries that use the same fetcher."""
+    entry = _existing_entry(m, use, entry_key)
     if entry is not None:
         targets = entry.get("targets") or []
         if 0 <= index < len(targets):
@@ -1055,13 +1084,14 @@ def remove_pattern(m: dict, scope: str, target: str, field: str, pattern: Option
     return gone
 
 
-def set_pattern_list(m: dict, use: str, field: str, items: List[patterns.Item], category: Optional[str] = None) -> None:
+def set_pattern_list(m: dict, use: str, field: str, items: List[patterns.Item], category: Optional[str] = None,
+                     entry_key: Optional[str] = None) -> None:
     """Give a fetcher its own pattern list. An empty one stays as [] while its category lists patterns, so those don't
-    come back to it, and is dropped otherwise."""
+    come back to it, and is dropped otherwise. `entry_key` (`x#1`) picks one of several entries that use `use`."""
     if items or category_patterns(m, category, field):
-        set_fetcher_config(m, use, field, [it.as_manifest() for it in items])
+        set_fetcher_config(m, use, field, [it.as_manifest() for it in items], entry_key=entry_key)
     else:
-        held = _existing_pattern_holder(m, "entry", use)
+        held = (_existing_entry(m, use, entry_key) or {}).get("config")
         if held is not None:
             held.pop(field, None)
 
@@ -1319,6 +1349,7 @@ def _invocation_record(r) -> dict:
         record["stderr_tail"] = r.stderr[-_STDERR_TAIL_CHARS:]
     if r.inputs is not None:
         record["inputs"] = r.inputs
+    record["entry_key"] = r.entry_key
     return record
 
 
@@ -1432,9 +1463,12 @@ def run(
         if on_event is not None:
             on_event(event)
 
-    run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    # The suffix keeps two runs started in the same second apart.
+    run_id = f"{datetime.now(timezone.utc):%Y-%m-%dT%H-%M-%SZ}-{secrets.token_hex(2)}"
     run_dir = parsed.output_dir.resolve() / f"run-{run_id}"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(parents=True, exist_ok=False)
+    # Keys come from manifest order; dependency_graph.order only reorders the same objects.
+    keys = {id(e): k for e, k in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries))}
 
     # Two phases: every fetcher in manifest order, then every comparator.
     entries = dependency_graph.order(parsed.entries, fetchers)
@@ -1510,6 +1544,7 @@ def run(
                 on_note=on_note,
                 inputs_index=inputs_index,
                 secret_vars=secret_vars,
+                entry_key=keys[id(entry)],
             )
         except (RuntimeError, ValueError) as e:
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
@@ -1560,6 +1595,10 @@ def run(
         "started_at": started_at,
         "completed_at": completed_at,
         "invocations": [_invocation_record(r) for r in all_results],
+        "paramify": {
+            keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(parsed, e)}
+            for e in entries
+        },
     }
     metadata_path = run_dir / "_run_metadata.json"
     metadata_path.write_text(json.dumps(metadata, indent=2, default=str))
@@ -1608,19 +1647,6 @@ def _upload_config(root: Path, config_path: Optional[Path]) -> Optional[Path]:
     return Path(config_path) if config_path else default_upload_config(root)
 
 
-def _load_paramify_uploader(root: Path):
-    """Load the source-tree uploader without requiring uploaders/ to be packaged."""
-    path = Path(root) / "uploaders" / "paramify_evidence" / "uploader.py"
-    if not path.exists():
-        raise RuntimeError(f"Paramify evidence uploader not found at {path}")
-    spec = importlib.util.spec_from_file_location("paramify_evidence_uploader", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load Paramify evidence uploader from {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def _load_paramify_validator_syncer(root: Path):
     """Load the source-tree validator syncer without requiring uploaders/ to be packaged."""
     path = Path(root) / "uploaders" / "paramify_validators" / "syncer.py"
@@ -1645,7 +1671,7 @@ def reference_ids_from_run(run_dir) -> set:
     if not run_path.is_dir():
         return refs
     for p in sorted(run_path.glob("*.json")):
-        if p.name in ("_run_metadata.json", "upload_log.json"):
+        if not is_evidence_file(p):
             continue
         try:
             env = json.loads(p.read_text())
@@ -1722,10 +1748,9 @@ def upload_preflight(
     dry_run: bool = False,
 ) -> dict:
     """Inspect upload readiness without making Paramify API calls."""
-    uploader = _load_paramify_uploader(root)
-    uploader.load_dotenv()
+    load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
+    config = _sync_upload.load_config(config_path)
     paramify_cfg = config.get("paramify") or {}
     base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
 
@@ -1735,11 +1760,11 @@ def upload_preflight(
     if not run_path.is_dir():
         errors.append(f"No run directory to upload: {run_path}")
     else:
-        file_count = sum(1 for _ in uploader.iter_evidence_files(run_path))
+        file_count = sum(1 for p in run_path.glob("*.json") if is_evidence_file(p))
         if file_count == 0:
             errors.append(f"No evidence files found in {run_path}")
 
-    url_error = uploader._base_url_error(base_url)
+    url_error = base_url_error(base_url)
     if url_error:
         errors.append(url_error)
 
@@ -1763,6 +1788,29 @@ def upload_preflight(
     }
 
 
+def plan_upload(
+    run_dir,
+    root: Path,
+    config_path: Optional[Path] = None,
+    *,
+    online: bool,
+    stack: Optional[str] = None,
+    only_file: Optional[str] = None,
+    custom_tags: bool = True,
+    with_validators: bool = False,
+) -> Plan:
+    """The upload plan for one run directory; nothing is written.
+
+    Online it reads the workspace and needs a token; `online=False` needs
+    neither, and shows routing values as unknown. Raises ValueError for setup
+    errors. `framework.sync.render.render_plan` turns the plan into text.
+    """
+    return _sync_upload.plan_upload(
+        run_dir, root, _upload_config(root, config_path), online=online, stack=stack,
+        only_file=only_file, custom_tags=custom_tags, with_validators=with_validators,
+    )
+
+
 def upload_run(
     run_dir,
     root: Path,
@@ -1771,23 +1819,127 @@ def upload_run(
     dry_run: bool = False,
     on_event: Optional[Callable[[dict], None]] = None,
     custom_tags: bool = True,
+    stack: Optional[str] = None,
+    only_file: Optional[str] = None,
+    with_validators: bool = False,
+    upload_cfg: Optional[dict] = None,
+    token: Optional[str] = None,
+    base_url: Optional[str] = None,
+    deprecations: Sequence[str] = (),
 ) -> dict:
-    """Upload one run directory to Paramify.
+    """Upload one run directory to Paramify, one batch per manifest entry.
 
-    Fires upload_start / upload_file / upload_complete so front-ends can render
-    progress. Raises ValueError for setup errors; returns the uploader summary
-    for completed batches, even when some files failed.
+    Plans, then applies under a lock on the run. Fires upload_start /
+    upload_file / upload_complete (plus the engine's action_* and
+    delivery_file events) so front-ends can render progress. A dry run plans
+    offline: no token and no API call. Raises ValueError for setup errors;
+    otherwise returns the summary (`uploaded`, `skipped_duplicate`,
+    `skipped_failed`, `errors`, `ok`, `plan`, `entries`, ...), even when some
+    entries failed. `with_validators` syncs validators for the run's sets
+    before delivery. `upload_cfg` (a config dict used instead of the file),
+    `token` and `base_url` (both ahead of the environment) are for callers that
+    already hold them; `deprecations` are notes for `upload_log.json`.
     """
-    uploader = _load_paramify_uploader(root)
-    config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    return uploader.upload_run(
-        Path(run_dir),
-        config=config,
-        dry_run=dry_run,
-        on_event=on_event,
-        custom_tags=custom_tags,
+    return _sync_upload.run_upload(
+        run_dir, root, _upload_config(root, config_path), dry_run=dry_run, on_event=on_event,
+        custom_tags=custom_tags, stack=stack, only_file=only_file, with_validators=with_validators,
+        upload_cfg=upload_cfg, token=token, base_url=base_url, deprecations=deprecations,
     )
+
+
+def list_stacks(root: Optional[Path] = None, config_path: Optional[Path] = None) -> List[dict]:
+    """The workspace's stacks as `[{"id", "name"}]`, sorted by name. Needs a token.
+
+    Raises ValueError when there is no token or the base URL is invalid; an
+    API error is raised as it is.
+    """
+    root = Path(root) if root is not None else find_repo_root()
+    load_dotenv()
+    config = _sync_upload.load_config(_upload_config(root, config_path))
+    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
+    url_error = base_url_error(base_url)
+    if url_error:
+        raise ValueError(url_error)
+    token, _ = resolve_upload_token()
+    if not token:
+        raise ValueError(_missing_token_error())
+    stacks = _sync_upload.Resources(_sync_upload.Client(token, base_url)).stacks()
+    return sorted(({"id": s.id, "name": s.name} for s in stacks), key=lambda s: (s["name"], s["id"]))
+
+
+def _run_block(m: dict) -> dict:
+    run = m.get("run")
+    return run if isinstance(run, dict) else {}
+
+
+def _keyed_entries(m: dict) -> List[Tuple[str, dict]]:
+    """Each fetcher entry with its entry key (`x`, `x#1`), as the runner names them."""
+    run = _run_block(m)
+    entries = [e for e in run.get("fetchers") or [] if isinstance(e, dict) and isinstance(e.get("use"), str)]
+    return list(zip(manifest_loader.entry_keys([ManifestEntry(use=e["use"]) for e in entries]), entries))
+
+
+def resolve_stack(stacks: Sequence[Mapping[str, Any]], value: str) -> Dict[str, str]:
+    """The workspace stack a user's `value` names: an exact id first, then an exact (case-sensitive) name.
+
+    Raises ValueError when nothing matches, or when a name is shared by several
+    stacks (the message lists their ids).
+    """
+    for s in stacks:
+        if s["id"] == value:
+            return {"id": s["id"], "name": s["name"]}
+    named = [s for s in stacks if s["name"] == value]
+    if len(named) == 1:
+        return {"id": named[0]["id"], "name": named[0]["name"]}
+    if named:
+        ids = ", ".join(s["id"] for s in named)
+        raise ValueError(f"{len(named)} stacks are named {value!r}; use one of these ids: {ids}")
+    known = ", ".join(s["name"] for s in stacks) or "none"
+    raise ValueError(f"no stack {value!r} in this workspace (stacks: {known})")
+
+
+def stack_errors(manifest: dict, stacks: Sequence[Mapping[str, Any]]) -> List[str]:
+    """One error for each `stack` in the manifest (the default and each entry's) that no workspace stack matches."""
+    run = _run_block(manifest)
+    places = [("run.paramify.stack", (run.get("paramify") or {}).get("stack"))]
+    places += [(f"fetchers[{k}].paramify.stack", (e.get("paramify") or {}).get("stack"))
+               for k, e in _keyed_entries(manifest)]
+    errors = []
+    for where, value in places:
+        if not value:
+            continue
+        try:
+            resolve_stack(stacks, str(value))
+        except ValueError as exc:
+            errors.append(f"{where}: {exc}")
+    return errors
+
+
+def set_stack(m: dict, stack: str, stack_name: Optional[str] = None, use: Optional[str] = None) -> dict:
+    """Record the Paramify stack uploads go to: manifest-wide, or for one fetcher entry.
+
+    Writes `run.paramify.stack` (and `stack_name` when given). With `use`, writes
+    that entry's `paramify` block instead. `use` is an entry key (`aws_iam_mfa` is
+    the first entry for that fetcher, `aws_iam_mfa#1` the second) or a fetcher
+    name; one that matches none, or several, raises ValueError naming the entry keys.
+    """
+    if use is None:
+        block = _run(m).setdefault("paramify", {})
+    else:
+        pairs = _keyed_entries(m)
+        hits = [(k, e) for k, e in pairs if k == use] or [(k, e) for k, e in pairs if e.get("use") == use]
+        if len(hits) != 1:
+            names = ", ".join(k for k, _ in hits) if hits else ", ".join(k for k, _ in pairs) or "none"
+            what = (f"matches several entries; use {hits[0][0]} for the first, {hits[0][0]}#1 for the second"
+                    if hits else "matches no entry")
+            raise ValueError(f"{use!r} {what} (entries: {names})")
+        block = hits[0][1].setdefault("paramify", {})
+    block["stack"] = stack
+    if stack_name:
+        block["stack_name"] = stack_name
+    else:
+        block.pop("stack_name", None)
+    return m
 
 
 # --------------------------------------------------------------------------- #
@@ -2236,7 +2388,7 @@ def _run_summary(run_dir: Path) -> dict:
         # upload_log.json is the evidence uploader's own record, not evidence:
         # counted, a scan-only run someone once ran `paramify upload` on looked
         # like an evidence run and was picked as one.
-        if p.name in ("_run_metadata.json", "upload_log.json") or p.name in seen:
+        if not is_evidence_file(p) or p.name in seen:
             continue
         files.append({"name": p.name, "path": str(p), "fetcher": None, "target": None,
                       "exit_code": None, "kind": "evidence"})

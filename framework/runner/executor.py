@@ -597,6 +597,7 @@ def _invoke(
     secret_values=None,
     run_dir: Optional[Path] = None,
     inputs_index: Optional[dict] = None,
+    entry_key: Optional[str] = None,
     patterns_meta: Optional[Dict[str, List[dict]]] = None,
 ) -> InvocationResult:
     """Run one fetcher invocation.
@@ -713,6 +714,7 @@ def _invoke(
         outputs=outputs,
         error=error,
         error_code=error_code,
+        entry_key=entry_key,
         config_patterns=patterns_meta,
     )
 
@@ -765,6 +767,7 @@ def run_entry(
     on_note: Optional[Callable[[str], None]] = None,
     inputs_index: Optional[dict] = None,
     secret_vars: FrozenSet[str] = frozenset(),
+    entry_key: Optional[str] = None,
 ) -> List[InvocationResult]:
     """Run one manifest entry: single invocation, or one per target for fanout.
 
@@ -781,6 +784,8 @@ def run_entry(
 
     `secret_vars` are the secret variables of the whole catalog and manifest
     (secret_env_vars), which no config reference may read.
+
+    `entry_key` is stamped on every InvocationResult, whatever the number of targets.
 
     A comparator gets `inputs_index` as $COMPARATOR_INPUTS. Callers pick the
     category blocks with contract.platform_for, which gives a comparator none: no
@@ -801,7 +806,7 @@ def run_entry(
                          secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir,
-                        inputs_index, patterns_meta)]
+                        inputs_index, entry_key=entry_key, patterns_meta=patterns_meta)]
 
     if not entry.targets:
         # No targets[] given. If every target field is optional, run once with the
@@ -818,7 +823,7 @@ def run_entry(
                          secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir,
-                        patterns_meta=patterns_meta)]
+                        entry_key=entry_key, patterns_meta=patterns_meta)]
 
     results = []
     for target in entry.targets:
@@ -831,7 +836,7 @@ def run_entry(
             _emit_notes(notes, on_note)
             _emit_shadowed(shadowed, on_note)
             results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir,
-                                   patterns_meta=patterns_meta))
+                                   entry_key=entry_key, patterns_meta=patterns_meta))
         except (RuntimeError, SecretResolutionError) as e:
             now = _utc_now()
             # The fetcher never ran, so it had no chance to report anything. The
@@ -851,5 +856,6 @@ def run_entry(
                 outputs=[],
                 error=reason,
                 error_code="runner_setup_failed",
+                entry_key=entry_key,
             ))
     return results

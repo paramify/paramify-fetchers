@@ -126,8 +126,8 @@ def test_facade_forwards_the_switch_to_every_stage(monkeypatch, tmp_path):
             return {"ok": True}
         return run
 
-    monkeypatch.setattr(api, "_load_paramify_uploader",
-                        lambda root: SimpleNamespace(load_config=lambda p: {}, upload_run=stub("upload")))
+    # The evidence upload runs on the sync engine, not a path-loaded uploader.
+    monkeypatch.setattr(api._sync_upload, "run_upload", stub("upload"))
     monkeypatch.setattr(api, "_load_paramify_scripts_uploader",
                         lambda root: SimpleNamespace(load_config=lambda p: {}, sync_scripts=stub("scripts")))
     monkeypatch.setattr(api, "_load_paramify_validator_syncer",

@@ -28,6 +28,7 @@ from textual.message import Message
 from textual.widgets import Button, Checkbox, RichLog, Static, TabbedContent
 
 from framework import api
+from framework.sync.render import render_plan
 from framework.tui import palette
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.components.table import DataTable
@@ -156,6 +157,7 @@ class UploadPage(ButtonRowNav, Vertical):
     def on_mount(self) -> None:
         self._uploading = False
         self._syncing = False
+        self._busy_planning = False
         self._run_dir: str | None = None
         self._issues_run_dir: str | None = None
         self._preflight: dict | None = None
@@ -230,7 +232,7 @@ class UploadPage(ButtonRowNav, Vertical):
 
     @property
     def _busy(self) -> bool:
-        return self._uploading or self._syncing
+        return self._uploading or self._syncing or self._busy_planning
 
     # -- data ------------------------------------------------------------- #
 
@@ -467,16 +469,32 @@ class UploadPage(ButtonRowNav, Vertical):
             self.notify("No upload-ready run selected.")
             return
 
-        def go(ok: bool) -> None:
-            if ok:
-                self._start_upload(self._run_dir)
-
-        self.app.push_screen(
-            ConfirmModal(
-                f"Upload {self._preflight['file_count']} evidence file(s) to {self._preflight['base_url']}?"
-            ),
-            go,
+        # Plan first, so the confirm shows what the upload will do. upload_run
+        # plans again under its own lock; this one only informs the question.
+        self._busy_planning = True
+        self._plan_worker(
+            self._run_dir, self.app.root_path, bool(self._preflight.get("token_present")),
+            f"Upload {self._preflight['file_count']} evidence file(s) to {self._preflight['base_url']}?",
         )
+
+    @work(thread=True, exclusive=True, group="plan")
+    def _plan_worker(self, run_dir: str, root, online: bool, question: str) -> None:
+        try:
+            lines = render_plan(api.plan_upload(run_dir, root, online=online))
+            error = False
+        except Exception as exc:
+            lines, error = [f"Cannot plan the upload: {exc}"], True
+        self.app.call_from_thread(self._confirm_upload, run_dir, "\n".join(lines), question, error)
+
+    def _confirm_upload(self, run_dir: str, body: str, question: str, error: bool) -> None:
+        def go(ok: bool) -> None:
+            if ok and not error:
+                self._start_upload(run_dir)
+
+        try:
+            self.app.push_screen(ConfirmModal(body if error else f"{body}\n\n{question}"), go)
+        finally:
+            self._busy_planning = False
 
     def _start_upload(self, run_dir: str) -> None:
         self._uploading = True
@@ -639,6 +657,13 @@ class UploadPage(ButtonRowNav, Vertical):
             mode = " (dry-run)" if ev.get("dry_run") else ""
             self._set_banner(Text(f"uploading {ev.get('files', 0)} {noun}(s) to {ev.get('base_url', '')}{mode}", style=palette.WARN))
             log.write(Text(f"upload {ev.get('files', 0)} {noun}(s) from {ev.get('run_dir', '')}{mode}", style="bold"))
+        elif etype == "delivery_file":
+            n = ev.get("n")
+            progress = f"{n}/{ev.get('of')} " if n is not None else ""
+            outcome = ev.get("outcome")
+            style = palette.OK if outcome == "uploaded" else palette.WARN
+            reason = f"  {ev['reason']}" if ev.get("reason") else ""
+            log.write(Text(f"  {progress}{ev.get('file', '?')} {outcome}{reason}", style=style))
         elif etype == "upload_file":
             outcome = ev.get("outcome")
             if outcome == "uploaded":
@@ -712,6 +737,7 @@ class UploadPage(ButtonRowNav, Vertical):
             f"uploaded={ev.get('uploaded', 0)} "
             f"duplicates={ev.get('skipped_duplicate', 0)} "
             f"errors={ev.get('errors', 0)}"
+            + (f" dropped={ev['dropped']}" if ev.get("dropped") else "")
             + (f" jobs_failed={ev['jobs_failed']}" if ev.get("jobs_failed") else ""),
             style=style,
         )
