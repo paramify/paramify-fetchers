@@ -1,0 +1,29 @@
+# Example: Azure DevOps change records, where only some record types need an approval.
+# The organization, project and type names below are synthetic.
+#
+# Set before running:
+#   export AZURE_DEVOPS_PAT=<token with Work Items, Code, and Project and Team (all Read)>
+#
+# azure_devops_work_items collects the work_item_types as change records. Only the
+# approval_types among them count toward change_items_approved_percentage; the
+# others (here, pre-approved standard changes) are collected and their approval
+# recorded, but leave the percentage alone. A name in approval_types that isn't in
+# work_item_types fails the run (bad_config).
+#
+# An approval is a move into an approval_states state, or a comment line matching
+# approval_pattern. The default pattern counts "Approved" and "@Jane Doe approved";
+# a pattern of your own sees each mention as @mention.
+
+run:
+  output_dir: ./evidence
+
+  fetchers:
+    - use: azure_devops_work_items
+      config:
+        work_item_types: Normal Change,Emergency Change,Standard Change
+        approval_types: Normal Change,Emergency Change
+      targets:
+        - organization_url: https://dev.azure.com/contoso
+          projects: Web
+          secrets:
+            pat: ${env:AZURE_DEVOPS_PAT}

@@ -26,7 +26,7 @@ from urllib.parse import quote, unquote
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
-from azure_common import sorted_counts  # noqa: E402
+from azure_common import coverage_percentage, sorted_counts  # noqa: E402
 from devops_rest import (  # noqa: E402
     DevOpsClient,
     DevOpsCollector,
@@ -43,12 +43,18 @@ TAGS_ENV = "AZURE_DEVOPS_WORK_ITEM_TAGS"
 LOOKBACK_ENV = "AZURE_DEVOPS_LOOKBACK_DAYS"
 APPROVAL_STATES_ENV = "AZURE_DEVOPS_APPROVAL_STATES"
 APPROVAL_PATTERN_ENV = "AZURE_DEVOPS_APPROVAL_PATTERN"
+APPROVAL_TYPES_ENV = "AZURE_DEVOPS_APPROVAL_TYPES"
 DEFAULT_TYPES = ("Change Request",)
 DEFAULT_TAGS = ("Security",)
 DEFAULT_LOOKBACK_DAYS = 90
 DEFAULT_APPROVAL_STATES = ("Approved",)
-# A line starting "Approved" with no question mark, so "Approved?" doesn't count.
-DEFAULT_APPROVAL_PATTERN = r"^\W*approved\b[^?\n]*$"
+# A line starting "Approved", after any @mentions, with no question mark, so "@Ann approved?" doesn't count.
+DEFAULT_APPROVAL_PATTERN = r"^(?:\W*@mention\b)*\W*approved\b[^?\n]*$"
+MENTION = "@mention"
+# The mention picker's link, a markdown comment's @<identity id>, and an @word typed without the picker.
+MENTION_LINK = re.compile(r"<a\b[^>]*\bdata-vss-mention\b[^>]*>.*?</a>"
+                          r"|@<[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}>", re.IGNORECASE | re.DOTALL)
+MENTION_WORD = re.compile(r"(?<![\w.@])@\w+(?:[.'-]\w+)*")
 COMMENTS_API = "7.1-preview.4"
 BATCH_SIZE = 200
 UPDATES_PAGE = 200
@@ -75,8 +81,8 @@ WORK_ITEM_LINKS = {"System.LinkTypes.Hierarchy-Reverse": "parent", "System.LinkT
 # Keyed by area, not a list, so an evidence sample keeps every entry.
 NOT_COLLECTED = {
     "text": "Descriptions, comment text, discussion history and attachments are never written; a comment counts as "
-            "an approval when a line of its text, quoted text left out, matches approval_pattern, and only its "
-            "author and time are kept.",
+            "an approval when a line of its text, quoted text left out and each @mention read as @mention, matches "
+            "approval_pattern, and only its author and time are kept.",
     "git_change_dates": "Linked Git commits and pull requests are recorded by id only; only TFVC changesets are "
                         "read for their date and author, so an item linked to a commit or pull request isn't "
                         "checked for changes made before approval or by its approver.",
@@ -118,6 +124,18 @@ def approval_pattern() -> Pattern[str]:
         return re.compile(raw, re.IGNORECASE | re.MULTILINE)
     except re.error as exc:
         raise ValueError(f"{APPROVAL_PATTERN_ENV} is not a valid regular expression: {exc}") from None
+
+
+def approval_types(types: Sequence[str]) -> List[str]:
+    """Selected change types that need an approval, as the selection spells them; none named means every one."""
+    spelt = {t.lower(): t for t in types}
+    named = list(dict.fromkeys(v.strip().lower() for v in (os.environ.get(APPROVAL_TYPES_ENV) or "").split(",")
+                               if v.strip()))
+    unknown = [n for n in named if n not in spelt]
+    if unknown:
+        raise ValueError(f"{APPROVAL_TYPES_ENV} names {unknown}, which aren't in {TYPES_ENV}, so the type meant would "
+                         f"need no approval; selected types are {', '.join(types) or 'none'}")
+    return [spelt[n] for n in named] if named else list(types)
 
 
 def call(collector: DevOpsCollector, operation: str, scope: str, fn: Callable[[], Any], default: Any = None) -> Any:
@@ -210,13 +228,13 @@ def _int(value: Any) -> Any:
 
 
 def comment_text(raw: Any) -> str:
-    """The comment's plain text without quoted text: a blockquote, or a line starting ">"."""
-    text, before = str(raw or ""), None
+    """The comment's plain text without quoted text (a blockquote, or a line starting ">"); each mention reads @mention."""
+    text, before = MENTION_LINK.sub(f" {MENTION} ", str(raw or "")), None
     while text != before:  # innermost blockquote first, so nested quotes go too
         before, text = text, re.sub(r"<blockquote\b[^>]*>(?:(?!<blockquote\b).)*?</blockquote>", "\n", text,
                                     flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r"<br\s*/?>|</(?:div|p|li)>", "\n", text, flags=re.IGNORECASE)
-    text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    text = MENTION_WORD.sub(MENTION, html.unescape(re.sub(r"<[^>]+>", " ", text)))
     return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
 
 
@@ -304,6 +322,7 @@ class Selection(NamedTuple):
     tags: List[str]
     approval_states: List[str]
     pattern: Pattern[str]
+    approval_types: List[str]
 
 
 def query(types: Dict[str, Dict[str, Any]], pname: str, selection: Selection, days: int) -> str:
@@ -353,6 +372,7 @@ def item_record(raw: Dict[str, Any], pname: str, types: Dict[str, Dict[str, Any]
         "high_priority": high_priority(priority, severity),
         "tags": tags,
         "selected_by": selected,
+        "approval_required": "type" in selected and str(kind).lower() in {t.lower() for t in selection.approval_types},
         "area_path": fields.get("System.AreaPath"),
         "iteration_path": fields.get("System.IterationPath"),
         **{key: person(fields.get(name)) for key, name in PEOPLE.items()},
@@ -478,6 +498,8 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
     tagged = [i for i in items if "tag" in i["selected_by"]]
     tagged_open = [i for i in tagged if i["open"]]
     history = all(i["approval_read"] for i in change)
+    needing = [i for i in change if i["approval_required"]]
+    needing_approved = sum(1 for i in needing if i["approval"])
     # Approved items with linked changes, and those whose every linked change was read.
     linked = [i for i in change if i["approval"] and has_change(i)]
     checked = [i for i in linked if i["changed_before_approval"] is not None]
@@ -486,6 +508,7 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
         "lookback_days": days,
         "work_item_types": selection.types,
         "work_item_tags": selection.tags,
+        "approval_types": selection.approval_types,
         "projects_collected": sum(1 for p in projects if p["work_items"] is not None),
         "work_item_types_missing": known(sorted({t for p in projects for t in p["work_item_types_missing"] or []})),
         "work_items_total": known(len(items)),
@@ -497,6 +520,9 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
         "change_items": known(len(change)),
         "change_items_finished": known(len(finished)),
         "change_items_approved": known(sum(1 for i in change if i["approval"]), history),
+        "change_items_needing_approval": known(len(needing)),
+        "change_items_needing_approval_approved": known(needing_approved, history),
+        "change_items_approved_percentage": known(coverage_percentage(needing_approved, len(needing)), history),
         "finished_change_items_without_approval": known(ids_of(i for i in finished if not i["approval"]), history),
         "change_items_approved_by_requester": known(ids_of(i for i in change if i["approved_by_requester"]), history),
         "change_items_with_linked_changes": known(sum(1 for i in change if has_change(i))),
@@ -518,8 +544,10 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
 
 def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     days = lookback_days()
-    selection = Selection(csv_config(TYPES_ENV, DEFAULT_TYPES), csv_config(TAGS_ENV, DEFAULT_TAGS),
-                          csv_config(APPROVAL_STATES_ENV, DEFAULT_APPROVAL_STATES), approval_pattern())
+    types = csv_config(TYPES_ENV, DEFAULT_TYPES)
+    selection = Selection(types, csv_config(TAGS_ENV, DEFAULT_TAGS),
+                          csv_config(APPROVAL_STATES_ENV, DEFAULT_APPROVAL_STATES), approval_pattern(),
+                          approval_types(types))
     if not selection.types and not selection.tags:
         raise ValueError(f"{TYPES_ENV} and {TAGS_ENV} are both empty, so no work item is selected")
     now = datetime.now(timezone.utc)
@@ -545,7 +573,8 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
     results = {
         "window": {"start": iso(now - timedelta(days=days)), "end": iso(now), "lookback_days": days},
         "selection": {"work_item_types": selection.types, "work_item_tags": selection.tags,
-                      "approval_states": selection.approval_states, "approval_pattern": selection.pattern.pattern},
+                      "approval_states": selection.approval_states, "approval_pattern": selection.pattern.pattern,
+                      "approval_types": selection.approval_types},
         "projects": projects,
         "work_items": items,
         "changesets": [c for _, c in sorted(changesets.items()) if c],

@@ -1,10 +1,9 @@
 name: azure_devops_work_items
-version: 0.1.0
+version: 0.2.0
 description: >-
-  Shows Azure DevOps change and security work items with their state, owner,
-  planned date and approval, whether the requester or a change's author approved
-  them, the changesets, commits and pull requests linked to them, and which
-  security work is open, overdue or unassigned.
+  Shows Azure DevOps change and security work items with state, owner, planned
+  date and approval, the share of change items approved, self-approvals, linked
+  changes, and open, overdue or unassigned security work.
 category: azure
 
 supports_targets: true
@@ -77,14 +76,34 @@ config_schema:
   approval_pattern:
     type: string
     required: false
-    default: '^\W*approved\b[^?\n]*$'
+    default: '^(?:\W*@mention\b)*\W*approved\b[^?\n]*$'
     env: AZURE_DEVOPS_APPROVAL_PATTERN
     description: >
       A regular expression, matched without regard to case against each line of
       a comment's text, with quoted text (a blockquote or a line starting ">")
-      left out; a matching comment counts as approval by its author. The
-      default matches a line that starts with "Approved" and has no question
-      mark, so "Approved?" doesn't count. The text itself is never written.
+      left out; a matching comment counts as approval by its author. Before
+      matching, every mention reads as the word @mention, whoever it names:
+      one made with the mention picker (or a markdown comment's @<id>) whatever
+      the name's length, and an @word typed as plain text, which is one word
+      long. The default matches a line that starts with "Approved", after any
+      mentions, and has no question mark: "Approved", "@Jane Doe approved" and
+      "@A, @B: approved" count, while "Approved?", "@Jane Doe approved?" and
+      "@Jane Doe not approved" don't. A pattern of your own sees @mention in
+      place of each mention, so add (?:\W*@mention\b)* after its ^ for a
+      line that starts with mentions to count. The text itself is never
+      written.
+  approval_types:
+    type: string
+    required: false
+    env: AZURE_DEVOPS_APPROVAL_TYPES
+    description: >
+      Comma-separated work item types, from work_item_types, whose items need
+      an approval, matched without regard to case; the approved percentage
+      counts only change items of these types. Items of the other selected
+      types are still collected and their approval recorded. Leave empty for
+      every type in work_item_types to need one. A name that isn't in
+      work_item_types is bad_config, since the type meant would need no
+      approval.
 
 secrets:
   - name: pat
@@ -119,10 +138,10 @@ evidence_set:
     - POST {project}/_apis/wit/wiql (per project) — a read-only query for the selected types or tags, changed in the window or still open
     - POST {project}/_apis/wit/workitemsbatch (200 at a time) — each item's fields and links; an item the query listed but this doesn't return is a failure
     - GET {project}/_apis/wit/workItems/{id}/updates (per item) — its state history, to see when and by whom it was approved and whether that approval was withdrawn
-    - GET {project}/_apis/wit/workItems/{id}/comments (per item) — who commented when, and whether a comment, quoted text left out, matches the approval pattern; the text is not kept
+    - GET {project}/_apis/wit/workItems/{id}/comments (per item) — who commented when, and whether a comment, quoted text left out and each mention read as @mention, matches the approval pattern; the text is not kept
     - GET _apis/tfvc/changesets/{id} (per linked changeset) — when the change was made and by whom
 
-    Output: azure_devops_work_items_<organization>.json — every selected work item with its title, type, state and reason, priority, severity, tags, area and iteration paths, who created, last changed, is assigned, resolved and closed it, its created, changed, activated, resolved, closed and planned dates, state history with each move's reason, the approval in effect (state or comment, with who and when) and whether its creator gave it, and its linked changesets, commits, pull requests and builds; plus each project's states for the types collected, and the linked changesets' dates and authors.
+    Output: azure_devops_work_items_<organization>.json — every selected work item with its title, type, state and reason, priority, severity, tags, area and iteration paths, who created, last changed, is assigned, resolved and closed it, its created, changed, activated, resolved, closed and planned dates, state history with each move's reason, whether it needs an approval, the approval in effect (state or comment, with who and when) and whether its creator gave it, and its linked changesets, commits, pull requests and builds; plus each project's states for the types collected, and the linked changesets' dates and authors.
 
     Summary fields:
 
@@ -130,6 +149,7 @@ evidence_set:
     - lookback_days — Number of days back that changed items are collected; open items are collected however old
     - work_item_types — List of work item types that record changes, as configured
     - work_item_tags — List of tags that mark security work, as configured
+    - approval_types — List of configured work item types whose items need an approval: the approval_types setting, or every type in work_item_types when it's empty
     - projects_collected — Number of projects whose work items were read
     - work_item_types_missing — List of configured types that no project defines; null if a project's items couldn't be listed
     - work_items_total — Number of work items collected; null if a project's items couldn't be listed
@@ -143,6 +163,9 @@ evidence_set:
     - change_items — Number of items of a configured change type; null if a project's items couldn't be listed
     - change_items_finished — Number of change items in a Completed state; a Removed (cancelled) item isn't finished; null if a project's items couldn't be listed
     - change_items_approved — Number of change items approved: moved into one of the configured approval states (a state such as Awaiting Approval doesn't count), or given a comment matching the approval pattern, and not withdrawn since by a move back to a state before the approval states or to a state or with a reason naming Rejected; null if a project's items or a change item's history or comments couldn't be read
+    - change_items_needing_approval — Number of change items of a type in approval_types; null if a project's items couldn't be listed
+    - change_items_needing_approval_approved — Number of change items of a type in approval_types that are approved, as change_items_approved counts approval (a comment line starting with mentions and then saying approved counts under the default pattern); null if a project's items or a change item's history or comments couldn't be read
+    - change_items_approved_percentage — Percentage of change items needing an approval that are approved = change_items_needing_approval_approved / change_items_needing_approval × 100 (a whole number, 0–100); 0 when change_items_needing_approval is 0; null if a project's items or a change item's history or comments couldn't be read. An item whose approval was withdrawn and not given again counts in the denominator only
     - finished_change_items_without_approval — List of finished change items (by id) never approved, or whose approval was withdrawn and not given again; null if a project's items or a change item's history or comments couldn't be read
     - change_items_approved_by_requester — List of change items (by id) whose approval in effect (the first since any withdrawal) was given by the person who created the item; null if a project's items or a change item's history or comments couldn't be read
     - change_items_with_linked_changes — Number of change items linked to a TFVC changeset, Git commit or pull request; null if a project's items couldn't be listed
