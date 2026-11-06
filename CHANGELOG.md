@@ -45,6 +45,21 @@ schemas and the `paramify` CLI — not the internal code.
     check every summary field against the instructions.
   - `examples/azure_devops_change_approvals.yaml` shows the settings.
 
+- **Inspector ECR findings and Paramify issue intake:** `aws_inspector_ecr_findings`
+  collects active findings, package details, image inventory and coverage;
+  `aws_inspector_ecr_report` converts those APIs to a documented CSV for the existing
+  Paramify intake uploader, without S3/KMS exports. Both support account/region
+  targets and optional repository/tag filters, retain all severities, and fail on
+  incomplete pagination. Issue reports also refuse missing scan coverage and
+  require an explicit opt-in for zero findings. Includes synthetic regression tests
+  and an example manifest with manual cycle closure.
+- **`aws_ecr_image_scanning` 0.3.0:** retrieve newest-image scan results regardless
+  of `scan_on_push`, including enhanced continuous and completed manual scans.
+  Resolve repository scan frequency through AWS, select the newest image across
+  pages, and retain every severity and scan timestamps. Missing/incomplete scans
+  have `severity_counts: null`, rather than fabricated zero counts; collection
+  errors no longer imply BASIC scanning.
+
 - **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables can be measured.**
   The query API refuses these tables. Set `basic_logs_lookback_hours`
   (`BASIC_LOGS_LOOKBACK_HOURS`, as `azure_resource_diagnostic_settings` names

@@ -1,6 +1,13 @@
 # AWS
 
-AWS fetchers pull evidence from your AWS accounts using the AWS CLI. All 81 fetchers are read-only and authenticate with the standard AWS credential chain — no static API token is needed.
+AWS fetchers pull evidence and scan reports from your AWS accounts using the AWS CLI. They are read-only and authenticate with the standard AWS credential chain — no static API token is needed for collection.
+
+## Inspector container vulnerabilities
+
+- [`ecr_image_scanning`](ecr_image_scanning/) reports each repository's effective scanning configuration and newest image's scan summary, including enhanced continuous and completed manual scans.
+- [`inspector_vulnerability_scanning`](inspector_vulnerability_scanning/) reports account enablement and whether active findings exist.
+- [`inspector_ecr_findings`](inspector_ecr_findings/README.md) collects detailed active findings, image inventory and coverage as evidence.
+- [`inspector_ecr_report`](inspector_ecr_report/README.md) converts the same Inspector APIs to a CSV for a Paramify vulnerability assessment. The existing uploader posts it directly to the intake API. No S3 bucket or KMS key is needed.
 
 ## Credential setup
 
