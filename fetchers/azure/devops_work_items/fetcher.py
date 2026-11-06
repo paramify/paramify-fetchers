@@ -44,17 +44,19 @@ LOOKBACK_ENV = "AZURE_DEVOPS_LOOKBACK_DAYS"
 APPROVAL_STATES_ENV = "AZURE_DEVOPS_APPROVAL_STATES"
 APPROVAL_PATTERN_ENV = "AZURE_DEVOPS_APPROVAL_PATTERN"
 APPROVAL_TYPES_ENV = "AZURE_DEVOPS_APPROVAL_TYPES"
+APPROVAL_MENTIONS_ENV = "AZURE_DEVOPS_APPROVAL_MENTIONS"
 DEFAULT_TYPES = ("Change Request",)
 DEFAULT_TAGS = ("Security",)
 DEFAULT_LOOKBACK_DAYS = 90
 DEFAULT_APPROVAL_STATES = ("Approved",)
-# A line starting "Approved", after any @mentions, with no question mark, so "@Ann approved?" doesn't count.
-DEFAULT_APPROVAL_PATTERN = r"^(?:\W*@mention\b)*\W*approved\b[^?\n]*$"
+# A line starting "Approved" with no question mark, so "Approved?" doesn't count.
+DEFAULT_APPROVAL_PATTERN = r"^\W*approved\b[^?\n]*$"
 MENTION = "@mention"
 # The mention picker's link, a markdown comment's @<identity id>, and an @word typed without the picker.
 MENTION_LINK = re.compile(r"<a\b[^>]*\bdata-vss-mention\b[^>]*>.*?</a>"
                           r"|@<[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}>", re.IGNORECASE | re.DOTALL)
 MENTION_WORD = re.compile(r"(?<![\w.@])@\w+(?:[.'-]\w+)*")
+LEADING_MENTIONS = re.compile(r"^(?:\W*@mention\b)+")
 COMMENTS_API = "7.1-preview.4"
 BATCH_SIZE = 200
 UPDATES_PAGE = 200
@@ -81,8 +83,8 @@ WORK_ITEM_LINKS = {"System.LinkTypes.Hierarchy-Reverse": "parent", "System.LinkT
 # Keyed by area, not a list, so an evidence sample keeps every entry.
 NOT_COLLECTED = {
     "text": "Descriptions, comment text, discussion history and attachments are never written; a comment counts as "
-            "an approval when a line of its text, quoted text left out and each @mention read as @mention, matches "
-            "approval_pattern, and only its author and time are kept.",
+            "an approval when a line of its text, quoted text left out (and, with approval_mentions on, the "
+            "@mentions it starts with), matches approval_pattern, and only its author and time are kept.",
     "git_change_dates": "Linked Git commits and pull requests are recorded by id only; only TFVC changesets are "
                         "read for their date and author, so an item linked to a commit or pull request isn't "
                         "checked for changes made before approval or by its approver.",
@@ -124,6 +126,15 @@ def approval_pattern() -> Pattern[str]:
         return re.compile(raw, re.IGNORECASE | re.MULTILINE)
     except re.error as exc:
         raise ValueError(f"{APPROVAL_PATTERN_ENV} is not a valid regular expression: {exc}") from None
+
+
+def approval_mentions() -> bool:
+    raw = (os.environ.get(APPROVAL_MENTIONS_ENV) or "").strip().lower()
+    if raw in ("", "false", "0", "no", "off"):
+        return False
+    if raw in ("true", "1", "yes", "on"):
+        return True
+    raise ValueError(f"{APPROVAL_MENTIONS_ENV} must be true or false, got {raw!r}")
 
 
 def approval_types(types: Sequence[str]) -> List[str]:
@@ -227,15 +238,20 @@ def _int(value: Any) -> Any:
     return int(value) if str(value).isdigit() else value
 
 
-def comment_text(raw: Any) -> str:
-    """The comment's plain text without quoted text (a blockquote, or a line starting ">"); each mention reads @mention."""
-    text, before = MENTION_LINK.sub(f" {MENTION} ", str(raw or "")), None
+def comment_text(raw: Any, mentions: bool = False) -> str:
+    """Plain text without quoted text (a blockquote, or a line starting ">"); mentions: @mention, a line's first dropped."""
+    text, before = str(raw or ""), None
+    if mentions:
+        text = MENTION_LINK.sub(f" {MENTION} ", text)
     while text != before:  # innermost blockquote first, so nested quotes go too
         before, text = text, re.sub(r"<blockquote\b[^>]*>(?:(?!<blockquote\b).)*?</blockquote>", "\n", text,
                                     flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r"<br\s*/?>|</(?:div|p|li)>", "\n", text, flags=re.IGNORECASE)
-    text = MENTION_WORD.sub(MENTION, html.unescape(re.sub(r"<[^>]+>", " ", text)))
-    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    lines = [line for line in text.splitlines() if not line.lstrip().startswith(">")]
+    if mentions:
+        lines = [LEADING_MENTIONS.sub("", MENTION_WORD.sub(MENTION, line)) for line in lines]
+    return "\n".join(lines)
 
 
 def state_history(updates: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -287,10 +303,11 @@ def read_updates(client: DevOpsClient, pid: str, wid: int) -> List[Dict[str, Any
             return updates
 
 
-def read_comments(client: DevOpsClient, pid: str, wid: int, pattern: Pattern[str]) -> List[Dict[str, Any]]:
+def read_comments(client: DevOpsClient, pid: str, wid: int, pattern: Pattern[str],
+                  mentions: bool) -> List[Dict[str, Any]]:
     comments = client.list(f"{pid}/_apis/wit/workItems/{wid}/comments", COMMENTS_API, item_key="comments")
     return sorted(({"at": iso(when(c.get("createdDate"))), "by": person(c.get("createdBy")),
-                    "approval": bool(pattern.search(comment_text(c.get("text"))))}
+                    "approval": bool(pattern.search(comment_text(c.get("text"), mentions)))}
                    for c in comments if isinstance(c, dict) and not c.get("isDeleted")),
                   key=lambda c: c["at"] or "")
 
@@ -323,6 +340,7 @@ class Selection(NamedTuple):
     approval_states: List[str]
     pattern: Pattern[str]
     approval_types: List[str]
+    mentions: bool
 
 
 def query(types: Dict[str, Dict[str, Any]], pname: str, selection: Selection, days: int) -> str:
@@ -425,7 +443,7 @@ def collect_project(client: DevOpsClient, collector: DevOpsCollector, project: D
         updates = call(collector, f"wit.updates({pname}/{wid})", SCOPE_WORK,
                        partial(read_updates, client, pid, wid))
         comments = call(collector, f"wit.comments({pname}/{wid})", SCOPE_WORK,
-                        partial(read_comments, client, pid, wid, selection.pattern))
+                        partial(read_comments, client, pid, wid, selection.pattern, selection.mentions))
         item["state_history"] = None if updates is None else state_history(updates)
         item["comments"] = None if comments is None else len(comments)
         ranks = (types.get(str(item["type"]).lower()) or {}).get("ranks") or {}
@@ -509,6 +527,7 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
         "work_item_types": selection.types,
         "work_item_tags": selection.tags,
         "approval_types": selection.approval_types,
+        "approval_mentions": selection.mentions,
         "projects_collected": sum(1 for p in projects if p["work_items"] is not None),
         "work_item_types_missing": known(sorted({t for p in projects for t in p["work_item_types_missing"] or []})),
         "work_items_total": known(len(items)),
@@ -547,7 +566,7 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
     types = csv_config(TYPES_ENV, DEFAULT_TYPES)
     selection = Selection(types, csv_config(TAGS_ENV, DEFAULT_TAGS),
                           csv_config(APPROVAL_STATES_ENV, DEFAULT_APPROVAL_STATES), approval_pattern(),
-                          approval_types(types))
+                          approval_types(types), approval_mentions())
     if not selection.types and not selection.tags:
         raise ValueError(f"{TYPES_ENV} and {TAGS_ENV} are both empty, so no work item is selected")
     now = datetime.now(timezone.utc)
@@ -574,7 +593,7 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         "window": {"start": iso(now - timedelta(days=days)), "end": iso(now), "lookback_days": days},
         "selection": {"work_item_types": selection.types, "work_item_tags": selection.tags,
                       "approval_states": selection.approval_states, "approval_pattern": selection.pattern.pattern,
-                      "approval_types": selection.approval_types},
+                      "approval_types": selection.approval_types, "approval_mentions": selection.mentions},
         "projects": projects,
         "work_items": items,
         "changesets": [c for _, c in sorted(changesets.items()) if c],

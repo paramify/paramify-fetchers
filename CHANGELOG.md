@@ -12,6 +12,32 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_devops_work_items` 0.2.0: approval comments that start with an @mention, and the approved percentage.**
+  - **`approval_mentions`** (`AZURE_DEVOPS_APPROVAL_MENTIONS`, `false` by
+    default). Set to `true`, a comment line that starts with one or more
+    @mentions counts as approval when the rest of the line matches
+    `approval_pattern`: with the default pattern, "@Jane Doe approved",
+    "@A @B approved" and "@Jane Doe, approved" count, while "@Jane Doe not
+    approved", "@Jane Doe approved?" and "@Jane Doe please approve" don't. Every
+    mention then reads as the word `@mention`, so a pattern never sees the names:
+    one made with the mention picker (or a markdown comment's `@<id>`) whatever
+    the name's length, and an `@word` typed as plain text, which is one word
+    long. Quoted text and a later move back or rejection still don't count. Off,
+    comments are read exactly as in 0.1.0.
+  - **`approval_types`** (`AZURE_DEVOPS_APPROVAL_TYPES`) names which of the
+    `work_item_types` need an approval. Empty, as by default, every one does. A
+    name that isn't in `work_item_types` is `bad_config`, as the comparator's
+    `CHANGE_RECORD_APPROVAL_TYPES` is, since the type meant would need no
+    approval. Each item gains `approval_required`, and the results' `selection`
+    records both settings.
+  - **Summary.** `approval_types`, `approval_mentions`,
+    `change_items_needing_approval`, `change_items_needing_approval_approved` and
+    `change_items_approved_percentage` (whole number; 0 when no item needs an
+    approval; null when a project's items or any change item's history or
+    comments couldn't be read). The tests now check every summary field against
+    the instructions.
+  - `examples/azure_devops_change_approvals.yaml` shows the settings.
+
 - **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables can be measured.**
   The query API refuses these tables. Set `basic_logs_lookback_hours`
   (`BASIC_LOGS_LOOKBACK_HOURS`, as `azure_resource_diagnostic_settings` names
@@ -1262,34 +1288,6 @@ schemas and the `paramify` CLI — not the internal code.
   can't be looked up.
 
 ### Changed
-
-- **`azure_devops_work_items` 0.2.0: "@name approved" counts as an approval, and the summary gives the approved percentage.**
-  - **Mentions.** Before a comment is matched against `approval_pattern`, every
-    mention reads as the word `@mention`: one made with the mention picker (or a
-    markdown comment's `@<id>`) whatever the name's length, and an `@word` typed
-    as plain text, which is one word long. The default pattern becomes
-    `^(?:\W*@mention\b)*\W*approved\b[^?\n]*$`, so a line that starts with one or
-    more mentions and then says approved counts ("@Jane Doe approved",
-    "@A @B approved", "@Jane Doe, approved"). The old guards stay: a line with a
-    question mark, or in quoted text, doesn't count, and a later move back or
-    rejection withdraws the approval. "@Jane Doe not approved" and "@Jane Doe
-    please approve" don't count.
-  - **A pattern of your own** now sees `@mention` where it saw the mentioned
-    name. Add `(?:\W*@mention\b)*` after its `^` for a line starting with mentions
-    to count; a manifest that set the 0.1.0 default explicitly keeps the old
-    behaviour until it does.
-  - **`approval_types`** (`AZURE_DEVOPS_APPROVAL_TYPES`) names which of the
-    `work_item_types` need an approval. Empty, as by default, every one does. A
-    name that isn't in `work_item_types` is `bad_config`, as the comparator's
-    `CHANGE_RECORD_APPROVAL_TYPES` is, since the type meant would need no
-    approval. Each item gains `approval_required`, and the results' `selection`
-    records the types.
-  - **Summary.** `approval_types`, `change_items_needing_approval`,
-    `change_items_needing_approval_approved` and `change_items_approved_percentage`
-    (whole number; 0 when no item needs an approval; null when a project's items
-    or any change item's history or comments couldn't be read). The tests now
-    check every summary field against the instructions.
-  - `examples/azure_devops_change_approvals.yaml` shows the settings.
 
 - **`azure_waf_ddos_activity` 0.2.0: DDoS figures include IPs protected by a network-level DDoS plan.**
   The existing figures `protected_ips_with_attack_alert_reaching_receiver`,

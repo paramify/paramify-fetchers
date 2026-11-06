@@ -11,8 +11,9 @@
 # work_item_types fails the run (bad_config).
 #
 # An approval is a move into an approval_states state, or a comment line matching
-# approval_pattern. The default pattern counts "Approved" and "@Jane Doe approved";
-# a pattern of your own sees each mention as @mention.
+# approval_pattern ("Approved" by default). approval_mentions (off by default) also
+# counts a line that starts with @mentions and then matches, such as
+# "@Jane Doe approved"; turn it on only where a mention doesn't just ask for approval.
 
 run:
   output_dir: ./evidence
@@ -22,6 +23,7 @@ run:
       config:
         work_item_types: Normal Change,Emergency Change,Standard Change
         approval_types: Normal Change,Emergency Change
+        approval_mentions: true
       targets:
         - organization_url: https://dev.azure.com/contoso
           projects: Web
