@@ -33,17 +33,20 @@ schemas and the `paramify` CLI — not the internal code.
   nothing, also for a run that the earlier uploader sent before batches. When
   the API refuses a write (400, 405, 415, 422) for one set or batch, only that
   entry fails. Only a 401 or 403 stops the upload. A refused tag is a warning.
-  Batches need Paramify API 0.14.0 or later. A workspace without them gets
-  direct delivery (see below).
+  Batches need Paramify API 0.14.0 or later. An entry that cannot use a batch
+  is sent direct, the way the uploader sent it before batches. This covers a
+  workspace without batches, a channel with no artifact request, and
+  `delivery: direct`.
 - **`delivery: auto | direct`** in the `paramify` block of the manifest, on the
   run or on one entry. `direct` sends the entry the way the uploader sent it
   before batches. `auto` is the default.
 - **`no_request: direct`, now the default.** When a channel has no artifact
   request, the upload sends the entry direct and warns. `evidence` and `refuse`
   still work.
-- **Direct delivery in the upload result.** Each entry has a `mode` (`batch` or
-  `direct`). The summary has `batches`, which says whether the workspace has
-  batches and why not. In a dry run, `batches` is null.
+- **Direct delivery in the upload result.** Each entry has a `mode` (`batch`,
+  `direct`, or null for an entry the upload did not route). The summary has
+  `batches`, which says whether the workspace has batches and why not. In a dry
+  run, `batches` is null. It is also null when the check for batches failed.
 - **`paramify upload --plan`** reads the workspace and changes nothing. It
   prints the plan. For each entry it shows the set, stack, channel and artifact
   request, and whether the batch is new, resumed or done. It also shows dropped
@@ -576,10 +579,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
-- **Entries that cannot use a batch are sent direct.** The uploader sends them
-  the way it sent them before batches, instead of refusing them. This covers a
-  workspace without batches, a channel with no artifact request, and
-  `delivery: direct`.
 - **Upload result shape.** The `--json` summary and `upload_log.json` keep
   `uploaded`, `skipped_duplicate`, `skipped_failed`, `errors` and `ok` for one
   release. So do the `upload_start`, `upload_file` and `upload_complete` events.

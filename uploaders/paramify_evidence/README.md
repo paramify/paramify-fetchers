@@ -57,7 +57,7 @@ For each fetcher entry in the run the upload:
 5. **delivers** one batch with every file of the entry, then submits it. A
    temporary failure leaves the batch open. Run the same upload again to resume
    it. A file that fails for good is dropped and named, and the rest goes in.
-   Otherwise the upload sends the files direct. See
+   If the entry cannot use a batch, the upload sends the files direct. See
    [direct delivery](../../docs/uploader_guide.md#when-a-batch-cannot-be-used).
 
 A refusal or failure stops that entry only. The stack, `approval`, `delivery`

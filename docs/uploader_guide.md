@@ -217,10 +217,12 @@ run:
 | `evidence` | Sends a batch to the evidence set. These artifacts do not count toward the solution capability. |
 | `refuse` | Refuses the entry. |
 
-The result and `upload_log.json` record each entry's `mode`: `batch` or
-`direct`. A direct entry has no batch id. A temporary failure holds only that
-file, and the next upload sends only that file. A direct artifact is not on a
-batch. Paramify decides whether it counts toward the solution capability.
+The result and `upload_log.json` record each entry's `mode`: `batch`,
+`direct`, or null. The mode is null when the upload did not route the entry:
+a refused entry, an entry with no file to send, or an entry in a dry run. A
+direct entry has no batch id. A temporary failure holds only that file, and the
+next upload sends only that file. A direct artifact is not on a batch. Paramify
+decides whether it counts toward the solution capability.
 
 When a workspace gets batches later, the files that the upload sent direct read
 as delivered. A new run goes in a batch.
@@ -269,11 +271,12 @@ runs.
 - `plan`: the actions the upload planned.
 - `entries`: one record for each fetcher entry, with its `state`
   (`planned` for a dry run, then `delivered`, `delivered_with_drops`, `held`,
-  `refused`, `failed` or `noop`), `mode` (`batch` or `direct`), batch id,
+  `refused`, `failed` or `noop`), `mode` (`batch`, `direct` or null), batch id,
   status, stack, channel and artifact request.
 - `outcomes`: what each action did.
-- `batches`: whether the workspace has batches. In a dry run, it is null. On an
-  online upload, it is `{"available": true or false, "reason": text or null}`.
+- `batches`: whether the workspace has batches. In a dry run, it is null. It is
+  also null when the check for batches failed and stopped the upload. Otherwise,
+  it is `{"available": true or false, "reason": text or null}`.
 - `validators`: the validator sync summary, when you pass `--with-validators`.
   With `--dry-run`, it names the sync that the upload would do.
 
