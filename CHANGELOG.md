@@ -156,6 +156,29 @@ schemas and the `paramify` CLI — not the internal code.
   profile authentication element, schedule `ACTIVE` values) are stated as
   assumptions in each fetcher's instructions.
 
+- **`azure_defender_plans` 0.3.0: security contacts.** The subscription's Defender for
+  Cloud security contacts: notification addresses, whether a phone is set, whether
+  alert notifications are on and from which minimal severity, and role-based
+  notification. `results.security_contacts` is null (and the run fails) when the list
+  could not be read, and empty when there are none. Maps to KSI-MLA-RVL as well.
+  The contacts are read over raw ARM at api-version 2020-01-01-preview, because
+  Azure Government offers only that and 2017-08-01-preview and answers with a bare
+  JSON list that azure-mgmt-security 7.0 cannot deserialize (seen on a live run);
+  both a bare list and a value page are accepted.
+- **`azure_vm_hardening_status` 0.3.0: OS patch settings.** Every VM and scale set
+  reports `patch_settings` (OS, patch mode, assessment mode, bypass of platform safety
+  checks on a user schedule) with the derived `automatic_patching` (AutomaticByPlatform
+  or AutomaticByOS; `patch_modes` tells Azure-orchestrated from in-guest Windows
+  Update) and
+  `assessment_automatic`, both null when Azure returned no patch mode (never read as
+  Manual). The summary counts automatic, manual-or-image-default and unknown
+  for VMs and scale sets.
+- **`azure_aks_cluster_configuration` 0.3.0: node security per agent pool.** Each
+  pool now reports `enable_fips` (the FIPS-enabled node image), `node_image_version`,
+  Trusted Launch (`secure_boot_enabled`, `vtpm_enabled`) and `ssh_access`. Each is
+  null, not false, when Azure did not return it; the summary counts FIPS-enabled,
+  FIPS-disabled and unknown pools apart, and `all_agent_pools_fips` is null until
+  every pool has answered (and when there are no pools).
 - **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
   secret and certificate gets `lifetime_days` (end date minus start date, null when
   either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.
@@ -1315,6 +1338,13 @@ schemas and the `paramify` CLI — not the internal code.
   can't be looked up.
 
 ### Changed
+
+- **The uploader guide explains the collection frequency of an evidence set.**
+  A new section in [`docs/uploader_guide.md`](docs/uploader_guide.md#set-the-collection-frequency)
+  gives the default (`THREE_DAY`), the values, and how to set `frequency` in
+  `upload.yaml`. It tells you that the upload writes the frequency only when it
+  creates a set, and it gives a loop that changes the sets that exist through
+  the API.
 
 - **`azure_waf_ddos_activity` 0.2.0: DDoS figures include IPs protected by a network-level DDoS plan.**
   The existing figures `protected_ips_with_attack_alert_reaching_receiver`,
