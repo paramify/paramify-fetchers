@@ -734,3 +734,33 @@ def test_a_collected_demo_run_uploads_with_its_entry_key_and_paramify_block(fake
     tokens = art["note"].split("; ")
     assert f"run_id={collected['run_id']}" in tokens and "entry=demo_hello" in tokens
     assert api.upload_run(run_dir, repo_root)["entries"]["demo_hello"]["state"] == "noop"
+
+
+# ---- found on stage, 2026-11-02 -------------------------------------------------
+
+def test_refused_entry_does_not_tag_its_set(fake, root, tmp_path):
+    st1, st2 = fake.add_stack("Prod"), fake.add_stack("Gov")
+    fake.add_evidence("EVD-X", channels=[st1.id, st2.id])
+    out = api.upload_run(two_files(tmp_path), root)  # two channels and no stack: refused
+    assert out["entries"]["x"]["state"] == "refused"
+    assert not [a for a in out["plan"]["actions"] if a["verb"] == "tag"]
+    assert fake.tags == {}
+
+
+def test_delivered_entry_still_tags_its_set(fake, root, tmp_path):
+    out = api.upload_run(two_files(tmp_path), root)  # a new set: evidence-level batch
+    assert out["entries"]["x"]["state"] == "delivered"
+    assert [a["id"] for a in out["plan"]["actions"] if a["verb"] == "tag"] == ["evidence_sets/tags/EVD-X"]
+    assert fake.tags
+
+
+def test_no_request_fallback_reports_no_channel(fake, root, tmp_path):
+    st = fake.add_stack("Prod")
+    fake.add_evidence("EVD-X", channels=[st.id])  # a channel with no artifact request
+    events: List[Dict[str, Any]] = []
+    run = two_files(tmp_path, {"x": {"use": "x", "no_request": "evidence"}})
+    out = api.upload_run(run, root, on_event=events.append)
+    entry = out["entries"]["x"]
+    assert entry["state"] == "delivered" and entry["artifact_request"] is None
+    assert entry["channel"] is None and entry["stack"] is None
+    assert all("channel" not in e for e in events if e["event"] == "upload_file")

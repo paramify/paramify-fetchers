@@ -65,6 +65,8 @@ ALL_DROPPED = "every file was dropped"
 BEFORE_BATCHES = "already delivered before batches"
 WAF_BLOCKED = "blocked by the production WAF"
 _FAILING = ("FAIL", "ERROR")
+# How far along a batch is: a status read back never moves a batch backwards.
+_STATUS_RANK = {"OPEN": 0, "REJECTED": 0, "SUBMITTED": 1, "APPROVED": 2}
 # The longest createdAt window the artifacts read lists day by day; an older run reads without one.
 MAX_CREATED_SPAN_DAYS = 31
 
@@ -328,7 +330,7 @@ class DeliveryProvider:
     def _plan_entry(self, e: EntryDesired, obs: Any, today: date) -> Action:
         files, dropped, skipped = self._split(e)
         payload: Dict[str, Any] = {
-            "entry_key": e.entry_key, "evidence_id": None, "target": None, "artifact_request_id": None,
+            "entry_key": e.entry_key, "reference_id": e.reference_id, "evidence_id": None, "target": None, "artifact_request_id": None,
             "planned_current": False, "resume_batch_id": None,
             "files": [_file_json(f) for f in files], "dropped": dropped, "skipped": skipped,
         }
@@ -395,8 +397,9 @@ class DeliveryProvider:
             planned_current=bool(ar_id and ar_id in obs.current_ids),
         )
         changes: Dict[str, Any] = {
-            "stack": {"id": channel.stack_id, "name": named} if channel else None,
-            "channel": channel.reference_id if channel else None,
+            # An evidence-level batch has no channel, even when routing found one first.
+            "stack": {"id": channel.stack_id, "name": named} if channel and ar_id else None,
+            "channel": channel.reference_id if channel and ar_id else None,
             "target": payload["target"],
             "artifact_request": None if ar_id is None else {
                 "id": ar_id,
@@ -542,17 +545,30 @@ class DeliveryProvider:
         if not run.uploaded and not run.already_present:
             self._read_back(run, resources, ev_id)
             return Outcome(action_id, "failed", run.result("failed"), ALL_DROPPED)
+        submitted: Optional[Batch] = None
         try:
-            resources.submit_batch(run.batch_id)
+            submitted = resources.submit_batch(run.batch_id)
         except ApiError as exc:
             if exc.kind is not ErrorKind.TEMPORARY:
                 return self._failed(action_id, exc, run, resources, ev_id, f"batch {run.name}")
             self._read_back(run, resources, ev_id)
             if run.status not in DONE:  # the submit may still have taken effect
                 return self._held(action_id, run, f"the submit failed temporarily ({exc.message})")
-        # Step 5: read the batch back.
+        # Step 5: read the batch back. The read can lag the submit: on stage a batch
+        # approved on submission once read back as SUBMITTED. So the submit's answer
+        # stands when the read fails, or when it is further along and the batch is
+        # approved on submission. Validator-gated batches trust the read: validators
+        # decide after the submit answers.
         parts = [note] if note else []
-        if not self._read_back(run, resources, ev_id):
+        read = self._read_back(run, resources, ev_id)
+        if submitted is not None and submitted.status and (not read or (
+                (run.approval or submitted.when_to_approve) == "SUBMISSION"
+                and _STATUS_RANK.get(submitted.status, -1) > _STATUS_RANK.get(run.status or "", -1))):
+            run.status = submitted.status
+            run.batch_reference = run.batch_reference or submitted.reference_id or None
+            run.approval = run.approval or submitted.when_to_approve
+            read = True
+        if not read:
             run.status = None  # the submit took effect; what it led to is unknown
             parts.append("submitted; status could not be read back")
         elif run.status == "SUBMITTED":

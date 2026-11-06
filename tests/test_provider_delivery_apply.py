@@ -6,6 +6,7 @@ evidence_sets and delivery providers, against the in-process fake API.
 """
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
 import sys
@@ -527,7 +528,7 @@ def test_temporary_failure_in_the_rollover_check_holds_with_no_batch(tmp_path, m
     assert ("POST", "/batches", {}) not in fake.calls
 
 
-def test_failed_read_back_after_submit_reports_no_status(tmp_path, monkeypatch):
+def test_failed_read_back_after_submit_reports_the_submit_answer(tmp_path, monkeypatch):
     fake = FakeParamify()
     h = Harness(fake, two_files(tmp_path))
     plan = h.plan()
@@ -538,10 +539,71 @@ def test_failed_read_back_after_submit_reports_no_status(tmp_path, monkeypatch):
     monkeypatch.setattr(h.res, "batch", boom)
     d = h.apply(plan)["delivery/x"]
     assert d.status == "applied"
+    assert d.result["state"] == "delivered" and d.result["status"] == "APPROVED"
+    assert d.message == "BCH-1 APPROVED"
+    assert h.submits() == ["/batches/bt-1/submit"]
+
+
+def test_failed_read_back_and_no_submit_status_reports_no_status(tmp_path, monkeypatch):
+    fake = FakeParamify()
+    h = Harness(fake, two_files(tmp_path))
+    plan = h.plan()
+    real_submit = h.res.submit_batch
+
+    def boom(batch_id):
+        raise _temporary(f"/batches/{batch_id}")
+
+    def submit_without_status(batch_id):
+        return dataclasses.replace(real_submit(batch_id), status="")
+
+    monkeypatch.setattr(h.res, "batch", boom)
+    monkeypatch.setattr(h.res, "submit_batch", submit_without_status)
+    d = h.apply(plan)["delivery/x"]
+    assert d.status == "applied"
     assert d.result["state"] == "delivered" and d.result["status"] is None
     assert d.result["uploaded"] == ["a.json", "b.json"]
     assert d.message == "submitted; status could not be read back"
-    assert h.submits() == ["/batches/bt-1/submit"]
+
+
+class LaggingFake(FakeParamify):
+    """Stage, once: the submit answers APPROVED but the next read still says SUBMITTED."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lag: set = set()
+
+    def _submit(self, batch):
+        out = super()._submit(batch)
+        self.lag.add(batch["id"])
+        return out
+
+    def _route(self, method, path, params, body, files):
+        resp = super()._route(method, path, params, body, files)
+        bid = path.rsplit("/", 1)[-1]
+        if method == "GET" and path.startswith("/batches/") and bid in self.lag and resp.status_code == 200:
+            self.lag.discard(bid)
+            body = resp.json()
+            body["status"] = "SUBMITTED"
+            return type(resp)(200, body)
+        return resp
+
+
+def test_lagging_read_after_approve_on_submission_reports_approved(tmp_path):
+    fake = LaggingFake()
+    with_request(fake, approval="SUBMISSION")
+    h = Harness(fake, two_files(tmp_path))
+    d = h.run()["delivery/x"]
+    assert d.status == "applied", d.message
+    assert d.result["status"] == "APPROVED"
+    assert "waiting for review" not in d.message and d.message.endswith("APPROVED")
+
+
+def test_validator_gated_batch_trusts_the_read_over_the_submit(tmp_path):
+    fake = LaggingFake()
+    with_request(fake, approval=SWPV)
+    h = Harness(fake, two_files(tmp_path))
+    d = h.run()["delivery/x"]
+    assert d.result["status"] == "SUBMITTED"
 
 
 def test_rollover_replan_warnings_reach_the_outcome_message(tmp_path):

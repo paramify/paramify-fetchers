@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -131,6 +131,24 @@ class _Setup:
         return providers, delivery
 
 
+def _plan(providers: Sequence[Any], ctx: Any, reader: Any) -> Plan:
+    """The engine's plan, less the tags of sets that get no delivery.
+
+    The tag action runs before delivery, so without this an entry that is
+    refused (no request, a stack mismatch) would still tag its set.
+    """
+    plan = engine.plan(providers, ctx, reader)
+    verbs: Dict[str, List[str]] = defaultdict(list)
+    for a in plan.actions:
+        if a.provider == "delivery" and a.payload.get("reference_id"):
+            verbs[a.payload["reference_id"]].append(a.verb)
+    refused = {ref for ref, vs in verbs.items() if vs and all(v == "refuse" for v in vs)}
+    plan.actions = [a for a in plan.actions
+                    if not (a.provider == "evidence_sets" and a.verb == "tag"
+                            and a.key.startswith("tags/") and a.key[len("tags/"):] in refused)]
+    return plan
+
+
 def plan_upload(
     run_dir: Any,
     root: Path,
@@ -150,7 +168,7 @@ def plan_upload(
         require_batches(client)
         reader = Reader(Resources(client))
     providers, _ = setup.providers(root, online=online, custom_tags=custom_tags, with_validators=with_validators)
-    return engine.plan(providers, setup.ctx, reader)
+    return _plan(providers, setup.ctx, reader)
 
 
 # ---- the legacy view of a plan and its outcomes ----------------------------- #
@@ -406,7 +424,7 @@ def run_upload(
         providers, delivery = setup.providers(
             root, online=False, custom_tags=custom_tags, with_validators=with_validators, on_event=emit)
         emit({"event": "upload_start", **base})
-        report.bind(engine.plan(providers, setup.ctx, None), delivery)
+        report.bind(_plan(providers, setup.ctx, None), delivery)
         emit({"event": "plan", "plan": report.plan.to_json()})
         report.planned()
         summary = {**base, **report.summary(None), "tags": report.tags(policy, None),
@@ -456,7 +474,7 @@ def _apply_locked(
             root, online=True, custom_tags=custom_tags, with_validators=with_validators,
             run_state=state, on_event=emit, on_delivery_event=report.on_delivery,
         )
-        report.bind(engine.plan(providers, setup.ctx, Reader(resources)), delivery)
+        report.bind(_plan(providers, setup.ctx, Reader(resources)), delivery)
         emit({"event": "plan", "plan": report.plan.to_json()})
         outcomes = engine.apply(report.plan, providers, resources, on_event=report.on_engine, outcomes=done)
     except BaseException as exc:

@@ -144,7 +144,9 @@ def test_channels_one_on_configured_stack_id_missing_from_stack_list(tmp_path):
     e = entry(tmp_path, stack="st-gone", no_request="evidence")
     assert resolve_channel(e, evidence(gone), [PROD]) == gone
     a = plan_one(e, observed(evidence(gone), stacks=[PROD], requests=[], current=[]))
-    assert a.verb == "deliver" and a.changes["channel"] == "CHN-9"
+    # The no_request fallback sends an evidence-level batch: it has no channel.
+    assert a.verb == "deliver" and a.payload["target"] == "EVIDENCE"
+    assert a.changes["channel"] is None and a.changes["stack"] is None
 
 
 def test_channels_one_other_stack_refuses(tmp_path):

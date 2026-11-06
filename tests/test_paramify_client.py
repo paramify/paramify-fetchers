@@ -194,6 +194,16 @@ def test_require_batches_on_old_api():
     assert s.calls[0]["url"] == f"{BASE}/batches"
 
 
+def test_require_batches_on_a_workspace_with_the_flag_off():
+    body = ('{"requestId":"8972c9d7","statusMessage":"Forbidden","error":{"message":'
+            '"Artifact requests are not enabled for this workspace.","path":"/api/v0/batches"}}')
+    c, _, _ = make([FakeResponse(403, text=body)])
+    with pytest.raises(ApiError) as ei:
+        require_batches(c)
+    assert ei.value.kind is ErrorKind.FATAL and ei.value.status == 403
+    assert ei.value.message.startswith("batches are not turned on for this workspace")
+
+
 def test_require_batches_ok():
     c, _, _ = make([FakeResponse(200, {"batches": []})])
     require_batches(c)
