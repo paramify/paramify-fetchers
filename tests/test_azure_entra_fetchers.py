@@ -32,6 +32,7 @@ def _load(name):
 
 
 auth_policy = _load("entra_authentication_policy")
+emergency_accounts = _load("entra_emergency_accounts")
 mfa_status = _load("entra_mfa_status")
 privileged_roles = _load("entra_privileged_roles")
 
@@ -214,6 +215,58 @@ def test_admin_figures_are_null_when_role_membership_is_unreadable():
     assert summary["mfa_coverage_percentage"] == 33
 
 
+def _methods_user(uid, methods, admin=False):
+    reg = _reg(uid, True, is_admin=admin)
+    reg["methods_registered"] = methods
+    reg["is_passwordless_capable"] = True
+    return reg
+
+
+def test_phishing_resistant_counts_only_resistant_methods():
+    cases = {
+        "p0": (["fido2SecurityKey"], True),
+        "p1": (["windowsHelloForBusiness", "mobilePhone"], True),
+        "p2": (["microsoftAuthenticatorPasswordless", "microsoftAuthenticatorPush"], False),
+        "p3": (["mobilePhone", "email"], False),
+        "p4": (["passKeyDeviceBound"], True),
+        "p5": (["passKeyDeviceBoundAuthenticator"], True),
+        "p6": (["passKeySynced"], True),
+        "p7": (["macOsSecureEnclaveKey"], True),
+        "p8": (["PASSKEYDEVICEBOUND"], True),
+    }
+    users = [_user(k, f"{k}@contoso.test") for k in cases] + [_user("p-none", "none@contoso.test")]
+    regs = [_methods_user(k, m, admin=(k == "p0")) for k, (m, _) in cases.items()]
+    records = mfa_status.join_users(users, regs, {"p0": ["Global Administrator"]})
+    by_id = {r["id"]: r for r in records}
+    for k, (_, want) in cases.items():
+        assert by_id[k]["is_phishing_resistant"] is want, k
+    assert by_id["p-none"]["is_phishing_resistant"] is False
+    assert by_id["p2"]["is_passwordless_capable"] is True
+    summary = mfa_status.summarize(records)
+    assert summary["phishing_resistant_enabled_users"] == 7
+    assert summary["phishing_resistant_coverage_percentage"] == 70
+    assert summary["passwordless_capable_enabled_users"] == 9
+    assert summary["phishing_resistant_admin_users"] == 1
+    assert summary["phishing_resistant_admin_coverage_percentage"] == 100
+    assert summary["admin_users_without_phishing_resistant"] == 0
+
+
+def test_mfa_status_and_emergency_accounts_share_one_phishing_resistant_set():
+    assert mfa_status.PHISHING_RESISTANT_METHODS is emergency_accounts.PHISHING_RESISTANT_METHODS
+
+
+def test_phishing_resistant_figures_are_null_when_unreadable():
+    records = mfa_status.join_users(USERS, REGISTRATIONS, None)
+    summary = mfa_status.summarize(records, admin_roles_readable=False)
+    assert summary["phishing_resistant_admin_users"] is None
+    assert summary["admin_users_without_phishing_resistant"] is None
+    assert summary["phishing_resistant_enabled_users"] == 0
+    summary = mfa_status.summarize(records, registrations_read=False)
+    assert summary["phishing_resistant_enabled_users"] is None
+    assert summary["phishing_resistant_coverage_percentage"] is None
+    assert summary["admin_users_without_phishing_resistant"] is None
+
+
 def test_mfa_status_and_privileged_roles_share_one_admin_definition():
     assert mfa_status.is_privileged_role is privileged_roles.is_privileged_role
 
@@ -302,6 +355,37 @@ def test_denied_role_members_read_is_recorded_and_makes_membership_unknown():
 def test_graph_status_text_is_classified_like_arm(status, code):
     failures = [{"operation": "graph.op", "type": "ODataError", "message": f"Something went wrong (status {status})"}]
     assert mfa_status.classify_failure_code(failures) == code
+
+
+# kiota-abstractions before 1.13 rendered an ODataError without "(status N)".
+OLD_KIOTA_TEXT = """
+        APIError
+        Code: {status}
+        message: None
+        error: MainError(code='{code}', message='{message}')
+        """
+
+
+@pytest.mark.parametrize("status, error_code, message, code", [
+    (403, "Authorization_RequestDenied", "Insufficient privileges to complete the operation.", "not_authorized"),
+    (403, "accessDenied", "Access denied", "not_authorized"),
+    (403, "Forbidden", "Attempted to perform an unauthorized operation.", "not_authorized"),
+    (403, "UnknownError", "", "not_authorized"),
+    (429, "TooManyRequests", "Too many requests", "rate_limited"),
+    (503, "serviceNotAvailable", "Service unavailable", "target_unreachable"),
+    (400, "BadRequest", "Invalid filter clause", "partial_failure"),
+    (404, "Request_ResourceNotFound", "Resource does not exist", "partial_failure"),
+])
+def test_graph_errors_from_older_kiota_are_classified_by_status(status, error_code, message, code):
+    text = OLD_KIOTA_TEXT.format(status=status, code=error_code, message=message)
+    failures = [{"operation": "graph.op", "type": "ODataError", "message": text}]
+    assert mfa_status.classify_failure_code(failures) == code
+
+
+@pytest.mark.parametrize("message", ["Authorization_RequestDenied: no", "accessDenied"])
+def test_graph_denial_codes_alone_classify_not_authorized(message):
+    failures = [{"operation": "graph.op", "type": "ODataError", "message": message}]
+    assert mfa_status.classify_failure_code(failures) == "not_authorized"
 
 
 def _mfa_graph():

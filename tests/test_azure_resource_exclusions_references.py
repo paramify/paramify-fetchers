@@ -109,7 +109,7 @@ def _cp_records():
 def run_cp(monkeypatch, tmp_path, patterns):
     changes, deployments = _cp_records()
     monkeypatch.setattr(cp, "pinned_credential", lambda sub: object())
-    monkeypatch.setattr(cp, "collect_changes", lambda sub, cred, days, collector: (
+    monkeypatch.setattr(cp, "collect_changes", lambda sub, cred, days, collector, paths=None: (
         changes, {t: {} for t in cp.CHANGE_TABLES}))
     monkeypatch.setattr(cp, "collect_deployments", lambda sub, cred, collector: (deployments, [], ["rg-in", "rg-out"]))
     monkeypatch.delenv("AZURE_PIPELINE_PRINCIPALS", raising=False)

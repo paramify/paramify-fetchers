@@ -1,0 +1,345 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_devops_service_connections",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-11-05",
+  "reviewed": true,
+  "collections": [
+    {
+      "path": "results.projects[]",
+      "records": 3,
+      "fields": {
+        "id": 3,
+        "name": 3,
+        "secure_files": 1,
+        "service_connections_listed": 3,
+        "variable_groups_listed": 3
+      }
+    },
+    {
+      "path": "results.projects[].secure_files[]",
+      "records": 1,
+      "fields": {
+        "created_on": 1,
+        "id": 1,
+        "modified_on": 1,
+        "name": 1,
+        "project": 1
+      }
+    },
+    {
+      "path": "results.service_connections[]",
+      "records": 3,
+      "fields": {
+        "auth_method": 3,
+        "authorization_scheme": 3,
+        "azure": 2,
+        "executions": 2,
+        "executions_collected": 3,
+        "executions_complete": 3,
+        "executions_in_window": 3,
+        "id": 3,
+        "is_ready": 3,
+        "is_shared": 3,
+        "last_pipeline_run": 2,
+        "last_pipeline_run_search_stopped": 3,
+        "last_used": 2,
+        "name": 3,
+        "open_to_all_pipelines": 3,
+        "owner": 3,
+        "pipeline_permissions": 3,
+        "pipeline_permissions_collected": 3,
+        "pipeline_runs_in_window": 3,
+        "projects": 3,
+        "service_principal_id": 2,
+        "stored_credential": 3,
+        "tenant_id": 2,
+        "type": 3,
+        "url": 3
+      }
+    },
+    {
+      "path": "results.service_connections[].executions[]",
+      "records": 2,
+      "fields": {
+        "definition": 2,
+        "definition_id": 2,
+        "execution_id": 2,
+        "finish_time": 2,
+        "pipeline_run": 2,
+        "plan_type": 2,
+        "project": 2,
+        "result": 2,
+        "run_id": 2,
+        "run_name": 2,
+        "run_url": 2,
+        "start_time": 2
+      }
+    },
+    {
+      "path": "results.service_connections[].pipeline_permissions[]",
+      "records": 4,
+      "fields": {
+        "all_pipelines_authorized": 4,
+        "authorized_pipeline_ids": 1,
+        "project": 4
+      }
+    },
+    {
+      "path": "results.service_connections[].projects[]",
+      "records": 4,
+      "fields": {
+        "id": 4,
+        "name": 4,
+        "name_in_project": 4
+      }
+    },
+    {
+      "path": "results.service_principals[]",
+      "records": 2,
+      "fields": {
+        "auth_methods": 2,
+        "connections": 2,
+        "executions_in_window": 2,
+        "last_pipeline_run": 1,
+        "pipeline_runs_in_window": 2,
+        "service_principal_id": 2,
+        "tenant_id": 2
+      }
+    },
+    {
+      "path": "results.variable_groups[]",
+      "records": 2,
+      "fields": {
+        "created_on": 2,
+        "id": 2,
+        "is_shared": 2,
+        "key_vault": 1,
+        "key_vault_last_refreshed": 1,
+        "key_vault_linked": 2,
+        "key_vault_secrets": 1,
+        "key_vault_service_connection_id": 1,
+        "modified_on": 2,
+        "name": 2,
+        "projects": 0,
+        "secret_variables": 2,
+        "secret_variables_outside_key_vault": 2,
+        "type": 2,
+        "variables": 2
+      }
+    },
+    {
+      "path": "results.variable_groups[].key_vault_secrets[]",
+      "records": 4,
+      "fields": {
+        "enabled": 4,
+        "expires": 3,
+        "name": 4
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "auth_mode": "entra",
+      "collecting_identity": {
+        "display_name": "Person1",
+        "id": "00000000-0000-4000-8000-111111111111",
+        "login": "user1@example.com"
+      },
+      "datetime": "2026-11-05T16:44:33Z",
+      "organization": "example-organization",
+      "organization_url": "https://dev.azure.com/example-organization",
+      "partial_failure": false,
+      "projects_filter": null
+    },
+    "results": {
+      "projects": [
+        {
+          "id": "00000000-0000-4000-8000-222222222222",
+          "name": "sbx-project",
+          "secure_files": [
+            {
+              "created_on": "2026-11-05T16:28:27Z",
+              "id": "00000000-0000-4000-8000-333333333333",
+              "modified_on": "2026-11-05T16:28:27Z",
+              "name": "sbx-placeholder.txt",
+              "project": "sbx-project"
+            }
+          ],
+          "service_connections_listed": 3,
+          "variable_groups_listed": 2
+        }
+      ],
+      "service_connections": [
+        {
+          "auth_method": "workload_identity_federation",
+          "authorization_scheme": "WorkloadIdentityFederation",
+          "azure": {
+            "app_object_id": null,
+            "creation_mode": "Manual",
+            "environment": "AzureCloud",
+            "identity_type": "AppRegistrationManual",
+            "management_group_id": null,
+            "management_group_name": null,
+            "scope_level": "Subscription",
+            "service_principal_object_id": null,
+            "subscription_id": "00000000-0000-4000-8000-444444444444",
+            "subscription_name": "sandbox-subscription"
+          },
+          "executions": [
+            {
+              "definition": "sbx-pipeline",
+              "definition_id": 2,
+              "execution_id": 1,
+              "finish_time": "2026-11-05T16:28:36Z",
+              "pipeline_run": true,
+              "plan_type": "Build",
+              "project": "00000000-0000-4000-8000-222222222222",
+              "result": "succeeded",
+              "run_id": 1,
+              "run_name": "20261105.1",
+              "run_url": "https://dev.azure.com/example-organization/00000000-0000-4000-8000-222222222222/_build/results?buildId=1",
+              "start_time": "2026-11-05T16:28:34Z"
+            }
+          ],
+          "executions_collected": true,
+          "executions_complete": true,
+          "executions_in_window": 1,
+          "id": "00000000-0000-4000-8000-555555555555",
+          "is_ready": true,
+          "is_shared": false,
+          "last_pipeline_run": "2026-11-05T16:28:34Z",
+          "last_pipeline_run_search_stopped": false,
+          "last_used": "2026-11-05T16:28:34Z",
+          "name": "sbx-arm-federated",
+          "open_to_all_pipelines": false,
+          "owner": "Library",
+          "pipeline_permissions": [
+            {
+              "all_pipelines_authorized": false,
+              "authorized_pipeline_ids": [
+                2
+              ],
+              "project": "sbx-project"
+            }
+          ],
+          "pipeline_permissions_collected": true,
+          "pipeline_runs_in_window": 1,
+          "projects": [
+            {
+              "id": "00000000-0000-4000-8000-222222222222",
+              "name": "sbx-project",
+              "name_in_project": "sbx-arm-federated"
+            }
+          ],
+          "service_principal_id": "00000000-0000-4000-8000-666666666666",
+          "stored_credential": false,
+          "tenant_id": "00000000-0000-4000-8000-777777777777",
+          "type": "azurerm",
+          "url": "https://management.azure.com"
+        }
+      ],
+      "service_principals": [
+        {
+          "auth_methods": [
+            "workload_identity_federation"
+          ],
+          "connections": [
+            "00000000-0000-4000-8000-555555555555"
+          ],
+          "executions_in_window": 1,
+          "last_pipeline_run": "2026-11-05T16:28:34Z",
+          "pipeline_runs_in_window": 1,
+          "service_principal_id": "00000000-0000-4000-8000-666666666666",
+          "tenant_id": "00000000-0000-4000-8000-777777777777"
+        }
+      ],
+      "variable_groups": [
+        {
+          "created_on": "2026-11-05T16:28:27Z",
+          "id": 2,
+          "is_shared": false,
+          "key_vault": "sandbox-vault",
+          "key_vault_last_refreshed": "2026-11-05T16:28:27Z",
+          "key_vault_linked": true,
+          "key_vault_secrets": [
+            {
+              "enabled": true,
+              "expires": "2027-02-03T16:18:24Z",
+              "name": "sbx-secret-current"
+            }
+          ],
+          "key_vault_service_connection_id": "00000000-0000-4000-8000-555555555555",
+          "modified_on": "2026-11-05T16:28:27Z",
+          "name": "sbx-keyvault",
+          "projects": [],
+          "secret_variables": 4,
+          "secret_variables_outside_key_vault": 0,
+          "type": "AzureKeyVault",
+          "variables": 4
+        }
+      ],
+      "window": {
+        "end": "2026-11-05T16:44:31Z",
+        "lookback_days": 30,
+        "start": "2026-10-06T16:44:31Z"
+      }
+    },
+    "summary": {
+      "azure_service_connections": 2,
+      "azure_service_connections_using_workload_identity_federation": 1,
+      "azure_service_connections_with_stored_secret": [
+        "sbx-arm-secret"
+      ],
+      "key_vault_secrets_expired": 1,
+      "key_vault_secrets_without_expiry": 1,
+      "lookback_days": 30,
+      "not_collected": {
+        "classic_pipeline_authorization": "Pipeline permissions limit YAML pipelines only; a classic build or release pipeline may use any connection its editor holds the User role on.",
+        "connection_roles": "Who holds the User, Creator and Administrator roles on each connection.",
+        "projects_not_visible": "Projects and connections the collecting identity (metadata.collecting_identity) cannot see; Azure DevOps lists only the connections it holds a role on, and refuses nothing for the rest.",
+        "secret_expiry": "Azure DevOps does not expose when a service principal secret or certificate expires; join service_principal_id to the Entra app registration for that.",
+        "secret_values": "Credentials, secret variable values and secure file contents are never read or written; of a connection's authorization parameters only the service principal and tenant ids are kept, and its URL is cut to scheme and host."
+      },
+      "pipeline_runs_using_service_connections": 1,
+      "projects_collected": 3,
+      "projects_with_no_service_connections_listed": [
+        "test-project"
+      ],
+      "secret_variables_outside_key_vault": 1,
+      "secret_variables_total": 5,
+      "secure_files_total": 1,
+      "service_connections_by_auth_method": {
+        "service_principal_secret": 1,
+        "username_password": 1,
+        "workload_identity_federation": 1
+      },
+      "service_connections_by_type": {
+        "azurerm": 2,
+        "generic": 1
+      },
+      "service_connections_credential_unknown": [],
+      "service_connections_not_ready": [],
+      "service_connections_open_to_all_pipelines": [
+        "sbx-generic-basic"
+      ],
+      "service_connections_total": 3,
+      "service_connections_unused_in_window": [
+        "sbx-arm-secret"
+      ],
+      "service_connections_used_in_window": 2,
+      "service_connections_with_stored_credential": [
+        "sbx-arm-secret",
+        "sbx-generic-basic"
+      ],
+      "service_principals": 2,
+      "variable_groups_key_vault_linked": 1,
+      "variable_groups_total": 2,
+      "variable_groups_with_secrets_outside_key_vault": [
+        "sbx-vars"
+      ]
+    }
+  }
+}

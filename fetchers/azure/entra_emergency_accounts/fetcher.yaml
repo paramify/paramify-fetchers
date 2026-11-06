@@ -1,5 +1,5 @@
 name: azure_entra_emergency_accounts
-version: 0.1.0
+version: 0.1.1
 description: >-
   Shows which users Conditional Access leaves without MFA through an exclusion, and for each emergency account its sign-in methods, last use and the alert rules that name it.
 category: azure
@@ -118,7 +118,7 @@ evidence_set:
     - emergency_accounts_not_found — Number of named accounts the directory has no user for; null if a named account couldn't be read or, with none named, if the exclusions weren't read
     - emergency_accounts_enabled — Number of emergency accounts whose account is enabled; null if a named account couldn't be read or, with none named, if the exclusions weren't read
     - emergency_accounts_excluded_from_every_all_users_mfa_policy — Number of emergency accounts excluded from every enforced MFA policy that includes all users (0 when no enforced MFA policy includes all users); null if the exclusions weren't read
-    - emergency_accounts_with_phishing_resistant_method — Number of emergency accounts with a phishing-resistant method: a FIDO2 security key, device-bound passkey, Windows Hello for Business or macOS platform credential registered, or a multi-factor certificate. A certificate counts when the X.509 method is enabled, multi-factor by default and applies to the account (all users or one of its groups, and none of its excluded groups), and the account has certificate user ids; a certificate matched by user principal name alone, with no certificate user id, doesn't count. Null if the accounts weren't read, or an account without a registered method has a read behind it that failed (the registration report, the X.509 method, its certificate user ids or its groups)
+    - emergency_accounts_with_phishing_resistant_method — Number of emergency accounts with a phishing-resistant method: a FIDO2 security key, a passkey (synced or device-bound), Windows Hello for Business or macOS platform credential registered, or a multi-factor certificate. A certificate counts when the X.509 method is enabled, multi-factor by default and applies to the account (all users or one of its groups, and none of its excluded groups), and the account has certificate user ids; a certificate matched by user principal name alone, with no certificate user id, doesn't count. Null if the accounts weren't read, or an account without a registered method has a read behind it that failed (the registration report, the X.509 method, its certificate user ids or its groups)
     - emergency_accounts_monitored — Number of emergency accounts named, by whole sign-in name or object id, in the query of at least one enabled Sentinel analytics rule or log search alert rule; a rule that finds the accounts through a watchlist, a group or a display name doesn't count, and whether the rule notifies anyone isn't checked; null if the rules or the accounts weren't read
 
     Is anyone left without MFA who shouldn't be?

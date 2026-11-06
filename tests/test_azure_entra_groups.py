@@ -167,11 +167,12 @@ def _tenant():
     )
 
 
-def test_groups_members_owners_and_membership_kinds(monkeypatch, tmp_path):
+def test_groups_members_owners_and_membership_kinds(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**_tenant()))
 
     assert code == 0
     s = evidence["summary"]
+    assert_summary_documented("azure/entra_groups", s)
     assert s["total_groups"] == 6
     assert s["groups_readable"] is s["members_readable"] is s["member_details_readable"] is True
     assert s["owners_readable"] is s["owner_details_readable"] is True
