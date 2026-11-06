@@ -19,6 +19,13 @@ _EVIDENCE_POST_KEYS = frozenset({
     "whenToApproveArtifactRequest", "whenToCreateAndUpdateProcessArtifactRequest",
 })
 
+_DIRECT_META_KEYS = frozenset({"title", "note", "effectiveDate", "channelId"})
+
+
+def _public(row: Dict[str, Any]) -> Dict[str, Any]:
+    """An artifact as the API shows it: the fake's private keys (leading underscore) are dropped."""
+    return {k: v for k, v in row.items() if not k.startswith("_")}
+
 
 def _matches(wanted: Any, value: str) -> bool:
     """A query filter: absent matches all; a list (a repeated parameter) matches any of its values."""
@@ -65,6 +72,7 @@ class FakeParamify:
         self._fail_once: Dict[str, int] = {}
         self._fail_routes: List[Tuple[str, str, int, str, Dict[str, Any]]] = []
         self._batches_enabled = True
+        self._batches_flag_off = False
         self._n: Dict[str, int] = {}
         self.duplicate_evidence_body = "Evidence already exists"
 
@@ -119,6 +127,10 @@ class FakeParamify:
     def without_batches(self) -> None:
         self._batches_enabled = False
 
+    def batches_flag_off(self, off: bool = True) -> None:
+        """A workspace whose batches flag is off: /batches and /artifact-requests answer 403."""
+        self._batches_flag_off = off
+
     def fail_route(self, method: str, path_regex: str, status: int, text: str = "",
                    when: Optional[Dict[str, Any]] = None) -> None:
         """Answer `status` to every `method` call on a path matching `path_regex`.
@@ -145,6 +157,11 @@ class FakeParamify:
             if (f_method == method and re.fullmatch(f_path, path)
                     and all((body or {}).get(k) == v for k, v in f_when.items())):
                 return FakeResponse(f_status, text=f_text)
+        if self._batches_flag_off and path.startswith(("/batches", "/artifact-requests")):
+            return FakeResponse(403, text=json.dumps({
+                "requestId": "r-1", "statusMessage": "Forbidden",
+                "error": {"message": "Artifact requests are not enabled for this workspace.", "path": path},
+            }))
         if path.startswith("/batches") and not self._batches_enabled:
             return FakeResponse(404, text="Not Found")
         if method == "GET" and path == "/stacks":
@@ -194,6 +211,11 @@ class FakeParamify:
                 return self._submit(batch)
             if m.group(2):
                 return self._upload(batch, files)
+        m = re.fullmatch(r"/evidence/([^/]+)/artifacts/upload", path)
+        if method == "POST" and m:
+            if not any(e["id"] == m.group(1) for e in self._evidence):
+                return FakeResponse(404, text="Not Found")
+            return self._upload_direct(m.group(1), files)
         m = re.fullmatch(r"/evidence/([^/]+)/artifacts", path)
         if method == "GET" and m:
             rows = [a for a in self._artifacts
@@ -201,7 +223,7 @@ class FakeParamify:
                     and params.get("batchId") in (None, a["batchId"])
                     and _matches(params.get("originalFileName"), a["originalFileName"])
                     and _matches(params.get("createdAt"), a["createdAt"][:10])]
-            return FakeResponse(200, {"artifacts": [{k: v for k, v in a.items() if k != "_evidenceId"} for a in rows]})
+            return FakeResponse(200, {"artifacts": [_public(a) for a in rows]})
         m = re.fullmatch(r"/custom-tags/([^/]+)/([^/]+)", path)
         if method == "POST" and m:
             have = self.tags.setdefault((m.group(1), m.group(2)), [])
@@ -258,7 +280,29 @@ class FakeParamify:
         }
         self._artifacts.append(row)
         batch["artifactCount"] += 1
-        return FakeResponse(201, {k: v for k, v in row.items() if k != "_evidenceId"})
+        return FakeResponse(201, _public(row))
+
+    def _upload_direct(self, evidence_id: str, files: Any) -> FakeResponse:
+        """POST /evidence/{id}/artifacts/upload: no batch, so the artifact has batchId None."""
+        filename = files["file"][0]
+        meta = json.loads(files["artifact"][1])
+        extra = sorted(set(meta) - _DIRECT_META_KEYS)
+        if extra:
+            return FakeResponse(400, text=f"Unrecognized keys: {', '.join(extra)}")
+        if filename in self._fail_once:
+            return FakeResponse(self._fail_once.pop(filename), text="injected failure")
+        if filename in self._fail_all:
+            status, text = self._fail_all[filename]
+            return FakeResponse(status, text=text)
+        row = {
+            "id": f"af-{self._next('af')}", "title": meta.get("title") or filename,
+            "originalFileName": filename, "pathname": f"/artifacts/{filename}", "note": meta.get("note"),
+            "isUrl": False, "fileType": "json", "createdAt": f"{self.today.isoformat()}T00:00:00Z",
+            "createdBy": {}, "effectiveDate": meta.get("effectiveDate") or self.today.isoformat(),
+            "batchId": None, "validators": [], "_evidenceId": evidence_id, "_channelId": meta.get("channelId"),
+        }
+        self._artifacts.append(row)
+        return FakeResponse(200, _public(row))
 
     def _submit(self, batch: Dict[str, Any]) -> FakeResponse:
         if batch["status"] not in ("OPEN", "REJECTED"):

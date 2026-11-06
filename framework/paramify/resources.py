@@ -234,6 +234,10 @@ class Resources:
     def upload_to_batch(self, batch_id: str, filename: str, content: bytes, meta: Dict[str, Any]) -> Artifact:
         return _artifact(self._client.post_file(f"/batches/{batch_id}/artifacts/upload", filename, content, meta))
 
+    def upload_to_evidence(self, evidence_id: str, filename: str, content: bytes, meta: Dict[str, Any]) -> Artifact:
+        """The route that predates batches: the artifact goes straight onto the evidence set."""
+        return _artifact(self._client.post_file(f"/evidence/{evidence_id}/artifacts/upload", filename, content, meta))
+
     def submit_batch(self, batch_id: str) -> Batch:
         return _batch(self._client.post_json(f"/batches/{batch_id}/submit", {}))
 

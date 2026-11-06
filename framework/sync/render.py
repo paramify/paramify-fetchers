@@ -30,7 +30,7 @@ def _key(action_id: str) -> str:
 
 def render_plan(plan: Plan) -> List[str]:
     """Actions grouped by provider in plan (engine) order, then one totals line."""
-    lines: List[str] = []
+    lines: List[str] = [f"! {n}" for n in plan.notes]
     current = None
     for a in plan.actions:
         if a.provider != current:

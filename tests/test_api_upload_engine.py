@@ -354,6 +354,14 @@ def test_render_plan_groups_by_provider_and_totals(no_env, root, tmp_path):
     assert not any("\x1b" in line for line in lines)
 
 
+def test_render_plan_prints_notes_first():
+    from framework.sync.model import Action, Plan
+
+    plan = Plan([Action("delivery/x", "delivery", "x", "deliver", "deliver 1 file")], notes=["x"])
+    lines = render.render_plan(plan)
+    assert lines[0] == "! x" and lines[1] == "delivery"
+
+
 def test_render_plan_shows_warnings():
     from framework.sync.model import Action, Plan
 

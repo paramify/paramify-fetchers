@@ -199,3 +199,40 @@ def test_unrecognized_duplicate_reply_is_not_swallowed(fake, res):
         res.create_evidence({"referenceId": "EVD-A", "name": "A"})
     assert e.value.status == 409
     assert not [c for c in fake.calls if c[0] == "GET" and c[1] == "/evidence"]
+
+
+def test_upload_to_evidence_posts_the_old_route(fake, res):
+    ev = fake.add_evidence("EVD-A", channels=[fake.add_stack("S").id])
+    ch = ev.channels[0].id
+    fake.calls.clear()
+    art = res.upload_to_evidence(ev.id, "a.json", b"{}", {"title": "a.json", "note": "run_id=R", "channelId": ch})
+    assert ("POST", f"/evidence/{ev.id}/artifacts/upload") in [(m, p) for m, p, _ in fake.calls]
+    assert art.batch_id is None and art.original_file_name == "a.json"
+    assert fake._artifacts[-1]["_channelId"] == ch
+    assert [a.original_file_name for a in res.artifacts(ev.id)] == ["a.json"]
+
+
+def test_evidence_upload_rejects_unlisted_meta_keys(fake, res):
+    ev = fake.add_evidence("EVD-A")
+    with pytest.raises(ApiError) as ei:
+        res.upload_to_evidence(ev.id, "a.json", b"{}", {"note": "n", "bogus": 1})
+    assert ei.value.status == 400
+
+
+def test_evidence_upload_honours_fail_upload_once(fake, res):
+    ev = fake.add_evidence("EVD-A")
+    fake.fail_upload_once("a.json", 400)
+    with pytest.raises(ApiError):
+        res.upload_to_evidence(ev.id, "a.json", b"{}", {"note": "n"})
+    assert res.upload_to_evidence(ev.id, "a.json", b"{}", {"note": "n"}).id
+
+
+def test_batches_flag_off_answers_403_and_can_be_undone(fake, res):
+    fake.batches_flag_off()
+    for call in (lambda: res.batches(), lambda: res.artifact_requests("ev-1")):
+        with pytest.raises(ApiError) as ei:
+            call()
+        assert ei.value.status == 403
+        assert "Artifact requests are not enabled for this workspace." in ei.value.message
+    fake.batches_flag_off(False)
+    assert list(res.batches()) == []

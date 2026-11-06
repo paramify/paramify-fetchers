@@ -99,6 +99,7 @@ def _decode(value: Any) -> Any:
 @dataclass
 class Plan:
     actions: List[Action] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)
 
     def to_json(self) -> Dict[str, Any]:
         """Plain JSON data; Refs become {"$ref": [id, field]}, UNKNOWN {"$unknown": true}."""
@@ -117,7 +118,8 @@ class Plan:
                     "payload": _encode(a.payload),
                 }
                 for a in self.actions
-            ]
+            ],
+            "notes": list(self.notes),
         }
 
     @classmethod
@@ -137,7 +139,8 @@ class Plan:
                     payload=_decode(a.get("payload", {})),
                 )
                 for a in data.get("actions", [])
-            ]
+            ],
+            notes=list(data.get("notes", [])),
         )
 
 

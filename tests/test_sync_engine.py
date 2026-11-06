@@ -106,6 +106,12 @@ def test_action_defaults_are_not_shared() -> None:
     assert a.on_failure == "continue" and a.fix is None
 
 
+def test_plan_notes_round_trip() -> None:
+    p = Plan(actions=[], notes=["x"])
+    assert Plan.from_json(p.to_json()).notes == ["x"]
+    assert Plan.from_json({"actions": []}).notes == []
+
+
 def test_plan_json_round_trip_with_ref_and_unknown() -> None:
     plan = Plan(
         actions=[

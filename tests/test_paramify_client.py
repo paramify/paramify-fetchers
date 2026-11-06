@@ -6,7 +6,7 @@ import requests
 
 from framework.paramify import ApiError, Client, ErrorKind
 from framework.paramify.client import base_url_error, classify
-from framework.paramify.version import require_batches
+from framework.paramify.version import Capability, delivery_capability
 
 BASE = "https://api.example.com/v0"
 
@@ -184,27 +184,48 @@ def test_http_refused_for_non_localhost():
     assert base_url_error("http://x.y") is not None
 
 
-def test_require_batches_on_old_api():
-    c, s, _ = make([FakeResponse(404, text="nf")])
-    with pytest.raises(ApiError) as ei:
-        require_batches(c)
-    assert ei.value.kind is ErrorKind.FATAL
-    assert ei.value.message == "this workspace's API has no batches; 0.14.0 or later is required"
+_FLAG_OFF_BODY = ('{"requestId":"r-1","statusMessage":"Forbidden","error":{"message":'
+                  '"Artifact requests are not enabled for this workspace.","path":"/api/v0/batches"}}')
+
+
+def test_delivery_capability_ok():
+    c, s, _ = make([FakeResponse(200, {"batches": []})])
+    assert delivery_capability(c) == Capability(True, None)
     assert s.calls[0]["params"] == {"pageSize": 1}
     assert s.calls[0]["url"] == f"{BASE}/batches"
 
 
-def test_require_batches_on_a_workspace_with_the_flag_off():
-    body = ('{"requestId":"8972c9d7","statusMessage":"Forbidden","error":{"message":'
-            '"Artifact requests are not enabled for this workspace.","path":"/api/v0/batches"}}')
-    c, _, _ = make([FakeResponse(403, text=body)])
+def test_delivery_capability_old_api():
+    c, _, _ = make([FakeResponse(404, text="nf")])
+    assert delivery_capability(c) == Capability(False, "the API has no batch routes")
+
+
+def test_delivery_capability_flag_off():
+    c, _, _ = make([FakeResponse(403, text=_FLAG_OFF_BODY)])
+    cap = delivery_capability(c)
+    assert cap.batches is False
+    assert cap.reason == "Artifact requests are not enabled for this workspace."
+
+
+def test_delivery_capability_other_403_raises():
+    c, _, _ = make([FakeResponse(403, text='{"error":{"message":"Insufficient scope"}}')])
+    with pytest.raises(ApiError) as ei:
+        delivery_capability(c)
+    assert ei.value.kind is ErrorKind.FATAL
+
+
+def test_require_batches_keeps_the_old_fatal_messages():
+    from framework.paramify.version import require_batches
+    c, _, _ = make([FakeResponse(404, text="nf")])
+    with pytest.raises(ApiError) as ei:
+        require_batches(c)
+    assert ei.value.kind is ErrorKind.FATAL
+    assert ei.value.message == "this workspace's API has no batches; 0.14.0 or later is required"
+    c, _, _ = make([FakeResponse(403, text=_FLAG_OFF_BODY)])
     with pytest.raises(ApiError) as ei:
         require_batches(c)
     assert ei.value.kind is ErrorKind.FATAL and ei.value.status == 403
     assert ei.value.message.startswith("batches are not turned on for this workspace")
-
-
-def test_require_batches_ok():
     c, _, _ = make([FakeResponse(200, {"batches": []})])
     require_batches(c)
 
