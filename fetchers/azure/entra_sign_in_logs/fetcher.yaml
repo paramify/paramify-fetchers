@@ -46,7 +46,7 @@ config_schema:
     required: false
     default: 30
     env: ENTRA_LOG_LOOKBACK_DAYS
-    description: How many days of SigninLogs and AuditLogs to summarize.
+    description: How many days of SigninLogs, AuditLogs, AADNonInteractiveUserSignInLogs and AADServicePrincipalSignInLogs to summarize.
   users:
     type: string
     required: false
@@ -89,7 +89,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_sign_in_logs/fetcher.py
 
-    Access: Reader on the subscription, which includes querying its workspaces' logs; or, to read only these two tables, a role with Microsoft.OperationalInsights/workspaces/read on the workspace and workspaces/query/read granted on its SigninLogs and AuditLogs tables. No Microsoft Graph permission is used. Without query access the run fails as not_authorized.
+    Access: Reader on the subscription, which includes querying its workspaces' logs; or, to read only these four tables, a custom role on the workspace with Microsoft.OperationalInsights/workspaces/read, workspaces/tables/read (whether each table exists, and its retention) and Microsoft.SecurityInsights/onboardingStates/read (whether Sentinel is on), plus workspaces/query/read granted on its SigninLogs, AuditLogs, AADNonInteractiveUserSignInLogs and AADServicePrincipalSignInLogs tables; without the first three the run fails. No Microsoft Graph permission is used. Without query access the run fails as not_authorized.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
