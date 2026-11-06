@@ -641,7 +641,7 @@ def summarize_certificates(vaults: list[dict], app_service_certificates: list[di
         "certificates_with_readable_policy": len(readable),
         "certificates_with_auto_renew": auto_renew,
         "certificate_auto_renew_percentage": coverage_percentage(auto_renew, len(readable)),
-        "certificates_without_expiry": sum(1 for cert in certificates if cert["expires"] is None),
+        "certificates_without_expiry": sum(1 for cert in certificates if cert["expired"] is None),
         "expired_certificates": sum(1 for cert in certificates if cert["expired"]) if all_listed else None,
         "certificates_expiring_within_30_days": _expiring_soon(certificates) if all_listed else None,
         "total_app_service_certificates": len(app_service_certificates),
