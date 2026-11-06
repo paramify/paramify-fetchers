@@ -31,9 +31,13 @@ dependencies = [
 # same app on 1.x.
 tui = ["textual>=8,<9"]
 checkov = ["checkov"]
+# python-dotenv 1.2.0 is the first to honour PYTHON_DOTENV_DISABLED, which the TUI and
+# CLI regression tests set so a developer's .env never reaches the commands they run.
 # cryptography: tests/test_azure_entra_authentication_policy.py builds test
 # certificates with it, and the `test` job installs dev but not the azure extra.
-dev = ["pytest", "pytest-xdist", "ruff", "mypy", "cryptography>=42.0.0,<51"]
+dev = ["pytest", "pytest-xdist", "ruff", "mypy", "python-dotenv>=1.2.0", "cryptography>=42.0.0,<51"]
+# TUI SVG snapshots; not in dev because its syrupy 4.8.0 pin caps pytest below 9.
+snapshots = ["pytest-textual-snapshot==1.1.0"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every
 # one producing wrong or empty evidence rather than an error. Keep the two files
