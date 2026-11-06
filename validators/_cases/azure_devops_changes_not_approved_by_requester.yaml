@@ -1,0 +1,123 @@
+validator: azure_devops_changes_not_approved_by_requester
+cases:
+  - name: approved_by_others
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEVOPS-WORK-ITEMS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"organization":"example-org","organization_url":"https://dev.azure.com/example-org","partial_failure":false},"results":{"changesets":[],"projects":[{"id":"00000000-0000-0000-0000-000000000001","name":"example-project"}],"settings":{"work_item_tags":["Security"],"work_item_types":["Change Request","Hotfix"]},"work_items":[{"approval":{"approved":true,"approved_by":"approver@example.com"},"created_by":"requester@example.com","id":101,"state":"Closed","state_category":"Completed","type":"Change Request"}]},"summary":{"approval_history_collected":true,"change_items":40,"change_items_approved":30,"change_items_approved_by_change_author":[],"change_items_approved_by_requester":[],"change_items_changed_before_approval":[],"change_items_finished":30,"change_items_linked_changes_checked":30,"change_items_with_linked_changes":30,"finished_change_items_without_approval":[],"finished_change_items_without_linked_change":[],"lookback_days":90,"not_collected":{"text":"Descriptions, comment text and attachments are not collected."},"projects_collected":1,"tagged_items_open":2,"tagged_items_open_by_priority":{"1":1,"3":1},"tagged_items_open_unassigned":[],"tagged_items_open_without_planned_date":0,"tagged_items_overdue":[],"tagged_items_overdue_high_priority":[],"work_item_states_undefined":[],"work_item_tags":["Security"],"work_item_types":["Change Request","Hotfix"],"work_item_types_missing":[],"work_items_by_state_category":{"Completed":30,"InProgress":6,"Proposed":6},"work_items_by_type":{"Change Request":35,"Hotfix":5,"Task":2},"work_items_open":12,"work_items_total":42}},"schema_version":"1.0"}'
+
+  - name: approved_by_others_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "evidence_set": {
+            "reference_id": "EVD-AZURE-DEVOPS-WORK-ITEMS"
+          },
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "api_failures": [],
+            "organization": "example-org",
+            "organization_url": "https://dev.azure.com/example-org",
+            "partial_failure": false
+          },
+          "results": {
+            "changesets": [],
+            "projects": [
+              {
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "example-project"
+              }
+            ],
+            "settings": {
+              "work_item_tags": [
+                "Security"
+              ],
+              "work_item_types": [
+                "Change Request",
+                "Hotfix"
+              ]
+            },
+            "work_items": [
+              {
+                "approval": {
+                  "approved": true,
+                  "approved_by": "approver@example.com"
+                },
+                "created_by": "requester@example.com",
+                "id": 101,
+                "state": "Closed",
+                "state_category": "Completed",
+                "type": "Change Request"
+              }
+            ]
+          },
+          "summary": {
+            "approval_history_collected": true,
+            "change_items": 40,
+            "change_items_approved": 30,
+            "change_items_approved_by_change_author": [],
+            "change_items_approved_by_requester": [],
+            "change_items_changed_before_approval": [],
+            "change_items_finished": 30,
+            "change_items_linked_changes_checked": 30,
+            "change_items_with_linked_changes": 30,
+            "finished_change_items_without_approval": [],
+            "finished_change_items_without_linked_change": [],
+            "lookback_days": 90,
+            "not_collected": {
+              "text": "Descriptions, comment text and attachments are not collected."
+            },
+            "projects_collected": 1,
+            "tagged_items_open": 2,
+            "tagged_items_open_by_priority": {
+              "1": 1,
+              "3": 1
+            },
+            "tagged_items_open_unassigned": [],
+            "tagged_items_open_without_planned_date": 0,
+            "tagged_items_overdue": [],
+            "tagged_items_overdue_high_priority": [],
+            "work_item_states_undefined": [],
+            "work_item_tags": [
+              "Security"
+            ],
+            "work_item_types": [
+              "Change Request",
+              "Hotfix"
+            ],
+            "work_item_types_missing": [],
+            "work_items_by_state_category": {
+              "Completed": 30,
+              "InProgress": 6,
+              "Proposed": 6
+            },
+            "work_items_by_type": {
+              "Change Request": 35,
+              "Hotfix": 5,
+              "Task": 2
+            },
+            "work_items_open": 12,
+            "work_items_total": 42
+          }
+        },
+        "schema_version": "1.0"
+      }
+
+  - name: self_approved
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEVOPS-WORK-ITEMS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"organization":"example-org","organization_url":"https://dev.azure.com/example-org","partial_failure":false},"results":{"changesets":[],"projects":[{"id":"00000000-0000-0000-0000-000000000001","name":"example-project"}],"settings":{"work_item_tags":["Security"],"work_item_types":["Change Request","Hotfix"]},"work_items":[{"approval":{"approved":true,"approved_by":"approver@example.com"},"created_by":"requester@example.com","id":101,"state":"Closed","state_category":"Completed","type":"Change Request"}]},"summary":{"approval_history_collected":true,"change_items":40,"change_items_approved":30,"change_items_approved_by_change_author":[],"change_items_approved_by_requester":[107],"change_items_changed_before_approval":[],"change_items_finished":30,"change_items_linked_changes_checked":30,"change_items_with_linked_changes":30,"finished_change_items_without_approval":[],"finished_change_items_without_linked_change":[],"lookback_days":90,"not_collected":{"text":"Descriptions, comment text and attachments are not collected."},"projects_collected":1,"tagged_items_open":2,"tagged_items_open_by_priority":{"1":1,"3":1},"tagged_items_open_unassigned":[],"tagged_items_open_without_planned_date":0,"tagged_items_overdue":[],"tagged_items_overdue_high_priority":[],"work_item_states_undefined":[],"work_item_tags":["Security"],"work_item_types":["Change Request","Hotfix"],"work_item_types_missing":[],"work_items_by_state_category":{"Completed":30,"InProgress":6,"Proposed":6},"work_items_by_type":{"Change Request":35,"Hotfix":5,"Task":2},"work_items_open":12,"work_items_total":42}},"schema_version":"1.0"}'
+
+  - name: history_unread
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEVOPS-WORK-ITEMS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"organization":"example-org","organization_url":"https://dev.azure.com/example-org","partial_failure":false},"results":{"changesets":[],"projects":[{"id":"00000000-0000-0000-0000-000000000001","name":"example-project"}],"settings":{"work_item_tags":["Security"],"work_item_types":["Change Request","Hotfix"]},"work_items":[{"approval":{"approved":true,"approved_by":"approver@example.com"},"created_by":"requester@example.com","id":101,"state":"Closed","state_category":"Completed","type":"Change Request"}]},"summary":{"approval_history_collected":false,"change_items":40,"change_items_approved":null,"change_items_approved_by_change_author":null,"change_items_approved_by_requester":null,"change_items_changed_before_approval":null,"change_items_finished":30,"change_items_linked_changes_checked":30,"change_items_with_linked_changes":30,"finished_change_items_without_approval":null,"finished_change_items_without_linked_change":[],"lookback_days":90,"not_collected":{"text":"Descriptions, comment text and attachments are not collected."},"projects_collected":1,"tagged_items_open":2,"tagged_items_open_by_priority":{"1":1,"3":1},"tagged_items_open_unassigned":[],"tagged_items_open_without_planned_date":0,"tagged_items_overdue":[],"tagged_items_overdue_high_priority":[],"work_item_states_undefined":[],"work_item_tags":["Security"],"work_item_types":["Change Request","Hotfix"],"work_item_types_missing":[],"work_items_by_state_category":{"Completed":30,"InProgress":6,"Proposed":6},"work_items_by_type":{"Change Request":35,"Hotfix":5,"Task":2},"work_items_open":12,"work_items_total":42}},"schema_version":"1.0"}'
+
+  - name: no_approvals
+    expect: FAIL
+    note: Nothing approved, so nothing shows separation.
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEVOPS-WORK-ITEMS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"organization":"example-org","organization_url":"https://dev.azure.com/example-org","partial_failure":false},"results":{"changesets":[],"projects":[{"id":"00000000-0000-0000-0000-000000000001","name":"example-project"}],"settings":{"work_item_tags":["Security"],"work_item_types":["Change Request","Hotfix"]},"work_items":[{"approval":{"approved":true,"approved_by":"approver@example.com"},"created_by":"requester@example.com","id":101,"state":"Closed","state_category":"Completed","type":"Change Request"}]},"summary":{"approval_history_collected":true,"change_items":40,"change_items_approved":0,"change_items_approved_by_change_author":[],"change_items_approved_by_requester":[],"change_items_changed_before_approval":[],"change_items_finished":30,"change_items_linked_changes_checked":30,"change_items_with_linked_changes":30,"finished_change_items_without_approval":[101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130],"finished_change_items_without_linked_change":[],"lookback_days":90,"not_collected":{"text":"Descriptions, comment text and attachments are not collected."},"projects_collected":1,"tagged_items_open":2,"tagged_items_open_by_priority":{"1":1,"3":1},"tagged_items_open_unassigned":[],"tagged_items_open_without_planned_date":0,"tagged_items_overdue":[],"tagged_items_overdue_high_priority":[],"work_item_states_undefined":[],"work_item_tags":["Security"],"work_item_types":["Change Request","Hotfix"],"work_item_types_missing":[],"work_items_by_state_category":{"Completed":30,"InProgress":6,"Proposed":6},"work_items_by_type":{"Change Request":35,"Hotfix":5,"Task":2},"work_items_open":12,"work_items_total":42}},"schema_version":"1.0"}'
+
+  - name: requester_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEVOPS-WORK-ITEMS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"organization":"example-org","organization_url":"https://dev.azure.com/example-org","partial_failure":false},"results":{"changesets":[],"projects":[{"id":"00000000-0000-0000-0000-000000000001","name":"example-project"}],"settings":{"work_item_tags":["Security"],"work_item_types":["Change Request","Hotfix"]},"work_items":[{"approval":{"approved":true,"approved_by":"approver@example.com"},"created_by":"requester@example.com","id":101,"state":"Closed","state_category":"Completed","type":"Change Request"}]},"summary":{"approval_history_collected":true,"change_items":40,"change_items_approved":30,"change_items_approved_by_change_author":[],"change_items_changed_before_approval":[],"change_items_finished":30,"change_items_linked_changes_checked":30,"change_items_self_approved":[],"change_items_with_linked_changes":30,"finished_change_items_without_approval":[],"finished_change_items_without_linked_change":[],"lookback_days":90,"not_collected":{"text":"Descriptions, comment text and attachments are not collected."},"projects_collected":1,"tagged_items_open":2,"tagged_items_open_by_priority":{"1":1,"3":1},"tagged_items_open_unassigned":[],"tagged_items_open_without_planned_date":0,"tagged_items_overdue":[],"tagged_items_overdue_high_priority":[],"work_item_states_undefined":[],"work_item_tags":["Security"],"work_item_types":["Change Request","Hotfix"],"work_item_types_missing":[],"work_items_by_state_category":{"Completed":30,"InProgress":6,"Proposed":6},"work_items_by_type":{"Change Request":35,"Hotfix":5,"Task":2},"work_items_open":12,"work_items_total":42}},"schema_version":"1.0"}'
