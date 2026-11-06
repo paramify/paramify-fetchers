@@ -1,0 +1,23 @@
+key: azure_ddos_every_attached_public_ip_protected
+name: Azure DDoS Protection on Every Attached Public IP
+type: AUTOMATED
+role: configuration
+statement: >-
+  The subscription's DDoS protection plans, virtual networks, public IPs, network interfaces and load
+  balancers were read with no partial failure, and every public IP attached to a resource is covered
+  by Azure DDoS Protection, through a plan on its virtual network (Network Protection) or its own IP
+  Protection, and none has protection that couldn't be determined (attached_public_ips_unprotected
+  and the unknown count are both 0). IPs held by a NAT gateway, which DDoS Protection can't cover,
+  are not counted, and a subscription with no attached public IPs passes. Supports KSI-CNA-RVP for
+  public IP entry points. Does not prove: Front Door or other edge protection; WAF policy; that
+  attacks are alerted on or mitigation reviewed; unattached IPs; or other subscriptions.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"summary":\s*\{(?=[\s\S]*?"attached_public_ips_by_effective_protection":\s*\{[^}]*"unknown":\s*0\b)(?=[\s\S]*?"attached_public_ips_unprotected":\s*0\b)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DDOS
