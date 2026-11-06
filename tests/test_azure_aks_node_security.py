@@ -72,7 +72,8 @@ def test_all_pools_fips_is_true_only_when_every_pool_answers_true():
     no = _records([pool("a", enable_fips=True), pool("b", enable_fips=False)])
     assert aks.summarize_node_security(yes)["all_agent_pools_fips"] is True
     assert aks.summarize_node_security(no)["all_agent_pools_fips"] is False
-    assert aks.summarize_node_security([])["all_agent_pools_fips"] is False and aks.summarize_node_security([])["fips_unknown_agent_pools"] == 0
+    # No pools: nothing to judge, so null, not false.
+    assert aks.summarize_node_security([])["all_agent_pools_fips"] is None and aks.summarize_node_security([])["fips_unknown_agent_pools"] == 0
 
 
 def test_cluster_summary_carries_node_security_keys():

@@ -306,8 +306,9 @@ def summarize_node_security(pools: list[dict]) -> dict:
         "fips_enabled_agent_pools": count("enable_fips", True),
         "fips_disabled_agent_pools": count("enable_fips", False),
         "fips_unknown_agent_pools": fips_unknown,
-        # All pools FIPS, judged only when every pool answered; None while any pool is unknown.
-        "all_agent_pools_fips": (None if fips_unknown else (total > 0 and count("enable_fips", True) == total)),
+        # All pools FIPS, judged only when every pool answered; None while any pool is unknown, and None when there
+        # are no pools, since there is nothing to judge (as the description and CHANGELOG say).
+        "all_agent_pools_fips": None if fips_unknown or total == 0 else count("enable_fips", True) == total,
         "secure_boot_enabled_agent_pools": count("secure_boot_enabled", True),
         "vtpm_enabled_agent_pools": count("vtpm_enabled", True),
         "trusted_launch_unknown_agent_pools": sum(
