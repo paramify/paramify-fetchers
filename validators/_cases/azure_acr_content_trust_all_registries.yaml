@@ -1,0 +1,88 @@
+validator: azure_acr_content_trust_all_registries
+cases:
+  - name: every_registry_trusted
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ACR-CONFIG"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"excluded":[],"provider_registration_status":"registered","registries":[{"admin_user_enabled":false,"anonymous_pull_enabled":false,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/crexample","location":"eastus","name":"crexample","policies":{"trust_policy_status":"enabled"},"sku":"Premium"}]},"summary":{"admin_user_disabled_percentage":100,"admin_user_enabled_registries":0,"anonymous_pull_enabled_registries":0,"content_trust_registries":2,"customer_managed_key_registries":0,"network_rules_default_deny_registries":2,"premium_sku_registries":2,"private_link_registries":2,"private_network_access_percentage":100,"private_network_access_registries":2,"provider_registration_status":"registered","public_network_access_registries":0,"quarantine_policy_registries":0,"registries_with_diagnostic_settings":2,"registries_with_enabled_logs":2,"retention_policy_registries":2,"total_registries":2}},"schema_version":"1.0"}'
+
+  - name: every_registry_trusted_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "evidence_set": {
+            "reference_id": "EVD-AZURE-ACR-CONFIG"
+          },
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "api_failures": [],
+            "partial_failure": false,
+            "subscription_id": "00000000-0000-0000-0000-000000000000",
+            "subscription_source": "target"
+          },
+          "results": {
+            "excluded": [],
+            "provider_registration_status": "registered",
+            "registries": [
+              {
+                "admin_user_enabled": false,
+                "anonymous_pull_enabled": false,
+                "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/crexample",
+                "location": "eastus",
+                "name": "crexample",
+                "policies": {
+                  "trust_policy_status": "enabled"
+                },
+                "sku": "Premium"
+              }
+            ]
+          },
+          "summary": {
+            "admin_user_disabled_percentage": 100,
+            "admin_user_enabled_registries": 0,
+            "anonymous_pull_enabled_registries": 0,
+            "content_trust_registries": 2,
+            "customer_managed_key_registries": 0,
+            "network_rules_default_deny_registries": 2,
+            "premium_sku_registries": 2,
+            "private_link_registries": 2,
+            "private_network_access_percentage": 100,
+            "private_network_access_registries": 2,
+            "provider_registration_status": "registered",
+            "public_network_access_registries": 0,
+            "quarantine_policy_registries": 0,
+            "registries_with_diagnostic_settings": 2,
+            "registries_with_enabled_logs": 2,
+            "retention_policy_registries": 2,
+            "total_registries": 2
+          }
+        },
+        "schema_version": "1.0"
+      }
+
+  - name: registry_without_trust
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ACR-CONFIG"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"excluded":[],"provider_registration_status":"registered","registries":[{"admin_user_enabled":false,"anonymous_pull_enabled":false,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/crexample","location":"eastus","name":"crexample","policies":{"trust_policy_status":"enabled"},"sku":"Premium"}]},"summary":{"admin_user_disabled_percentage":100,"admin_user_enabled_registries":0,"anonymous_pull_enabled_registries":0,"content_trust_registries":1,"customer_managed_key_registries":0,"network_rules_default_deny_registries":2,"premium_sku_registries":2,"private_link_registries":2,"private_network_access_percentage":100,"private_network_access_registries":2,"provider_registration_status":"registered","public_network_access_registries":0,"quarantine_policy_registries":0,"registries_with_diagnostic_settings":2,"registries_with_enabled_logs":2,"retention_policy_registries":2,"total_registries":2}},"schema_version":"1.0"}'
+
+  - name: no_registries
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ACR-CONFIG"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"excluded":[],"provider_registration_status":"registered","registries":[{"admin_user_enabled":false,"anonymous_pull_enabled":false,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/crexample","location":"eastus","name":"crexample","policies":{"trust_policy_status":"enabled"},"sku":"Premium"}]},"summary":{"admin_user_disabled_percentage":0,"admin_user_enabled_registries":0,"anonymous_pull_enabled_registries":0,"content_trust_registries":0,"customer_managed_key_registries":0,"network_rules_default_deny_registries":0,"premium_sku_registries":0,"private_link_registries":0,"private_network_access_percentage":0,"private_network_access_registries":0,"provider_registration_status":"registered","public_network_access_registries":0,"quarantine_policy_registries":0,"registries_with_diagnostic_settings":0,"registries_with_enabled_logs":0,"retention_policy_registries":0,"total_registries":0}},"schema_version":"1.0"}'
+
+  - name: count_prefix_total_12_trust_1
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ACR-CONFIG"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"excluded":[],"provider_registration_status":"registered","registries":[{"admin_user_enabled":false,"anonymous_pull_enabled":false,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/crexample","location":"eastus","name":"crexample","policies":{"trust_policy_status":"enabled"},"sku":"Premium"}]},"summary":{"admin_user_disabled_percentage":100,"admin_user_enabled_registries":0,"anonymous_pull_enabled_registries":0,"content_trust_registries":1,"customer_managed_key_registries":0,"network_rules_default_deny_registries":12,"premium_sku_registries":12,"private_link_registries":12,"private_network_access_percentage":100,"private_network_access_registries":12,"provider_registration_status":"registered","public_network_access_registries":0,"quarantine_policy_registries":0,"registries_with_diagnostic_settings":12,"registries_with_enabled_logs":12,"retention_policy_registries":12,"total_registries":12}},"schema_version":"1.0"}'
+
+  - name: count_prefix_total_1_trust_12
+    expect: FAIL
+    note: Proves the backreference stops at the digit boundary.
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ACR-CONFIG"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"excluded":[],"provider_registration_status":"registered","registries":[{"admin_user_enabled":false,"anonymous_pull_enabled":false,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/crexample","location":"eastus","name":"crexample","policies":{"trust_policy_status":"enabled"},"sku":"Premium"}]},"summary":{"admin_user_disabled_percentage":100,"admin_user_enabled_registries":0,"anonymous_pull_enabled_registries":0,"content_trust_registries":12,"customer_managed_key_registries":0,"network_rules_default_deny_registries":1,"premium_sku_registries":1,"private_link_registries":1,"private_network_access_percentage":100,"private_network_access_registries":1,"provider_registration_status":"registered","public_network_access_registries":0,"quarantine_policy_registries":0,"registries_with_diagnostic_settings":1,"registries_with_enabled_logs":1,"retention_policy_registries":1,"total_registries":1}},"schema_version":"1.0"}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ACR-CONFIG"},"exit_code":1,"status":"failed"},"payload":{"metadata":{"api_failures":[{"message":"example failure","operation":"example.read"}],"partial_failure":true,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"excluded":[],"provider_registration_status":"registered","registries":[{"admin_user_enabled":false,"anonymous_pull_enabled":false,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/crexample","location":"eastus","name":"crexample","policies":{"trust_policy_status":"enabled"},"sku":"Premium"}]},"summary":{"admin_user_disabled_percentage":100,"admin_user_enabled_registries":0,"anonymous_pull_enabled_registries":0,"content_trust_registries":2,"customer_managed_key_registries":0,"network_rules_default_deny_registries":2,"premium_sku_registries":2,"private_link_registries":2,"private_network_access_percentage":100,"private_network_access_registries":2,"provider_registration_status":"registered","public_network_access_registries":0,"quarantine_policy_registries":0,"registries_with_diagnostic_settings":2,"registries_with_enabled_logs":2,"retention_policy_registries":2,"total_registries":2}},"schema_version":"1.0"}'
+
+  - name: trust_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-ACR-CONFIG"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"excluded":[],"provider_registration_status":"registered","registries":[{"admin_user_enabled":false,"anonymous_pull_enabled":false,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/crexample","location":"eastus","name":"crexample","policies":{"trust_policy_status":"enabled"},"sku":"Premium"}]},"summary":{"admin_user_disabled_percentage":100,"admin_user_enabled_registries":0,"anonymous_pull_enabled_registries":0,"customer_managed_key_registries":0,"network_rules_default_deny_registries":2,"premium_sku_registries":2,"private_link_registries":2,"private_network_access_percentage":100,"private_network_access_registries":2,"provider_registration_status":"registered","public_network_access_registries":0,"quarantine_policy_registries":0,"registries_with_diagnostic_settings":2,"registries_with_enabled_logs":2,"retention_policy_registries":2,"total_registries":2,"trusted_registries":2}},"schema_version":"1.0"}'

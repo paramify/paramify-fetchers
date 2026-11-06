@@ -1,0 +1,23 @@
+key: azure_acr_content_trust_all_registries
+name: Azure Container Registry Content Trust on Every Registry
+type: AUTOMATED
+role: configuration
+statement: >-
+  The subscription's container registries were read with no partial failure, there is at least one,
+  and every one has its content trust policy enabled (content_trust_registries equals a non-zero
+  total_registries), so it accepts and serves signed images for clients that verify them. Supports
+  KSI-SVC-VRI with cryptographic signing of container images. Does not prove: that images are
+  actually signed or that clients pull with content trust enforced; Notary Project (Notation)
+  signatures, which this policy doesn't show; which algorithms or modules sign them; or registries in
+  other subscriptions.
+
+# Backreference: content_trust_registries must equal a non-zero total_registries.
+regex: '"partial_failure":\s*false\b[\s\S]*?"summary":\s*\{(?=[\s\S]*?"total_registries":\s*(?<total_registries>[1-9]\d*)\b)(?=[\s\S]*?"content_trust_registries":\s*\k<total_registries>(?!\d))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ACR-CONFIG
