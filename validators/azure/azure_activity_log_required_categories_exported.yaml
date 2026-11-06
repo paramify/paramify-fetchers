@@ -1,0 +1,23 @@
+key: azure_activity_log_required_categories_exported
+name: Azure Activity Log Exported With Required Categories
+type: AUTOMATED
+role: configuration
+statement: >-
+  The subscription's diagnostic settings were read with no partial failure, at least one exports the
+  Activity Log, and together they export the four control-plane audit categories Administrative,
+  Security, Policy and Alert (activity_log_exported and all_required_log_categories_covered are both
+  true), so those records are kept past the Activity Log's own 90 days. Supports KSI-MLA-OSM and
+  KSI-MLA-LET for the subscription's control-plane log. Does not prove: that the categories reach a
+  Log Analytics workspace (azure_activity_log_required_categories_to_log_analytics); the other
+  Activity Log categories; resource-level or Entra ID diagnostic settings; that records arrive or how
+  long the destination keeps them; or other subscriptions.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"summary":\s*\{(?=[\s\S]*?"activity_log_exported":\s*true\b)(?=[\s\S]*?"all_required_log_categories_covered":\s*true\b)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DIAG-SETTINGS

@@ -1,0 +1,25 @@
+key: azure_activity_log_required_categories_to_log_analytics
+name: Azure Activity Log Required Categories Sent to Log Analytics
+type: AUTOMATED
+role: configuration
+statement: >-
+  The subscription's diagnostic settings were read with no partial failure, and one setting carries
+  all four control-plane audit categories (Administrative, Security, Policy and Alert, or every
+  category) to a Log Analytics workspace, where they can be queried and analysed with the rest of the
+  logs. Supports KSI-MLA-OSM for the subscription's control-plane log. Fails when the categories are
+  split across settings and the one sending to a workspace lacks some, or when they go only to storage,
+  an event hub or a partner solution. Does not prove: that the workspace is the approved one or feeds a
+  SIEM; that records arrive; the workspace's retention; resource-level or Entra ID diagnostic
+  settings; or other subscriptions.
+
+# One setting object: captures_required_log_categories sorts just before destinations, and the
+# character class keeps the match from crossing into a neighbouring setting.
+regex: '"partial_failure":\s*false\b[\s\S]*?"captures_required_log_categories":\s*true\b[^{}\[\]]*?"destinations":\s*\[[^\]]*"log_analytics_workspace"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DIAG-SETTINGS
