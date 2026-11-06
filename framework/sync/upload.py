@@ -38,7 +38,11 @@ from framework.paramify_auth import (
 from framework.run_files import is_evidence_file
 from framework.sync import engine
 from framework.sync.model import Action, Outcome, Plan, SyncContext, Unknown
-from framework.sync.providers.delivery import BATCHES_OFF, DIRECT, DeliveryProvider
+from framework.sync.providers.delivery import (
+    BATCHES_OFF,
+    DeliveryProvider,
+    delivery_mode,
+)
 from framework.sync.providers.evidence_sets import (
     TAGS_UNAVAILABLE,
     EvidenceSetsProvider,
@@ -317,7 +321,8 @@ class _Report:
             entry["stack"] = _known(a.changes.get("stack"))
             entry["channel"] = _known(a.changes.get("channel"))
             entry["artifact_request"] = _known(a.changes.get("artifact_request"))
-            entry["mode"] = "direct" if a.payload.get("target") == DIRECT else "batch"
+            # How apply sent it (a re-plan can change it), else how the plan routed it.
+            entry["mode"] = entry["mode"] if "mode" in entry else delivery_mode(a.payload.get("target"))
             out[a.key] = entry
         return out
 

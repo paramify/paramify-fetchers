@@ -325,6 +325,40 @@ def test_direct_then_batches_on_sends_nothing_twice(fake, root, tmp_path):
     assert len(fake._artifacts) == 2 and fake._batches == []
 
 
+def test_reupload_of_an_entry_sent_direct_for_lack_of_a_request_stays_direct(fake, root, tmp_path):
+    st = fake.add_stack("Prod")
+    fake.add_evidence("EVD-X", channels=[st.id])  # batches on, no artifact request: direct
+    run = two_files(tmp_path)
+    first = api.upload_run(run, root)["entries"]["x"]
+    assert (first["state"], first["mode"], first["channel"]) == ("delivered", "direct", "CH-1")
+    again = api.upload_run(run, root)["entries"]["x"]
+    assert (again["state"], again["mode"], again["channel"]) == ("noop", "direct", "CH-1")
+    assert again["message"] == "already delivered (2 files)"
+    assert fake._batches == []
+
+
+def test_refused_entry_has_no_mode_when_batches_are_off(fake, root, tmp_path):
+    fake.batches_flag_off()
+    st1, st2 = fake.add_stack("Prod"), fake.add_stack("Gov")
+    fake.add_evidence("EVD-X", channels=[st1.id, st2.id])
+    out = api.upload_run(two_files(tmp_path), root)  # two channels and no stack: refused
+    assert out["entries"]["x"]["state"] == "refused" and out["entries"]["x"]["mode"] is None
+
+
+def test_entry_with_nothing_to_send_has_no_mode(fake, root, tmp_path):
+    run = tmp_path / "run-1"
+    run.mkdir()
+    build(run, {"a.json": env(fetcher="x", inventory={"complete": False})}, [inv("x", ["a.json"])])
+    out = api.upload_run(run, root)
+    entry = out["entries"]["x"]
+    assert entry["state"] == "noop" and entry["mode"] is None
+
+
+def test_dry_run_entry_has_no_mode(no_env, root, tmp_path):
+    out = api.upload_run(two_files(tmp_path), root, dry_run=True)
+    assert out["entries"]["x"]["state"] == "planned" and out["entries"]["x"]["mode"] is None
+
+
 def test_refused_entry_is_an_error_and_not_ok(fake, root, tmp_path):
     st1, st2 = fake.add_stack("Prod"), fake.add_stack("Gov")
     fake.add_evidence("EVD-X", channels=[st1.id, st2.id])

@@ -444,6 +444,24 @@ def test_rollover_replan_that_refuses_returns_refused(tmp_path):
     assert ("POST", "/batches", {}) not in fake.calls
 
 
+def test_rollover_replan_that_goes_direct_uploads_direct(tmp_path):
+    fake = FakeParamify()
+    ev, old = with_request(fake, requested=date(2026, 10, 1), due=date(2026, 11, 5))
+    h = Harness(fake, two_files(tmp_path))  # no_request: the default, direct
+    plan = h.plan()
+    fake.set_today(date(2026, 11, 10))
+    fake._requests.clear()  # the request was deleted: nothing current or past
+    d = h.apply(plan)["delivery/x"]
+    assert d.status == "applied", d.message
+    assert ("POST", "/batches", {}) not in fake.calls and fake._batches == []
+    assert h.uploads() == [f"/evidence/{ev.id}/artifacts/upload"] * 2
+    assert d.result["mode"] == "direct" and d.result["batch_id"] is None
+    assert [a["_channelId"] for a in fake._artifacts] == [ev.channels[0].id] * 2
+    assert d.message.count("CH-1 has no artifact request") == 1
+    assert d.message.startswith("re-planned, the artifact request rolled over: ")
+    assert "CH-1 has no artifact request; sent direct, as before batches" in d.message
+
+
 # ---- observe carry-over -----------------------------------------------------
 
 def test_observe_entry_with_no_sendable_names_skips_the_artifacts_query(tmp_path):
@@ -691,6 +709,17 @@ def test_direct_temporary_failure_holds_one_file_and_resends_only_it(tmp_path):
     assert again.result["uploaded"] == ["b.json"]
     assert [p["file"][0] for p in h2.sent] == ["b.json"]
     assert not [c for c in fake.calls if c[1].startswith(("/batches", "/artifact-requests"))]
+
+
+def test_direct_temporary_failure_of_two_files_says_them(tmp_path):
+    fake = FakeParamify()
+    flag_off_with_channel(fake)
+    fake.fail_upload_once("a.json", 503)
+    fake.fail_upload_once("b.json", 503)
+    h = Harness(fake, two_files(tmp_path), capability=BATCHES_OFF, budget=0)
+    d = h.run()["delivery/x"]
+    assert d.result["state"] == "held"
+    assert d.message == "held: a.json, b.json failed temporarily; the next upload sends them"
 
 
 def test_direct_permanent_failure_drops_one_file(tmp_path):

@@ -21,7 +21,7 @@ and sends only the files of this run that are not on the set yet.
 The rules live in `delivery_routing` as pure functions; `diff` composes them.
 
 Apply, per `deliver` action: re-check that a new batch's request is still
-current (else re-plan the entry once), create the batch and record its id at
+current (else re-plan the entry once; a re-plan can send it direct), create the batch and record its id at
 once (or resume), upload each missing file, drop a file on a permanent
 failure and hold the batch OPEN on a temporary one, submit only when nothing
 is held, and read the batch back. A direct action uploads each missing file
@@ -79,11 +79,19 @@ WAF_BLOCKED = "blocked by the production WAF"
 BATCHES_OFF = "batches are off for this workspace"
 DELIVERY_DIRECT = "delivery: direct"
 DIRECT = "DIRECT"  # the payload target of an entry sent direct
+_BATCH_TARGETS = ("ARTIFACT_REQUEST", "EVIDENCE")
 _FAILING = ("FAIL", "ERROR")
 # How far along a batch is: a status read back never moves a batch backwards.
 _STATUS_RANK = {"OPEN": 0, "REJECTED": 0, "SUBMITTED": 1, "APPROVED": 2}
 # The longest createdAt window the artifacts read lists day by day; an older run reads without one.
 MAX_CREATED_SPAN_DAYS = 31
+
+
+def delivery_mode(target: Any) -> Optional[str]:
+    """How an entry with this payload target is sent: "direct", "batch", or None (never routed)."""
+    if target == DIRECT:
+        return "direct"
+    return "batch" if target in _BATCH_TARGETS else None
 
 
 def created_window(collected_on: Optional[date], today: date) -> Optional[List[date]]:
@@ -137,7 +145,7 @@ class _Delivered:
     dropped: List[Dict[str, str]] = field(default_factory=list)  # {name, reason}
     held: List[str] = field(default_factory=list)
     validators_failed: List[str] = field(default_factory=list)
-    mode: str = "batch"  # or "direct": no batch, no submit
+    mode: Optional[str] = "batch"  # or "direct" (no batch, no submit), or None (never routed)
 
     def result(self, state: str) -> Dict[str, Any]:
         return {
@@ -208,6 +216,19 @@ def _open_warning(b: Batch, run_id: str, arts: List[Artifact], today: date) -> s
 
 def _count(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _run_batches(e: EntryDesired, obs: EntryObserved) -> List[str]:
+    """This run's batches of the entry that a direct upload leaves as they are: reference, else id.
+
+    A batch observe read and found SUBMITTED or APPROVED is left out.
+    """
+    ids = own_batch_ids(obs.found, e)
+    if e.recorded_batch_id and e.recorded_batch_id not in ids:
+        ids.append(e.recorded_batch_id)
+    known = {b.id: b for b in obs.batches}
+    return [known[i].reference_id if i in known and known[i].reference_id else i
+            for i in ids if not (i in known and known[i].status in DONE)]
 
 
 def _file_json(f: DeliveryFile) -> Dict[str, str]:
@@ -397,14 +418,17 @@ class DeliveryProvider:
         warnings = [w for w in (stack_drift(e, obs.stacks),) if w]
         sendable = len(files)
         direct = self._direct_reason(e)
+        route = _route(e, obs, today, direct)
+        # A direct entry counts the files sent before batches as on the set (below). A
+        # batch entry leaves them out first, so the no-op comes ahead of a refusal.
+        goes_direct = direct is not None or (not isinstance(route, Refusal) and route.direct_reason is not None)
         earlier = [f.original_file_name for f in files if f.original_file_name in obs.before_batches]
-        if earlier and direct is None:
+        if earlier and not goes_direct:
             payload["before_batches"] = earlier
             if len(earlier) == len(files):
                 return action("noop", f"{BEFORE_BATCHES} ({_count(len(files), 'file')})", warnings=warnings)
             files = [f for f in files if f.original_file_name not in earlier]
             payload["files"] = [_file_json(f) for f in files]
-        route = _route(e, obs, today, direct)
         if isinstance(route, Refusal):
             return action("refuse", route.message, fix=route.fix, warnings=warnings)
         channel = route.channel
@@ -412,6 +436,8 @@ class DeliveryProvider:
         if route.direct_reason is not None:
             if route.warning:
                 warnings.append(route.warning)
+            warnings += [f"this run's batch {name} stays open; its files count as delivered, "
+                         "and the direct upload does not submit it" for name in _run_batches(e, obs)]
             on_set = delivered_files(obs.found, e)
             missing = [f for f in files if f.original_file_name not in on_set]
             payload.update(
@@ -434,8 +460,8 @@ class DeliveryProvider:
                 f"deliver {_count(len(missing), 'file')} to {e.reference_id} direct ({on}): {route.direct_reason}",
                 changes=direct_changes, warnings=warnings,
             )
-        found = attribute(obs.batches, obs.artifacts, e)
-        mine = found.mine
+        attribution = attribute(obs.batches, obs.artifacts, e)
+        mine = attribution.mine
         route_ar = route.request.id if route.request else None
         request, ar_id, target_warning = route.request, route_ar, route.warning
         if mine is not None and mine.artifact_request_id != route_ar:
@@ -447,7 +473,7 @@ class DeliveryProvider:
             warnings.append(target_warning)
         warnings += [
             _open_warning(b, rid, obs.artifacts.get(b.id) or [], today)
-            for b, rid in found.earlier_open
+            for b, rid in attribution.earlier_open
             if b.artifact_request_id == route_ar
         ]
 
@@ -517,12 +543,17 @@ class DeliveryProvider:
                     raise
                 return self._held(action.id, _Delivered(), f"the artifact request check failed temporarily ({exc.message})")
             if again is not None:
-                note = "; ".join([f"re-planned, the artifact request rolled over: {again.summary}", *again.warnings])
+                summary = again.summary
+                if again.payload.get("target") == DIRECT:  # the reason is in the warning too
+                    summary = summary.removesuffix(f": {again.payload.get('direct_reason')}")
+                note = "; ".join([f"re-planned, the artifact request rolled over: {summary}", *again.warnings])
                 if again.verb == "refuse":
-                    return Outcome(action.id, "refused", _Delivered().result("refused"),
+                    return Outcome(action.id, "refused", _Delivered(mode=None).result("refused"),
                                    "; ".join([f"{again.summary}: {again.fix}", *again.warnings]))
                 if again.verb == "noop":
                     return self._noop(action.id, again.payload, note)
+                if again.payload.get("target") == DIRECT:
+                    return self._deliver_direct(action.id, again.payload, resources, resolve, note)
                 p = resolve(again.payload)
         return self._deliver(action.id, p, resources, note)
 
@@ -537,10 +568,10 @@ class DeliveryProvider:
 
     def _noop(self, action_id: str, p: Dict[str, Any], message: str) -> Outcome:
         done = _Delivered(p.get("batch_id"), p.get("batch_reference"), p.get("status"),
-                          already_present=list(p.get("before_batches") or []))
+                          already_present=list(p.get("before_batches") or []), mode=delivery_mode(p.get("target")))
         if p.get("target") == DIRECT:
             # A direct no-op plans no files: each sendable file is on the set already.
-            done.mode, done.already_present = "direct", self._wanted(p)
+            done.already_present = self._wanted(p)
             for name in done.already_present:
                 self._emit(action_id, name, "already_present", None, 0, 0)
         return Outcome(action_id, "noop", done.result("noop"), message)
@@ -641,7 +672,7 @@ class DeliveryProvider:
                        "; ".join(parts))
 
     def _deliver_direct(self, action_id: str, p: Dict[str, Any], resources: Any,
-                        resolve: Callable[[Any], Any]) -> Outcome:
+                        resolve: Callable[[Any], Any], note: str = "") -> Outcome:
         """Each planned file straight onto the set, with the routed channel's id (when one was routed)."""
         run = self._started(p, mode="direct")
         ev_id = resolve(p["evidence_id"])
@@ -658,10 +689,12 @@ class DeliveryProvider:
             return self._failed(action_id, error, run, resources, ev_id, f"evidence set {ev_id}")
         if run.held:
             return Outcome(action_id, "failed", run.result("held"),
-                           f"held: {', '.join(run.held)} failed temporarily; the next upload sends it")
+                           f"held: {', '.join(run.held)} failed temporarily; "
+                           f"the next upload sends {'them' if len(run.held) > 1 else 'it'}")
         if not run.uploaded and not run.already_present:
             return Outcome(action_id, "failed", run.result("failed"), ALL_DROPPED)
-        parts = [f"{_count(len(run.uploaded), 'file')} sent direct"]
+        parts = [note] if note else []
+        parts.append(f"{_count(len(run.uploaded), 'file')} sent direct")
         if run.dropped:
             parts.append(f"dropped {', '.join(d['name'] for d in run.dropped)}")
         return Outcome(action_id, "applied", run.result("delivered_with_drops" if run.dropped else "delivered"),

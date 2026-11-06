@@ -845,3 +845,46 @@ def test_delivered_files_counts_with_or_without_a_batch(tmp_path):
             artifact("c.json", bid=None, note_text=note(run_id="R0", entry="aws_x")),
             artifact("a.json", bid="bt-10")]
     assert delivered_files(arts, e) == ["a.json", "b.json"]
+
+
+def test_no_request_direct_reupload_of_files_sent_direct_is_a_direct_noop(tmp_path):
+    # The first upload sent both files direct (no batch): the re-upload says so, on its channel.
+    on_set = [artifact("a.json", bid=None), artifact("b.json", bid=None)]
+    obs = observed(evidence(CH_P), requests=[], current=[], found=on_set)
+    obs.before_batches = ["a.json", "b.json"]  # as observe reads them: no batch
+    a = plan_one(entry(tmp_path, no_request="direct"), obs)
+    assert a.verb == "noop" and a.summary == "already delivered (2 files)"
+    assert a.payload["target"] == "DIRECT" and a.payload["files"] == []
+    assert a.changes["channel"] == "CHN-1" and a.changes["target"] == "DIRECT"
+    assert a.warnings == ["CHN-1 has no artifact request; sent direct, as before batches"]
+
+
+def test_files_sent_before_batches_still_noop_ahead_of_a_refusal(tmp_path):
+    # A batch entry keeps its order: the before-batches no-op comes before routing refuses.
+    on_set = [artifact("a.json", bid=None), artifact("b.json", bid=None)]
+    obs = observed(evidence(CH_P, CH_G), stacks=[PROD, GOV], found=on_set)
+    obs.before_batches = ["a.json", "b.json"]
+    a = plan_one(entry(tmp_path), obs)
+    assert a.verb == "noop" and a.summary == "already delivered before batches (2 files)"
+
+
+def test_direct_entry_warns_that_this_runs_open_batch_stays_open(tmp_path):
+    on_set = [artifact("a.json", bid="bt-9")]
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), found=on_set), BATCHES_OFF)
+    assert a.verb == "deliver" and [f["original_file_name"] for f in a.payload["files"]] == ["b.json"]
+    assert a.warnings == [
+        "this run's batch bt-9 stays open; its files count as delivered, and the direct upload does not submit it"]
+
+
+def test_direct_entry_warns_about_the_recorded_batch_with_its_reference_when_observed(tmp_path):
+    obs = observed(evidence(CH_P), batches=[batch("bt-9", "BCH-9")])
+    a = plan_one(entry(tmp_path, recorded="bt-9", delivery="direct"), obs, Capability(True, None))
+    assert a.verb == "deliver"
+    assert a.warnings == [
+        "this run's batch BCH-9 stays open; its files count as delivered, and the direct upload does not submit it"]
+
+
+def test_direct_entry_without_a_batch_of_this_run_has_no_open_batch_warning(tmp_path):
+    other_run = artifact("a.json", bid="bt-9", note_text=note(run_id="R0", entry="aws_x"))
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), found=[other_run]), BATCHES_OFF)
+    assert a.verb == "deliver" and a.warnings == []
