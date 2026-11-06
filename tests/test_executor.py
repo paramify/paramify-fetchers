@@ -275,17 +275,27 @@ def _manifest(use, config=None, platform=None, target=None):
     return m
 
 
-@pytest.mark.parametrize("config, platform, target, message", [
-    pytest.param({"metrics_lookback_days": "${env:DAYS}"}, None, None,
+# A plain string config field; the exclusion fields are pattern lists, which take no references at all.
+STRING_FETCHER, STRING_FIELD = "azure_storage_encryption_status", "owner_tag_keys"
+
+
+@pytest.mark.parametrize("use, config, platform, target, message", [
+    pytest.param("azure_front_door_origins", {"metrics_lookback_days": "${env:DAYS}"}, None, None,
                  "azure_front_door_origins: config 'metrics_lookback_days' is integer", id="typed-entry-field"),
-    pytest.param({"scope_exclusions": "${env:lower}"}, None, None,
-                 "azure_front_door_origins: config 'scope_exclusions': Malformed", id="malformed"),
-    pytest.param(None, None, {"production_tag": "${env:TAG}"},
+    pytest.param(STRING_FETCHER, {STRING_FIELD: "${env:lower}"}, None, None,
+                 f"{STRING_FETCHER}: config '{STRING_FIELD}': Malformed", id="malformed"),
+    pytest.param("azure_front_door_origins", None, None, {"production_tag": "${env:TAG}"},
                  "azure_front_door_origins target[0]: production_tag is '${env:TAG}', but target fields aren't resolved",
                  id="target-field"),
+    pytest.param("azure_front_door_origins", {"scope_exclusions": "${env:SCOPE_PATTERNS}"}, None, None,
+                 "azure_front_door_origins: config 'scope_exclusions': ${env:} references aren't read for a "
+                 "pattern list", id="pattern-list"),
+    pytest.param("azure_key_vault_configuration", None, {"resource_exclusions": "${env:AZURE_RESOURCE_EXCLUSIONS}"},
+                 None, "platforms.azure.config: config 'resource_exclusions': ${env:} references aren't read",
+                 id="platform-pattern-list"),
 ])
-def test_validate_reports_references_the_runner_refuses(config, platform, target, message):
-    errors = api.validate(_manifest("azure_front_door_origins", config, platform, target), REPO_ROOT)
+def test_validate_reports_references_the_runner_refuses(use, config, platform, target, message):
+    errors = api.validate(_manifest(use, config, platform, target), REPO_ROOT)
     assert any(e.startswith(message) for e in errors), errors
 
 
@@ -339,15 +349,15 @@ LEAK_PROBE = "leak-probe-aaaaaaaa"
 @pytest.mark.parametrize("targets", [[], [{"subscription_id": "s"}]], ids=["ambient", "target"])
 def test_a_reference_to_a_credential_variable_is_refused_and_never_resolved(tmp_path, monkeypatch, targets):
     monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", LEAK_PROBE)
-    m = _manifest("azure_front_door_tls", {"scope_exclusions": "${env:PARAMIFY_UPLOAD_API_TOKEN}"})
+    m = _manifest(STRING_FETCHER, {STRING_FIELD: "${env:PARAMIFY_UPLOAD_API_TOKEN}"})
     m["run"]["output_dir"] = str(tmp_path / "evidence")
     m["run"]["fetchers"][0]["targets"] = targets
-    refusal = ("config 'scope_exclusions' reads ${env:PARAMIFY_UPLOAD_API_TOKEN}, which holds a secret; "
+    refusal = (f"config '{STRING_FIELD}' reads ${{env:PARAMIFY_UPLOAD_API_TOKEN}}, which holds a secret; "
                "config references can't read secrets")
 
-    assert f"azure_front_door_tls: {refusal}" in api.validate(m, REPO_ROOT)
-    [field] = [f for f in api.effective_config(m, ["azure_front_door_tls"], REPO_ROOT)["azure_front_door_tls"]
-               if f["name"] == "scope_exclusions"]
+    assert f"{STRING_FETCHER}: {refusal}" in api.validate(m, REPO_ROOT)
+    [field] = [f for f in api.effective_config(m, [STRING_FETCHER], REPO_ROOT)[STRING_FETCHER]
+               if f["name"] == STRING_FIELD]
     assert (field["value"], field["reference_state"]) == ("${env:PARAMIFY_UPLOAD_API_TOKEN}", "invalid")
 
     events: list = []
@@ -383,16 +393,16 @@ def test_a_reference_to_one_of_the_fetchers_secrets_is_refused(tmp_path, monkeyp
 ])
 def test_a_reference_to_another_fetchers_secret_is_refused(tmp_path, monkeypatch, var, sibling):
     monkeypatch.setenv(var, LEAK_PROBE)
-    m = _manifest("azure_front_door_tls", {"scope_exclusions": f"${{env:{var}}}"})
+    m = _manifest(STRING_FETCHER, {STRING_FIELD: f"${{env:{var}}}"})
     if sibling:
         api.add_entry(m, sibling)
     m["run"]["output_dir"] = str(tmp_path / "evidence")
-    refusal = f"azure_front_door_tls: config 'scope_exclusions' reads ${{env:{var}}}, which holds a secret"
+    refusal = f"{STRING_FETCHER}: config '{STRING_FIELD}' reads ${{env:{var}}}, which holds a secret"
     assert any(e.startswith(refusal) for e in api.validate(m, REPO_ROOT))
-    [field] = [f for f in api.effective_config(m, ["azure_front_door_tls"], REPO_ROOT)["azure_front_door_tls"]
-               if f["name"] == "scope_exclusions"]
+    [field] = [f for f in api.effective_config(m, [STRING_FETCHER], REPO_ROOT)[STRING_FETCHER]
+               if f["name"] == STRING_FIELD]
     assert field["reference_state"] == "invalid" and LEAK_PROBE not in json.dumps(field)
-    m["run"]["fetchers"] = [e for e in m["run"]["fetchers"] if e["use"] == "azure_front_door_tls"]
+    m["run"]["fetchers"] = [e for e in m["run"]["fetchers"] if e["use"] == STRING_FETCHER]
     summary = api.run(m, REPO_ROOT)
     assert summary["ok"] is False
     assert all(LEAK_PROBE not in f.read_text() for f in Path(summary["run_dir"]).rglob("*") if f.is_file())
@@ -400,12 +410,12 @@ def test_a_reference_to_another_fetchers_secret_is_refused(tmp_path, monkeypatch
 
 def test_a_variable_a_sibling_entrys_secret_reads_is_refused(tmp_path, monkeypatch):
     monkeypatch.setenv("MY_DEVOPS_LOGIN", LEAK_PROBE)
-    m = _manifest("azure_front_door_tls", {"scope_exclusions": "${env:MY_DEVOPS_LOGIN}"})
+    m = _manifest(STRING_FETCHER, {STRING_FIELD: "${env:MY_DEVOPS_LOGIN}"})
     api.add_entry(m, "azure_devops_audit_streams")
     m["run"]["fetchers"][-1]["secrets"] = {"pat": "${env:MY_DEVOPS_LOGIN}"}
     assert any("reads ${env:MY_DEVOPS_LOGIN}, which holds a secret" in e for e in api.validate(m, REPO_ROOT))
-    view = api.effective_config(m, ["azure_front_door_tls"], REPO_ROOT)["azure_front_door_tls"]
-    assert next(f for f in view if f["name"] == "scope_exclusions")["reference_state"] == "invalid"
+    view = api.effective_config(m, [STRING_FETCHER], REPO_ROOT)[STRING_FETCHER]
+    assert next(f for f in view if f["name"] == STRING_FIELD)["reference_state"] == "invalid"
 
 
 @pytest.mark.parametrize("name, refused", [
@@ -457,8 +467,8 @@ def test_a_reference_that_is_only_part_of_the_value_is_refused(tmp_path, monkeyp
     fetcher = make_fetcher(tmp_path, config_schema={"patterns": cfg("patterns", "PATTERNS")})
     with pytest.raises(RuntimeError, match="must be the whole value"):
         _apply_config({}, fetcher, None, None, ManifestEntry(use="x", config={"patterns": value}))
-    errors = api.validate(_manifest("azure_front_door_origins", {"scope_exclusions": value}), REPO_ROOT)
-    assert ("azure_front_door_origins: config 'scope_exclusions': a ${env:} reference must be the whole value, "
+    errors = api.validate(_manifest(STRING_FETCHER, {STRING_FIELD: value}), REPO_ROOT)
+    assert (f"{STRING_FETCHER}: config '{STRING_FIELD}': a ${{env:}} reference must be the whole value, "
             "not part of it") in errors
 
 

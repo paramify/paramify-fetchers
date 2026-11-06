@@ -6,7 +6,7 @@ documented in framework/schemas/*.json and parsed by config_loader / manifest_lo
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, TypeVar
+from typing import Any, Dict, List, Mapping, Optional, Tuple, TypeVar
 
 
 @dataclass
@@ -159,6 +159,11 @@ class ConfigField:
     env: Optional[str] = None
     default: Any = None
     description: Optional[str] = None
+    #: For type `patterns`: the prefixes a pattern may start with (rg for rg:...), and whether one may have none.
+    prefixes: Tuple[str, ...] = ()
+    bare: bool = True
+    #: For type `patterns`: whether `manifest exclude`/`unexclude` may change it. An allowlist sets False.
+    exclusion: bool = True
 
 
 @dataclass
@@ -332,3 +337,5 @@ class InvocationResult:
     # The manifest entry this invocation belongs to (see manifest_loader.entry_keys);
     # every target of a fan-out shares it.
     entry_key: Optional[str] = None
+    # The pattern lists the fetcher received, per field, for `metadata.config_patterns`; None when it got none.
+    config_patterns: Optional[Dict[str, List[Dict[str, Any]]]] = None

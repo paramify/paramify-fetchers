@@ -5,7 +5,7 @@ A field spec is a plain dict:
     {
         "key":         str,          # the config/secret/target key
         "label":       str,          # display label (defaults to key)
-        "kind":        "text" | "int" | "bool" | "secret" | "select",
+        "kind":        "text" | "int" | "bool" | "secret" | "select" | "patterns",
         "options":     [(label, value), ...]   # select only; blank is always allowed
         "value":       initial value (str/int/bool/None),
         "placeholder": str,          # e.g. a default or the suggested env var
@@ -15,6 +15,11 @@ A field spec is a plain dict:
 
 `kind == "secret"` is a text input that collects an ENV VAR NAME (never a
 secret value); the caller turns it into a ${env:VAR} reference via api.set_secret.
+
+`kind == "patterns"` is a text area, one `pattern  # reason` per line (see
+patterns.to_lines). Its spec adds "prefixes" and "bare" (the field's grammar)
+and "note" (where the list comes from). get_value() is None while the text
+holds the patterns it opened with, else the list as manifest items.
 """
 
 from __future__ import annotations
@@ -23,8 +28,9 @@ from typing import Any, Optional
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Input, Label, Select, Switch
+from textual.widgets import Input, Label, Select, Switch, TextArea
 
+from framework import patterns
 from framework.secret_resolver import env_var_name
 
 # Select.BLANK was renamed Select.NULL; 8.0 only knows the old name.
@@ -70,7 +76,12 @@ class FieldRow(Vertical):
             suffix = f"  [dim]{help_text}[/]" if help_text else ""
             yield Label(f"{head}{req}{suffix}", classes="field-label")
 
-        if kind == "bool":
+        if kind == "patterns":
+            if spec.get("note"):
+                yield Label(spec["note"], classes="field-note")
+            yield TextArea(spec.get("value") or "", placeholder=spec.get("placeholder", ""), soft_wrap=False,
+                           show_line_numbers=False, id="field-input", classes="patterns-input")
+        elif kind == "bool":
             yield Switch(value=bool(spec.get("value")), id="field-input")
         elif kind == "select":
             # Blank is a choice: it means "unset", and the caller drops the key.
@@ -90,8 +101,23 @@ class FieldRow(Vertical):
                 id="field-input",
             )
 
+    def problems(self) -> list:
+        """What stops this row from being saved; only a pattern list is checked here."""
+        if self.spec.get("kind") != "patterns":
+            return []
+        items, shape = patterns.from_lines(self.query_one(TextArea).text)
+        if shape or self.get_value() is None:
+            # An untouched list writes nothing, so what it already holds is validate's to report, not the form's.
+            return shape
+        return patterns.check(items, self.spec.get("prefixes", ()), self.spec.get("bare", True))
+
     def get_value(self) -> Any:
         kind = self.spec.get("kind", "text")
+        if kind == "patterns":
+            items = patterns.from_lines(self.query_one(TextArea).text)[0]
+            if items == patterns.from_lines(self.spec.get("value") or "")[0]:
+                return None
+            return [item.as_manifest() for item in items]
         if kind == "bool":
             return self.query_one(Switch).value
         if kind == "select":

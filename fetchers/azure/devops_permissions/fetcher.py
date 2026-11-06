@@ -7,6 +7,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from urllib.parse import quote
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
@@ -23,6 +24,8 @@ from devops_rest import (  # noqa: E402
 NAME = "azure_devops_permissions"
 SECURITY_API = "7.1"
 IDENTITY_BATCH = 50
+# Measured: a 6,100-character descriptors query answered 404 and a 3,000-character one was read.
+IDENTITY_QUERY_CHARS = 2000
 GRAPH = "vssps"
 
 SCOPE_SECURITY = "Security (Manage)"
@@ -48,6 +51,12 @@ NAMESPACES = {
 }
 HIGH_IMPACT = {name.lower(): actions for name, actions in NAMESPACES.items()}
 BYPASS_ACTIONS = {("git repositories", "policyexempt"), ("git repositories", "pullrequestbypasspolicy")}
+CHECKIN_OVERRIDE = "overridebuildcheckinvalidation"
+BUILD_SERVICE_GROUP = "project collection build service accounts"
+# ACLs name each organization group by this template SID plus a well-known -0-0-0-x-y ending; custom groups never have one.
+TEMPLATE_SID = "microsoft.teamfoundation.identity;s-1-9-1551374245-1204400969-2402986413-2179408616-0-0-0-"
+BUILD_SERVICE_GROUP_SID = "-0-0-0-1-1"
+_WELL_KNOWN = re.compile(r"-0-0-0-\d+-\d+$")
 ADMIN_GROUPS = {
     "project collection administrators", "project collection service accounts",
     "project collection build administrators", "project administrators", "build administrators",
@@ -77,8 +86,9 @@ NOT_COLLECTED = {
                       "id; the pipelines and service-connections evidence carries the same ids.",
     "other_namespaces": "Permissions in namespaces other than those listed in results.namespaces (work items, "
                         "boards, wiki, dashboards, analytics, agent pools).",
-    "inherited_grants": "High-impact rights are flagged where they are set explicitly; a right only inherited from "
-                        "a parent token is shown on that parent.",
+    "inherited_grants": "High-impact rights are flagged where they are set explicitly, and the check-in validation "
+                        "override also where an entry inherits it; a right only inherited from a parent token, on "
+                        "an object with no entry of its own for that identity, is shown on that parent.",
 }
 
 logger = logging.getLogger(NAME)
@@ -176,23 +186,80 @@ def parse_token(namespace: str, token: str, projects_by_name: Dict[str, str]) ->
     return "other", None, token
 
 
+def batches(descriptors: List[str]) -> List[List[str]]:
+    """Consecutive batches of at most IDENTITY_BATCH descriptors and IDENTITY_QUERY_CHARS URL-encoded characters."""
+    out: List[List[str]] = []
+    size = 0
+    for descriptor in descriptors:
+        length = len(quote(descriptor, safe="")) + 3  # and its encoded comma
+        if not out or len(out[-1]) >= IDENTITY_BATCH or size + length > IDENTITY_QUERY_CHARS:
+            out.append([])
+            size = 0
+        out[-1].append(descriptor)
+        size += length
+    return out
+
+
+def read_identities(client, batch: List[str], split: bool = False) -> List[Any]:
+    """One batch, a row or None per descriptor; a 404 is split until it names one descriptor, which reads as not found.
+
+    A 404 that hides a refusal raises, and so does a batch whose split finds no one, so it reads as unread.
+    """
+    try:
+        return client.list("_apis/identities", SECURITY_API, params={
+            "descriptors": ",".join(batch), "queryMembership": "None"}, service=GRAPH)
+    except DevOpsError as exc:
+        if exc.status != 404 or exc.failure_code == "not_authorized":
+            raise
+        if len(batch) == 1:
+            return [None]
+        half = len(batch) // 2
+        rows = read_identities(client, batch[:half], True) + read_identities(client, batch[half:], True)
+        if not any(rows) and not split:
+            raise
+        return rows
+
+
+def row_descriptor(row: Dict[str, Any]) -> str:
+    descriptor = row.get("descriptor")
+    if isinstance(descriptor, dict):
+        descriptor = f"{descriptor.get('identityType')};{descriptor.get('identifier')}"
+    return str(descriptor or "")
+
+
+def answers(requested: str, got: str, wanted: Set[str]) -> bool:
+    """Whether a row answers the descriptor requested in its place; a template SID answers with the group's own SID."""
+    requested, got = requested.lower(), got.lower()
+    if got == requested:
+        return True
+    ending = _WELL_KNOWN.search(requested)
+    return bool(ending) and requested.startswith(TEMPLATE_SID) and got not in wanted \
+        and got.startswith("microsoft.teamfoundation.identity;") and got.endswith(ending.group(0))
+
+
 def resolve(client, collector, descriptors: List[str]) -> Tuple[Dict[str, Dict[str, Any]], Set[str]]:
     """(lowercased descriptor -> identity, lowercased descriptors whose batch failed); unresolved ones are left out."""
     found: Dict[str, Dict[str, Any]] = {}
     unread: Set[str] = set()
-    for start in range(0, len(descriptors), IDENTITY_BATCH):
-        batch = descriptors[start:start + IDENTITY_BATCH]
-        rows = call(collector, f"identities.read({start // IDENTITY_BATCH + 1})", SCOPE_IDENTITY,
-                    lambda batch=batch: client.list("_apis/identities", SECURITY_API, params={
-                        "descriptors": ",".join(batch), "queryMembership": "None"}, service=GRAPH))
+    for number, batch in enumerate(batches(descriptors), 1):
+        rows = call(collector, f"identities.read({number})", SCOPE_IDENTITY,
+                    lambda batch=batch: read_identities(client, batch))
         if rows is None:
             unread |= {d.lower() for d in batch}
+        # Rows keep request order, and an organization group's template SID answers with its own, so match by position.
+        if rows and len(rows) == len(batch):
+            wanted = {d.lower() for d in batch}
+            misplaced = [d for d, row in zip(batch, rows) if isinstance(row, dict)
+                         and not answers(d, row_descriptor(row), wanted)]
+            found.update((d.lower(), row) for d, row in zip(batch, rows) if isinstance(row, dict) and d not in misplaced)
+            if misplaced:
+                unread |= {d.lower() for d in misplaced}
+                collector.record(f"identities.read({number})", RuntimeError(
+                    f"{len(misplaced)} identity rows didn't answer the descriptor requested in their place"))
+            continue
         for row in rows or []:
-            if isinstance(row, dict) and row.get("descriptor"):
-                descriptor = row["descriptor"]
-                if isinstance(descriptor, dict):
-                    descriptor = f"{descriptor.get('identityType')};{descriptor.get('identifier')}"
-                found[str(descriptor).lower()] = row
+            if isinstance(row, dict) and row_descriptor(row):
+                found[row_descriptor(row).lower()] = row
     return found, unread
 
 
@@ -286,6 +353,10 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         extended = ace.get("extendedInfo") if isinstance(ace.get("extendedInfo"), dict) else {}
         allow, deny = ace.get("allow") or 0, ace.get("deny") or 0
         allowed = bits(allow & ~deny, actions)
+        # An explicit deny beats an inherited allow; effectiveAllow also reflects group membership, so it isn't used.
+        inherited = (extended.get("inheritedAllow") or 0) & ~(extended.get("inheritedDeny") or 0)
+        override = key == "build" and any(a.lower() == CHECKIN_OVERRIDE
+                                          for a in bits((allow | inherited) & ~deny, actions))
         high = sorted(a for a in allowed if a.lower() in HIGH_IMPACT[key])
         who = identities.get(str(ace.get("descriptor")))
         admin = (who or {}).get("admin_group")
@@ -310,9 +381,11 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
             "high_impact_from_defaults": default,
             "high_impact_outside_admin_groups": ((None if admin is None or default is None else not admin)
                                                  if high and not default else False),
+            "checkin_validation_override": override,
         })
     entries.sort(key=lambda e: (str(e["namespace"]).lower(), e["token"], str((e["identity"] or {}).get("name") or "")))
     git = [n for n in namespace_records if str(n["name"]).lower() == "git repositories"]
+    build = [n for n in namespace_records if str(n["name"]).lower() == "build"]
     results = {
         "namespaces": namespace_records,
         "namespaces_not_found": None if listed is None else sorted(n for n in NAMESPACES if n.lower() not in found_names),
@@ -324,11 +397,23 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         complete=listed is not None and all(n["acls_read"] for n in namespace_records) and bool(projects or not narrowed),
         git_repositories=git_repositories,
         git_read=bool(git) and all(n["acls_read"] for n in git),
+        build_read=bool(build) and all(n["acls_read"] for n in build) and bool(projects or not narrowed),
     )
 
 
+def build_service(identity: Optional[Dict[str, Any]]) -> bool:
+    """A build service account (the organization's or a project's), or the organization's group that holds them."""
+    identity = identity or {}
+    descriptor = str(identity.get("descriptor") or "").lower()
+    if identity.get("kind") == "group":
+        # By SID as well as name, since a project named like the organization can name a group the same way.
+        return descriptor.startswith("microsoft.teamfoundation.identity;") and descriptor.endswith(BUILD_SERVICE_GROUP_SID) \
+            and str(identity.get("name") or "").rsplit("\\", 1)[-1].lower() == BUILD_SERVICE_GROUP
+    return identity.get("kind") == "service_identity" and ":build:" in descriptor
+
+
 def summarize(entries, identities, namespaces, acls_off: int, not_found: Optional[List[str]], *, complete: bool,
-              git_repositories: Optional[int], git_read: bool) -> Dict[str, Any]:
+              git_repositories: Optional[int], git_read: bool, build_read: bool) -> Dict[str, Any]:
     """Counts read null when a namespace (or, for the admin-group split, an identity) couldn't be read."""
     def name(identity):
         return (identity or {}).get("name") or (identity or {}).get("descriptor")
@@ -347,6 +432,11 @@ def summarize(entries, identities, namespaces, acls_off: int, not_found: Optiona
     rights = Counter(f"{e['namespace']}: {a}" for e in outside for a in e["high_impact_allowed"])
     bypass = [e for e in entries
               if any((str(e["namespace"]).lower(), a.lower()) in BYPASS_ACTIONS for a in e["high_impact_allowed"])]
+    override = [e for e in entries if e["checkin_validation_override"]]
+    override_services = [e for e in override if build_service(e["identity"])]
+    override_known = build_read and all((e["identity"] or {}).get("admin_group") is not None for e in override)
+    override_outside = [e for e in override if not build_service(e["identity"])
+                        and not (e["identity"] or {}).get("admin_group")]
     return {
         "namespaces_collected": sum(1 for n in namespaces if n["acls_read"]),
         "namespaces_not_found": not_found,
@@ -367,6 +457,11 @@ def summarize(entries, identities, namespaces, acls_off: int, not_found: Optiona
         "identities_with_high_impact_rights_from_defaults": known(names(defaults), admins_known),
         "git_repositories": git_repositories,
         "branch_policy_bypass_holders": names(bypass) if git_read and git_repositories else None,
+        "checkin_validation_override_grants": len(override) if build_read else None,
+        "checkin_validation_override_holders": names(override) if build_read else None,
+        "checkin_validation_override_build_services": names(override_services) if override_known else None,
+        "checkin_validation_override_grants_outside_admin_groups": len(override_outside) if override_known else None,
+        "checkin_validation_override_holders_outside_admin_groups": names(override_outside) if override_known else None,
         "not_collected": dict(NOT_COLLECTED),
     }
 

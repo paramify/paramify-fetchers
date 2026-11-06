@@ -174,8 +174,10 @@ def run_rotation(monkeypatch, tmp_path, patterns):
                 collect_app_service_certificates=_app_certificates)
 
 
-def test_key_vault_key_rotation_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_key_vault_key_rotation_without_patterns_adds_only_empty_exclusion_fields(
+        monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_rotation(monkeypatch, tmp_path, None)
+    assert_summary_documented("azure/key_vault_key_rotation", evidence["summary"])
     app = _app_certificates(None, None, None, ROTATION_VAULTS, NOW)
     results, summary = rotation.evidence_sections(ROTATION_VAULTS, "registered", app, "registered")
     assert code == 0
@@ -327,7 +329,7 @@ def run_backup(monkeypatch, tmp_path, patterns, fail=()):
     protects = {name: items for _, name, _, items in RECOVERY_VAULTS}
 
     def reader(operation, answer):
-        def call(vault_name, resource_group_name):
+        def call(vault_name, resource_group_name, **_):
             read.append((operation, vault_name))
             _refuse(vault_name, fail)
             return answer(vault_ids[vault_name], protects[vault_name])
@@ -340,29 +342,48 @@ def run_backup(monkeypatch, tmp_path, patterns, fail=()):
     def items(vault_id, protected):
         return [ns(id=f"{vault_id}/backupFabrics/Azure/protectionContainers/c/protectedItems/{vm}", name=vm,
                    properties=ns(source_resource_id=_vm_id(rg, vm), policy_id=f"{vault_id}/backupPolicies/daily",
-                                 protection_state="Protected", last_backup_status="Completed", workload_type="VM"))
+                                 protection_state="Protected", last_backup_status="Completed", workload_type="VM",
+                                 friendly_name=vm))
                 for vm, rg in protected]
+
+    def restore_jobs(vault_id, protected):
+        return [ns(id=f"{vault_id}/backupJobs/job-{vm}", name=f"job-{vm}",
+                   properties=ns(operation="Restore", status="Completed", entity_friendly_name=vm,
+                                 start_time="2026-09-20T10:00:00Z", end_time="2026-09-20T10:30:00Z", duration="PT30M"))
+                for vm, _ in protected]
+
+    def job_details(vault_name, resource_group_name, job_name):
+        read.append(("job_details", vault_name))
+        _refuse(vault_name, fail)
+        return ns(properties=ns(extended_info=ns(property_bag={"Recovery Point Time in UTC": "20/09/2026 04:00:00"})))
 
     vaults = [ns(id=vault_ids[name], name=name, location=location,
                  properties=ns(security_settings=ns(soft_delete_settings=ns(soft_delete_state="Enabled"))))
               for _, name, location, _ in RECOVERY_VAULTS]
     recovery = ns(vaults=ns(list_by_subscription_id=lambda: iter(vaults)))
     client = ns(backup_policies=ns(list=reader("backup_policies", policies)),
-                backup_protected_items=ns(list=reader("protected_items", items)))
+                backup_protected_items=ns(list=reader("protected_items", items)),
+                backup_jobs=ns(list=reader("restore_jobs", restore_jobs)), job_details=ns(get=job_details))
     monkeypatch.setitem(sys.modules, "azure.mgmt.recoveryservices", ns(RecoveryServicesClient=lambda **_: recovery))
     monkeypatch.setitem(sys.modules, "azure.mgmt.recoveryservicesbackup",
                         ns(RecoveryServicesBackupClient=lambda **_: client))
+    # One 30-day slice, so each vault's restore jobs are one read.
+    monkeypatch.setenv(backup.RESTORE_WINDOW_ENV, "30")
+    monkeypatch.setattr(backup, "utc_now", lambda: NOW)
     return (*_run(backup, monkeypatch, tmp_path, patterns, "azure_backup_recovery_status"), read)
 
 
 def test_backup_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
     code, evidence, read = run_backup(monkeypatch, tmp_path, None)
-    assert code == 0 and len(read) == 8
-    vaults = _unfiltered(backup.collect_vaults)
-    assert evidence["results"] == _json({"recovery_services_vaults": vaults,
-                                         "provider_registration_status": "registered", "excluded": []})
-    assert evidence["summary"] == _json({**backup.summarize(vaults), "provider_registration_status": "registered",
-                                         **_no_exclusions(recovery_services_vault=4, protected_item=5)})
+    assert code == 0 and len(read) == 4 * 3 + 5
+    collector = Collector(logging.getLogger("test_exclusions_data"))
+    vaults = backup.read_restore_job_details(
+        "s1", object(), collector, backup.collect_vaults("s1", object(), collector, restore_window_days=30, now=NOW))
+    assert evidence["results"] == _json({"recovery_services_vaults": vaults, "provider_registration_status": "registered",
+                                         "restore_job_window_days_requested": 30, "excluded": []})
+    assert evidence["summary"] == _json({**backup.summarize(vaults), **backup.summarize_restores(vaults, 30, NOW),
+                                         "provider_registration_status": "registered",
+                                         **_no_exclusions(recovery_services_vault=4, protected_item=5, restore_job=5)})
 
 
 def test_backup_items_leave_with_the_resource_they_protect_and_excluded_vaults_items_are_not_listed(
@@ -372,18 +393,26 @@ def test_backup_items_leave_with_the_resource_they_protect_and_excluded_vaults_i
     assert code == 0
     assert [(v["name"], [i["name"] for i in v["backup_protected_items"]], v["total_protected_items"])
             for v in vaults] == [("rsv-in", ["vm-a"], 1), ("rsv-only-out", [], 0)]
-    # Matched through the protected resource: the entry carries that resource's id.
+    # Matched through the protected resource: the entry carries that resource's id. Its restore job follows it.
     assert _entries(evidence) == [
         ("protected_item", "vm-b", "rg:rg-out", _vm_id(OUT_RG, "vm-b")),
         ("protected_item", "vm-c", "rg:rg-out", _vm_id(OUT_RG, "vm-c")),
         ("recovery_services_vault", "rsv-east", "location:regioneast", _recovery_vault_id(IN_RG, "rsv-east")),
         ("recovery_services_vault", "rsv-out", "rg:rg-out", _recovery_vault_id(OUT_RG, "rsv-out")),
+        ("restore_job", "vm-b", "rg:rg-out", f"{_recovery_vault_id(IN_RG, 'rsv-in')}/backupJobs/job-vm-b"),
+        ("restore_job", "vm-c", "rg:rg-out", f"{_recovery_vault_id(IN_RG, 'rsv-only-out')}/backupJobs/job-vm-c"),
     ]
+    assert [(v["name"], [j["name"] for j in v["restore_jobs"]], v["total_restore_jobs"]) for v in vaults] == [
+        ("rsv-in", ["job-vm-a"], 1), ("rsv-only-out", [], 0)]
     assert (summary["total_recovery_services_vaults"], summary["vaults_with_protected_items"],
             summary["vaults_without_protected_items"], summary["total_backup_policies"],
             summary["total_protected_items"], summary["retention_threshold_percentage"]) == (2, 1, 1, 2, 1, 100)
-    assert (summary["excluded_recovery_services_vaults"], summary["excluded_protected_items"]) == (2, 2)
-    assert (summary["in_scope_recovery_services_vaults"], summary["in_scope_protected_items"]) == (2, 1)
+    assert (summary["total_restore_jobs"], summary["succeeded_restore_jobs"],
+            summary["vaults_with_succeeded_restore"]) == (1, 1, 1)
+    assert (summary["excluded_recovery_services_vaults"], summary["excluded_protected_items"],
+            summary["excluded_restore_jobs"]) == (2, 2, 2)
+    assert (summary["in_scope_recovery_services_vaults"], summary["in_scope_protected_items"],
+            summary["in_scope_restore_jobs"]) == (2, 1, 1)
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
 
 
@@ -391,14 +420,20 @@ def test_backup_id_pattern_on_a_protected_resource_takes_only_that_item(monkeypa
     vm = _vm_id(IN_RG, "vm-a")
     code, evidence, read = run_backup(monkeypatch, tmp_path, f"id:{vm}")
     summary, vaults = evidence["summary"], evidence["results"]["recovery_services_vaults"]
-    assert code == 0 and len(read) == 8
+    # The excluded item's restore job gets no details read.
+    assert code == 0 and len(read) == 4 * 3 + 4
     assert [(v["name"], [i["name"] for i in v["backup_protected_items"]]) for v in vaults] == [
         ("rsv-east", ["vm-e"]), ("rsv-in", ["vm-b"]), ("rsv-only-out", ["vm-c"]), ("rsv-out", ["vm-d"])]
-    assert evidence["results"]["excluded"] == [{
-        "kind": "protected_item", "name": "vm-a", "pattern": f"id:{vm}", "reason": "resource_matched", "id": vm,
-        "resource_group": "rg-in", "location": None}]
-    assert (summary["excluded_recovery_services_vaults"], summary["excluded_protected_items"]) == (0, 1)
+    vault = _recovery_vault_id(IN_RG, "rsv-in")
+    assert evidence["results"]["excluded"] == [
+        {"kind": "protected_item", "name": "vm-a", "pattern": f"id:{vm}", "reason": "resource_matched", "id": vm,
+         "resource_group": "rg-in", "location": None},
+        {"kind": "restore_job", "name": "vm-a", "pattern": f"id:{vm}", "reason": "protected_item_excluded",
+         "id": f"{vault}/backupJobs/job-vm-a", "resource_group": "rg-in", "location": "regionwest"}]
+    assert (summary["excluded_recovery_services_vaults"], summary["excluded_protected_items"],
+            summary["excluded_restore_jobs"]) == (0, 1, 1)
     assert (summary["total_protected_items"], summary["in_scope_protected_items"]) == (4, 4)
+    assert (summary["total_restore_jobs"], summary["in_scope_restore_jobs"]) == (4, 4)
     assert summary["resource_exclusion_patterns_unmatched"] == []
 
 
@@ -420,7 +455,8 @@ def test_bare_pattern_fails_the_run(monkeypatch, tmp_path, run, total):
     (run_storage, [(op, "sa-in") for op in ("blob_properties", "file_service_properties", "geo_replication_stats",
                                             "containers")]
      + [(op, "sa-files") for op in ("blob_properties", "file_service_properties", "containers")]),
-    (run_backup, [(op, vault) for vault in ("rsv-in", "rsv-only-out") for op in ("backup_policies", "protected_items")]),
+    (run_backup, [(op, vault) for vault in ("rsv-in", "rsv-only-out")
+                  for op in ("backup_policies", "protected_items", "restore_jobs")] + [("job_details", "rsv-in")]),
 ])
 def test_excluded_resources_are_not_read_past_the_list(monkeypatch, tmp_path, run, reads):
     code, _, read = run(monkeypatch, tmp_path, PATTERNS)

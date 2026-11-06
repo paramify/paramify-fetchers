@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Azure SQL Managed Instance backup retention, backup storage redundancy and failover groups."""
+"""Azure SQL Managed Instance backup retention, backup storage redundancy, failover groups and failover history."""
 
 import logging
 import os
+import re
 import sys
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -20,12 +23,15 @@ from azure_common import (  # noqa: E402
     failure_reason,
     get_optional,
     model_attr,
+    monitor_client,
     provider_registration_status,
     report_failure,
     resolve_subscription,
+    resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
 )
+from azure_rest import bounded_int_config  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 from sql_managed_instance import (  # noqa: E402
@@ -41,6 +47,22 @@ MINIMUM_RETENTION_DAYS = 7
 ZONE_REDUNDANT_STORAGE = ("zone", "geozone")
 GEO_REDUNDANT_STORAGE = ("geo", "geozone")
 POLICY_NAME = "default"
+
+FAILOVER_DAYS_ENV = "AZURE_SQL_MI_FAILOVER_HISTORY_DAYS"
+# The Activity Log keeps 90 days.
+ACTIVITY_LOG_MAX_DAYS = 90
+# The window starts this far inside retention, so its oldest edge is still served when a long paged read reaches it.
+ACTIVITY_LOG_RETENTION_MARGIN = timedelta(hours=1)
+ACTIVITY_LOG_MAX_EVENTS = 200_000
+# operation -> (what failed over, whether data loss was allowed; None where that doesn't apply).
+FAILOVER_OPERATIONS = {
+    "microsoft.sql/locations/instancefailovergroups/failover/action": ("failover_group", False),
+    "microsoft.sql/locations/instancefailovergroups/forcefailoverallowdataloss/action": ("failover_group", True),
+    "microsoft.sql/managedinstances/failover/action": ("managed_instance", None),
+}
+FINAL_STATUSES = ("succeeded", "failed", "canceled")
+_GROUP_ID = re.compile(r"/providers/microsoft\.sql/locations/([^/]+)/instancefailovergroups/([^/]+)", re.IGNORECASE)
+_INSTANCE_ID = re.compile(r"/providers/microsoft\.sql/managedinstances/([^/]+)", re.IGNORECASE)
 
 
 def ltr_tier_on(duration) -> bool:
@@ -102,6 +124,28 @@ def project_failover_group(group) -> dict:
             }
             for region in (model_attr(group, "partner_regions") or [])
         ],
+    }
+
+
+def _iso(value):
+    if isinstance(value, datetime):
+        moment = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return value
+
+
+def project_event(event) -> dict:
+    """Read an Activity Log `EventData`; of its claims only the identity type is kept."""
+    claims = model_attr(event, "claims") or {}
+    return {
+        "operation": model_attr(model_attr(event, "operation_name"), "value"),
+        "status": model_attr(model_attr(event, "status"), "value"),
+        "caller": model_attr(event, "caller"),
+        "caller_type": claims.get("idtyp") if isinstance(claims, dict) else None,
+        "resource_id": model_attr(event, "resource_id"),
+        "correlation_id": model_attr(event, "correlation_id"),
+        "event_id": model_attr(event, "event_data_id"),
+        "time": _iso(model_attr(event, "event_timestamp")),
     }
 
 
@@ -256,7 +300,200 @@ def summarize(
     }
 
 
+def _minutes(start, end) -> float | None:
+    if not start or not end:
+        return None
+    begin, finish = (datetime.fromisoformat(str(t).replace("Z", "+00:00")) for t in (start, end))
+    return round((finish - begin).total_seconds() / 60, 2)
+
+
+def failover_target(resource_id) -> tuple:
+    """(kind, failover group or instance name, the failover group's region in the id) for a failover event's resource."""
+    group = _GROUP_ID.search(str(resource_id or ""))
+    if group:
+        return "failover_group", group.group(2), group.group(1)
+    instance = _INSTANCE_ID.search(str(resource_id or ""))
+    return ("managed_instance", instance.group(1), None) if instance else (None, None, None)
+
+
+def failover_records(events: list[dict]) -> list[dict]:
+    """One record per request (correlation id and target); a group failover is sent to the region that takes over."""
+    grouped: dict = defaultdict(list)
+    for event in events:
+        if lower(event.get("operation")) not in FAILOVER_OPERATIONS:
+            continue
+        kind, name, _ = failover_target(event.get("resource_id"))
+        grouped[(event.get("correlation_id") or event.get("event_id"), lower(event.get("operation")), lower(name))].append(event)
+    records = []
+    for (_, operation, _), group in grouped.items():
+        group.sort(key=lambda e: e.get("time") or "")
+        kind, data_loss = FAILOVER_OPERATIONS[operation]
+        final = next((e for e in reversed(group) if lower(e.get("status")) in FINAL_STATUSES), None)
+        requester = next((e for e in group if e.get("caller_type") or "@" in str(e.get("caller") or "")), group[0])
+        _, name, location = failover_target(requester.get("resource_id"))
+        status = (final or group[-1]).get("status")
+        start, end = group[0].get("time"), (final or {}).get("time")
+        records.append({
+            "kind": kind,
+            "operation": group[0].get("operation"),
+            "allows_data_loss": data_loss,
+            "resource_id": requester.get("resource_id"),
+            "failover_group": name if kind == "failover_group" else None,
+            "managed_instance": name if kind == "managed_instance" else None,
+            "new_primary_location": location,
+            "start_time": start,
+            "end_time": end,
+            "duration_minutes": _minutes(start, end),
+            "status": status,
+            "succeeded": lower(status) == "succeeded",
+            "caller": requester.get("caller"),
+            "caller_type": requester.get("caller_type"),
+            "correlation_id": requester.get("correlation_id"),
+        })
+    return sorted(records, key=lambda r: r.get("start_time") or "", reverse=True)
+
+
+def attach_failovers(records: list[dict] | None, instances: list[dict], groups: list[dict], excluded: list[dict],
+                     exclusions: ResourceExclusions | None) -> tuple[list[dict] | None, list[dict]]:
+    """(in-scope failovers joined to their target, excluded entries); a failover follows the group or instance it moved,
+    and one whose target isn't listed any more leaves only when a pattern matches its resource id."""
+    if records is None:
+        return None, []
+    out_entries = [e for e in excluded if e["kind"] == "instance_failover_group"]
+    by_group = {key: g for g in groups for key in _group_keys(g)}
+    out_groups = {key: e for e in out_entries for key in _group_keys(e)}
+    by_instance = {lower(i.get("id")): i for i in instances}
+    out_instances = {lower(e.get("id")): e for e in excluded if e["kind"] == "managed_instance"}
+    kept, dropped = [], []
+    for record in records:
+        if record["kind"] == "failover_group":
+            key = (lower(resource_group_from_id(record["resource_id"])), lower(record["failover_group"]))
+            target, entry = by_group.get(key), out_groups.get(key)
+            if target is None and entry is None:
+                # A resource group no listed view names: the name decides, but only when one group has it.
+                same = ([(g, None) for g in groups if lower(g.get("name")) == key[1]]
+                        + [(None, e) for e in out_entries if lower(e.get("name")) == key[1]])
+                if len(same) == 1:
+                    target, entry = same[0]
+        else:
+            match = re.match(r".*?/providers/microsoft\.sql/managedinstances/[^/]+", lower(record["resource_id"]))
+            instance_id = match.group(0) if match else lower(record["resource_id"])
+            target, entry = by_instance.get(instance_id), out_instances.get(instance_id)
+        pattern, reason = (entry["pattern"], f"{record['kind']}_excluded") if entry else (None, None)
+        if target is None and entry is None and exclusions:
+            pattern, reason = exclusions.match(record["resource_id"]), "resource_matched"
+        if pattern:
+            dropped.append(excluded_item(
+                "failover", record["failover_group"] or record["managed_instance"], pattern, reason,
+                id=record["resource_id"], resource_group=resource_group_from_id(record["resource_id"]),
+                location=record["new_primary_location"], correlation_id=record["correlation_id"]))
+            continue
+        is_group = record["kind"] == "failover_group"
+        kept.append({
+            **record,
+            "target_found": target is not None,
+            "failover_group_id": (target or {}).get("id") if is_group else None,
+            "failover_policy": (target or {}).get("failover_policy") if is_group else None,
+        })
+    return kept, dropped
+
+
+def _group_keys(group: dict) -> set:
+    """(resource group, name) for every region Azure lists a failover group from; a failover is sent to one of them."""
+    views = group.get("regional_views") or [group]
+    return {(lower(v.get("resource_group") or resource_group_from_id(v.get("id"))), lower(group.get("name")))
+            for v in views}
+
+
+def group_failover_fields(group: dict, failovers: list[dict] | None) -> dict:
+    """A failover group's failovers in the window; null when the history wasn't read in full."""
+    if failovers is None:
+        return {**group, "failovers_in_window": None, "succeeded_failovers_in_window": None,
+                "latest_succeeded_failover_time": None}
+    mine = [f for f in failovers if f.get("failover_group_id") and lower(f["failover_group_id"]) == lower(group.get("id"))]
+    succeeded = [f for f in mine if f["succeeded"]]
+    return {
+        **group,
+        "failovers_in_window": len(mine),
+        "succeeded_failovers_in_window": len(succeeded),
+        "latest_succeeded_failover_time": max((f["end_time"] or f["start_time"] for f in succeeded), default=None),
+    }
+
+
+def _failover_group_key(failover: dict):
+    """The group a failover moved: its listed id, else the resource group and name, since a name is unique per DNS zone."""
+    if failover.get("failover_group_id"):
+        return lower(failover["failover_group_id"])
+    return lower(resource_group_from_id(failover.get("resource_id"))), lower(failover.get("failover_group"))
+
+
+def summarize_failovers(failovers: list[dict] | None, window: dict, now: datetime) -> dict:
+    """Failover counts over the window; all but the window fields are null when the history wasn't read in full."""
+    read = failovers is not None
+    failovers = failovers or []
+    succeeded = [f for f in failovers if f["succeeded"]]
+    latest = max((f["end_time"] or f["start_time"] for f in succeeded), default=None)
+    durations = [f["duration_minutes"] for f in succeeded if f["duration_minutes"] is not None]
+    fields = {
+        "total_failovers": len(failovers),
+        "failover_group_failovers": sum(1 for f in failovers if f["kind"] == "failover_group"),
+        "forced_failovers_allowing_data_loss": sum(1 for f in failovers if f["allows_data_loss"] is True),
+        "managed_instance_failovers": sum(1 for f in failovers if f["kind"] == "managed_instance"),
+        "succeeded_failovers": len(succeeded),
+        "failed_failovers": sum(1 for f in failovers if lower(f["status"]) == "failed"),
+        "failover_groups_with_succeeded_failover": len(
+            {_failover_group_key(f) for f in succeeded if f["kind"] == "failover_group"}),
+        "latest_succeeded_failover_time": latest,
+        "days_since_latest_succeeded_failover": round(
+            (now - datetime.fromisoformat(latest.replace("Z", "+00:00"))).total_seconds() / 86400, 1) if latest else None,
+        "longest_succeeded_failover_minutes": max(durations) if durations else None,
+    }
+    return {
+        "failover_history_days": window.get("days"),
+        "failover_history_read": read,
+        **{k: (v if read else None) for k, v in fields.items()},
+    }
+
+
 # --- collection (lazy azure imports) ---
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def read_failover_history(subscription_id, cred, collector: Collector, days: int, now: datetime):
+    """Microsoft.Sql failover events in [now - days, now]; events is None on a failed or cut read, which would undercount,
+    and either is recorded as a failure."""
+    start = now - min(timedelta(days=days), timedelta(days=ACTIVITY_LOG_MAX_DAYS) - ACTIVITY_LOG_RETENTION_MARGIN)
+    window: dict = {"days": days, "start_time": _iso(start), "end_time": _iso(now), "complete": False,
+                    "cut_reason": None, "events_read": 0}
+    monitor = collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))
+    if monitor is None:
+        window["cut_reason"] = "read_failed"
+        return None, window
+    # An explicit end time: with only a start the Activity Log returns just a few hours.
+    query = (f"eventTimestamp ge '{start:%Y-%m-%dT%H:%M:%SZ}' and eventTimestamp le '{now:%Y-%m-%dT%H:%M:%SZ}' "
+             "and resourceProvider eq 'Microsoft.Sql'")
+    events = []
+    try:
+        for event in monitor.activity_logs.list(filter=query):
+            if window["events_read"] >= ACTIVITY_LOG_MAX_EVENTS:
+                window["cut_reason"] = "max_events"
+                collector.record("monitor.activity_logs.list", RuntimeError(
+                    f"stopped after {ACTIVITY_LOG_MAX_EVENTS} Microsoft.Sql events without reaching the window's start, "
+                    f"so the failover counts are unknown; shorten {FAILOVER_DAYS_ENV}"))
+                return None, window
+            window["events_read"] += 1
+            projected = project_event(event)
+            if lower(projected["operation"]) in FAILOVER_OPERATIONS:
+                events.append(projected)
+    except Exception as exc:  # noqa: BLE001 — record it; the counts are unknown, not zero
+        collector.record("monitor.activity_logs.list", exc)
+        window["cut_reason"] = "read_failed"
+        return None, window
+    window["complete"] = True
+    return events, window
+
 
 def list_failover_groups(client, group_name: str, location: str) -> list[dict]:
     return [project_failover_group(g) for g in client.instance_failover_groups.list_by_location(group_name, location)]
@@ -364,6 +601,10 @@ def main() -> int:
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
+    now = utc_now()
+    events: list[dict] | None = None
+    days, days_requested = bounded_int_config(collector, FAILOVER_DAYS_ENV, ACTIVITY_LOG_MAX_DAYS, ACTIVITY_LOG_MAX_DAYS)
+    window: dict = {"days": days, "complete": False, "cut_reason": "not_read"}
     if subscription_id and cred is not None:
         registration = provider_registration_status(
             collector, subscription_id, cred, "Microsoft.Sql"
@@ -375,6 +616,7 @@ def main() -> int:
                 subscription_id,
             )
         instances, groups, unlisted = collect(subscription_id, cred, collector, exclusions, excluded)
+        events, window = read_failover_history(subscription_id, cred, collector, days, now)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -384,8 +626,19 @@ def main() -> int:
             ),
         )
 
+    window["days_requested"] = days_requested
     exclusions.record_invalid(collector)
+    failovers, out = attach_failovers(
+        None if events is None else failover_records(events), instances, groups, excluded, exclusions)
+    excluded += out
+    groups = [group_failover_fields(g, failovers) for g in groups]
     exclusions.warn_unmatched(logger)
+    boundary = exclusions.summary(excluded, ("managed_instance", "instance_failover_group", "failover"), {
+        "managed_instances": len(instances), "instance_failover_groups": len(groups),
+        "failovers": None if failovers is None else len(failovers)})
+    if failovers is None:
+        # No failover was read, so none was tested against the patterns.
+        boundary["excluded_failovers"] = None
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -394,14 +647,16 @@ def main() -> int:
         results={
             "managed_instances": instances,
             "instance_failover_groups": groups,
+            "failovers": failovers,
+            "failover_history_window": window,
             "provider_registration_status": registration,
             "excluded": excluded,
         },
         summary={
             **summarize(instances, groups, not unlisted),
+            **summarize_failovers(failovers, window, now),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("managed_instance", "instance_failover_group"), {
-                "managed_instances": len(instances), "instance_failover_groups": len(groups)}),
+            **boundary,
         },
     )
 

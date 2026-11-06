@@ -154,7 +154,9 @@ no readable file: counts over a subset of the scope would read as complete.
 `comparator_inputs.run(check, output, summary_keys)` is every comparator's
 main(), so the policy changes in one place. If the index can't be read, the
 comparison raises, or its result isn't JSON, it still writes the file with null
-counts and exits 1 with `internal_error`.
+counts and exits 1 with `internal_error`. If `check` raises `ConfigError`, a
+setting the inputs show is wrong, it writes the results and summary it carries
+and exits 1 with `bad_config`.
 
 ## 3. Output
 

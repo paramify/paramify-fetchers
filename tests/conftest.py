@@ -164,6 +164,52 @@ def make_result():
 
 
 # --------------------------------------------------------------------------- #
+# Summary fields in the instructions, checked against a summary the code built (docs/authoring_fetcher_guide.md)
+# --------------------------------------------------------------------------- #
+
+def documented_summary(fetcher: str) -> Dict[str, list[str]]:
+    """Each field under 'Summary fields:' in a fetcher's instructions, with the breakdown values listed below it."""
+    import re
+
+    import yaml
+
+    yaml_path = next(p for root in ("fetchers", "comparators")
+                     if (p := REPO_ROOT / root / fetcher / "fetcher.yaml").exists())
+    text = (yaml.safe_load(yaml_path.read_text()).get("evidence_set") or {}).get("instructions") or ""
+    _, found, section = text.partition("\nSummary fields:\n")
+    assert found, f"{fetcher}: the instructions have no 'Summary fields:' section"
+    fields: Dict[str, list[str]] = {}
+    field = None
+    for line in section.splitlines():
+        if m := re.match(r"- (\S+) — ", line):
+            field = m.group(1)
+            fields[field] = []
+        elif field and (m := re.match(r"  - (\S+) \(", line)):
+            fields[field].append(m.group(1))
+    return fields
+
+
+@pytest.fixture(name="documented_summary")
+def documented_summary_fixture():
+    return documented_summary
+
+
+@pytest.fixture
+def assert_summary_documented():
+    """Call as assert_summary_documented("azure/<name>", summary) with a summary holding every field."""
+    def _check(fetcher: str, summary: Dict[str, Any]) -> None:
+        documented = documented_summary(fetcher)
+        problems = [f"not in the instructions: {k}" for k in sorted(set(summary) - set(documented))]
+        problems += [f"in the instructions but not the summary: {k}" for k in sorted(set(documented) - set(summary))]
+        for name, values in documented.items():
+            if values and isinstance(summary.get(name), dict):
+                problems += [f"{name}: value {v!r} is not listed under it" for v in sorted(set(summary[name]) - set(values))]
+                problems += [f"{name}: value {v!r} is listed but not in the summary" for v in sorted(set(values) - set(summary[name]))]
+        assert not problems, f"{fetcher} summary fields vs instructions:\n  " + "\n  ".join(problems)
+    return _check
+
+
+# --------------------------------------------------------------------------- #
 # requests test doubles
 #
 # For new uploader tests. The uploaders hold a requests.Session, so a fake with
@@ -311,13 +357,16 @@ def _pin(value: Any, roots: list) -> Any:
 
 
 def _offline(mp: pytest.MonkeyPatch) -> None:
-    """Make os.environ match offline_env(): no .env, and no PARAMIFY_* or AZURE_* values."""
-    env = _cli().offline_env()
-    for name in set(os.environ) - set(env):
+    """No .env and no PARAMIFY_* or AZURE_* values in os.environ, the Paramify names as offline_env() sets them."""
+    # Not offline_env()'s allowlist: pytest plugins keep state in os.environ (TEXTUAL_SNAPSHOT_TEMPDIR).
+    # An earlier load_dotenv() in this process may have copied any .env name into os.environ.
+    cli = _cli()
+    dotenv = cli.dotenv_names()
+    for name in [k for k in os.environ if k.startswith(("PARAMIFY_", "AZURE_")) or k in dotenv]:
         mp.delenv(name)
-    for name, value in env.items():
-        if os.environ.get(name) != value:
-            mp.setenv(name, value)
+    offline = cli.offline_env()
+    for name in (*cli.PARAMIFY_ENV, "PYTHON_DOTENV_DISABLED"):
+        mp.setenv(name, offline[name])
 
 
 @pytest.fixture(scope="session")
@@ -363,8 +412,12 @@ def demo_workspace(_demo_template, tmp_path, monkeypatch):
     return SimpleNamespace(root=root, run_events=events)
 
 
-# Imported by every Python fetcher a no_network test runs; the fetcher is a child
-# process, out of reach of the in-process patches.
+_REFUSED_LOOKUPS = ("getaddrinfo", "gethostbyname", "gethostbyname_ex")
+# sendto and sendmsg send without a connect.
+_REFUSED_SOCKET_METHODS = ("connect", "connect_ex", "sendto", "sendmsg")
+
+# Imported by every Python child a no_network test starts (a fetcher, a launched app),
+# out of reach of the in-process patches.
 _CHILD_NO_NETWORK = """\
 import socket
 
@@ -375,17 +428,17 @@ def _refuse(*args, **kwargs):
     raise OSError("network blocked by tests/conftest.py no_network")
 
 
-for _name in ("getaddrinfo", "gethostbyname", "gethostbyname_ex"):
+for _name in {lookups!r}:
     setattr(socket, _name, _refuse)
-for _name in ("connect", "connect_ex", "sendto"):
+for _name in {methods!r}:
     setattr(socket.socket, _name, _refuse)
 """
 
 
 @pytest.fixture
 def no_network(monkeypatch, tmp_path):
-    """Refuse name lookups, connects and sendto, here and in the fetchers a run starts;
-    fail at teardown if any were tried."""
+    """Refuse name lookups, connects, sendto and sendmsg, here and in the Python children
+    the test starts; fail at teardown if any were tried, unless the test removed `.log`."""
     from framework.runner import executor
 
     attempts: list = []
@@ -395,20 +448,23 @@ def no_network(monkeypatch, tmp_path):
         attempts.append(where)
         raise AssertionError(f"test touched the network: {where!r}")
 
-    for name in ("getaddrinfo", "gethostbyname", "gethostbyname_ex"):
+    for name in _REFUSED_LOOKUPS:
         monkeypatch.setattr(socket, name, refuse)
-    for name in ("connect", "connect_ex", "sendto"):
+    for name in _REFUSED_SOCKET_METHODS:
         monkeypatch.setattr(socket.socket, name, refuse)
 
-    # A fetcher's env is a whitelist, so add the PYTHONPATH that loads the guard.
     guard = tmp_path / "no-network"
     guard.mkdir()
     log = guard / "attempts.log"
-    (guard / "sitecustomize.py").write_text(_CHILD_NO_NETWORK.format(log=str(log)))
+    (guard / "sitecustomize.py").write_text(_CHILD_NO_NETWORK.format(
+        log=str(log), lookups=_REFUSED_LOOKUPS, methods=_REFUSED_SOCKET_METHODS))
+    # Children given os.environ or offline_env() load the guard from PYTHONPATH.
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(filter(None, (str(guard), os.environ.get("PYTHONPATH")))))
+    # A fetcher's env is a whitelist, so add the PYTHONPATH that loads the guard.
     build_env = executor._build_env
     monkeypatch.setattr(executor, "_build_env",
                         lambda *a, **kw: {**build_env(*a, **kw), "PYTHONPATH": str(guard)})
-    yield attempts
+    yield SimpleNamespace(attempts=attempts, log=log)
     if log.exists():
         attempts += log.read_text().splitlines()
     assert not attempts, f"network attempts (the app may have swallowed the error): {attempts}"

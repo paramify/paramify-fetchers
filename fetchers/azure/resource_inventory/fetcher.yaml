@@ -1,5 +1,5 @@
 name: azure_resource_inventory
-version: 0.3.0
+version: 0.4.0
 description: >
   An automatically generated inventory of every resource in the subscription, read
   from Azure Resource Graph's `Resources` table rather than service by service: each
@@ -48,12 +48,14 @@ output:
 
 config_schema:
   resource_exclusions:
-    type: string
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
     description: >
       Resources outside the authorization boundary, to leave out of scope, as
-      case-insensitive glob patterns separated by commas or spaces, each with a
+      case-insensitive glob patterns listed in the manifest, each with a
       prefix: rg:<resource group> (read from the resource id), location:<region>
       (the region's name without spaces, such as eastus2; a resource with no
       location never matches one) or id:<resource id> (also matches that
@@ -66,7 +68,7 @@ config_schema:
       resource group), are left out of every Defender and Policy count, including
       the outside-inventory ones. A pattern without one of these prefixes fails
       the run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it.
-      Can be ${env:VAR}. Empty: every resource is in scope.
+      Each item is a pattern, or a pattern with a reason. Empty: every resource is in scope.
 
 target_schema:
   subscription_id:

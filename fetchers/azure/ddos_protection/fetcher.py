@@ -29,18 +29,16 @@ from azure_common import (  # noqa: E402
     vnet_id_of,
     write_evidence,
 )
+from ddos_coverage import (  # noqa: E402
+    EFFECTIVE_PROTECTION,
+    attachment,
+    effective_protection,
+    vnet_by_resource,
+    vnet_has_plan,
+)
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_ddos_protection")
-
-ATTACHMENT_TYPES = {
-    "networkinterfaces": "network_interface",
-    "loadbalancers": "load_balancer",
-    "bastionhosts": "bastion_host",
-    "azurefirewalls": "azure_firewall",
-    "virtualnetworkgateways": "virtual_network_gateway",
-    "applicationgateways": "application_gateway",
-}
-EFFECTIVE_PROTECTION = ("network_protection", "ip_protection", "none", "disabled", "not_supported", "unknown")
 
 
 # --- projection: the only code here that touches an azure-mgmt model ---
@@ -118,74 +116,6 @@ def project_load_balancer(lb) -> dict:
 
 
 # --- pure transforms (flat snake_case dicts in, evidence records out) ---
-
-def resource_of(child_id):
-    """(attachment type, owning resource id) for an ARM child id such as an IP configuration."""
-    parts = str(child_id or "").split("/")
-    lowered = [p.lower() for p in parts]
-    if "providers" not in lowered:
-        return None, None
-    i = lowered.index("providers")
-    if len(parts) < i + 4:
-        return None, None
-    return ATTACHMENT_TYPES.get(lowered[i + 2], "other"), "/".join(parts[: i + 4])
-
-
-def attachment(ip: dict):
-    if ip.get("ip_configuration_id"):
-        return resource_of(ip["ip_configuration_id"])
-    if ip.get("nat_gateway_id"):
-        return "nat_gateway", ip["nat_gateway_id"]
-    return "unattached", None
-
-
-def _nic_of(config_id) -> str:
-    """The NIC id of a NIC IP configuration id (VM or scale-set instance)."""
-    key = arm_id_key(config_id)
-    return key.rsplit("/ipconfigurations/", 1)[0] if "/networkinterfaces/" in key else ""
-
-
-def vnet_by_resource(vnets: list[dict], nics: list[dict], load_balancers: list[dict] = ()) -> dict:
-    """Lower-cased resource id -> lower-cased VNet id, from subnet back-references, NIC subnets, then a load
-    balancer's backend pools (whose IP configurations or addresses must all sit in one VNet)."""
-    index, by_config = {}, {}
-    for vnet in vnets:
-        for config_id in vnet.get("subnet_ip_configuration_ids") or []:
-            by_config[arm_id_key(config_id)] = arm_id_key(vnet["id"])
-            _, resource_id = resource_of(config_id)
-            if resource_id:
-                index.setdefault(arm_id_key(resource_id), arm_id_key(vnet["id"]))
-    for nic in nics:
-        vnet_ids = {vnet_id_of(s) for s in nic.get("subnet_ids") or [] if vnet_id_of(s)}
-        if len(vnet_ids) == 1:
-            index.setdefault(arm_id_key(nic["id"]), vnet_ids.pop())
-    for lb in load_balancers:
-        backends = {arm_id_key(v) for v in lb.get("backend_virtual_network_ids") or []}
-        for config_id in lb.get("backend_ip_configuration_ids") or []:
-            backends.add(by_config.get(arm_id_key(config_id)) or index.get(_nic_of(config_id)))
-        if len(backends) == 1 and None not in backends:
-            index.setdefault(arm_id_key(lb["id"]), backends.pop())
-    return index
-
-
-def vnet_has_plan(vnet) -> bool:
-    return bool(vnet and vnet.get("enable_ddos_protection") and vnet.get("ddos_protection_plan_id"))
-
-
-def effective_protection(ip: dict, attached_to: str, vnet) -> str:
-    if attached_to == "nat_gateway":
-        return "not_supported"
-    mode = ip.get("protection_mode") or "VirtualNetworkInherited"
-    if mode == "Enabled":
-        return "ip_protection"
-    if mode == "Disabled":
-        return "disabled"
-    if attached_to == "unattached":
-        return "none"
-    if vnet is None:
-        return "unknown"
-    return "network_protection" if vnet_has_plan(vnet) else "none"
-
 
 def public_ip_record(ip: dict, resource_vnets: dict, vnets_by_id: dict) -> dict:
     attached_to, resource_id = attachment(ip)
@@ -272,10 +202,24 @@ def build_records(
     return by_id(plans), by_id(vnets), by_id(ips)
 
 
+def build_scoped(raw_plans, raw_vnets, raw_ips, raw_nics, raw_lbs, exclusions: ResourceExclusions):
+    """Verdicts are worked out against every plan, VNet and public IP; excluded ones then leave the lists and counts."""
+    plans, vnets, ips = build_records(raw_plans, raw_vnets, raw_ips, raw_nics, raw_lbs)
+    plans, out_plans = exclusions.split(plans, "ddos_protection_plan", resource_group=lambda r: None)
+    ips, out_ips = exclusions.split(ips, "public_ip", resource_group=lambda r: None)
+    in_vnets, out_vnets = exclusions.split(vnets, "virtual_network", resource_group=lambda r: None)
+    # A VNet's attached-IP counts cover only the in-scope IPs; each IP's own protection verdict is unchanged.
+    plan_ids = {arm_id_key(p["id"]) for p in raw_plans}
+    by_id = {arm_id_key(v["id"]): v for v in raw_vnets}
+    vnets = [virtual_network_record(by_id[arm_id_key(v["id"])], plan_ids, ips) for v in in_vnets]
+    return plans, vnets, ips, out_plans + out_vnets + out_ips
+
+
 # --- collection (lazy azure imports) ---
 
 def collect(subscription_id, cred, collector: Collector):
-    """DDoS protection plans, VNets with their subnets' back-references, public IPs, NICs and load balancers."""
+    """DDoS protection plans, VNets with their subnets' back-references, public IPs, NICs and load balancers; the
+    first three are None when their list wasn't read."""
     from azure.mgmt.network import NetworkManagementClient
 
     client = collector.guard(
@@ -285,22 +229,19 @@ def collect(subscription_id, cred, collector: Collector):
         ),
     )
     if client is None:
-        return [], [], [], [], []
+        return None, None, None, [], []
 
     plans = collector.guard(
         "network.ddos_protection_plans.list",
         lambda: [project_plan(p) for p in client.ddos_protection_plans.list()],
-        default=[],
     )
     vnets = collector.guard(
         "network.virtual_networks.list_all",
         lambda: [project_virtual_network(v) for v in client.virtual_networks.list_all()],
-        default=[],
     )
     ips = collector.guard(
         "network.public_ip_addresses.list_all",
         lambda: [project_public_ip(i) for i in client.public_ip_addresses.list_all()],
-        default=[],
     )
     nics = collector.guard(
         "network.network_interfaces.list_all",
@@ -330,7 +271,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    raw = ([], [], [], [], [])
+    raw: tuple = (None, None, None, [], [])
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Network")
@@ -349,7 +290,12 @@ def main() -> int:
             ),
         )
 
-    plans, vnets, ips = build_records(*raw)
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    read = {"ddos_protection_plans": raw[0] is not None, "virtual_networks": raw[1] is not None,
+            "public_ips": raw[2] is not None}
+    plans, vnets, ips, excluded = build_scoped(*(r or [] for r in raw), exclusions)
+    exclusions.warn_unmatched(logger)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -359,8 +305,15 @@ def main() -> int:
             "virtual_networks": vnets,
             "public_ip_addresses": ips,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(plans, vnets, ips), "provider_registration_status": registration},
+        summary={
+            **summarize(plans, vnets, ips),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("ddos_protection_plan", "virtual_network", "public_ip"), {
+                name: len(rows) if read[name] else None for name, rows in
+                (("ddos_protection_plans", plans), ("virtual_networks", vnets), ("public_ips", ips))}),
+        },
     )
 
     filename = f"azure_ddos_protection_{sanitize_for_filename(subscription_id or 'unknown')}.json"

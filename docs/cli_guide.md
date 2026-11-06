@@ -188,10 +188,17 @@ paramify manifest add-target <fetcher> k=v ... [--secret name=ENV_VAR ...]
 paramify manifest set-target <fetcher> <index> k=v ... [--secret name=ENV_VAR ...]
 paramify manifest remove-target <fetcher> <index>
 paramify manifest set-platform-config <category> key=value
+paramify manifest exclude <category|fetcher> <pattern> [--reason TEXT] [--field NAME]
+paramify manifest unexclude <category|fetcher> [pattern] [--field NAME] [--all]
 paramify manifest set-passthrough <category> ENV_VAR ...
 paramify manifest set-output-dir <dir>
 paramify manifest show [--json]
 ```
+
+`exclude` and `unexclude` edit exclusion lists, such as resource exclusions
+([pattern lists](config_injection_guide.md#5-leave-resources-out-of-scope)).
+They never touch a pattern list that shows more when it grows, such as
+`azure_change_provenance`'s `value_paths`; set that one with `set-config`.
 
 Every `manifest` subcommand also accepts `--json` and returns a stable
 `{"ok", "path", "errors"}` object. Thus an agent can build a manifest step by

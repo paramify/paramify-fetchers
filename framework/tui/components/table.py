@@ -17,6 +17,7 @@ from textual.widgets.data_table import RowKey
 
 
 class DataTable(_DataTable):
+    # Private textual hook: tests/test_tui_table.py fails if a textual release renames it.
     def _update_dimensions(self, new_rows: Iterable[RowKey]) -> None:
         super()._update_dimensions(new_rows)
         self.notify_style_update()

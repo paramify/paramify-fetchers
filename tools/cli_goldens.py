@@ -23,6 +23,9 @@ EVIDENCE = REPO_ROOT / "evidence"
 
 # paramify(), offline_env() and normalise() are shared with the TUI tests via the cli_tools fixture.
 PARAMIFY_ENV = (UPLOAD_TOKEN_ENV, READ_TOKEN_ENV, BASE_URL_ENV, ENV_SWITCH)
+# All a command run offline sees of the caller's env, so no platform's credentials reach it.
+OFFLINE_ENV = ("PATH", "HOME", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR", "TZ",
+               "PYTHONPATH", "PYTHONHOME", "PYTHONDONTWRITEBYTECODE", "PYTHONHASHSEED")
 RUN_ID = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:-[0-9a-f]{4})?")
 TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")
 ASCTIME = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}")
@@ -36,7 +39,7 @@ def paramify() -> str:
     return str(beside) if beside.exists() else (shutil.which("paramify") or str(beside))
 
 
-def _dotenv_names() -> set:
+def dotenv_names() -> set:
     """What the .env a bare load_dotenv() here finds sets: the nearest one up from the repo."""
     for folder in (REPO_ROOT, *REPO_ROOT.parents):
         if (folder / ".env").is_file():
@@ -45,11 +48,8 @@ def _dotenv_names() -> set:
 
 
 def offline_env() -> dict:
-    """os.environ without PARAMIFY_*/AZURE_* or .env; the Paramify names stay set, empty."""
-    # An earlier load_dotenv() in this process may have copied any .env name into os.environ.
-    dotenv = _dotenv_names()
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith(("PARAMIFY_", "AZURE_")) and k not in dotenv}
+    """The OFFLINE_ENV part of os.environ, no .env, and the Paramify names set but empty."""
+    env = {k: os.environ[k] for k in OFFLINE_ENV if k in os.environ}
     # Empty, not unset: python-dotenv never overrides a variable that is set.
     env.update(dict.fromkeys(PARAMIFY_ENV, ""), PYTHON_DOTENV_DISABLED="1")
     return env
