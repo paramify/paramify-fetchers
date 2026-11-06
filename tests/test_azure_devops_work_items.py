@@ -615,6 +615,13 @@ def test_mentions_read_as_one_token_only_when_on():
     assert mod.comment_text(raw).split() == ["@Jane", "Doe", "and", "@bo,", "mail", "jane@example.com"]
 
 
+def test_an_unclosed_mention_link_does_not_swallow_the_text_after_it():
+    raw = "<div><a data-vss-mention=\"v\">@X please</div><div>hold, <a href='y'>doc</a> approved</div>"
+    assert not mod.approval_pattern().search(mod.comment_text(raw, True))
+    # Only the attribute counts, not the words inside another attribute's value.
+    assert "@mention" not in mod.comment_text('<a title="data-vss-mention">@X</a> approved', True)
+
+
 def comment(n, text, by, days):
     return {"id": n, "text": text, "createdBy": who(by), "createdDate": ago(days=days), "isDeleted": False}
 
@@ -736,3 +743,21 @@ def test_an_unlisted_project_leaves_the_percentage_unknown(tmp_path):
     _, evidence, _, _, _ = run(tmp_path, fake)
     s = evidence["summary"]
     assert s["finished_change_items_needing_approval"] is None and s["finished_change_items_approved_percentage"] is None
+
+
+def test_a_refused_finished_item_is_left_out_of_the_percentage(tmp_path):
+    def finished(wid, state, reason):
+        return item(wid, "Change Request", state, **{"System.Reason": reason})
+    fake = with_items(FakeADO(), {104: finished(104, "Closed", "Rejected"), 105: finished(105, "Rejected", "Rejected"),
+                                  106: finished(106, "Removed", "Cut"), 107: finished(107, "Closed", "Completed")})
+    types = [dict(t) for t in TYPES]
+    # A process whose Rejected and Removed states finish the item (Completed category).
+    types[0] = {**types[0], "states": types[0]["states"] + states(("Rejected", "Completed"), ("Removed", "Completed"))}
+    fake.routes[("GET", f"/contoso/{P}/_apis/wit/workitemtypes")] = Resp(body={"value": types})
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert code == 0 and s["change_items_finished"] == 6
+    # Refused 104-106 are still listed as finished without approval, but only 101, 103 and 107 are judged.
+    assert s["finished_change_items_without_approval"] == [103, 104, 105, 106, 107]
+    assert (s["finished_change_items_needing_approval"], s["finished_change_items_needing_approval_approved"]) == (3, 1)
+    assert s["finished_change_items_approved_percentage"] == 33

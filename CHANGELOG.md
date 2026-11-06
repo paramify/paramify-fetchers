@@ -23,7 +23,10 @@ schemas and the `paramify` CLI — not the internal code.
     one made with the mention picker (or a markdown comment's `@<id>`) whatever
     the name's length, and an `@word` typed as plain text, which is one word
     long. Quoted text and a later move back or rejection still don't count. Off,
-    comments are read exactly as in 0.1.0.
+    comments are read exactly as in 0.1.0, where a markdown comment's
+    "@<id> approved" already counted. `azure_change_work_items` reads each item's
+    approval from this evidence, so with the setting on, a mention approval
+    counts there too.
   - **`approval_types`** (`AZURE_DEVOPS_APPROVAL_TYPES`) names which of the
     `work_item_types` need an approval. Empty, as by default, every one does. A
     name that isn't in `work_item_types` is `bad_config`, as the comparator's
@@ -33,11 +36,13 @@ schemas and the `paramify` CLI — not the internal code.
   - **Summary.** `approval_types`, `approval_mentions`,
     `finished_change_items_needing_approval`,
     `finished_change_items_needing_approval_approved` and
-    `finished_change_items_approved_percentage`, over finished change items only,
-    since an open one may still be waiting on its approval (whole number; 0 when
-    no finished item needs an approval; null when a project's items or any change
-    item's history or comments couldn't be read). The tests now check every summary field against
-    the instructions.
+    `finished_change_items_approved_percentage`. They count finished change items
+    of the approval types only: an open one may still be waiting on its approval,
+    and a refused one (its state or reason naming Rejected, or its state named
+    Removed) was turned down rather than left unapproved. The percentage is a whole
+    number, 0 when no finished item needs an approval, and null when a project's
+    items or any change item's history or comments couldn't be read. The tests now
+    check every summary field against the instructions.
   - `examples/azure_devops_change_approvals.yaml` shows the settings.
 
 - **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables can be measured.**

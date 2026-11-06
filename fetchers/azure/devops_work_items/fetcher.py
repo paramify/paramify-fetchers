@@ -53,7 +53,8 @@ DEFAULT_APPROVAL_STATES = ("Approved",)
 DEFAULT_APPROVAL_PATTERN = r"^\W*approved\b[^?\n]*$"
 MENTION = "@mention"
 # The mention picker's link, a markdown comment's @<identity id>, and an @word typed without the picker.
-MENTION_LINK = re.compile(r"<a\b[^>]*\bdata-vss-mention\b[^>]*>.*?</a>"
+# A link must close before the next link or block tag, so an unclosed one can't swallow text.
+MENTION_LINK = re.compile(r"<a\b[^>]*\sdata-vss-mention\s*=[^>]*>(?:(?!</?(?:a|div|p|li)\b|<br).)*?</a>"
                           r"|@<[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}>", re.IGNORECASE | re.DOTALL)
 MENTION_WORD = re.compile(r"(?<![\w.@])@\w+(?:[.'-]\w+)*")
 LEADING_MENTIONS = re.compile(r"^(?:\W*@mention\b)+")
@@ -500,6 +501,12 @@ def has_change(item: Dict[str, Any]) -> bool:
     return any(item["links"][k] for k in ("changesets", "commits", "pull_requests"))
 
 
+def refused(item: Dict[str, Any]) -> bool:
+    """Finished as refused: its state or reason names Rejected, or its state is named Removed."""
+    state = str(item["state"] or "")
+    return bool(REJECTED.search(state) or REJECTED.search(str(item["reason"] or "")) or state.lower() == "removed")
+
+
 def ids_of(items: Iterable[Dict[str, Any]]) -> List[Any]:
     return sorted((i["id"] for i in items), key=lambda v: (str(type(v)), v))
 
@@ -517,8 +524,8 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
     tagged = [i for i in items if "tag" in i["selected_by"]]
     tagged_open = [i for i in tagged if i["open"]]
     history = all(i["approval_read"] for i in change)
-    # An open item may still be waiting on its approval, so only finished ones are judged.
-    needing = [i for i in finished if i["approval_required"]]
+    # An open item may still be waiting on its approval, and a refused one was never meant to get one.
+    needing = [i for i in finished if i["approval_required"] and not refused(i)]
     needing_approved = sum(1 for i in needing if i["approval"])
     # Approved items with linked changes, and those whose every linked change was read.
     linked = [i for i in change if i["approval"] and has_change(i)]

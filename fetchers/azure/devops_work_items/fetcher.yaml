@@ -101,7 +101,10 @@ config_schema:
       the mention picker (or a markdown comment's @<id>) whatever the name's
       length, and an @word typed as plain text, which is one word long. Quoted
       text and a later move back or rejection still don't count. Off (false)
-      by default, as an @mention may only ask someone to approve.
+      by default, as an @mention may only ask someone to approve; off, comments
+      are read as in 0.1.0, where a markdown comment's "@<id> approved" already
+      counted. azure_change_work_items reads each item's approval from this
+      evidence, so with this on, a mention approval counts there too.
   approval_types:
     type: string
     required: false
@@ -174,9 +177,9 @@ evidence_set:
     - change_items — Number of items of a configured change type; null if a project's items couldn't be listed
     - change_items_finished — Number of change items in a Completed state; a Removed (cancelled) item isn't finished; null if a project's items couldn't be listed
     - change_items_approved — Number of change items approved: moved into one of the configured approval states (a state such as Awaiting Approval doesn't count), or given a comment matching the approval pattern (after any leading @mentions when approval_mentions is on), and not withdrawn since by a move back to a state before the approval states or to a state or with a reason naming Rejected; null if a project's items or a change item's history or comments couldn't be read
-    - finished_change_items_needing_approval — Number of finished change items (in a Completed state) of a type in approval_types; open items are left out, as they may still be waiting on their approval; null if a project's items couldn't be listed
-    - finished_change_items_needing_approval_approved — Number of finished change items of a type in approval_types that are approved, as change_items_approved counts approval; null if a project's items or a change item's history or comments couldn't be read
-    - finished_change_items_approved_percentage — Percentage of finished change items needing an approval that are approved = finished_change_items_needing_approval_approved / finished_change_items_needing_approval × 100 (a whole number, 0–100); 0 when finished_change_items_needing_approval is 0; null if a project's items or a change item's history or comments couldn't be read. A finished item whose approval was withdrawn and not given again counts in the denominator only
+    - finished_change_items_needing_approval — Number of finished change items (in a Completed state) of a type in approval_types, other than refused ones; open items are left out, as they may still be waiting on their approval, and so are refused items (whose state or reason names Rejected, or whose state is named Removed), which were turned down rather than left unapproved; null if a project's items couldn't be listed
+    - finished_change_items_needing_approval_approved — Number of finished change items of a type in approval_types, other than refused ones, that are approved, as change_items_approved counts approval; null if a project's items or a change item's history or comments couldn't be read
+    - finished_change_items_approved_percentage — Percentage of finished change items needing an approval (refused ones left out) that are approved = finished_change_items_needing_approval_approved / finished_change_items_needing_approval × 100 (a whole number, 0–100); 0 when finished_change_items_needing_approval is 0; null if a project's items or a change item's history or comments couldn't be read. A finished item whose approval was withdrawn and not given again counts in the denominator only
     - finished_change_items_without_approval — List of finished change items (by id) never approved, or whose approval was withdrawn and not given again; null if a project's items or a change item's history or comments couldn't be read
     - change_items_approved_by_requester — List of change items (by id) whose approval in effect (the first since any withdrawal) was given by the person who created the item; null if a project's items or a change item's history or comments couldn't be read
     - change_items_with_linked_changes — Number of change items linked to a TFVC changeset, Git commit or pull request; null if a project's items couldn't be listed
