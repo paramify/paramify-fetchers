@@ -1,0 +1,24 @@
+key: azure_appsvc_deployment_record_complete
+name: Azure App Service Deployment Record Complete
+type: AUTOMATED
+role: integrity
+statement: >-
+  The subscription was read with no partial failure, at least one web app is in scope, the whole
+  Activity Log window was read (activity_log_complete is true), and every web app's and slot's Kudu
+  deployment records and deployment source were read, so no app's deployment evidence is unknown.
+  Supports KSI-CMT-RMV by showing the record of how and by whom each web app was deployed is complete
+  for the window, so a missing deployment can't hide behind a failed read. Does not prove: that
+  deployments were redeployments rather than direct changes
+  (azure_appsvc_no_publish_profile_downloads); that any change was approved or recorded (the
+  comparator's validators); function apps; requests on deleted apps; or anything older than the
+  window.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"summary":\s*\{(?=[\s\S]*?"activity_log_complete":\s*true\b)(?=[\s\S]*?"apps_deployment_evidence_unknown":\s*0\b)(?=[\s\S]*?"apps_kudu_deployment_records_unknown":\s*0\b)(?=[\s\S]*?"apps_source_control_unknown":\s*0\b)(?=[\s\S]*?"in_scope_web_apps":\s*[1-9]\d*)(?=[\s\S]*?"slots_source_control_unknown":\s*0\b)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-APPSVC-DEPLOYMENTS

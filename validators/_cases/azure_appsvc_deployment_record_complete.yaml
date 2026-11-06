@@ -1,0 +1,171 @@
+validator: azure_appsvc_deployment_record_complete
+cases:
+  - name: record_complete
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-APPSVC-DEPLOYMENTS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"activity_log":{"complete":true,"days":90},"excluded":[],"limitations":[],"provider_registration_status":"registered","web_apps":[{"activity":{"package_deployments":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publish_profile_downloads":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publishing_credential_reads":{"by_caller_type":{"app":2},"count":2,"failed":0,"latest":null,"records":[]},"slot_swaps":{"by_caller_type":{"app":1},"count":1,"failed":0,"latest":null,"records":[]}},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","kudu_deployments":{"active":null,"count":0,"latest":null,"records":[]},"location":"East US","name":"app-example","resource_group":"rg-app","slots":[],"source_control":{"configured":false},"state":"Running"}]},"summary":{"activity_log_complete":true,"activity_log_days":90,"apps_deploying_from_github_actions":0,"apps_deployment_evidence_unknown":0,"apps_kudu_deployment_records_unknown":0,"apps_source_control_unknown":0,"apps_with_deployment_evidence":3,"apps_with_kudu_deployment_records":2,"apps_with_package_deployments":0,"apps_with_publish_profile_downloads":0,"apps_with_publishing_credential_reads":2,"apps_with_slot_swaps":2,"apps_with_slots":2,"apps_with_source_control":0,"apps_without_deployment_evidence":0,"apps_without_kudu_deployment_records":1,"boundary_excluded_deployment_slots":0,"boundary_excluded_function_apps":0,"boundary_excluded_web_apps":0,"deployment_activity_by_caller_type":{"app":6},"deployment_activity_on_unlisted_sites":0,"excluded_function_apps":1,"failed_kudu_deployment_records":0,"failed_slot_swaps":0,"in_scope_web_apps":3,"kudu_deployment_records":4,"kudu_deployments_by_deployer":{"ZipDeploy":4},"latest_kudu_deployment_time":"2026-10-28T12:00:00Z","latest_slot_swap_time":"2026-10-29T12:00:00Z","package_deployments":0,"provider_registration_status":"registered","publish_profile_downloads":0,"publishing_credential_reads":4,"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"slot_swaps":2,"slots_comparison_unknown":0,"slots_differing_from_production":0,"slots_matching_production":2,"slots_source_control_unknown":0,"slots_with_source_control":0,"total_deployment_slots":2,"total_web_apps":3}},"schema_version":"1.0"}'
+
+  - name: record_complete_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "evidence_set": {
+            "reference_id": "EVD-AZURE-APPSVC-DEPLOYMENTS"
+          },
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "api_failures": [],
+            "partial_failure": false,
+            "subscription_id": "00000000-0000-0000-0000-000000000000",
+            "subscription_source": "target"
+          },
+          "results": {
+            "activity_log": {
+              "complete": true,
+              "days": 90
+            },
+            "excluded": [],
+            "limitations": [],
+            "provider_registration_status": "registered",
+            "web_apps": [
+              {
+                "activity": {
+                  "package_deployments": {
+                    "by_caller_type": {},
+                    "count": 0,
+                    "failed": 0,
+                    "latest": null,
+                    "records": []
+                  },
+                  "publish_profile_downloads": {
+                    "by_caller_type": {},
+                    "count": 0,
+                    "failed": 0,
+                    "latest": null,
+                    "records": []
+                  },
+                  "publishing_credential_reads": {
+                    "by_caller_type": {
+                      "app": 2
+                    },
+                    "count": 2,
+                    "failed": 0,
+                    "latest": null,
+                    "records": []
+                  },
+                  "slot_swaps": {
+                    "by_caller_type": {
+                      "app": 1
+                    },
+                    "count": 1,
+                    "failed": 0,
+                    "latest": null,
+                    "records": []
+                  }
+                },
+                "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example",
+                "kind": "app",
+                "kudu_deployments": {
+                  "active": null,
+                  "count": 0,
+                  "latest": null,
+                  "records": []
+                },
+                "location": "East US",
+                "name": "app-example",
+                "resource_group": "rg-app",
+                "slots": [],
+                "source_control": {
+                  "configured": false
+                },
+                "state": "Running"
+              }
+            ]
+          },
+          "summary": {
+            "activity_log_complete": true,
+            "activity_log_days": 90,
+            "apps_deploying_from_github_actions": 0,
+            "apps_deployment_evidence_unknown": 0,
+            "apps_kudu_deployment_records_unknown": 0,
+            "apps_source_control_unknown": 0,
+            "apps_with_deployment_evidence": 3,
+            "apps_with_kudu_deployment_records": 2,
+            "apps_with_package_deployments": 0,
+            "apps_with_publish_profile_downloads": 0,
+            "apps_with_publishing_credential_reads": 2,
+            "apps_with_slot_swaps": 2,
+            "apps_with_slots": 2,
+            "apps_with_source_control": 0,
+            "apps_without_deployment_evidence": 0,
+            "apps_without_kudu_deployment_records": 1,
+            "boundary_excluded_deployment_slots": 0,
+            "boundary_excluded_function_apps": 0,
+            "boundary_excluded_web_apps": 0,
+            "deployment_activity_by_caller_type": {
+              "app": 6
+            },
+            "deployment_activity_on_unlisted_sites": 0,
+            "excluded_function_apps": 1,
+            "failed_kudu_deployment_records": 0,
+            "failed_slot_swaps": 0,
+            "in_scope_web_apps": 3,
+            "kudu_deployment_records": 4,
+            "kudu_deployments_by_deployer": {
+              "ZipDeploy": 4
+            },
+            "latest_kudu_deployment_time": "2026-10-28T12:00:00Z",
+            "latest_slot_swap_time": "2026-10-29T12:00:00Z",
+            "package_deployments": 0,
+            "provider_registration_status": "registered",
+            "publish_profile_downloads": 0,
+            "publishing_credential_reads": 4,
+            "resource_exclusion_patterns": [],
+            "resource_exclusion_patterns_unmatched": [],
+            "slot_swaps": 2,
+            "slots_comparison_unknown": 0,
+            "slots_differing_from_production": 0,
+            "slots_matching_production": 2,
+            "slots_source_control_unknown": 0,
+            "slots_with_source_control": 0,
+            "total_deployment_slots": 2,
+            "total_web_apps": 3
+          }
+        },
+        "schema_version": "1.0"
+      }
+
+  - name: window_truncated
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-APPSVC-DEPLOYMENTS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"activity_log":{"complete":true,"days":90},"excluded":[],"limitations":[],"provider_registration_status":"registered","web_apps":[{"activity":{"package_deployments":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publish_profile_downloads":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publishing_credential_reads":{"by_caller_type":{"app":2},"count":2,"failed":0,"latest":null,"records":[]},"slot_swaps":{"by_caller_type":{"app":1},"count":1,"failed":0,"latest":null,"records":[]}},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","kudu_deployments":{"active":null,"count":0,"latest":null,"records":[]},"location":"East US","name":"app-example","resource_group":"rg-app","slots":[],"source_control":{"configured":false},"state":"Running"}]},"summary":{"activity_log_complete":false,"activity_log_days":90,"apps_deploying_from_github_actions":0,"apps_deployment_evidence_unknown":1,"apps_kudu_deployment_records_unknown":0,"apps_source_control_unknown":0,"apps_with_deployment_evidence":3,"apps_with_kudu_deployment_records":2,"apps_with_package_deployments":0,"apps_with_publish_profile_downloads":0,"apps_with_publishing_credential_reads":2,"apps_with_slot_swaps":2,"apps_with_slots":2,"apps_with_source_control":0,"apps_without_deployment_evidence":null,"apps_without_kudu_deployment_records":1,"boundary_excluded_deployment_slots":0,"boundary_excluded_function_apps":0,"boundary_excluded_web_apps":0,"deployment_activity_by_caller_type":{"app":6},"deployment_activity_on_unlisted_sites":0,"excluded_function_apps":1,"failed_kudu_deployment_records":0,"failed_slot_swaps":0,"in_scope_web_apps":3,"kudu_deployment_records":4,"kudu_deployments_by_deployer":{"ZipDeploy":4},"latest_kudu_deployment_time":"2026-10-28T12:00:00Z","latest_slot_swap_time":"2026-10-29T12:00:00Z","package_deployments":0,"provider_registration_status":"registered","publish_profile_downloads":0,"publishing_credential_reads":4,"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"slot_swaps":2,"slots_comparison_unknown":0,"slots_differing_from_production":0,"slots_matching_production":2,"slots_source_control_unknown":0,"slots_with_source_control":0,"total_deployment_slots":2,"total_web_apps":3}},"schema_version":"1.0"}'
+
+  - name: kudu_records_unknown
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-APPSVC-DEPLOYMENTS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"activity_log":{"complete":true,"days":90},"excluded":[],"limitations":[],"provider_registration_status":"registered","web_apps":[{"activity":{"package_deployments":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publish_profile_downloads":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publishing_credential_reads":{"by_caller_type":{"app":2},"count":2,"failed":0,"latest":null,"records":[]},"slot_swaps":{"by_caller_type":{"app":1},"count":1,"failed":0,"latest":null,"records":[]}},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","kudu_deployments":{"active":null,"count":0,"latest":null,"records":[]},"location":"East US","name":"app-example","resource_group":"rg-app","slots":[],"source_control":{"configured":false},"state":"Running"}]},"summary":{"activity_log_complete":true,"activity_log_days":90,"apps_deploying_from_github_actions":0,"apps_deployment_evidence_unknown":0,"apps_kudu_deployment_records_unknown":1,"apps_source_control_unknown":0,"apps_with_deployment_evidence":3,"apps_with_kudu_deployment_records":2,"apps_with_package_deployments":0,"apps_with_publish_profile_downloads":0,"apps_with_publishing_credential_reads":2,"apps_with_slot_swaps":2,"apps_with_slots":2,"apps_with_source_control":0,"apps_without_deployment_evidence":0,"apps_without_kudu_deployment_records":0,"boundary_excluded_deployment_slots":0,"boundary_excluded_function_apps":0,"boundary_excluded_web_apps":0,"deployment_activity_by_caller_type":{"app":6},"deployment_activity_on_unlisted_sites":0,"excluded_function_apps":1,"failed_kudu_deployment_records":0,"failed_slot_swaps":0,"in_scope_web_apps":3,"kudu_deployment_records":4,"kudu_deployments_by_deployer":{"ZipDeploy":4},"latest_kudu_deployment_time":"2026-10-28T12:00:00Z","latest_slot_swap_time":"2026-10-29T12:00:00Z","package_deployments":0,"provider_registration_status":"registered","publish_profile_downloads":0,"publishing_credential_reads":4,"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"slot_swaps":2,"slots_comparison_unknown":0,"slots_differing_from_production":0,"slots_matching_production":2,"slots_source_control_unknown":0,"slots_with_source_control":0,"total_deployment_slots":2,"total_web_apps":3}},"schema_version":"1.0"}'
+
+  - name: app_source_unknown
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-APPSVC-DEPLOYMENTS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"activity_log":{"complete":true,"days":90},"excluded":[],"limitations":[],"provider_registration_status":"registered","web_apps":[{"activity":{"package_deployments":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publish_profile_downloads":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publishing_credential_reads":{"by_caller_type":{"app":2},"count":2,"failed":0,"latest":null,"records":[]},"slot_swaps":{"by_caller_type":{"app":1},"count":1,"failed":0,"latest":null,"records":[]}},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","kudu_deployments":{"active":null,"count":0,"latest":null,"records":[]},"location":"East US","name":"app-example","resource_group":"rg-app","slots":[],"source_control":{"configured":false},"state":"Running"}]},"summary":{"activity_log_complete":true,"activity_log_days":90,"apps_deploying_from_github_actions":0,"apps_deployment_evidence_unknown":0,"apps_kudu_deployment_records_unknown":0,"apps_source_control_unknown":1,"apps_with_deployment_evidence":3,"apps_with_kudu_deployment_records":2,"apps_with_package_deployments":0,"apps_with_publish_profile_downloads":0,"apps_with_publishing_credential_reads":2,"apps_with_slot_swaps":2,"apps_with_slots":2,"apps_with_source_control":0,"apps_without_deployment_evidence":0,"apps_without_kudu_deployment_records":1,"boundary_excluded_deployment_slots":0,"boundary_excluded_function_apps":0,"boundary_excluded_web_apps":0,"deployment_activity_by_caller_type":{"app":6},"deployment_activity_on_unlisted_sites":0,"excluded_function_apps":1,"failed_kudu_deployment_records":0,"failed_slot_swaps":0,"in_scope_web_apps":3,"kudu_deployment_records":4,"kudu_deployments_by_deployer":{"ZipDeploy":4},"latest_kudu_deployment_time":"2026-10-28T12:00:00Z","latest_slot_swap_time":"2026-10-29T12:00:00Z","package_deployments":0,"provider_registration_status":"registered","publish_profile_downloads":0,"publishing_credential_reads":4,"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"slot_swaps":2,"slots_comparison_unknown":0,"slots_differing_from_production":0,"slots_matching_production":2,"slots_source_control_unknown":0,"slots_with_source_control":0,"total_deployment_slots":2,"total_web_apps":3}},"schema_version":"1.0"}'
+
+  - name: slot_source_unknown
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-APPSVC-DEPLOYMENTS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"activity_log":{"complete":true,"days":90},"excluded":[],"limitations":[],"provider_registration_status":"registered","web_apps":[{"activity":{"package_deployments":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publish_profile_downloads":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publishing_credential_reads":{"by_caller_type":{"app":2},"count":2,"failed":0,"latest":null,"records":[]},"slot_swaps":{"by_caller_type":{"app":1},"count":1,"failed":0,"latest":null,"records":[]}},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","kudu_deployments":{"active":null,"count":0,"latest":null,"records":[]},"location":"East US","name":"app-example","resource_group":"rg-app","slots":[],"source_control":{"configured":false},"state":"Running"}]},"summary":{"activity_log_complete":true,"activity_log_days":90,"apps_deploying_from_github_actions":0,"apps_deployment_evidence_unknown":0,"apps_kudu_deployment_records_unknown":0,"apps_source_control_unknown":0,"apps_with_deployment_evidence":3,"apps_with_kudu_deployment_records":2,"apps_with_package_deployments":0,"apps_with_publish_profile_downloads":0,"apps_with_publishing_credential_reads":2,"apps_with_slot_swaps":2,"apps_with_slots":2,"apps_with_source_control":0,"apps_without_deployment_evidence":0,"apps_without_kudu_deployment_records":1,"boundary_excluded_deployment_slots":0,"boundary_excluded_function_apps":0,"boundary_excluded_web_apps":0,"deployment_activity_by_caller_type":{"app":6},"deployment_activity_on_unlisted_sites":0,"excluded_function_apps":1,"failed_kudu_deployment_records":0,"failed_slot_swaps":0,"in_scope_web_apps":3,"kudu_deployment_records":4,"kudu_deployments_by_deployer":{"ZipDeploy":4},"latest_kudu_deployment_time":"2026-10-28T12:00:00Z","latest_slot_swap_time":"2026-10-29T12:00:00Z","package_deployments":0,"provider_registration_status":"registered","publish_profile_downloads":0,"publishing_credential_reads":4,"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"slot_swaps":2,"slots_comparison_unknown":0,"slots_differing_from_production":0,"slots_matching_production":2,"slots_source_control_unknown":1,"slots_with_source_control":0,"total_deployment_slots":2,"total_web_apps":3}},"schema_version":"1.0"}'
+
+  - name: deployment_evidence_unknown
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-APPSVC-DEPLOYMENTS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"activity_log":{"complete":true,"days":90},"excluded":[],"limitations":[],"provider_registration_status":"registered","web_apps":[{"activity":{"package_deployments":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publish_profile_downloads":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publishing_credential_reads":{"by_caller_type":{"app":2},"count":2,"failed":0,"latest":null,"records":[]},"slot_swaps":{"by_caller_type":{"app":1},"count":1,"failed":0,"latest":null,"records":[]}},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","kudu_deployments":{"active":null,"count":0,"latest":null,"records":[]},"location":"East US","name":"app-example","resource_group":"rg-app","slots":[],"source_control":{"configured":false},"state":"Running"}]},"summary":{"activity_log_complete":true,"activity_log_days":90,"apps_deploying_from_github_actions":0,"apps_deployment_evidence_unknown":1,"apps_kudu_deployment_records_unknown":0,"apps_source_control_unknown":0,"apps_with_deployment_evidence":2,"apps_with_kudu_deployment_records":2,"apps_with_package_deployments":0,"apps_with_publish_profile_downloads":0,"apps_with_publishing_credential_reads":2,"apps_with_slot_swaps":2,"apps_with_slots":2,"apps_with_source_control":0,"apps_without_deployment_evidence":0,"apps_without_kudu_deployment_records":1,"boundary_excluded_deployment_slots":0,"boundary_excluded_function_apps":0,"boundary_excluded_web_apps":0,"deployment_activity_by_caller_type":{"app":6},"deployment_activity_on_unlisted_sites":0,"excluded_function_apps":1,"failed_kudu_deployment_records":0,"failed_slot_swaps":0,"in_scope_web_apps":3,"kudu_deployment_records":4,"kudu_deployments_by_deployer":{"ZipDeploy":4},"latest_kudu_deployment_time":"2026-10-28T12:00:00Z","latest_slot_swap_time":"2026-10-29T12:00:00Z","package_deployments":0,"provider_registration_status":"registered","publish_profile_downloads":0,"publishing_credential_reads":4,"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"slot_swaps":2,"slots_comparison_unknown":0,"slots_differing_from_production":0,"slots_matching_production":2,"slots_source_control_unknown":0,"slots_with_source_control":0,"total_deployment_slots":2,"total_web_apps":3}},"schema_version":"1.0"}'
+
+  - name: no_web_apps
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-APPSVC-DEPLOYMENTS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"activity_log":{"complete":true,"days":90},"excluded":[],"limitations":[],"provider_registration_status":"registered","web_apps":[{"activity":{"package_deployments":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publish_profile_downloads":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publishing_credential_reads":{"by_caller_type":{"app":2},"count":2,"failed":0,"latest":null,"records":[]},"slot_swaps":{"by_caller_type":{"app":1},"count":1,"failed":0,"latest":null,"records":[]}},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","kudu_deployments":{"active":null,"count":0,"latest":null,"records":[]},"location":"East US","name":"app-example","resource_group":"rg-app","slots":[],"source_control":{"configured":false},"state":"Running"}]},"summary":{"activity_log_complete":true,"activity_log_days":90,"apps_deploying_from_github_actions":0,"apps_deployment_evidence_unknown":0,"apps_kudu_deployment_records_unknown":0,"apps_source_control_unknown":0,"apps_with_deployment_evidence":0,"apps_with_kudu_deployment_records":2,"apps_with_package_deployments":0,"apps_with_publish_profile_downloads":0,"apps_with_publishing_credential_reads":2,"apps_with_slot_swaps":2,"apps_with_slots":0,"apps_with_source_control":0,"apps_without_deployment_evidence":0,"apps_without_kudu_deployment_records":1,"boundary_excluded_deployment_slots":0,"boundary_excluded_function_apps":0,"boundary_excluded_web_apps":0,"deployment_activity_by_caller_type":{"app":6},"deployment_activity_on_unlisted_sites":0,"excluded_function_apps":1,"failed_kudu_deployment_records":0,"failed_slot_swaps":0,"in_scope_web_apps":0,"kudu_deployment_records":4,"kudu_deployments_by_deployer":{"ZipDeploy":4},"latest_kudu_deployment_time":"2026-10-28T12:00:00Z","latest_slot_swap_time":"2026-10-29T12:00:00Z","package_deployments":0,"provider_registration_status":"registered","publish_profile_downloads":0,"publishing_credential_reads":4,"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"slot_swaps":2,"slots_comparison_unknown":0,"slots_differing_from_production":0,"slots_matching_production":2,"slots_source_control_unknown":0,"slots_with_source_control":0,"total_deployment_slots":0,"total_web_apps":0}},"schema_version":"1.0"}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-APPSVC-DEPLOYMENTS"},"exit_code":1,"status":"failed"},"payload":{"metadata":{"api_failures":[{"message":"example failure","operation":"example.read"}],"partial_failure":true,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"activity_log":{"complete":true,"days":90},"excluded":[],"limitations":[],"provider_registration_status":"registered","web_apps":[{"activity":{"package_deployments":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publish_profile_downloads":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publishing_credential_reads":{"by_caller_type":{"app":2},"count":2,"failed":0,"latest":null,"records":[]},"slot_swaps":{"by_caller_type":{"app":1},"count":1,"failed":0,"latest":null,"records":[]}},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","kudu_deployments":{"active":null,"count":0,"latest":null,"records":[]},"location":"East US","name":"app-example","resource_group":"rg-app","slots":[],"source_control":{"configured":false},"state":"Running"}]},"summary":{"activity_log_complete":true,"activity_log_days":90,"apps_deploying_from_github_actions":0,"apps_deployment_evidence_unknown":0,"apps_kudu_deployment_records_unknown":0,"apps_source_control_unknown":0,"apps_with_deployment_evidence":3,"apps_with_kudu_deployment_records":2,"apps_with_package_deployments":0,"apps_with_publish_profile_downloads":0,"apps_with_publishing_credential_reads":2,"apps_with_slot_swaps":2,"apps_with_slots":2,"apps_with_source_control":0,"apps_without_deployment_evidence":0,"apps_without_kudu_deployment_records":1,"boundary_excluded_deployment_slots":0,"boundary_excluded_function_apps":0,"boundary_excluded_web_apps":0,"deployment_activity_by_caller_type":{"app":6},"deployment_activity_on_unlisted_sites":0,"excluded_function_apps":1,"failed_kudu_deployment_records":0,"failed_slot_swaps":0,"in_scope_web_apps":3,"kudu_deployment_records":4,"kudu_deployments_by_deployer":{"ZipDeploy":4},"latest_kudu_deployment_time":"2026-10-28T12:00:00Z","latest_slot_swap_time":"2026-10-29T12:00:00Z","package_deployments":0,"provider_registration_status":"registered","publish_profile_downloads":0,"publishing_credential_reads":4,"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"slot_swaps":2,"slots_comparison_unknown":0,"slots_differing_from_production":0,"slots_matching_production":2,"slots_source_control_unknown":0,"slots_with_source_control":0,"total_deployment_slots":2,"total_web_apps":3}},"schema_version":"1.0"}'
+
+  - name: complete_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-APPSVC-DEPLOYMENTS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"activity_log":{"complete":true,"days":90},"excluded":[],"limitations":[],"provider_registration_status":"registered","web_apps":[{"activity":{"package_deployments":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publish_profile_downloads":{"by_caller_type":{},"count":0,"failed":0,"latest":null,"records":[]},"publishing_credential_reads":{"by_caller_type":{"app":2},"count":2,"failed":0,"latest":null,"records":[]},"slot_swaps":{"by_caller_type":{"app":1},"count":1,"failed":0,"latest":null,"records":[]}},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","kudu_deployments":{"active":null,"count":0,"latest":null,"records":[]},"location":"East US","name":"app-example","resource_group":"rg-app","slots":[],"source_control":{"configured":false},"state":"Running"}]},"summary":{"activity_log_days":90,"activity_log_read_in_full":true,"apps_deploying_from_github_actions":0,"apps_deployment_evidence_unknown":0,"apps_kudu_deployment_records_unknown":0,"apps_source_control_unknown":0,"apps_with_deployment_evidence":3,"apps_with_kudu_deployment_records":2,"apps_with_package_deployments":0,"apps_with_publish_profile_downloads":0,"apps_with_publishing_credential_reads":2,"apps_with_slot_swaps":2,"apps_with_slots":2,"apps_with_source_control":0,"apps_without_deployment_evidence":0,"apps_without_kudu_deployment_records":1,"boundary_excluded_deployment_slots":0,"boundary_excluded_function_apps":0,"boundary_excluded_web_apps":0,"deployment_activity_by_caller_type":{"app":6},"deployment_activity_on_unlisted_sites":0,"excluded_function_apps":1,"failed_kudu_deployment_records":0,"failed_slot_swaps":0,"in_scope_web_apps":3,"kudu_deployment_records":4,"kudu_deployments_by_deployer":{"ZipDeploy":4},"latest_kudu_deployment_time":"2026-10-28T12:00:00Z","latest_slot_swap_time":"2026-10-29T12:00:00Z","package_deployments":0,"provider_registration_status":"registered","publish_profile_downloads":0,"publishing_credential_reads":4,"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"slot_swaps":2,"slots_comparison_unknown":0,"slots_differing_from_production":0,"slots_matching_production":2,"slots_source_control_unknown":0,"slots_with_source_control":0,"total_deployment_slots":2,"total_web_apps":3}},"schema_version":"1.0"}'
