@@ -53,9 +53,14 @@ schemas and the `paramify` CLI — not the internal code.
   apps, risk and Conditional Access status for non-interactive sign-ins; results and
   distinct principals for service-principal sign-ins, plus one capped row per
   principal with id, name, app id, counts and last sign-in (no IP addresses or
-  resources). The user scope applies to non-interactive sign-ins and the app scope to
-  both. An invalid scope value now fails as `bad_config`. Maps to KSI-IAM-SNU and
-  KSI-MLA-LET as well.
+  resources). The user and `app_ids` scopes apply to interactive and non-interactive
+  user sign-ins only. Service principals have their own scope,
+  `service_principal_app_ids` (`ENTRA_LOG_SERVICE_PRINCIPAL_APP_IDS`), because in a
+  service-principal sign-in the app id names the principal while in a user sign-in it
+  names the app signed in to: one shared list would drop either the users' sign-ins
+  to apps not on it or the service principals. The summary adds
+  `scope_service_principal_app_ids`. An invalid scope value now fails as
+  `bad_config`. Maps to KSI-IAM-SNU and KSI-MLA-LET as well.
 - **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
   Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
   - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from
