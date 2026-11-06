@@ -48,6 +48,7 @@ query($owner: String!, $name: String!, $ref: String!, $since: GitTimestamp!, $fi
           oid message committedDate
           author { name user { login } }
           signature { isValid }
+          parents(first: 1) { nodes { oid } }
           associatedPullRequests(first: %d) { totalCount nodes { mergedAt baseRefName } }
         }
       }
@@ -227,10 +228,28 @@ def history(data):
     return (((repository or {}).get("ref") or {}).get("target") or {}).get("history")
 
 
-def direct_pushes(client, owner, name, branch, since, merge_shas, cap):
-    """Commits on the branch in the window that no pull request into this branch brought in. (commits, truncated)
+def first_parent_chain(commits):
+    """The commits on the branch's own line, tip first: each commit's first parent, back to the window's edge.
 
-    A pull request merged into another branch does not count: pushing that branch here bypasses review on this one.
+    A commit off this line came in through a merge commit on it, and that merge commit is the one to check.
+    """
+    by_oid = {c.get("oid"): c for c in commits}
+    chain, oid = [], commits[0].get("oid") if commits else None
+    while oid in by_oid:
+        commit = by_oid.pop(oid)
+        chain.append(commit)
+        parents = (commit.get("parents") or {}).get("nodes") or []
+        oid = parents[0].get("oid") if parents else None
+    return chain
+
+
+def direct_pushes(client, owner, name, branch, since, merge_shas, cap):
+    """Commits on the branch's first-parent line in the window that no pull request into this branch merged.
+
+    Each commit on that line is the merge or squash commit of a pull request into this branch, or a direct push.
+    The commits a merged pull request brought in are off the line, so a reviewed release pull request from
+    another branch does not count its commits as pushes. A branch pushed here without a pull request puts its
+    commits on the line, and a pull request merged into another branch does not count for them.
     """
     seen = []
     commits = client.graphql_nodes(f"GraphQL history repos/{owner}/{name}", HISTORY,
@@ -239,7 +258,7 @@ def direct_pushes(client, owner, name, branch, since, merge_shas, cap):
     if commits is None:
         return None, False
     pushed = []
-    for commit in commits:
+    for commit in first_parent_chain(commits):
         if commit.get("oid") in merge_shas:
             continue
         associated = commit.get("associatedPullRequests") or {}

@@ -632,8 +632,11 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
 
     filters_ignored = []
     if inventory:
+        # include_archived is false by default; it narrows only when someone set it.
+        archived_set = bool(os.environ.get("GITHUB_INCLUDE_ARCHIVED", "").strip())
         filters_ignored = [key for key, narrows in (("repositories", bool(target["repositories"])),
-                                                    ("include_archived", not target["include_archived"])) if narrows]
+                                                    ("include_archived", archived_set and not target["include_archived"]))
+                           if narrows]
         target = {**target, "repositories": [], "include_archived": True}
     client = GitHubClient(target["api_url"], target["token"])
     result: Dict[str, Any] = {}

@@ -35,8 +35,11 @@ organization, each with its own token and API host.
 |---|---|---|---|
 | `org` | `GITHUB_ORG` | yes | Organization login, as in `github.com/<org>` |
 | `api_url` | `GITHUB_API_URL` | no | `https://api.github.com` (default), `https://api.<sub>.ghe.com` (GHE.com), `https://<host>/api/v3` (GitHub Enterprise Server) |
-| `repositories` | `GITHUB_REPOSITORIES` | no | Comma-separated names; unset collects every repository the token can see |
-| `include_archived` | `GITHUB_INCLUDE_ARCHIVED` | no | Default `false`. Set it `true` on the inventory's target: an archived repository is still an asset |
+| `repositories` | `GITHUB_REPOSITORIES` | no | Comma-separated names; unset collects every repository the token can see. The inventory ignores it |
+| `include_archived` | `GITHUB_INCLUDE_ARCHIVED` | no | Default `false`. The inventory ignores it and always includes archived repositories, because they are still assets |
+
+The inventory names each filter that it ignored in `metadata.filters_ignored`.
+It does not fail on them, so all fetchers can share one target.
 | secret `token` | `GITHUB_TOKEN` | yes | Per target |
 
 ## Creating the token
@@ -217,6 +220,22 @@ repositories; each returns well-formed, misleading data without an error.
   on the documented shape.
 - **Required checks are as of collection time.** A pull request merged before a
   requirement changed is judged against today's requirement.
+- **Direct pushes are found by commit date.** `history(since:)` filters on the
+  commit date, not the push date. A commit made before the window and pushed
+  in it is not in `direct_pushes`.
+- **GitHub Enterprise Server has not been tested.** These fetchers ran against
+  github.com only. Some endpoints are recent (for example
+  `fork-pr-contributor-approval`, `artifact-and-log-retention` and
+  `immutable-releases`). On a server version that does not have them, the call
+  returns 404, and `actions_security` and `release_integrity` fail.
+
+## Free text in the evidence
+
+The evidence holds text that people write: commit subjects, pull request
+titles, advisory summaries, change notification sections and deploy key
+titles. A web application firewall can refuse an upload that contains text
+such as `../`, `/bin/sh` or `<script`. If an upload fails with a bare 403, look
+for this type of text in the file.
 
 ## Cost and run time
 

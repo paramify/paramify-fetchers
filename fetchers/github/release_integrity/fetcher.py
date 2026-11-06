@@ -57,8 +57,12 @@ def asset_record(client, base, asset):
 
 
 def tag_rules(rulesets, repo_name, tag, default_branch):
-    """The tag-lock rules active rulesets enforce on refs/tags/<tag>, and whether any ruleset's reach is unknown."""
-    locks, unknown, always_bypass, exempt = set(), False, [], []
+    """The tag-lock rules active rulesets enforce on refs/tags/<tag>, and whether any ruleset's reach is unknown.
+
+    GitHub returns a ruleset's bypass_actors only to a token with admin rights on the ruleset's source. A missing
+    list makes the bypass unknown, never empty.
+    """
+    locks, unknown, always_bypass, exempt, bypass_unknown = set(), False, [], [], False
     for rs in rulesets:
         applies = ruleset_targets_ref(rs, repo_name, f"refs/tags/{tag}", default_branch, target="tag")
         if rs.get("enforcement") != "active" or applies is False:
@@ -68,7 +72,10 @@ def tag_rules(rulesets, repo_name, tag, default_branch):
             unknown = unknown or bool(types & set(TAG_LOCKS))
             continue
         locks |= types & set(TAG_LOCKS)
-        modes = {a.get("bypass_mode") for a in rs.get("bypass_actors") or []}
+        if rs.get("bypass_actors") is None:
+            bypass_unknown = True
+            continue
+        modes = {a.get("bypass_mode") for a in rs["bypass_actors"]}
         if "always" in modes:
             always_bypass.append(rs.get("name"))
         # An exempt actor skips the tag rules and GitHub writes no bypass entry for it.
@@ -76,7 +83,7 @@ def tag_rules(rulesets, repo_name, tag, default_branch):
             exempt.append(rs.get("name"))
     full = set(TAG_LOCKS) <= locks
     return {"locked": True if full else None if unknown else False, "rules": sorted(locks),
-            "always_bypass": sorted(always_bypass), "exempt_actors": sorted(exempt)}
+            "always_bypass": sorted(always_bypass), "exempt_actors": sorted(exempt), "bypass_unknown": bypass_unknown}
 
 
 def repo_record(client, org, repo, config, details):
@@ -159,6 +166,8 @@ def collect(client, org, repos, config):
                                                 if rel["tag_protection"]["locked"] is None and not rel["immutable"]),
             "release_tags_with_exempt_actors": sorted(label(repo, rel) for repo, rel in published
                                                       if rel["tag_protection"]["exempt_actors"]),
+            "release_tags_bypass_unreadable": sorted(label(repo, rel) for repo, rel in published
+                                                     if rel["tag_protection"]["bypass_unknown"]),
             "not_collected": [r["repository"] for r in records if not r["collected"]],
         },
         "organization": {"immutable_releases": policy},

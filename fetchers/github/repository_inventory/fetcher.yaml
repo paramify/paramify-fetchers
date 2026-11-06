@@ -30,14 +30,16 @@ target_schema:
     required: false
     env: GITHUB_REPOSITORIES
     description: >-
-      Comma-separated repository names to collect. Unset collects every
-      repository the token can see; a name the token cannot see fails the run.
+      Ignored by the inventory, which always lists every repository the token
+      can see. Set, it is named in metadata.filters_ignored.
   include_archived:
     type: boolean
     required: false
     default: false
     env: GITHUB_INCLUDE_ARCHIVED
-    description: Include archived repositories, which cannot change.
+    description: >-
+      Ignored by the inventory, which always includes archived repositories.
+      Set to false, it is named in metadata.filters_ignored.
 
 runtime:
   type: python

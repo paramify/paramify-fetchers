@@ -65,8 +65,6 @@ run:
     #   targets: [*github_target]
 
     # An inventory: sent to Paramify only when every repository was collected.
-    # Archived repositories are still assets, so this target includes them.
+    # It always lists every repository, archived ones too, whatever the target sets.
     - use: github_repository_inventory
-      targets:
-        - <<: *github_target
-          include_archived: true
+      targets: [*github_target]

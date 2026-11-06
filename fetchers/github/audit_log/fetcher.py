@@ -68,17 +68,18 @@ def collect(client, org, repos, config):
                                       until=lambda e: seen.append(e) or len(seen) > cap)
     if events is None:
         return None
-    if len(seen) > cap:
+    truncated = len(seen) > cap
+    if truncated:
+        # The run fails, but the file keeps the newest `cap` events; summary.oldest_event shows how far back they go.
         client.fail(f"GET orgs/{login}/audit-log", "Truncated",
                     f"more than {cap} events since {day}; raise GITHUB_AUDIT_MAX_EVENTS or shorten the window",
                     "partial_failure")
-        return None
     by_action = {}
     for e in events:
         by_action[e.get("action") or "unknown"] = by_action.get(e.get("action") or "unknown", 0) + 1
     security = [event_row(e) for e in events if str(e.get("action") or "").split(".")[0] in SECURITY_FAMILIES]
     return {
-        "metadata": {"since": f"{day}T00:00:00Z", "include": "web"},
+        "metadata": {"since": f"{day}T00:00:00Z", "include": "web", "truncated": truncated},
         "summary": {
             "events_total": len(events),
             "security_events": len(security),

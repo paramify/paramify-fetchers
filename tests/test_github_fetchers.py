@@ -184,14 +184,18 @@ def graphql_from_rest(routes, query, variables):
     if isinstance(commits, tuple):
         return commits
     nodes = []
-    for c in commits or []:
+    commits = commits or []
+    for i, c in enumerate(commits):
         info = c.get("commit") or {}
+        # REST lists parents first-parent first; without them, the history is a line in list order.
+        parents = c["parents"] if "parents" in c else [{"sha": n["sha"]} for n in commits[i + 1:i + 2]]
         associated = _get(routes, f"{base}/commits/{c['sha']}/pulls") or []
         nodes.append({"oid": c["sha"], "message": info.get("message"),
                       "committedDate": (info.get("committer") or {}).get("date"),
                       "author": {"name": (info.get("author") or {}).get("name"),
                                  "user": {"login": c["author"]["login"]} if c.get("author") else None},
                       "signature": {"isValid": True} if (info.get("verification") or {}).get("verified") else None,
+                      "parents": {"nodes": [{"oid": p["sha"]} for p in parents]},
                       "associatedPullRequests": {"totalCount": len(associated),
                                                  "nodes": [{"mergedAt": a.get("merged_at"),
                                                             "baseRefName": (a.get("base") or {}).get("ref")}
@@ -299,7 +303,12 @@ def run_fetcher(name, monkeypatch, tmp_path, **env):
 
 # --- the shape every fetcher follows -------------------------------------------
 
-BP_TARGET = yaml.safe_load((GITHUB / "branch_protection" / "fetcher.yaml").read_text())["target_schema"]
+def target_shape(schema):
+    """A target_schema without its descriptions: the fields one shared manifest target fills."""
+    return {key: {k: v for k, v in field.items() if k != "description"} for key, field in schema.items()}
+
+
+BP_TARGET = target_shape(yaml.safe_load((GITHUB / "branch_protection" / "fetcher.yaml").read_text())["target_schema"])
 
 
 @pytest.mark.parametrize("name", FETCHERS)
@@ -307,7 +316,7 @@ def test_every_fetcher_follows_the_shape(name):
     m, spec = MODS[name], yaml.safe_load((GITHUB / name / "fetcher.yaml").read_text())
     assert m.NAME == spec["name"] == f"github_{name}"
     assert callable(m.collect)
-    assert spec["target_schema"] == BP_TARGET  # one target shape for the whole category
+    assert target_shape(spec["target_schema"]) == BP_TARGET  # one target shape for the whole category
     assert spec["evidence_set"]["reference_id"].startswith("EVD-GITHUB-")
     declared = {f["env"] for f in spec.get("config_schema", {}).values()}
     assert {env for env, _ in getattr(m, "CONFIG", {}).values()} <= declared
@@ -680,12 +689,37 @@ def test_a_commit_with_more_associated_prs_than_fit_is_read_over_rest(fake, monk
 
 
 def test_a_commit_merged_into_another_branch_then_pushed_here_is_a_direct_push(fake, monkeypatch, tmp_path):
+    # GitHub returns only the pull request that introduced a commit: c1 came in by a pull request into develop,
+    # and develop was then pushed to main; c2 is the squash commit of a pull request into main.
     commits = [{"sha": c, "commit": {"message": c, "committer": {"date": ago(1)}}} for c in ("c1", "c2")]
     into_develop = [{"merged_at": ago(2), "base": {"ref": "develop"}}]
     into_main = [{"merged_at": ago(1), "base": {"ref": "main"}}]
-    fake(pr_routes([], {}, {}, commits=commits, associated={"c1": into_develop, "c2": into_develop + into_main}))
+    fake(pr_routes([], {}, {}, commits=commits, associated={"c1": into_develop, "c2": into_main}))
     code, ev, _ = run_fetcher("pull_request_checks", monkeypatch, tmp_path)
     assert code == 0 and [d["sha"] for d in ev["repositories"][0]["direct_pushes"]] == ["c1"]
+
+
+def test_feature_commits_a_release_pull_request_merged_here_are_not_direct_pushes(fake, monkeypatch, tmp_path):
+    # Pull request A merged f1 and f2 into develop. Release pull request B merged develop into main with merge
+    # commit b. GitHub names A, not B, for f1 and f2, but they are off main's first-parent line.
+    def commit(sha, *parents):
+        return {"sha": sha, "commit": {"message": sha, "committer": {"date": ago(1)}},
+                "parents": [{"sha": p} for p in parents]}
+    commits = [commit("b", "m0", "f2"), commit("f2", "f1"), commit("f1", "m0"), commit("m0")]
+    a = [{"merged_at": ago(2), "base": {"ref": "develop"}}]
+    b = [{"merged_at": ago(1), "base": {"ref": "main"}}]
+    m0 = [{"merged_at": ago(3), "base": {"ref": "main"}}]
+    fake(pr_routes([], {}, {}, commits=commits, associated={"b": b, "f2": a, "f1": a, "m0": m0}))
+    code, ev, _ = run_fetcher("pull_request_checks", monkeypatch, tmp_path)
+    assert code == 0 and ev["repositories"][0]["direct_pushes"] == []
+
+
+def test_a_local_merge_commit_pushed_here_is_the_direct_push():
+    pc = MODS["pull_request_checks"]
+    line = [{"oid": "x", "parents": {"nodes": [{"oid": "m0"}, {"oid": "f1"}]}},
+            {"oid": "f1", "parents": {"nodes": [{"oid": "m0"}]}}, {"oid": "m0", "parents": {"nodes": []}}]
+    assert [c["oid"] for c in pc.first_parent_chain(line)] == ["x", "m0"]
+    assert pc.first_parent_chain([]) == []
 
 
 def test_the_rest_fallback_also_checks_the_base_branch(fake, monkeypatch, tmp_path):
@@ -1644,9 +1678,11 @@ def test_inventory_ignores_the_repository_filters_and_names_them(fake, monkeypat
     assert ev["metadata"]["repositories_filter"] is None and ev["metadata"]["include_archived"] is True
 
 
-def test_inventory_names_no_ignored_filter_when_none_was_set(fake, monkeypatch, tmp_path):
+@pytest.mark.parametrize("env", [{}, {"GITHUB_INCLUDE_ARCHIVED": "true"}])
+def test_inventory_names_no_ignored_filter_when_none_was_set(fake, monkeypatch, tmp_path, env):
+    monkeypatch.delenv("GITHUB_INCLUDE_ARCHIVED", raising=False)
     fake(inv_routes())
-    _, ev, _ = run_fetcher("repository_inventory", monkeypatch, tmp_path, GITHUB_INCLUDE_ARCHIVED="true")
+    _, ev, _ = run_fetcher("repository_inventory", monkeypatch, tmp_path, **env)
     assert ev["metadata"]["filters_ignored"] == []
 
 
@@ -2031,6 +2067,17 @@ def test_an_exempt_actor_on_a_tag_ruleset_is_reported_apart_from_always_bypass(f
     assert ev["summary"]["release_tags_with_exempt_actors"] == ["app@v1"]
 
 
+def test_a_tag_ruleset_without_a_readable_bypass_list_is_unknown_not_bypass_free(fake, monkeypatch, tmp_path):
+    hidden = {k: v for k, v in tag_ruleset(1, ["refs/tags/v1"]).items() if k != "bypass_actors"}
+    other = tag_ruleset(2, ["refs/tags/v2"])
+    fake(release_routes([release("v2", [asset("x", None)]), release("v1", [asset("x", None)])], [hidden, other]))
+    _, ev, _ = run_fetcher("release_integrity", monkeypatch, tmp_path)
+    by_tag = {r["tag"]: r["tag_protection"] for r in ev["repositories"][0]["releases"]}
+    assert by_tag["v1"]["bypass_unknown"] is True and by_tag["v1"]["locked"] is True
+    assert by_tag["v2"]["bypass_unknown"] is False
+    assert ev["summary"]["release_tags_bypass_unreadable"] == ["app@v1"]
+
+
 def test_an_attestation_whose_statement_names_another_digest_does_not_count():
     m = MODS["release_integrity"]
     s = m.attestation_summary([{"bundle": bundle("f" * 64)}], "sha256:" + "a" * 64)
@@ -2058,7 +2105,8 @@ def test_tag_ruleset_reach(fake, monkeypatch, tmp_path):
     m = MODS["release_integrity"]
     always = [{"actor_type": "OrganizationAdmin", "actor_id": 1, "bypass_mode": "always"}]
     assert m.tag_rules([tag_ruleset(1, ["refs/tags/v*"], bypass_actors=always)], "app", "v1.2", "main") == {
-        "locked": True, "rules": ["deletion", "update"], "always_bypass": ["tags-1"], "exempt_actors": []}
+        "locked": True, "rules": ["deletion", "update"], "always_bypass": ["tags-1"], "exempt_actors": [],
+        "bypass_unknown": False}
     assert m.tag_rules([tag_ruleset(1, ["refs/tags/v*"], enforcement="evaluate")], "app", "v1", "main")["locked"] is False
     assert m.tag_rules([tag_ruleset(1, ["~ALL"])], "app", "anything", "main")["locked"] is True
     branch_rs = {**tag_ruleset(1, ["~ALL"]), "target": "branch"}
@@ -2411,6 +2459,15 @@ def test_audit_limits_at_their_edges_are_accepted(fake, monkeypatch, tmp_path, e
     fake(audit_routes([audit_event("repo.create", 1, repository=f"{ORG}/app")]))
     code, ev, _ = run_fetcher("audit_log", monkeypatch, tmp_path, **env)
     assert code == 0 and ev["security_events"][0]["repo"] == f"{ORG}/app"  # the newer field name, when repo is absent
+
+
+def test_a_window_over_the_event_cap_fails_but_keeps_the_newest_events(fake, monkeypatch, tmp_path):
+    events = [audit_event("repo.create", h, repository=f"{ORG}/app") for h in (1, 2, 3)]
+    fake(audit_routes(events))
+    code, ev, status = run_fetcher("audit_log", monkeypatch, tmp_path, GITHUB_AUDIT_MAX_EVENTS="2")
+    assert code == 1 and status["code"] == "partial_failure" and "Truncated" in json.dumps(ev["metadata"])
+    assert ev["metadata"]["truncated"] is True and ev["summary"]["events_total"] == 2
+    assert [e["document_id"] for e in ev["security_events"]] == ["d-repo.create-1", "d-repo.create-2"]
 
 
 def test_access_review_sharper_verdicts(fake, monkeypatch, tmp_path):
