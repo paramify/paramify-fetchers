@@ -12,6 +12,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **GitHub fetchers (15).** Branch protection, pull request reviews and
+  checks, Actions security, release integrity, deployment controls,
+  Dependabot, code scanning and secret scanning alerts, vulnerability
+  disclosure, organization security settings, access review, non-user
+  credentials, the audit log (Enterprise Cloud), significant change
+  notifications, and `github_repository_inventory`. One target per
+  organization, on github.com, GHE.com or GitHub Enterprise Server. See
+  `fetchers/github/README.md`.
+
 - **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
   secret and certificate gets `lifetime_days` (end date minus start date, null when
   either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.
