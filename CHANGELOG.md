@@ -12,6 +12,49 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Qualys VMDR fetchers, a new `qualys` category.** Four evidence fetchers read
+  the Qualys VM/PC XML API with one read-only API user (Basic auth, the
+  `X-Requested-With` header Qualys requires):
+  - `qualys_scan_coverage`: each host's last vulnerability scan and last
+    authenticated scan against `scan_window_days` (default 31, so a monthly scan
+    counts as within it), the subscription IPs that have no host record, and
+    excluded IPs. IPv4 is counted by address and IPv6 by range, so one IPv6 /64
+    can't swamp the count, and excluded addresses are not counted as gaps.
+  - `qualys_scan_schedules`: active scan schedules and their longest gap between
+    runs, whether each option profile enables authentication, and how the scans
+    launched in the window ended.
+  - `qualys_vulnerability_findings`: open detections (New, Active, Re-Opened) by
+    severity and type, with each one's age against `remediation_days`. The age
+    counts from the last reopening when Qualys reopened a detection, and from
+    first found otherwise. Ignored and disabled detections are counted, not
+    dropped.
+  - `qualys_vulnerability_remediation`: detections fixed within the lookback,
+    fixed within or after their timeframe, and the detections reopened in it
+    whatever their status now (Qualys sets a reopened detection to Active at its
+    next scan).
+
+  `QUALYS_API_URL` is required with no default, because subscriptions live on
+  different platforms (US1–US4, GOV1, EU and others). Credentials go only to a
+  `qualysapi.` host on a Qualys domain, or to the private cloud host named in
+  `QUALYS_PRIVATE_CLOUD_HOST`; any other URL fails as `bad_config` before a
+  request is sent. A Reader sees only the hosts in its asset groups, so every
+  fetcher records whether the API user sees the built-in All group
+  (`scope_all`). The shared client branches on the Qualys
+  error code rather than the HTTP status, because 409 covers rate and concurrency
+  limits, an unfinished registration and SecureID. It retries only the limits.
+  Each next page re-sends the original filters with the `id_min` from Qualys's
+  next-page URL, and refuses a URL on another host. A page that fails means the
+  run writes no summary. Responses are parsed with `defusedxml`. It is a new
+  dependency, in the new `qualys` extra and in `dev`. The `remediation_days`
+  default (`5:30,4:30,3:90,2:180,1:180`) follows FedRAMP's historical
+  continuous-monitoring timeframes as a convention; set your own policy's values.
+  Raw scan output (`RESULTS`) is never requested, and option profiles keep only
+  their title and authentication types. The fetchers are tested against a double
+  built from the documented API shapes, not a live subscription; the points
+  taken from the guide alone (All-group scope, tracking-method values, the option
+  profile authentication element, schedule `ACTIVE` values) are stated as
+  assumptions in each fetcher's instructions.
+
 - **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
   secret and certificate gets `lifetime_days` (end date minus start date, null when
   either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.
