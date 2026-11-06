@@ -174,8 +174,10 @@ def run_rotation(monkeypatch, tmp_path, patterns):
                 collect_app_service_certificates=_app_certificates)
 
 
-def test_key_vault_key_rotation_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_key_vault_key_rotation_without_patterns_adds_only_empty_exclusion_fields(
+        monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_rotation(monkeypatch, tmp_path, None)
+    assert_summary_documented("azure/key_vault_key_rotation", evidence["summary"])
     app = _app_certificates(None, None, None, ROTATION_VAULTS, NOW)
     results, summary = rotation.evidence_sections(ROTATION_VAULTS, "registered", app, "registered")
     assert code == 0
