@@ -2,29 +2,44 @@ validator: azure_changes_outside_pipeline_approved
 cases:
   - name: every_change_has_an_approved_record
     expect: PASS
-    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":0}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"approval_types_not_record_types":[],"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":0}}}'
 
   - name: approved_after_the_change_still_passes
     expect: PASS
     note: An approval given after the change is counted in changes_approved_after_change, not failed.
-    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":0,"changes_approved_after_change":2}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"approval_types_not_record_types":[],"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":0,"changes_approved_after_change":2}}}'
 
   - name: no_changes_outside_a_pipeline
     expect: PASS
-    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":0,"changes_without_record":0,"changes_without_approved_record":0}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"approval_types_not_record_types":[],"changes_needing_record":0,"changes_without_record":0,"changes_without_approved_record":0}}}'
 
   - name: recorded_but_not_approved
     expect: FAIL
-    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":3,"changes_without_record":0,"changes_recorded_without_approval":1,"changes_without_approved_record":1}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"approval_types_not_record_types":[],"changes_needing_record":3,"changes_without_record":0,"changes_recorded_without_approval":1,"changes_without_approved_record":1}}}'
 
   - name: unrecorded_counts_as_unapproved
     expect: FAIL
-    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":3,"changes_without_record":2,"changes_without_approved_record":2}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"approval_types_not_record_types":[],"changes_needing_record":3,"changes_without_record":2,"changes_without_approved_record":2}}}'
 
   - name: missing_input_nulls_the_count
     expect: FAIL
-    artifact: '{"metadata":{"exit_code":1},"payload":{"summary":{"changes_without_approved_record":null,"inputs_complete":false}}}'
+    artifact: '{"metadata":{"exit_code":1},"payload":{"summary":{"approval_types_not_record_types":[],"changes_without_approved_record":null,"inputs_complete":false}}}'
 
   - name: count_renamed
     expect: FAIL
-    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":3,"changes_without_approved_records":1}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"approval_types_not_record_types":[],"changes_needing_record":3,"changes_without_approved_records":1}}}'
+
+  - name: approval_type_not_a_record_type
+    expect: FAIL
+    note: A name in the approval_types setting that matches no record type; the type meant would need no approval.
+    artifact: '{"metadata":{"exit_code":1},"payload":{"summary":{"approval_types_not_record_types":["change requst"],"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":0}}}'
+
+  - name: approval_types_unknown
+    expect: FAIL
+    note: Null when a work items file doesn't say which types it selected.
+    artifact: '{"metadata":{"exit_code":1},"payload":{"summary":{"approval_types_not_record_types":null,"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":0}}}'
+
+  - name: evidence_from_before_approval_types
+    expect: FAIL
+    note: A comparator older than 0.2.0 writes no approval_types_not_record_types.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":3,"changes_without_record":0,"changes_without_approved_record":0}}}'
