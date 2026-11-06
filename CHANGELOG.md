@@ -136,6 +136,14 @@ schemas and the `paramify` CLI — not the internal code.
   profile authentication element, schedule `ACTIVE` values) are stated as
   assumptions in each fetcher's instructions.
 
+- **`azure_vm_hardening_status` 0.3.0: OS patch settings.** Every VM and scale set
+  reports `patch_settings` (OS, patch mode, assessment mode, bypass of platform safety
+  checks on a user schedule) with the derived `automatic_patching` (AutomaticByPlatform
+  or AutomaticByOS; `patch_modes` tells Azure-orchestrated from in-guest Windows
+  Update) and
+  `assessment_automatic`, both null when Azure returned no patch mode (never read as
+  Manual). The summary counts automatic, manual-or-image-default and unknown
+  for VMs and scale sets.
 - **`azure_aks_cluster_configuration` 0.3.0: node security per agent pool.** Each
   pool now reports `enable_fips` (the FIPS-enabled node image), `node_image_version`,
   Trusted Launch (`secure_boot_enabled`, `vtpm_enabled`) and `ssh_access`. Each is

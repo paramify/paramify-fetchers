@@ -1595,6 +1595,30 @@ def test_operation_group_surface(
 # (module, model, required fields, affected fetchers)
 REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
+        "azure.mgmt.compute.models",
+        "PatchSettings",
+        ["patch_mode", "assessment_mode", "automatic_by_platform_settings"],
+        "azure/vm_hardening_status — Windows patch settings; a rename reads every VM as patch mode unknown",
+    ),
+    (
+        "azure.mgmt.compute.models",
+        "LinuxPatchSettings",
+        ["patch_mode", "assessment_mode", "automatic_by_platform_settings"],
+        "azure/vm_hardening_status — Linux patch settings",
+    ),
+    (
+        "azure.mgmt.compute.models",
+        "LinuxConfiguration",
+        ["patch_settings", "disable_password_authentication"],
+        "azure/vm_hardening_status — os_profile.linux_configuration",
+    ),
+    (
+        "azure.mgmt.compute.models",
+        "WindowsConfiguration",
+        ["patch_settings"],
+        "azure/vm_hardening_status — os_profile.windows_configuration",
+    ),
+    (
         "azure.mgmt.containerservice.models",
         "ManagedClusterAgentPoolProfile",
         ["enable_fips", "node_image_version", "security_profile"],
