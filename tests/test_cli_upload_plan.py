@@ -53,6 +53,22 @@ def test_plan_prints_entries_and_totals_and_applies_nothing(fake, tmp_path):  # 
     assert not (run / "upload_log.json").exists()
 
 
+def test_plan_says_first_that_batches_are_off(fake, tmp_path):  # noqa: F811
+    fake.batches_flag_off()
+    run = two_files(tmp_path)
+    res = cli("upload", str(run), "--plan")
+    assert res.exit_code == 0, res.output
+    plan_lines = [line for line in res.output.splitlines() if not line.startswith("Planning upload to ")]
+    assert plan_lines[0] == (
+        "! batches are off for this workspace (Artifact requests are not enabled for this workspace.); "
+        "every entry is sent direct, as before batches")
+    assert "  deliver x: deliver 2 files to EVD-X direct (no channel): batches are off for this workspace" \
+        in res.output
+    js = cli("upload", str(run), "--plan", "--json")
+    assert json.loads(js.output)["plan"]["notes"][0].startswith("batches are off for this workspace")
+    assert not (run / "upload_log.json").exists()
+
+
 def test_plan_with_a_refusal_is_still_a_preview_and_exits_0(fake, tmp_path):  # noqa: F811
     st1, st2 = fake.add_stack("Prod"), fake.add_stack("Gov")
     fake.add_evidence("EVD-X", channels=[st1.id, st2.id])
@@ -186,7 +202,7 @@ def test_a_rejected_token_is_named_in_human_and_json_output(no_env, tmp_path, mo
     def reject(client):
         raise ApiError("GET /batches failed (HTTP 401)", status=401, kind=ErrorKind.FATAL, method="GET", path="/batches")
 
-    monkeypatch.setattr(upload_mod, "require_batches", reject)
+    monkeypatch.setattr(upload_mod, "delivery_capability", reject)
     want = f"Paramify rejected the API token (HTTP 401); check {paramify_auth.UPLOAD_TOKEN_ENV}"
     run = str(two_files(tmp_path))
     for args in (["upload", run], ["upload", run, "--plan"]):

@@ -18,6 +18,7 @@ import pytest
 
 from framework.paramify.client import ApiError, Client, ErrorKind
 from framework.paramify.resources import Reader, Resources
+from framework.paramify.version import FLAG_OFF, Capability
 from framework.sync import engine
 from framework.sync.model import Action, SyncContext
 from framework.sync.providers.delivery import DeliveryProvider
@@ -39,7 +40,7 @@ URL = "https://api.example.test"
 class Harness:
     """One run directory, one fake workspace, and the two providers wired as the CLI will wire them."""
 
-    def __init__(self, fake: Any, run_dir: Path) -> None:
+    def __init__(self, fake: Any, run_dir: Path, capability: Any = None, budget: float = 3) -> None:
         self.fake = fake
         self.run_dir = run_dir
         self.events: List[Dict[str, Any]] = []
@@ -53,8 +54,9 @@ class Harness:
             return real(method, url, params=params, json=json, files=files, timeout=timeout)
 
         session.request = spy
-        self.res = Resources(Client("t", URL, session=session, retry_budget_s=3, sleep=lambda _s: None))
-        self.delivery = DeliveryProvider(RunState(run_dir), today=lambda: fake.today, on_event=self.events.append)
+        self.res = Resources(Client("t", URL, session=session, retry_budget_s=budget, sleep=lambda _s: None))
+        self.delivery = DeliveryProvider(RunState(run_dir), today=lambda: fake.today, on_event=self.events.append,
+                                         capability=capability)
         self.providers = [EvidenceSetsProvider(False, {}, {}, today=lambda: fake.today), self.delivery]
 
     def plan(self):
@@ -106,7 +108,8 @@ def test_full_run_creates_set_uploads_submits_and_reads_back_approved(tmp_path):
     assert r["uploaded"] == ["a.json", "b.json"] and r["already_present"] == [] and r["dropped"] == []
     assert r["validators_failed"] == [] and r["batch_id"] == "bt-1" and r["batch_reference"] == "BCH-1"
     assert set(r) == {"state", "batch_id", "batch_reference", "status", "uploaded", "already_present",
-                      "dropped", "validators_failed"}
+                      "dropped", "validators_failed", "mode"}
+    assert r["mode"] == "batch"
     json.dumps(r)
     assert batch_row(fake, "bt-1")["whenToApprove"] == SWPV
     assert h.submits() == ["/batches/bt-1/submit"]
@@ -616,3 +619,122 @@ def test_rollover_replan_warnings_reach_the_outcome_message(tmp_path):
     assert d.status == "applied"
     assert "re-planned" in d.message
     assert f"late submission to {old.reference_id} (due 2026-11-05)" in d.message
+
+
+# ---- direct (the route before batches) ---------------------------------------
+
+BATCHES_OFF = Capability(False, FLAG_OFF)
+
+
+def flag_off_with_channel(fake):
+    """A set with one channel, on a workspace whose batches flag is off."""
+    fake.batches_flag_off()
+    st = fake.add_stack("Prod")
+    return fake.add_evidence("EVD-X", channels=[st.id])
+
+
+def test_direct_apply_uploads_each_file_with_the_channel_id(tmp_path):
+    fake = FakeParamify()
+    ev = flag_off_with_channel(fake)
+    h = Harness(fake, two_files(tmp_path), capability=BATCHES_OFF)
+    d = h.run()["delivery/x"]
+    assert d.status == "applied", d.message
+    assert h.uploads() == [f"/evidence/{ev.id}/artifacts/upload"] * 2
+    assert not [c for c in fake.calls if c[1].startswith(("/batches", "/artifact-requests"))]
+    assert [a["_channelId"] for a in fake._artifacts] == [ev.channels[0].id] * 2
+    assert [a["batchId"] for a in fake._artifacts] == [None, None]
+    r = d.result
+    assert r["mode"] == "direct" and r["state"] == "delivered" and r["batch_id"] is None
+    assert r["status"] is None and r["uploaded"] == ["a.json", "b.json"]
+    assert {"title", "note", "channelId"} == set(json.loads(h.sent[0]["artifact"][1]))
+    assert [(e["file"], e["outcome"], e["n"], e["of"]) for e in h.file_events()] == [
+        ("a.json", "uploaded", 1, 2), ("b.json", "uploaded", 2, 2)]
+
+
+def test_direct_apply_with_no_channel_sends_no_channel_id(tmp_path):
+    fake = FakeParamify()
+    fake.batches_flag_off()
+    fake.add_evidence("EVD-X")
+    h = Harness(fake, two_files(tmp_path), capability=BATCHES_OFF)
+    d = h.run()["delivery/x"]
+    assert d.result["state"] == "delivered" and d.result["mode"] == "direct"
+    assert {"title", "note"} == set(json.loads(h.sent[0]["artifact"][1]))
+
+
+def test_direct_apply_to_a_set_made_in_this_run(tmp_path):
+    fake = FakeParamify()
+    fake.batches_flag_off()
+    h = Harness(fake, two_files(tmp_path), capability=BATCHES_OFF)
+    out = h.run()
+    assert out["evidence_sets/EVD-X"].status == "applied"
+    assert out["delivery/x"].result["state"] == "delivered"
+    ev_id = fake._evidence[0]["id"]
+    assert h.uploads() == [f"/evidence/{ev_id}/artifacts/upload"] * 2
+
+
+def test_direct_temporary_failure_holds_one_file_and_resends_only_it(tmp_path):
+    fake = FakeParamify()
+    flag_off_with_channel(fake)
+    fake.fail_upload_once("b.json", 503)
+    h = Harness(fake, two_files(tmp_path), capability=BATCHES_OFF, budget=0)
+    d = h.run()["delivery/x"]
+    assert d.status == "failed"
+    assert d.result["state"] == "held" and d.result["mode"] == "direct" and d.result["batch_id"] is None
+    assert d.result["uploaded"] == ["a.json"]
+    assert d.message == "held: b.json failed temporarily; the next upload sends it"
+    assert [e["outcome"] for e in h.file_events()] == ["uploaded", "held"]
+
+    fake.calls.clear()
+    h2 = Harness(fake, tmp_path, capability=BATCHES_OFF)
+    again = h2.run()["delivery/x"]
+    assert again.status == "applied" and again.result["state"] == "delivered"
+    assert again.result["uploaded"] == ["b.json"]
+    assert [p["file"][0] for p in h2.sent] == ["b.json"]
+    assert not [c for c in fake.calls if c[1].startswith(("/batches", "/artifact-requests"))]
+
+
+def test_direct_permanent_failure_drops_one_file(tmp_path):
+    fake = FakeParamify()
+    flag_off_with_channel(fake)
+    fake.fail_upload("a.json", 413, "Payload Too Large")
+    h = Harness(fake, two_files(tmp_path), capability=BATCHES_OFF)
+    d = h.run()["delivery/x"]
+    assert d.status == "applied"
+    assert d.result["state"] == "delivered_with_drops" and d.result["mode"] == "direct"
+    assert d.result["uploaded"] == ["b.json"]
+    [drop] = d.result["dropped"]
+    assert drop["name"] == "a.json" and "HTTP 413" in drop["reason"]
+    assert "a.json" in d.message
+    assert [a["originalFileName"] for a in fake._artifacts] == ["b.json"]
+
+
+def test_direct_every_file_dropped_fails_the_entry(tmp_path):
+    fake = FakeParamify()
+    flag_off_with_channel(fake)
+    fake.fail_upload("a.json", 403)
+    fake.fail_upload("b.json", 400, "bad file")
+    h = Harness(fake, two_files(tmp_path), capability=BATCHES_OFF)
+    d = h.run()["delivery/x"]
+    assert d.status == "failed" and d.message == "every file was dropped"
+    assert d.result["state"] == "failed" and d.result["mode"] == "direct"
+    assert d.result["dropped"][0] == {"name": "a.json", "reason": "blocked by the production WAF"}
+
+
+def test_direct_fatal_error_is_raised(tmp_path):
+    fake = FakeParamify()
+    flag_off_with_channel(fake)
+    fake.fail_upload("a.json", 401)
+    h = Harness(fake, two_files(tmp_path), capability=BATCHES_OFF)
+    [action] = [a for a in h.plan().actions if a.provider == "delivery"]
+    assert action.payload["target"] == "DIRECT"
+    with pytest.raises(ApiError) as exc:
+        h.delivery.apply(action, h.res, lambda v: v)
+    assert exc.value.kind is ErrorKind.FATAL
+
+
+def test_direct_noop_applies_as_noop_with_no_batch(tmp_path):
+    fake = FakeParamify()
+    flag_off_with_channel(fake)
+    Harness(fake, two_files(tmp_path), capability=BATCHES_OFF).run()
+    again = Harness(fake, tmp_path, capability=BATCHES_OFF).run()["delivery/x"]
+    assert again.status == "noop" and again.result["mode"] == "direct" and again.result["batch_id"] is None

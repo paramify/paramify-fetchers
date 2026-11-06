@@ -29,19 +29,3 @@ def delivery_capability(client: Client) -> Capability:
         raise
     return Capability(True, None)
 
-
-def require_batches(client: Client) -> None:
-    """Raise FATAL when batches are unavailable. Kept for the uploader until direct delivery replaces it."""
-    cap = delivery_capability(client)
-    if cap.batches:
-        return
-    if cap.reason == FLAG_OFF:
-        raise ApiError(
-            "batches are not turned on for this workspace (the API answered "
-            f"\"{FLAG_OFF}\"); ask Paramify to turn on artifact requests for it",
-            status=403, kind=ErrorKind.FATAL, method="GET", path="/batches",
-        )
-    raise ApiError(
-        "this workspace's API has no batches; 0.14.0 or later is required",
-        status=404, kind=ErrorKind.FATAL, method="GET", path="/batches",
-    )

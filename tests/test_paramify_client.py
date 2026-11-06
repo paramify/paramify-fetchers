@@ -214,22 +214,6 @@ def test_delivery_capability_other_403_raises():
     assert ei.value.kind is ErrorKind.FATAL
 
 
-def test_require_batches_keeps_the_old_fatal_messages():
-    from framework.paramify.version import require_batches
-    c, _, _ = make([FakeResponse(404, text="nf")])
-    with pytest.raises(ApiError) as ei:
-        require_batches(c)
-    assert ei.value.kind is ErrorKind.FATAL
-    assert ei.value.message == "this workspace's API has no batches; 0.14.0 or later is required"
-    c, _, _ = make([FakeResponse(403, text=_FLAG_OFF_BODY)])
-    with pytest.raises(ApiError) as ei:
-        require_batches(c)
-    assert ei.value.kind is ErrorKind.FATAL and ei.value.status == 403
-    assert ei.value.message.startswith("batches are not turned on for this workspace")
-    c, _, _ = make([FakeResponse(200, {"batches": []})])
-    require_batches(c)
-
-
 def test_retry_after_zero_cannot_spin():
     c, _, sleeps = make([FakeResponse(429, headers={"Retry-After": "0"})] * 50, retry_budget_s=3)
     with pytest.raises(ApiError) as ei:

@@ -2,12 +2,14 @@
 
 This is the integration layer, so unlike the engine it knows the Paramify API.
 It loads the uploader config, builds the providers (evidence sets, then the
-validator sync when asked, then delivery), checks the API version, plans and
-applies under the run lock, and maps the outcomes to what front-ends have
-always read: the `uploaded` / `skipped_duplicate` / `skipped_failed` /
-`errors` / `ok` summary (plus `dropped`; `ok` is `errors == 0`), the `upload_start` / `upload_file` /
-`upload_complete` events and `upload_log.json`. The plan, each entry's state
-and the engine's own events are added beside them.
+validator sync when asked, then delivery), checks once whether the workspace
+takes batches (when it does not, every entry is sent direct and the plan says
+so in a note), plans and applies under the run lock, and maps the outcomes to
+what front-ends have always read: the `uploaded` / `skipped_duplicate` /
+`skipped_failed` / `errors` / `ok` summary (plus `dropped`; `ok` is
+`errors == 0`), the `upload_start` / `upload_file` / `upload_complete` events
+and `upload_log.json`. The plan, each entry's state and mode, the `batches`
+capability and the engine's own events are added beside them.
 
 A dry run plans offline: no token, no HTTP request.
 """
@@ -27,7 +29,7 @@ from framework import yaml_io
 from framework.custom_tags import Tagger, category_display_names, resolve_tag_policy
 from framework.paramify.client import Client, base_url_error
 from framework.paramify.resources import Reader, Resources
-from framework.paramify.version import require_batches
+from framework.paramify.version import Capability, delivery_capability
 from framework.paramify_auth import (
     missing_token_error,
     resolve_base_url,
@@ -36,7 +38,7 @@ from framework.paramify_auth import (
 from framework.run_files import is_evidence_file
 from framework.sync import engine
 from framework.sync.model import Action, Outcome, Plan, SyncContext, Unknown
-from framework.sync.providers.delivery import DeliveryProvider
+from framework.sync.providers.delivery import BATCHES_OFF, DIRECT, DeliveryProvider
 from framework.sync.providers.evidence_sets import (
     TAGS_UNAVAILABLE,
     EvidenceSetsProvider,
@@ -117,8 +119,9 @@ class _Setup:
         run_state: Optional[RunState] = None,
         on_event: Optional[Event] = None,
         on_delivery_event: Optional[Event] = None,
+        capability: Optional[Capability] = None,
     ) -> Tuple[List[Any], DeliveryProvider]:
-        delivery = DeliveryProvider(run_state, on_event=on_delivery_event)
+        delivery = DeliveryProvider(run_state, on_event=on_delivery_event, capability=capability)
         providers: List[Any] = [EvidenceSetsProvider(custom_tags, category_display_names(root), self.config)]
         if with_validators:
             from framework.api import reference_ids_from_run  # api imports this module
@@ -131,13 +134,15 @@ class _Setup:
         return providers, delivery
 
 
-def _plan(providers: Sequence[Any], ctx: Any, reader: Any) -> Plan:
-    """The engine's plan, less the tags of sets that get no delivery.
+def _plan(providers: Sequence[Any], ctx: Any, reader: Any, capability: Optional[Capability] = None) -> Plan:
+    """The engine's plan, less the tags of sets that get no delivery, with a note when batches are off.
 
     The tag action runs before delivery, so without this an entry that is
     refused (no request, a stack mismatch) would still tag its set.
     """
     plan = engine.plan(providers, ctx, reader)
+    if capability is not None and not capability.batches:
+        plan.notes.append(f"{BATCHES_OFF} ({capability.reason}); every entry is sent direct, as before batches")
     verbs: Dict[str, List[str]] = defaultdict(list)
     for a in plan.actions:
         if a.provider == "delivery" and a.payload.get("reference_id"):
@@ -163,12 +168,14 @@ def plan_upload(
     """The plan for uploading `run_dir`. Online it reads the workspace (read-only); offline it needs no token."""
     setup = _Setup(run_dir, config_path, stack, only_file)
     reader = None
+    capability: Optional[Capability] = None  # offline: no check, no note
     if online:
         client = setup.client()
-        require_batches(client)
+        capability = delivery_capability(client)
         reader = Reader(Resources(client))
-    providers, _ = setup.providers(root, online=online, custom_tags=custom_tags, with_validators=with_validators)
-    return _plan(providers, setup.ctx, reader)
+    providers, _ = setup.providers(root, online=online, custom_tags=custom_tags, with_validators=with_validators,
+                                   capability=capability)
+    return _plan(providers, setup.ctx, reader, capability)
 
 
 # ---- the legacy view of a plan and its outcomes ----------------------------- #
@@ -185,6 +192,7 @@ class _Report:
         self.dry_run = dry_run
         self.tagger = tagger  # session-less: plans tag names, writes nothing
         self.plan = Plan()
+        self.capability: Optional[Capability] = None  # None: not checked (a dry run, or the check failed)
         self.actions: Dict[str, Action] = {}
         self.refs: Dict[str, str] = {}  # entry key -> evidence set reference id
         self.categories: Dict[str, Optional[str]] = {}  # entry key -> category
@@ -309,6 +317,7 @@ class _Report:
             entry["stack"] = _known(a.changes.get("stack"))
             entry["channel"] = _known(a.changes.get("channel"))
             entry["artifact_request"] = _known(a.changes.get("artifact_request"))
+            entry["mode"] = "direct" if a.payload.get("target") == DIRECT else "batch"
             out[a.key] = entry
         return out
 
@@ -335,6 +344,8 @@ class _Report:
             "ok": ok,
             "plan": self.plan.to_json(),
             "entries": entries,
+            "batches": None if self.capability is None else {
+                "available": self.capability.batches, "reason": self.capability.reason},
         }
 
     def _errors(self, entries: Dict[str, Dict[str, Any]], refused: List[str], *, applied: bool) -> int:
@@ -468,13 +479,13 @@ def _apply_locked(
     error: Optional[str] = None
     try:
         emit({"event": "upload_start", **base})
-        require_batches(client)
+        report.capability = delivery_capability(client)
         resources = Resources(client)
         providers, delivery = setup.providers(
             root, online=True, custom_tags=custom_tags, with_validators=with_validators,
-            run_state=state, on_event=emit, on_delivery_event=report.on_delivery,
+            run_state=state, on_event=emit, on_delivery_event=report.on_delivery, capability=report.capability,
         )
-        report.bind(_plan(providers, setup.ctx, Reader(resources)), delivery)
+        report.bind(_plan(providers, setup.ctx, Reader(resources), report.capability), delivery)
         emit({"event": "plan", "plan": report.plan.to_json()})
         outcomes = engine.apply(report.plan, providers, resources, on_event=report.on_engine, outcomes=done)
     except BaseException as exc:
@@ -500,7 +511,7 @@ def _apply_locked(
 
 def _write_log(run_dir: Path, summary: Dict[str, Any], error: Optional[str]) -> Optional[str]:
     """upload_log.json: the fields it has always had, plus `dropped`, `plan`, `entries`
-    (each entry's batch, stack, channel and request), `outcomes` and the validator sync."""
+    (each entry's mode, batch, stack, channel and request), `batches`, `outcomes` and the validator sync."""
     log: Dict[str, Any] = {
         "uploaded_at": _utc_now(),
         "run_dir": summary["run_dir"],
@@ -514,6 +525,7 @@ def _write_log(run_dir: Path, summary: Dict[str, Any], error: Optional[str]) -> 
         "results": summary["results"],
         "plan": summary["plan"],
         "entries": summary["entries"],
+        "batches": summary["batches"],
         "outcomes": summary["outcomes"],
     }
     if "validators" in summary:

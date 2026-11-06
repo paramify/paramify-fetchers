@@ -24,7 +24,10 @@ Apply, per `deliver` action: re-check that a new batch's request is still
 current (else re-plan the entry once), create the batch and record its id at
 once (or resume), upload each missing file, drop a file on a permanent
 failure and hold the batch OPEN on a temporary one, submit only when nothing
-is held, and read the batch back.
+is held, and read the batch back. A direct action uploads each missing file
+straight onto the set, with the routed channel's id, through the same per-file
+loop; a held file is sent by the next upload of the run. It has no batch, so
+no request re-check, no submit and no read-back.
 """
 from __future__ import annotations
 
@@ -75,6 +78,7 @@ BEFORE_BATCHES = "already delivered before batches"
 WAF_BLOCKED = "blocked by the production WAF"
 BATCHES_OFF = "batches are off for this workspace"
 DELIVERY_DIRECT = "delivery: direct"
+DIRECT = "DIRECT"  # the payload target of an entry sent direct
 _FAILING = ("FAIL", "ERROR")
 # How far along a batch is: a status read back never moves a batch backwards.
 _STATUS_RANK = {"OPEN": 0, "REJECTED": 0, "SUBMITTED": 1, "APPROVED": 2}
@@ -133,12 +137,14 @@ class _Delivered:
     dropped: List[Dict[str, str]] = field(default_factory=list)  # {name, reason}
     held: List[str] = field(default_factory=list)
     validators_failed: List[str] = field(default_factory=list)
+    mode: str = "batch"  # or "direct": no batch, no submit
 
     def result(self, state: str) -> Dict[str, Any]:
         return {
             "state": state, "batch_id": self.batch_id, "batch_reference": self.batch_reference,
             "status": self.status, "uploaded": list(self.uploaded), "already_present": list(self.already_present),
             "dropped": [dict(d) for d in self.dropped], "validators_failed": list(self.validators_failed),
+            "mode": self.mode,
         }
 
     @property
@@ -411,13 +417,13 @@ class DeliveryProvider:
             payload.update(
                 evidence_id=obs.evidence.id if obs.evidence is not None
                 else Ref(f"evidence_sets/{e.reference_id}", "id"),
-                target="DIRECT", channel_id=channel.id if channel else None,
+                target=DIRECT, channel_id=channel.id if channel else None,
                 direct_reason=route.direct_reason, files=[_file_json(f) for f in missing],
             )
             direct_changes: Dict[str, Any] = {
                 "stack": {"id": channel.stack_id, "name": named} if channel else None,
                 "channel": channel.reference_id if channel else None,
-                "target": "DIRECT",
+                "target": DIRECT,
             }
             if not missing:
                 return action("noop", f"already delivered ({_count(sendable, 'file')})",
@@ -497,9 +503,8 @@ class DeliveryProvider:
             return self._noop(action.id, p, action.summary)
         if action.verb != "deliver":
             return Outcome(action.id, "failed", message=f"unexpected verb {action.verb}")
-        if p.get("target") == "DIRECT":  # stopgap: the next change applies it; never make a batch here
-            return Outcome(action.id, "failed", _Delivered().result("failed"),
-                           "direct delivery is applied in the next change")
+        if p.get("target") == DIRECT:  # no batch, so no request to re-check
+            return self._deliver_direct(action.id, p, resources, resolve)
         note = ""
         # Step 1. A resumed batch stays on its own request by design, so only a
         # new batch on a request planned as current is re-checked.
@@ -533,7 +538,26 @@ class DeliveryProvider:
     def _noop(self, action_id: str, p: Dict[str, Any], message: str) -> Outcome:
         done = _Delivered(p.get("batch_id"), p.get("batch_reference"), p.get("status"),
                           already_present=list(p.get("before_batches") or []))
+        if p.get("target") == DIRECT:
+            # A direct no-op plans no files: each sendable file is on the set already.
+            done.mode, done.already_present = "direct", self._wanted(p)
+            for name in done.already_present:
+                self._emit(action_id, name, "already_present", None, 0, 0)
         return Outcome(action_id, "noop", done.result("noop"), message)
+
+    def _wanted(self, p: Dict[str, Any]) -> List[str]:
+        """This entry's sendable file names, from the entry, else from the payload."""
+        entry = self.entries.get(p["entry_key"])
+        return [f.original_file_name for f in self._split(entry)[0]] if entry is not None \
+            else [*(p.get("before_batches") or []), *(f["original_file_name"] for f in p.get("files") or [])]
+
+    def _started(self, p: Dict[str, Any], mode: str = "batch") -> _Delivered:
+        # Files that are errors (unreadable, not evidence) show in the entry state
+        # as drops, so a delivered entry that left some behind says so.
+        return _Delivered(mode=mode, dropped=[
+            {"name": d["original_file_name"], "reason": d["reason"]}
+            for d in [*(p.get("dropped") or []),
+                      *(s for s in p.get("skipped") or [] if s.get("kind") == "error")]])
 
     def _emit(self, action_id: str, name: str, outcome: str, n: Optional[int], of: int, size: int,
               reason: Optional[str] = None) -> None:
@@ -545,11 +569,7 @@ class DeliveryProvider:
             self._on_event(event)
 
     def _deliver(self, action_id: str, p: Dict[str, Any], resources: Any, note: str) -> Outcome:
-        # Files that are errors (unreadable, not evidence) show in the entry state
-        # as drops, so a delivered entry that left some behind says so.
-        run = _Delivered(dropped=[{"name": d["original_file_name"], "reason": d["reason"]}
-                                  for d in [*(p.get("dropped") or []),
-                                            *(s for s in p.get("skipped") or [] if s.get("kind") == "error")]])
+        run = self._started(p)
         ev_id, ar_id = p["evidence_id"], p.get("artifact_request_id")
         target = f"artifact request {ar_id}" if ar_id else f"evidence set {ev_id}"
         # Step 2: create (and record at once) or resume.
@@ -570,40 +590,11 @@ class DeliveryProvider:
             return self._failed(action_id, exc, run, resources, ev_id, target)
 
         # Step 3: upload what the batch does not have yet.
-        files = p.get("files") or []
-        entry = self.entries.get(p["entry_key"])
-        wanted = [f.original_file_name for f in self._split(entry)[0]] if entry is not None \
-            else [*(p.get("before_batches") or []), *(f["original_file_name"] for f in files)]
         present |= set(p.get("before_batches") or [])  # sent before batches existed
-        run.already_present = [n for n in wanted if n in present]
-        to_send = [f for f in files if f["original_file_name"] not in present]
-        for name in run.already_present:
-            self._emit(action_id, name, "already_present", None, len(to_send), 0)
-        for n, f in enumerate(to_send, 1):
-            name = f["original_file_name"]
-            try:
-                content = self._content(Path(f["path"]))
-            except OSError as exc:
-                run.dropped.append({"name": name, "reason": f"cannot read {name}: {exc.strerror or exc}"})
-                # An unreadable file is an error, as it is at plan time; the rest still goes in.
-                self._emit(action_id, name, "error", n, len(to_send), 0, run.dropped[-1]["reason"])
-                continue
-            reason: Optional[str] = None
-            try:
-                resources.upload_to_batch(run.batch_id, name, content, {"title": f["title"], "note": f["note"]})
-                run.uploaded.append(name)
-                outcome = "uploaded"
-            except ApiError as exc:
-                if exc.kind is ErrorKind.PERMANENT:
-                    reason = WAF_BLOCKED if exc.status == 403 else exc.message
-                    run.dropped.append({"name": name, "reason": reason})
-                    outcome = "dropped"
-                elif exc.kind is ErrorKind.TEMPORARY:
-                    run.held.append(name)
-                    outcome, reason = "held", exc.message
-                else:
-                    return self._failed(action_id, exc, run, resources, ev_id, f"batch {run.name}")
-            self._emit(action_id, name, outcome, n, len(to_send), len(content), reason)
+        error = self._send(action_id, p, run, present,
+                           lambda name, content, meta: resources.upload_to_batch(run.batch_id, name, content, meta))
+        if error is not None:
+            return self._failed(action_id, error, run, resources, ev_id, f"batch {run.name}")
 
         # Step 4: submit only when nothing is held and the batch is not empty.
         if run.held:
@@ -648,6 +639,71 @@ class DeliveryProvider:
             parts.append(f"dropped {', '.join(d['name'] for d in run.dropped)}")
         return Outcome(action_id, "applied", run.result("delivered_with_drops" if run.dropped else "delivered"),
                        "; ".join(parts))
+
+    def _deliver_direct(self, action_id: str, p: Dict[str, Any], resources: Any,
+                        resolve: Callable[[Any], Any]) -> Outcome:
+        """Each planned file straight onto the set, with the routed channel's id (when one was routed)."""
+        run = self._started(p, mode="direct")
+        ev_id = resolve(p["evidence_id"])
+        channel_id = p.get("channel_id")
+        planned = {f["original_file_name"] for f in p.get("files") or []}
+        present = {n for n in self._wanted(p) if n not in planned}  # on the set at plan time
+
+        def upload(name: str, content: bytes, meta: Dict[str, Any]) -> Any:
+            return resources.upload_to_evidence(ev_id, name, content,
+                                                {**meta, "channelId": channel_id} if channel_id else meta)
+
+        error = self._send(action_id, p, run, present, upload)
+        if error is not None:
+            return self._failed(action_id, error, run, resources, ev_id, f"evidence set {ev_id}")
+        if run.held:
+            return Outcome(action_id, "failed", run.result("held"),
+                           f"held: {', '.join(run.held)} failed temporarily; the next upload sends it")
+        if not run.uploaded and not run.already_present:
+            return Outcome(action_id, "failed", run.result("failed"), ALL_DROPPED)
+        parts = [f"{_count(len(run.uploaded), 'file')} sent direct"]
+        if run.dropped:
+            parts.append(f"dropped {', '.join(d['name'] for d in run.dropped)}")
+        return Outcome(action_id, "applied", run.result("delivered_with_drops" if run.dropped else "delivered"),
+                       "; ".join(parts))
+
+    def _send(self, action_id: str, p: Dict[str, Any], run: _Delivered, present: Set[str],
+              upload: Callable[[str, bytes, Dict[str, Any]], Any]) -> Optional[ApiError]:
+        """Upload each planned file not in `present`, in both modes: `upload(name, content, meta)`.
+
+        A permanent failure drops the file and a temporary one holds it; the rest
+        still go. Returns the error that ends the entry, or None.
+        """
+        run.already_present = [n for n in self._wanted(p) if n in present]
+        to_send = [f for f in p.get("files") or [] if f["original_file_name"] not in present]
+        for name in run.already_present:
+            self._emit(action_id, name, "already_present", None, len(to_send), 0)
+        for n, f in enumerate(to_send, 1):
+            name = f["original_file_name"]
+            try:
+                content = self._content(Path(f["path"]))
+            except OSError as exc:
+                run.dropped.append({"name": name, "reason": f"cannot read {name}: {exc.strerror or exc}"})
+                # An unreadable file is an error, as it is at plan time; the rest still goes in.
+                self._emit(action_id, name, "error", n, len(to_send), 0, run.dropped[-1]["reason"])
+                continue
+            reason: Optional[str] = None
+            try:
+                upload(name, content, {"title": f["title"], "note": f["note"]})
+                run.uploaded.append(name)
+                outcome = "uploaded"
+            except ApiError as exc:
+                if exc.kind is ErrorKind.PERMANENT:
+                    reason = WAF_BLOCKED if exc.status == 403 else exc.message
+                    run.dropped.append({"name": name, "reason": reason})
+                    outcome = "dropped"
+                elif exc.kind is ErrorKind.TEMPORARY:
+                    run.held.append(name)
+                    outcome, reason = "held", exc.message
+                else:
+                    return exc
+            self._emit(action_id, name, outcome, n, len(to_send), len(content), reason)
+        return None
 
     def _held(self, action_id: str, run: _Delivered, why: str) -> Outcome:
         """A temporary failure: the next upload of this run resumes (or creates) the batch."""

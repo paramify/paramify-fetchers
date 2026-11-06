@@ -102,6 +102,7 @@ def test_dry_run_makes_no_http_calls(no_env, root, tmp_path, monkeypatch):
     first = next(e for e in events if e["event"] == "upload_file")
     assert first["reference_id"] == "EVD-X" and first["tags"] == ["Automated by Paramify Fetchers"]
     assert events[0]["files"] == 3 and events[0]["dry_run"] is True
+    assert out["plan"]["notes"] == [] and out["batches"] is None
     assert not (run / "upload_log.json").exists()
 
 
@@ -260,11 +261,68 @@ def test_missing_token_is_a_setup_error(no_env, root, tmp_path):
         api.upload_run(two_files(tmp_path), root)
 
 
-def test_api_without_batches_stops_before_planning(fake, root, tmp_path):
+def _direct_without_batches(fake, root, tmp_path, reason: str) -> None:
+    """Batches are off: every entry goes direct, the plan says why, and no batch route is read again."""
+    st = fake.add_stack("Prod")
+    ev = fake.add_evidence("EVD-X", channels=[st.id])
+    run = two_files(tmp_path)
+    out = api.upload_run(run, root)
+    assert out["ok"] is True and out["errors"] == 0 and out["uploaded"] == 2
+    entry = out["entries"]["x"]
+    assert entry["mode"] == "direct" and entry["state"] == "delivered" and entry["batch_id"] is None
+    assert entry["channel"] == "CH-1"
+    assert out["plan"]["notes"] == [
+        f"batches are off for this workspace ({reason}); every entry is sent direct, as before batches"]
+    assert out["batches"] == {"available": False, "reason": reason}
+    assert fake.calls[0][1] == "/batches"
+    assert not [c for c in fake.calls[1:] if c[1].startswith(("/batches", "/artifact-requests"))]
+    assert [a["_channelId"] for a in fake._artifacts] == [ev.channels[0].id] * 2
+    log = json.loads((run / "upload_log.json").read_text())
+    assert log["batches"] == out["batches"] and log["entries"]["x"]["mode"] == "direct"
+
+
+def test_flag_off_workspace_uploads_direct_and_says_why(fake, root, tmp_path):
+    fake.batches_flag_off()
+    _direct_without_batches(fake, root, tmp_path, "Artifact requests are not enabled for this workspace.")
+
+
+def test_old_api_without_batch_routes_uploads_direct(fake, root, tmp_path):
     fake.without_batches()
-    with pytest.raises(ApiError, match="0.14.0 or later is required"):
-        api.upload_run(two_files(tmp_path), root)
-    assert [c[1] for c in fake.calls] == ["/batches"]
+    _direct_without_batches(fake, root, tmp_path, "the API has no batch routes")
+
+
+def test_batches_on_reports_batch_mode_and_no_note(fake, root, tmp_path):
+    out = api.upload_run(two_files(tmp_path), root)
+    assert out["entries"]["x"]["mode"] == "batch"
+    assert out["plan"]["notes"] == [] and out["batches"] == {"available": True, "reason": None}
+
+
+def test_second_direct_upload_of_same_run_is_noop(fake, root, tmp_path):
+    fake.batches_flag_off()
+    run = two_files(tmp_path)
+    api.upload_run(run, root)
+    fake.calls.clear()
+    out = api.upload_run(run, root)
+    assert out["ok"] is True and out["entries"]["x"]["state"] == "noop"
+    assert out["entries"]["x"]["mode"] == "direct"
+    assert (out["uploaded"], out["skipped_duplicate"], out["errors"]) == (0, 2, 0)
+    assert not [c for c in fake.calls if c[1].endswith("/artifacts/upload")]
+    assert len(fake._artifacts) == 2
+
+
+def test_direct_then_batches_on_sends_nothing_twice(fake, root, tmp_path):
+    fake.batches_flag_off()
+    run = two_files(tmp_path)
+    first = api.upload_run(run, root)
+    assert first["entries"]["x"]["mode"] == "direct" and first["entries"]["x"]["state"] == "delivered"
+    fake.batches_flag_off(False)
+    fake.calls.clear()
+    out = api.upload_run(run, root)
+    assert out["ok"] is True and out["entries"]["x"]["state"] == "noop"
+    assert out["batches"] == {"available": True, "reason": None} and out["plan"]["notes"] == []
+    assert ("POST", "/batches", {}) not in fake.calls
+    assert not [c for c in fake.calls if c[1].endswith("/artifacts/upload")]
+    assert len(fake._artifacts) == 2 and fake._batches == []
 
 
 def test_refused_entry_is_an_error_and_not_ok(fake, root, tmp_path):
