@@ -12,6 +12,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_defender_vulnerability_findings`**
+  (`EVD-AZURE-DEFENDER-VULNERABILITY-FINDINGS`): Defender for Cloud vulnerability
+  findings below the recommendation level, read from the securityresources
+  sub-assessments in Azure Resource Graph. One row per container image (registry,
+  repository, digest) and per server with open findings by severity, fix
+  availability, latest scan and oldest open finding; the open findings themselves
+  with CVE id, severity, CVSS, package and fixed version, exploit-steps flag,
+  published date and age. Handles the MDVM (`AzureContainerRegistryVulnerability`)
+  and legacy (`ContainerRegistryVulnerability`) container schemas and
+  `ServerVulnerability`. Totals are computed by Resource Graph, so the evidence
+  cap on the listed findings (`AZURE_VULN_MAX_FINDINGS`, most severe first) never
+  changes a count. No sub-assessments reads as zero with
+  `findings_source_present: false`; a failed read leaves its section null and
+  fails the run. Reader on the subscription is enough. Maps to KSI-SCR-MON,
+  KSI-SVC-PRR and KSI-PIY-RVD.
 - **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables can be measured.**
   The query API refuses these tables. Set `basic_logs_lookback_hours`
   (`BASIC_LOGS_LOOKBACK_HOURS`, as `azure_resource_diagnostic_settings` names

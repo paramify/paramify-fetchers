@@ -128,7 +128,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `sc-4`
 
-*4 fetchers:* [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_residual_resources`](../fetchers/azure/residual_resources), [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration)
+*5 fetchers:* [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_defender_vulnerability_findings`](../fetchers/azure/defender_vulnerability_findings), [`azure_residual_resources`](../fetchers/azure/residual_resources), [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration)
 
 #### ⬜ `KSI-SVC-RUD` — Removing Unwanted Data *(optional at Low)*
 
@@ -354,13 +354,13 @@ python tools/gen_ksi_mapping.py
 
 *1 fetcher:* [`wiz_code_findings`](../fetchers/wiz/code_findings)
 
-#### ⬜ `KSI-PIY-RVD` — Reviewing Vulnerability Disclosures
+#### `KSI-PIY-RVD` — Reviewing Vulnerability Disclosures
 
 > The effectiveness of the provider's vulnerability disclosure program is persistently reviewed.
 
 *Controls:* `ra-5.11`
 
-*Organizational — evidenced by HR, training or process, not cloud config.*
+*1 fetcher:* [`azure_defender_vulnerability_findings`](../fetchers/azure/defender_vulnerability_findings)
 
 ### SCR — Supply Chain Risk  (2/2)
 
@@ -378,7 +378,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-20`, `ca-3`, `ir-6.3`, `ps-7`, `ra-5`, `sa-9`, `si-5`, `sr-5`, `sr-6`, `sr-8`
 
-*7 fetchers:* [`aws_ecr_image_scanning`](../fetchers/aws/ecr_image_scanning), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories), `fedramp_marketplace_vendor_certification_status`, `fedramp_marketplace_workspace_vendor_certification_status`, [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities), [`qualys_vulnerability_findings`](../fetchers/qualys/vulnerability_findings)
+*8 fetchers:* [`aws_ecr_image_scanning`](../fetchers/aws/ecr_image_scanning), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), [`azure_defender_vulnerability_findings`](../fetchers/azure/defender_vulnerability_findings), [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories), `fedramp_marketplace_vendor_certification_status`, `fedramp_marketplace_workspace_vendor_certification_status`, [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities), [`qualys_vulnerability_findings`](../fetchers/qualys/vulnerability_findings)
 
 ### CED — Cybersecurity Education  (1/1)
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-300 of 312 fetchers carry a mapping.
+305 of 317 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -505,7 +505,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (102)
+### azure  (103)
 
 | Fetcher | Indicators |
 |---|---|
@@ -536,6 +536,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_defender_assessments`](../fetchers/azure/defender_assessments) | `KSI-CNA-EIS`, `KSI-SVC-EIS` |
 | [`azure_defender_plans`](../fetchers/azure/defender_plans) | `KSI-CNA-EIS`, `KSI-SVC-EIS` |
 | [`azure_defender_regulatory_compliance`](../fetchers/azure/defender_regulatory_compliance) | `KSI-CNA-IBP` |
+| [`azure_defender_vulnerability_findings`](../fetchers/azure/defender_vulnerability_findings) | `KSI-PIY-RVD`, `KSI-SCR-MON`, `KSI-SVC-PRR` |
 | [`azure_devops_audit_streams`](../fetchers/azure/devops_audit_streams) | `KSI-MLA-LET` |
 | [`azure_devops_identities`](../fetchers/azure/devops_identities) | `KSI-IAM-AAM`, `KSI-IAM-JIT` |
 | [`azure_devops_permissions`](../fetchers/azure/devops_permissions) | `KSI-IAM-ELP` |
