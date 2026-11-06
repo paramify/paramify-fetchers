@@ -272,8 +272,8 @@ runs.
   `refused`, `failed` or `noop`), `mode` (`batch` or `direct`), batch id,
   status, stack, channel and artifact request.
 - `outcomes`: what each action did.
-- `batches`: whether the workspace has batches, as `{"available": true or
-  false, "reason": text or null}`. `reason` is null in a dry run.
+- `batches`: whether the workspace has batches. In a dry run, it is null. On an
+  online upload, it is `{"available": true or false, "reason": text or null}`.
 - `validators`: the validator sync summary, when you pass `--with-validators`.
   With `--dry-run`, it names the sync that the upload would do.
 
