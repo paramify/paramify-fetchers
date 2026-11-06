@@ -824,13 +824,6 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
     (
         "azure.mgmt.security",
         "SecurityCenter",
-        "security_contacts",
-        ["list"],
-        "azure/defender_plans — who Defender for Cloud notifies",
-    ),
-    (
-        "azure.mgmt.security",
-        "SecurityCenter",
         "assessments",
         ["list"],
         "azure/defender_assessments",
@@ -1601,12 +1594,6 @@ def test_operation_group_surface(
 #
 # (module, model, required fields, affected fetchers)
 REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
-    (
-        "azure.mgmt.security.models",
-        "SecurityContact",
-        ["emails", "phone", "alert_notifications", "notifications_by_role"],
-        "azure/defender_plans — security contacts; a rename reads every contact as unconfigured",
-    ),
     (
         "azure.mgmt.authorization.v2020_10_01.models",
         "RoleAssignmentScheduleInstance",

@@ -22,7 +22,9 @@ description: >
   whether a phone number is set, whether alert notifications are on and from which
   minimal severity, and whether owners or other roles are notified. The contact
   list is null (and the run fails) when it could not be read, and empty when there
-  are none. A subscription that never
+  are none. The contacts are read over raw ARM at api-version 2020-01-01-preview,
+  the newest one Azure Government offers, and either response shape (a bare list
+  or a value page) is accepted. A subscription that never
   registered the Microsoft.Security resource provider reports
   provider_registration_status: not_registered, which is valid evidence ("not in
   use") rather than a collection failure. Needs Reader (or Security Reader).

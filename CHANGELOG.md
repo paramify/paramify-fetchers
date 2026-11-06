@@ -17,6 +17,10 @@ schemas and the `paramify` CLI — not the internal code.
   alert notifications are on and from which minimal severity, and role-based
   notification. `results.security_contacts` is null (and the run fails) when the list
   could not be read, and empty when there are none. Maps to KSI-MLA-RVL as well.
+  The contacts are read over raw ARM at api-version 2020-01-01-preview, because
+  Azure Government offers only that and 2017-08-01-preview and answers with a bare
+  JSON list that azure-mgmt-security 7.0 cannot deserialize (seen on a live run);
+  both a bare list and a value page are accepted.
 - **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
   secret and certificate gets `lifetime_days` (end date minus start date, null when
   either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.

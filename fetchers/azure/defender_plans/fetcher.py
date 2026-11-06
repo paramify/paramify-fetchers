@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from arm_rest import arm_rest_client, get_json  # noqa: E402
 from azure_common import (  # noqa: E402
     Collector,
     arm_client_kwargs,
@@ -293,19 +294,40 @@ def collect_pricings(subscription_id, cred, collector: Collector) -> tuple[list[
 
 # --- security contacts (who Defender for Cloud notifies) ----------------------
 
-def project_security_contact(contact) -> dict:
-    """Read a `SecurityContact`: addresses, phone presence, alert notification settings and role routing."""
-    alerts = model_attr(contact, "alert_notifications")
-    by_role = model_attr(contact, "notifications_by_role")
+# Read over raw ARM, not azure-mgmt-security: Azure Government supports only
+# 2020-01-01-preview and 2017-08-01-preview for securityContacts, and answers the list
+# with a bare JSON array instead of a {"value": [...]} page, which the SDK cannot
+# deserialize ("Unable to deserialize to object: type"). Both shapes are accepted here.
+SECURITY_CONTACTS_API = "2020-01-01-preview"
+
+
+def _dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def project_security_contact(contact: dict) -> dict:
+    """Read one securityContacts item from the ARM JSON (2020-01-01-preview shape)."""
+    props = _dict(_dict(contact).get("properties"))
+    alerts = _dict(props.get("alertNotifications"))
+    by_role = _dict(props.get("notificationsByRole"))
     return {
-        "name": model_attr(contact, "name"),
-        "emails": model_attr(contact, "emails"),
-        "phone": model_attr(contact, "phone"),
-        "alert_notifications_state": model_attr(alerts, "state"),
-        "alert_notifications_minimal_severity": model_attr(alerts, "minimal_severity"),
-        "notifications_by_role_state": model_attr(by_role, "state"),
-        "notifications_by_role_roles": model_attr(by_role, "roles"),
+        "name": _dict(contact).get("name"),
+        "emails": props.get("emails"),
+        "phone": props.get("phone"),
+        "alert_notifications_state": alerts.get("state"),
+        "alert_notifications_minimal_severity": alerts.get("minimalSeverity"),
+        "notifications_by_role_state": by_role.get("state"),
+        "notifications_by_role_roles": by_role.get("roles"),
     }
+
+
+def security_contact_items(body) -> list:
+    """The contacts in a securityContacts response: a bare list (Azure Government) or a {"value": [...]} page."""
+    if isinstance(body, list):
+        return body
+    if isinstance(body, dict) and isinstance(body.get("value"), list):
+        return body["value"]
+    raise ValueError(f"unexpected securityContacts response shape: {type(body).__name__}")
 
 
 def security_contact_record(contact: dict) -> dict:
@@ -354,27 +376,35 @@ def summarize_security_contacts(contacts: list[dict] | None) -> dict:
 
 
 def collect_security_contacts(subscription_id, cred, collector: Collector) -> list[dict] | None:
-    """security_contacts.list(): the subscription's Defender for Cloud notification contacts.
+    """GET securityContacts over raw ARM: the subscription's Defender for Cloud notification contacts.
 
     Returns None (not []) when the read failed, so the summary reads null rather than
     "no contacts". A subscription where Microsoft.Security is not registered has no
     contacts to read and is reported as [] without a failure, matching collect_pricings.
+    A {"value": [...]} page that carries a nextLink is followed to the end.
     """
-    from azure.mgmt.security import SecurityCenter
-
-    def _client():
-        return SecurityCenter(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
-
-    client = collector.guard("security.SecurityCenter (init)", _client)
+    client = collector.guard("arm_rest.ARMPipelineClient (init)", lambda: arm_rest_client(cred))
     if client is None:
         return None
+    url = (f"/subscriptions/{subscription_id}/providers/Microsoft.Security/securityContacts"
+           f"?api-version={SECURITY_CONTACTS_API}")
+    items: list = []
+    seen: set = set()
     try:
-        contacts = [security_contact_record(project_security_contact(c)) for c in client.security_contacts.list()]
-    except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
+        while url:
+            body = get_json(client, url)
+            items.extend(security_contact_items(body))
+            url = body.get("nextLink") if isinstance(body, dict) else None
+            if url in seen:
+                raise RuntimeError("securityContacts paging repeated a nextLink")
+            if url:
+                seen.add(url)
+    except Exception as exc:  # noqa: BLE001 (boundary: classify, do not crash the run)
         if is_provider_not_registered(exc):
             return []
-        collector.record("security.security_contacts.list", exc)
+        collector.record("security.securityContacts.list", exc)
         return None
+    contacts = [security_contact_record(project_security_contact(c)) for c in items]
     return sorted(contacts, key=lambda c: c.get("name") or "")
 
 
