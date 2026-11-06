@@ -1,5 +1,5 @@
 name: azure_entra_dormant_identities
-version: 0.1.0
+version: 0.2.0
 description: >-
   Shows whether any dormant, never-used, guest or deleted user or service principal still holds an Entra directory role or an Azure role in the subscription.
 category: azure
@@ -71,10 +71,11 @@ evidence_set:
     - subscriptions.list() — picks a subscription when none is set
     - GET /subscriptions/{id} — the subscription's tenant, to tell this tenant's own apps from other tenants'
     - Microsoft Graph GET /organization — the tenant Microsoft Graph is signed in to, which must be the subscription's
-    - Microsoft Graph GET /users with sign-in activity — every user, when it was created and when it last signed in (read again without sign-in activity if that is refused)
+    - Microsoft Graph GET /users with sign-in activity — every user, when it was created and when it last signed in (read again without sign-in activity if that read fails)
     - Microsoft Graph GET /applications — when each of this tenant's app registrations was created, for the grace period of a service principal with no creation date of its own
     - Microsoft Graph GET /reports/servicePrincipalSignInActivities on the beta endpoint — when each app or managed identity last signed in
     - Microsoft Graph GET /directoryRoles and GET /directoryRoles/{id}/members (per role) — who holds each directory role now, tenant-wide; eligible (PIM) assignments and roles scoped to an administrative unit aren't read
+    - Microsoft Graph GET /directoryRoles/{id}/members/microsoft.graph.servicePrincipal (per role) — the service principals holding the role, which v1.0 /members leaves out
     - GET Microsoft.Authorization/roleDefinitions and GET Microsoft.Authorization/roleAssignments — every active Azure role assignment that applies in the subscription, including those inherited from management groups and made below it, with its role name; eligible (PIM) assignments aren't read
     - Microsoft Graph GET /groups/{id}/transitiveMembers on the beta endpoint (per group holding a role) — who holds the role through the group; beta because v1.0 member reads are known to leave out service principals
     - Microsoft Graph POST /directoryObjects/getByIds — the service principals holding a role, and which assigned principals no longer exist
@@ -97,16 +98,16 @@ evidence_set:
     - service_principals_holding_roles — Number of service principals (apps and managed identities) holding a directory role or an Azure role in the subscription; null if the roles or the lookup weren't read
 
     Who holds a role?
-    - users_holding_roles — Number of users holding a directory role or an Azure role in the subscription, directly or through a group; null if the users or the roles weren't read
+    - users_holding_roles — Number of users holding a directory role or an Azure role in the subscription, directly or through a group; only active assignments count (a role an identity is only eligible for through PIM, or one scoped to an administrative unit, isn't read); null if the users or the roles weren't read
     - users_holding_directory_roles — Number of users holding a directory role, directly or through a role-assignable group; null if the users or the directory roles weren't read
-    - users_holding_privileged_directory_roles — Number of users holding a directory role that grants tenant-wide administrative power (the list shared with azure_entra_privileged_roles); null if the users or the directory roles weren't read
+    - users_holding_privileged_directory_roles — Number of users holding a directory role on the privileged list shared with azure_entra_privileged_roles, which holds tenant-wide administrative roles and also read-only ones such as Global Reader and Security Reader, and Billing Administrator; null if the users or the directory roles weren't read
     - users_holding_azure_roles — Number of users holding an Azure role that applies in the subscription, directly or through a group; null if the users or the Azure roles weren't read
     - service_principals_holding_directory_roles — Number of service principals holding a directory role; null if the directory roles or the lookup weren't read
     - service_principals_holding_azure_roles — Number of service principals holding an Azure role that applies in the subscription; null if the Azure roles or the lookup weren't read
 
     Are enabled accounts in use?
     - enabled_users — Number of users whose account is enabled; null if the user list wasn't read
-    - guest_users — Number of guest (external) users; null if the user list wasn't read
+    - guest_users — Number of users whose user type is Guest (an external user whose user type is Member isn't counted); null if the user list wasn't read
     - dormant_users — Number of dormant users: enabled, with no successful sign-in in the last dormant_after_days days, or with none at all and created more than that many days ago; null if sign-in activity wasn't read
     - users_never_signed_in — Number of users with no sign-in attempt on record, successful or not, including new and disabled accounts; null if sign-in activity wasn't read
     - dormant_service_principals_holding_roles — Number of enabled role-holding service principals with no sign-in as a client (app-only or on behalf of a user) in the last dormant_after_days days, or with none on record and created more than that many days ago; the creation date comes from the service principal, else its app registration in this tenant; a principal with neither gets no grace, or reads unknown if the app registrations couldn't be read. One with no sign-in as a client on record counts only if it's an app registered in this tenant; the enabled rest are unknown. Null if the report, the roles or the lookup weren't read

@@ -94,7 +94,7 @@ def test_durations_round_trip_to_iso_and_hours():
     assert pim.duration_hours(None) is None
 
 
-def test_active_grants_are_marked_permanent_time_bound_or_activated():
+def test_active_grants_are_marked_permanent_time_bound_or_activated(assert_summary_documented):
     active = [
         _instance(GA, "u-break-glass", upn="bg@contoso.test"),
         _instance(GA, "u-jit", upn="jit@contoso.test", assignment_type="Activated", end=LATER),
@@ -107,6 +107,7 @@ def test_active_grants_are_marked_permanent_time_bound_or_activated():
         _instance(PRA, "u-forever", upn="forever@contoso.test"),
     ]
     results, summary = pim.build(DEFINITIONS, eligible, active, [_policy(GA), _policy(PRA)], [])
+    assert_summary_documented("azure/entra_pim_assignments", summary)
 
     by_principal = {a["principal_id"]: a for a in results["active_assignments"]}
     assert by_principal["u-break-glass"]["standing"] == "permanent"

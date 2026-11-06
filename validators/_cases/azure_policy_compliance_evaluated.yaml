@@ -13,8 +13,12 @@ cases:
     artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"provider_registration_status":"registered","evaluated_resources":1374}}}'
 
   - name: resources_evaluated_null_with_exclusions
-    expect: PASS
+    expect: FAIL
     artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"provider_registration_status":"registered","resource_exclusion_patterns":["rg:example-rg"],"resources_evaluated":null}}}'
+
+  - name: resources_evaluated_in_scope_with_exclusions
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"provider_registration_status":"registered","resource_exclusion_patterns":["rg:example-rg"],"resources_evaluated":3}}}'
 
   - name: resources_evaluated_small_positive
     expect: PASS

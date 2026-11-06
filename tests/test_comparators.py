@@ -575,13 +575,17 @@ def test_a_comparators_required_config_points_at_its_own_entry(tmp_path):
     hint = (f"set it on this entry: paramify manifest set-config {cmp} environments=<value>; "
             "a comparator ignores platforms.testcat.config")
 
-    assert api.validate(m, tmp_path) == [f"{cmp}: required config 'environments' not set ({hint})"]
+    assert api.validate(m, tmp_path) == [
+        "platforms.testcat.config: no testcat fetcher takes 'environments' (a comparator takes it, but only on its "
+        "own entry)",
+        f"{cmp}: required config 'environments' not set ({hint})"]
     _, _, events = run(tmp_path, m)
     error = next(e["error"] for e in events if e["event"] == "fetcher_error" and e["fetcher"] == cmp)
     assert hint in error
     assert [f["value"] for f in api.effective_config(m, [cmp], tmp_path)[cmp]] == [None]
 
     m["run"]["fetchers"][1]["config"] = {"environments": "production"}
+    del m["run"]["platforms"]
     assert api.validate(m, tmp_path) == []
 
 
@@ -854,6 +858,22 @@ def test_run_writes_a_whole_file_when_the_result_is_not_json(tmp_path, monkeypat
     assert code == 1
     assert payload["results"] == [] and payload["summary"] == {"records": None, "inputs_complete": True}
     assert status["code"] == "internal_error" and "cannot write the comparison: TypeError" in status["error"]
+
+
+def test_run_keeps_the_comparison_and_reports_bad_config_when_check_finds_a_bad_setting(tmp_path, monkeypatch,
+                                                                                         comparator_env):
+    monkeypatch.setenv(ci.INPUTS_ENV, str(_index(tmp_path, _inv([_envelope_file(tmp_path / "a.json")]))))
+
+    def check(inputs):
+        raise ci.ConfigError("SETTING names ['x']", [{"id": "a"}], {"records": 1, "unknown": ["x"]})
+    code = ci.run(check, output="out.json", summary_keys=("records", "unknown"))
+    payload, status = _written(*comparator_env)
+    assert code == 1 and payload["results"] == [{"id": "a"}]
+    assert payload["summary"] == {"records": 1, "unknown": ["x"], "inputs_complete": True}
+    assert payload["metadata"]["partial_failure"] is True
+    assert payload["metadata"]["api_failures"] == [{"operation": "check settings", "type": "bad_config",
+                                                    "message": "SETTING names ['x']"}]
+    assert status["code"] == "bad_config" and "SETTING names ['x']" in status["error"]
 
 
 def test_reader_needs_the_index(monkeypatch):

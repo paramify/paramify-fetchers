@@ -142,10 +142,37 @@ spaces, as `- <value> (<meaning>)`:
       - INACTIVE (turned off, so it applies to nobody)
 ```
 
+Keep each field line under about 400 characters where you can. The layout test
+stops at 800, and every fetcher's `instructions` stop at 20,000.
+
+The fetcher's tests keep the list in step with the code. Pass a summary that
+holds every field, from a full run of the code, to the `assert_summary_documented`
+fixture, with the fetcher's path written out:
+
+```python
+def test_main_writes_the_summary(monkeypatch, tmp_path, assert_summary_documented):
+    ...
+    assert_summary_documented("okta/password_policy", evidence["summary"])
+```
+
+It fails on:
+- a field the instructions don't list;
+- a listed field the summary doesn't have;
+- for a breakdown with values listed under it, a key that isn't listed, or a
+  listed value the summary doesn't hold.
+
 [`azure/alert_rules`](../fetchers/azure/alert_rules/fetcher.yaml) is a full
-example. `tests/test_contracts.py` checks this layout for the fetchers listed in
-`TEXT_FORMAT_FETCHERS`; until a platform is converted, its instructions only
-need to open with the `Script:` path.
+example. `tests/test_contracts.py` checks:
+- the layout, for the fetchers listed in `TEXT_FORMAT_FETCHERS`;
+- that a test calls `assert_summary_documented` for every fetcher whose
+  instructions list summary fields. Fetchers that listed them before the check
+  existed wait in `SUMMARY_DOCS_PENDING`, which is meant only to shrink. Its
+  count, `SUMMARY_DOCS_PENDING_MAX`, must match it, so adding a fetcher means
+  raising the count, which shows in review. A new fetcher calls the fixture
+  instead.
+
+Until a platform is converted, its instructions only need to open with the
+`Script:` path.
 
 ## 3. Write `fetcher.py` and smoke-test it
 

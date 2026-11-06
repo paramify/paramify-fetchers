@@ -1,5 +1,5 @@
 name: azure_container_registry_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   For every container registry in the subscription, reports who can reach it and who
   can pull from it: the SKU and login server, whether the shared admin account is
@@ -11,6 +11,28 @@ description: >
   policies, and the diagnostic settings that ship the registry's login and repository
   audit logs.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope,
+      as case-insensitive glob patterns listed in the manifest, each with
+      a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as
+      eastus2; a resource with no location never matches one) or
+      id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching
+      container registry is listed under excluded with the pattern and
+      left out of every count and verdict; its diagnostic settings are not
+      read. A pattern without one of these prefixes fails the run. Set it
+      once under platforms.azure.config for every Azure fetcher that has
+      this field; fetchers without it ignore it. Each item is a pattern, or a pattern with a reason. Empty: every resource is
+      in scope.
 
 supports_targets: true
 
@@ -59,3 +81,9 @@ evidence_set:
     ContainerRegistryManagementClient.registries.list(), then azure-mgmt-monitor
     MonitorManagementClient.diagnostic_settings.list(resource_uri) per registry,
     preceded by ResourceManagementClient.providers.get("Microsoft.ContainerRegistry").
+    Registries the resource_exclusions patterns take out are listed under results.excluded
+    instead, each with the pattern that matched; the summary gives resource_exclusion_patterns
+    (the configured patterns, empty when none are set), resource_exclusion_patterns_unmatched
+    (patterns that matched no registry, such as a mistyped name), excluded_registries (how many
+    the patterns took out, null if the list couldn't be read; no other count includes them) and in_scope_registries (how many
+    stayed; null if the list couldn't be read, and 0 means there are none or the patterns took out every registry).

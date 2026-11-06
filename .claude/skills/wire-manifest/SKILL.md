@@ -58,7 +58,11 @@ their checks.
 
 - **Contract** — from `describe <fetcher> --json`: required vs optional
   `secrets`, `config`, `target_schema`, and the `supports_targets` flag (fanout
-  or single). Note which secrets are `per_target`.
+  or single). Note which secrets are `per_target`, and which config fields are
+  `type: patterns` (pattern lists, such as `resource_exclusions`; `prefixes` and
+  `bare` say what each pattern may start with; `exclusion: false` marks a list
+  that shows more as it grows, such as `value_paths`, which `manifest exclude`
+  never edits: set it with `set-config`).
 - **Current manifest** — `paramify manifest show --json`
   (or read the file). Determine:
   - Is the fetcher present in `run.fetchers:` at all?
@@ -77,6 +81,11 @@ their checks.
    unknown fetcher, fanout/target mismatch (targets on a single fetcher or none
    on a fanout one), missing required config (platform or per-fetcher), and
    missing secrets including per-target ones. Treat its `errors[]` as the gap list.
+   It also refuses a pattern its list doesn't take (an unknown or missing
+   prefix, a space or comma inside one, a duplicate) and a config key nothing
+   declares. Its `notes[]` name, for each category-wide pattern list, the
+   entries that take it, the ones with their own list, and the ones that don't
+   declare the field: tell the user which evidence the exclusions cover.
 
 2. **Comparator inputs:** a comparator (`describe` shows `depends_on`) reads
    only its inputs' evidence from the same run, so every input must be in the
@@ -118,6 +127,8 @@ Build the exact command sequence from the gaps. Map each gap to one command:
 | Missing secret | `manifest set-secret <fetcher> <secret_name> <ENV_VAR>` |
 | Missing per-fetcher config | `manifest set-config <fetcher> key=value` |
 | Missing platform config | `manifest set-platform-config <category> key=value` |
+| Something out of scope (a pattern list) | `manifest exclude <category\|fetcher> <pattern> --reason "<why>"` (a category list reaches every entry without its own; a fetcher's first pattern copies the category list in, since its own list replaces it) |
+| A pattern that shouldn't be there | `manifest unexclude <category\|fetcher> <pattern>` |
 | Fanout needs targets | `manifest add-target <fetcher> field=val ... --secret name=ENV_VAR` |
 | A target's field is wrong | `manifest set-target <fetcher> <index> field=val ...` (replaces that target; its secrets are kept) |
 | Ambient-cred var stripped | `manifest set-passthrough <category> VAR [VAR ...]` |
@@ -165,6 +176,10 @@ first when several edits are involved.
 - Hand-editing the manifest YAML when a `manifest` subcommand does it (and
   re-validates).
 - Putting a **secret value** in the manifest instead of a `${env:VAR}` ref.
+- Setting a pattern list through `${env:VAR}`, a `.env` file or the shell. The
+  runner refuses a reference there and never reads one from the environment;
+  the patterns and their reasons go in the manifest, where each run records
+  them in the evidence's `metadata.config_patterns`.
 - Assuming a fetcher runs because the directory exists — it must be in
   `run.fetchers:`.
 - Treating a clean `validate` as proof the creds work or the env vars are set.

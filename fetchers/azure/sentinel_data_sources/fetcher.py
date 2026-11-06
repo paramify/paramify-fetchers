@@ -22,6 +22,7 @@ from sentinel_ingestion import (  # noqa: E402
     ALERT_PRODUCTS_QUERY,
     ALERTS_TABLE,
     DEFAULT_WINDOW_DAYS,
+    DEFENDER_XDR_CARRIES,
     INGESTION_QUERY,
     NON_SOURCE_TABLES,
     WINDOW_ENV,
@@ -70,12 +71,6 @@ DEFENDER_XDR_ALERT_PRODUCTS = (
     '"Microsoft Defender Advanced Threat Protection", "Office 365 Advanced Threat Protection", '
     '"Azure Advanced Threat Protection", "Microsoft Cloud App Security", "Microsoft 365 Defender", "Microsoft Defender XDR"'
 )
-# Defender XDR's own MtpAlerts list: the products whose alerts it carries. Defender for Cloud's and IoT's aren't among them.
-DEFENDER_XDR_CARRIES = frozenset({
-    "AzureActiveDirectory", "AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity",
-    "MicrosoftDefenderAdvancedThreatProtection", "MicrosoftThreatProtection", "OfficeATP", "OfficeIRM",
-})
-
 # Built-in connection kinds and what they fill, for a connection whose connector definition isn't installed.
 BUILT_IN_DATA_TYPES: Dict[str, List[Tuple[str, str]]] = {
     "AzureActiveDirectory": [("SecurityAlert (IPC)", 'SecurityAlert | where ProductName == "Azure Active Directory Identity Protection"')],
@@ -495,7 +490,8 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def main() -> int:
-    return run_workspaces(fetcher=NAME, logger=logger, collect=collect, summarize=summarize)
+    return run_workspaces(fetcher=NAME, logger=logger, collect=collect, summarize=summarize,
+                          resource_exclusions=True)
 
 
 if __name__ == "__main__":

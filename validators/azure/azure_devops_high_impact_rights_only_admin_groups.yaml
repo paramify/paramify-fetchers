@@ -1,0 +1,33 @@
+key: azure_devops_high_impact_rights_only_admin_groups
+name: Azure DevOps High-Impact Rights Held Only by Admin Groups
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every delivery-related security namespace was read and the identities in its permission entries
+  looked up with no partial failure, at least one permission entry exists, and no entry allows a
+  high-impact action (managing permissions or policies, deleting projects or repositories, bypassing
+  branch policies, administering TFVC, pipelines, service connections, environments, the library or
+  audit streams, and the rest the fetcher lists) to anyone outside the built-in admin groups, other
+  than the Contributors defaults (high_impact_grants_outside_admin_groups is 0). Supports
+  KSI-IAM-ELP for Azure DevOps. Covers only the projects the run kept and the collecting identity
+  can see, and fails as unknown when a Contributors grant is on a project the collecting identity
+  can't list. An identity looked up with no result counts as outside the admin groups. Does not
+  prove: who is in the admin groups (azure_devops_identities); rights only inherited from a parent
+  object; that a grant has an approved exception, so an approved grant still fails; or that a
+  creator's own grants are excluded, so a branch, environment, service connection or variable group
+  created by someone outside the admin groups fails too.
+
+# Null when a namespace or an identity couldn't be read, or a Contributors grant sits on a project the
+# collecting identity can't list, so \d+ fails rather than reading unknown as 0.
+regex: '"partial_failure":\s*false\b[\s\S]*?"entries_total":\s*[1-9]\d*,[\s\S]*?"high_impact_grants_outside_admin_groups":\s*(?<high_impact_grants_outside_admin_groups>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # high_impact_grants_outside_admin_groups
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DEVOPS-PERMISSIONS

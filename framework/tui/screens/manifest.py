@@ -18,7 +18,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, DataTable, Input, Static
 
-from framework import api
+from framework import api, patterns
 from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
 from framework.tui import kinds, palette, render
 from framework.tui.components.forms import env_name_from_ref
@@ -302,6 +302,37 @@ class ManifestPage(ButtonRowNav, Vertical):
             "help": field.get("description") or "",
         }
 
+    @staticmethod
+    def _patterns_spec(field: dict, cfg: dict, m: dict, category: Optional[str]) -> dict:
+        """A pattern list opens on the entry's own list, or on the category's, which it inherits until edited."""
+        name = field["name"]
+        where = f"platforms.{category}"
+        inherited = api.category_patterns(m, category, name)
+        n = len(inherited)
+        held = f"{n} pattern{'' if n == 1 else 's'}"
+        if name in cfg:
+            value = patterns.to_lines(cfg[name])
+            note = "this entry's own list"
+            if inherited:
+                note = f"{note}; replaces {where}'s {held}" if value else f"empty here: {where}'s {held} don't apply"
+        elif inherited:
+            value = patterns.to_lines([it.as_manifest() for it in inherited])
+            note = f"inherits {where} ({held}) until edited here"
+        else:
+            value, note = "", ""
+        return {
+            "key": name,
+            "label": name,
+            "kind": "patterns",
+            "value": value,
+            "placeholder": "one per line: pattern  # reason",
+            "required": field.get("required", False),
+            "help": api.grammar_text(field.get("prefixes") or (), field.get("bare", True)),
+            "prefixes": tuple(field.get("prefixes") or ()),
+            "bare": field.get("bare", True),
+            "note": note,
+        }
+
     # -- events ----------------------------------------------------------- #
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -415,7 +446,10 @@ class ManifestPage(ButtonRowNav, Vertical):
         entry = self._entry(use)
         cfg = entry.get("config") or {}
         secs = entry.get("secrets") or {}
-        config_specs = [self._config_spec(c, cfg.get(c["name"])) for c in d.get("config", [])]
+        category = d.get("category")
+        config_specs = [self._patterns_spec(c, cfg, m, category) if c.get("type") == patterns.TYPE
+                        else self._config_spec(c, cfg.get(c["name"])) for c in d.get("config", [])]
+        lists = {c["name"] for c in d.get("config", []) if c.get("type") == patterns.TYPE}
         secret_specs = [
             {
                 "key": s["name"], "label": s["name"], "kind": "secret",
@@ -436,7 +470,10 @@ class ManifestPage(ButtonRowNav, Vertical):
             if result is None:
                 return
             for k, v in (result.get("config") or {}).items():
-                api.set_fetcher_config(m, use, k, v)
+                if k in lists:
+                    api.set_pattern_list(m, use, k, patterns.parse(v)[0], category)
+                else:
+                    api.set_fetcher_config(m, use, k, v)
             for name, env in (result.get("secrets") or {}).items():
                 api.set_secret(m, use, name, env)
             self._autosave()

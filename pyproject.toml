@@ -31,7 +31,9 @@ dependencies = [
 # same app on 1.x.
 tui = ["textual>=8,<9"]
 checkov = ["checkov"]
-dev = ["pytest", "pytest-xdist", "ruff", "mypy"]
+# cryptography: tests/test_azure_entra_authentication_policy.py builds test
+# certificates with it, and the `test` job installs dev but not the azure extra.
+dev = ["pytest", "pytest-xdist", "ruff", "mypy", "cryptography>=42.0.0,<51"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every
 # one producing wrong or empty evidence rather than an error. Keep the two files
@@ -50,6 +52,8 @@ azure = [
     "azure-mgmt-security>=7.0.0,<8",
     "azure-mgmt-authorization>=4.0.0,<5",
     "msgraph-sdk>=1.61.0,<2",
+    # Reads the subject and expiry of the CAs trusted for certificate sign-in.
+    "cryptography>=42.0.0,<51",
     "azure-mgmt-sql>=4.0.0,<5",
     "azure-mgmt-rdbms>=10.1.1,<11",
     "azure-mgmt-postgresqlflexibleservers>=2.0.0,<3",
@@ -66,7 +70,7 @@ azure = [
     "azure-mgmt-mongocluster>=1.2.0,<2",
     "azure-mgmt-kusto>=4.0.0,<5",
     "azure-mgmt-eventhub>=12.0.0,<13",
-    "azure-mgmt-compute>=38.2.0,<39",
+    "azure-mgmt-compute>=38.2.0,<40",
     "azure-mgmt-containerservice>=41.5.0,<42",
     "azure-mgmt-containerregistry>=15.0.0,<16",
     "azure-mgmt-keyvault>=14.0.1,<15",

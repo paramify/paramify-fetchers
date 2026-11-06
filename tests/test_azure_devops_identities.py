@@ -208,6 +208,21 @@ def test_collects_the_organization_and_exits_zero(tmp_path):
     assert s["guest_privileged_users"] == ["carol@partner.example"]
 
 
+def test_the_summary_matches_the_instructions(assert_summary_documented):
+    def person(origin):
+        return {"kind": mod.HUMAN, "guest": False, "access_level": None, "origin": origin, "can_sign_in": True,
+                "deleted_in_origin": False, "principal_name": f"{origin}@example.com", "display_name": "", "descriptor": origin,
+                "inactive": False, "never_accessed": False}
+
+    holder = {"name": "a@example.com", "descriptor": "a", "kind": mod.HUMAN, "through_entra_group": False,
+              "inactive": False, "guest": False}
+    group = {"name": "Admins", "members_read": True, "computed": False, "entra_group": False, "members_complete": True,
+             "effective_members": [holder], "entra_groups": []}
+    read = dict.fromkeys(("users", "entitlements", "groups", "service_principals"), True)
+    summary = mod.summarize([person("aad"), person("msa"), person(None)], [group], [group], 90, read)
+    assert_summary_documented("azure/devops_identities", summary)
+
+
 def test_privileged_members_carry_the_path_and_whether_it_crosses_an_entra_group(tmp_path):
     _, evidence, _, _ = run(tmp_path)
     pca = privileged_group(evidence, "[contoso]\\Project Collection Administrators")
