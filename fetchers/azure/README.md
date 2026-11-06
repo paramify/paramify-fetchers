@@ -358,7 +358,7 @@ Azure DevOps:
 | `azure_devops_identities` | Every user's access level, groups and last access, inactive users, and who holds privileged Azure DevOps groups, directly or through Entra groups |
 | `azure_devops_permissions` | Who is allowed or denied what at organization, project, repository, pipeline, environment and service-connection scope, high-impact rights outside the admin groups, and who may bypass Git branch policies |
 | `azure_devops_service_connections` | How each service connection signs in (federated or a stored secret), its service principal, which pipelines may use it and which runs did, and whether variable group secrets live in Key Vault |
-| `azure_devops_work_items` | Change and security work items with state, owner, planned date and approval, the share of change items needing approval that are approved, whether the requester or author approved them, linked changesets, commits and pull requests, and open, overdue or unassigned security work |
+| `azure_devops_work_items` | Change and security work items with state, owner, planned date and approval, the share of finished change items needing approval that are approved, whether the requester or author approved them, linked changesets, commits and pull requests, and open, overdue or unassigned security work |
 
 ## Notes
 
