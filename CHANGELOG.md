@@ -12,6 +12,54 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables can be measured.**
+  The query API refuses these tables. Set `basic_logs_lookback_hours`
+  (`BASIC_LOGS_LOOKBACK_HOURS`, as `azure_resource_diagnostic_settings` names
+  it) above 0, and each one is read through the Log Analytics `/search` endpoint
+  (`AzureRestClient.search()`), one table at a time, for its newest record time
+  and record count over that many hours. The hours are capped at the ingestion
+  window and at the 720 `/search` reaches. The setting is off (0) by default,
+  because `/search` bills per GB scanned, so the query asks for nothing else. A
+  value of 0 or less leaves it off, and so does one that isn't a whole number,
+  with a warning. Off, nothing changes from 0.3.0: these tables are not
+  measured (which is not unknown), aren't counted as sources, and leave their
+  connectors unmeasured. On:
+  - **A table with data** joins `tables` and counts as a source, so
+    `sources_ingesting` and `min_sources_ingesting` can rise.
+  - **Connectors.** A connector whose data type is the whole table reads
+    connected or not connected. One that filters a table with data stays
+    unmeasured, since answering it would bill another scan.
+  - **An empty table** is measured only when the search covers the whole
+    window (an ingestion window of 30 days or less, since `/search` reaches 30
+    days). With fewer hours, it stays not measured.
+  - **A table new to the Auxiliary plan.** After a table is created on, or
+    switched to, the Auxiliary plan, a search spanning the date its lake data
+    starts answers with a `PartialLakeDataWarning`, until that date is older
+    than the hours searched (up to the whole window). The table is then
+    searched again in two parts, cut exactly at that date, and the answers are
+    combined (newest record time, summed count), with the date in the table's
+    new `lake_data_start` field. If `/search` includes both ends of an
+    interval, a record stamped exactly at that date counts in both parts; only
+    the table's `records` can be off by it. When the warning names no date,
+    names two different dates or names one outside the hours searched, or when
+    a part still warns, the first answer's newest record time stands, its count
+    reads null, and a table with nothing found is not measured. Either way the
+    workspace's `notes` say so.
+  - **A failed search**, or one that returns no result row, leaves its table
+    unmeasured, lists it in `tables_search_failed` and fails the run. Any
+    partial error other than that warning counts as failed. `sources_ingesting`
+    then reads null, as it does when the table plans couldn't be read.
+
+  Every table gains a `plan` field. Each workspace gains `tables_searched` and
+  `tables_search_failed`. `tables_not_measured` lists the Basic and Auxiliary
+  tables that weren't measured, for whatever reason. The summary gains
+  `basic_logs_lookback_hours`, the hours each table is searched over (0 when
+  off), and the fetcher's tests now check every summary field against its
+  instructions. The shared Azure query client's `QueryError` now carries the
+  error's `details[]` and a partial error's result. Its message is unchanged,
+  so every check that reads it (a missing table, the failure codes) reads the
+  same.
+
 - **Qualys VMDR fetchers, a new `qualys` category.** Four evidence fetchers read
   the Qualys VM/PC XML API with one read-only API user (Basic auth, the
   `X-Requested-With` header Qualys requires):

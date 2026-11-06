@@ -277,7 +277,6 @@ SUMMARY_DOCS_PENDING = (
     "azure/rbac_role_assignments",
     "azure/resource_diagnostic_settings",
     "azure/sentinel_analytics_rules",
-    "azure/sentinel_data_sources",
     "azure/sentinel_incidents",
     "azure/sentinel_playbooks",
     "azure/service_availability",
@@ -303,7 +302,7 @@ SUMMARY_DOCS_PENDING = (
     "oci/vault_keys",
     "oci/zpr_policies",
 )
-SUMMARY_DOCS_PENDING_MAX = 48
+SUMMARY_DOCS_PENDING_MAX = 47
 MAX_DESCRIPTION_WORDS = 30
 MAX_INSTRUCTIONS_CHARS = 20_000
 MAX_FIELD_LINE_CHARS = 800
