@@ -27,7 +27,11 @@ schemas and the `paramify` CLI — not the internal code.
   `findings_source_present: false`; a failed read leaves its section null and
   fails the run. Reader on the subscription is enough. Ages count from each
   CVE's published date, not from first detection, which sub-assessments do not
-  carry. Maps to KSI-SCR-MON and KSI-SVC-EIS.
+  carry. Each finding is keyed to the Azure resource its sub-assessment sits
+  under (the registry or machine), not to `resourceDetails.id`, which is a
+  repository path in the legacy schema; exclusions match that resource, and
+  `open_findings_in_scope` gives the open count after exclusions. Only
+  CVE-shaped ids are reported as CVEs. Maps to KSI-SCR-MON and KSI-SVC-EIS.
 - **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables can be measured.**
   The query API refuses these tables. Set `basic_logs_lookback_hours`
   (`BASIC_LOGS_LOOKBACK_HOURS`, as `azure_resource_diagnostic_settings` names
