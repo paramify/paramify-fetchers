@@ -27,7 +27,7 @@ schemas and the `paramify` CLI — not the internal code.
   `findings_source_present: false`; a failed read leaves its section null and
   fails the run. Reader on the subscription is enough. Ages count from each
   CVE's published date, not from first detection, which sub-assessments do not
-  carry. Each finding is keyed to the Azure resource its sub-assessment sits
+  carry; each finding's `last_scanned_at` is the latest assessment time. Each finding is keyed to the Azure resource its sub-assessment sits
   under (the registry or machine), not to `resourceDetails.id`, which is a
   repository path in the legacy schema; exclusions match that resource, and
   `open_findings_in_scope` gives the open count after exclusions. Only
