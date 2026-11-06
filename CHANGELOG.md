@@ -1885,6 +1885,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_key_vault_key_rotation` 0.5.0: unlisted vaults no longer read as zero expired certificates.**
+  `expired_certificates` and `certificates_expiring_within_30_days` are null when any
+  in-scope vault's certificates could not be listed (refused with 401 or 403, failed, or
+  no data-plane address), where they read 0 and let a check pass with nothing read. A
+  refused list still exits 0 and shows in `certificate_not_authorized_vaults`. New
+  `certificates_without_expiry` counts listed certificates with no expiry date, which
+  are in neither expiry count.
+
 - **`azure_app_service_backups` 0.3.1: an app with no restore point misses the RPO.**
   On a plan that supports backups, an app with no restore point at all, when both the
   restore-point read and the backup-history read succeeded, now reads
