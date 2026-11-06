@@ -517,7 +517,8 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
     tagged = [i for i in items if "tag" in i["selected_by"]]
     tagged_open = [i for i in tagged if i["open"]]
     history = all(i["approval_read"] for i in change)
-    needing = [i for i in change if i["approval_required"]]
+    # An open item may still be waiting on its approval, so only finished ones are judged.
+    needing = [i for i in finished if i["approval_required"]]
     needing_approved = sum(1 for i in needing if i["approval"])
     # Approved items with linked changes, and those whose every linked change was read.
     linked = [i for i in change if i["approval"] and has_change(i)]
@@ -540,9 +541,10 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
         "change_items": known(len(change)),
         "change_items_finished": known(len(finished)),
         "change_items_approved": known(sum(1 for i in change if i["approval"]), history),
-        "change_items_needing_approval": known(len(needing)),
-        "change_items_needing_approval_approved": known(needing_approved, history),
-        "change_items_approved_percentage": known(coverage_percentage(needing_approved, len(needing)), history),
+        "finished_change_items_needing_approval": known(len(needing)),
+        "finished_change_items_needing_approval_approved": known(needing_approved, history),
+        "finished_change_items_approved_percentage": known(coverage_percentage(needing_approved, len(needing)),
+                                                           history),
         "finished_change_items_without_approval": known(ids_of(i for i in finished if not i["approval"]), history),
         "change_items_approved_by_requester": known(ids_of(i for i in change if i["approved_by_requester"]), history),
         "change_items_with_linked_changes": known(sum(1 for i in change if has_change(i))),

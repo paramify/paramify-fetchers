@@ -31,10 +31,12 @@ schemas and the `paramify` CLI — not the internal code.
     approval. Each item gains `approval_required`, and the results' `selection`
     records both settings.
   - **Summary.** `approval_types`, `approval_mentions`,
-    `change_items_needing_approval`, `change_items_needing_approval_approved` and
-    `change_items_approved_percentage` (whole number; 0 when no item needs an
-    approval; null when a project's items or any change item's history or
-    comments couldn't be read). The tests now check every summary field against
+    `finished_change_items_needing_approval`,
+    `finished_change_items_needing_approval_approved` and
+    `finished_change_items_approved_percentage`, over finished change items only,
+    since an open one may still be waiting on its approval (whole number; 0 when
+    no finished item needs an approval; null when a project's items or any change
+    item's history or comments couldn't be read). The tests now check every summary field against
     the instructions.
   - `examples/azure_devops_change_approvals.yaml` shows the settings.
 

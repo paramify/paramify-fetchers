@@ -5,9 +5,9 @@
 #   export AZURE_DEVOPS_PAT=<token with Work Items, Code, and Project and Team (all Read)>
 #
 # azure_devops_work_items collects the work_item_types as change records. Only the
-# approval_types among them count toward change_items_approved_percentage; the
-# others (here, pre-approved standard changes) are collected and their approval
-# recorded, but leave the percentage alone. A name in approval_types that isn't in
+# approval_types among them count toward finished_change_items_approved_percentage,
+# once finished; the others (here, pre-approved standard changes) are collected and
+# their approval recorded, but leave the percentage alone. A name in approval_types that isn't in
 # work_item_types fails the run (bad_config).
 #
 # An approval is a move into an approval_states state, or a comment line matching

@@ -266,8 +266,9 @@ def test_collects_change_and_security_items_and_exits_zero(tmp_path):
     assert (s["change_items"], s["change_items_finished"], s["change_items_approved"]) == (3, 2, 2)
     # Every selected type needs an approval when approval_types is empty.
     assert s["approval_types"] == ["Change Request"]
-    assert (s["change_items_needing_approval"], s["change_items_needing_approval_approved"]) == (3, 2)
-    assert s["change_items_approved_percentage"] == 66
+    # Only finished items are judged: 102 is approved but still open, so it's left out.
+    assert (s["finished_change_items_needing_approval"], s["finished_change_items_needing_approval_approved"]) == (2, 1)
+    assert s["finished_change_items_approved_percentage"] == 50
     assert s["finished_change_items_without_approval"] == [103] and s["change_items_approved_by_requester"] == []
     assert s["change_items_with_linked_changes"] == 2
     assert s["finished_change_items_without_linked_change"] == [103]
@@ -644,8 +645,9 @@ def test_a_mention_approval_counts_only_when_on_and_a_later_rejection_withdraws_
     assert work_item(evidence, 105)["approval"] is None
     s = evidence["summary"]
     assert s["finished_change_items_without_approval"] == ([103, 105] if on else [103, 104, 105])
-    assert (s["change_items_needing_approval"], s["change_items_needing_approval_approved"]) == (5, 3 if on else 2)
-    assert s["change_items_approved_percentage"] == (60 if on else 40)
+    assert (s["finished_change_items_needing_approval"],
+            s["finished_change_items_needing_approval_approved"]) == (4, 2 if on else 1)
+    assert s["finished_change_items_approved_percentage"] == (50 if on else 25)
 
 
 @pytest.mark.parametrize("mentions, pattern, approves", [
@@ -687,10 +689,10 @@ def test_only_approval_types_count_toward_the_percentage(tmp_path, monkeypatch):
     s = evidence["summary"]
     assert s["approval_types"] == ["Normal Change", "Emergency Change"]
     assert evidence["results"]["selection"]["approval_types"] == ["Normal Change", "Emergency Change"]
-    # The approved standard change counts in change_items_approved but not toward the percentage.
+    # The approved standard change counts in change_items_approved but not toward the percentage, nor does open 302.
     assert (s["change_items"], s["change_items_approved"]) == (5, 3)
-    assert (s["change_items_needing_approval"], s["change_items_needing_approval_approved"]) == (4, 2)
-    assert s["change_items_approved_percentage"] == 50
+    assert (s["finished_change_items_needing_approval"], s["finished_change_items_needing_approval_approved"]) == (3, 2)
+    assert s["finished_change_items_approved_percentage"] == 66
 
 
 def test_a_tag_only_item_never_needs_approval(tmp_path):
@@ -713,8 +715,8 @@ def test_no_item_needing_approval_reads_zero_percent(tmp_path, monkeypatch):
     monkeypatch.setenv(mod.APPROVAL_TYPES_ENV, "Release")
     _, evidence, _, _, _ = run(tmp_path)
     s = evidence["summary"]
-    assert (s["change_items"], s["change_items_needing_approval"]) == (3, 0)
-    assert (s["change_items_needing_approval_approved"], s["change_items_approved_percentage"]) == (0, 0)
+    assert (s["change_items"], s["finished_change_items_needing_approval"]) == (3, 0)
+    assert (s["finished_change_items_needing_approval_approved"], s["finished_change_items_approved_percentage"]) == (0, 0)
 
 
 def test_unread_history_leaves_the_percentage_unknown_not_zero(tmp_path):
@@ -723,8 +725,9 @@ def test_unread_history_leaves_the_percentage_unknown_not_zero(tmp_path):
     code, evidence, _, _, _ = run(tmp_path, fake)
     s = evidence["summary"]
     assert code == 1 and s["approval_history_collected"] is False
-    assert s["change_items_needing_approval"] == 3
-    assert s["change_items_needing_approval_approved"] is None and s["change_items_approved_percentage"] is None
+    assert s["finished_change_items_needing_approval"] == 2
+    assert s["finished_change_items_needing_approval_approved"] is None
+    assert s["finished_change_items_approved_percentage"] is None
 
 
 def test_an_unlisted_project_leaves_the_percentage_unknown(tmp_path):
@@ -732,4 +735,4 @@ def test_an_unlisted_project_leaves_the_percentage_unknown(tmp_path):
     fake.routes[("POST", f"/contoso/{P}/_apis/wit/wiql")] = err(403, "TF401019: no access")
     _, evidence, _, _, _ = run(tmp_path, fake)
     s = evidence["summary"]
-    assert s["change_items_needing_approval"] is None and s["change_items_approved_percentage"] is None
+    assert s["finished_change_items_needing_approval"] is None and s["finished_change_items_approved_percentage"] is None
