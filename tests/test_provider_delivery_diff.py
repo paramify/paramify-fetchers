@@ -23,6 +23,7 @@ from framework.paramify.resources import (
     Resources,
     Stack,
 )
+from framework.paramify.version import FLAG_OFF, Capability
 from framework.sync.model import UNKNOWN, Plan, Ref, SyncContext
 from framework.sync.providers import waf
 from framework.sync.providers.delivery import DeliveryProvider, EntryObserved
@@ -30,10 +31,15 @@ from framework.sync.providers.delivery_routing import (
     DirectRoute,
     Refusal,
     attribute,
+    delivered_files,
     resolve_channel,
     resolve_request,
 )
-from framework.sync.providers.desired import DeliveryFile, EntryDesired
+from framework.sync.providers.desired import (
+    DEFAULT_NO_REQUEST,
+    DeliveryFile,
+    EntryDesired,
+)
 from framework.sync.state import RunState
 from tests.test_sync_desired import build, env, inv
 
@@ -75,12 +81,12 @@ def write_file(tmp_path: Path, name: str, payload=None, skip: Optional[str] = No
 
 
 def entry(tmp_path, key="aws_x", use="aws_x", *, files=("a.json", "b.json"), stack=None, stack_name=None,
-          no_request="refuse", recorded=None, run_id="R1", ref="EVD-12") -> EntryDesired:
+          no_request="refuse", recorded=None, run_id="R1", ref="EVD-12", delivery="auto") -> EntryDesired:
     built = tuple(f if isinstance(f, DeliveryFile) else write_file(tmp_path, f, key=key) for f in files)
     return EntryDesired(
         entry_key=key, use=use, run_id=run_id, reference_id=ref, evidence_set={"reference_id": ref, "name": "Set 12"},
         category="aws", approval="SUBMISSION_WITH_PASSING_VALIDATORS", stack=stack, stack_name=stack_name,
-        no_request=no_request, files=built, recorded_batch_id=recorded,
+        no_request=no_request, files=built, recorded_batch_id=recorded, delivery=delivery,
     )
 
 
@@ -92,19 +98,61 @@ def artifact(name="a.json", bid="bt-12", note_text=None, created="2026-10-29T10:
     return Artifact(f"af-{name}-{bid}", name, note(entry="aws_x") if note_text is None else note_text, bid, created, ())
 
 
-def observed(ev=None, *, stacks=(), requests=(AR_NOW,), current=("ar-41",), batches=(), artifacts=None):
+def observed(ev=None, *, stacks=(), requests=(AR_NOW,), current=("ar-41",), batches=(), artifacts=None, found=()):
     return EntryObserved(
         evidence=ev, stacks=list(stacks), requests=list(requests), current_ids=set(current),
-        batches=list(batches), artifacts=dict(artifacts or {}),
+        batches=list(batches), artifacts=dict(artifacts or {}), found=list(found),
     )
 
 
-def provider() -> DeliveryProvider:
-    return DeliveryProvider(today=lambda: TODAY)
+BATCHES_OFF = Capability(False, FLAG_OFF)
 
 
-def plan_one(e: EntryDesired, obs):
-    [action] = provider().diff([e], {e.entry_key: obs})
+def provider(capability: Optional[Capability] = None) -> DeliveryProvider:
+    return DeliveryProvider(today=lambda: TODAY, capability=capability)
+
+
+def plan_one(e: EntryDesired, obs, capability: Optional[Capability] = None):
+    [action] = provider(capability).diff([e], {e.entry_key: obs})
+    return action
+
+
+class RecordingReader:
+    """A reader that records each method it is asked for and answers from canned data."""
+
+    def __init__(self, ev: Optional[EvidenceSet], *, stacks=(), requests=(), current=(), found=()):
+        self.ev, self.stacks_, self.requests, self.current = ev, list(stacks), list(requests), set(current)
+        self.found = list(found)
+        self.calls: list = []
+
+    def evidence_by_reference(self, refs):
+        self.calls.append("evidence_by_reference")
+        return {self.ev.reference_id: self.ev} if self.ev is not None and self.ev.reference_id in refs else {}
+
+    def stacks(self):
+        self.calls.append("stacks")
+        return self.stacks_
+
+    def artifacts(self, evidence_id, **kw):
+        self.calls.append("artifacts")
+        return self.found
+
+    def artifact_requests(self, evidence_id, *, current=None):
+        self.calls.append("artifact_requests")
+        return [r for r in self.requests if r.id in self.current] if current else self.requests
+
+    def batches(self, **kw):
+        self.calls.append("batches")
+        return []
+
+    def batch(self, batch_id):
+        self.calls.append("batch")
+        raise AssertionError("no batch is read in these tests")
+
+
+def plan_read(e: EntryDesired, reader: RecordingReader, capability: Optional[Capability] = None):
+    p = provider(capability)
+    [action] = p.diff([e], p.observe([e], reader))
     return action
 
 
@@ -687,3 +735,113 @@ def test_every_signature_drops(tmp_path, bad):
     f = write_file(tmp_path, "x.json", payload={"v": f"a {bad} b"})
     a = plan_one(entry(tmp_path, files=("a.json", f)), observed(evidence()))
     assert [d["original_file_name"] for d in a.payload["dropped"]] == ["x.json"]
+
+
+# ---- direct delivery --------------------------------------------------------
+
+def test_direct_when_batches_off_sends_the_routed_channel_id(tmp_path):
+    a = plan_one(entry(tmp_path, ref="EVD-X"), observed(evidence(CH_P)), BATCHES_OFF)
+    assert a.verb == "deliver" and a.payload["target"] == "DIRECT"
+    assert a.payload["channel_id"] == "ch-1"
+    assert a.payload["direct_reason"] == "batches are off for this workspace"
+    assert a.payload["evidence_id"] == "ev-1"
+    assert a.payload["artifact_request_id"] is None and a.payload["planned_current"] is False
+    assert a.payload["resume_batch_id"] is None
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json", "b.json"]
+    assert a.changes == {"stack": {"id": "st-1", "name": None}, "channel": "CHN-1", "target": "DIRECT"}
+    assert a.summary == "deliver 2 files to EVD-X direct (channel CHN-1): batches are off for this workspace"
+    assert a.warnings == []
+
+
+def test_direct_when_batches_off_and_no_channel(tmp_path):
+    a = plan_one(entry(tmp_path), observed(evidence()), BATCHES_OFF)
+    assert a.verb == "deliver" and a.payload["target"] == "DIRECT"
+    assert a.payload["channel_id"] is None
+    assert a.changes == {"stack": None, "channel": None, "target": "DIRECT"}
+    assert "(no channel)" in a.summary
+    assert a.summary == "deliver 2 files to EVD-12 direct (no channel): batches are off for this workspace"
+
+
+def test_direct_new_set_targets_ref_with_no_channel(tmp_path):
+    a = plan_one(entry(tmp_path), observed(None), BATCHES_OFF)
+    assert a.verb == "deliver" and a.payload["target"] == "DIRECT"
+    assert a.payload["evidence_id"] == Ref("evidence_sets/EVD-12", "id")
+    assert a.payload["channel_id"] is None
+    rt = Plan.from_json(json.loads(json.dumps(Plan([a]).to_json())))
+    assert rt.actions[0].payload == a.payload
+
+
+def test_direct_mode_keeps_channel_refusals(tmp_path):
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P, CH_G), stacks=[PROD, GOV]), BATCHES_OFF)
+    assert a.verb == "refuse"
+    assert a.summary == "EVD-12 has 2 channels and no stack is configured"
+
+
+def test_direct_mode_reads_no_requests_or_batches(tmp_path):
+    reader = RecordingReader(evidence(CH_P, CH_G), stacks=[PROD, GOV], requests=[AR_NOW], current=["ar-41"])
+    a = plan_read(entry(tmp_path, stack="Prod"), reader, BATCHES_OFF)
+    assert a.verb == "deliver" and a.payload["target"] == "DIRECT" and a.payload["channel_id"] == "ch-1"
+    assert reader.calls == ["evidence_by_reference", "stacks", "artifacts"]
+
+
+def test_delivery_direct_setting_with_batches_on(tmp_path):
+    reader = RecordingReader(evidence(CH_P), requests=[AR_NOW], current=["ar-41"])
+    a = plan_read(entry(tmp_path, delivery="direct"), reader, Capability(True, None))
+    assert a.verb == "deliver" and a.payload["target"] == "DIRECT"
+    assert a.payload["direct_reason"] == "delivery: direct" and a.payload["channel_id"] == "ch-1"
+    assert a.summary == "deliver 2 files to EVD-12 direct (channel CHN-1): delivery: direct"
+    assert "artifact_requests" not in reader.calls
+    assert "batches" not in reader.calls and "batch" not in reader.calls
+
+
+def test_no_request_direct_falls_back_with_warning(tmp_path):
+    reader = RecordingReader(evidence(CH_P), requests=[], current=[])
+    a = plan_read(entry(tmp_path, no_request=DEFAULT_NO_REQUEST), reader)
+    assert a.verb == "deliver" and a.payload["target"] == "DIRECT"
+    assert a.payload["direct_reason"] == "CHN-1 has no artifact request"
+    assert a.payload["channel_id"] == "ch-1"
+    assert a.warnings == ["CHN-1 has no artifact request; sent direct, as before batches"]
+    assert a.summary == "deliver 2 files to EVD-12 direct (channel CHN-1): CHN-1 has no artifact request"
+    assert "artifact_requests" in reader.calls  # routing had to look
+    assert "batches" not in reader.calls and "batch" not in reader.calls
+
+
+def test_direct_noop_when_every_file_is_on_the_set(tmp_path):
+    on_set = [artifact("a.json", bid=None), artifact("b.json", bid="bt-9")]
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), found=on_set), BATCHES_OFF)
+    assert a.verb == "noop" and a.summary == "already delivered (2 files)"
+    assert a.payload["target"] == "DIRECT" and a.payload["files"] == []
+
+
+def test_direct_sends_only_missing_files(tmp_path):
+    other_run = artifact("b.json", bid=None, note_text=note(run_id="R0", entry="aws_x"))
+    on_set = [artifact("a.json", bid=None), other_run]
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), found=on_set), BATCHES_OFF)
+    assert a.verb == "deliver" and a.payload["target"] == "DIRECT"
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["b.json"]
+    assert a.summary == "deliver 1 file to EVD-12 direct (channel CHN-1): batches are off for this workspace"
+
+
+def test_no_request_direct_noop_counts_every_file_on_the_set(tmp_path):
+    on_set = [artifact("a.json", bid=None), artifact("b.json", bid="bt-9")]
+    obs = observed(evidence(CH_P), requests=[], current=[], found=on_set)
+    obs.before_batches = ["a.json"]  # as observe reads it: the file with no batch
+    a = plan_one(entry(tmp_path, no_request="direct"), obs)
+    assert a.verb == "noop" and a.summary == "already delivered (2 files)"
+    assert a.payload["target"] == "DIRECT" and a.payload["files"] == []
+
+
+def test_evidence_level_batch_still_reports_no_channel(tmp_path):
+    a = plan_one(entry(tmp_path, stack="Prod", no_request="evidence"),
+                 observed(evidence(CH_P), stacks=[PROD], requests=[], current=[]))
+    assert a.verb == "deliver" and a.payload["target"] == "EVIDENCE"
+    assert a.changes["channel"] is None and a.changes["stack"] is None
+    assert "channel_id" not in a.payload
+
+
+def test_delivered_files_counts_with_or_without_a_batch(tmp_path):
+    e = entry(tmp_path)
+    arts = [artifact("a.json", bid=None), artifact("b.json", bid="bt-9"),
+            artifact("c.json", bid=None, note_text=note(run_id="R0", entry="aws_x")),
+            artifact("a.json", bid="bt-10")]
+    assert delivered_files(arts, e) == ["a.json", "b.json"]

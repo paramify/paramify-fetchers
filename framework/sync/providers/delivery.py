@@ -12,6 +12,12 @@ For each entry, in this order (the first refusal ends the entry):
    no-op;
 4. WAF: a file the production WAF would block is dropped at plan time.
 
+An entry is sent direct (the route before batches: no batch, no submit) when
+the workspace has no batches or the entry says `delivery: direct`; then it
+reads no artifact requests and no batches. It is also sent direct when step 2
+finds no request and `no_request` is `direct`. A direct entry keeps step 1,
+and sends only the files of this run that are not on the set yet.
+
 The rules live in `delivery_routing` as pure functions; `diff` composes them.
 
 Apply, per `deliver` action: re-check that a new batch's request is still
@@ -38,6 +44,7 @@ from framework.paramify.resources import (
     Reader,
     Stack,
 )
+from framework.paramify.version import Capability
 from framework.sync.model import UNKNOWN, Action, Outcome, Ref, SyncContext
 from framework.sync.providers import waf
 from framework.sync.providers.delivery_routing import (
@@ -46,6 +53,7 @@ from framework.sync.providers.delivery_routing import (
     Refusal,
     attribute,
     delivered_before_batches,
+    delivered_files,
     own_batch_ids,
     resolve_channel,
     resolve_request,
@@ -65,6 +73,8 @@ EVIDENCE_LEVEL_WARNING = "evidence-level batch: does not count toward the soluti
 ALL_DROPPED = "every file was dropped"
 BEFORE_BATCHES = "already delivered before batches"
 WAF_BLOCKED = "blocked by the production WAF"
+BATCHES_OFF = "batches are off for this workspace"
+DELIVERY_DIRECT = "delivery: direct"
 _FAILING = ("FAIL", "ERROR")
 # How far along a batch is: a status read back never moves a batch backwards.
 _STATUS_RANK = {"OPEN": 0, "REJECTED": 0, "SUBMITTED": 1, "APPROVED": 2}
@@ -98,6 +108,8 @@ class EntryObserved:
     artifacts: Dict[str, List[Artifact]] = field(default_factory=dict)  # batch id -> artifacts
     # This run's files the pre-batch uploader already sent (their artifacts have no batch).
     before_batches: List[str] = field(default_factory=list)
+    # This entry's artifacts on the set, from the read by file name (any run, any batch).
+    found: List[Artifact] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -105,6 +117,7 @@ class _Route:
     channel: Optional[Channel]
     request: Optional[ArtifactRequest]  # None: deliver on the evidence set
     warning: Optional[str]
+    direct_reason: Optional[str] = None  # set: send direct, not in a batch
 
 
 @dataclass
@@ -133,16 +146,23 @@ class _Delivered:
         return self.batch_reference or self.batch_id or "the batch"
 
 
-def _route(entry: EntryDesired, obs: EntryObserved, today: date) -> _Route | Refusal:
-    """Steps 1 and 2: channel, then artifact request. A set that does not exist yet has no channels."""
+def _route(entry: EntryDesired, obs: EntryObserved, today: date, direct: Optional[str]) -> _Route | Refusal:
+    """Steps 1 and 2: channel, then artifact request. A set that does not exist yet has no channels.
+
+    `direct` (a reason) skips step 2: the entry is sent direct on the routed channel.
+    """
     if obs.evidence is None:
-        return _Route(None, None, None)
+        return _Route(None, None, None, direct)
     channel = resolve_channel(entry, obs.evidence, obs.stacks)
-    if channel is None or isinstance(channel, Refusal):
-        return _Route(None, None, None) if channel is None else channel
+    if isinstance(channel, Refusal):
+        return channel
+    if direct is not None:
+        return _Route(channel, None, None, direct)
+    if channel is None:
+        return _Route(None, None, None)
     request = resolve_request(entry, channel, obs.requests, obs.current_ids, today)
     if isinstance(request, DirectRoute):
-        return Refusal(request.reason, "direct delivery arrives in the next change")
+        return _Route(channel, None, f"{request.reason}; sent direct, as before batches", request.reason)
     if isinstance(request, Refusal):
         return request
     if request is None:
@@ -199,8 +219,10 @@ class DeliveryProvider:
         run_state: Optional[RunState] = None,
         today: Callable[[], date] = date.today,
         on_event: Optional[Callable[[dict], None]] = None,
+        capability: Optional[Capability] = None,
     ) -> None:
         self._run_state = run_state
+        self._capability = capability  # None: batches are assumed (offline)
         self._today = today
         self._on_event = on_event
         self._payload_mode = "envelope"
@@ -260,6 +282,14 @@ class DeliveryProvider:
                 files.append(f)
         return files, dropped, skipped
 
+    def _direct_reason(self, entry: EntryDesired) -> Optional[str]:
+        """Why this entry is sent direct before any request routing, or None."""
+        if self._capability is not None and not self._capability.batches:
+            return BATCHES_OFF
+        if entry.delivery == "direct":
+            return DELIVERY_DIRECT
+        return None
+
     # -- observe ---------------------------------------------------------- #
     def observe(self, desired: list, reader: Any) -> dict:
         if reader is None:
@@ -289,7 +319,10 @@ class DeliveryProvider:
         # No names would make the filter vanish and read the whole set's artifacts.
         window = created_window(e.collected_on, self._today())
         found = reader.artifacts(ev.id, original_file_names=names, created_on=window) if names else []
+        obs.found = found
         obs.before_batches = delivered_before_batches(found, e)
+        if self._direct_reason(e) is not None:
+            return obs  # direct: no artifact requests, no batches
         channel = resolve_channel(e, ev, obs.stacks)
         if isinstance(channel, Refusal):
             return obs
@@ -299,7 +332,7 @@ class DeliveryProvider:
             obs.current_ids = {r.id for r in reader.artifact_requests(ev.id, current=True)}
             request = resolve_request(e, channel, obs.requests, obs.current_ids, self._today())
             if isinstance(request, (Refusal, DirectRoute)):
-                return obs
+                return obs  # refused, or sent direct: no batches to read
             target = request
         candidates = own_batch_ids(found, e)
         if e.recorded_batch_id and e.recorded_batch_id not in candidates:
@@ -356,17 +389,45 @@ class DeliveryProvider:
             )
 
         warnings = [w for w in (stack_drift(e, obs.stacks),) if w]
+        sendable = len(files)
+        direct = self._direct_reason(e)
         earlier = [f.original_file_name for f in files if f.original_file_name in obs.before_batches]
-        if earlier:
+        if earlier and direct is None:
             payload["before_batches"] = earlier
             if len(earlier) == len(files):
                 return action("noop", f"{BEFORE_BATCHES} ({_count(len(files), 'file')})", warnings=warnings)
             files = [f for f in files if f.original_file_name not in earlier]
             payload["files"] = [_file_json(f) for f in files]
-        route = _route(e, obs, today)
+        route = _route(e, obs, today, direct)
         if isinstance(route, Refusal):
             return action("refuse", route.message, fix=route.fix, warnings=warnings)
         channel = route.channel
+        named = stack_name(channel.stack_id, obs.stacks) if channel else None
+        if route.direct_reason is not None:
+            if route.warning:
+                warnings.append(route.warning)
+            on_set = delivered_files(obs.found, e)
+            missing = [f for f in files if f.original_file_name not in on_set]
+            payload.update(
+                evidence_id=obs.evidence.id if obs.evidence is not None
+                else Ref(f"evidence_sets/{e.reference_id}", "id"),
+                target="DIRECT", channel_id=channel.id if channel else None,
+                direct_reason=route.direct_reason, files=[_file_json(f) for f in missing],
+            )
+            direct_changes: Dict[str, Any] = {
+                "stack": {"id": channel.stack_id, "name": named} if channel else None,
+                "channel": channel.reference_id if channel else None,
+                "target": "DIRECT",
+            }
+            if not missing:
+                return action("noop", f"already delivered ({_count(sendable, 'file')})",
+                              changes=direct_changes, warnings=warnings)
+            on = f"channel {channel.reference_id}" if channel else "no channel"
+            return action(
+                "deliver",
+                f"deliver {_count(len(missing), 'file')} to {e.reference_id} direct ({on}): {route.direct_reason}",
+                changes=direct_changes, warnings=warnings,
+            )
         found = attribute(obs.batches, obs.artifacts, e)
         mine = found.mine
         route_ar = route.request.id if route.request else None
@@ -390,7 +451,6 @@ class DeliveryProvider:
         else:
             payload["evidence_id"] = obs.evidence.id
             where = f"{e.reference_id} (evidence level)"
-        named = stack_name(channel.stack_id, obs.stacks) if channel else None
         if ar_id is not None:
             route_text = f"{f'stack {named}, ' if named else ''}channel {channel.reference_id}" if channel else e.reference_id
             where = f"{request.reference_id if request else 'an earlier artifact request'} ({route_text})"
@@ -400,7 +460,8 @@ class DeliveryProvider:
             planned_current=bool(ar_id and ar_id in obs.current_ids),
         )
         changes: Dict[str, Any] = {
-            # An evidence-level batch has no channel, even when routing found one first.
+            # A channel shows for a request batch or a direct entry (above), never for an
+            # evidence-level batch, even when routing found one first.
             "stack": {"id": channel.stack_id, "name": named} if channel and ar_id else None,
             "channel": channel.reference_id if channel and ar_id else None,
             "target": payload["target"],
@@ -436,6 +497,9 @@ class DeliveryProvider:
             return self._noop(action.id, p, action.summary)
         if action.verb != "deliver":
             return Outcome(action.id, "failed", message=f"unexpected verb {action.verb}")
+        if p.get("target") == "DIRECT":  # stopgap: the next change applies it; never make a batch here
+            return Outcome(action.id, "failed", _Delivered().result("failed"),
+                           "direct delivery is applied in the next change")
         note = ""
         # Step 1. A resumed batch stays on its own request by design, so only a
         # new batch on a request planned as current is re-checked.

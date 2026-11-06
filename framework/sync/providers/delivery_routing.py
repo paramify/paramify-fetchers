@@ -184,6 +184,17 @@ def delivered_before_batches(artifacts: List[Artifact], entry: EntryDesired) -> 
     return names
 
 
+def delivered_files(artifacts: List[Artifact], entry: EntryDesired) -> List[str]:
+    """Names of this entry's files from this run that are on the set, with or without a batch."""
+    names: List[str] = []
+    for a in artifacts:
+        tokens = note_tokens(a.note)
+        if (a.original_file_name not in names and entry.run_id
+                and _token(tokens, "run_id") == entry.run_id and _of_entry(tokens, entry)):
+            names.append(a.original_file_name)
+    return names
+
+
 def attribute(batches: List[Batch], artifacts: Dict[str, List[Artifact]], entry: EntryDesired) -> Attribution:
     """Which batch is this entry's for this run, and which of its batches from earlier runs are still open."""
     mine: List[Batch] = []
