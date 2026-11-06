@@ -1,0 +1,29 @@
+key: entra_auth_methods_cba_users_mapped
+name: Entra Certificate Sign-In Users Mapped With No Weaker Method
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every enabled member account the X.509 certificate method targets holds a
+  certificate user ID of the type a certificateUserIds username binding maps, and no
+  method enabled in the authentication methods policy other than X.509, FIDO2 or the
+  guest-only email one-time passcode reaches it. Passes when the X.509 method is
+  disabled or targets no one, since no user then signs in by certificate.
+  Substantiates that certificate sign-in users are mapped to certificates and that
+  the methods policy offers them no weaker method (KSI-IAM-APM). Fails on a user only
+  a userPrincipalName-style binding could match, since only the certificate shows
+  that name, when no username binding is configured, and when the targeted users or
+  a group they depend on could not be read. Does not check that a certificate user ID
+  names that user's own certificate, or whether a binding is high affinity. Does not
+  cover the legacy per-user MFA and SSPR policies, which entra_auth_methods_weak_disabled
+  checks through the migration state, or passwords, Conditional Access and guests.
+
+# Each count is null when the users it covers could not be read, so an unread target fails.
+regex: '"summary":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"x509_targeted_users_unmapped":\s*0\s*[,}])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"x509_targeted_users_mapping_unverified":\s*0\s*[,}])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"x509_targeted_users_with_weaker_methods":\s*0\s*[,}])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-AUTH-METHODS-POLICY
