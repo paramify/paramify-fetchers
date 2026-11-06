@@ -125,6 +125,20 @@ schemas and the `paramify` CLI — not the internal code.
   the resource, its resource group or the subscription is in effect. Lock fields
   read null when the lock list was not read. KSI-MLA-ALA, RPL-ABO, CNA-DFP.
 
+- **`azure_pim_activations`** (`EVD-AZURE-PIM-ACTIVATIONS`): Azure resource PIM
+  activity on the subscription. Every role assignment schedule request Azure
+  still holds at the subscription and below (self-activations, admin
+  assignments, extensions, renewals and removals) with its requester, role,
+  scope, requested duration, justification, ticket, approval and outcome, and
+  the activations in force now. Counts self-activations by role, scope level
+  and outcome, those without a justification, ticket or approval, activations
+  of Owner, Contributor, User Access Administrator and RBAC Administrator,
+  admin assignments that grant standing access, and the oldest and newest
+  request seen. A tenant without PIM (a 400 with the error code
+  AadPremiumLicenseRequired or TenantNotOnboarded) reports `pim_available`
+  false rather than failing; any other failed list leaves its counts null and
+  fails the run, and `pim_available` is null when both lists fail. Reader is
+  enough. KSI-IAM-JIT, CMT-LMC.
 - **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
   Unhealthy assessment reports `days_open` (from `status_change_date`, null when
   missing; it starts again at 0 when a finding turns Healthy and then Unhealthy

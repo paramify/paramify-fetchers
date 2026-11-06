@@ -236,7 +236,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2`, `ac-2.1`, `ac-2.2`, `ac-2.3`, `ac-2.4`, `ac-2.6`, `ac-3`, `ac-4`, `ac-5`, `ac-6`, `ac-6.1`, `ac-6.2`, `ac-6.5`, `ac-6.7`, `ac-6.9`, `ac-6.10`, `ac-7`, `ac-20.1`, `ac-17`, `au-9.4`, `cm-5`, `cm-7`, `cm-7.2`, `cm-7.5`, `cm-9`, `ia-4`, `ia-4.4`, `ia-7`, `ps-2`, `ps-3`, `ps-4`, `ps-5`, `ps-6`, `ps-9`, `ra-5.5`, `sc-2`, `sc-23`, `sc-39`
 
-*7 fetchers:* [`aws_iam_identity_center`](../fetchers/aws/iam_identity_center), [`azure_devops_identities`](../fetchers/azure/devops_identities), [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_entra_pim_assignments`](../fetchers/azure/entra_pim_assignments), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`oci_bastion_sessions`](../fetchers/oci/bastion_sessions), [`okta_just_in_time_authorization`](../fetchers/okta/just_in_time_authorization)
+*8 fetchers:* [`aws_iam_identity_center`](../fetchers/aws/iam_identity_center), [`azure_devops_identities`](../fetchers/azure/devops_identities), [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_entra_pim_assignments`](../fetchers/azure/entra_pim_assignments), [`azure_pim_activations`](../fetchers/azure/pim_activations), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`oci_bastion_sessions`](../fetchers/oci/bastion_sessions), [`okta_just_in_time_authorization`](../fetchers/okta/just_in_time_authorization)
 
 #### `KSI-IAM-SNU` — Securing Non-User Authentication
 
@@ -262,7 +262,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `au-2`, `cm-3`, `cm-3.2`, `cm-4.2`, `cm-6`, `cm-8.3`, `ma-2`
 
-*14 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_change_work_items`](../comparators/azure/change_work_items), [`azure_devops_work_items`](../fetchers/azure/devops_work_items), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`crowdstrike_filevantage`](../fetchers/crowdstrike/filevantage), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration), [`gitlab_merge_request_summary`](../fetchers/gitlab/merge_request_summary), [`gitlab_significant_change_notifications`](../fetchers/gitlab/significant_change_notifications), [`jira_audit_records`](../fetchers/jira/audit_records), [`jira_change_requests`](../fetchers/jira/change_requests), [`jira_site_inventory`](../fetchers/jira/site_inventory)
+*15 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_change_work_items`](../comparators/azure/change_work_items), [`azure_devops_work_items`](../fetchers/azure/devops_work_items), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`azure_pim_activations`](../fetchers/azure/pim_activations), [`crowdstrike_filevantage`](../fetchers/crowdstrike/filevantage), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration), [`gitlab_merge_request_summary`](../fetchers/gitlab/merge_request_summary), [`gitlab_significant_change_notifications`](../fetchers/gitlab/significant_change_notifications), [`jira_audit_records`](../fetchers/jira/audit_records), [`jira_change_requests`](../fetchers/jira/change_requests), [`jira_site_inventory`](../fetchers/jira/site_inventory)
 
 #### `KSI-CMT-RMV` — Redeploying vs Modifying
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-299 of 311 fetchers carry a mapping.
+300 of 312 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -505,7 +505,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (101)
+### azure  (102)
 
 | Fetcher | Indicators |
 |---|---|
@@ -578,6 +578,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_network_flow_logs`](../fetchers/azure/network_flow_logs) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_network_security_groups`](../fetchers/azure/network_security_groups) | `KSI-CNA-DFP`, `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-ULN` |
 | [`azure_network_traffic_activity`](../fetchers/azure/network_traffic_activity) | `KSI-CNA-ULN` |
+| [`azure_pim_activations`](../fetchers/azure/pim_activations) | `KSI-CMT-LMC`, `KSI-IAM-JIT` |
 | [`azure_policy_assignments`](../fetchers/azure/policy_assignments) | `KSI-CNA-EIS`, `KSI-CNA-IBP`, `KSI-MLA-EVC`, `KSI-SVC-ACM` |
 | [`azure_policy_compliance`](../fetchers/azure/policy_compliance) | `KSI-CNA-EIS`, `KSI-MLA-EVC`, `KSI-SVC-ACM`, `KSI-SVC-EIS` |
 | [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-IAM-APM`, `KSI-MLA-LET`, `KSI-RPL-ABO`, `KSI-SVC-SIN` |
