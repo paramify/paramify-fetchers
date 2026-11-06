@@ -1,4 +1,4 @@
-# Qualys VMDR
+# Qualys
 
 Qualys fetchers read the Qualys VM/PC API (XML) with one read-only API user:
 
@@ -88,3 +88,18 @@ Qualys limits API calls per subscription and per API: by default 2 at once and
 The fetchers make one call at a time, one per page of 1000 hosts, and wait out a
 rate or concurrency limit when Qualys says how long (up to 5 minutes). A run that
 fails partway writes no summary and exits non-zero.
+
+## Assessment issue reports
+
+The evidence fetchers above collect JSON evidence and summaries. Two additional
+fetchers produce CSV reports for configured Paramify assessment intake presets:
+
+| Fetcher | Purpose |
+| --- | --- |
+| [VMDR vulnerability findings](vmdr_vulnerability_findings/README.md) | Complete detections joined to KnowledgeBase and required QVS/CISA enrichment |
+| [STIG compliance report](stig_compliance_report/README.md) | Per-policy postures, control references, remediation, and exception context |
+
+See [assessment report setup and intake limitations](REPORTS.md). Report-specific
+page/record limits, retries, pacing, and `allow_empty` do not change the evidence
+fetchers' behavior. Evidence remediation-timeframe summaries do not define the
+assessment reports' CISA deadline policy.

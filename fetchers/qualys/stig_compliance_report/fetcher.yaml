@@ -1,0 +1,23 @@
+name: qualys_stig_compliance_report
+version: 0.1.0
+description: Collects every evaluated posture for a Qualys STIG policy, preserving results, control references, remediation, and exceptions for configuration assessments.
+category: qualys
+kind: issue_report
+supports_targets: true
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 3600
+output:
+  type: csv
+  path: qualys_stig_compliance_report.csv
+secrets: []
+target_schema:
+  policy_id:
+    type: string
+    required: true
+    env: QUALYS_POLICY_ID
+    description: Numeric Qualys policy ID. Each policy writes its own report; controls must carry STIG references.
+issue_report:
+  assessment_type: CONFIGURATION
+  title: Qualys STIG Compliance

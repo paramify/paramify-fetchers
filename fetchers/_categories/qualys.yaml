@@ -2,6 +2,7 @@ display_name: Qualys
 description: >-
   Qualys VMDR vulnerability management. Scan coverage per host, scan schedules
   and runs, open findings against remediation timeframes, and fixed findings.
+  Also supports enriched VMDR and STIG assessment reports.
   One read-only API user per subscription.
 
 # Python (requests) against the Qualys VM/PC XML API, parsed with defusedxml.
@@ -60,3 +61,35 @@ config_schema:
       follows FedRAMP's historical continuous-monitoring convention (high 30,
       moderate 90, low 180 days, reading severity 5 and 4 as high); set your
       policy's own values.
+
+  # The following settings apply to assessment reports only.
+  page_size:
+    type: integer
+    default: 1000
+    env: QUALYS_PAGE_SIZE
+    description: Hosts per VMDR page or postures per STIG page (1–10000).
+  max_pages:
+    type: integer
+    default: 10000
+    env: QUALYS_MAX_PAGES
+    description: Maximum pages per collection (1–100000). Exceeding it fails collection.
+  max_records:
+    type: integer
+    default: 500000
+    env: QUALYS_MAX_RECORDS
+    description: Maximum output rows per invocation (1–10000000). Exceeding it fails collection.
+  retries:
+    type: integer
+    default: 3
+    env: QUALYS_RETRIES
+    description: Retries per request for transient failures (0–10).
+  min_request_interval:
+    type: integer
+    default: 1
+    env: QUALYS_MIN_REQUEST_INTERVAL
+    description: Minimum seconds between request starts (0–60). Requests run sequentially.
+  allow_empty:
+    type: boolean
+    default: false
+    env: QUALYS_ALLOW_EMPTY
+    description: Explicitly permit a valid zero-result collection. Missing or malformed responses always fail.
