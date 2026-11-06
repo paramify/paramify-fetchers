@@ -136,6 +136,15 @@ schemas and the `paramify` CLI — not the internal code.
   profile authentication element, schedule `ACTIVE` values) are stated as
   assumptions in each fetcher's instructions.
 
+- **`azure_defender_plans` 0.3.0: security contacts.** The subscription's Defender for
+  Cloud security contacts: notification addresses, whether a phone is set, whether
+  alert notifications are on and from which minimal severity, and role-based
+  notification. `results.security_contacts` is null (and the run fails) when the list
+  could not be read, and empty when there are none. Maps to KSI-MLA-RVL as well.
+  The contacts are read over raw ARM at api-version 2020-01-01-preview, because
+  Azure Government offers only that and 2017-08-01-preview and answers with a bare
+  JSON list that azure-mgmt-security 7.0 cannot deserialize (seen on a live run);
+  both a bare list and a value page are accepted.
 - **`azure_vm_hardening_status` 0.3.0: OS patch settings.** Every VM and scale set
   reports `patch_settings` (OS, patch mode, assessment mode, bypass of platform safety
   checks on a user schedule) with the derived `automatic_patching` (AutomaticByPlatform
