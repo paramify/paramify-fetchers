@@ -1183,6 +1183,24 @@ def validate_notes(manifest: dict, root: Path, fetchers=None, platforms=None) ->
             notes.append(note)
     if not UNKNOWN_CONFIG_KEYS_ARE_ERRORS:
         notes += unknown_config_keys(parsed, fetchers, platforms)
+    notes += _duplicate_entry_notes(parsed, fetchers)
+    return notes
+
+
+def _duplicate_entry_notes(parsed, fetchers) -> List[str]:
+    """Entries that run one fetcher with no targets: each writes the same file names,
+    so the runner fails every entry after the first (see executor._clobbered)."""
+    keys: Dict[str, List[str]] = {}
+    for e, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries)):
+        if e.use in fetchers and not fetchers[e.use].supports_targets:
+            keys.setdefault(e.use, []).append(key)
+    notes = []
+    for same in keys.values():
+        if len(same) < 2:
+            continue
+        names = f"{', '.join(same[:-1])} and {same[-1]}"
+        later = "the second entry's run fails" if len(same) == 2 else "every entry after the first fails"
+        notes.append(f"entries {names} run the same fetcher with no targets; they write the same files, so {later}.")
     return notes
 
 

@@ -93,6 +93,59 @@ COMPARATOR_INPUTS_ENV = "COMPARATOR_INPUTS"
 # Bound on the reported reason. Truncates the tail, not the head — the useful
 # part of an error message is the front (stderr is the opposite; see envelope.py).
 _STATUS_ERROR_MAX_CHARS = 4000
+# error_code the runner sets when an invocation overwrote or deleted a file an
+# earlier invocation in the same run wrote (see _clobbered).
+OUTPUT_OVERWRITTEN_CODE = "output_overwritten"
+
+
+class _FileId(NamedTuple):
+    """What tells one write of a file from another: a rewrite changes at least one."""
+    ino: int
+    size: int
+    mtime_ns: int
+
+
+def _file_ids(directory: Path) -> Dict[str, _FileId]:
+    """Each regular file in `directory` by name, with its identity.
+
+    Directories are left out: their mtime changes whenever a file is added
+    inside them, which is not an overwrite.
+    """
+    if not directory.exists():
+        return {}
+    ids = {}
+    for p in directory.iterdir():
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        if p.is_file():
+            ids[p.name] = _FileId(st.st_ino, st.st_size, st.st_mtime_ns)
+    return ids
+
+
+def _clobbered(before: Dict[str, _FileId], directory: Path) -> Optional[str]:
+    """Why the invocation failed, if it overwrote or deleted a file that existed before it ran.
+
+    Outputs are found by the names that are new after an invocation, and the run
+    directory is new for each run. So a file that was there before the invocation
+    came from an earlier entry or target in this run. Fetchers pick fixed file
+    names, so two entries of one fetcher, or a fan-out that names its file the
+    same for each target, write over that file. The earlier evidence is then lost,
+    and nothing else says so.
+    """
+    after = _file_ids(directory)
+    overwritten = sorted(n for n, fid in before.items() if n in after and after[n] != fid)
+    deleted = sorted(n for n in before if n not in after)
+    if not overwritten and not deleted:
+        return None
+    parts = []
+    if overwritten:
+        parts.append("overwrote " + ", ".join(overwritten))
+    if deleted:
+        parts.append("deleted " + ", ".join(deleted))
+    return (f"{' and '.join(parts)}, which an earlier entry or target wrote in this run. "
+            "Give each entry its own target, or remove the duplicate entry.")
 
 
 def _redact(text: str, secret_values) -> str:
@@ -624,6 +677,7 @@ def _invoke(
     start = time.monotonic()
 
     before = {p.name for p in output_dir.iterdir()} if output_dir.exists() else set()
+    before_ids = _file_ids(output_dir)
 
     timeout = fetcher.runtime_timeout or _DEFAULT_TIMEOUT_SEC
 
@@ -700,6 +754,17 @@ def _invoke(
     # which subdirectory the fetcher actually wrote to.
     rel = output_dir.relative_to(run_dir) if output_dir != run_dir else None
     outputs = sorted(f"{rel}/{name}" if rel else name for name in (after - before))
+
+    # A file the invocation wrote over is not one of its outputs (its name was
+    # there before), so it would be lost without a word. Fail the invocation the
+    # way a timeout does: a non-zero exit, a reason, and the runner's own code.
+    clobber = _clobbered(before_ids, output_dir)
+    if clobber:
+        if exit_code == 0:
+            exit_code = 1
+        error = f"{error}; {clobber}" if error else clobber
+        error_code = error_code or OUTPUT_OVERWRITTEN_CODE
+        stderr += f"\nrunner: {clobber}"
 
     return InvocationResult(
         fetcher_name=fetcher.name,
