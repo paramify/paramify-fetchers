@@ -274,6 +274,24 @@ def test_channels_two_on_the_stack_refuses(tmp_path):
     assert a.verb == "refuse" and "CHN-2" in a.summary and "CHN-3" in a.summary
 
 
+def test_channels_one_per_owner_on_the_stack_refuse_and_name_the_owners(tmp_path):
+    a_ = Channel("ch-3", "CHN-3", "st-2", owner="Owner A")
+    b_ = Channel("ch-4", "CHN-4", "st-2", owner="Owner B")
+    a = plan_one(entry(tmp_path, stack="GovCloud"), observed(evidence(CH_P, a_, b_), stacks=[PROD, GOV]))
+    assert a.verb == "refuse"
+    assert a.summary == "EVD-12 has 2 channels on stack GovCloud, one per owner: CHN-3 (Owner A), CHN-4 (Owner B)"
+    assert a.fix == ("the upload cannot choose which owner's request this evidence fills. "
+                     "Upload it in the app and choose the channel there.")
+
+
+def test_a_channel_with_no_owner_shows_its_reference_id_only(tmp_path):
+    a_ = Channel("ch-3", "CHN-3", "st-2", owner="Owner A")
+    b_ = Channel("ch-4", "CHN-4", "st-2")
+    refusal = resolve_channel(entry(tmp_path, stack="GovCloud"), evidence(a_, b_), [PROD, GOV])
+    assert isinstance(refusal, Refusal)
+    assert refusal.message == "EVD-12 has 2 channels on stack GovCloud, one per owner: CHN-3 (Owner A), CHN-4"
+
+
 def test_stack_label_drift_warns(tmp_path):
     a = plan_one(entry(tmp_path, stack="st-1", stack_name="Production"), observed(evidence(CH_P), stacks=[PROD]))
     assert a.verb == "deliver"

@@ -348,6 +348,7 @@ results, see [verify validators](suggest_validator_guide.md#5-verify-in-paramify
 | `No run under ./evidence that collected evidence.` | Your manifest writes elsewhere. Add `-f <manifest>`, or pass the run directory. |
 | `… has 3 channels and no stack is configured` | The upload does not guess a channel. Set the stack: `paramify manifest set-stack`, or `paramify upload --stack`. The message lists the stacks. |
 | `… has no channel on stack …` | Create a channel for that stack on the evidence set in the app, or choose another stack. |
+| `… has 2 channels on stack …, one per owner: …` | Paramify makes one channel for each owner on a stack. The upload cannot choose the owner, so it refuses this entry. Upload the evidence in the app and choose the channel there. The message gives the owner of each channel. |
 | `no current or past artifact request on channel …` | This appears only with `no_request: refuse`. Create an artifact request on the channel in the app, or remove `no_request: refuse` from this entry to send it direct. |
 | `batches are off for this workspace (…); every entry is sent direct, as before batches` | This is a note, not an error. The workspace has no batches, so the upload sends every entry direct. |
 | An entry shows `held` | A temporary failure stopped the batch. Run the same upload again. |

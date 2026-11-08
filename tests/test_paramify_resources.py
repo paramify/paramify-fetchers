@@ -46,6 +46,28 @@ def test_stacks_and_evidence_by_reference(fake, res):
     assert got["EVD-A"].channels[0].stack_id == stack.id
 
 
+def test_channels_carry_their_owners_username(fake, res):
+    stack = fake.add_stack("prod")
+    fake.add_evidence("EVD-A", channels=[stack.id, stack.id], owners=["Owner A", None])
+    a, b = res.evidence_by_reference(["EVD-A"])["EVD-A"].channels
+    assert (a.owner, b.owner) == ("Owner A", None)
+
+
+@pytest.mark.parametrize("raw, owner", [
+    ({"owner": {"type": "user", "username": "Owner A", "email": "a@example.test"}}, "Owner A"),
+    ({}, None),
+    ({"owner": None}, None),
+    ({"owner": "Owner A"}, None),
+    ({"owner": {"type": "user", "email": "a@example.test"}}, None),
+    ({"owner": {"type": "user", "username": ""}}, None),
+], ids=["present", "missing", "null", "not-a-dict", "no-username", "blank-username"])
+def test_channel_owner_is_parsed_defensively(raw, owner):
+    from framework.paramify.resources import _channel
+
+    ch = _channel({"id": "ch-1", "referenceId": "CHN-1", "stackId": "st-1", **raw})
+    assert (ch.reference_id, ch.stack_id, ch.owner) == ("CHN-1", "st-1", owner)
+
+
 def test_create_evidence_then_read_by_reference(res):
     made = res.create_evidence({"referenceId": "EVD-N", "name": "N"})
     assert res.evidence_by_reference(["EVD-N"])["EVD-N"] == made

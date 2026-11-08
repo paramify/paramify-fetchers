@@ -86,24 +86,31 @@ class FakeParamify:
         self._stacks.append(row)
         return Stack(**row)
 
-    def _make_evidence(self, ref: str, channels: Any, approval: str, name: Optional[str] = None) -> Dict[str, Any]:
+    def _make_evidence(self, ref: str, channels: Any, approval: str, name: Optional[str] = None,
+                       owners: Any = ()) -> Dict[str, Any]:
+        owners = list(owners) + [None] * (len(channels) - len(owners))
         row = {
             "id": f"ev-{self._next('ev')}", "referenceId": ref, "name": name or ref,
             "whenToApproveArtifactRequest": approval,
             "channels": [
                 {"id": f"ch-{self._next('ch')}", "referenceId": f"CH-{self._n['ch']}",
-                 "owner": None, "stackId": s}
-                for s in channels
+                 "owner": ({"type": "user", "username": o, "email": f"{o.lower().replace(' ', '.')}@example.test"}
+                           if o else None),
+                 "stackId": s}
+                for s, o in zip(channels, owners)
             ],
         }
         self._evidence.append(row)
         return row
 
-    def add_evidence(self, ref: str, *, channels: Any = (), approval: str = "SUBMISSION") -> EvidenceSet:
-        row = self._make_evidence(ref, channels, approval)
+    def add_evidence(self, ref: str, *, channels: Any = (), approval: str = "SUBMISSION",
+                     owners: Any = ()) -> EvidenceSet:
+        """`owners` gives each channel's owner username, in the order of `channels`; a channel past its end has none."""
+        row = self._make_evidence(ref, channels, approval, owners=owners)
         return EvidenceSet(
             id=row["id"], reference_id=ref, name=row["name"], approval=approval,
-            channels=tuple(Channel(c["id"], c["referenceId"], c["stackId"]) for c in row["channels"]),
+            channels=tuple(Channel(c["id"], c["referenceId"], c["stackId"], (c["owner"] or {}).get("username"))
+                           for c in row["channels"]),
         )
 
     def add_request(self, evidence_id: str, channel_id: str, requested: date, due: date) -> ArtifactRequest:

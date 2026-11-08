@@ -29,6 +29,9 @@ class Channel:
     id: str
     reference_id: str
     stack_id: str
+    # The owner's username, never the email. Paramify makes one channel per
+    # (evidence set, owner, stack), so two owners give two channels on a stack.
+    owner: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -72,7 +75,12 @@ class Artifact:
 
 
 def _channel(d: Dict[str, Any]) -> Channel:
-    return Channel(id=d["id"], reference_id=d.get("referenceId") or "", stack_id=d.get("stackId") or "")
+    owner = d.get("owner")
+    username = owner.get("username") if isinstance(owner, dict) else None
+    return Channel(
+        id=d["id"], reference_id=d.get("referenceId") or "", stack_id=d.get("stackId") or "",
+        owner=username if isinstance(username, str) and username.strip() else None,
+    )
 
 
 def _evidence(d: Dict[str, Any]) -> EvidenceSet:

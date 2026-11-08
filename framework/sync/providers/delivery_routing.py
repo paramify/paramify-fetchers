@@ -109,10 +109,13 @@ def resolve_channel(entry: EntryDesired, evidence: Optional[EvidenceSet], stacks
             f"create a channel for stack {stack.name} on {ref} in the app",
         )
     if len(on_stack) > 1:
-        names = ", ".join(c.reference_id for c in on_stack)
+        # Paramify makes one channel per owner on a stack, by design, so the
+        # user cannot remove one. Name the owners so they know which to pick.
+        names = ", ".join(f"{c.reference_id} ({c.owner})" if c.owner else c.reference_id for c in on_stack)
         return Refusal(
-            f"{ref} has {len(on_stack)} channels on stack {stack.name}: {names}",
-            f"keep one channel for stack {stack.name} on {ref} in the app",
+            f"{ref} has {len(on_stack)} channels on stack {stack.name}, one per owner: {names}",
+            "the upload cannot choose which owner's request this evidence fills. "
+            "Upload it in the app and choose the channel there.",
         )
     return on_stack[0]
 

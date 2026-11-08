@@ -1834,6 +1834,10 @@ schemas and the `paramify` CLI — not the internal code.
   for each target, replaced the earlier evidence and passed. That invocation now
   fails with `error_code: output_overwritten` and names the file. `paramify
   validate` gives a note for two entries of a fetcher that takes no targets.
+- **The refusal for two channels on one stack names the owners.** Paramify makes
+  one channel for each owner, so the old fix, to keep one channel, was not
+  possible. The message now gives each channel's owner, and the fix says to
+  upload the evidence in the app.
 - **The TUI's Paramify tab fits a 160x50 terminal.** Below 242 columns the
   scripts-sync panel was squeezed to its border, its buttons drawn over the log,
   and a missing-token preflight error ran off the evidence panel behind a
