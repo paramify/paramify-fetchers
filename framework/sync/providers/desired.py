@@ -150,6 +150,60 @@ def _skip_reason(metadata: Dict, es: Optional[Dict], skip_failed: bool) -> Optio
     return None
 
 
+# The settings a run records per entry that a later manifest edit can change, and
+# what each one is when the manifest leaves it unset. The stack has no default.
+_SETTING_DEFAULTS = (
+    ("approval", DEFAULT_APPROVAL),
+    ("no_request", DEFAULT_NO_REQUEST),
+    ("delivery", DEFAULT_DELIVERY),
+)
+
+
+def _stack_label(cfg: Dict) -> str:
+    return str(cfg.get("stack_name") or cfg.get("stack") or "none")
+
+
+def settings_notes(
+    run_settings: Dict[str, Dict],
+    manifest_settings: Dict[str, Dict],
+    *,
+    stack_override: Optional[str] = None,
+) -> list[str]:
+    """One plan note per setting the manifest now sets differently from the run.
+
+    `run_settings` is the run's `paramify` block; `manifest_settings` maps each
+    entry key of the current manifest to its resolved settings and its `use`.
+    Only keys in both are compared, and only when both name the same fetcher.
+    The run's settings still win: these notes only say that they differ.
+    The stack is not compared when `--stack` was given, since that wins over both.
+    """
+    notes: list[str] = []
+    for key, run_cfg in run_settings.items():
+        now = manifest_settings.get(key)
+        if not isinstance(run_cfg, dict) or now is None:
+            continue
+        if run_cfg.get("use") and now.get("use") and run_cfg["use"] != now["use"]:
+            continue
+        if not stack_override and (run_cfg.get("stack") or None) != (now.get("stack") or None):
+            # The flag takes the stack as the manifest holds it (an id after
+            # set-stack), so a name two stacks share cannot pick the wrong one.
+            # --stack cannot unset a stack, so a removed one gets no flag.
+            fix = (f"Run the manifest again, or upload with --stack {now['stack']}." if now.get("stack")
+                   else "Run the manifest again to use it.")
+            notes.append(
+                f"the manifest now sets stack {_stack_label(now)} for {key}; this run was made with "
+                f"{_stack_label(run_cfg)}. {fix}"
+            )
+        for field, default in _SETTING_DEFAULTS:
+            then, later = run_cfg.get(field) or default, now.get(field) or default
+            if then != later:
+                notes.append(
+                    f"the manifest now sets {field}: {later} for {key}; this run was made with {then}. "
+                    "Run the manifest again to use it."
+                )
+    return notes
+
+
 def desired_from_run(
     run_dir: Path,
     upload_cfg: dict,

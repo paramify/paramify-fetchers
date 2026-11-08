@@ -193,6 +193,36 @@ def test_confirm_shows_the_plan_totals(tmp_path, monkeypatch, no_token, run_tui)
     assert "1 deliver" in text and "evidence file(s)" in text
 
 
+def test_the_plan_compares_the_run_with_the_open_manifest(tmp_path, monkeypatch, no_token, run_tui):
+    _upload_ready(tmp_path, monkeypatch, token=True)
+    seen = {}
+
+    def fake_plan(run_dir, root, config_path=None, *, online, **kw):
+        seen["manifest_path"] = kw.get("manifest_path")
+        return Plan([], notes=["the manifest now sets stack E2E-A for ev; this run was made with none. "
+                               "Run the manifest again, or upload with --stack E2E-A."])
+
+    monkeypatch.setattr(api, "plan_upload", fake_plan)
+
+    text = _open_confirm(tmp_path, run_tui, _confirm_text, monkeypatch)
+    assert Path(seen["manifest_path"]).resolve() == (tmp_path / "plan-test.yaml").resolve()
+    assert "! the manifest now sets stack E2E-A for ev" in text
+
+
+def test_a_run_another_manifest_made_is_not_compared_with_the_open_one(tmp_path, monkeypatch, no_token, run_tui):
+    evidence_run(tmp_path / "evidence", "2026-09-01T00-00-00Z", manifest="manifests/other.yaml")
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "tok")
+    seen = {}
+
+    def fake_plan(run_dir, root, config_path=None, *, online, **kw):
+        seen["manifest_path"] = kw.get("manifest_path", "absent")
+        return Plan([])
+
+    monkeypatch.setattr(api, "plan_upload", fake_plan)
+    _open_confirm(tmp_path, run_tui, _confirm_text, monkeypatch)
+    assert seen["manifest_path"] is None
+
+
 def test_confirm_without_a_token_plans_offline(tmp_path, monkeypatch, no_token, run_tui):
     _upload_ready(tmp_path, monkeypatch, token=False)
     real = api.upload_preflight

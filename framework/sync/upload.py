@@ -36,6 +36,7 @@ from framework.paramify_auth import (
     resolve_upload_token,
 )
 from framework.run_files import is_evidence_file
+from framework.runner import manifest_loader
 from framework.sync import engine
 from framework.sync.model import Action, Outcome, Plan, SyncContext, Unknown
 from framework.sync.providers.delivery import (
@@ -43,6 +44,7 @@ from framework.sync.providers.delivery import (
     DeliveryProvider,
     delivery_mode,
 )
+from framework.sync.providers.desired import settings_notes
 from framework.sync.providers.evidence_sets import (
     TAGS_UNAVAILABLE,
     EvidenceSetsProvider,
@@ -80,6 +82,50 @@ def load_config(config_path: Optional[Path]) -> Dict[str, Any]:
     return data
 
 
+def _run_manifest(run_dir: Path, root: Path) -> Optional[Path]:
+    """The manifest the run records in `_run_metadata.json`, when that file is still there.
+
+    `paramify run` records it relative to the repo root, or absolute when it is
+    outside the root (see api._manifest_id).
+    """
+    try:
+        meta = json.loads((run_dir / "_run_metadata.json").read_text())
+    except (OSError, ValueError):
+        return None
+    manifest_id = meta.get("manifest") if isinstance(meta, dict) else None
+    if not isinstance(manifest_id, str) or not manifest_id:
+        return None
+    path = Path(manifest_id)
+    path = path if path.is_absolute() else Path(root) / path
+    return path if path.is_file() else None
+
+
+def manifest_notes(run_dir: Path, root: Path, manifest_path: Optional[Path],
+                   stack_override: Optional[str]) -> List[str]:
+    """Plan notes for the Paramify settings the manifest now sets differently from the run.
+
+    `paramify run` records each entry's settings in the run, and the upload uses
+    those. A `manifest set-stack` or an edit after the run changes nothing for
+    it, so the plan says so. With no `manifest_path` the run's own manifest is
+    used. A manifest that is missing or cannot be read gives no notes: this is
+    advice, and it must not stop an upload.
+    """
+    path = Path(manifest_path) if manifest_path else _run_manifest(run_dir, root)
+    if path is None or not path.is_file():
+        return []
+    try:
+        meta = json.loads((run_dir / "_run_metadata.json").read_text())
+        run_settings = meta.get("paramify")
+        parsed = manifest_loader.parse_manifest(yaml_io.load_path(path))
+        now = {key: {"use": e.use, **manifest_loader.resolved_paramify(parsed, e)}
+               for e, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries))}
+    except Exception:  # noqa: BLE001 — advice only; a bad manifest is reported where it is used
+        return []
+    if not isinstance(run_settings, dict):
+        return []
+    return settings_notes(run_settings, now, stack_override=stack_override)
+
+
 # ---- setup ------------------------------------------------------------------ #
 
 class _Setup:
@@ -106,6 +152,8 @@ class _Setup:
         if not self.files:
             raise ValueError(f"no evidence files found in {self.run_dir} — nothing to upload (wrong directory?)")
         self.ctx = SyncContext(self.run_dir, self.config, stack_override=stack, only_file=only_file)
+        # Plan notes the caller adds (see manifest_notes).
+        self.notes: List[str] = []
 
     def client(self) -> Client:
         token = self.token or resolve_upload_token()[0]
@@ -138,8 +186,10 @@ class _Setup:
         return providers, delivery
 
 
-def _plan(providers: Sequence[Any], ctx: Any, reader: Any, capability: Optional[Capability] = None) -> Plan:
-    """The engine's plan, less the tags of sets that get no delivery, with a note when batches are off.
+def _plan(providers: Sequence[Any], ctx: Any, reader: Any, capability: Optional[Capability] = None,
+          notes: Sequence[str] = ()) -> Plan:
+    """The engine's plan, less the tags of sets that get no delivery, with a note when batches are off
+    and the `notes` given (see manifest_notes).
 
     The tag action runs before delivery, so without this an entry that is
     refused (no request, a stack mismatch) would still tag its set.
@@ -147,6 +197,7 @@ def _plan(providers: Sequence[Any], ctx: Any, reader: Any, capability: Optional[
     plan = engine.plan(providers, ctx, reader)
     if capability is not None and not capability.batches:
         plan.notes.append(f"{BATCHES_OFF} ({capability.reason}); every entry is sent direct, as before batches")
+    plan.notes.extend(notes)
     verbs: Dict[str, List[str]] = defaultdict(list)
     for a in plan.actions:
         if a.provider == "delivery" and a.payload.get("reference_id"):
@@ -168,9 +219,15 @@ def plan_upload(
     only_file: Optional[str] = None,
     custom_tags: bool = True,
     with_validators: bool = False,
+    manifest_path: Optional[Path] = None,
 ) -> Plan:
-    """The plan for uploading `run_dir`. Online it reads the workspace (read-only); offline it needs no token."""
+    """The plan for uploading `run_dir`. Online it reads the workspace (read-only); offline it needs no token.
+
+    `manifest_path` is the manifest to compare the run's Paramify settings with
+    (see manifest_notes); without it, the run's own manifest is used.
+    """
     setup = _Setup(run_dir, config_path, stack, only_file)
+    notes = manifest_notes(setup.run_dir, root, manifest_path, stack)
     reader = None
     capability: Optional[Capability] = None  # offline: no check, no note
     if online:
@@ -179,7 +236,7 @@ def plan_upload(
         reader = Reader(Resources(client))
     providers, _ = setup.providers(root, online=online, custom_tags=custom_tags, with_validators=with_validators,
                                    capability=capability)
-    return _plan(providers, setup.ctx, reader, capability)
+    return _plan(providers, setup.ctx, reader, capability, notes)
 
 
 # ---- the legacy view of a plan and its outcomes ----------------------------- #
@@ -416,13 +473,15 @@ def run_upload(
     token: Optional[str] = None,
     base_url: Optional[str] = None,
     deprecations: Sequence[str] = (),
+    manifest_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Plan and apply the upload of one run; see the module docstring.
 
     `upload_cfg`, `token` and `base_url` are for callers that already hold them
     (the legacy uploader script): a config dict is used instead of reading
     `config_path`, and the token and base URL win over the environment.
-    `deprecations` are notes written to `upload_log.json`.
+    `deprecations` are notes written to `upload_log.json`. `manifest_path` is
+    as for plan_upload.
 
     Raises ValueError for setup errors (no run dir, no evidence, bad base URL
     or config, no token, another upload of this run in progress). An API
@@ -431,6 +490,7 @@ def run_upload(
     emit: Event = on_event or (lambda _ev: None)
     setup = _Setup(run_dir, config_path, stack, only_file,
                    upload_cfg=upload_cfg, token=token, base_url=base_url)
+    setup.notes = manifest_notes(setup.run_dir, root, manifest_path, stack)
     policy = resolve_tag_policy(setup.config, override_off=None if custom_tags else NO_TAGS)
     report = _Report(emit, dry_run, Tagger(None, "", policy=policy, display_names=category_display_names(root)))
     base = {"run_dir": str(setup.run_dir), "base_url": setup.base_url, "dry_run": dry_run,
@@ -440,7 +500,7 @@ def run_upload(
         providers, delivery = setup.providers(
             root, online=False, custom_tags=custom_tags, with_validators=with_validators, on_event=emit)
         emit({"event": "upload_start", **base})
-        report.bind(_plan(providers, setup.ctx, None), delivery)
+        report.bind(_plan(providers, setup.ctx, None, notes=setup.notes), delivery)
         emit({"event": "plan", "plan": report.plan.to_json()})
         report.planned()
         summary = {**base, **report.summary(None), "tags": report.tags(policy, None),
@@ -490,7 +550,7 @@ def _apply_locked(
             root, online=True, custom_tags=custom_tags, with_validators=with_validators,
             run_state=state, on_event=emit, on_delivery_event=report.on_delivery, capability=report.capability,
         )
-        report.bind(_plan(providers, setup.ctx, Reader(resources), report.capability), delivery)
+        report.bind(_plan(providers, setup.ctx, Reader(resources), report.capability, setup.notes), delivery)
         emit({"event": "plan", "plan": report.plan.to_json()})
         outcomes = engine.apply(report.plan, providers, resources, on_event=report.on_engine, outcomes=done)
     except BaseException as exc:

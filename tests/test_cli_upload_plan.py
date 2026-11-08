@@ -319,3 +319,105 @@ def test_validate_without_online_makes_no_calls(fake, tmp_path):  # noqa: F811
     path.write_text(yaml.safe_dump({"run": {"output_dir": "./evidence", "paramify": {"stack": "Ghost"}, "fetchers": []}}))
     cli("validate", str(path), "--json")
     assert fake.calls == []
+
+
+# ---- the manifest's Paramify settings against the run's ---------------------------
+
+STACK_NOTE = ("the manifest now sets stack E2E-A for x; this run was made with none. "
+              "Run the manifest again, or upload with --stack E2E-A.")
+
+
+def paramify_manifest(path: Path, run_paramify=None, entry_paramify=None, use="x") -> Path:
+    entry: Dict[str, Any] = {"use": use}
+    if entry_paramify:
+        entry["paramify"] = entry_paramify
+    run: Dict[str, Any] = {"output_dir": "./evidence", "fetchers": [entry]}
+    if run_paramify:
+        run["paramify"] = run_paramify
+    path.write_text(yaml.safe_dump({"run": run}))
+    return path
+
+
+def test_plan_notes_a_stack_the_manifest_now_sets(fake, tmp_path):  # noqa: F811
+    m = paramify_manifest(tmp_path / "m.yaml", {"stack": "E2E-A"})
+    res = cli("upload", str(two_files(tmp_path)), "--plan", "-f", str(m))
+    assert res.exit_code == 0, res.output
+    assert f"! {STACK_NOTE}" in res.output.splitlines()
+
+
+def test_dry_run_and_a_real_upload_print_the_note(fake, tmp_path):  # noqa: F811
+    m = paramify_manifest(tmp_path / "m.yaml", {"stack": "E2E-A"})
+    run = two_files(tmp_path)
+    dry = cli("upload", str(run), "--dry-run", "-f", str(m))
+    assert dry.exit_code == 0, dry.output
+    assert f"! {STACK_NOTE}" in dry.output.splitlines()
+    real = cli("upload", str(run), "-f", str(m))
+    assert f"! {STACK_NOTE}" in real.output.splitlines(), real.output
+
+
+def test_same_settings_give_no_note(no_env, root, tmp_path):  # noqa: F811
+    run = two_files(tmp_path, {"x": {"use": "x", "stack": "st-2", "stack_name": "Gov", "delivery": "direct"}})
+    m = paramify_manifest(tmp_path / "m.yaml", {"stack": "st-2", "stack_name": "Gov"}, {"delivery": "direct"})
+    assert api.plan_upload(run, root, online=False, manifest_path=m).notes == []
+
+
+def test_unset_and_default_are_the_same_setting(no_env, root, tmp_path):  # noqa: F811
+    run = two_files(tmp_path, {"x": {"use": "x"}})
+    m = paramify_manifest(tmp_path / "m.yaml", entry_paramify={
+        "approval": "SUBMISSION_WITH_PASSING_VALIDATORS", "no_request": "direct", "delivery": "auto"})
+    assert api.plan_upload(run, root, online=False, manifest_path=m).notes == []
+
+
+def test_a_stack_label_names_the_stack_and_the_flag_takes_its_id(no_env, root, tmp_path):  # noqa: F811
+    run = two_files(tmp_path, {"x": {"use": "x", "stack": "st-1", "stack_name": "Prod"}})
+    m = paramify_manifest(tmp_path / "m.yaml", {"stack": "st-2", "stack_name": "Gov"})
+    assert api.plan_upload(run, root, online=False, manifest_path=m).notes == [
+        "the manifest now sets stack Gov for x; this run was made with Prod. "
+        "Run the manifest again, or upload with --stack st-2."]
+
+
+def test_each_other_setting_gets_its_own_note(no_env, root, tmp_path):  # noqa: F811
+    run = two_files(tmp_path, {"x": {"use": "x", "approval": "MANUAL"}})
+    m = paramify_manifest(tmp_path / "m.yaml", entry_paramify={"no_request": "evidence", "delivery": "direct"})
+    assert api.plan_upload(run, root, online=False, manifest_path=m).notes == [
+        "the manifest now sets approval: SUBMISSION_WITH_PASSING_VALIDATORS for x; this run was made with MANUAL. "
+        "Run the manifest again to use it.",
+        "the manifest now sets no_request: evidence for x; this run was made with direct. "
+        "Run the manifest again to use it.",
+        "the manifest now sets delivery: direct for x; this run was made with auto. "
+        "Run the manifest again to use it.",
+    ]
+
+
+def test_a_stack_override_drops_only_the_stack_note(no_env, root, tmp_path):  # noqa: F811
+    run = two_files(tmp_path)
+    m = paramify_manifest(tmp_path / "m.yaml", {"stack": "E2E-A"}, {"delivery": "direct"})
+    notes = api.plan_upload(run, root, online=False, manifest_path=m, stack="Prod").notes
+    assert notes == ["the manifest now sets delivery: direct for x; this run was made with auto. "
+                     "Run the manifest again to use it."]
+    out = api.upload_run(run, root, dry_run=True, manifest_path=m, stack="Prod")
+    assert out["plan"]["notes"] == notes
+
+
+def test_the_runs_own_manifest_is_used_when_none_is_given(no_env, root, tmp_path):  # noqa: F811
+    run = two_files(tmp_path)
+    paramify_manifest(root / "m.yaml", {"stack": "E2E-A"})
+    meta = json.loads((run / "_run_metadata.json").read_text())
+    (run / "_run_metadata.json").write_text(json.dumps({**meta, "manifest": "m.yaml"}))
+    assert api.plan_upload(run, root, online=False).notes == [STACK_NOTE]
+    assert api.upload_run(run, root, dry_run=True)["plan"]["notes"] == [STACK_NOTE]
+
+
+def test_no_manifest_to_compare_gives_no_note(no_env, root, tmp_path):  # noqa: F811
+    run = two_files(tmp_path)
+    assert api.plan_upload(run, root, online=False).notes == []
+    meta = json.loads((run / "_run_metadata.json").read_text())
+    (run / "_run_metadata.json").write_text(json.dumps({**meta, "manifest": "gone.yaml"}))
+    assert api.plan_upload(run, root, online=False).notes == []
+    assert api.plan_upload(run, root, online=False, manifest_path=tmp_path / "missing.yaml").notes == []
+
+
+def test_an_entry_key_in_only_one_side_or_for_another_fetcher_is_not_compared(no_env, root, tmp_path):  # noqa: F811
+    run = two_files(tmp_path)
+    other = paramify_manifest(tmp_path / "other.yaml", {"stack": "E2E-A"}, use="y")
+    assert api.plan_upload(run, root, online=False, manifest_path=other).notes == []

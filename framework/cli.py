@@ -489,6 +489,7 @@ def _upload_stage(
     manifest: Optional[str] = None,
     plan_fn: Optional[Callable[..., Plan]] = None,
     plan_only: bool = False,
+    pass_manifest: bool = False,
 ) -> NoReturn:
     """Resolve a run directory, preflight it, and upload — the whole flow for one
     upload stage.
@@ -501,15 +502,26 @@ def _upload_stage(
     With `plan_only` the stage prints the plan (`plan_fn`, read-only, online) and
     stops. Otherwise the upload prints the plan it makes, as a `plan` event, before
     it applies, and the outcomes after it.
+
+    With `pass_manifest`, the manifest given with -f also goes to `upload_fn` and
+    `plan_fn` as `manifest_path`, so the plan can say where its Paramify settings
+    now differ from the run's.
     """
     root = api.find_repo_root()
+    manifest_path = None
     if run_dir:
         resolved_run_dir = Path(run_dir).resolve()
+        # The run is named, so the manifest only feeds the plan notes: one that
+        # is not found is left out, as before, rather than failing the upload.
+        if manifest and pass_manifest:
+            try:
+                manifest_path = api.resolve_manifest_path(root, manifest)
+            except api.ManifestNotFound:
+                manifest_path = None
     else:
         # The newest run with something of this stage's kind — not simply the
         # newest run: evidence and pipeline manifests usually share an
         # output_dir, and each command would otherwise pick up the other's run.
-        manifest_path = None
         if manifest:
             try:
                 manifest_path = api.resolve_manifest_path(root, manifest)
@@ -531,6 +543,9 @@ def _upload_stage(
                 _err(msg)
             raise typer.Exit(1)
         resolved_run_dir = Path(latest["dir"]).resolve()
+
+    if pass_manifest:
+        upload_kwargs = {**(upload_kwargs or {}), "manifest_path": manifest_path}
 
     config_path = Path(config).resolve() if config else None
     try:
@@ -627,7 +642,7 @@ def _upload_stage(
     raise typer.Exit(0 if summary["ok"] else 1)
 
 
-_PLAN_KWARGS = frozenset({"stack", "custom_tags", "with_validators", "only_file"})
+_PLAN_KWARGS = frozenset({"stack", "custom_tags", "with_validators", "only_file", "manifest_path"})
 _TOKEN_REJECTED = "Paramify rejected the API token (HTTP 401); check {env}"
 
 
@@ -1383,7 +1398,8 @@ def upload_cmd(
         help="Base dir to find the run in (default: the -f manifest's output_dir, else ./evidence)",
     ),
     file: Optional[str] = typer.Option(
-        None, "-f", "--file", help="Only runs this manifest produced",
+        None, "-f", "--file",
+        help="Only runs this manifest produced; the plan notes its Paramify settings that differ from the run's",
     ),
     config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and report what would upload; no API calls"),
@@ -1416,6 +1432,7 @@ def upload_cmd(
         manifest=file,
         plan_fn=api.plan_upload,
         plan_only=plan,
+        pass_manifest=True,
     )
 
 

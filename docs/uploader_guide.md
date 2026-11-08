@@ -162,6 +162,8 @@ run:
 `paramify run` writes each entry's settings into the run's `_run_metadata.json`.
 The upload reads them from there. A manifest that changes after the run does not
 change the upload, and a scheduled container needs no manifest.
+When the manifest now sets a different value, the plan gives a note for each
+difference.
 
 List the stacks with `paramify stacks`. Store one in a manifest with
 `paramify manifest set-stack MANIFEST STACK`. Add `--fetcher NAME` to set it for

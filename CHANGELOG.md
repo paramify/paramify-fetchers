@@ -1838,6 +1838,11 @@ schemas and the `paramify` CLI — not the internal code.
   one channel for each owner, so the old fix, to keep one channel, was not
   possible. The message now gives each channel's owner, and the fix says to
   upload the evidence in the app.
+- **The upload plan says when the Paramify settings in the manifest changed
+  after the run.** The upload uses the settings that the run recorded. When the
+  manifest now sets a different stack, approval, no_request or delivery for an
+  entry, the plan gives a note with the fix. The upload still uses the settings
+  of the run.
 - **The TUI's Paramify tab fits a 160x50 terminal.** Below 242 columns the
   scripts-sync panel was squeezed to its border, its buttons drawn over the log,
   and a missing-token preflight error ran off the evidence panel behind a

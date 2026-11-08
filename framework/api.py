@@ -1816,16 +1816,23 @@ def plan_upload(
     only_file: Optional[str] = None,
     custom_tags: bool = True,
     with_validators: bool = False,
+    manifest_path: Optional[Path] = None,
 ) -> Plan:
     """The upload plan for one run directory; nothing is written.
 
     Online it reads the workspace and needs a token; `online=False` needs
     neither, and shows routing values as unknown. Raises ValueError for setup
     errors. `framework.sync.render.render_plan` turns the plan into text.
+
+    The plan notes each Paramify setting (stack, approval, no_request,
+    delivery) that `manifest_path` now sets differently from the run. Without
+    it, the run's own manifest is used; with neither, nothing is compared. The
+    run's settings still apply.
     """
     return _sync_upload.plan_upload(
         run_dir, root, _upload_config(root, config_path), online=online, stack=stack,
         only_file=only_file, custom_tags=custom_tags, with_validators=with_validators,
+        manifest_path=manifest_path,
     )
 
 
@@ -1844,6 +1851,7 @@ def upload_run(
     token: Optional[str] = None,
     base_url: Optional[str] = None,
     deprecations: Sequence[str] = (),
+    manifest_path: Optional[Path] = None,
 ) -> dict:
     """Upload one run directory to Paramify, one batch per manifest entry.
 
@@ -1857,11 +1865,14 @@ def upload_run(
     before delivery. `upload_cfg` (a config dict used instead of the file),
     `token` and `base_url` (both ahead of the environment) are for callers that
     already hold them; `deprecations` are notes for `upload_log.json`.
+    `manifest_path` is as for plan_upload: the plan notes the settings it now
+    sets differently from the run.
     """
     return _sync_upload.run_upload(
         run_dir, root, _upload_config(root, config_path), dry_run=dry_run, on_event=on_event,
         custom_tags=custom_tags, stack=stack, only_file=only_file, with_validators=with_validators,
         upload_cfg=upload_cfg, token=token, base_url=base_url, deprecations=deprecations,
+        manifest_path=manifest_path,
     )
 
 
