@@ -703,6 +703,21 @@ def test_human_run_printer_emits_contract(capsys):
     assert "SKIP  f3 (missing secret)" in err  # skips/errors go to stderr
 
 
+def test_human_run_printer_says_why_an_invocation_failed(capsys):
+    """A failed invocation's reason (the event's `error`) is printed under its
+    [FAIL] line, so the CLI says why, as the TUI does. A pass prints none."""
+    from framework.cli import _human_run_printer
+    cb = _human_run_printer()
+    cb({"event": "fetcher_result", "fetcher": "f1", "exit_code": 0, "duration_sec": 0.1, "target": None,
+        "error": "ignored on a pass"})
+    cb({"event": "fetcher_result", "fetcher": "f1", "exit_code": 1, "duration_sec": 0.1, "target": None,
+        "error": "overwrote demo_hello.json, which an earlier entry or target wrote in this run."})
+    cb({"event": "fetcher_result", "fetcher": "f2", "exit_code": 2, "duration_sec": 0.1, "target": None})
+    err = capsys.readouterr().err
+    assert "overwrote demo_hello.json, which an earlier entry or target wrote in this run." in err
+    assert "ignored on a pass" not in err
+
+
 # --------------------------------------------------------------------------- #
 # Manifest mutators — JSON contract + actual effects
 # --------------------------------------------------------------------------- #

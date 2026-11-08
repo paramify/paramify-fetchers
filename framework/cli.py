@@ -335,6 +335,10 @@ def _human_run_printer():
             typer.echo(
                 f"        [{style.mark(m)}] {style.dim(detail)}{style.env(target)}"
             )
+            # Why it failed, as the TUI shows it: the fetcher's reported reason,
+            # else its last stderr line, else the runner's own (an overwrite).
+            if ev["exit_code"] != 0 and ev.get("error"):
+                _err(f"        {style.dim(ev['error'])}")
         elif kind == "run_complete":
             typer.echo(f"\n_run_metadata.json → {style.path(ev['metadata_path'])}")
             # `paramify upload` cannot see these, so a run that collected reports
