@@ -2102,6 +2102,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_app_registrations` 0.2.1: a failed applications read nulls
+  every summary count.** When the Graph applications read was denied, failed or
+  stopped part-way, the counts (credentials, expired, expiring, without expiry,
+  the rotation percentage and the rest) read 0 or a short number. They are now
+  null, as `credentials_issued_beyond_approved_lifetime` and
+  `credentials_without_lifetime` already were; `approved_lifetime_days` and
+  `rotation_threshold_days` are settings and stay. `partial_failure` and the
+  exit code are unchanged.
 - **The TUI's Paramify tab fits a 160x50 terminal.** Below 242 columns the
   scripts-sync panel was squeezed to its border, its buttons drawn over the log,
   and a missing-token preflight error ran off the evidence panel behind a
