@@ -185,29 +185,34 @@ Output: `azure_entra_app_registrations_<tenant>.json` — each app registration 
 Summary fields:
 
 **What app registrations exist?**
-- `total_app_registrations` — Number of app registrations in the tenant
-- `apps_with_credentials` — Number of app registrations holding at least one client secret or certificate
-- `apps_without_credentials` — Number of app registrations holding no client secret or certificate
-- `multi_tenant_apps` — Number of app registrations that accounts outside this tenant can sign in to: the sign-in audience is anything but this organization only (AzureADMyOrg), such as other organizations or personal Microsoft accounts; an app with no audience recorded counts here too
+- `total_app_registrations` — Number of app registrations in the tenant; null if the applications read failed or stopped part-way
+- `apps_with_credentials` — Number of app registrations holding at least one client secret or certificate; null if the applications read failed or stopped part-way
+- `apps_without_credentials` — Number of app registrations holding no client secret or certificate; null if the applications read failed or stopped part-way
+- `multi_tenant_apps` — Number of app registrations that accounts outside this tenant can sign in to: the sign-in audience is anything but this organization only (AzureADMyOrg), such as other organizations or personal Microsoft accounts; an app with no audience recorded counts here too; null if the applications read failed or stopped part-way
 
 **What credentials do the apps hold?**
-- `total_credentials` — Number of client secrets and certificates held on app registrations
-- `password_credentials` — Number of app registration credentials that are client secrets (passwords)
-- `certificate_credentials` — Number of app registration credentials that are certificates
+- `total_credentials` — Number of client secrets and certificates held on app registrations; null if the applications read failed or stopped part-way
+- `password_credentials` — Number of app registration credentials that are client secrets (passwords); null if the applications read failed or stopped part-way
+- `certificate_credentials` — Number of app registration credentials that are certificates; null if the applications read failed or stopped part-way
 
 **Do credentials expire and get rotated?**
 - `rotation_threshold_days` — Days before expiry at which a credential counts as expiring soon (30)
-- `expired_credentials` — Number of credentials whose end date has passed
-- `credentials_expiring_soon` — Number of credentials that haven't expired and expire within `rotation_threshold_days` days
-- `credentials_without_expiry` — Number of credentials with no end date (or one that couldn't be read), which never show up as expiring
-- `healthy_credentials` — Number of healthy credentials: they have an end date, haven't expired and don't expire within `rotation_threshold_days` days
-- `credential_rotation_compliance_percentage` — Percentage of credentials that are healthy = `healthy_credentials` / `total_credentials` × 100 (a whole number, 0–100); 0 when `total_credentials` is 0. Credentials with no end date count in the total but not as healthy, so they lower it
+- `expired_credentials` — Number of credentials whose end date has passed; null if the applications read failed or stopped part-way
+- `credentials_expiring_soon` — Number of credentials that haven't expired and expire within `rotation_threshold_days` days; null if the applications read failed or stopped part-way
+- `credentials_without_expiry` — Number of credentials with no end date (or one that couldn't be read), which never show up as expiring; null if the applications read failed or stopped part-way
+- `healthy_credentials` — Number of healthy credentials: they have an end date, haven't expired and don't expire within `rotation_threshold_days` days; null if the applications read failed or stopped part-way
+- `credential_rotation_compliance_percentage` — Percentage of credentials that are healthy = `healthy_credentials` / `total_credentials` × 100 (a whole number, 0–100); 0 when `total_credentials` is 0. Credentials with no end date count in the total but not as healthy, so they lower it; null if the applications read failed or stopped part-way
 
 **Which apps have a credential to fix?**
-- `apps_with_expired_credentials` — Number of app registrations holding at least one expired credential
-- `apps_with_credentials_expiring_soon` — Number of app registrations holding at least one credential that expires within `rotation_threshold_days` days
-- `apps_with_credentials_without_expiry` — Number of app registrations holding at least one credential with no end date
-- `apps_with_all_credentials_healthy` — Number of app registrations that hold at least one credential and whose every credential is healthy
+- `apps_with_expired_credentials` — Number of app registrations holding at least one expired credential; null if the applications read failed or stopped part-way
+- `apps_with_credentials_expiring_soon` — Number of app registrations holding at least one credential that expires within `rotation_threshold_days` days; null if the applications read failed or stopped part-way
+- `apps_with_credentials_without_expiry` — Number of app registrations holding at least one credential with no end date; null if the applications read failed or stopped part-way
+- `apps_with_all_credentials_healthy` — Number of app registrations that hold at least one credential and whose every credential is healthy; null if the applications read failed or stopped part-way
+
+**How long were credentials issued for?**
+- `credentials_issued_beyond_approved_lifetime` — Number of client secrets and certificates issued for more than `approved_lifetime_days` days, not counting any 29 February in the span; a credential with a start date and no end date counts, because it never expires; null if the applications read failed or stopped part-way, or if any credential has no start date or ends before it starts, because the count could be short
+- `credentials_without_lifetime` — Number of credentials whose issued lifetime can't be computed: no start date, no end date, or an end before the start; null if the applications read failed or stopped part-way
+- `approved_lifetime_days` — Number of days a credential can be issued for and still count as within the approved interval (365 unless configured, at most 3650; 365 is a convention, as FedRAMP KSI-SVC-ASM asks for regular rotation and sets no number)
 
 
 ### azure_entra_authentication_policy
@@ -309,7 +314,7 @@ Commands Executed:
 - Microsoft Graph `GET /identity/conditionalAccess/policies` — every policy with its state, conditions, grant controls and session controls
 - Microsoft Graph `GET /policies/authenticationStrengthPolicies` (only when a policy uses an authentication strength) — each strength's allowed sign-in method combinations, read as raw JSON because the SDK drops combinations of two methods such as password and SMS
 
-Output: `azure_entra_conditional_access_policies_<tenant>.json` — each Conditional Access policy with its state, the users, groups, roles and apps it includes and excludes, any application filter that includes or excludes apps by their attributes, its other conditions (client apps, sign-in, user, insider and service principal risk levels, platforms, locations, device filter, authentication flows), what it grants or blocks and its session controls, and each authentication strength the policies use with its allowed method combinations.
+Output: `azure_entra_conditional_access_policies_<tenant>.json` — each Conditional Access policy with its state, the users, groups, roles, guest or external user types and apps it includes and excludes, any application filter that includes or excludes apps by their attributes, its other conditions (client apps, sign-in, user, insider and service principal risk levels, platforms, locations, device filter, authentication flows), what it grants or blocks and its session controls, and each authentication strength the policies use with its allowed method combinations.
 
 Summary fields:
 
@@ -330,23 +335,25 @@ Summary fields:
 **Do enforced policies require phishing-resistant MFA?**
 - `authentication_strengths_readable` — True if the authentication strengths the policies use were read with their allowed combinations, or no policy uses one; also true when the strengths weren't read because the policies couldn't be read, and authentication_strengths is then null; false if the strengths read failed, and the phishing-resistant figures read null
 - `enforced_policies_requiring_phishing_resistant_mfa` — Number of enforced policies that require phishing-resistant MFA: their authentication strength allows only FIDO2 security keys and passkeys, Windows Hello for Business or multi-factor certificate authentication, and the policy doesn't let the user meet another grant control instead; null if the policies or a policy's strength couldn't be read
-- `enforced_phishing_resistant_mfa_for_all_users_and_apps` — Number of enforced policies that require phishing-resistant MFA for all users on all cloud apps, before any exclusions; Conditions (sign-in, user, insider or service principal risk, client app types, platforms, locations, device filter, authentication flows, application filter) and excluded apps aren't checked, so a policy limited by them still counts; `mfa_client_app_types_for_all_users_and_apps` is the strict figure; null if the policies or a policy's strength couldn't be read
-- `phishing_resistant_mfa_role_template_ids` — List of directory role template ids (Global Administrator is 62e90394-69f5-4237-9190-012177145e10) that an enforced policy requiring phishing-resistant MFA on all cloud apps includes; excluded users, groups and roles aren't checked, and a policy's conditions aren't either (see `mfa_client_app_types_for_all_users_and_apps` for the strict figure); null if the policies or a policy's strength couldn't be read
+- `enforced_phishing_resistant_mfa_for_all_users_and_apps` — Number of enforced policies that require phishing-resistant MFA for all users on all cloud apps, for all client app types. A policy counts only when it excludes no app and no directory role, and has no application filter, sign-in, user, insider or service principal risk, client app type, platform, location, device filter or authentication flow condition. Excluded users and groups aren't checked; null if the policies or a policy's strength couldn't be read
+- `phishing_resistant_mfa_role_template_ids` — List of directory role template ids (Global Administrator is 62e90394-69f5-4237-9190-012177145e10) that an enforced policy requiring phishing-resistant MFA on all cloud apps includes; a policy counts only when it excludes no app, has no application filter, sign-in, user, insider or service principal risk, client app type, platform, location, device filter or authentication flow condition. Excluded users, groups and roles aren't checked; null if the policies or a policy's strength couldn't be read
 
 **How widely do enforced policies apply?**
 - `enforced_policies_targeting_all_users` — Number of enforced policies that include all users; a policy can still exclude users, groups or roles; null if the policies couldn't be read
 - `enforced_policies_targeting_all_applications` — Number of enforced policies that include all cloud apps; a policy can still exclude apps; null if the policies couldn't be read
-- `enforced_mfa_for_all_users_and_apps` — Number of enforced policies that require MFA for all users on all cloud apps, before any exclusions, even when the policy lets the user meet a different control instead; Conditions (sign-in, user, insider or service principal risk, client app types, platforms, locations, device filter, authentication flows, application filter) and excluded apps aren't checked, so a policy limited by them still counts; `mfa_client_app_types_for_all_users_and_apps` is the strict figure; null if the policies couldn't be read
+- `enforced_mfa_for_all_users_and_apps` — Number of enforced policies that require MFA for all users on all cloud apps, for all client app types. A policy counts only when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no application filter, sign-in, user, insider or service principal risk, client app type, platform, location, device filter or authentication flow condition. Excluded users, groups and roles aren't checked; null if the policies couldn't be read
 - `mfa_client_app_types_for_all_users_and_apps` — List of client app types (browser, mobileAppsAndDesktopClients, exchangeActiveSync, other) on which enforced policies, taken together, require MFA for all users on all cloud apps. A policy counts when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no application filter, sign-in, user, insider or service principal risk, platform, location, device filter or authentication flow condition; a policy for all client app types adds all four. Excluded users, groups and roles aren't checked; null if the policies couldn't be read
 - `enforced_policies_targeting_legacy_authentication` — Number of enforced policies whose conditions name legacy clients (Exchange ActiveSync or other older clients, which can't prompt for MFA; a policy for all client app types names none and isn't counted), whether the policy blocks them or requires something else; null if the policies couldn't be read
 
 **Do admin portals and Azure management require MFA?**
-- `mfa_required_for_admin_portals` — True if at least one enforced policy requires MFA for all users on Microsoft Admin Portals (the Microsoft admin centers) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. The policy counts even when it lets the user meet a different control instead. Conditions (sign-in, user, insider or service principal risk, client app types, platforms, locations, device filter, authentication flows, application filter) and excluded users, groups, roles and apps aren't checked, so a policy limited by them still counts; `mfa_client_app_types_for_all_users_and_apps` is the strict figure
-- `mfa_required_for_azure_management_api` — True if at least one enforced policy requires MFA for all users on Windows Azure Service Management API (the Azure portal, CLI and PowerShell) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. The policy counts even when it lets the user meet a different control instead. Conditions (sign-in, user, insider or service principal risk, client app types, platforms, locations, device filter, authentication flows, application filter) and excluded users, groups, roles and apps aren't checked, so a policy limited by them still counts; `mfa_client_app_types_for_all_users_and_apps` is the strict figure
+- `mfa_required_for_admin_portals` — True if at least one enforced policy requires MFA for all users on Microsoft Admin Portals (the Microsoft admin centers) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. The policy counts only when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no application filter, sign-in, user, insider or service principal risk, client app type, platform, location, device filter or authentication flow condition. Excluded users, groups and roles aren't checked
+- `mfa_required_for_azure_management_api` — True if at least one enforced policy requires MFA for all users on Windows Azure Service Management API (the Azure portal, CLI and PowerShell) or on all cloud apps; false if no enforced policy does; null if the policies couldn't be read. The policy counts only when no other grant control, terms of use or authentication strength that doesn't satisfy MFA can stand in for MFA, it excludes no app, and it has no application filter, sign-in, user, insider or service principal risk, client app type, platform, location, device filter or authentication flow condition. Excluded users, groups and roles aren't checked
 
 **Who is left out?**
-- `enforced_policies_with_exclusions` — Number of enforced policies that exclude at least one user, group or directory role (the excludeGuestsOrExternalUsers exclusion is not read, so a policy that excludes only guests or external users isn't counted); null if the policies couldn't be read
-- `distinct_excluded_principals` — Number of distinct users, groups and directory roles excluded by at least one enforced policy (not counting excludeGuestsOrExternalUsers); null if the policies couldn't be read
+- `enforced_policies_with_exclusions` — Number of enforced policies that exclude at least one user, group, directory role, or guests or external users (either the GuestsOrExternalUsers entry in the excluded users or the excludeGuestsOrExternalUsers exclusion); null if the policies couldn't be read
+- `distinct_excluded_principals` — Number of distinct users, groups, directory roles and guest or external user exclusions excluded by at least one enforced policy (a guest or external user exclusion is one principal per distinct set of guest types and tenant scope kind; the GuestsOrExternalUsers entry counts as its own); null if the policies couldn't be read
+- `enforced_policies_excluding_guests_or_external_users` — Number of enforced policies that exclude guests or external users, by the GuestsOrExternalUsers entry in the excluded users or the excludeGuestsOrExternalUsers exclusion; null if the policies couldn't be read
+- `excluded_guest_or_external_user_types` — List of the guest or external user types (for example internalGuest, b2bCollaborationGuest) that the excludeGuestsOrExternalUsers exclusion of an enforced policy names; the tenants it covers are never listed, and each policy's evidence records whether they are all or enumerated tenants; null if the policies couldn't be read
 
 
 ### azure_entra_dormant_identities

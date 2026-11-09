@@ -8,7 +8,7 @@ statement: >-
   has no app registration credentials at all, so entra_app_creds_validity_within_interval's zero count
   reflects the credentials rather than a renamed field or a failed read. Asserts nothing about posture.
 
-# partial_failure first: a denied read writes "total_credentials": 0, which would otherwise match.
+# partial_failure first: a failed read writes "total_credentials": null (older evidence wrote 0, which would match).
 regex: '"partial_failure":\s*false[\s\S]*?(?:"days_until_expiry":\s*(?:-?\d+|null)|"total_credentials":\s*0(?![\d.]))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
