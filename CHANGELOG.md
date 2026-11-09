@@ -53,12 +53,32 @@ schemas and the `paramify` CLI — not the internal code.
   incomplete pagination. Issue reports also refuse missing scan coverage and
   require an explicit opt-in for zero findings. Includes synthetic regression tests
   and an example manifest with manual cycle closure.
+  Evidence retains validated partial results with `metadata.partial_failure`, an
+  `api_failures` ledger, `collection_complete: false` and null summary totals,
+  while still exiting nonzero. Issue reports remain all-or-nothing. Staging files
+  stay outside the output directory, including after a process kill; the output
+  directory and its parent must be writable and share a filesystem. CSV text
+  starting with formula markers receives a leading apostrophe; JSON evidence
+  keeps the original values.
 - **`aws_ecr_image_scanning` 0.3.0:** retrieve newest-image scan results regardless
   of `scan_on_push`, including enhanced continuous and completed manual scans.
   Resolve repository scan frequency through AWS, select the newest image across
   pages, and retain every severity and scan timestamps. Missing/incomplete scans
   have `severity_counts: null`, rather than fabricated zero counts; collection
   errors no longer imply BASIC scanning.
+  - **Required upgrade step:** grant `ecr:BatchGetRepositoryScanningConfiguration`
+    to the collection role. The AWS managed `AmazonEC2ContainerRegistryReadOnly`
+    policy does not include this new action.
+  - **Output changes:** `latest_image_scan.severity_counts` can be null when
+    counts are unavailable. Its keys now include `low`, `informational` and
+    `untriaged`; `latest_image_scan` adds `scan_completed_at` and
+    `vulnerability_source_updated_at`. Repositories add `scan_frequency`,
+    `applied_scan_filters` and `scan_collection_status`. Validators must distinguish
+    unknown counts from zero findings. Concurrent image deletion produces
+    `scan_collection_status: image_deleted`, `scan_status: IMAGE_NOT_FOUND` and
+    null counts without failing the run.
+  - Repository configurations are joined once across all batches. Batch failures
+    include AWS error details and preserve any successful repository configurations.
 
 - **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables can be measured.**
   The query API refuses these tables. Set `basic_logs_lookback_hours`

@@ -42,6 +42,13 @@ One row represents one finding on one ECR image. Multiple packages stay together
 in that row. Multiple findings with the same CVE remain distinct. JSON-valued
 cells use normal CSV quoting, including embedded commas/newlines.
 
+String cells beginning with `=`, `+`, `-` or `@` (including after leading spaces,
+tabs or line breaks) receive a leading apostrophe to prevent spreadsheet formula
+interpretation. This applies to every string column, including advisory titles,
+descriptions and remediation text. The intake mapping should treat these as text;
+verify how the preset handles the apostrophe. JSON evidence retains the original
+values. Normal Inspector finding ARNs and asset identities remain unchanged.
+
 | Column | Intended mapping / meaning |
 | --- | --- |
 | ID | Stable source record identity: finding ARN plus Asset ID. Use for repeat-import deduplication. |
@@ -67,6 +74,9 @@ does not assert that an existing Inspector preset accepts these columns.
 ## Completeness and closure
 
 The collector publishes the final CSV atomically only after all reads succeed.
+It stages files beside `EVIDENCE_DIR`; use a writable output subdirectory within
+the destination filesystem so the final rename stays atomic. Interrupted staging
+files never appear in the report directory.
 It refuses a report when Inspector ECR is disabled, no selected images exist, or
 any selected image lacks ACTIVE coverage with a last scan timestamp. Findings
 whose images disappeared or changed scope during collection also block a report;

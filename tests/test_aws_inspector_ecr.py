@@ -7,11 +7,13 @@ account/resource filters and explicit continuation tokens actually sent.
 from __future__ import annotations
 
 import csv
+import errno
 import importlib.util
 import io
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -65,7 +67,10 @@ def finding(index=1, severity="HIGH"):
 
 def responses():
     return {
-        "sts get-caller-identity": {"Account": ACCOUNT, "Arn": f"arn:aws-us-gov:iam::{ACCOUNT}:role/test"},
+        "sts get-caller-identity": {
+            "Account": ACCOUNT,
+            "Arn": f"arn:aws-us-gov:iam::{ACCOUNT}:role/test",
+        },
         "inspector2 batch-get-account-status": {
             "accounts": [{"accountId": ACCOUNT, "resourceState": {"ecr": {"status": "ENABLED"}}}],
             "failedAccounts": [],
@@ -107,6 +112,11 @@ with open(os.environ['FAKE_LOG'], 'a') as log:
 key = ' '.join(args[:2])
 if params.get('nextToken'): key += ':'+params['nextToken']
 response = json.load(open(os.environ['FAKE_RESPONSES']))[key]
+if isinstance(response, dict) and '_by_repository' in response:
+    repo = params.get('repositoryName') or args[args.index('--repository-name')+1]
+    response = response['_by_repository'][repo]
+if isinstance(response, dict) and '_configs' in response:
+    response = {'scanningConfigurations': [response['_configs'][name] for name in reversed(params['repositoryNames'])]}
 if isinstance(response, dict) and '_error' in response:
     print(response['_error'], file=sys.stderr)
     sys.exit(254)
@@ -205,7 +215,9 @@ def test_incomplete_collection_never_writes_report(tmp_path, case):
     if case in ("late_error", "loop", "changed_duplicate"):
         data["inspector2 list-findings"]["nextToken"] = "second"
         data["inspector2 list-findings:second"] = {
-            "late_error": {"_error": "An error occurred (AccessDeniedException) when calling ListFindings"},
+            "late_error": {
+                "_error": "An error occurred (AccessDeniedException) when calling ListFindings"
+            },
             "loop": {"findings": [], "nextToken": "second"},
             "changed_duplicate": {"findings": [finding(severity="LOW")]},
         }[case]
@@ -226,21 +238,224 @@ def test_incomplete_collection_never_writes_report(tmp_path, case):
     assert not files
     status = json.loads((tmp_path / "status.json").read_text())
     assert status["code"] == ("not_authorized" if case == "late_error" else "partial_failure")
+    result, files, _ = run_fetcher(tmp_path / "evidence", data, "inspector_ecr_findings")
+    assert result.returncode == 1
+    assert len(files) == 1
+    evidence = json.loads(files[0].read_text())
+    assert evidence["metadata"]["partial_failure"] is True
+    assert evidence["metadata"]["api_failures"]
+    assert evidence["results"]["collection_complete"] is False
+    assert evidence["results"]["summary"]["finding_count"] is None
+    if case in ("late_error", "loop", "changed_duplicate"):
+        assert evidence["results"]["findings"] == [finding()]
 
 
-@pytest.mark.parametrize("case", ["missing", "inactive", "never_scanned", "disabled", "empty_inventory"])
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "ecr describe-repositories",
+        "ecr describe-images",
+        "inspector2 list-coverage",
+        "inspector2 list-findings",
+    ],
+)
+def test_evidence_preserves_earlier_pages_and_independent_reads(tmp_path, operation):
+    data = responses()
+    data[operation]["nextToken"] = "denied"
+    data[operation + ":denied"] = {"_error": "AccessDeniedException: synthetic denial"}
+    result, files, _ = run_fetcher(tmp_path, data, "inspector_ecr_findings")
+    assert result.returncode == 1
+    assert len(files) == 1
+    evidence = json.loads(files[0].read_text())
+    assert evidence["metadata"]["partial_failure"] is True
+    failures = evidence["metadata"]["api_failures"]
+    assert len(failures) == 1
+    assert failures[0]["operation"] == operation
+    assert failures[0]["type"] == "CollectionError"
+    assert "synthetic denial" in failures[0]["message"]
+    assert failures[0]["code"] == "not_authorized"
+    results = evidence["results"]
+    assert results["collection_complete"] is False
+    assert results["findings_collection_status"] == "incomplete"
+    assert all(value is None for value in results["summary"].values())
+    assert results["findings"] == [finding()]
+    assert len(results["coverage"]) == len(results["images"]) == 1
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+    # The same partial evidence cannot become an issue report, even with opt-in.
+    with pytest.raises(collector.CollectionError, match="incomplete"):
+        collector.write_output(evidence, True, tmp_path / "report", allow_empty=True)
+    assert not (tmp_path / "report").exists()
+
+
+def test_evidence_records_multiple_failures_and_continues_other_repositories(tmp_path):
+    data = responses()
+    data["ecr describe-repositories"]["repositories"].insert(
+        0,
+        {
+            "repositoryName": "denied",
+            "repositoryArn": REPO + "-denied",
+            "registryId": ACCOUNT,
+        },
+    )
+    data["ecr describe-images"] = {
+        "_by_repository": {
+            "denied": {"_error": "AccessDeniedException"},
+            "example": data["ecr describe-images"],
+        }
+    }
+    data["inspector2 list-coverage"]["nextToken"] = "throttled"
+    data["inspector2 list-coverage:throttled"] = {"_error": "ThrottlingException"}
+    result, files, calls = run_fetcher(tmp_path, data, "inspector_ecr_findings")
+    assert result.returncode == 1
+    evidence = json.loads(files[0].read_text())
+    failures = evidence["metadata"]["api_failures"]
+    assert [f["operation"] for f in failures] == ["ecr describe-images", "inspector2 list-coverage"]
+    assert failures[0]["repository"] == "denied"
+    assert len(evidence["results"]["images"]) == 1
+    assert evidence["results"]["findings"] == [finding()]
+    assert calls[-1]["args"][:2] == ["inspector2", "list-findings"]
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "partial_failure"
+
+
+@pytest.mark.parametrize(
+    "operation", ["sts get-caller-identity", "inspector2 batch-get-account-status"]
+)
+def test_evidence_handles_identity_and_status_failures_without_false_disabled_state(
+    tmp_path, operation
+):
+    data = responses()
+    data[operation] = {"_error": "AccessDeniedException"}
+    result, files, calls = run_fetcher(tmp_path, data, "inspector_ecr_findings")
+    assert result.returncode == 1
+    evidence = json.loads(files[0].read_text())
+    assert evidence["results"]["scan_status"] is None
+    assert evidence["results"]["findings_collection_status"] == "incomplete"
+    assert evidence["results"]["summary"]["finding_count"] is None
+    assert evidence["metadata"]["api_failures"][0]["operation"] == operation
+    if operation.startswith("sts"):
+        assert len(calls) == 1
+        assert evidence["metadata"]["account_id"] is None
+        assert evidence["results"]["findings"] == []
+    else:
+        assert evidence["results"]["findings"] == [finding()]
+
+
+@pytest.mark.parametrize("kind", ["findings", "coverage"])
+def test_partial_evidence_does_not_include_out_of_scope_records(tmp_path, kind):
+    data = responses()
+    if kind == "findings":
+        invalid = finding(2)
+        invalid["awsAccountId"] = "999999999999"
+        data["inspector2 list-findings"]["findings"].append(invalid)
+    else:
+        data["inspector2 list-coverage"]["coveredResources"].append({"accountId": "999999999999"})
+    result, files, _ = run_fetcher(tmp_path, data, "inspector_ecr_findings")
+    assert result.returncode == 1
+    evidence = json.loads(files[0].read_text())
+    assert len(evidence["results"]["coverage"]) == 1
+    assert evidence["results"]["findings"] == [finding()]
+    assert evidence["metadata"]["partial_failure"] is True
+
+
+@pytest.mark.parametrize("kind", ["image", "coverage", "vulnerability"])
+def test_malformed_record_cannot_discard_earlier_valid_evidence(tmp_path, kind):
+    data = responses()
+    if kind == "image":
+        data["ecr describe-images"]["imageDetails"].append({"imageDigest": ["not-a-string"]})
+    elif kind == "coverage":
+        invalid = dict(data["inspector2 list-coverage"]["coveredResources"][0], scanStatus=None)
+        data["inspector2 list-coverage"]["coveredResources"].append(invalid)
+    else:
+        invalid = finding(2)
+        invalid["packageVulnerabilityDetails"]["vulnerabilityId"] = {"invalid": "object"}
+        data["inspector2 list-findings"]["findings"].append(invalid)
+    result, files, _ = run_fetcher(tmp_path, data, "inspector_ecr_findings")
+    assert result.returncode == 1
+    evidence = json.loads(files[0].read_text())
+    assert evidence["metadata"]["partial_failure"] is True
+    assert len(evidence["results"]["images"]) == 1
+    assert len(evidence["results"]["coverage"]) == 1
+    assert evidence["results"]["findings"] == [finding()]
+
+
+@pytest.mark.parametrize("prefix", ["=", "+", "-", "@", "\t=", "\r\n+", "  @"])
+def test_csv_formula_protection_preserves_raw_evidence_and_record_identity(tmp_path, prefix):
+    data = responses()
+    advisory = data["inspector2 list-findings"]["findings"][0]
+    value = prefix + 'SUM(1,2)\n"quoted"'
+    advisory.update(title=value, description=value, remediation={"recommendation": {"text": value}})
+    result, files, _ = run_fetcher(tmp_path / "report", data)
+    assert result.returncode == 0, result.stderr
+    with files[0].open(newline="") as stream:
+        row = next(csv.DictReader(stream))
+    for column in ("Title", "Description", "Remediation"):
+        assert row[column] == "'" + value
+    assert row["ID"] == f"{advisory['findingArn']}|{ACCOUNT}/{REGION}/example@{DIGEST}"
+    result, files, _ = run_fetcher(tmp_path / "evidence", data, "inspector_ecr_findings")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(files[0].read_text())["results"]["findings"] == [advisory]
+
+
+@pytest.mark.parametrize("report", [False, True])
+def test_killed_writer_never_leaves_an_artifact_in_output_directory(tmp_path, report):
+    result, files, _ = run_fetcher(tmp_path / "setup", name="inspector_ecr_findings")
+    assert result.returncode == 0, result.stderr
+    output = tmp_path / "output"
+    script = """
+import importlib.util, json, os, signal, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("collector", sys.argv[1])
+collector = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(collector)
+evidence = json.loads(Path(sys.argv[2]).read_text())
+def die(*args, **kwargs):
+    os.kill(os.getpid(), signal.SIGKILL)
+collector.json.dump = die
+collector.csv.DictWriter.writerows = die
+collector.write_output(evidence, sys.argv[4] == "True", Path(sys.argv[3]))
+"""
+    killed = subprocess.run(
+        [sys.executable, "-c", script, str(SHARED), str(files[0]), str(output), str(report)]
+    )
+    assert killed.returncode == -signal.SIGKILL
+    assert list(output.iterdir()) == []
+    # The abrupt kill really left a staging file, outside the runner's directory.
+    assert len(list(tmp_path.glob(".inspector-*.tmp"))) == 1
+
+
+def test_cross_filesystem_publication_fails_without_copying_partial_report(tmp_path, monkeypatch):
+    result, files, _ = run_fetcher(tmp_path / "setup", name="inspector_ecr_findings")
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(files[0].read_text())
+    output = tmp_path / "output"
+
+    def cross_device(*args):
+        raise OSError(errno.EXDEV, "Cross-device link")
+
+    monkeypatch.setattr(Path, "replace", cross_device)
+    with pytest.raises(collector.CollectionError, match="same filesystem"):
+        collector.write_output(evidence, True, output)
+    assert list(output.iterdir()) == []
+    assert not list(tmp_path.glob(".inspector-*.tmp"))
+
+
+@pytest.mark.parametrize(
+    "case", ["missing", "inactive", "never_scanned", "disabled", "empty_inventory"]
+)
 def test_evidence_exposes_coverage_gaps_but_report_refuses_them(tmp_path, case):
     data = responses()
     if case == "missing":
         data["inspector2 list-coverage"]["coveredResources"] = []
     elif case == "inactive":
-        data["inspector2 list-coverage"]["coveredResources"][0]["scanStatus"]["statusCode"] = "INACTIVE"
+        data["inspector2 list-coverage"]["coveredResources"][0]["scanStatus"]["statusCode"] = (
+            "INACTIVE"
+        )
     elif case == "never_scanned":
         del data["inspector2 list-coverage"]["coveredResources"][0]["lastScannedAt"]
     elif case == "disabled":
-        data["inspector2 batch-get-account-status"]["accounts"][0]["resourceState"]["ecr"]["status"] = (
-            "DISABLED"
-        )
+        data["inspector2 batch-get-account-status"]["accounts"][0]["resourceState"]["ecr"][
+            "status"
+        ] = "DISABLED"
     else:
         data["ecr describe-images"]["imageDetails"] = []
     result, files, _ = run_fetcher(tmp_path / "evidence", data, "inspector_ecr_findings")
@@ -268,10 +483,14 @@ def test_repositories_and_tags_are_explicit_not_internal_defaults(tmp_path):
     result, files, calls = run_fetcher(tmp_path / "all")
     assert result.returncode == 0, result.stderr
     filters = next(
-        c["params"]["filterCriteria"] for c in calls if c["args"][:2] == ["inspector2", "list-findings"]
+        c["params"]["filterCriteria"]
+        for c in calls
+        if c["args"][:2] == ["inspector2", "list-findings"]
     )
     assert "ecrImageTags" not in filters and "ecrImageRepositoryName" not in filters
-    result, files, _ = run_fetcher(tmp_path / "typo", AWS_INSPECTOR_REPOSITORIES='["does-not-exist"]')
+    result, files, _ = run_fetcher(
+        tmp_path / "typo", AWS_INSPECTOR_REPOSITORIES='["does-not-exist"]'
+    )
     assert result.returncode == 1 and not files
 
 
@@ -289,8 +508,12 @@ def test_filenames_distinguish_scope_and_profile(tmp_path):
 
 
 def test_commercial_partition_and_target_region_override_ambient_region(tmp_path):
-    data = json.loads(json.dumps(responses()).replace("aws-us-gov", "aws").replace(REGION, "us-east-1"))
-    result, files, calls = run_fetcher(tmp_path, data, AWS_DEFAULT_REGION="us-east-1", AWS_REGION="us-west-2")
+    data = json.loads(
+        json.dumps(responses()).replace("aws-us-gov", "aws").replace(REGION, "us-east-1")
+    )
+    result, files, calls = run_fetcher(
+        tmp_path, data, AWS_DEFAULT_REGION="us-east-1", AWS_REGION="us-west-2"
+    )
     assert result.returncode == 0, result.stderr
     rows = list(csv.DictReader(io.StringIO(files[0].read_text())))
     assert rows[0]["Asset ID"].startswith(f"{ACCOUNT}/us-east-1/")
@@ -299,9 +522,9 @@ def test_commercial_partition_and_target_region_override_ambient_region(tmp_path
 
 def test_finding_for_image_missing_from_inventory_is_not_an_importable_snapshot(tmp_path):
     data = responses()
-    data["inspector2 list-findings"]["findings"][0]["resources"][0]["details"]["awsEcrContainerImage"][
-        "imageHash"
-    ] = "sha256:" + "b" * 64
+    data["inspector2 list-findings"]["findings"][0]["resources"][0]["details"][
+        "awsEcrContainerImage"
+    ]["imageHash"] = "sha256:" + "b" * 64
     result, files, _ = run_fetcher(tmp_path / "report", data)
     assert result.returncode == 1 and not files
     result, files, _ = run_fetcher(tmp_path / "evidence", data, "inspector_ecr_findings")
@@ -355,8 +578,101 @@ def test_scan_configuration_failure_is_not_basic_scanning(tmp_path):
 
 
 @pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
+def test_ecr_config_batches_join_the_correct_repository_once(tmp_path):
+    data = responses()
+    data["ecr get-registry-scanning-configuration"] = {
+        "scanningConfiguration": {"scanType": "ENHANCED", "rules": []}
+    }
+    configs = {}
+    repositories = []
+    for index in range(27):
+        name = f"repository-{index}"
+        repositories.append(
+            {"repositoryName": name, "repositoryArn": REPO + name, "registryId": ACCOUNT}
+        )
+        configs[name] = {
+            "repositoryName": name,
+            "scanFrequency": "CONTINUOUS_SCAN" if index % 2 else "SCAN_ON_PUSH",
+            "appliedScanFilters": [{"filter": name, "filterType": "WILDCARD"}],
+        }
+    data["ecr describe-repositories"] = {"repositories": repositories}
+    data["ecr batch-get-repository-scanning-configuration"] = {"_configs": configs}
+    data["ecr describe-images"] = None
+    result, files, calls = run_fetcher(tmp_path, data, "ecr_image_scanning")
+    assert result.returncode == 0, result.stderr
+    collected = json.loads(files[0].read_text())["results"]["repositories"]
+    assert len(collected) == 27
+    for repo in collected:
+        assert repo["scan_frequency"] == configs[repo["name"]]["scanFrequency"]
+        assert repo["applied_scan_filters"] == configs[repo["name"]]["appliedScanFilters"]
+    batches = [
+        c["params"]["repositoryNames"]
+        for c in calls
+        if c["args"][:2] == ["ecr", "batch-get-repository-scanning-configuration"]
+    ]
+    assert [len(batch) for batch in batches] == [25, 2]
+    assert [name for batch in batches for name in batch] == [
+        repo["repositoryName"] for repo in repositories
+    ]
+
+
+@pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
+def test_ecr_partial_batch_preserves_successful_config_and_failure_reason(tmp_path):
+    data = responses()
+    data["ecr get-registry-scanning-configuration"] = {
+        "scanningConfiguration": {"scanType": "ENHANCED", "rules": []}
+    }
+    data["ecr describe-repositories"]["repositories"].append(
+        {
+            "repositoryName": "gone",
+            "repositoryArn": REPO + "-gone",
+            "registryId": ACCOUNT,
+        }
+    )
+    data["ecr batch-get-repository-scanning-configuration"] = {
+        "scanningConfigurations": [
+            {"repositoryName": "example", "scanFrequency": "CONTINUOUS_SCAN"}
+        ],
+        "failures": [
+            {
+                "repositoryName": "gone",
+                "failureCode": "REPOSITORY_NOT_FOUND",
+                "failureReason": "deleted",
+            }
+        ],
+    }
+    data["ecr describe-images"] = None
+    result, files, _ = run_fetcher(tmp_path, data, "ecr_image_scanning")
+    assert result.returncode == 1
+    repos = json.loads(files[0].read_text())["results"]["repositories"]
+    assert repos[0]["scan_frequency"] == "CONTINUOUS_SCAN"
+    assert repos[1]["scan_frequency"] is None
+    error = json.loads((tmp_path / "status.json").read_text())["error"]
+    assert "REPOSITORY_NOT_FOUND" in error and "gone" in error and "deleted" in error
+
+
+@pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
+def test_ecr_batch_error_identifies_request_and_aws_reason(tmp_path):
+    data = responses()
+    data["ecr get-registry-scanning-configuration"] = {
+        "scanningConfiguration": {"scanType": "ENHANCED", "rules": []}
+    }
+    data["ecr batch-get-repository-scanning-configuration"] = {
+        "_error": "AccessDeniedException: missing ecr:BatchGetRepositoryScanningConfiguration"
+    }
+    data["ecr describe-images"] = None
+    result, _, _ = run_fetcher(tmp_path, data, "ecr_image_scanning")
+    assert result.returncode == 1
+    status = json.loads((tmp_path / "status.json").read_text())
+    assert status["code"] == "not_authorized"
+    assert "example" in status["error"]
+    assert "missing ecr:BatchGetRepositoryScanningConfiguration" in status["error"]
+
+
+@pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
 @pytest.mark.parametrize(
-    "scan_type,frequency", [("ENHANCED", "CONTINUOUS_SCAN"), ("BASIC", "MANUAL"), ("BASIC", "SCAN_ON_PUSH")]
+    "scan_type,frequency",
+    [("ENHANCED", "CONTINUOUS_SCAN"), ("BASIC", "MANUAL"), ("BASIC", "SCAN_ON_PUSH")],
 )
 def test_ecr_scan_results_do_not_depend_on_scan_on_push(tmp_path, scan_type, frequency):
     data = responses()
@@ -393,7 +709,14 @@ def test_ecr_scan_results_do_not_depend_on_scan_on_push(tmp_path, scan_type, fre
 @pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
 @pytest.mark.parametrize(
     "scan",
-    ["ScanNotFoundException", "PENDING", "SCAN_ELIGIBILITY_EXPIRED", "FAILED", "AccessDeniedException"],
+    [
+        "ScanNotFoundException",
+        "ImageNotFoundException",
+        "PENDING",
+        "SCAN_ELIGIBILITY_EXPIRED",
+        "FAILED",
+        "AccessDeniedException",
+    ],
 )
 def test_unavailable_scan_counts_never_look_clean(tmp_path, scan):
     data = responses()
@@ -401,7 +724,9 @@ def test_unavailable_scan_counts_never_look_clean(tmp_path, scan):
         "scanningConfiguration": {"scanType": "ENHANCED", "rules": []}
     }
     data["ecr batch-get-repository-scanning-configuration"] = {
-        "scanningConfigurations": [{"repositoryName": "example", "scanFrequency": "CONTINUOUS_SCAN"}]
+        "scanningConfigurations": [
+            {"repositoryName": "example", "scanFrequency": "CONTINUOUS_SCAN"}
+        ]
     }
     data["ecr describe-images"] = DIGEST
     data["ecr describe-image-scan-findings"] = (
@@ -421,6 +746,58 @@ def test_unavailable_scan_counts_never_look_clean(tmp_path, scan):
     else:
         assert result.returncode == 0, result.stderr
         assert repo["latest_image_scan"]["severity_counts"] is None
+        if scan == "ImageNotFoundException":
+            assert repo["scan_collection_status"] == "image_deleted"
+            assert repo["latest_image_scan"]["scan_status"] == "IMAGE_NOT_FOUND"
+            assert repo["latest_image_scan"]["image_digest"] == DIGEST
+
+
+def configure_runner_aws(setup, monkeypatch):
+    # The runner intentionally strips undeclared env vars. Bake test paths into
+    # the fake rather than altering the production credential/config contract.
+    fake = (
+        (setup / "aws")
+        .read_text()
+        .replace("os.environ['FAKE_LOG']", repr(str(setup / "calls.jsonl")))
+    )
+    fake = fake.replace("os.environ['FAKE_RESPONSES']", repr(str(setup / "responses.json")))
+    (setup / "aws").write_text(fake)
+    monkeypatch.setenv("PATH", f"{setup}{os.pathsep}{os.environ['PATH']}")
+    for key in list(os.environ):
+        if key.startswith(("AWS_", "PARAMIFY_")):
+            monkeypatch.delenv(key)
+
+
+def test_runner_retains_partial_evidence_with_failed_envelope(tmp_path, monkeypatch):
+    from framework import api
+
+    setup = tmp_path / "setup"
+    data = responses()
+    data["inspector2 list-findings"]["nextToken"] = "denied"
+    data["inspector2 list-findings:denied"] = {"_error": "AccessDeniedException"}
+    result, _, _ = run_fetcher(setup, data, "inspector_ecr_findings")
+    assert result.returncode == 1
+    configure_runner_aws(setup, monkeypatch)
+    summary = api.run(
+        {
+            "run": {
+                "output_dir": str(tmp_path / "runs"),
+                "fetchers": [
+                    {"use": "aws_inspector_ecr_findings", "targets": [{"region": REGION}]}
+                ],
+            }
+        },
+        ROOT,
+    )
+    assert not summary["ok"]
+    artifacts = list(Path(summary["run_dir"]).glob("aws_inspector_ecr_findings_*.json"))
+    assert len(artifacts) == 1
+    artifact = json.loads(artifacts[0].read_text())
+    assert artifact["metadata"]["status"] == "failed"
+    assert artifact["metadata"]["error_code"] == "not_authorized"
+    assert artifact["payload"]["metadata"]["partial_failure"] is True
+    assert artifact["payload"]["results"]["findings"] == [finding()]
+    assert artifact["payload"]["results"]["collection_complete"] is False
 
 
 def test_runner_to_paramify_intake_preserves_rows_and_does_not_reupload(tmp_path, monkeypatch):
@@ -430,15 +807,7 @@ def test_runner_to_paramify_intake_preserves_rows_and_does_not_reupload(tmp_path
     setup = tmp_path / "setup"
     result, original, _ = run_fetcher(setup)
     assert result.returncode == 0, result.stderr
-    # The runner intentionally strips undeclared env vars. Bake test paths into
-    # the fake rather than altering the production credential/config contract.
-    fake = (setup / "aws").read_text().replace("os.environ['FAKE_LOG']", repr(str(setup / "calls.jsonl")))
-    fake = fake.replace("os.environ['FAKE_RESPONSES']", repr(str(setup / "responses.json")))
-    (setup / "aws").write_text(fake)
-    monkeypatch.setenv("PATH", f"{setup}{os.pathsep}{os.environ['PATH']}")
-    for key in list(os.environ):
-        if key.startswith(("AWS_", "PARAMIFY_")):
-            monkeypatch.delenv(key)
+    configure_runner_aws(setup, monkeypatch)
     assessment = "123e4567-e89b-12d3-a456-426614174000"
     manifest = {
         "run": {

@@ -7,8 +7,12 @@ scope. It does not generate an AWS export or contact Paramify.
 
 For vulnerability issue intake, use the companion
 [`aws_inspector_ecr_report`](../inspector_ecr_report/README.md). For a lightweight
-newest-image summary use `aws_ecr_image_scanning`; `inspector_vulnerability_scanning`
-continues to report account scanning enablement.
+newest-image summary use `aws_ecr_image_scanning`. Use this fetcher for per-image
+ECR findings and scan coverage; use
+[`aws_inspector_vulnerability_scanning`](../inspector_vulnerability_scanning/fetcher.yaml)
+for account-level scanning status across EC2, ECR and Lambda, plus whether active
+findings exist. Select the evidence appropriate to the claim you are evaluating;
+the shared KSI mapping does not make the two outputs interchangeable.
 
 ## Scope and collection
 
@@ -31,11 +35,28 @@ they do not claim durable history across image replacement.
 
 The collector reads every repository, image, coverage and finding page. It rejects
 malformed pages, repeated pagination tokens, differing duplicate findings and
-out-of-scope finding resources. IAM, throttling and late-page errors fail the
-invocation without an output file. AWS CLI standard retries are bounded to four
+out-of-scope finding resources. In evidence mode, IAM, throttling and late-page
+errors preserve previously validated records and collection continues with
+independent operations and repositories. The output sets
+`metadata.partial_failure: true`, records each failure's `operation`, `type`,
+`message` and status `code` in `metadata.api_failures`, and sets
+`collection_complete: false` and `findings_collection_status: incomplete`.
+Summary totals are null for incomplete collections, so partial results cannot
+look like a complete or clean scan. The invocation exits nonzero. Records that
+fail identity/scope validation are excluded. If STS identity cannot be verified, the
+output records the failure with a null account/ARN and no dependent AWS calls.
+Invalid configuration before collection can still fail without an output file.
+Issue-report mode continues to fail without a report on any collection error.
+AWS CLI standard retries are bounded to four
 attempts per request; each CLI request has a 180-second timeout and the runner
 allows one hour per target. The collector keeps the selected inventory and
 findings in memory. Scope large registries with repository/tag filters.
+
+Files are staged beside `EVIDENCE_DIR`, then atomically renamed into it. The
+output directory and its parent must be writable and on the same filesystem;
+when using a mounted volume, select an output subdirectory within that volume.
+A killed process can leave a sibling `.inspector-*.tmp` file, but the runner
+will not discover it as an output artifact.
 
 `collection_complete` means all requested API reads completed. The APIs are live
 and do not provide a transactional snapshot. Each artifact records start/end

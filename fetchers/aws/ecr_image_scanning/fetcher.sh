@@ -26,7 +26,8 @@ _FETCHER_TMP_JSON="$(mktemp -t aws_ecr_image_scanning.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_ecr_image_scanning_fail.XXXXXX)"
 _REPOS_STREAM="$(mktemp -t aws_ecr_image_scanning_repos.XXXXXX.json)"
 _CONFIG_STREAM="$(mktemp -t aws_ecr_image_scanning_config.XXXXXX.json)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_REPOS_STREAM" "$_CONFIG_STREAM"' EXIT
+_CONFIG_ERR="$(mktemp -t aws_ecr_image_scanning_config_err.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_REPOS_STREAM" "$_CONFIG_STREAM" "$_CONFIG_ERR"' EXIT
 
 log_info() { printf '%s INFO aws_ecr_image_scanning %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_ecr_image_scanning %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -83,25 +84,26 @@ if [ $list_exit -ne 0 ] || ! echo "$repositories" | jq -e '.repositories | type 
 else
     # AWS resolves overlapping registry filters; batch requests accept 25 names.
     echo "$repositories" | jq -c '[.repositories[].repositoryName] | range(0; length; 25) as $i | {repositoryNames: .[$i:$i+25]}' | while read -r batch; do
-        config=$(aws ecr batch-get-repository-scanning-configuration --cli-input-json "$batch" --output json)
+        config=$(aws ecr batch-get-repository-scanning-configuration --cli-input-json "$batch" --output json 2>"$_CONFIG_ERR")
         if [ $? -ne 0 ]; then
-            echo "aws ecr batch-get-repository-scanning-configuration failed" >> "$_FAILURE_LOG"
-        elif ! echo "$config" | jq -e '(.failures // [] | length) == 0 and (.scanningConfigurations | type == "array")' >/dev/null; then
-            echo "aws ecr batch-get-repository-scanning-configuration returned failures or invalid data" >> "$_FAILURE_LOG"
+            echo "aws ecr batch-get-repository-scanning-configuration failed for $batch: $(tr '\n' ' ' < "$_CONFIG_ERR")" >> "$_FAILURE_LOG"
+        elif ! echo "$config" | jq -e '(.scanningConfigurations | type == "array") and (.failures // [] | type == "array")' >/dev/null; then
+            echo "aws ecr batch-get-repository-scanning-configuration returned invalid data for $batch: $config" >> "$_FAILURE_LOG"
         else
+            echo "$config" | jq -cr '.failures[]? | "aws ecr batch-get-repository-scanning-configuration: \(tojson)"' >> "$_FAILURE_LOG"
             echo "$config" | jq -c '.scanningConfigurations[]' >> "$_CONFIG_STREAM"
         fi
     done
-    # Each repository and its scan result are appended to a stream and turned
-    # into records in one jq pass below -- not five jq processes and an output
-    # rewrite per repository.
-    echo "$repositories" | jq -c '.repositories[]?' | while read -r repo; do
+    # Join configs once, rather than parsing/searching the full stream per repo.
+    echo "$repositories" | jq -c --slurpfile configs "$_CONFIG_STREAM" '
+        (reduce $configs[] as $c ({}; .[$c.repositoryName] = $c)) as $by_name
+        | .repositories[]?
+        | . + {effective_scanning: ($by_name[.repositoryName] // null), scan_collection_status: "empty_repository"}
+    ' | while read -r repo; do
         repo_name=$(echo "$repo" | jq -r '.repositoryName')
-        effective=$(jq -s --arg name "$repo_name" '[.[] | select(.repositoryName == $name)][0] // null' "$_CONFIG_STREAM")
-        if [ "$effective" = "null" ]; then
+        if ! echo "$repo" | jq -e '.effective_scanning != null' >/dev/null; then
             echo "No effective scanning configuration returned for $repo_name" >> "$_FAILURE_LOG"
         fi
-        repo=$(echo "$repo" | jq --argjson effective "$effective" '. + {effective_scanning: $effective, scan_collection_status: "empty_repository"}')
 
         # null = no scan recorded (latest_image_scan stays null); otherwise the
         # NOT_SCANNED summary, or {"findings": <describe-image-scan-findings>}.
@@ -145,6 +147,14 @@ else
                         severity_counts: null
                     }')
                     repo=$(echo "$repo" | jq '.scan_collection_status = "not_scanned"')
+                elif grep -q 'ImageNotFoundException' "$_FIND_ERR"; then
+                    # A concurrent deletion is neither a failed API permission
+                    # nor proof of a clean scan. Retain the selected digest.
+                    scan=$(jq -n --arg d "$latest_digest" '{
+                        image_digest: $d, scan_status: "IMAGE_NOT_FOUND",
+                        severity_counts: null
+                    }')
+                    repo=$(echo "$repo" | jq '.scan_collection_status = "image_deleted"')
                 else
                     echo "aws ecr describe-image-scan-findings ($repo_name) failed (exit=$find_exit): $(tr '\n' ' ' < "$_FIND_ERR")" >> "$_FAILURE_LOG"
                     repo=$(echo "$repo" | jq '.scan_collection_status = "error"')

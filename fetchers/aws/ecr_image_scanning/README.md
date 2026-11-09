@@ -20,6 +20,9 @@ active findings and coverage across the selected ECR image inventory, or
 Version 0.3.0 adds `BatchGetRepositoryScanningConfiguration`. It asks AWS to
 resolve repository filters in batches of at most 25, rather than approximating
 overlapping rules locally.
+Add `ecr:BatchGetRepositoryScanningConfiguration` to the collection role when
+upgrading; the AWS managed `AmazonEC2ContainerRegistryReadOnly` policy does not
+include this action.
 
 ## Results
 
@@ -36,3 +39,8 @@ scans, and when AWS supplies no count map. Only a completed or active scan with 
 count map fills absent severity entries with zero. Collection failures exit
 nonzero while preserving partial evidence; a failed configuration read does not
 default the registry to BASIC.
+
+If the newest image disappears between listing and reading its scan, the result
+keeps its digest with `scan_status: IMAGE_NOT_FOUND`, null severity counts and
+`scan_collection_status: image_deleted`. This deletion race does not fail the
+run and does not imply a clean scan.
