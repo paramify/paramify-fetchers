@@ -1,0 +1,200 @@
+validator: azure_activity_log_required_categories_to_log_analytics
+cases:
+  - name: required_categories_to_workspace
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DIAG-SETTINGS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"diagnostic_settings":[{"captures_all_log_categories":false,"captures_required_log_categories":true,"destinations":["log_analytics_workspace"],"enabled_log_categories":["Administrative","Alert","Autoscale","Policy","Recommendation","ResourceHealth","Security","ServiceHealth"],"enabled_log_category_groups":[],"event_hub_authorization_rule_id":null,"event_hub_name":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-to-law","log_analytics_destination_type":null,"logs":[{"category":"Administrative","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Alert","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Autoscale","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Policy","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Recommendation","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ResourceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Security","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ServiceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}}],"marketplace_partner_id":null,"missing_required_log_categories":[],"name":"activity-to-law","service_bus_rule_id":null,"storage_account_id":null,"storage_account_name":null,"workspace_id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.OperationalInsights/workspaces/law-example","workspace_name":"law-example"}],"provider_registration_status":"registered","scope":"subscription"},"summary":{"activity_log_exported":true,"all_required_log_categories_covered":true,"covered_required_log_categories":4,"log_category_coverage":{"Administrative":true,"Alert":true,"Autoscale":true,"Policy":true,"Recommendation":true,"ResourceHealth":true,"Security":true,"ServiceHealth":true},"provider_registration_status":"registered","required_log_categories":["Administrative","Security","Alert","Policy"],"required_log_category_percentage":100,"settings_capturing_required_categories":1,"settings_with_event_hub":0,"settings_with_legacy_retention":0,"settings_with_log_analytics_workspace":1,"settings_with_partner_solution":0,"settings_with_storage_account":0,"total_diagnostic_settings":1}},"schema_version":"1.0"}'
+
+  - name: required_categories_to_workspace_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "evidence_set": {
+            "reference_id": "EVD-AZURE-DIAG-SETTINGS"
+          },
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "api_failures": [],
+            "partial_failure": false,
+            "subscription_id": "00000000-0000-0000-0000-000000000000",
+            "subscription_source": "target"
+          },
+          "results": {
+            "diagnostic_settings": [
+              {
+                "captures_all_log_categories": false,
+                "captures_required_log_categories": true,
+                "destinations": [
+                  "log_analytics_workspace"
+                ],
+                "enabled_log_categories": [
+                  "Administrative",
+                  "Alert",
+                  "Autoscale",
+                  "Policy",
+                  "Recommendation",
+                  "ResourceHealth",
+                  "Security",
+                  "ServiceHealth"
+                ],
+                "enabled_log_category_groups": [],
+                "event_hub_authorization_rule_id": null,
+                "event_hub_name": null,
+                "id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-to-law",
+                "log_analytics_destination_type": null,
+                "logs": [
+                  {
+                    "category": "Administrative",
+                    "category_group": null,
+                    "enabled": true,
+                    "retention_policy": {
+                      "days": 0,
+                      "enabled": false
+                    }
+                  },
+                  {
+                    "category": "Alert",
+                    "category_group": null,
+                    "enabled": true,
+                    "retention_policy": {
+                      "days": 0,
+                      "enabled": false
+                    }
+                  },
+                  {
+                    "category": "Autoscale",
+                    "category_group": null,
+                    "enabled": true,
+                    "retention_policy": {
+                      "days": 0,
+                      "enabled": false
+                    }
+                  },
+                  {
+                    "category": "Policy",
+                    "category_group": null,
+                    "enabled": true,
+                    "retention_policy": {
+                      "days": 0,
+                      "enabled": false
+                    }
+                  },
+                  {
+                    "category": "Recommendation",
+                    "category_group": null,
+                    "enabled": true,
+                    "retention_policy": {
+                      "days": 0,
+                      "enabled": false
+                    }
+                  },
+                  {
+                    "category": "ResourceHealth",
+                    "category_group": null,
+                    "enabled": true,
+                    "retention_policy": {
+                      "days": 0,
+                      "enabled": false
+                    }
+                  },
+                  {
+                    "category": "Security",
+                    "category_group": null,
+                    "enabled": true,
+                    "retention_policy": {
+                      "days": 0,
+                      "enabled": false
+                    }
+                  },
+                  {
+                    "category": "ServiceHealth",
+                    "category_group": null,
+                    "enabled": true,
+                    "retention_policy": {
+                      "days": 0,
+                      "enabled": false
+                    }
+                  }
+                ],
+                "marketplace_partner_id": null,
+                "missing_required_log_categories": [],
+                "name": "activity-to-law",
+                "service_bus_rule_id": null,
+                "storage_account_id": null,
+                "storage_account_name": null,
+                "workspace_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.OperationalInsights/workspaces/law-example",
+                "workspace_name": "law-example"
+              }
+            ],
+            "provider_registration_status": "registered",
+            "scope": "subscription"
+          },
+          "summary": {
+            "activity_log_exported": true,
+            "all_required_log_categories_covered": true,
+            "covered_required_log_categories": 4,
+            "log_category_coverage": {
+              "Administrative": true,
+              "Alert": true,
+              "Autoscale": true,
+              "Policy": true,
+              "Recommendation": true,
+              "ResourceHealth": true,
+              "Security": true,
+              "ServiceHealth": true
+            },
+            "provider_registration_status": "registered",
+            "required_log_categories": [
+              "Administrative",
+              "Security",
+              "Alert",
+              "Policy"
+            ],
+            "required_log_category_percentage": 100,
+            "settings_capturing_required_categories": 1,
+            "settings_with_event_hub": 0,
+            "settings_with_legacy_retention": 0,
+            "settings_with_log_analytics_workspace": 1,
+            "settings_with_partner_solution": 0,
+            "settings_with_storage_account": 0,
+            "total_diagnostic_settings": 1
+          }
+        },
+        "schema_version": "1.0"
+      }
+
+  - name: storage_then_workspace_setting
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DIAG-SETTINGS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"diagnostic_settings":[{"captures_all_log_categories":false,"captures_required_log_categories":true,"destinations":["storage_account"],"enabled_log_categories":["Administrative","Alert","Autoscale","Policy","Recommendation","ResourceHealth","Security","ServiceHealth"],"enabled_log_category_groups":[],"event_hub_authorization_rule_id":null,"event_hub_name":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-all-to-storage","log_analytics_destination_type":null,"logs":[{"category":"Administrative","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Alert","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Autoscale","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Policy","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Recommendation","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ResourceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Security","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ServiceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}}],"marketplace_partner_id":null,"missing_required_log_categories":[],"name":"activity-all-to-storage","service_bus_rule_id":null,"storage_account_id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.Storage/storageAccounts/stexample","storage_account_name":"stexample","workspace_id":null,"workspace_name":null},{"captures_all_log_categories":false,"captures_required_log_categories":true,"destinations":["log_analytics_workspace"],"enabled_log_categories":["Administrative","Alert","Policy","Security"],"enabled_log_category_groups":[],"event_hub_authorization_rule_id":null,"event_hub_name":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-to-law","log_analytics_destination_type":null,"logs":[{"category":"Administrative","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Alert","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Policy","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Security","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}}],"marketplace_partner_id":null,"missing_required_log_categories":[],"name":"activity-to-law","service_bus_rule_id":null,"storage_account_id":null,"storage_account_name":null,"workspace_id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.OperationalInsights/workspaces/law-example","workspace_name":"law-example"}],"provider_registration_status":"registered","scope":"subscription"},"summary":{"activity_log_exported":true,"all_required_log_categories_covered":true,"covered_required_log_categories":4,"log_category_coverage":{"Administrative":true,"Alert":true,"Autoscale":true,"Policy":true,"Recommendation":true,"ResourceHealth":true,"Security":true,"ServiceHealth":true},"provider_registration_status":"registered","required_log_categories":["Administrative","Security","Alert","Policy"],"required_log_category_percentage":100,"settings_capturing_required_categories":2,"settings_with_event_hub":0,"settings_with_legacy_retention":0,"settings_with_log_analytics_workspace":1,"settings_with_partner_solution":0,"settings_with_storage_account":1,"total_diagnostic_settings":2}},"schema_version":"1.0"}'
+
+  - name: storage_only
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DIAG-SETTINGS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"diagnostic_settings":[{"captures_all_log_categories":false,"captures_required_log_categories":true,"destinations":["storage_account"],"enabled_log_categories":["Administrative","Alert","Autoscale","Policy","Recommendation","ResourceHealth","Security","ServiceHealth"],"enabled_log_category_groups":[],"event_hub_authorization_rule_id":null,"event_hub_name":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-to-storage","log_analytics_destination_type":null,"logs":[{"category":"Administrative","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Alert","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Autoscale","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Policy","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Recommendation","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ResourceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Security","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ServiceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}}],"marketplace_partner_id":null,"missing_required_log_categories":[],"name":"activity-to-storage","service_bus_rule_id":null,"storage_account_id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.Storage/storageAccounts/stexample","storage_account_name":"stexample","workspace_id":null,"workspace_name":null}],"provider_registration_status":"registered","scope":"subscription"},"summary":{"activity_log_exported":true,"all_required_log_categories_covered":true,"covered_required_log_categories":4,"log_category_coverage":{"Administrative":true,"Alert":true,"Autoscale":true,"Policy":true,"Recommendation":true,"ResourceHealth":true,"Security":true,"ServiceHealth":true},"provider_registration_status":"registered","required_log_categories":["Administrative","Security","Alert","Policy"],"required_log_category_percentage":100,"settings_capturing_required_categories":1,"settings_with_event_hub":0,"settings_with_legacy_retention":0,"settings_with_log_analytics_workspace":0,"settings_with_partner_solution":0,"settings_with_storage_account":1,"total_diagnostic_settings":1}},"schema_version":"1.0"}'
+
+  - name: workspace_setting_lacks_categories
+    expect: FAIL
+    note: Complete setting goes to storage; the workspace one has two categories.
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DIAG-SETTINGS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"diagnostic_settings":[{"captures_all_log_categories":false,"captures_required_log_categories":false,"destinations":["log_analytics_workspace"],"enabled_log_categories":["Administrative","Alert"],"enabled_log_category_groups":[],"event_hub_authorization_rule_id":null,"event_hub_name":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-admin-to-law","log_analytics_destination_type":null,"logs":[{"category":"Administrative","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Alert","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}}],"marketplace_partner_id":null,"missing_required_log_categories":["Security","Policy"],"name":"activity-admin-to-law","service_bus_rule_id":null,"storage_account_id":null,"storage_account_name":null,"workspace_id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.OperationalInsights/workspaces/law-example","workspace_name":"law-example"},{"captures_all_log_categories":false,"captures_required_log_categories":true,"destinations":["storage_account"],"enabled_log_categories":["Administrative","Alert","Autoscale","Policy","Recommendation","ResourceHealth","Security","ServiceHealth"],"enabled_log_category_groups":[],"event_hub_authorization_rule_id":null,"event_hub_name":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-all-to-storage","log_analytics_destination_type":null,"logs":[{"category":"Administrative","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Alert","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Autoscale","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Policy","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Recommendation","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ResourceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Security","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ServiceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}}],"marketplace_partner_id":null,"missing_required_log_categories":[],"name":"activity-all-to-storage","service_bus_rule_id":null,"storage_account_id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.Storage/storageAccounts/stexample","storage_account_name":"stexample","workspace_id":null,"workspace_name":null}],"provider_registration_status":"registered","scope":"subscription"},"summary":{"activity_log_exported":true,"all_required_log_categories_covered":true,"covered_required_log_categories":4,"log_category_coverage":{"Administrative":true,"Alert":true,"Autoscale":true,"Policy":true,"Recommendation":true,"ResourceHealth":true,"Security":true,"ServiceHealth":true},"provider_registration_status":"registered","required_log_categories":["Administrative","Security","Alert","Policy"],"required_log_category_percentage":100,"settings_capturing_required_categories":1,"settings_with_event_hub":0,"settings_with_legacy_retention":0,"settings_with_log_analytics_workspace":1,"settings_with_partner_solution":0,"settings_with_storage_account":1,"total_diagnostic_settings":2}},"schema_version":"1.0"}'
+
+  - name: workspace_setting_lacks_categories_reversed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DIAG-SETTINGS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"diagnostic_settings":[{"captures_all_log_categories":false,"captures_required_log_categories":true,"destinations":["storage_account"],"enabled_log_categories":["Administrative","Alert","Autoscale","Policy","Recommendation","ResourceHealth","Security","ServiceHealth"],"enabled_log_category_groups":[],"event_hub_authorization_rule_id":null,"event_hub_name":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-all-to-storage","log_analytics_destination_type":null,"logs":[{"category":"Administrative","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Alert","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Autoscale","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Policy","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Recommendation","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ResourceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Security","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ServiceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}}],"marketplace_partner_id":null,"missing_required_log_categories":[],"name":"activity-all-to-storage","service_bus_rule_id":null,"storage_account_id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.Storage/storageAccounts/stexample","storage_account_name":"stexample","workspace_id":null,"workspace_name":null},{"captures_all_log_categories":false,"captures_required_log_categories":false,"destinations":["log_analytics_workspace"],"enabled_log_categories":["Administrative","Alert"],"enabled_log_category_groups":[],"event_hub_authorization_rule_id":null,"event_hub_name":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-admin-to-law","log_analytics_destination_type":null,"logs":[{"category":"Administrative","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Alert","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}}],"marketplace_partner_id":null,"missing_required_log_categories":["Security","Policy"],"name":"activity-admin-to-law","service_bus_rule_id":null,"storage_account_id":null,"storage_account_name":null,"workspace_id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.OperationalInsights/workspaces/law-example","workspace_name":"law-example"}],"provider_registration_status":"registered","scope":"subscription"},"summary":{"activity_log_exported":true,"all_required_log_categories_covered":true,"covered_required_log_categories":4,"log_category_coverage":{"Administrative":true,"Alert":true,"Autoscale":true,"Policy":true,"Recommendation":true,"ResourceHealth":true,"Security":true,"ServiceHealth":true},"provider_registration_status":"registered","required_log_categories":["Administrative","Security","Alert","Policy"],"required_log_category_percentage":100,"settings_capturing_required_categories":1,"settings_with_event_hub":0,"settings_with_legacy_retention":0,"settings_with_log_analytics_workspace":1,"settings_with_partner_solution":0,"settings_with_storage_account":1,"total_diagnostic_settings":2}},"schema_version":"1.0"}'
+
+  - name: not_exported
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DIAG-SETTINGS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"diagnostic_settings":[],"provider_registration_status":"registered","scope":"subscription"},"summary":{"activity_log_exported":false,"all_required_log_categories_covered":false,"covered_required_log_categories":0,"log_category_coverage":{"Administrative":false,"Alert":false,"Autoscale":false,"Policy":false,"Recommendation":false,"ResourceHealth":false,"Security":false,"ServiceHealth":false},"provider_registration_status":"registered","required_log_categories":["Administrative","Security","Alert","Policy"],"required_log_category_percentage":0,"settings_capturing_required_categories":0,"settings_with_event_hub":0,"settings_with_legacy_retention":0,"settings_with_log_analytics_workspace":0,"settings_with_partner_solution":0,"settings_with_storage_account":0,"total_diagnostic_settings":0}},"schema_version":"1.0"}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DIAG-SETTINGS"},"exit_code":1,"status":"failed"},"payload":{"metadata":{"api_failures":[{"message":"example failure","operation":"example.read"}],"partial_failure":true,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"diagnostic_settings":[{"captures_all_log_categories":false,"captures_required_log_categories":true,"destinations":["log_analytics_workspace"],"enabled_log_categories":["Administrative","Alert","Autoscale","Policy","Recommendation","ResourceHealth","Security","ServiceHealth"],"enabled_log_category_groups":[],"event_hub_authorization_rule_id":null,"event_hub_name":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-to-law","log_analytics_destination_type":null,"logs":[{"category":"Administrative","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Alert","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Autoscale","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Policy","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Recommendation","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ResourceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Security","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ServiceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}}],"marketplace_partner_id":null,"missing_required_log_categories":[],"name":"activity-to-law","service_bus_rule_id":null,"storage_account_id":null,"storage_account_name":null,"workspace_id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.OperationalInsights/workspaces/law-example","workspace_name":"law-example"}],"provider_registration_status":"registered","scope":"subscription"},"summary":{"activity_log_exported":true,"all_required_log_categories_covered":true,"covered_required_log_categories":4,"log_category_coverage":{"Administrative":true,"Alert":true,"Autoscale":true,"Policy":true,"Recommendation":true,"ResourceHealth":true,"Security":true,"ServiceHealth":true},"provider_registration_status":"registered","required_log_categories":["Administrative","Security","Alert","Policy"],"required_log_category_percentage":100,"settings_capturing_required_categories":1,"settings_with_event_hub":0,"settings_with_legacy_retention":0,"settings_with_log_analytics_workspace":1,"settings_with_partner_solution":0,"settings_with_storage_account":0,"total_diagnostic_settings":1}},"schema_version":"1.0"}'
+
+  - name: captures_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DIAG-SETTINGS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"diagnostic_settings":[{"captures_all_log_categories":false,"captures_required_categories":true,"destinations":["log_analytics_workspace"],"enabled_log_categories":["Administrative","Alert","Autoscale","Policy","Recommendation","ResourceHealth","Security","ServiceHealth"],"enabled_log_category_groups":[],"event_hub_authorization_rule_id":null,"event_hub_name":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-to-law","log_analytics_destination_type":null,"logs":[{"category":"Administrative","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Alert","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Autoscale","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Policy","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Recommendation","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ResourceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Security","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ServiceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}}],"marketplace_partner_id":null,"missing_required_log_categories":[],"name":"activity-to-law","service_bus_rule_id":null,"storage_account_id":null,"storage_account_name":null,"workspace_id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.OperationalInsights/workspaces/law-example","workspace_name":"law-example"}],"provider_registration_status":"registered","scope":"subscription"},"summary":{"activity_log_exported":true,"all_required_log_categories_covered":true,"covered_required_log_categories":4,"log_category_coverage":{"Administrative":true,"Alert":true,"Autoscale":true,"Policy":true,"Recommendation":true,"ResourceHealth":true,"Security":true,"ServiceHealth":true},"provider_registration_status":"registered","required_log_categories":["Administrative","Security","Alert","Policy"],"required_log_category_percentage":100,"settings_capturing_required_categories":1,"settings_with_event_hub":0,"settings_with_legacy_retention":0,"settings_with_log_analytics_workspace":1,"settings_with_partner_solution":0,"settings_with_storage_account":0,"total_diagnostic_settings":1}},"schema_version":"1.0"}'
+
+  - name: destination_value_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DIAG-SETTINGS"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"diagnostic_settings":[{"captures_all_log_categories":false,"captures_required_log_categories":true,"destinations":["workspace"],"enabled_log_categories":["Administrative","Alert","Autoscale","Policy","Recommendation","ResourceHealth","Security","ServiceHealth"],"enabled_log_category_groups":[],"event_hub_authorization_rule_id":null,"event_hub_name":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/microsoft.insights/diagnosticSettings/activity-to-law","log_analytics_destination_type":null,"logs":[{"category":"Administrative","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Alert","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Autoscale","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Policy","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Recommendation","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ResourceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"Security","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}},{"category":"ServiceHealth","category_group":null,"enabled":true,"retention_policy":{"days":0,"enabled":false}}],"marketplace_partner_id":null,"missing_required_log_categories":[],"name":"activity-to-law","service_bus_rule_id":null,"storage_account_id":null,"storage_account_name":null,"workspace_id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logs/providers/Microsoft.OperationalInsights/workspaces/law-example","workspace_name":"law-example"}],"provider_registration_status":"registered","scope":"subscription"},"summary":{"activity_log_exported":true,"all_required_log_categories_covered":true,"covered_required_log_categories":4,"log_category_coverage":{"Administrative":true,"Alert":true,"Autoscale":true,"Policy":true,"Recommendation":true,"ResourceHealth":true,"Security":true,"ServiceHealth":true},"provider_registration_status":"registered","required_log_categories":["Administrative","Security","Alert","Policy"],"required_log_category_percentage":100,"settings_capturing_required_categories":1,"settings_with_event_hub":0,"settings_with_legacy_retention":0,"settings_with_log_analytics_workspace":1,"settings_with_partner_solution":0,"settings_with_storage_account":0,"total_diagnostic_settings":1}},"schema_version":"1.0"}'

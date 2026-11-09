@@ -217,6 +217,39 @@ def test_stale_automatic_backups_are_not_backed_up(monkeypatch):
     assert r.summary["apps_missing_recovery_point_objective"] == 2
 
 
+def test_no_restore_point_with_both_reads_ok_misses_the_rpo(monkeypatch):
+    client = web_client(snapshots={("rg-web", "web-basic"): []})
+    r = run(monkeypatch, client, settings={**SETTINGS, "recovery_point_objective_hours": 24})
+    basic = r.apps["web-basic"]
+    assert basic["latest_restore_point"] is None
+    assert basic["backed_up"] is False
+    assert basic["meets_recovery_point_objective"] is False
+    assert r.summary["apps_missing_recovery_point_objective"] == 2  # web-free and web-basic
+
+
+def test_no_restore_point_with_a_failed_read_stays_unknown(monkeypatch):
+    client = web_client(
+        snapshots={("rg-web", "web-basic"): []}, history={("rg-web", "web-basic"): Exception("boom")}
+    )
+    r = run(monkeypatch, client, settings={**SETTINGS, "recovery_point_objective_hours": 24})
+    assert r.apps["web-basic"]["meets_recovery_point_objective"] is None
+
+
+def test_one_restore_point_inside_the_rpo_stays_unknown(monkeypatch):
+    client = web_client(snapshots={("rg-web", "web-basic"): snapshot_times(count=1)})
+    r = run(monkeypatch, client, settings={**SETTINGS, "recovery_point_objective_hours": 24})
+    assert r.apps["web-basic"]["meets_recovery_point_objective"] is None
+
+
+def test_no_restore_point_on_an_unrecognised_tier_stays_unknown(monkeypatch):
+    client = web_client(sites=[site("web-basic", sku="Mystery", kind="app")], snapshots={("rg-web", "web-basic"): []})
+    graph = rows(("web-basic", "app", SITE))
+    r = run(monkeypatch, client, graph=graph, settings={**SETTINGS, "recovery_point_objective_hours": 24})
+    odd = r.apps["web-basic"]
+    assert odd["backups_supported"] is None
+    assert odd["meets_recovery_point_objective"] is None
+
+
 def test_largest_gap_inside_the_window_drives_the_effective_interval(monkeypatch):
     holey = snapshot_times(skip=range(10, 16))
     for rpo, meets in ((4, False), (8, True)):

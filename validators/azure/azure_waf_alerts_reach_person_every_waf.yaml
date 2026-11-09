@@ -9,8 +9,8 @@ statement: >-
   or ITSM receiver and no alert processing rule that always suppresses it
   (waf_resources_with_alert_reaching_person equals waf_resources; null when the alert rules can't be
   read). An action group that can't be resolved doesn't count, so it fails. Supports KSI-CNA-RVP.
-  Does not prove: what the alert's threshold or query is; that anyone acts on it; DDoS attack alerts; or
-  that the WAF blocks.
+  Does not prove: what the alert's threshold or query is; that anyone acts on it; DDoS attack alerts
+  (azure_ddos_attack_alerts_reach_receiver); or that the WAF blocks.
 
 regex: '"partial_failure":\s*false\b[\s\S]*?"waf_resources":\s*(?<waf_resources>[1-9]\d*),[\s\S]*?"waf_resources_with_alert_reaching_person":\s*(?<waf_resources_with_alert_reaching_person>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS MATCH_GROUP[1]

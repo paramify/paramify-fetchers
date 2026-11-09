@@ -1595,6 +1595,42 @@ def test_operation_group_surface(
 # (module, model, required fields, affected fetchers)
 REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
+        "azure.mgmt.compute.models",
+        "PatchSettings",
+        ["patch_mode", "assessment_mode", "automatic_by_platform_settings"],
+        "azure/vm_hardening_status — Windows patch settings; a rename reads every VM as patch mode unknown",
+    ),
+    (
+        "azure.mgmt.compute.models",
+        "LinuxPatchSettings",
+        ["patch_mode", "assessment_mode", "automatic_by_platform_settings"],
+        "azure/vm_hardening_status — Linux patch settings",
+    ),
+    (
+        "azure.mgmt.compute.models",
+        "LinuxConfiguration",
+        ["patch_settings", "disable_password_authentication"],
+        "azure/vm_hardening_status — os_profile.linux_configuration",
+    ),
+    (
+        "azure.mgmt.compute.models",
+        "WindowsConfiguration",
+        ["patch_settings"],
+        "azure/vm_hardening_status — os_profile.windows_configuration",
+    ),
+    (
+        "azure.mgmt.containerservice.models",
+        "ManagedClusterAgentPoolProfile",
+        ["enable_fips", "node_image_version", "security_profile"],
+        "azure/aks_cluster_configuration — a renamed enable_fips reads every pool as FIPS unknown",
+    ),
+    (
+        "azure.mgmt.containerservice.models",
+        "AgentPoolSecurityProfile",
+        ["enable_secure_boot", "enable_vtpm", "ssh_access"],
+        "azure/aks_cluster_configuration — node pool Trusted Launch and SSH access",
+    ),
+    (
         "azure.mgmt.authorization.v2020_10_01.models",
         "RoleAssignmentScheduleInstance",
         ["origin_role_assignment_id", "assignment_type", "member_type", "status", "end_date_time"],
@@ -2934,6 +2970,37 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["x509_certificate_authentication_default_mode"],
         "azure/entra_authentication_policy — without the default mode no X.509 "
         "method is counted as phishing-resistant",
+    ),
+    (
+        "msgraph.generated.models.certificate_authority",
+        "CertificateAuthority",
+        ["certificate", "certificate_revocation_list_url", "is_root_authority", "issuer", "issuer_ski"],
+        "azure/entra_authentication_policy — trusted CAs; a missing certificate leaves every expiry unknown",
+    ),
+    (
+        "msgraph.generated.models.certificate_authority_detail",
+        "CertificateAuthorityDetail",
+        ["certificate", "certificate_authority_type", "certificate_revocation_list_url", "expiration_date_time",
+         "issuer", "issuer_subject_key_identifier", "thumbprint"],
+        "azure/entra_authentication_policy — CAs in the PKI-based trust store",
+    ),
+    (
+        "msgraph.generated.models.certificate_based_auth_configuration",
+        "CertificateBasedAuthConfiguration",
+        ["certificate_authorities"],
+        "azure/entra_authentication_policy — a missing list reads as no trusted CA",
+    ),
+    (
+        "msgraph.generated.models.x509_certificate_user_binding",
+        "X509CertificateUserBinding",
+        ["user_property", "x509_certificate_field", "priority", "trust_affinity_level"],
+        "azure/entra_authentication_policy — which user property matches a certificate",
+    ),
+    (
+        "msgraph.generated.models.authorization_info",
+        "AuthorizationInfo",
+        ["certificate_user_ids"],
+        "azure/entra_authentication_policy — a missing field reads as no certificate user ids",
     ),
     (
         "msgraph.generated.models.identity_security_defaults_enforcement_policy",
@@ -4344,6 +4411,32 @@ def test_graph_access_review_models_present() -> None:
         model = _import(f"msgraph.generated.models.{module}", name)
         missing = [f for f in fields if f not in getattr(model, "__dataclass_fields__", {})]
         assert not missing, f"{name} lost {missing} (azure/entra_access_reviews)"
+
+
+def test_graph_certificate_sign_in_builders_present() -> None:
+    """The per-item builders azure/entra_authentication_policy walks for trusted CAs and X.509 targets."""
+    client = _build("msgraph", "GraphServiceClient")
+    organization = client.organization.by_organization_id("00000000-0000-0000-0000-000000000000")
+    group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
+    assert getattr(organization, "certificate_based_auth_configuration", None) is not None, (
+        "organization.by_organization_id(...).certificate_based_auth_configuration is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — trusted CAs read null"
+    )
+    pki = client.directory.public_key_infrastructure.certificate_based_auth_configurations
+    assert getattr(pki.by_certificate_based_auth_pki_id("p"), "certificate_authorities", None) is not None, (
+        "directory.public_key_infrastructure.certificate_based_auth_configurations...certificate_authorities is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — the PKI trust store reads failed"
+    )
+    assert getattr(group.transitive_members, "graph_user", None) is not None, (
+        "groups.by_group_id(...).transitive_members.graph_user is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — X.509 targets read null"
+    )
+    builder = type(group.transitive_members.graph_user)
+    params = getattr(builder, "GraphUserRequestBuilderGetQueryParameters", None)
+    assert params is not None and {"select", "top"} <= set(vars(params()).keys()) | set(dir(params)), (
+        "GraphUserRequestBuilder.GraphUserRequestBuilderGetQueryParameters (select, top) is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — X.509 target groups read without their users"
+    )
 
 
 def test_graph_group_member_builders_present() -> None:

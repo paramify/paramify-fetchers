@@ -62,6 +62,21 @@ def project_agent_pool_profile(profile) -> dict:
         "enable_auto_scaling": model_attr(profile, "enable_auto_scaling"),
         "orchestrator_version": model_attr(profile, "orchestrator_version"),
         "vnet_subnet_id": model_attr(profile, "vnet_subnet_id"),
+        # Node security: FIPS image, the node image build, and the pool's security profile
+        # (Trusted Launch flags and SSH access). Each is left None when Azure omits it, so a
+        # FIPS claim reads "unknown", never a false "not FIPS", when the field was not returned.
+        "enable_fips": model_attr(profile, "enable_fips"),
+        "node_image_version": model_attr(profile, "node_image_version"),
+        "security_profile": project_agent_pool_security_profile(model_attr(profile, "security_profile")),
+    }
+
+
+def project_agent_pool_security_profile(security_profile) -> dict:
+    """Read an `AgentPoolSecurityProfile`: Trusted Launch (secure boot, vTPM) and SSH access."""
+    return {
+        "enable_secure_boot": model_attr(security_profile, "enable_secure_boot"),
+        "enable_vtpm": model_attr(security_profile, "enable_vtpm"),
+        "ssh_access": model_attr(security_profile, "ssh_access"),
     }
 
 
@@ -149,7 +164,29 @@ def agent_pool_record(profile: dict) -> dict:
         "enable_auto_scaling": bool(profile.get("enable_auto_scaling") or False),
         "orchestrator_version": profile.get("orchestrator_version"),
         "vnet_subnet_id": profile.get("vnet_subnet_id"),
+        # Tri-state on purpose (see project_agent_pool_profile): True, False, or None for not returned.
+        "enable_fips": _tri_state(profile.get("enable_fips")),
+        "node_image_version": profile.get("node_image_version"),
+        "secure_boot_enabled": _tri_state((profile.get("security_profile") or {}).get("enable_secure_boot")),
+        "vtpm_enabled": _tri_state((profile.get("security_profile") or {}).get("enable_vtpm")),
+        # "Disabled" or "LocalUser" (the AKS enum); None when the pool predates the field.
+        "ssh_access": (profile.get("security_profile") or {}).get("ssh_access"),
     }
+
+
+def _tri_state(value):
+    """A boolean Azure returned, or None when it returned nothing: never coerce unknown to False.
+
+    A string is read by its text ("true"/"false"), never by truthiness: bool("false") is True.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        return True if text in ("true", "1", "yes") else False if text in ("false", "0", "no") else None
+    return bool(value)
 
 
 def cluster_record(cluster: dict) -> dict:
@@ -249,10 +286,38 @@ def summarize(clusters: list[dict]) -> dict:
         ),
         "clusters_with_public_node_ips": sum(1 for c in clusters if c["node_public_ip_pools"]),
         "total_agent_pools": sum(len(c["agent_pool_profiles"]) for c in clusters),
+        **summarize_node_security([p for c in clusters for p in c["agent_pool_profiles"]]),
         # Sorted unique: the version spread at a glance, and a byte-stable payload.
         "kubernetes_versions": sorted(
             {c["kubernetes_version"] for c in clusters if c["kubernetes_version"]}
         ),
+    }
+
+
+def summarize_node_security(pools: list[dict]) -> dict:
+    """Node pool FIPS, Trusted Launch and SSH posture. Unknown pools are counted apart, never as failing."""
+    def count(key, value):
+        return sum(1 for p in pools if p.get(key) is value)
+
+    total = len(pools)
+    fips_unknown = count("enable_fips", None)
+    ssh = [p.get("ssh_access") for p in pools]
+    return {
+        "fips_enabled_agent_pools": count("enable_fips", True),
+        "fips_disabled_agent_pools": count("enable_fips", False),
+        "fips_unknown_agent_pools": fips_unknown,
+        # All pools FIPS, judged only when every pool answered; None while any pool is unknown, and None when there
+        # are no pools, since there is nothing to judge (as the description and CHANGELOG say).
+        "all_agent_pools_fips": None if fips_unknown or total == 0 else count("enable_fips", True) == total,
+        "secure_boot_enabled_agent_pools": count("secure_boot_enabled", True),
+        "vtpm_enabled_agent_pools": count("vtpm_enabled", True),
+        "trusted_launch_unknown_agent_pools": sum(
+            1 for p in pools if p.get("secure_boot_enabled") is None and p.get("vtpm_enabled") is None),
+        "ssh_disabled_agent_pools": sum(1 for v in ssh if isinstance(v, str) and v.lower() == "disabled"),
+        "ssh_local_user_agent_pools": sum(1 for v in ssh if isinstance(v, str) and v.lower() == "localuser"),
+        "ssh_access_unknown_agent_pools": sum(1 for v in ssh if v is None),
+        # Sorted unique node image builds across the estate: a spread here means pools on old images.
+        "node_image_versions": sorted({p["node_image_version"] for p in pools if p.get("node_image_version")}),
     }
 
 

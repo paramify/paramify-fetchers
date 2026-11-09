@@ -7,13 +7,18 @@ statement: >
   pipeline, by a person, a caller of unknown type or an unrecorded caller, and not by an
   excluded caller) is recorded by an approved Azure DevOps work item:
   summary.changes_without_approved_record is 0, which is the changes without a record
-  plus the recorded changes whose record isn't approved. Approved means
+  plus the recorded changes whose record needs an approval and isn't approved. Only
+  the work item types in summary.approval_types need an approval; a change recorded
+  only by items of other record types counts as approved. Every name in the
+  comparator's approval_types setting must be a record type
+  (summary.approval_types_not_record_types is empty), so a misspelt type can't leave
+  the type meant needing no approval. Approved means
   azure_devops_work_items found an approval in effect: a move into one of its approval
   states, or a comment matching its approval pattern with quoted text left out, not
   withdrawn since by a move back to a state before its approval states or to a state or
   with a reason naming Rejected. A record whose approval couldn't be read is not
   approved; a change several items could record counts as approved only when every one
-  of them is. Changes by applications are counted apart (summary.changes_by_application)
+  of them is, or needs no approval. Changes by applications are counted apart (summary.changes_by_application)
   and not checked. Substantiates KSI-CMT-LMC: changes are logged with an approved change
   or emergency-change record. Does NOT prove the approval came before the change: an
   approval given after it still counts, and summary.changes_approved_after_change counts
@@ -21,9 +26,9 @@ statement: >
   or anything azure_changes_outside_pipeline_recorded does not prove about the match
   itself.
 
-# Reads one value, so it guards itself: a renamed or null field matches nothing and
-# the MATCH_COUNT rule fails.
-regex: '"changes_without_approved_record":\s*(?<changes_without_approved_record>\d+)'
+# A renamed or null field, or an approval type that isn't a record type, matches
+# nothing and the MATCH_COUNT rule fails.
+regex: '^\s*\{(?=[\s\S]*?"approval_types_not_record_types":\s*\[\s*\])(?=[\s\S]*?"changes_without_approved_record":\s*(?<changes_without_approved_record>\d+))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

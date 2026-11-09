@@ -189,7 +189,7 @@ class FakeADO:
 @pytest.fixture(autouse=True)
 def env(monkeypatch, tmp_path):
     for name in (mod.TYPES_ENV, mod.TAGS_ENV, mod.LOOKBACK_ENV, mod.APPROVAL_STATES_ENV, mod.APPROVAL_PATTERN_ENV,
-                 "AZURE_DEVOPS_PROJECTS"):
+                 mod.APPROVAL_TYPES_ENV, mod.APPROVAL_MENTIONS_ENV, "AZURE_DEVOPS_PROJECTS"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AZURE_DEVOPS_ORG_URL", ORG)
     monkeypatch.setenv("AZURE_DEVOPS_PAT", "pat-do-not-write")
@@ -226,13 +226,15 @@ def with_items(fake, extra, updates=None, comments=None):
 
 def test_fetcher_yaml_follows_the_shape():
     spec_ = yaml.safe_load((FETCHER_DIR / "fetcher.yaml").read_text())
-    assert spec_["name"] == mod.NAME and spec_["version"] == "0.1.0" and spec_["category"] == "azure"
+    assert spec_["name"] == mod.NAME and spec_["version"] == "0.2.0" and spec_["category"] == "azure"
     assert spec_["ksis"] == ["KSI-CMT-LMC", "KSI-PIY-RES"]
     assert spec_["evidence_set"]["reference_id"] == "EVD-AZURE-DEVOPS-WORK-ITEMS"
     config = spec_["config_schema"]
     assert {k: v["env"] for k, v in config.items()} == {
         "work_item_types": mod.TYPES_ENV, "work_item_tags": mod.TAGS_ENV, "lookback_days": mod.LOOKBACK_ENV,
-        "approval_states": mod.APPROVAL_STATES_ENV, "approval_pattern": mod.APPROVAL_PATTERN_ENV}
+        "approval_states": mod.APPROVAL_STATES_ENV, "approval_pattern": mod.APPROVAL_PATTERN_ENV,
+        "approval_types": mod.APPROVAL_TYPES_ENV, "approval_mentions": mod.APPROVAL_MENTIONS_ENV}
+    assert config["approval_mentions"]["default"] is False and config["approval_mentions"]["type"] == "boolean"
     assert config["work_item_types"]["default"] == ",".join(mod.DEFAULT_TYPES)
     assert config["work_item_tags"]["default"] == ",".join(mod.DEFAULT_TAGS)
     assert config["lookback_days"]["default"] == mod.DEFAULT_LOOKBACK_DAYS
@@ -242,7 +244,13 @@ def test_fetcher_yaml_follows_the_shape():
     summary_fields = [line.split(" — ")[0].strip("- ").strip()
                       for line in spec_["evidence_set"]["instructions"].split("Summary fields:")[1].splitlines()
                       if line.startswith("- ")]
-    assert summary_fields == list(mod.summarize([], [], True, mod.Selection([], [], [], mod.approval_pattern()), 1))
+    selection = mod.Selection([], [], [], mod.approval_pattern(), [], False)
+    assert summary_fields == list(mod.summarize([], [], True, selection, 1))
+
+
+def test_every_summary_field_is_documented(tmp_path, assert_summary_documented):
+    _, evidence, _, _, _ = run(tmp_path)
+    assert_summary_documented("azure/devops_work_items", evidence["summary"])
 
 
 def test_collects_change_and_security_items_and_exits_zero(tmp_path):
@@ -256,6 +264,11 @@ def test_collects_change_and_security_items_and_exits_zero(tmp_path):
     assert s["work_item_states_undefined"] == []
     assert s["work_items_open"] == 3 and s["approval_history_collected"] is True
     assert (s["change_items"], s["change_items_finished"], s["change_items_approved"]) == (3, 2, 2)
+    # Every selected type needs an approval when approval_types is empty.
+    assert s["approval_types"] == ["Change Request"]
+    # Only finished items are judged: 102 is approved but still open, so it's left out.
+    assert (s["finished_change_items_needing_approval"], s["finished_change_items_needing_approval_approved"]) == (2, 1)
+    assert s["finished_change_items_approved_percentage"] == 50
     assert s["finished_change_items_without_approval"] == [103] and s["change_items_approved_by_requester"] == []
     assert s["change_items_with_linked_changes"] == 2
     assert s["finished_change_items_without_linked_change"] == [103]
@@ -346,7 +359,7 @@ def test_no_selected_type_and_no_tag_skips_the_query(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("env_name, value", [(mod.APPROVAL_PATTERN_ENV, "(unclosed"), (mod.LOOKBACK_ENV, "soon"),
-                                             (mod.TYPES_ENV, "none")])
+                                             (mod.TYPES_ENV, "none"), (mod.APPROVAL_MENTIONS_ENV, "sometimes")])
 def test_bad_config_fails_with_bad_config(tmp_path, monkeypatch, env_name, value):
     monkeypatch.setenv(env_name, value)
     if env_name == mod.TYPES_ENV:
@@ -553,3 +566,198 @@ def test_links_reads_every_kind():
 ])
 def test_person(value, expected):
     assert mod.person(value) == expected
+
+
+def mention(name, guid="1b2c3d4e-0000-4000-8000-000000000001"):
+    return f'<a href="#" data-vss-mention="version:2.0,{guid}">@{name}</a>'
+
+
+MENTION_CASES = [
+    (f"<div>{mention('Jane Doe')} approved</div>", True),
+    (f"<div>{mention('Ann Lee')} {mention('Bo Li')} approved</div>", True),
+    (f"<div>{mention('Jane Doe')}, approved</div>", True),
+    (f"<div>{mention('Jane Doe')}&nbsp;Approved - deploy Friday</div>", True),
+    (f"<div>Checked the plan.</div><div>{mention('Jane Doe')} approved</div>", True),
+    ("@jane approved", True),
+    ("@jane.doe, @bo-li: approved", True),
+    ("@<1B2C3D4E-0000-4000-8000-000000000001> approved", True),
+    (f"<div>{mention('Jane Doe')} not approved</div>", False),
+    (f"<div>{mention('Jane Doe')} approved?</div>", False),
+    (f"<div>{mention('Jane Doe')} please approve</div>", False),
+    ("approved by nobody yet?", False),
+    (f"<blockquote>{mention('Jane Doe')} approved</blockquote><div>Not yet</div>", False),
+    ("&gt; @jane approved<br>Not yet", False),
+    ("Hi @jane approved", False),
+    # Typed without the picker, a mention is one word long, so the rest of a name stays text.
+    ("@Jane Doe approved", False),
+    ("jane@example.com approved", False),
+]
+
+
+@pytest.mark.parametrize("text, approves", MENTION_CASES)
+def test_with_mentions_on_a_line_starting_with_mentions_then_approved_is_approval(text, approves):
+    assert bool(mod.approval_pattern().search(mod.comment_text(text, True))) is approves
+
+
+@pytest.mark.parametrize("text", [text for text, _ in MENTION_CASES if not text.startswith("@<")])
+def test_with_mentions_off_no_mention_line_is_approval(text):
+    assert not mod.approval_pattern().search(mod.comment_text(text))
+
+
+def test_with_mentions_off_a_markdown_mention_still_reads_as_before():
+    # Its @<id> is stripped as a tag, leaving "@", which the default pattern skips; so it counted before the setting.
+    assert mod.comment_text("@<1B2C3D4E-0000-4000-8000-000000000001> approved") == "@  approved"
+
+
+def test_mentions_read_as_one_token_only_when_on():
+    raw = f"<div>{mention('Jane Doe')} and @bo, mail jane@example.com</div>"
+    assert mod.comment_text(raw, True).split() == ["and", "@mention,", "mail", "jane@example.com"]
+    assert mod.comment_text(raw).split() == ["@Jane", "Doe", "and", "@bo,", "mail", "jane@example.com"]
+
+
+def test_an_unclosed_mention_link_does_not_swallow_the_text_after_it():
+    raw = "<div><a data-vss-mention=\"v\">@X please</div><div>hold, <a href='y'>doc</a> approved</div>"
+    assert not mod.approval_pattern().search(mod.comment_text(raw, True))
+    # Only the attribute counts, not the words inside another attribute's value.
+    assert "@mention" not in mod.comment_text('<a title="data-vss-mention">@X</a> approved', True)
+
+
+def comment(n, text, by, days):
+    return {"id": n, "text": text, "createdBy": who(by), "createdDate": ago(days=days), "isDeleted": False}
+
+
+@pytest.mark.parametrize("setting", ["true", "false", None])
+def test_a_mention_approval_counts_only_when_on_and_a_later_rejection_withdraws_it(tmp_path, monkeypatch, setting):
+    if setting is not None:
+        monkeypatch.setenv(mod.APPROVAL_MENTIONS_ENV, setting)
+    approving = f"<div>{mention('Erin Example')} approved</div>"
+    fake = with_items(FakeADO(), {104: item(104, "Change Request", "Closed"), 105: item(105, "Change Request", "Closed")},
+                      updates={104: [update(1, "Proposed", "Closed", ago(days=1))],
+                               105: [rejected(1, "Proposed", "Rejected", ago(days=6)),
+                                     update(2, "Rejected", "Closed", ago(days=1))]},
+                      comments={104: [comment(1, approving, "frank@example.com", 4)],
+                                105: [comment(1, approving, "frank@example.com", 9)]})
+    types = [dict(t) for t in TYPES]
+    types[0] = {**types[0], "states": types[0]["states"] + states(("Rejected", "Removed"))}
+    fake.routes[("GET", f"/contoso/{P}/_apis/wit/workitemtypes")] = Resp(body={"value": types})
+    code, evidence, _, _, text = run(tmp_path, fake)
+    on = setting == "true"
+    assert code == 0 and "Erin" not in text
+    assert evidence["results"]["selection"]["approval_mentions"] is on and evidence["summary"]["approval_mentions"] is on
+    approval = work_item(evidence, 104)["approval"]
+    if on:
+        assert approval["source"] == "comment" and approval["by"]["login"] == "frank@example.com"
+    else:
+        assert approval is None
+    assert work_item(evidence, 105)["approval"] is None
+    s = evidence["summary"]
+    assert s["finished_change_items_without_approval"] == ([103, 105] if on else [103, 104, 105])
+    assert (s["finished_change_items_needing_approval"],
+            s["finished_change_items_needing_approval_approved"]) == (4, 2 if on else 1)
+    assert s["finished_change_items_approved_percentage"] == (50 if on else 25)
+
+
+@pytest.mark.parametrize("mentions, pattern, approves", [
+    # On, a pattern of its own matches what follows the mentions, and never sees a name.
+    ("true", r"^\W*cab ok\b", True),
+    ("true", r"jane", False),
+    # Off, the line is matched as today, name included.
+    (None, r"^\W*cab ok\b", False),
+    (None, r"jane", True),
+])
+def test_a_custom_pattern_with_mentions_on_and_off(tmp_path, monkeypatch, mentions, pattern, approves):
+    monkeypatch.setenv(mod.APPROVAL_PATTERN_ENV, pattern)
+    if mentions:
+        monkeypatch.setenv(mod.APPROVAL_MENTIONS_ENV, mentions)
+    fake = with_items(FakeADO(), {104: item(104, "Change Request", "Active")},
+                      comments={104: [comment(1, f"<div>{mention('Jane Doe')} CAB OK</div>", "erin@example.com", 2)]})
+    _, evidence, _, _, _ = run(tmp_path, fake)
+    assert (work_item(evidence, 104)["approval"] is not None) is approves
+    assert evidence["results"]["selection"]["approval_pattern"] == pattern
+
+
+def test_only_approval_types_count_toward_the_percentage(tmp_path, monkeypatch):
+    monkeypatch.setenv(mod.TYPES_ENV, "Normal Change, Emergency Change, Standard Change")
+    monkeypatch.setenv(mod.TAGS_ENV, "none")
+    monkeypatch.setenv(mod.APPROVAL_TYPES_ENV, "normal change ,EMERGENCY CHANGE, Normal Change")
+    extra = {301: item(301, "Normal Change", "Closed"), 302: item(302, "Normal Change", "Active"),
+             303: item(303, "Emergency Change", "Closed"), 304: item(304, "Emergency Change", "Closed"),
+             305: item(305, "Standard Change", "Closed")}
+    fake = with_items(FakeADO(), extra,
+                      updates={301: [update(1, "Proposed", "Approved", ago(days=5))]},
+                      comments={303: [comment(1, "Approved", "erin@example.com", 3)],
+                                305: [comment(1, "Approved", "erin@example.com", 3)]})
+    types = [{"name": n, "states": TYPES[0]["states"]} for n in ("Normal Change", "Emergency Change", "Standard Change")]
+    fake.routes[("GET", f"/contoso/{P}/_apis/wit/workitemtypes")] = Resp(body={"value": types})
+    fake.routes[("POST", f"/contoso/{P}/_apis/wit/wiql")] = Resp(body={"workItems": [{"id": i} for i in extra]})
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    assert code == 0
+    assert [work_item(evidence, i)["approval_required"] for i in extra] == [True, True, True, True, False]
+    s = evidence["summary"]
+    assert s["approval_types"] == ["Normal Change", "Emergency Change"]
+    assert evidence["results"]["selection"]["approval_types"] == ["Normal Change", "Emergency Change"]
+    # The approved standard change counts in change_items_approved but not toward the percentage, nor does open 302.
+    assert (s["change_items"], s["change_items_approved"]) == (5, 3)
+    assert (s["finished_change_items_needing_approval"], s["finished_change_items_needing_approval_approved"]) == (3, 2)
+    assert s["finished_change_items_approved_percentage"] == 66
+
+
+def test_a_tag_only_item_never_needs_approval(tmp_path):
+    _, evidence, _, _, _ = run(tmp_path)
+    assert [work_item(evidence, i)["approval_required"] for i in (101, 201, 202)] == [True, False, False]
+
+
+@pytest.mark.parametrize("types, approval_types", [("Change Request", "Change Request, Release"),
+                                                   ("none", "Change Request")])
+def test_an_approval_type_that_is_not_selected_is_bad_config(tmp_path, monkeypatch, types, approval_types):
+    monkeypatch.setenv(mod.TYPES_ENV, types)
+    monkeypatch.setenv(mod.APPROVAL_TYPES_ENV, approval_types)
+    code, _, status, fake, _ = run(tmp_path)
+    assert code == 1 and status["code"] == "bad_config"
+    assert mod.APPROVAL_TYPES_ENV in status["error"] and not any(p.endswith("/wiql") for _, p, _, _ in fake.calls)
+
+
+def test_no_item_needing_approval_reads_zero_percent(tmp_path, monkeypatch):
+    monkeypatch.setenv(mod.TYPES_ENV, "Change Request, Release")
+    monkeypatch.setenv(mod.APPROVAL_TYPES_ENV, "Release")
+    _, evidence, _, _, _ = run(tmp_path)
+    s = evidence["summary"]
+    assert (s["change_items"], s["finished_change_items_needing_approval"]) == (3, 0)
+    assert (s["finished_change_items_needing_approval_approved"], s["finished_change_items_approved_percentage"]) == (0, 0)
+
+
+def test_unread_history_leaves_the_percentage_unknown_not_zero(tmp_path):
+    fake = FakeADO()
+    fake.routes[("GET", f"/contoso/{P}/_apis/wit/workItems/101/comments")] = err(500, "boom")
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert code == 1 and s["approval_history_collected"] is False
+    assert s["finished_change_items_needing_approval"] == 2
+    assert s["finished_change_items_needing_approval_approved"] is None
+    assert s["finished_change_items_approved_percentage"] is None
+
+
+def test_an_unlisted_project_leaves_the_percentage_unknown(tmp_path):
+    fake = FakeADO()
+    fake.routes[("POST", f"/contoso/{P}/_apis/wit/wiql")] = err(403, "TF401019: no access")
+    _, evidence, _, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert s["finished_change_items_needing_approval"] is None and s["finished_change_items_approved_percentage"] is None
+
+
+def test_a_refused_finished_item_is_left_out_of_the_percentage(tmp_path):
+    def finished(wid, state, reason):
+        return item(wid, "Change Request", state, **{"System.Reason": reason})
+    fake = with_items(FakeADO(), {104: finished(104, "Closed", "Rejected"), 105: finished(105, "Rejected", "Rejected"),
+                                  106: finished(106, "Removed", "Cut"), 107: finished(107, "Closed", "Completed")})
+    types = [dict(t) for t in TYPES]
+    # A process whose Rejected and Removed states finish the item (Completed category).
+    types[0] = {**types[0], "states": types[0]["states"] + states(("Rejected", "Completed"), ("Removed", "Completed"))}
+    fake.routes[("GET", f"/contoso/{P}/_apis/wit/workitemtypes")] = Resp(body={"value": types})
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert code == 0 and s["change_items_finished"] == 6
+    # Refused 104-106 are still listed as finished without approval, but only 101, 103 and 107 are judged.
+    assert s["finished_change_items_without_approval"] == [103, 104, 105, 106, 107]
+    assert (s["finished_change_items_needing_approval"], s["finished_change_items_needing_approval_approved"]) == (3, 1)
+    assert s["finished_change_items_approved_percentage"] == 33

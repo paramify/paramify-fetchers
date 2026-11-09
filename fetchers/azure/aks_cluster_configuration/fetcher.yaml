@@ -1,5 +1,5 @@
 name: azure_aks_cluster_configuration
-version: 0.2.0
+version: 0.3.0
 description: >
   For every AKS managed cluster in the subscription, reports the control-plane
   configuration: the public and private API server FQDNs, whether it is a private
@@ -8,7 +8,13 @@ description: >
   disabled, workload identity and the OIDC issuer, the network policy and plugin, the
   requested and running Kubernetes versions with the cluster and node-OS auto-upgrade
   channels, Microsoft Defender for Containers and Azure Monitor metrics, and each
-  agent pool's size, OS, version and whether its nodes get public IPs.
+  agent pool's size, OS, version and whether its nodes get public IPs, plus each
+  pool's node security: whether it runs the FIPS-enabled node image
+  (enable_fips), its node image version, Trusted Launch (secure boot and vTPM)
+  and whether SSH to the nodes is disabled. Each node-security field is null,
+  not false, when Azure did not return it, and the summary counts unknown pools
+  apart from FIPS-disabled ones; all_agent_pools_fips is null until every pool
+  has answered, and null when there are no pools to judge.
 category: azure
 
 config_schema:

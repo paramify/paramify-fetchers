@@ -1,0 +1,24 @@
+key: azure_appsvc_no_publish_profile_downloads
+name: Azure App Service No Publish Profile Downloads
+type: AUTOMATED
+role: configuration
+statement: >-
+  The subscription was read with no partial failure, the whole Activity Log window was read, and no
+  web app's or slot's publish profile (the Web Deploy and FTP credentials used to push files to an app
+  directly) was downloaded in it (summary publish_profile_downloads is 0; it is null when the Activity
+  Log couldn't be read). Passes with no web apps in scope, since there is nothing to download from
+  (azure_appsvc_deployment_record_complete requires at least one). Supports KSI-CMT-RMV: nobody
+  fetched the credentials for changing an app's files in place. Does not prove: that the Kudu or FTP credentials weren't read another way
+  (publishing_credential_reads, which pipelines use too); that deployments came from a pipeline; that
+  basic-auth publishing is disabled; function apps or requests on deleted apps
+  (deployment_activity_on_unlisted_sites); or anything older than the window.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"summary":\s*\{(?=[\s\S]*?"activity_log_complete":\s*true\b)(?=[\s\S]*?"publish_profile_downloads":\s*0\b)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-APPSVC-DEPLOYMENTS
