@@ -41,7 +41,7 @@ _tfvc_http_error() {
     case "$TFVC_AUTH_MODE" in
         pat)   who="the token" ;;
         entra) who="the Entra identity" ;;
-        *)     who="an anonymous caller (no tfvc_token, and Entra sign-in was not available: ${_TFVC_ENTRA_WHY:-no reason given})" ;;
+        *)     who="an anonymous caller (no tfvc_token; $TFVC_AUTH_NOTE)" ;;
     esac
     if [[ "$detail" =~ (^|[^A-Z0-9])($_TFVC_MASKING_CODES)([^0-9]|$) ]]; then
         _tfvc_fail "$what: HTTP $code ($detail); $who cannot see this project or path, or it does not exist (reading it needs Code (Read))" not_authorized
@@ -54,7 +54,7 @@ _tfvc_http_error() {
             case "$TFVC_AUTH_MODE" in
                 pat)   _tfvc_fail "$what: HTTP $code, the token was not accepted (it needs Code (Read))" auth_failed ;;
                 entra) _tfvc_fail "$what: HTTP $code${detail:+ ($detail)}, Azure DevOps did not accept the Entra identity (it must be a member of the organization with Code (Read) on the project), or set tfvc_token" auth_failed ;;
-                *)     _tfvc_fail "$what: HTTP $code, sign-in required and no tfvc_token was set (a PAT with Code (Read)), and Entra sign-in was not available: ${_TFVC_ENTRA_WHY:-no reason given}" auth_failed ;;
+                *)     _tfvc_fail "$what: HTTP $code, sign-in required and no tfvc_token was set (a PAT with Code (Read)); $TFVC_AUTH_NOTE" auth_failed ;;
             esac ;;
         403) _tfvc_fail "$what: HTTP 403${detail:+ ($detail)}, $who cannot read this project's code (it needs Code (Read))" not_authorized ;;
         400|404) _tfvc_fail "$what: HTTP $code${detail:+ ($detail)}; check the project URL, the TFVC path and the changeset" bad_config ;;
@@ -113,7 +113,7 @@ checkov_fetch_tfvc() {
     fi
     # TFVC hides what the caller may not read, so a folder it cannot see is missing, not refused.
     if [ "$code" = "404" ] || { [ "$code" = "200" ] && ! jq -e --arg p "${path%/}" \
-            'any(.value[]; (.path | ascii_downcase) == ($p | ascii_downcase))' "$work/items.json" >/dev/null; }; then
+            'any(.value[]; (.path // "" | ascii_downcase) == ($p | ascii_downcase))' "$work/items.json" >/dev/null; }; then
         _tfvc_fail "listing of $path at changeset $CHANGESET: HTTP $code without the folder; the identity cannot see this path, or it does not exist (TFVC leaves out folders the identity may not read)" not_authorized
         rm -rf "$work"; return 1
     fi
@@ -123,14 +123,18 @@ checkov_fetch_tfvc() {
     # One line per .bicep/.json file: its server path URL-encoded, a tab, then its path under the folder's own name
     # (empty when the item is outside the folder).
     top="${path%/}"; top="${top##*/}"
-    jq -r --arg p "${path%/}" --arg top "$top" '
+    # jq stops at the first item it cannot read, so its exit status guards against scanning a subset.
+    if ! jq -r --arg p "${path%/}" --arg top "$top" '
         ($p | ascii_downcase) as $lp
         | .value[] | select((.isFolder // false) | not) | .path
         | select(test("\\.(bicep|json)$"; "i"))
         | [@uri, (if ascii_downcase == $lp then $top
                   elif ascii_downcase | startswith($lp + "/") then $top + "/" + .[($lp | length) + 1:]
                   else "" end)]
-        | @tsv' "$work/items.json" > "$work/files.tsv"
+        | @tsv' "$work/items.json" > "$work/files.tsv" 2>/dev/null; then
+        _tfvc_fail "could not read the listing of $path at changeset $CHANGESET" internal_error
+        rm -rf "$work"; return 1
+    fi
     CLONE_DIR="$(mktemp -d -t checkov_clone.XXXXXX)"
     while IFS=$'\t' read -r item rel; do
         case "/$rel/" in //|*/../*|*/./*|///*)

@@ -701,6 +701,16 @@ def test_tfvc_public_project_that_refuses_the_entra_identity_is_read_anonymously
     assert ENTRA not in stderr
 
 
+def test_anonymous_refusal_after_a_refused_entra_identity_says_it_was_refused(tmp_path):
+    code, _, status, _ = run(tmp_path, {}, ONE_PASS, tfvc={
+        "changesets": (200, LATEST), "changesets.authed": (401, None), "items": (401, b"")},
+        STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
+    assert (code, status["code"]) == (1, "auth_failed")
+    assert "refused the Entra identity" in status["error"]
+    assert "was not available" not in status["error"]
+    assert ENTRA not in status["error"]
+
+
 def test_a_pat_or_entra_read_logs_no_anonymous_note(tmp_path):
     code, _, _, tmp = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": (200, TEMPLATES)},
                           STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
@@ -848,6 +858,17 @@ def test_tfvc_readable_folder_whose_subfolder_is_denied_is_no_files_not_a_clean_
     assert payload["status"] == "no_files"
     assert payload["summary"]["total_checks"] is None
     assert "TFVC also leaves out folders the identity may not read" in status["error"]
+    assert not (tmp / "log" / "checkov.args").exists()
+
+
+def test_tfvc_listing_jq_cannot_read_fails_instead_of_scanning_a_subset(tmp_path):
+    listing = {"count": 4, "value": [{"path": TFVC_PATH, "isFolder": True}, {"path": f"{TFVC_PATH}/a.json"},
+                                     {"version": 4217}, {"path": f"{TFVC_PATH}/b.json"}]}
+    code, _, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": (200, listing)},
+                               **TFVC_ENV)
+    assert (code, status["code"]) == (1, "internal_error")
+    assert "could not read the listing" in status["error"]
+    assert len(curl_calls(tmp)) == 2            # no downloads
     assert not (tmp / "log" / "checkov.args").exists()
 
 

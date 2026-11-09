@@ -123,8 +123,9 @@ gcp = [
 oci = ["oci"]
 # Qualys returns XML that names an external DTD; the fetchers parse it with defusedxml.
 qualys = ["defusedxml"]
-# Convenience: every front-end + dev tooling in one install.
-all = ["textual>=8,<9", "checkov", "pytest", "ruff", "mypy", "defusedxml"]
+# Convenience: every front-end + dev tooling in one install. azure-identity comes with checkov, for
+# checkov_bicep's Entra sign-in to TFVC; the azure-mgmt SDKs stay out (see the azure extra).
+all = ["textual>=8,<9", "checkov", "azure-identity>=1.25.3,<2", "pytest", "ruff", "mypy", "defusedxml"]
 
 # The single entry point. `paramify` steers every front-end: the headless
 # commands, plus `paramify tui`. (Renaming later is a one-line change here; add
