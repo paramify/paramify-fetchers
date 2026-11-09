@@ -20,6 +20,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Identity and access | [azure_entra_service_principals](#azure_entra_service_principals) | `EVD-AZURE-ENTRA-SERVICE-PRINCIPALS` |
 | Identity and access | [azure_entra_sign_ins](#azure_entra_sign_ins) | `EVD-AZURE-ENTRA-SIGN-INS` |
 | Identity and access | [azure_managed_identity_configuration](#azure_managed_identity_configuration) | `EVD-AZURE-MANAGED-IDENTITY-CONFIG` |
+| Identity and access | [azure_pim_activations](#azure_pim_activations) | `EVD-AZURE-PIM-ACTIVATIONS` |
 | Identity and access | [azure_rbac_custom_roles](#azure_rbac_custom_roles) | `EVD-AZURE-RBAC-CUSTOM-ROLES` |
 | Identity and access | [azure_rbac_role_assignments](#azure_rbac_role_assignments) | `EVD-AZURE-RBAC-ASSIGNMENTS` |
 | Logging and monitoring | [azure_activity_log_alerts](#azure_activity_log_alerts) | `EVD-AZURE-ACTIVITY-ALERTS` |
@@ -43,22 +44,28 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Microsoft Sentinel | [azure_sentinel_playbooks](#azure_sentinel_playbooks) | `EVD-AZURE-SENTINEL-PLAYBOOKS` |
 | Security posture, policy and backup | [azure_app_service_backups](#azure_app_service_backups) | `EVD-AZURE-APPSVC-BACKUPS` |
 | Security posture, policy and backup | [azure_backup_recovery_status](#azure_backup_recovery_status) | `EVD-AZURE-BACKUP-RECOVERY` |
+| Security posture, policy and backup | [azure_backup_vault_protection](#azure_backup_vault_protection) | `EVD-AZURE-BACKUP-VAULT-PROTECTION` |
 | Security posture, policy and backup | [azure_defender_assessments](#azure_defender_assessments) | `EVD-AZURE-DEFENDER-ASSESSMENTS` |
 | Security posture, policy and backup | [azure_defender_plans](#azure_defender_plans) | `EVD-AZURE-DEFENDER` |
 | Security posture, policy and backup | [azure_defender_regulatory_compliance](#azure_defender_regulatory_compliance) | `EVD-AZURE-DEFENDER-REG-COMPLIANCE` |
+| Security posture, policy and backup | [azure_defender_vulnerability_findings](#azure_defender_vulnerability_findings) | `EVD-AZURE-DEFENDER-VULNERABILITY-FINDINGS` |
 | Security posture, policy and backup | [azure_disk_encryption_status](#azure_disk_encryption_status) | `EVD-AZURE-DISK-ENC` |
 | Security posture, policy and backup | [azure_policy_assignments](#azure_policy_assignments) | `EVD-AZURE-POLICY-ASSIGN` |
 | Security posture, policy and backup | [azure_policy_compliance](#azure_policy_compliance) | `EVD-AZURE-POLICY-COMPLIANCE` |
 | Security posture, policy and backup | [azure_residual_resources](#azure_residual_resources) | `EVD-AZURE-RESIDUAL-RESOURCES` |
 | Security posture, policy and backup | [azure_resource_inventory](#azure_resource_inventory) | `EVD-AZURE-RESOURCE-INVENTORY` |
+| Security posture, policy and backup | [azure_resource_locks](#azure_resource_locks) | `EVD-AZURE-RESOURCE-LOCKS` |
 | Security posture, policy and backup | [azure_service_availability](#azure_service_availability) | `EVD-AZURE-SERVICE-AVAILABILITY` |
 | Security posture, policy and backup | [azure_vm_hardening_status](#azure_vm_hardening_status) | `EVD-AZURE-VM-HARDENING` |
+| Security posture, policy and backup | [azure_zone_redundancy](#azure_zone_redundancy) | `EVD-AZURE-ZONE-REDUNDANCY` |
 | Network and edge | [azure_api_management_configuration](#azure_api_management_configuration) | `EVD-AZURE-API-MANAGEMENT-CONFIG` |
 | Network and edge | [azure_app_gateway_backend_tls](#azure_app_gateway_backend_tls) | `EVD-AZURE-APPGW-BACKEND-TLS` |
 | Network and edge | [azure_app_gateway_tls_listeners](#azure_app_gateway_tls_listeners) | `EVD-AZURE-APPGW-TLS-LISTENERS` |
 | Network and edge | [azure_app_gateway_waf](#azure_app_gateway_waf) | `EVD-AZURE-APPGW-WAF` |
+| Network and edge | [azure_bastion_configuration](#azure_bastion_configuration) | `EVD-AZURE-BASTION-CONFIGURATION` |
 | Network and edge | [azure_ddos_protection](#azure_ddos_protection) | `EVD-AZURE-DDOS` |
 | Network and edge | [azure_dns_configuration](#azure_dns_configuration) | `EVD-AZURE-DNS-CONFIG` |
+| Network and edge | [azure_firewall_configuration](#azure_firewall_configuration) | `EVD-AZURE-FIREWALL-CONFIGURATION` |
 | Network and edge | [azure_front_door_origins](#azure_front_door_origins) | `EVD-AZURE-FRONTDOOR-ORIGINS` |
 | Network and edge | [azure_front_door_tls](#azure_front_door_tls) | `EVD-AZURE-FRONTDOOR-TLS` |
 | Network and edge | [azure_front_door_waf_coverage](#azure_front_door_waf_coverage) | `EVD-AZURE-FRONTDOOR-WAF-COVERAGE` |
@@ -962,6 +969,73 @@ Summary fields:
 - `identities_with_graph_roles` — Number of identities granted at least one Graph application permission
 - `identities_with_privileged_graph_roles` — Number of identities granted a privileged Graph application permission (any permission containing ReadWrite or FullControl, or Mail.Send or Mail.Send.Shared)
 - `identities_graph_roles_unknown` — Number of identities whose Graph application permissions couldn't be read
+
+
+### azure_pim_activations
+Short Description: Shows who activated or was assigned an Azure role through PIM, with justification, ticket, approval and outcome, and which activations are in force now.
+
+Script: fetchers/azure/pim_activations/fetcher.py
+
+Access: Reader on the subscription.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET Microsoft.Authorization/roleAssignmentScheduleRequests` — every PIM request Azure still holds for the subscription and the scopes under it (self-activations, admin assignments, extensions, renewals, removals)
+- `GET Microsoft.Authorization/roleAssignmentScheduleInstances` — the activations in force now (instances of type Activated)
+
+Output: `azure_pim_activations_<subscription>.json` — each PIM request with who made it, the role, the scope, how long it was asked for, its justification, ticket, approval and outcome, plus the activations in force now; requests on a management group or the tenant root are not included.
+
+Summary fields:
+
+**What was checked?**
+- `pim_available` — True if PIM answered; false if the tenant has no PIM (no Entra ID P2 or ID Governance licence), and then every count reads 0; null if both lists failed for another reason
+- `collected_at` — Timestamp (UTC) of when the evidence was collected
+- `oldest_request_created_on` — Time of the oldest request Azure still holds; null if there are none or the requests were not read
+- `newest_request_created_on` — Time of the newest request; null if there are none or the requests were not read
+
+**What PIM requests were made?**
+- `requests_total` — Number of PIM requests Azure still holds, of any type; null if the requests were not read (Azure keeps them for a limited window, shown by the oldest and newest dates)
+- `requests_by_type` — Number of requests for each request type, as Azure reports it (SelfActivate, AdminAssign, AdminRemove, AdminExtend, SelfExtend, SelfRenew and so on); null if the requests were not read
+- `requests_by_status` — Number of requests for each status, as Azure reports it; null if the requests were not read
+- `requests_by_outcome` — Number of requests for each outcome; null if the requests were not read:
+  - granted (the request was provisioned or approved)
+  - revoked (it was granted, then ended early by a deactivation or an admin removal)
+  - denied_or_failed (it was denied, canceled, timed out or failed)
+  - pending (it is waiting for approval or still being processed)
+  - unknown (any other status)
+
+**Who activated roles, and how?**
+- `self_activations` — Number of requests where a person activated a role they were eligible for (type SelfActivate); null if the requests were not read
+- `self_activations_granted` — Number of self-activations that took effect, including self-activations later ended early
+- `self_activations_revoked_early` — Number of self-activations that were granted and then ended early
+- `self_activations_denied_or_failed` — Number of self-activations that were denied, canceled, timed out or failed
+- `self_activations_pending` — Number of self-activations still waiting for approval or processing
+- `principals_who_activated` — Number of distinct users, groups or apps with at least one granted self-activation
+- `self_activations_by_role` — Number of self-activations for each role name; a role with no name read is counted as unknown
+- `self_activations_by_scope_level` — Number of self-activations for each scope level: subscription, resource_group, resource, management_group, root or other_subscription
+- `activation_duration_hours_max` — Number of hours: the longest duration asked for in a self-activation; null if none states one
+- `activation_duration_hours_median` — Number of hours: the median duration, in hours, asked for in self-activations that state one; null if none does
+
+**Were activations justified and approved?**
+- `self_activations_without_justification` — Number of self-activations with no justification text
+- `self_activations_without_ticket` — Number of self-activations with no ticket number
+- `self_activations_without_approval` — Number of self-activations that did not go through an approval
+
+**Do over-broad roles stand out?**
+- `self_activations_of_over_broad_roles` — Number of self-activations of Owner, Contributor, User Access Administrator or Role Based Access Control Administrator, the four built-in roles treated as over-broad
+- `over_broad_activations_without_justification` — Number of self-activations of the four over-broad roles with no justification text
+- `over_broad_activations_without_approval` — Number of self-activations of the four over-broad roles that did not go through an approval
+
+**Was standing access granted through PIM?**
+- `admin_assign_requests` — Number of requests where an administrator assigned a role directly (type AdminAssign), rather than a person activating one
+- `admin_assign_requests_of_over_broad_roles` — Number of direct assignments (type AdminAssign) of the four over-broad roles
+- `admin_assign_requests_without_expiration` — Number of direct assignments with no end date or duration, which grant permanent access
+- `admin_remove_requests` — Number of requests that removed an assignment (type AdminRemove)
+
+**What is active right now?**
+- `currently_active_activations` — Number of activations in force now, whether or not a request for them is still held; null if the instances were not read
+- `currently_active_over_broad_activations` — Number of activations in force now of the four over-broad roles
+- `currently_active_activations_without_end` — Number of activations in force now with no end date
 
 
 ### azure_rbac_custom_roles
@@ -2237,6 +2311,87 @@ Summary fields:
 - `succeeded_restores_without_recovery_point_time` — Number of Completed restores left out of `max_recovery_point_age_hours`: their details named no recovery point time the fetcher could read (it reads day/month/year in 24-hour form, as SQL restores write it, and month/day/year with AM/PM, as Azure Files restores write it), the time named was after the restore's start, or the details couldn't be read; null if a vault's restore jobs couldn't be read
 
 
+### azure_backup_vault_protection
+Short Description: Shows whether each Backup vault's backup instances have a recent recovery point, how long each policy keeps backups, and whether the vault has soft delete, immutability and geo-redundant storage.
+
+Script: fetchers/azure/backup_vault_protection/fetcher.py
+
+Access: Reader on the subscription. This reads Backup vaults (Microsoft.DataProtection), the newer vault type; Recovery Services vaults are read by azure_backup_recovery_status.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET providers/Microsoft.DataProtection` — whether the provider is registered, and which API version this cloud supports
+- `GET Microsoft.DataProtection/backupVaults` — every Backup vault with its storage redundancy, soft delete, immutability and cross-region restore settings
+- `GET backupVaults/{vault}/backupPolicies (per vault)` — each policy's backup schedule and retention rules
+- `GET backupVaults/{vault}/backupInstances (per vault)` — each protected resource, its policy and protection state
+- `GET backupInstances/{instance}/recoveryPoints (per backup instance, within the lookback)` — when it was last backed up
+
+Output: `azure_backup_vault_protection_<subscription>.json` — each Backup vault with its settings, policies and backup instances, and each instance's newest recovery point judged against the window, its policy's interval and the objective.
+
+Summary fields:
+
+**Which Backup vaults exist, and do their own settings protect the backups?**
+- `total_backup_vaults` — Number of Backup vaults in the subscription; null when the vault list was not read, and then every count and verdict here is null too (only the settings stay) and the run fails
+- `vaults_instances_listed` — True if every vault's backup instance list was read; false if any failed, and then the two counts below, every backup instance count and the two all_ fields are null and the run fails
+- `vaults_with_backup_instances` — Number of vaults protecting at least one resource
+- `vaults_without_backup_instances` — Number of vaults protecting nothing
+- `vaults_by_vault_store_redundancy` — Number of vaults for each redundancy of their vault store, where the backups are kept:
+  - LocallyRedundant (three copies in one datacenter)
+  - ZoneRedundant (copies across availability zones of the region)
+  - GeoRedundant (copies in the paired region too)
+  - None (no vault store listed)
+- `soft_delete_enabled_vaults` — Number of vaults whose soft delete is On or AlwaysOn, so a deleted backup can be recovered for the retention period
+- `immutability_enabled_vaults` — Number of vaults whose immutability is Unlocked or Locked, so recovery points cannot be deleted before they expire
+- `cross_region_restore_vaults` — Number of vaults with cross-region restore enabled; a geo-redundant vault without it keeps copies in the paired region that cannot be restored there
+- `resource_guard_protected_vaults` — Number of vaults protected by a Resource Guard, which requires a second approval for destructive operations
+- `provider_registration_status` — Whether Microsoft.DataProtection is registered on the subscription: registered, not_registered (no Backup vaults in use; every count is 0), or unknown (the lookup failed)
+- `api_version` — The Microsoft.DataProtection API version the run used, the newest stable version this cloud lists at or below the one the fetcher was written against
+
+**How long do the policies keep backups?**
+- `total_backup_policies` — Number of backup policies across every vault; null when any vault's policy list was not read, as are the other policy counts, and the run fails
+- `retention_threshold_days` — Number of days: the fewest a policy must keep a backup to count as adequate (retention_threshold_days setting, default 30)
+- `policies_meeting_retention_threshold` — Number of policies whose longest retention rule keeps a backup for at least retention_threshold_days; months count as 30 days and years as 365
+- `policies_without_readable_retention` — Number of policies with no retention rule the fetcher could read; these never count as meeting the threshold
+
+**Which resources are protected, and is their protection healthy?**
+- `total_backup_instances` — Number of backup instances, each one resource a vault protects, across every vault
+- `backup_instances_by_datasource_type` — Number of backup instances for each datasource type, as the service names it (Microsoft.Compute/disks, Microsoft.Storage/storageAccounts/blobServices, Microsoft.DBforPostgreSQL/flexibleServers, Microsoft.ContainerService/managedClusters and others)
+- `backup_instances_by_protection_state` — Number of backup instances for each current protection state (ProtectionConfigured, ProtectionError, ProtectionStopped, SoftDeleted and others)
+- `backup_instances_protected` — Number of backup instances whose current protection state is ProtectionConfigured
+- `backup_instances_in_error` — Number of backup instances in ProtectionError or ConfiguringProtectionFailed, or carrying a protection error
+- `backup_instances_without_policy` — Number of backup instances with no policy id, which have no schedule or retention
+- `backup_instances_meeting_retention_threshold` — Number of backup instances whose policy meets the retention threshold
+- `backup_instances_retention_unknown` — Number of backup instances whose policy was not read (the policy list failed, or the policy id names none listed), so their retention is unknown rather than short
+- `retention_threshold_percentage` — Percentage of backup instances whose policy meets the retention threshold = `backup_instances_meeting_retention_threshold` / `total_backup_instances` × 100 (a whole number, 0–100); 0 when `total_backup_instances` is 0; null when `backup_instances_retention_unknown` is more than 0
+
+**Has every backup instance been backed up recently?**
+- `recovery_point_window_hours` — Number of hours: how recent the newest recovery point must be for an instance to count as backed up (recovery_point_window_hours setting, default 48)
+- `recovery_point_lookback_days` — Number of days: how far back recovery points were read (recovery_point_lookback_days setting, default 35)
+- `backup_instances_recovery_points_read` — Number of backup instances whose recovery points were read
+- `backup_instances_recovery_points_not_applicable` — Number of backup instances with operational (continuous) blob backup, which restores to a point in time and has no recovery points to list
+- `backup_instances_recovery_points_unknown` — Number of backup instances whose recovery point list failed, so whether they are backed up is unknown; the run fails
+- `backup_instances_backed_up_in_window` — Number of backup instances whose newest recovery point is within recovery_point_window_hours
+- `backup_instances_not_backed_up_in_window` — Number of backup instances read whose newest recovery point is older than the window, or that have none in the lookback
+- `backup_instances_without_recovery_point` — Number of backup instances read with no recovery point in the lookback
+- `backup_instances_overdue` — Number of backup instances whose newest recovery point is older than twice their policy's backup interval, or that have none, so at least one scheduled backup was missed; instances whose policy has no readable interval, or whose interval doubled is longer than the lookback, are not counted
+- `max_latest_recovery_point_age_hours` — Hours since the oldest of the newest recovery points, across the instances read; null when none had one
+- `all_backup_instances_backed_up` — True if every applicable backup instance is backed up in the window; false if any is not; null if any is unknown, there are none, or a vault's instance list was not read
+
+**Does the backup frequency meet the recovery point objective?**
+- `recovery_point_objective_hours` — Number of hours: the defined recovery point objective (recovery_point_objective_hours setting); null when unset, and then the three fields below are null too
+- `backup_instances_meeting_recovery_point_objective` — Number of backup instances whose newest recovery point is no older than the objective
+- `backup_instances_missing_recovery_point_objective` — Number of backup instances read whose newest recovery point is older than the objective, or that have none
+- `all_backup_instances_meet_recovery_point_objective` — True if every applicable backup instance meets the objective; false if any does not; null if any is unknown, there are none, a vault's instance list was not read, or no objective is set
+
+**What was left out of scope?**
+- `resource_exclusion_patterns` — List of the resource_exclusions patterns as given
+- `resource_exclusion_patterns_unmatched` — List of the patterns that matched nothing, such as a mistyped name
+- `excluded_backup_vaults` — Number of vaults a pattern took out of scope
+- `excluded_backup_instances` — Number of backup instances a pattern took out of scope, by their own id or the resource they protect
+- `in_scope_backup_vaults` — Number of vaults assessed
+- `in_scope_backup_instances` — Number of backup instances assessed
+
+
 ### azure_defender_assessments
 Short Description: Lists every Defender for Cloud check result on the subscription, showing which resources pass or fail which checks and how severe each failure is.
 
@@ -2397,6 +2552,67 @@ Summary fields:
 - `mcsb_failed_controls` — Number of the benchmark's controls whose state is Failed
 - `mcsb_control_pass_percentage` — Percentage of the benchmark's graded controls that pass = `mcsb_passed_controls` / (`mcsb_passed_controls` + `mcsb_failed_controls`) × 100 (a whole number, 0–100); 0 when `mcsb_passed_controls` + `mcsb_failed_controls` is 0, including when the benchmark isn't listed. Skipped and Unsupported controls are left out of both
 - `mcsb_failed_control_names` — List of the names of the benchmark's controls whose state is Failed
+
+
+### azure_defender_vulnerability_findings
+Short Description: Shows the vulnerabilities Defender for Cloud found on each container image and server, by severity, with whether a fix exists and how old each is.
+
+Script: fetchers/azure/defender_vulnerability_findings/fetcher.py
+
+Access: Reader on the subscription.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- Resource Graph query on `securityresources` (sub-assessments) — totals by assessment type, status and severity
+- Resource Graph query on `securityresources` (sub-assessments) — one row per container image digest and one per server, with its finding counts
+- Resource Graph query on `securityresources` (sub-assessments) — every open (Unhealthy) finding, kept up to a cap
+
+Output: `azure_defender_vulnerability_findings_<subscription>.json` — each container image and server with its vulnerability counts, the open findings with CVE, severity, package and fix, and the images, servers and findings left out of scope.
+
+Summary fields:
+
+**Are there vulnerability findings at all?**
+- `findings_source_present` — True if Resource Graph returned at least one container or server vulnerability finding; false if none exist, which means no Defender plan is producing them in this subscription; null if the totals were not read
+- `assessment_keys_seen` — List of the Defender assessment keys the findings belong to (registry, runtime and server assessments have different keys); null if the totals were not read
+- `findings_total` — Number of findings, open and resolved, before resource exclusions; null if the totals were not read
+- `open_findings` — Number of findings with status Unhealthy, before resource exclusions
+- `resolved_findings` — Number of findings with status Healthy, before resource exclusions
+- `other_status_findings` — Number of findings with any other status, such as NotApplicable, before resource exclusions
+- `open_findings_by_severity` — Number of open findings for each severity: critical, high, medium and low
+- `findings_by_assessment_type` — Number of findings for each kind of assessed resource (container registry image or server)
+
+**Which images carry open findings?**
+- `images_scanned` — Number of distinct images (registry, repository and digest) Defender has findings for, after resource exclusions; null if the image list was not read
+- `images_with_open_findings` — Number of scanned images with at least one open finding
+- `images_with_open_critical` — Number of scanned images with at least one open critical finding
+- `images_with_open_high` — Number of scanned images with at least one open high finding
+- `images_open_patchable_findings` — Number of open image findings that have a fixed version or are marked patchable
+- `image_oldest_open_age_days` — Days since the oldest open image finding's vulnerability was published (not days since Defender detected it); null if no image has an open finding or the image list was not read
+- `registries_seen` — List of the registry host names the scanned images belong to
+
+**Which servers carry open findings?**
+- `servers_scanned` — Number of machines Defender for Servers has findings for, after resource exclusions; null if the server list was not read
+- `servers_with_open_findings` — Number of scanned servers with at least one open finding
+- `servers_with_open_critical` — Number of scanned servers with at least one open critical finding
+- `server_oldest_open_age_days` — Days since the oldest open server finding's vulnerability was published (not days since Defender detected it); null if no server has an open finding or the server list was not read
+
+**What is in the open-findings list?**
+- `open_findings_in_scope` — Number of open findings after resource exclusions, summed from the image and server rows; null unless both were read
+- `open_findings_listed` — Number of open findings written to the evidence after the cap; null if the findings were not read
+- `open_findings_list_truncated` — True if more open findings existed than the cap, so the list was cut (most severe, then oldest, kept first); false if not; null if the findings were not read
+- `open_findings_list_cap` — Number of open findings the evidence lists at most (default 5000, set by AZURE_VULN_MAX_FINDINGS)
+- `open_findings_with_exploit_steps_published` — Number of open findings, after resource exclusions and before the cap, whose vulnerability has published exploit steps
+- `distinct_open_cves` — Number of distinct CVE ids among the open findings, after resource exclusions and before the cap; ids that are not CVE-shaped (such as a scanner's own id) are not counted
+
+**What was left out of scope?**
+- `resource_exclusion_patterns` — List of the resource_exclusions patterns as given
+- `resource_exclusion_patterns_unmatched` — List of the patterns that matched nothing, such as a mistyped name
+- `excluded_images` — Number of images a pattern took out of scope; null if the image list was not read
+- `excluded_servers` — Number of servers a pattern took out of scope; null if the server list was not read
+- `excluded_findings` — Number of open findings a pattern took out of scope; null if the findings were not read
+- `in_scope_images` — Number of images assessed after exclusions; null if the image list was not read
+- `in_scope_servers` — Number of servers assessed after exclusions; null if the server list was not read
+- `in_scope_findings` — Number of open findings assessed after exclusions, before the cap; null if the findings were not read
 
 
 ### azure_disk_encryption_status
@@ -2778,6 +2994,60 @@ Summary fields:
 - `resources_covered_by_neither_by_type` — Number of resources of each type that have neither a Defender assessment nor a Policy state. It counts every such resource, so it holds both the missing resources listed above and the types neither service covers on any resource; null if either query failed
 
 
+### azure_resource_locks
+Short Description: Shows every management lock in the subscription and whether each log workspace, backup vault, key vault and storage account is locked against deletion.
+
+Script: fetchers/azure/resource_locks/fetcher.py
+
+Access: Reader on the subscription.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET Microsoft.Authorization/locks at subscription scope` — every management lock in the subscription, at the subscription, a resource group, a resource or a child resource, with its level, notes and owners
+- `GET resources` — every resource in the subscription with its type, so each one can be matched to the locks whose scope covers it
+- `GET resourceGroups` — every resource group, to count how many are locked
+
+Output: `azure_resource_locks_<subscription>.json` — every lock with its scope; each resource of a protected type with the locks in effect on it; the other resources that have a lock; the resource groups; and the resources left out of scope.
+
+Summary fields:
+
+**What locks exist?**
+- `locks_read` — True if the lock list was read; false if it failed, and then every lock field and every resource's lock fields read null and the run fails
+- `locks` — Number of management locks in the subscription at any scope; a lock acts on the management plane only, so data inside a locked resource, such as blobs in a storage account or rows in a workspace, is not covered; null if the lock list was not read
+- `locks_by_level` — Number of locks for each level; null if the lock list was not read:
+  - cannotdelete (the scope and the resources beneath it in Azure Resource Manager can be read and changed, not deleted)
+  - readonly (the scope and the resources beneath it can only be read, so some operations such as listing storage keys also fail)
+  - unknown (the API reported no level)
+- `locks_by_scope_kind` — Number of locks for each scope kind; a lock on a child resource counts as resource; null if the lock list was not read:
+  - subscription (placed on the subscription, covering everything in it)
+  - resource_group (placed on a resource group, covering every resource in it)
+  - resource (placed on one resource or one of its children)
+- `subscription_lock_levels` — List of the levels of the locks placed on the subscription itself; null if the lock list was not read
+- `subscription_delete_locked` — True if a lock on the subscription itself prevents deletion of everything in it; false if there is none; null if the lock list was not read
+- `resource_groups` — Number of resource groups in the subscription; null if the resource group list was not read
+- `resource_groups_delete_locked` — Number of resource groups with a lock placed on the group itself, which covers every resource in it; null if the lock list was not read
+
+**Are the protected resources locked against deletion?**
+- `protected_resource_types` — List of the resource types treated as protected (protected_types setting, or the default list)
+- `protected_resource_types_unmatched` — List of the protected types with no resource in scope, such as a mistyped name; null if the resource list was not read
+- `resources_read` — True if the resource list was read; false if it failed, and then every resource count below is null
+- `resources` — Number of resources in scope of any type; null if the resource list was not read
+- `resources_delete_locked` — Number of resources of any type with a cannotdelete or readonly lock in effect, placed on the resource, its resource group or the subscription; null if the lock or resource list was not read
+- `resources_read_only` — Number of resources of any type under a readonly lock, which can break operations the resource needs; null if the lock or resource list was not read
+- `protected_resources` — Number of resources whose type is protected; null if the resource list was not read
+- `protected_resources_delete_locked` — Number of protected resources with a cannotdelete or readonly lock in effect on the resource, its resource group or the subscription; a lock on a child of the resource does not count, and the data inside the resource is not protected by any lock; null if the lock or resource list was not read
+- `protected_resources_unlocked` — Number of protected resources with no cannotdelete or readonly lock in effect on the resource, its resource group or the subscription; null if the lock or resource list was not read
+- `protected_resources_by_type` — Number of resources and of delete-locked resources for each protected type; both null if the lock or resource list was not read
+- `protected_resource_lock_percentage` — Percentage of protected resources locked against deletion = `protected_resources_delete_locked` / `protected_resources` × 100 (a whole number, 0–100); 0 when `protected_resources` is 0; null if the lock or resource list was not read
+- `all_protected_resources_locked` — True if every protected resource is locked against deletion; false if any is not; null if there is no protected resource or a list was not read
+
+**What was left out of scope?**
+- `resource_exclusion_patterns` — List of the resource_exclusions patterns as given
+- `resource_exclusion_patterns_unmatched` — List of the patterns that matched nothing, such as a mistyped name
+- `excluded_resources` — Number of resources a pattern took out of scope; null if the resource list was not read
+- `in_scope_resources` — Number of resources assessed; null if the resource list was not read
+
+
 ### azure_service_availability
 Short Description: Shows when each App Service app and SQL Managed Instance was unavailable and for how long, why, Front Door origin probe failures, and each app's health-check results.
 
@@ -3006,6 +3276,68 @@ Summary fields:
 - `certificates_expiring_within_30_days` — Number of uploaded and hostname certificates that expire within 30 days of collection
 
 
+### azure_zone_redundancy
+Short Description: Shows whether each compute, network, storage, database and backup resource is spread across availability zones, which regions it runs in, and whether those regions support zones.
+
+Script: fetchers/azure/zone_redundancy/fetcher.py
+
+Access: Reader on the subscription.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET subscriptions/{subscription}/locations` — every region of the cloud with its availability zones and paired regions
+- `Azure Resource Graph: Resources, filtered to the assessed types` — each resource's region, zones, sku and the properties its zone configuration is read from, paged to the end
+
+Output: `azure_zone_redundancy_<subscription>.json` — each assessed resource with its region, zones and zone configuration, and each region in use with whether it supports zones.
+
+Summary fields:
+
+**Which resources were assessed?**
+- `resources_assessed` — Number of resources of the assessed types in the subscription
+- `resource_types_assessed` — List of the resource types assessed: scale sets, application gateways, public IPs, NAT gateways, Azure Firewalls, Bastion hosts, Redis caches, virtual machines, managed disks, AKS clusters, load balancers, storage accounts, App Service plans, Backup vaults, Recovery Services vaults, Cosmos DB accounts, PostgreSQL and MySQL flexible servers, and SQL databases (the master database left out)
+- `resources_by_type` — Number of resources for each type
+- `resource_list_read` — True if Resource Graph returned the resource list; false if it failed, and then every count, list and verdict that comes from the resources is null, not 0, and the run fails
+
+**How is each resource spread across zones?**
+- `resources_by_zone_configuration` — Number of resources for each zone configuration:
+  - zone_redundant (placed in two or more zones, a zone-redundant storage or high-availability setting, or a Redis cache with automatic zonal allocation)
+  - zonal (pinned to one zone)
+  - regional (no zone placement; for a type whose zones array is read, an empty array)
+  - mixed (a cluster, load balancer or account whose node pools, frontends or replicas differ)
+  - unknown (a configuration the fetcher could not read)
+- `resources_by_type_and_zone_configuration` — Number of resources for each type and zone configuration
+- `zone_redundant_resources` — Number of resources that are zone redundant
+- `zonal_resources` — Number of resources that are zonal
+- `regional_resources` — Number of resources that are regional
+- `zonal_or_zone_redundant_resources` — Number of resources placed in at least one zone
+- `mixed_resources` — Number of resources that are mixed
+- `unknown_resources` — Number of resources whose zone configuration is unknown
+- `geo_redundant_resources` — Number of storage accounts, vaults and Cosmos DB accounts whose data is also kept in another region (GRS or GZRS storage, geo-redundant vault storage, two or more Cosmos DB locations)
+
+**Do the regions in use support zones, and is more than one region in use?**
+- `region_support_read` — True if the region list was read; false if it failed, so region zone support reads null
+- `regions_in_use` — Number of regions holding at least one assessed resource
+- `regions` — List of the regions in use
+- `multi_region` — True if assessed resources run in two or more regions
+- `regions_with_zone_support_in_use` — Number of regions in use that have availability zones
+- `regions_without_zone_support_in_use` — Number of regions in use with no availability zones, where nothing can be zone redundant
+- `resources_in_regions_without_zone_support` — Number of assessed resources in regions with no availability zones
+- `resources_in_unlisted_regions` — Number of assessed resources whose region the region list does not name, so its zone support is unknown
+
+**Of the resources that could be zone redundant, how many are?**
+- `zone_redundant_capable_resources` — Number of assessed resources of a type that has a zone-redundant mode; a virtual machine or NAT gateway sits in at most one zone, a managed disk follows its VM, and a Basic SKU public IP or load balancer has no zones, so these resources are classified but not held to zone redundancy
+- `zone_capable_resources` — Number of zone-redundant-capable resources in regions that have availability zones; null when the region list was not read
+- `zone_redundant_in_zone_capable_regions` — Number of zone-capable resources (`zone_capable_resources`) that are zone redundant; null when the region list was not read
+- `zone_redundant_percentage` — Percentage of zone-capable resources that are zone redundant = `zone_redundant_in_zone_capable_regions` / `zone_capable_resources` × 100 (a whole number, 0–100); 0 when `zone_capable_resources` is 0; null when the region list was not read
+- `all_zone_capable_resources_zone_redundant` — True if every zone-capable resource is zone redundant; false if any is not; null if any is unknown, there are none, or the region list was not read
+
+**What was left out of scope?**
+- `resource_exclusion_patterns` — List of the resource_exclusions patterns as given
+- `resource_exclusion_patterns_unmatched` — List of the patterns that matched nothing, such as a mistyped name
+- `excluded_resources` — Number of resources a pattern took out of scope
+- `in_scope_resources` — Number of resources assessed
+
+
 ### azure_app_gateway_backend_tls
 Short Description: Shows whether Application Gateway traffic to its backends is encrypted and whether the backend certificate and SNI are validated.
 
@@ -3125,6 +3457,69 @@ Summary fields:
 - `policies_disabled` — Number of WAF policies that are turned off
 - `disabled_managed_rules` — Number of Microsoft-managed WAF rules switched off, across all policies
 - `rate_limit_rules` — Number of enabled rate-limiting custom rules, across all policies
+
+
+### azure_bastion_configuration
+Short Description: Shows how each Azure Bastion host is configured and logged, and which virtual machines a Bastion can reach, so administrative access needs no exposed port.
+
+Script: fetchers/azure/bastion_configuration/fetcher.py
+
+Access: Reader on the subscription. Optional: Reader on a subscription whose virtual network is peered with one of this subscription's; without it a virtual machine reachable only through a Bastion in that subscription reads unknown, and the run succeeds. A subscription that never registered Microsoft.Network or Microsoft.Compute reads as having no hosts or no virtual machines.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET Microsoft.Network/bastionHosts` — every Bastion host with its SKU, scale units, features, IP allow-list, zones and subnet
+- `GET Microsoft.Insights/diagnosticSettings (per host)` — whether BastionAuditLogs goes to a workspace, storage account or event hub
+- `GET Microsoft.Compute/virtualMachines` — every virtual machine and its network interfaces
+- `GET Microsoft.Network/networkInterfaces` — each interface's subnet and public IP address
+- `GET Microsoft.Network/virtualNetworks` — each virtual network's subnets and their network security groups, and its peerings with their state and whether they allow virtual network access
+- `GET Microsoft.Network/bastionHosts (per peered subscription)` — the Bastion hosts a connected peering could lead to, when the credential may list them
+
+Output: `azure_bastion_configuration_<subscription>.json` — each Bastion host with its configuration, subnet NSG and log export; each virtual machine with its virtual networks, public IPs and the Bastion path that reaches it; the peered subscriptions read; and the resources left out of scope.
+
+Summary fields:
+
+**What Bastion hosts exist?**
+- `bastion_hosts_read` — True if the host list was read; false if it failed, and then every host count below is null, not 0, and the run fails
+- `bastion_hosts` — Number of Bastion hosts in scope
+- `bastion_hosts_by_sku` — Number of hosts for each SKU (developer, basic, standard, premium, or unknown when the API reports none)
+- `virtual_networks_with_bastion` — Number of distinct virtual networks that hold a Bastion host
+- `bastion_hosts_with_public_ip` — Number of hosts with a public IP address, which is how users reach a Bastion that is not private-only
+- `bastion_hosts_private_only` — Number of hosts in private-only mode (Premium SKU), reachable only from a private address; a host reads null when the API version in use does not report the setting, and is not counted
+
+**Which access features are on?**
+- `bastion_hosts_with_shareable_links` — Number of hosts that allow shareable links, which open a session to a VM from a link without the Azure portal's own sign-in to that host
+- `bastion_hosts_with_ip_connect` — Number of hosts that allow IP-based connections to any reachable address, not only to Azure virtual machines
+- `bastion_hosts_with_native_client_tunneling` — Number of hosts that allow native client tunneling (SSH and RDP clients through the Azure CLI)
+- `bastion_hosts_with_file_copy` — Number of hosts that allow file transfer in a session
+- `bastion_hosts_with_copy_paste_disabled` — Number of hosts with clipboard copy and paste disabled
+- `bastion_hosts_with_kerberos` — Number of hosts with Kerberos authentication enabled
+- `bastion_hosts_with_session_recording` — Number of hosts that record sessions (Premium SKU); a host reads null when the API version in use does not report the setting, and is not counted
+- `bastion_hosts_with_ip_allowlist` — Number of hosts whose network access control lists restrict the source addresses that may connect; the API reports this list for the Developer SKU, so other SKUs read 0 here and are restricted through the subnet network security group
+
+**Is the Bastion subnet protected and logged?**
+- `bastion_hosts_with_subnet_nsg` — Number of hosts whose AzureBastionSubnet has a network security group, counting only hosts that have a subnet; null if the virtual network list was not read or a host's subnet is not in it
+- `bastion_hosts_without_subnet_nsg` — Number of hosts whose subnet has no network security group, counting only hosts that have a subnet; null if the virtual network list was not read or a host's subnet is not in it
+- `bastion_hosts_exporting_audit_logs` — Number of hosts whose diagnostic settings export BastionAuditLogs, by name or through the allLogs or audit group; null if a host's diagnostic settings could not be read
+- `bastion_hosts_without_audit_log_export` — Number of hosts with no setting that exports BastionAuditLogs; null if a host's diagnostic settings could not be read
+
+**Can a Bastion reach the virtual machines?**
+- `virtual_machines_read` — True if the virtual machine list and the network interface list were read; false if either failed, and then every path reads unknown and the public IP, in-VNet and peering counts, the without-path count and the percentage read null
+- `virtual_machines` — Number of virtual machines in scope; scale set instances are not assessed; null if the machine list was not read
+- `virtual_machines_with_public_ip` — Number of virtual machines with a public IP address on a network interface, which is a path to the machine that does not go through Bastion; null if any machine's network interfaces could not be read
+- `virtual_machines_with_bastion_in_vnet` — Number of virtual machines in a virtual network that holds a Bastion host; null if the machine, interface or host list was not read
+- `virtual_machines_with_bastion_via_peering` — Number of virtual machines whose virtual network has a connected peering to a virtual network holding a ready Bastion host of the Basic, Standard or Premium SKU (the Developer SKU does not reach peered networks), in this or a readable peered subscription; where the Bastion's virtual network is in this subscription, its own peering link must also allow virtual network access, and for a Bastion in another subscription that link is not read; null if the machine, interface, host or virtual network list was not read
+- `virtual_machines_without_bastion_path` — Number of virtual machines no in-scope or readable Bastion can reach; null if any machine's path is unknown or the host, interface or virtual network list was not read
+- `virtual_machines_with_unknown_bastion_path` — Number of virtual machines whose path could not be decided: the host, interface or virtual network list not read, an interface missing from the list, a machine with no interface, a Bastion host that is not in the Succeeded state or reports no SKU, or a peering into a subscription whose Bastion hosts could not be listed; null if the machine list was not read
+- `bastion_path_percentage` — Percentage of virtual machines a Bastion can reach = (`virtual_machines_with_bastion_in_vnet` + `virtual_machines_with_bastion_via_peering`) / `virtual_machines` × 100 (a whole number, 0–100); 0 when `virtual_machines` is 0; null if any path is unknown or a list was not read
+
+**What was left out of scope?**
+- `resource_exclusion_patterns` — List of the resource_exclusions patterns as given
+- `resource_exclusion_patterns_unmatched` — List of the patterns that matched nothing, such as a mistyped name
+- `excluded_bastion_hosts` — Number of Bastion hosts a pattern took out of scope; null if the host list was not read
+- `excluded_virtual_machines` — Number of virtual machines a pattern took out of scope; null if the machine list was not read
+- `in_scope_bastion_hosts` — Number of Bastion hosts assessed; null if the host list was not read
+- `in_scope_virtual_machines` — Number of virtual machines assessed; null if the machine list was not read
 
 
 ### azure_ddos_protection
@@ -3559,6 +3954,91 @@ Summary fields:
 
 **Do policies limit request rates?**
 - `waf_policies_with_rate_limit_rules` — Number of WAF policies with at least one enabled rate-limit custom rule
+
+
+### azure_firewall_configuration
+Short Description: Shows what each Azure Firewall allows and denies, whether threat intelligence, IDPS, TLS inspection and DNS proxy are on, and whether its logs are exported.
+
+Script: fetchers/azure/firewall_configuration/fetcher.py
+
+Access: Reader on the subscription. Optional: Reader on another subscription that holds a Firewall Policy a firewall uses or a base policy a policy inherits from; without it that policy reads unread, the firewall's rule fields read null, and the run succeeds. A subscription that never registered Microsoft.Network reads as having no firewalls.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET Microsoft.Network/azureFirewalls` — every firewall with its SKU, deployment, IP configurations, forced tunneling, attached Firewall Policy and the classic rule collections configured on the firewall itself
+- `GET Microsoft.Network/firewallPolicies` — every Firewall Policy with its threat intelligence mode and allowlist, IDPS, DNS, TLS inspection, insights, base policy and the firewalls using it
+- `GET firewallPolicies/{policy} (per policy a firewall or policy references outside the subscription)` — the policy's settings, when the credential can read it
+- `GET firewallPolicies/{policy}/ruleCollectionGroups (per policy)` — every rule collection and rule, and GET ruleCollectionGroups/{group} when a listing leaves the collections out
+- `GET Microsoft.Insights/diagnosticSettings (per firewall)` — which log categories go to which workspace, storage account or event hub
+
+Output: `azure_firewall_configuration_<subscription>.json` — each firewall with its effective settings, its policy chain and rule findings, and its log export; each Firewall Policy with its settings and every rule; the policies read from other subscriptions; and the resources left out of scope.
+
+Summary fields:
+
+**What firewalls and policies exist?**
+- `firewalls_read` — True if the firewall list was read; false if it failed, and then every firewall count and every rule count is null, not 0, and the run fails
+- `firewalls` — Number of Azure Firewalls in scope
+- `firewalls_by_sku_tier` — Number of firewalls for each SKU tier (basic, standard, premium, or unknown when the API reports none)
+- `firewalls_by_deployment` — Number of firewalls for each deployment kind:
+  - virtual_network (deployed into a virtual network's AzureFirewallSubnet)
+  - virtual_hub (deployed into a Virtual WAN hub)
+- `firewalls_with_policy` — Number of firewalls whose rules come from an attached Firewall Policy
+- `firewalls_with_classic_rules` — Number of firewalls whose rules are the rule collections configured on the firewall itself
+- `firewalls_without_rules` — Number of firewalls with no policy and no classic rule collection; such a firewall denies every flow
+- `firewalls_with_rules_unread` — Number of firewalls whose policy, or a base policy in its chain, could not be read, so their rule fields read null
+- `firewall_policies_read` — True if the policy list was read; false if it failed, and then every policy count and every rule count is null, not 0, and the run fails
+- `firewall_policies` — Number of Firewall Policies in the subscription and in scope
+- `firewall_policies_in_use` — Number of Firewall Policies attached to at least one firewall
+- `firewall_policies_unused` — Number of Firewall Policies attached to no firewall
+- `firewall_policies_with_base_policy` — Number of Firewall Policies that inherit rules from a base policy
+- `firewall_policies_with_rules_unread` — Number of Firewall Policies whose rule collection groups could not be read
+
+**What do the rules allow?**
+- `rules` — Number of rules across every in-scope policy, every policy from another subscription that a firewall or policy here references and that could be read, and every classic rule collection, each policy counted once; null if any policy's or firewall's rules could not be read
+- `rules_by_type` — Number of rules for each type (network, application, nat); null if any rules could not be read
+- `rules_by_action` — Number of rules for each action (allow, deny, dnat); null if any rules could not be read
+- `allow_all_network_rules` — Number of allow network rules whose sources and destinations are any (*, 0.0.0.0/0 or any) and whose ports are * or together cover 1-65535, in any number of entries or ranges; an IP group adds addresses, so a * beside one is still every address; a rule that carries only ICMP is not counted; such a rule permits every flow; counted regardless of the priority of other rules; null if any rules could not be read
+- `network_rules_to_any_destination` — Number of allow network rules whose destination is any, whatever the source or ports; null if any rules could not be read
+- `egress_open_network_rules` — Number of allow network rules whose destination is any and whose ports are * or together cover 1-65535 (not ICMP only), whatever the source: each lets its sources, such as 10.0.0.0/8 or a single subnet, out to anywhere unfiltered; null if any rules could not be read
+- `application_rules_to_any_fqdn` — Number of allow application rules whose target FQDN or URL is * with no FQDN tag or web category narrowing it; such a rule permits web traffic to any destination; null if any rules could not be read
+- `firewalls_enforcing_egress_filtering` — Number of firewalls with no egress-open network rule (see egress_open_network_rules) and no any-FQDN application rule in their effective rules (the attached policy and its base policies, or the classic rule collections). Azure Firewall denies whatever no rule allows, so a firewall with no rules, or only DNAT or deny rules, counts (firewalls_without_rules lists those with no rules). This judges the rules only, not whether traffic reaches the firewall: a subnet whose default route bypasses it is reported by azure_vnet_egress_routing. Null if any firewall's rules could not be read or the firewall list failed
+- `firewalls_with_allow_all_rule` — Number of firewalls whose effective rules include an allow-all network rule or an any-FQDN application rule; null if any firewall's rules could not be read
+- `egress_filtering_percentage` — Percentage of firewalls enforcing egress filtering = `firewalls_enforcing_egress_filtering` / `firewalls` × 100 (a whole number, 0–100); 0 when `firewalls` is 0; null if any firewall's rules could not be read or the firewall list failed
+
+**Does the firewall publish anything inbound?**
+- `dnat_rules` — Number of DNAT rules, which translate a firewall public IP and port to an internal address; null if any rules could not be read
+- `dnat_rules_to_admin_ports` — Number of DNAT rules whose destination ports or translated port include 22 or 3389, as a port or inside a range, which publish SSH or RDP; null if any rules could not be read
+- `dnat_rules_from_any_source` — Number of DNAT rules whose source is any, so the whole internet can reach the translated address; null if any rules could not be read
+
+**Is threat protection on?**
+- `firewalls_with_settings_unread` — Number of firewalls whose attached policy could not be read, so their threat intelligence, IDPS, TLS inspection and DNS proxy fields read null or unknown; once a policy is attached the firewall's own settings no longer apply
+- `firewalls_by_threat_intel_mode` — Number of firewalls for each threat intelligence mode in effect, from the policy when one is attached and otherwise from the firewall:
+  - alert (known malicious addresses and domains are logged, not blocked)
+  - deny (known malicious addresses and domains are blocked)
+  - off (threat intelligence is not applied)
+  - unknown (the attached policy could not be read, or the firewall reports no mode)
+- `firewalls_with_threat_intel_deny` — Number of firewalls whose threat intelligence mode is deny; null if any firewall's policy could not be read
+- `firewalls_with_idps_deny` — Number of firewalls whose policy sets IDPS to deny; IDPS needs the Premium tier; null if any firewall's policy could not be read
+- `firewalls_with_idps_alert_only` — Number of firewalls whose policy sets IDPS to alert, so signatures are logged but not blocked; null if any firewall's policy could not be read
+- `firewalls_without_idps` — Number of firewalls with IDPS off, with no policy, or on a tier without IDPS; null if any firewall's policy could not be read
+- `firewalls_with_tls_inspection` — Number of firewalls whose policy has a TLS inspection certificate authority configured; null if any firewall's policy could not be read
+- `firewalls_with_dns_proxy` — Number of firewalls that proxy DNS, which FQDN-based network rules need to resolve consistently; null if any firewall's policy could not be read
+- `firewalls_with_management_ip` — Number of firewalls with a management IP configuration, which forced tunneling and the Basic tier both require; it does not by itself show that internet traffic is forced to another hop
+- `firewalls_with_public_ip` — Number of firewalls with at least one public IP address
+
+**Are firewall logs kept?**
+- `firewalls_exporting_rule_logs` — Number of firewalls whose diagnostic settings export a network, application or NAT rule log category; null if any firewall's diagnostic settings could not be read
+- `firewalls_exporting_threat_logs` — Number of firewalls whose diagnostic settings export the resource-specific threat intelligence or IDPS signature log category (AZFWThreatIntel, AZFWIdpsSignature); the legacy rule categories also carry threat intelligence hits inside the rule log; null if any firewall's diagnostic settings could not be read
+- `firewalls_without_log_export` — Number of firewalls with no diagnostic setting that sends any enabled log anywhere; null if any firewall's diagnostic settings could not be read
+- `log_categories_exported` — List of the firewall log categories exported by at least one firewall; a setting that exports the allLogs group counts for every category, and any other category group is listed as `group:<name>` without claiming the categories inside it
+
+**What was left out of scope?**
+- `resource_exclusion_patterns` — List of the resource_exclusions patterns as given
+- `resource_exclusion_patterns_unmatched` — List of the patterns that matched nothing, such as a mistyped name
+- `excluded_firewalls` — Number of firewalls a pattern took out of scope; null if the firewall list was not read
+- `excluded_firewall_policies` — Number of firewall policies a pattern took out of scope; null if the policy list was not read
+- `in_scope_firewalls` — Number of firewalls assessed; null if the firewall list was not read
+- `in_scope_firewall_policies` — Number of firewall policies assessed; null if the policy list was not read
 
 
 ### azure_network_security_groups
