@@ -15,6 +15,7 @@ when agents are. Extensions come from a per-VM virtual_machine_extensions.list()
 import logging
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -127,6 +128,33 @@ def project_storage_profile(profile) -> dict:
     }
 
 
+def project_patch_settings(os_profile) -> dict:
+    """Read the OS patch settings off an `OSProfile`: Windows `PatchSettings` or `LinuxPatchSettings`.
+
+    Both carry the same two fields. `patch_mode` is how patches are applied
+    (AutomaticByPlatform, AutomaticByOS, Manual, or ImageDefault for Linux) and
+    `assessment_mode` whether Azure assesses missing patches (AutomaticByPlatform or
+    ImageDefault). An OS without the settings reads as `os: None`, not as Manual.
+    """
+    windows = model_attr(os_profile, "windows_configuration")
+    linux = model_attr(os_profile, "linux_configuration")
+    if windows is not None and model_attr(windows, "patch_settings") is not None:
+        settings, os_name = model_attr(windows, "patch_settings"), "windows"
+    elif linux is not None and model_attr(linux, "patch_settings") is not None:
+        settings, os_name = model_attr(linux, "patch_settings"), "linux"
+    else:
+        return {"os": "windows" if windows is not None else ("linux" if linux is not None else None),
+                "patch_mode": None, "assessment_mode": None, "bypass_platform_safety_checks_on_user_schedule": None}
+    by_platform = model_attr(settings, "automatic_by_platform_settings")
+    return {
+        "os": os_name,
+        "patch_mode": model_attr(settings, "patch_mode"),
+        "assessment_mode": model_attr(settings, "assessment_mode"),
+        "bypass_platform_safety_checks_on_user_schedule": model_attr(
+            by_platform, "bypass_platform_safety_checks_on_user_schedule"),
+    }
+
+
 def project_virtual_machine(vm) -> dict:
     """Read a `VirtualMachine` model's attributes into a flat snake_case dict.
 
@@ -168,6 +196,7 @@ def project_virtual_machine(vm) -> dict:
             if linux_configuration is not None
             else None
         ),
+        "patch_settings": project_patch_settings(os_profile),
         # Extensions come from the per-VM enrichment call: ARM omits `resources` on the
         # list response (see the module docstring).
         "extensions": [],
@@ -238,6 +267,7 @@ def project_scale_set(scale_set) -> dict:
             if linux_configuration is not None
             else None
         ),
+        "patch_settings": project_patch_settings(model_attr(vm_profile, "os_profile")),
         "image_reference": project_image_reference(
             model_attr(model_attr(vm_profile, "storage_profile"), "image_reference")
         ),
@@ -355,6 +385,30 @@ def extension_record(extension: dict) -> dict:
     }
 
 
+AUTOMATIC_PATCH_MODES = {"automaticbyplatform", "automaticbyos"}
+
+
+def patch_settings_record(settings) -> dict:
+    """Normalize the projected patch settings and derive the two readings a reviewer wants.
+
+    `automatic_patching` is True for AutomaticByPlatform (Azure orchestrates the updates) or
+    AutomaticByOS (Windows Update installs them in the guest), False for Manual or ImageDefault, and None when Azure returned no patch mode: an absent
+    setting is "unknown", never "manual". `assessment_automatic` reads the same way.
+    """
+    settings = settings if isinstance(settings, dict) else {}
+    # An empty string is no setting, not a setting that fails to match the automatic modes.
+    mode = settings.get("patch_mode") or None
+    assessment = settings.get("assessment_mode") or None
+    return {
+        "os": settings.get("os"),
+        "patch_mode": mode,
+        "assessment_mode": assessment,
+        "bypass_platform_safety_checks_on_user_schedule": settings.get("bypass_platform_safety_checks_on_user_schedule"),
+        "automatic_patching": (None if mode is None else str(mode).lower() in AUTOMATIC_PATCH_MODES),
+        "assessment_automatic": (None if assessment is None else str(assessment).lower() == "automaticbyplatform"),
+    }
+
+
 def virtual_machine_record(vm: dict) -> dict:
     """Normalize one projected VM into an evidence record with its derived readings."""
     resource_id = vm.get("id")
@@ -380,6 +434,8 @@ def virtual_machine_record(vm: dict) -> dict:
         # --- disks ---
         "storage_profile": storage_profile,
         "managed_disks_only": uses_managed_disks_only(storage_profile),
+        # --- patching (copied as read; see patch_settings_record) ---
+        "patch_settings": patch_settings_record(vm.get("patch_settings")),
         # --- credentials (null on a non-Linux VM: the setting does not exist) ---
         "linux_configuration": (
             {
@@ -430,6 +486,7 @@ def scale_set_record(scale_set: dict) -> dict:
         "upgrade_policy_mode": scale_set.get("upgrade_policy_mode"),
         "security_profile": _security_profile_record(scale_set.get("security_profile")),
         "trusted_launch_enabled": trusted_launch_enabled(scale_set.get("security_profile")),
+        "patch_settings": patch_settings_record(scale_set.get("patch_settings")),
         "linux_configuration": (
             {
                 "disable_password_authentication": bool(
@@ -496,7 +553,25 @@ def summarize(virtual_machines: list[dict], scale_sets: list[dict]) -> dict:
         "empty_scale_sets": sum(1 for s in scale_sets if not s["instance_ids"]),
         "trusted_launch_scale_sets": sum(1 for s in scale_sets if s["trusted_launch_enabled"]),
         "total_scale_set_instances": sum(s["instance_count"] for s in scale_sets),
+        **summarize_patching(virtual_machines, scale_sets),
     }
+
+
+def summarize_patching(virtual_machines: list[dict], scale_sets: list[dict]) -> dict:
+    """Patch mode and assessment mode across VMs and scale sets; unknown counted apart, never as manual."""
+    def counts(records: list[dict], prefix: str) -> dict:
+        ps = [r.get("patch_settings") or {} for r in records]
+        return {
+            f"{prefix}_automatic_patching": sum(1 for p in ps if p.get("automatic_patching") is True),
+            f"{prefix}_manual_or_image_default_patching": sum(1 for p in ps if p.get("automatic_patching") is False),
+            f"{prefix}_patch_mode_unknown": sum(1 for p in ps if p.get("automatic_patching") is None),
+            f"{prefix}_automatic_patch_assessment": sum(1 for p in ps if p.get("assessment_automatic") is True),
+            f"{prefix}_patch_assessment_unknown": sum(1 for p in ps if p.get("assessment_automatic") is None),
+            # Which automatic mode: AutomaticByPlatform (Azure) vs AutomaticByOS (Windows Update in the guest).
+            f"{prefix}_patch_modes": dict(sorted(Counter(
+                str(p["patch_mode"]) for p in ps if p.get("patch_mode") is not None).items())),
+        }
+    return {**counts(virtual_machines, "vms"), **counts(scale_sets, "scale_sets")}
 
 
 # --- collection (lazy azure imports) ---

@@ -1,0 +1,28 @@
+# Synthetic configuration. Replace the endpoint and policy IDs for your tenant.
+# Set assessment IDs only after configuring the CSV intake mappings in the READMEs.
+run:
+  output_dir: ./evidence
+  platforms:
+    qualys:
+      config:
+        api_url: https://qualys.example.com
+        page_size: 1000
+        allow_empty: false
+  fetchers:
+    - use: qualys_vmdr_vulnerability_findings
+      secrets:
+        username: ${env:QUALYS_USERNAME}
+        password: ${env:QUALYS_PASSWORD}
+      config:
+        close_cycle: never
+        # host_ids: "101,102"
+        # asset_group_ids: "201"
+    - use: qualys_stig_compliance_report
+      secrets:
+        username: ${env:QUALYS_USERNAME}
+        password: ${env:QUALYS_PASSWORD}
+      config:
+        close_cycle: never
+      targets:
+        - policy_id: "301"
+        - policy_id: "302"

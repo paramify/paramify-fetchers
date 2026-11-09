@@ -35,7 +35,8 @@ checkov = ["checkov"]
 # CLI regression tests set so a developer's .env never reaches the commands they run.
 # cryptography: tests/test_azure_entra_authentication_policy.py builds test
 # certificates with it, and the `test` job installs dev but not the azure extra.
-dev = ["pytest", "pytest-xdist", "ruff", "mypy", "python-dotenv>=1.2.0", "cryptography>=42.0.0,<51"]
+# defusedxml: the qualys tests need it, and the same `test` job runs them.
+dev = ["pytest", "pytest-xdist", "ruff", "mypy", "python-dotenv>=1.2.0", "cryptography>=42.0.0,<51", "defusedxml"]
 # TUI SVG snapshots; not in dev because its syrupy 4.8.0 pin caps pytest below 9.
 snapshots = ["pytest-textual-snapshot==1.1.0"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
@@ -60,7 +61,7 @@ azure = [
     "cryptography>=42.0.0,<51",
     "azure-mgmt-sql>=4.0.0,<5",
     "azure-mgmt-rdbms>=10.1.1,<11",
-    "azure-mgmt-postgresqlflexibleservers>=2.0.0,<3",
+    "azure-mgmt-postgresqlflexibleservers>=2.0.0,<4",
     "azure-mgmt-cosmosdb>=10.0.0,<11",
     "azure-mgmt-redisenterprise>=3.1.0,<4",
     "azure-mgmt-redis>=14.5.0,<15",
@@ -123,8 +124,10 @@ gcp = [
 # opens with pytest.importorskip("oci"), so without it installed they SKIP rather
 # than fail. Out of `all` for the same reason as Azure and GCP.
 oci = ["oci"]
+# Qualys returns XML that names an external DTD; the fetchers parse it with defusedxml.
+qualys = ["defusedxml"]
 # Convenience: every front-end + dev tooling in one install.
-all = ["textual>=8,<9", "checkov", "pytest", "ruff", "mypy"]
+all = ["textual>=8,<9", "checkov", "pytest", "ruff", "mypy", "defusedxml"]
 
 # The single entry point. `paramify` steers every front-end: the headless
 # commands, plus `paramify tui`. (Renaming later is a one-line change here; add
