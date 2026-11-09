@@ -12,6 +12,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **GitHub fetchers (15).** Branch protection, pull request reviews and
+  checks, Actions security, release integrity, deployment controls,
+  Dependabot, code scanning and secret scanning alerts, vulnerability
+  disclosure, organization security settings, access review, non-user
+  credentials, the audit log (Enterprise Cloud), significant change
+  notifications, and `github_repository_inventory`. One target per
+  organization, on github.com, GHE.com or GitHub Enterprise Server. See
+  `fetchers/github/README.md`.
+
 - **`azure_devops_work_items` 0.2.0: approval comments that start with an @mention, and the approved percentage.**
   - **`approval_mentions`** (`AZURE_DEVOPS_APPROVAL_MENTIONS`, `false` by
     default). Set to `true`, a comment line that starts with one or more
