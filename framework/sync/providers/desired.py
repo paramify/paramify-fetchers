@@ -14,7 +14,7 @@ from typing import Any, Dict, Literal, Optional
 from framework.run_files import RESERVED_RUN_FILES, is_evidence_file
 from framework.sync.state import RunState
 
-DEFAULT_APPROVAL = "SUBMISSION_WITH_PASSING_VALIDATORS"
+DEFAULT_APPROVAL = "SUBMISSION"
 DEFAULT_NO_REQUEST = "direct"
 DEFAULT_DELIVERY = "auto"
 

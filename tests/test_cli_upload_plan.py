@@ -364,7 +364,7 @@ def test_same_settings_give_no_note(no_env, root, tmp_path):  # noqa: F811
 def test_unset_and_default_are_the_same_setting(no_env, root, tmp_path):  # noqa: F811
     run = two_files(tmp_path, {"x": {"use": "x"}})
     m = paramify_manifest(tmp_path / "m.yaml", entry_paramify={
-        "approval": "SUBMISSION_WITH_PASSING_VALIDATORS", "no_request": "direct", "delivery": "auto"})
+        "approval": "SUBMISSION", "no_request": "direct", "delivery": "auto"})
     assert api.plan_upload(run, root, online=False, manifest_path=m).notes == []
 
 
@@ -380,7 +380,7 @@ def test_each_other_setting_gets_its_own_note(no_env, root, tmp_path):  # noqa: 
     run = two_files(tmp_path, {"x": {"use": "x", "approval": "MANUAL"}})
     m = paramify_manifest(tmp_path / "m.yaml", entry_paramify={"no_request": "evidence", "delivery": "direct"})
     assert api.plan_upload(run, root, online=False, manifest_path=m).notes == [
-        "the manifest now sets approval: SUBMISSION_WITH_PASSING_VALIDATORS for x; this run was made with MANUAL. "
+        "the manifest now sets approval: SUBMISSION for x; this run was made with MANUAL. "
         "Run the manifest again to use it.",
         "the manifest now sets no_request: evidence for x; this run was made with direct. "
         "Run the manifest again to use it.",

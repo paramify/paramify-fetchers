@@ -42,7 +42,7 @@ def test_desired_groups_targets_into_one_entry(tmp_path):
     assert e.entry_key == "x" and e.use == "x" and e.run_id == "RID"
     assert [f.original_file_name for f in e.files] == ["a.json", "b.json"]
     assert e.reference_id == "EVD-X" and e.category == "cat"
-    assert e.approval == "SUBMISSION_WITH_PASSING_VALIDATORS" and e.no_request == "direct"
+    assert e.approval == "SUBMISSION" and e.no_request == "direct"
 
 
 def test_entry_delivery_defaults_to_auto(tmp_path):
@@ -72,7 +72,7 @@ def test_desired_two_entries_same_use(tmp_path):
     assert (a.entry_key, a.reference_id, a.stack, a.approval) == ("x", "EVD-A", "S1", "MANUAL")
     assert (b.entry_key, b.stack_name, b.no_request) == ("x#1", "Main", "evidence")
     assert a.approval_explicit is True
-    assert b.approval_explicit is False and b.approval == "SUBMISSION_WITH_PASSING_VALIDATORS"
+    assert b.approval_explicit is False and b.approval == "SUBMISSION"
 
 
 def test_desired_from_legacy_run(tmp_path):

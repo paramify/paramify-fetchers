@@ -26,7 +26,7 @@ sys.modules.setdefault("paramify_fake", _mod)
 _spec.loader.exec_module(_mod)
 FakeParamify = _mod.FakeParamify
 
-DEFAULT = "SUBMISSION_WITH_PASSING_VALIDATORS"
+DEFAULT = "SUBMISSION"
 TODAY = date(2026, 11, 1)
 
 

@@ -48,7 +48,7 @@ For each fetcher entry in the run the upload:
    The upload names it and sends the other files,
 2. applies any per-fetcher override from `--config`,
 3. **get-or-creates** the evidence set by `reference_id`. A new set gets the
-   approval mode `SUBMISSION_WITH_PASSING_VALIDATORS` unless `approval` in the
+   approval mode `SUBMISSION` unless `approval` in the
    manifest says otherwise. It never changes an existing set. It only adds tags,
 4. **routes** the batch by the channels on the set. With no channel, the batch
    goes on the evidence set. With one channel, it uses that channel. With

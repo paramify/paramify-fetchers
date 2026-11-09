@@ -231,9 +231,10 @@ as delivered. A new run goes in a batch.
 
 ### Approval mode
 
-A new evidence set gets the approval mode
-`SUBMISSION_WITH_PASSING_VALIDATORS`. Paramify approves a batch when its
-validators pass. Set `approval` to change it. The upload never changes an
+A new evidence set gets the approval mode `SUBMISSION`. Paramify approves
+each batch when the upload submits it, so the evidence always goes in. Set
+`approval` to change it: `SUBMISSION_WITH_PASSING_VALIDATORS` holds a batch
+until its validators pass, and `MANUAL` holds it for a person. The upload never changes an
 existing set: it only adds tags to it.
 
 When you set `approval` and an existing set uses a different mode, the plan

@@ -243,8 +243,8 @@ the stack ids against the workspace with `paramify validate --online`.
 Uploading the same run again changes nothing. The upload finds the batch it made
 for that run. A new run makes a new batch. If a temporary failure holds a batch
 open, run the same upload again to resume it. A new evidence set gets the
-approval mode `SUBMISSION_WITH_PASSING_VALIDATORS` unless `approval` says
-otherwise. The upload never changes an existing set. The routing rules and each
+approval mode `SUBMISSION` unless `approval` says otherwise: Paramify approves
+each batch when the upload submits it. The upload never changes an existing set. The routing rules and each
 refusal are in [`uploader_guide.md`](uploader_guide.md#how-a-run-is-delivered).
 
 The upload talks to Paramify REST v0 over HTTPS only, and it reads

@@ -111,7 +111,7 @@ def test_full_run_creates_set_uploads_submits_and_reads_back_approved(tmp_path):
                       "dropped", "validators_failed", "mode"}
     assert r["mode"] == "batch"
     json.dumps(r)
-    assert batch_row(fake, "bt-1")["whenToApprove"] == SWPV
+    assert batch_row(fake, "bt-1")["whenToApprove"] == "SUBMISSION"
     assert h.submits() == ["/batches/bt-1/submit"]
     assert RunState(tmp_path).batch_for("x") == "bt-1"
 
@@ -345,7 +345,7 @@ class ValidatingFake(FakeParamify):
 
 def test_submitted_with_passing_validators_lists_failing_validators(tmp_path):
     fake = ValidatingFake()
-    h = Harness(fake, two_files(tmp_path))
+    h = Harness(fake, two_files(tmp_path, {"x": {"use": "x", "approval": SWPV}}))
     d = h.run()["delivery/x"]
     assert d.status == "applied"
     assert d.result["status"] == "SUBMITTED"

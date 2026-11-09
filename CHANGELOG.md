@@ -1193,10 +1193,10 @@ schemas and the `paramify` CLI — not the internal code.
   the exit code. A file that is unreadable, not an envelope, or has no complete
   evidence set still counts in `errors` and makes `ok` false, as before. The
   other files of the entry still go in.
-- **New evidence sets get the approval mode
-  `SUBMISSION_WITH_PASSING_VALIDATORS`** (was the API default, `SUBMISSION`).
-  Set `approval` in the manifest to choose another. The upload never changes an
-  existing set.
+- **`approval` in the manifest sets the approval mode of a new evidence set.**
+  The default stays `SUBMISSION`: Paramify approves each batch when the upload
+  submits it. Set `SUBMISSION_WITH_PASSING_VALIDATORS` to hold a batch until its
+  validators pass, or `MANUAL`. The upload never changes an existing set.
 - **Run ids gain a 4-hex suffix** (`run-2026-11-01T02-00-00Z-a1b2`). Two runs
   that start together no longer share a directory. Readers accept both forms.
 - **`--with-validators` now runs before delivery.** A new set has its validators
