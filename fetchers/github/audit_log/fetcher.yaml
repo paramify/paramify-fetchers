@@ -1,0 +1,83 @@
+name: github_audit_log
+version: 0.1.0
+description: >-
+  The organization audit log over a window: event counts by action and
+  family, and every event that changes access, code protection or a
+  security control (members, teams, repository visibility, branch rules and
+  rulesets, push-protection bypasses, webhooks, apps, tokens), with actor,
+  target and country. GitHub Enterprise Cloud only.
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: github_audit_log.json
+  aggregation: per_target
+
+config_schema:
+  days_back:
+    type: integer
+    required: false
+    default: 7
+    env: GITHUB_AUDIT_DAYS_BACK
+    description: Days of audit log to read (1-180, the API's retention for web events).
+  max_events:
+    type: integer
+    required: false
+    default: 50000
+    env: GITHUB_AUDIT_MAX_EVENTS
+    description: >-
+      Most events read; more in the window fails the run rather than
+      reporting part of it.
+
+secrets: []
+
+ksis:
+  - KSI-MLA-LET
+  - KSI-MLA-OSM
+  - KSI-IAM-SUS
+
+evidence_set:
+  reference_id: EVD-GITHUB-AUDIT-LOG
+  name: GitHub Organization Audit Log
+  instructions: >-
+    Script: github/audit_log/fetcher.py. Web (non-Git) audit log events since the window start, newest first: a
+    count per action and per family, and each event in the access,
+    protection and security-control families with time, action, actor,
+    country, user, repository, team and visibility change. Requires GitHub
+    Enterprise Cloud.

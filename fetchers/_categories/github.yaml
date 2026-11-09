@@ -1,0 +1,28 @@
+# One target per organization: org-level endpoints make the org the cheap unit.
+display_name: GitHub
+description: >-
+  GitHub change-management, supply-chain and code-security evidence: branch
+  protection, pull request review and CI checks, Actions security, release
+  integrity, deployment controls, Dependabot, code scanning and secret
+  scanning alerts, vulnerability disclosure, organization security settings,
+  access, non-user credentials, the audit log, FedRAMP significant change
+  notifications, and an inventory of every repository. One organization per target, each with its own token and API
+  host (github.com, GHE.com or GitHub Enterprise Server).
+
+requires:
+  python_packages:
+    - requests
+    - python-dotenv
+    - pyyaml
+    - jsonschema
+
+secrets:
+  - name: token
+    env: GITHUB_TOKEN
+    per_target: true
+
+auth:
+  description: >-
+    A fine-grained personal access token or GitHub App installation token
+    whose resource owner is the organization, read-only. The permissions each
+    fetcher needs are listed in fetchers/github/README.md.
