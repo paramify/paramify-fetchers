@@ -5500,8 +5500,9 @@ Summary fields:
 - `certificate_auto_renew_percentage` — Percentage of Key Vault certificates with a readable policy that auto-renew = `certificates_with_auto_renew` / `certificates_with_readable_policy` × 100 (a whole number, 0–100); 0 when `certificates_with_readable_policy` is 0. Certificates whose policy couldn't be read, and vaults that refused the list, are left out of both
 
 **Are certificates expired or about to expire?**
-- `expired_certificates` — Number of Key Vault certificates past their expiry date when the fetcher ran; only certificates in vaults whose certificates could be listed count (a vault in `certificate_not_authorized_vaults` adds none, even if it holds an expired one), and a certificate with no expiry date is in neither this count nor `certificates_expiring_within_30_days`
-- `certificates_expiring_within_30_days` — Number of Key Vault certificates not yet expired that expire within 30 days (0 to 30 whole days left, with part days dropped, so 30 days 23 hours counts); counts only certificates in vaults whose certificates could be listed, and only those with an expiry date
+- `certificates_without_expiry` — Number of Key Vault certificates, in the vaults whose certificates could be listed, that have no expiry date; they are in neither `expired_certificates` nor `certificates_expiring_within_30_days`
+- `expired_certificates` — Number of Key Vault certificates past their expiry date when the fetcher ran; null when any in-scope vault's certificates could not be listed (refused, failed or no data-plane address), because an unlisted vault may hold an expired one; a certificate with no expiry date is not counted
+- `certificates_expiring_within_30_days` — Number of Key Vault certificates not yet expired that expire within 30 days (0 to 30 whole days left, with part days dropped, so 30 days 23 hours counts); null when any in-scope vault's certificates could not be listed; certificates with no expiry date are not counted
 - `expired_app_service_certificates` — Number of App Service certificates past their expiry date when the fetcher ran
 - `app_service_certificates_expiring_within_30_days` — Number of App Service certificates not yet expired that expire within 30 days
 
