@@ -47,7 +47,8 @@ The service account role must include read access to:
 
 | Datadog Product | Required Permission |
 |---|---|
-| Cloud SIEM | `security_monitoring_rules_read`, `security_monitoring_signals_read` |
+| Cloud SIEM | `security_monitoring_rules_read`, `security_monitoring_signals_read`, `security_monitoring_filters_read` (or `logs_read_index_data`) for the Cloud SIEM state check |
+| Cloud SIEM configuration (`datadog_siem_configuration`) | `security_monitoring_suppressions_read`, `security_monitoring_notification_profiles_read`, `integrations_read` |
 | Log Management | `logs_read_data`, `logs_read_index_data`, `logs_read_archives` |
 | Infrastructure | `metrics_read`, `hosts_read` |
 | APM | `apm_read` |
@@ -225,4 +226,6 @@ indexes the figures count.
 - Application keys are scoped to the creating service account. If the service account is deleted, the application key is invalidated immediately. Always use a dedicated service account, not a personal account.
 - Datadog does not enforce API or application key expiration by default. Establish a rotation schedule (90 days is a common baseline) and track it outside the platform.
 - The SIEM fetchers (`datadog_siem_configuration`, `datadog_siem_detection_rules` and `datadog_siem_signals`) report Cloud SIEM as not active only when Datadog says so: the content pack states endpoint (in preview) returns `onboarding` content packs. A 403 or 404 alone is never read as "not active", because a missing permission answers the same way. In `datadog_siem_detection_rules` and `datadog_siem_signals`, a 403 or 404 on the first page triggers that check. If the check does not report `onboarding`, the run fails. `datadog_siem_configuration` always runs the check. If it fails, `siem_enabled` is `null` and the run continues, and a 403 or 404 on any other read fails the run. All three need `security_monitoring_filters_read` (or `logs_read_index_data`) for the check. `datadog_siem_configuration` also needs `security_monitoring_suppressions_read`, `security_monitoring_notification_profiles_read` and `integrations_read`.
-- The `incident_timelines` and `incidents_list` fetchers require Datadog Incident Management to be enabled on the tenant. If the feature is not active, both fetchers will return zero records without error.
+- The `incident_timelines` and `incidents_list` fetchers require Datadog Incident Management to be enabled on the tenant. A failed incidents read (for example a 403 or 404) fails the run. It is never read as "no incidents". The incidents date filter that the fetchers send is not documented, so they also drop each incident created before the lookback window.
+- Every fetcher that pages writes `metadata.partial_failure` and `metadata.api_failures`. If a later page or a per-item read fails, the status is `partial_failure` and the run exits 1. The records read stay in `data`, but the summary figures counted from them are `null`, because they are only a lower bound. A 429 is retried up to three times, after the wait in the `X-RateLimit-Reset` header (at most 60 seconds).
+- Some evidence keeps text that users write in Datadog: monitor `query` and `message` (`datadog_monitors_list`), timeline cell `content` (`datadog_incident_timelines`), and rule queries (`datadog_siem_detection_rules`). The fetchers do not change this text. Some upload firewalls refuse a file that contains strings such as `<script`, `../` or `/bin/sh`, often with a bare 403. If an upload of this evidence fails with a 403, look for such strings in that text.
