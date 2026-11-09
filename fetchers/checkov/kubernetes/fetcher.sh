@@ -25,6 +25,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Interim v0.x: load .env for the dev loop if present. The runner injects env directly.
 [ -f .env ] && { set -a; . .env; set +a; }
+# The category lets an Entra identity through for checkov_bicep's TFVC sign-in; this fetcher never uses it.
+unset AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_FEDERATED_TOKEN_FILE AZURE_AUTHORITY_HOST \
+      MSI_ENDPOINT IDENTITY_ENDPOINT IDENTITY_HEADER
 
 . "$SCRIPT_DIR/../_shared/clone.sh"
 # The one place a fetcher reports WHY it failed (docs/fetcher_contract_guide.md, step 6).

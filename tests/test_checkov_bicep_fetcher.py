@@ -91,8 +91,9 @@ esac
 exec "$STUB_REAL_PYTHON" "$@"
 """
 
-# Prints $STUB_REPORT with __ROOT__ replaced by the --directory it was given.
+# Prints $STUB_REPORT with __ROOT__ replaced by the --directory it was given; logs any Azure identity it was handed.
 _STUB_CHECKOV = r"""#!/bin/bash
+env | grep -E '^(AZURE_|MSI_|IDENTITY_)' > "$STUB_LOG/checkov.env"
 printf '%s\n' "$*" > "$STUB_LOG/checkov.args"
 printf '%s\n' "$@" > "$STUB_LOG/checkov.argv"
 dir=""; prev=""
@@ -191,6 +192,7 @@ def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, fet
     }
     proc = subprocess.run(["bash", str(fetcher)], cwd=tmp_path, env=env,
                           capture_output=True, text=True, timeout=600)
+    (log / "stderr").write_text(proc.stderr)
     outputs = list(evidence.glob("checkov_bicep_*.json")) if evidence.exists() else []
     payload = json.loads(outputs[0].read_text()) if outputs else None
     status = json.loads(status_file.read_text()) if status_file.exists() else None
@@ -656,6 +658,8 @@ def test_tfvc_without_token_or_entra_identity_sends_no_credentials(tmp_path):
     assert len(curl_calls(tmp)) == 2 + TEMPLATE_DOWNLOADS
     assert payload["metadata"]["auth_mode"] == "anonymous"
     assert "-I " in (tmp / "log" / "python3.log").read_text()     # Entra sign-in was tried first
+    stderr = (tmp / "log" / "stderr").read_text()
+    assert "Read anonymously: Entra sign-in was not available: CredentialUnavailableError" in stderr
 
 
 # --- TFVC source: Entra sign-in ------------------------------------------------------
@@ -692,6 +696,16 @@ def test_tfvc_public_project_that_refuses_the_entra_identity_is_read_anonymously
     assert payload["metadata"]["auth_mode"] == "anonymous"
     assert [bool(c["CONFIG"]) for c in curl_calls(tmp)] == [True, False, False] + [False] * TEMPLATE_DOWNLOADS
     assert payload["metadata"]["changeset"] == 4217
+    stderr = (tmp / "log" / "stderr").read_text()
+    assert "Read anonymously: Azure DevOps refused the Entra identity (HTTP 401 on the changeset lookup)" in stderr
+    assert ENTRA not in stderr
+
+
+def test_a_pat_or_entra_read_logs_no_anonymous_note(tmp_path):
+    code, _, _, tmp = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": (200, TEMPLATES)},
+                          STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
+    assert code == 0
+    assert "Read anonymously" not in (tmp / "log" / "stderr").read_text()
 
 
 def test_checkov_category_lets_the_same_entra_identity_through_as_the_azure_category():
@@ -700,6 +714,23 @@ def test_checkov_category_lets_the_same_entra_identity_through_as_the_azure_cate
     platforms = discover_platforms(REPO_ROOT)
     assert platforms["checkov"].passthrough_env == platforms["azure"].passthrough_env
 
+
+AZURE_IDENTITY_ENV = {
+    "AZURE_TENANT_ID": "00000000-0000-0000-0000-000000000000", "AZURE_CLIENT_ID": "00000000-0000-0000-0000-000000000001",
+    "AZURE_CLIENT_SECRET": "fake-client-secret", "AZURE_FEDERATED_TOKEN_FILE": "/nonexistent/token",
+    "AZURE_AUTHORITY_HOST": "https://login.example.invalid", "MSI_ENDPOINT": "http://127.0.0.1:1/msi",
+    "IDENTITY_ENDPOINT": "http://127.0.0.1:1/identity", "IDENTITY_HEADER": "fake-identity-header",
+}
+
+
+@pytest.mark.parametrize("source", ["tfvc", "git"])
+def test_checkov_never_gets_the_azure_identity(tmp_path, source):
+    env = {**TFVC_ENV, "STUB_ENTRA_TOKEN": ENTRA} if source == "tfvc" else {}
+    files = {} if source == "tfvc" else {"azuredeploy.json": ARM}
+    code, _, status, tmp = run(tmp_path, files, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": (200, TEMPLATES)},
+                               **AZURE_IDENTITY_ENV, **env)
+    assert code == 0, status
+    assert (tmp / "log" / "checkov.env").read_text() == ""
 
 TF400813 = {"message": "TF400813: The user 'x' is not authorized to access this resource."}
 

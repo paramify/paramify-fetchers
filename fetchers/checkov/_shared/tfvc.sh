@@ -9,7 +9,8 @@
 #       would use (ado_token.py), and without that it sends no credentials (a public project)
 #       on success sets globals: CLONE_DIR, CHANGESET, CHANGESET_DATE   (return 0)
 #       on failure sets TFVC_ERROR and TFVC_ERROR_CODE (a report_failure code), returns 1
-#       either way sets TFVC_AUTH_MODE: pat, entra or anonymous
+#       either way sets TFVC_AUTH_MODE: pat, entra or anonymous, and TFVC_AUTH_NOTE: why it fell back
+#       to anonymous, when it did
 #
 # Credentials reach curl only as an Authorization header on stdin, never in argv or logs.
 
@@ -66,6 +67,7 @@ checkov_fetch_tfvc() {
     local project_url="${1%/}" path="$2" version="${3:-latest}" token="$4"
     local api="${1%/}/_apis/tfvc" auth="" bearer enc work code cs_url pin top item rel
     TFVC_ERROR=""; TFVC_ERROR_CODE=""; CHANGESET=""; CHANGESET_DATE=""; TFVC_AUTH_MODE=anonymous; _TFVC_ENTRA_WHY=""
+    TFVC_AUTH_NOTE=""
     enc="$(jq -rn --arg p "$path" '$p | @uri')"
     work="$(mktemp -d -t checkov_tfvc.XXXXXX)"
 
@@ -76,6 +78,7 @@ checkov_fetch_tfvc() {
         auth="Bearer $bearer"; TFVC_AUTH_MODE=entra
     else
         _TFVC_ENTRA_WHY="$(tr '\n' ' ' < "$work/entra.err" 2>/dev/null | head -c 300)"
+        TFVC_AUTH_NOTE="Entra sign-in was not available: ${_TFVC_ENTRA_WHY:-no reason given}"
     fi
 
     # "latest" pins the newest changeset, so the folder is read at one version even if a check-in lands mid-run.
@@ -87,6 +90,7 @@ checkov_fetch_tfvc() {
     # A public project may refuse an ambient identity from another organization yet allow anonymous reads.
     if [ "$TFVC_AUTH_MODE" = entra ] && [[ "$code" =~ ^(203|302|401)$ ]] &&
        [ "$(_tfvc_get "$cs_url" application/json "$work/anonymous.json" "")" = 200 ]; then
+        TFVC_AUTH_NOTE="Azure DevOps refused the Entra identity (HTTP $code on the changeset lookup); the project allowed an anonymous read"
         auth=""; TFVC_AUTH_MODE=anonymous; code=200; mv "$work/anonymous.json" "$work/changeset.json"
     fi
     if [ "$code" != "200" ]; then

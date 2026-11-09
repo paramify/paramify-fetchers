@@ -21,7 +21,13 @@ schemas and the `paramify` CLI — not the internal code.
     gets the token; it needs `python3` with `azure-identity`, which the `checkov`
     extra now installs.
   - The checkov category lets the same `AZURE_*` identity variables through as
-    the azure category.
+    the azure category, and declares `azure-identity`. Only the TFVC sign-in
+    sees them: `checkov_bicep` unsets them once its source is fetched, and
+    `checkov_terraform` and `checkov_kubernetes` unset them at start, so the
+    `checkov` CLI never gets the client secret.
+  - When the TFVC source falls back to an anonymous read, it logs why: Entra
+    sign-in was not available (and the reason), or Azure DevOps refused the
+    identity and the project allowed an anonymous read.
   - A PAT still wins, and with neither a PAT nor an Entra identity the fetcher
     reads anonymously, as before, for a public project. A public project that
     refuses the ambient Entra identity is read anonymously too.

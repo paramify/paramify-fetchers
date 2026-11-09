@@ -231,6 +231,7 @@ if [ "$SOURCE_TYPE" = "tfvc" ]; then
     fi
     WHERE="$TFVC_PATH in $REPO_URL (changeset $CHANGESET)"
     log_info "Downloaded $WHERE (auth: $TFVC_AUTH_MODE)"
+    [ -n "$TFVC_AUTH_NOTE" ] && log_info "Read anonymously: $TFVC_AUTH_NOTE"
 else
     if ! checkov_clone_repo "$REPO_URL" "$BRANCH" "$TOKEN" "$GIT_USER" "$COMPONENT"; then
         write_status_json error "git clone failed"
@@ -241,6 +242,9 @@ else
     WHERE="$REPO_URL (branch $SCANNED_BRANCH, commit ${COMMIT_SHA:0:12})"
     log_info "Cloned $REPO_URL @ ${COMMIT_SHA:0:12} (branch $SCANNED_BRANCH)"
 fi
+# Only the TFVC sign-in above needs the Entra identity; checkov never gets it.
+unset AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_FEDERATED_TOKEN_FILE AZURE_AUTHORITY_HOST \
+      MSI_ENDPOINT IDENTITY_ENDPOINT IDENTITY_HEADER
 
 # checkov's ARM runner reads every .json; only deploymentTemplate schemas are templates (not parameter files).
 BICEP_FILES=$(find "$CLONE_DIR" -path "$CLONE_DIR/.git" -prune -o -type f -name '*.bicep' -print | wc -l | tr -d ' ')

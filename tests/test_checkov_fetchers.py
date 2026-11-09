@@ -62,6 +62,7 @@ esac
 
 FAKE_CHECKOV = r"""#!/bin/bash
 printf '%s\n' "$@" > "$CHECKOV_ARGV_FILE"
+env | grep -E '^(AZURE_|MSI_|IDENTITY_)' > "$CHECKOV_ARGV_FILE.env"
 cat "$CHECKOV_FIXTURE"
 """
 
@@ -143,6 +144,19 @@ def arg_after(argv: List[str], flag: str) -> Optional[str]:
 K8S_RESULT = checkov_result("kubernetes", [check("CKV_K8S_1", "Pod.default.x", "PASSED")],
                             [check("CKV_K8S_14", "Pod.default.x", "FAILED")])
 TF_RESULT = checkov_result("terraform", [check("CKV_AWS_1", "aws_s3_bucket.x", "PASSED")], [])
+
+
+# --- the category's Azure identity passthrough ----------------------------------
+
+@pytest.mark.parametrize("fetcher,result", [("kubernetes", K8S_RESULT), ("terraform", TF_RESULT)])
+def test_checkov_never_gets_the_azure_identity(harness, tmp_path, fetcher, result):
+    # The checkov category lets these through for checkov_bicep's TFVC sign-in only.
+    harness(fetcher, result, AZURE_TENANT_ID="00000000-0000-0000-0000-000000000000",
+            AZURE_CLIENT_ID="00000000-0000-0000-0000-000000000001", AZURE_CLIENT_SECRET="fake-client-secret",
+            AZURE_FEDERATED_TOKEN_FILE="/nonexistent/token", AZURE_AUTHORITY_HOST="https://login.example.invalid",
+            MSI_ENDPOINT="http://127.0.0.1:1/msi", IDENTITY_ENDPOINT="http://127.0.0.1:1/identity",
+            IDENTITY_HEADER="fake-identity-header")
+    assert (tmp_path / "checkov.argv.env").read_text() == ""
 
 
 # --- branch actually scanned ---------------------------------------------------
