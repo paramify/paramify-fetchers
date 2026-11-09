@@ -2118,6 +2118,13 @@ schemas and the `paramify` CLI — not the internal code.
   Clarify that `metadata.skip_checks` records CLI skips; discovered Checkov
   configuration must also be retained to review effective exclusions.
 
+- **`azure_key_vault_key_rotation` 0.6.0: Key Vault's default rotation policy no longer counts as a
+  configured one.** A key never given a rotation policy answers a default policy (a Notify
+  action only, no id or creation time), not a 404, and `keys_with_rotation_policy` counted it,
+  so "has a rotation policy" passed with nothing set. It now counts only a policy with an id or
+  a creation time. Each key record has a new `rotation_policy_configured`; `keys_with_rotation_enabled`
+  is unchanged.
+
 - **`azure_key_vault_key_rotation` 0.5.0: unlisted vaults no longer read as zero expired certificates.**
   `expired_certificates` and `certificates_expiring_within_30_days` are null when any
   in-scope vault's certificates could not be listed (refused with 401 or 403, failed, or
