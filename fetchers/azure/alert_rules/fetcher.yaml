@@ -1,5 +1,5 @@
 name: azure_alert_rules
-version: 0.3.0
+version: 0.3.1
 description: >-
   Shows every metric, log search and smart detector alert rule and whether
   each one actually reaches a person.
@@ -98,7 +98,7 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no alert rule, action group or processing rule, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no alert rule, action group or processing rule, such as a mistyped name; null when a list could not be read
     - excluded_alert_rules — Number of alert rules left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
     - excluded_action_groups — Number of action groups left out of scope the same way
     - excluded_processing_rules — Number of alert processing rules left out of scope the same way

@@ -468,6 +468,8 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
+    if workspaces is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     read = workspaces is not None

@@ -197,6 +197,7 @@ def main() -> int:
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     excluded_processing: list[dict] = []
+    unread = True
     registration = {ns: REGISTRATION_UNKNOWN for ns in ("Microsoft.Insights", "Microsoft.AlertsManagement")}
     if subscription_id and cred is not None:
         for ns in registration:
@@ -206,6 +207,7 @@ def main() -> int:
         alerts_mgmt = registration["Microsoft.AlertsManagement"] != NOT_REGISTERED
         raw_rules: list[tuple[str, dict]] = []
         if rest is not None:
+            unread = False
             for rule_type, ns, path, api in SOURCES:
                 if registration[ns] == NOT_REGISTERED:
                     continue
@@ -213,18 +215,21 @@ def main() -> int:
                     f"{path} list",
                     lambda path=path, api=api: list_all(rest, f"/subscriptions/{subscription_id}/providers/{path}", api),
                 )
+                unread = unread or listed is None
                 if listed:
                     pages[rule_type] = listed["pages"]
                     raw_rules.extend((rule_type, r) for r in listed["items"])
             if insights:
                 groups = collector.guard("Microsoft.Insights/actionGroups list", lambda: collect_action_groups(rest, subscription_id))
                 group_records = groups["groups"] if groups else []
+                unread = unread or groups is None
             if alerts_mgmt:
                 apr = collector.guard(
                     "Microsoft.AlertsManagement/actionRules list",
                     lambda: collect_processing_rules(rest, subscription_id, now),
                 )
                 processing_rules = apr["rules"] if apr else []
+                unread = unread or apr is None
             raw_rules, excluded = exclusions.split(
                 raw_rules, "alert_rule", resource_id=lambda t: t[1].get("id"), location=lambda t: t[1].get("location"),
                 resource_group=lambda t: None, name=lambda t: t[1].get("name"))
@@ -252,6 +257,8 @@ def main() -> int:
     exclusions.record_invalid(collector)
     group_records, excluded_groups = exclusions.split(group_records, "action_group")
     excluded += excluded_groups + excluded_processing
+    if unread:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     rules.sort(key=lambda r: (r["id"] or "").lower())

@@ -1,5 +1,5 @@
 name: azure_ai_services_configuration
-version: 0.2.0
+version: 0.2.1
 description: >
   Inventories Azure AI services accounts (Microsoft.CognitiveServices/accounts — Azure AI Foundry,
   Azure OpenAI, Language, Speech, Document Intelligence and the other kinds) and Azure AI Search
@@ -128,6 +128,6 @@ evidence_set:
     (registered / not_registered / unknown) is the Microsoft.CognitiveServices resource provider's state.
     Accounts and search services the resource_exclusions patterns take out are listed under excluded instead of accounts and search_services.
     resource_exclusion_patterns lists the configured patterns, empty when none are set; resource_exclusion_patterns_unmatched the ones that matched no
-    account or search service, such as a mistyped name; excluded_accounts and excluded_search_services count those left out of scope because a pattern matched
+    account or search service, such as a mistyped name, or null when either list could not be read; excluded_accounts and excluded_search_services count those left out of scope because a pattern matched
     their resource group, region or id; in_scope_accounts and in_scope_search_services count those read and in scope. They, and the total_* and other counts of a kind, are null when that list could not be read; 0 means the
     patterns took out every one, which a check can catch by requiring more than 0.
