@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -72,7 +73,8 @@ def tally(items: list[dict], field: str) -> tuple[int, int, int]:
 
 
 def count_by(items: list[dict], field: str) -> dict[str, int]:
-    counts = Counter(item.get(field) if item.get(field) is not None else NOT_RETURNED for item in items)
+    counts: Counter[str] = Counter(str(item[field]) if item.get(field) is not None else NOT_RETURNED
+                                   for item in items)
     return {key: counts[key] for key in sorted(counts)}
 
 
@@ -84,6 +86,9 @@ def largest(items: list[dict], field: str) -> Optional[float]:
 def output_name(output_file: str, client: Optional[SophosClient]) -> str:
     """<stem>_<tenant>.json, so fanned-out tenants never overwrite each other."""
     tenant = (client.tenant_id or client.requested_tenant_id) if client else None
+    if tenant and not re.fullmatch(r"[A-Za-z0-9-]+", tenant):
+        # The tenant id comes from a response; never let it name a path.
+        tenant = "tenant-" + hashlib.sha256(tenant.encode()).hexdigest()[:8]
     if not tenant:
         seed = os.environ.get("SOPHOS_CLIENT_ID", "")
         tenant = "credential-" + hashlib.sha256(seed.encode()).hexdigest()[:8] if seed else "unconfigured"
@@ -127,9 +132,13 @@ def run(logger_name: str, output_file: str, collect: Collect) -> int:
         ledger.add(SophosError(
             f"collected {population['collected']} but Sophos reports {population['reported_total']}",
             "partial_failure", "count_check"))
+    if unread:
+        fields = sorted({key for item in unread for key in item["unread_facts"]})
+        ledger.add(SophosError(f"{len(unread)} item(s) have facts Sophos did not return: {', '.join(fields)}",
+                               "partial_failure", "unread_facts"))
     if fatal is not None:
         complete: Optional[bool] = False
-    elif mismatch or unread or ledger.failures:
+    elif ledger.failures:
         complete = False
     elif population.get("reported_total") is None:
         complete = None
@@ -142,7 +151,7 @@ def run(logger_name: str, output_file: str, collect: Collect) -> int:
             "credential_type": client.id_type if client else None,
             "api_host": client.api_host if client else None,
             "datetime": now.isoformat(),
-            "partial_failure": bool(ledger.failures or unread),
+            "partial_failure": bool(ledger.failures),
             "api_failures": ledger.failures,
             "population": {**population, "complete": complete,
                            "items_with_unread_facts": len(unread)},
@@ -164,11 +173,8 @@ def run(logger_name: str, output_file: str, collect: Collect) -> int:
         return 1
     if ledger.failures:
         first = ledger.failures[0]
-        report_failure(f"{len(ledger.failures)} Sophos read(s) failed; first: {first['message']}", first["type"])
-        return 1
-    if unread:
-        fields = sorted({key for item in unread for key in item["unread_facts"]})
-        report_failure(f"{len(unread)} item(s) have facts Sophos did not return: {', '.join(fields)}",
-                       "partial_failure")
+        many = len(ledger.failures) > 1
+        report_failure(f"{len(ledger.failures)} problems; first: {first['message']}" if many else first["message"],
+                       first["type"])
         return 1
     return 0

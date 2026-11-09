@@ -23,7 +23,7 @@ def record(ep: dict) -> dict:
     if not ep.get("id"):
         raise SophosError(f"an endpoint came back without an id: {ep.get('hostname')!r}", "partial_failure", "list_endpoints")
     attributes = copy.deepcopy(ep)
-    # Personal-data rule is undecided: keep the login, leave the display name out.
+    # Keep the login; drop the display name.
     if isinstance(attributes.get("associatedPerson"), dict):
         attributes["associatedPerson"].pop("name", None)
     ident = endpoint_identity(ep)
@@ -86,11 +86,11 @@ def main() -> int:
     except OSError as e:
         report_failure(f"could not write the inventory: {e}", "internal_error")
         return 1
+    logger.info("Inventory saved to %s (%d records)", path, len(records) if failure is None else 0)
 
     if failure is not None:
         report_failure(f"inventory incomplete, records withheld: {failure}", failure.code)
         return 1
-    logger.info("Inventory saved to %s (%d records)", path, len(records))
     return 0
 
 

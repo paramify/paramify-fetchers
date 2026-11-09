@@ -86,7 +86,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `sc-5`, `si-8`, `si-8.2`
 
-*12 fetchers:* [`aws_cloudfront_distribution_security`](../fetchers/aws/cloudfront_distribution_security), [`aws_shield_dos_protection`](../fetchers/aws/shield_dos_protection), [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules), [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules), [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf), [`azure_ddos_protection`](../fetchers/azure/ddos_protection), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies), [`azure_waf_ddos_activity`](../fetchers/azure/waf_ddos_activity), [`sophos_endpoint_check_in`](../fetchers/sophos/endpoint_check_in), [`sophos_endpoint_protection`](../fetchers/sophos/endpoint_protection), [`sophos_threat_protection_policies`](../fetchers/sophos/threat_protection_policies)
+*11 fetchers:* [`aws_cloudfront_distribution_security`](../fetchers/aws/cloudfront_distribution_security), [`aws_shield_dos_protection`](../fetchers/aws/shield_dos_protection), [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules), [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules), [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf), [`azure_ddos_protection`](../fetchers/azure/ddos_protection), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies), [`azure_waf_ddos_activity`](../fetchers/azure/waf_ddos_activity), [`sophos_endpoint_protection`](../fetchers/sophos/endpoint_protection), [`sophos_threat_protection_policies`](../fetchers/sophos/threat_protection_policies)
 
 #### `KSI-CNA-ULN` — Using Logical Networking
 
@@ -128,7 +128,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `sc-4`
 
-*5 fetchers:* [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_residual_resources`](../fetchers/azure/residual_resources), [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration), [`sophos_agent_updates`](../fetchers/sophos/agent_updates)
+*4 fetchers:* [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_residual_resources`](../fetchers/azure/residual_resources), [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration)
 
 #### ⬜ `KSI-SVC-RUD` — Removing Unwanted Data *(optional at Low)*
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-310 of 324 fetchers carry a mapping.
+309 of 324 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -802,12 +802,11 @@ python tools/gen_ksi_mapping.py
 | [`sentinelone_user_config`](../fetchers/sentinelone/user_config) | `KSI-IAM-APM`, `KSI-IAM-ELP` |
 | [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets) | `KSI-PIY-GIV` |
 
-### sophos  (5)
+### sophos  (4)
 
 | Fetcher | Indicators |
 |---|---|
-| [`sophos_agent_updates`](../fetchers/sophos/agent_updates) | `KSI-CNA-IBP`, `KSI-SVC-PRR` |
-| [`sophos_endpoint_check_in`](../fetchers/sophos/endpoint_check_in) | `KSI-CNA-RVP` |
+| [`sophos_agent_updates`](../fetchers/sophos/agent_updates) | `KSI-CNA-IBP` |
 | [`sophos_endpoint_inventory`](../fetchers/sophos/endpoint_inventory) | `KSI-PIY-GIV` |
 | [`sophos_endpoint_protection`](../fetchers/sophos/endpoint_protection) | `KSI-CNA-RVP`, `KSI-SVC-EIS` |
 | [`sophos_threat_protection_policies`](../fetchers/sophos/threat_protection_policies) | `KSI-CNA-RVP`, `KSI-SVC-EIS` |
@@ -842,4 +841,4 @@ python tools/gen_ksi_mapping.py
 
 ### Unmapped
 
-[`aws_discovery_beta`](../fetchers/aws/discovery_beta), [`demo_hello`](../fetchers/demo/hello), [`demo_policy_check`](../comparators/demo/policy_check), [`knowbe4_discovery_beta`](../fetchers/knowbe4/discovery_beta), [`qualys_stig_compliance_report`](../fetchers/qualys/stig_compliance_report), [`qualys_vmdr_vulnerability_findings`](../fetchers/qualys/vmdr_vulnerability_findings), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`web_page_text`](../fetchers/web/page_text), [`web_vulnerability_disclosure`](../fetchers/web/vulnerability_disclosure), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings), [`zendesk_help_center_section`](../fetchers/zendesk/help_center_section) — deliberately carry no mapping.
+[`aws_discovery_beta`](../fetchers/aws/discovery_beta), [`demo_hello`](../fetchers/demo/hello), [`demo_policy_check`](../comparators/demo/policy_check), [`knowbe4_discovery_beta`](../fetchers/knowbe4/discovery_beta), [`qualys_stig_compliance_report`](../fetchers/qualys/stig_compliance_report), [`qualys_vmdr_vulnerability_findings`](../fetchers/qualys/vmdr_vulnerability_findings), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`sophos_endpoint_check_in`](../fetchers/sophos/endpoint_check_in), [`web_page_text`](../fetchers/web/page_text), [`web_vulnerability_disclosure`](../fetchers/web/vulnerability_disclosure), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings), [`zendesk_help_center_section`](../fetchers/zendesk/help_center_section) — deliberately carry no mapping.

@@ -1,7 +1,7 @@
 name: sophos_agent_updates
 version: 0.1.0
 description: >-
-  Shows, for every computer and server in Sophos Central, the days since its agent last updated and whether Sophos offers a newer protection package.
+  Shows, for every computer and server in Sophos Central, the days since its agent last updated and whether its protection package is current.
 category: sophos
 
 supports_targets: true
@@ -12,7 +12,7 @@ target_schema:
     required: false
     env: SOPHOS_TENANT_ID
     description: >-
-      Sophos Central tenant id. Leave it out for a tenant-level credential; set
+      Sophos Central tenant id (a UUID). Leave it out for a tenant-level credential; set
       it to pick a tenant when the credential is partner- or organization-level.
 
 runtime:
@@ -29,7 +29,6 @@ secrets: []          # client_id / client_secret, per target, from _categories/s
 
 ksis:
   - KSI-CNA-IBP
-  - KSI-SVC-PRR
 
 evidence_set:
   reference_id: EVD-SOPHOS-AGENT-UPDATES
@@ -58,11 +57,11 @@ evidence_set:
       - unlicensed (the tenant has no licence for it)
       - unsupported (the endpoint cannot run it)
       - not_returned (Sophos gave no status)
-    - endpoints_package_not_upgradable — Number of endpoints whose protection package status is anything other than upgradable
-    - endpoints_package_upgradable — Number of endpoints whose protection package status is upgradable
+    - endpoints_package_current — Number of endpoints whose protection package status is assigned (the assigned package is installed)
+    - endpoints_package_not_current — Number of endpoints whose protection package status is upgradable, unassigned, unlicensed or unsupported
     - endpoints_package_unread — Number of endpoints where Sophos returned no protection package status
     - max_days_since_agent_update — Days since the least recently updated agent last updated; null if no endpoint has an update time
     - endpoints_agent_update_unread — Number of endpoints with no readable last agent update time
   description: >-
     Shows, for every computer and server in Sophos Central, the days since its
-    agent last updated and whether Sophos offers a newer protection package.
+    agent last updated and whether its protection package is current.

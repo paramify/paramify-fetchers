@@ -13,7 +13,7 @@ target_schema:
     required: false
     env: SOPHOS_TENANT_ID
     description: >-
-      Sophos Central tenant id. Leave it out for a tenant-level credential; set
+      Sophos Central tenant id (a UUID). Leave it out for a tenant-level credential; set
       it to pick a tenant when the credential is partner- or organization-level.
 
 runtime:

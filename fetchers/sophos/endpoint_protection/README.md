@@ -13,7 +13,8 @@ subject:     sophos_endpoint          # one item is one endpoint that Sophos Cen
 identity:    [hostname, serial_number] # plus the Sophos endpoint id
 measures:                              # each reads a fact parsed from GET /endpoint/v1/endpoints?view=full
   - services_all_running:          [KSI-CNA-RVP, sophos-ahc:protection]       # every health.services.serviceDetails[].status == running
-  - tamper_protection_enabled:     [KSI-CNA-RVP, sophos-ahc:tamper-protection] # tamperProtectionEnabled == true
+  - tamper_protection_enabled:     [KSI-CNA-RVP, sophos-ahc:tamper-protection] # tamperProtectionEnabled == true;
+                                                                               # null, not unread, if tamperProtectionSupported == false
   - protection_product_installed:  [KSI-CNA-RVP, sophos-ahc:protection]       # an interceptX or endpointProtection product has status installed
   - threats_status_good:           [KSI-SVC-EIS]                               # health.threats.status == good
 breakdown:   health_overall [good, suspicious, bad, unknown]   # the platform's own words
@@ -27,7 +28,7 @@ calls:       POST id.sophos.com/api/v2/oauth2/token; GET /whoami/v1;
              GET /endpoint/v1/endpoints?view=full&pageTotal=true (nextKey paging);
              GET /endpoint/v1/settings/tamper-protection
 replaces:    none (new platform)
-live test:   the client tenant. Pass case: an endpoint with all services running and
+live test:   a real tenant. Pass case: an endpoint with all services running and
              tamper protection on. Fail case: any endpoint with a stopped or missing service,
              or tamper protection off. Whether the tenant has one is measured first.
 ```
@@ -44,11 +45,14 @@ live test:   the client tenant. Pass case: an endpoint with all services running
   in `unread_facts`. A missing fact never counts as `false`.
 - `tamper_protection_enabled` is per endpoint. The tenant-wide switch is
   context, because a switch that is off can make the per-endpoint flag misleading.
+  If the tenant response has no `enabled` value, the run records a failure.
+- If `tamperProtectionSupported` is `false`, the endpoint cannot run tamper
+  protection. Then `tamper_protection_enabled` is `null`, it is not an unread
+  fact, and the endpoint counts in `endpoints_tamper_protection_not_supported`,
+  not in the enabled or disabled counts.
 
-## Open decision
+## KSI-CNA-EIS is not mapped
 
-The aspect list has no malware-protection aspect. This card uses
-`threat_and_vulnerability_detection`, whose KSIs are IAM-SUS, CNA-RVP and SVC-EIS.
-The CrowdStrike and SentinelOne fetchers map endpoint protection to KSI-CNA-EIS,
-which is in the `configuration_integrity` aspect. The aspect guard flags that
-KSI here, so it is left out until the aspect list is decided.
+The CrowdStrike and SentinelOne fetchers map endpoint protection to
+KSI-CNA-EIS. This fetcher does not. Its evidence shows the protection state of
+each endpoint. It does not show that Sophos enforces that state.

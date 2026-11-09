@@ -5,9 +5,9 @@ APIs. All of them only read data.
 
 | Fetcher | What it shows |
 |---|---|
-| [`sophos_endpoint_protection`](endpoint_protection/) | Per endpoint: services running, tamper protection, Intercept X installed, threat status |
+| [`sophos_endpoint_protection`](endpoint_protection/) | Per endpoint: services running, tamper protection, Intercept X or Endpoint Protection installed, threat status |
 | [`sophos_endpoint_check_in`](endpoint_check_in/) | Per endpoint: hours since the agent last communicated, and online status |
-| [`sophos_agent_updates`](agent_updates/) | Per endpoint: days since the agent last updated, and protection package status |
+| [`sophos_agent_updates`](agent_updates/) | Per endpoint: days since the agent last updated, and whether the protection package is current |
 | [`sophos_threat_protection_policies`](threat_protection_policies/) | Per policy: scheduled scan and on-access scanning settings |
 | [`sophos_endpoint_inventory`](endpoint_inventory/) | Every endpoint, one inventory record each |
 
@@ -44,11 +44,18 @@ send a warning first. When a credential expires, the fetchers fail with
 |---|---|---|
 | `SOPHOS_CLIENT_ID` | Yes, per target | Client ID of the API credential |
 | `SOPHOS_CLIENT_SECRET` | Yes, per target | Client secret of the API credential |
-| `SOPHOS_TENANT_ID` | Only for a partner or organization credential | The tenant to read |
-| `SOPHOS_AUTH_URL`, `SOPHOS_GLOBAL_URL` | No | Override the Sophos hosts, for a test double only |
+| `SOPHOS_TENANT_ID` | Only for a partner or organization credential | The tenant to read, as a UUID. Another value is `bad_config`. |
+| `SOPHOS_AUTH_URL`, `SOPHOS_GLOBAL_URL` | No | Override the Sophos hosts, for a test double only. See below. |
 
 The fetchers find the tenant's data region from `whoami`, so you do not set a
 region.
+
+The client sends the client secret and the token only to Sophos hosts.
+`SOPHOS_AUTH_URL`, `SOPHOS_GLOBAL_URL` and the data-region host that `whoami`
+returns must use `https`, and the host must be `sophos.com` or end with
+`.sophos.com`. Plain `http` is accepted only for a loopback host, such as a
+local test double. Any other value fails the run with `bad_config` before the
+fetcher asks for a token.
 
 ## Wire it into a manifest
 
@@ -81,7 +88,12 @@ curl -s -H "Authorization: Bearer $TOKEN" https://api.central.sophos.com/whoami/
 - If Sophos leaves out a fact, the fetcher writes `null`, names the fact in
   the item's `unread_facts`, and exits non-zero. It never writes `false` for a
   value it did not read.
-- On HTTP 429 or 5xx, the client retries up to 5 times with exponential
-  backoff. Sophos limits each credential to 100 calls a minute.
+- On HTTP 429, 5xx or a network error, the client tries a call up to 6 times
+  with exponential backoff. The token request uses the same retries. The waits
+  add up to more than one minute, because Sophos limits each credential to
+  100 calls a minute. Only HTTP 400 or 401 from the token service is
+  `auth_failed`.
+- If Sophos returns the same page key twice, or more than 10,000 pages, the
+  run stops with `partial_failure`.
 - No fetcher calls `GET /endpoints/{id}/tamper-protection`. That route
   returns tamper protection passwords.

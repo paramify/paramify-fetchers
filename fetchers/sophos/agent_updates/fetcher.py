@@ -26,18 +26,20 @@ def item(ep: dict, now) -> dict:
     package = ((ep.get("packages") or {}).get("protection")) or {}
     status = package.get("status")
     if status:
-        not_upgradable = status != "upgradable"
+        # Only "assigned" is current; upgradable, unassigned, unlicensed and unsupported are not.
+        current = status == "assigned"
     else:
-        not_upgradable = None
-        unread["protection_package_not_upgradable"] = ABSENT
-    products = ep.get("assignedProducts") if isinstance(ep.get("assignedProducts"), list) else []
+        current = None
+        unread["protection_package_current"] = ABSENT
+    raw_products = ep.get("assignedProducts")
+    products: list = raw_products if isinstance(raw_products, list) else []
     result = {
         **endpoint_identity(ep),
         "last_agent_update_at": ep.get("lastAgentUpdateAt"),
         "days_since_agent_update": days,
         "protection_package_name": package.get("name"),
         "protection_package_status": status,
-        "protection_package_not_upgradable": not_upgradable,
+        "protection_package_current": current,
         "assigned_product_versions": {p.get("code"): p.get("version") for p in products if p.get("code")},
     }
     if unread:
@@ -48,12 +50,12 @@ def item(ep: dict, now) -> dict:
 def collect(client, ledger, now):
     endpoints, reported_total = client.list_endpoints()
     items = [item(ep, now) for ep in endpoints]
-    current, upgradable, package_unread = tally(items, "protection_package_not_upgradable")
+    current, not_current, package_unread = tally(items, "protection_package_current")
     summary = {
         "total_endpoints": len(items),
         "endpoints_by_protection_package_status": count_by(items, "protection_package_status"),
-        "endpoints_package_not_upgradable": current,
-        "endpoints_package_upgradable": upgradable,
+        "endpoints_package_current": current,
+        "endpoints_package_not_current": not_current,
         "endpoints_package_unread": package_unread,
         "max_days_since_agent_update": largest(items, "days_since_agent_update"),
         "endpoints_agent_update_unread": sum(1 for i in items if i["days_since_agent_update"] is None),

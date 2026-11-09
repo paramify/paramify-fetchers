@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Sophos Central threat protection policies: what each sets for scheduled and on-access scanning."""
 
-import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -12,55 +11,49 @@ from sophos_evidence import ABSENT, count_by, run, tally  # noqa: E402
 
 OUTPUT_FILE = "sophos_threat_protection_policies.json"
 POLICY_TYPES = ("threat-protection", "server-threat-protection")
-SCHEDULED_DAYS = "endpoint.scans.scheduled.days"
-SCHEDULED_HOUR = "endpoint.scans.scheduled.hour"
-SCHEDULED_ENABLED = "endpoint.scans.scheduled.enabled"
-ON_ACCESS_TEXT = re.compile(r"on[- ]access|real[- ]time", re.I)
+# Setting names from https://developer.sophos.com/endpoint-policy-settings-all/, the same for both policy types.
+MALWARE = "endpoint.threat-protection.malware-protection."
+SCHEDULED_ENABLED = MALWARE + "scheduled-scan.enabled"  # boolean, default false
+SCHEDULED_DAYS = MALWARE + "scheduled-scan.days"  # integers, Sunday = 0 to Saturday = 6, default [6]
+SCHEDULED_TIME = MALWARE + "scheduled-scan.time"  # "HH:MM"
+ON_ACCESS_ENABLED = MALWARE + "on-access.enabled"  # "Enable real-time scanning"
 
 
-def on_access_key(metadata: dict) -> Optional[str]:
-    """The boolean setting Sophos's own metadata describes as on-access scanning, if any."""
-    candidates = []
-    for group in metadata.get("items") or []:
-        for setting in group.get("items") or []:
-            name = setting.get("name") or ""
-            text = f"{name} {setting.get('description') or ''}"
-            if setting.get("type") == "boolean" and ON_ACCESS_TEXT.search(text):
-                candidates.append(name)
-    candidates.sort(key=lambda n: (not ON_ACCESS_TEXT.search(n), not n.endswith(".enabled"), n))
-    return candidates[0] if candidates else None
-
-
-def setting_value(settings: dict, key: Optional[str]):
-    entry = settings.get(key) if key else None
+def setting_value(settings: dict, key: str):
+    entry = settings.get(key)
     return entry.get("value") if isinstance(entry, dict) else None
 
 
-def item(policy: dict, policy_type: str, is_base: bool, access_key: Optional[str]) -> dict:
+def item(policy: dict, policy_type: str, is_base: bool) -> dict:
     unread: dict = {}
     settings = policy.get("settings") if isinstance(policy.get("settings"), dict) else None
     if settings is None:
         unread["settings"] = ABSENT
         settings = {}
 
+    # Sophos's defaults are enabled: false with days: [6], so only an enabled schedule with days counts.
+    sched_enabled = setting_value(settings, SCHEDULED_ENABLED)
     days = setting_value(settings, SCHEDULED_DAYS)
-    if setting_value(settings, SCHEDULED_ENABLED) is False:
+    scheduled: Optional[bool]
+    if sched_enabled is False:
         scheduled = False
-    elif isinstance(days, list):
+    elif sched_enabled is True and isinstance(days, list):
         scheduled = bool(days)
     else:
         scheduled = None
         unread["scheduled_scan_configured"] = ABSENT
 
-    on_access = setting_value(settings, access_key)
+    on_access = setting_value(settings, ON_ACCESS_ENABLED)
     if not isinstance(on_access, bool):
         on_access = None
-        unread["on_access_scanning_on"] = ABSENT if access_key else "no on-access setting in Sophos metadata"
+        unread["on_access_scanning_on"] = ABSENT
 
-    off_baseline = sorted(
-        key for key, entry in settings.items()
-        if isinstance(entry, dict) and "recommendedValue" in entry and entry.get("value") != entry["recommendedValue"]
-    )
+    # recommendedValue is in Sophos's example responses, not its settings reference. With none to compare,
+    # the count is null, not 0.
+    with_recommendation = [key for key, entry in settings.items()
+                           if isinstance(entry, dict) and "recommendedValue" in entry]
+    off_baseline = sorted(key for key in with_recommendation
+                          if settings[key].get("value") != settings[key]["recommendedValue"])
     enabled = policy.get("enabled")
     if not isinstance(enabled, bool):
         enabled = None
@@ -75,11 +68,12 @@ def item(policy: dict, policy_type: str, is_base: bool, access_key: Optional[str
         "enabled": enabled,
         "applies_to": policy.get("appliesTo"),
         "scheduled_scan_configured": scheduled,
+        "scheduled_scan_enabled": sched_enabled if isinstance(sched_enabled, bool) else None,
         "scheduled_scan_days": days if isinstance(days, list) else None,
-        "scheduled_scan_hour": setting_value(settings, SCHEDULED_HOUR),
+        "scheduled_scan_time": setting_value(settings, SCHEDULED_TIME),
         "on_access_scanning_on": on_access,
-        "on_access_setting_key": access_key,
-        "settings_off_vendor_baseline": len(off_baseline),
+        "settings_with_recommended_value": len(with_recommendation),
+        "settings_off_vendor_baseline": len(off_baseline) if with_recommendation else None,
         "settings_off_vendor_baseline_keys": off_baseline,
         "settings": settings,
     }
@@ -94,12 +88,6 @@ def collect(client, ledger, now):
     for policy_type in POLICY_TYPES:
         policies, total = client.list_policies(policy_type)
         reported_total = None if total is None or reported_total is None else reported_total + total
-        try:
-            access_key = on_access_key(client.get("/endpoint/v1/policies/settings", f"settings_metadata:{policy_type}",
-                                                  {"policyType": policy_type}))
-        except SophosError as e:
-            ledger.add(e)
-            access_key = None
         try:
             base = client.get(f"/endpoint/v1/policies/{policy_type}/base", f"base_policy:{policy_type}")
         except SophosError as e:
@@ -117,7 +105,7 @@ def collect(client, ledger, now):
                         f"/endpoint/v1/policies/{policy['id']}", f"policy_detail:{policy_type}").get("settings")}
                 except SophosError as e:
                     ledger.add(e)
-            items.append(item(policy, policy_type, policy.get("id") == base_id, access_key))
+            items.append(item(policy, policy_type, base_id is not None and policy.get("id") == base_id))
 
     enabled, disabled, enabled_unread = tally(items, "enabled")
     sched, no_sched, sched_unread = tally(items, "scheduled_scan_configured")
@@ -136,6 +124,7 @@ def collect(client, ledger, now):
         "policies_on_access_scanning_off": oa_off,
         "policies_on_access_scanning_unread": oa_unread,
         "policies_with_settings_off_vendor_baseline": sum(1 for i in items if i["settings_off_vendor_baseline"]),
+        "policies_without_recommended_values": sum(1 for i in items if i["settings_off_vendor_baseline"] is None),
     }
     return items, summary, {"collected": len(items), "reported_total": reported_total}
 

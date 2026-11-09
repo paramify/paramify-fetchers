@@ -20,7 +20,8 @@ OUTPUT_FILE = "sophos_endpoint_protection.json"
 
 def item(ep: dict) -> dict:
     unread: dict = {}
-    health = ep.get("health") if isinstance(ep.get("health"), dict) else {}
+    raw_health = ep.get("health")
+    health: dict = raw_health if isinstance(raw_health, dict) else {}
     services = (health.get("services") or {}).get("serviceDetails")
     if isinstance(services, list) and services:
         not_running = sorted(f"{s.get('name')}: {s.get('status')}" for s in services if s.get("status") != "running")
@@ -29,8 +30,12 @@ def item(ep: dict) -> dict:
         not_running, all_running = None, None
         unread["services_all_running"] = ABSENT
 
+    supported = ep.get("tamperProtectionSupported")
     tamper = ep.get("tamperProtectionEnabled")
-    if not isinstance(tamper, bool):
+    if supported is False:
+        # The endpoint cannot run tamper protection: neither on nor off, and not unread.
+        tamper = None
+    elif not isinstance(tamper, bool):
         tamper = None
         unread["tamper_protection_enabled"] = ABSENT
 
@@ -61,7 +66,7 @@ def item(ep: dict) -> dict:
         "services_all_running": all_running,
         "stopped_or_missing_services": not_running,
         "tamper_protection_enabled": tamper,
-        "tamper_protection_supported": ep.get("tamperProtectionSupported"),
+        "tamper_protection_supported": supported if isinstance(supported, bool) else None,
         "protection_product_installed": installed,
         "assigned_products": product_list,
         "threats_status_good": threats_good,
@@ -79,11 +84,19 @@ def collect(client, ledger, now):
     except SophosError as e:
         ledger.add(e)
         tenant_tamper = None
+    else:
+        if not isinstance(tenant_tamper, bool):
+            tenant_tamper = None
+            ledger.add(SophosError("the tenant tamper protection response has no enabled value",
+                                   "partial_failure", "tenant_tamper_protection"))
     for i in items:
         i["tenant_tamper_protection_enabled"] = tenant_tamper
 
     running, not_running, services_unread = tally(items, "services_all_running")
-    tp_on, tp_off, tp_unread = tally(items, "tamper_protection_enabled")
+    tp_on, tp_off, _ = tally(items, "tamper_protection_enabled")
+    tp_unsupported = sum(1 for i in items if i["tamper_protection_supported"] is False)
+    tp_unread = sum(1 for i in items if i["tamper_protection_enabled"] is None
+                    and i["tamper_protection_supported"] is not False)
     prod_yes, prod_no, prod_unread = tally(items, "protection_product_installed")
     thr_good, thr_not, thr_unread = tally(items, "threats_status_good")
     summary = {
@@ -95,6 +108,7 @@ def collect(client, ledger, now):
         "endpoints_services_unread": services_unread,
         "endpoints_tamper_protection_enabled": tp_on,
         "endpoints_tamper_protection_disabled": tp_off,
+        "endpoints_tamper_protection_not_supported": tp_unsupported,
         "endpoints_tamper_protection_unread": tp_unread,
         "endpoints_protection_product_installed": prod_yes,
         "endpoints_protection_product_not_installed": prod_no,

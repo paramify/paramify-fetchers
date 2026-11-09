@@ -12,7 +12,7 @@ target_schema:
     required: false
     env: SOPHOS_TENANT_ID
     description: >-
-      Sophos Central tenant id. Leave it out for a tenant-level credential; set
+      Sophos Central tenant id (a UUID). Leave it out for a tenant-level credential; set
       it to pick a tenant when the credential is partner- or organization-level.
 
 runtime:
@@ -27,8 +27,8 @@ output:
 
 secrets: []          # client_id / client_secret, per target, from _categories/sophos.yaml
 
-ksis:
-  - KSI-CNA-RVP
+# No ksis: check-in times show that the agents report, not how well a
+# protection works (KSI-CNA-RVP). Add a KSI when one fits this evidence.
 
 evidence_set:
   reference_id: EVD-SOPHOS-ENDPOINT-CHECK-IN
@@ -42,7 +42,7 @@ evidence_set:
     - GET /whoami/v1 — finds the tenant and its data-region host
     - GET /endpoint/v1/endpoints (full view, every page) — every computer and server with the time it last communicated
 
-    Output: sophos_endpoint_check_in_<tenant>.json — one item per endpoint with when it last communicated with Sophos Central, the hours since then, whether it is online, and its isolation and lockdown status; no endpoint is left out for being stale, and a fact Sophos did not return is null and named in the item's unread_facts.
+    Output: sophos_endpoint_check_in_<tenant>.json — one item per endpoint with when it last communicated with Sophos Central, the hours since then, whether it is online, and its isolation and lockdown status; no endpoint is left out for being stale. A missing last-seen time is null and named in the item's unread_facts, and the run then exits non-zero. A missing online value is null and counted in endpoints_online_unread, and the run does not fail for it.
 
     Summary fields:
 

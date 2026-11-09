@@ -25,9 +25,9 @@ def item(ep: dict, now) -> dict:
         unread["hours_since_last_seen"] = ABSENT
     online = ep.get("online")
     if not isinstance(online, bool):
-        # A community report says Sophos sometimes leaves `online` out.
+        # Sophos sometimes leaves `online` out. It is context, not the check-in fact (lastSeenAt is),
+        # so a missing value is null and counted, and does not fail the run.
         online = None
-        unread["online"] = ABSENT
     result = {
         **endpoint_identity(ep),
         "last_seen_at": ep.get("lastSeenAt"),

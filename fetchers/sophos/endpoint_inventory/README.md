@@ -18,7 +18,7 @@ permissions: [Service Principal Read-Only: endpoint-state:read]
 ksis:        [KSI-PIY-GIV]
 calls:       the same endpoints list (shared client)
 replaces:    none
-live test:   the client tenant. The collected count must equal pages.items and the
+live test:   a real tenant. The collected count must equal pages.items and the
              Account Health Check totals.
 ```
 
@@ -30,8 +30,7 @@ every in-scope host runs the agent, a comparator must join this inventory with
 another inventory (cloud VMs or a CMDB) on `hostname` or `serial_number`. That
 comparator is separate work.
 
-## Personal data (open decision)
+## Personal data
 
-`associatedPerson` carries a display name and a login. Until the
-team decides the personal-data rule, this inventory keeps `associatedPerson.viaLogin`
-and leaves out `associatedPerson.name`.
+`associatedPerson` carries a display name and a login. This inventory keeps
+`associatedPerson.viaLogin` and drops `associatedPerson.name`.

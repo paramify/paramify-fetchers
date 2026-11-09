@@ -26,11 +26,14 @@ config_schema:
     env: SOPHOS_AUTH_URL
     description: >-
       OAuth token URL. Defaults to https://id.sophos.com/api/v2/oauth2/token.
-      Set it only to point the fetchers at a test double.
+      Must be https on sophos.com or a subdomain of it; http is accepted only
+      on a loopback host, for a test double. Any other value is bad_config.
   global_url:
     type: string
     required: false
     env: SOPHOS_GLOBAL_URL
     description: >-
       Sophos Central global API host, used for whoami and tenant lookup.
-      Defaults to https://api.central.sophos.com. Set it only for a test double.
+      Defaults to https://api.central.sophos.com. Must be https on sophos.com
+      or a subdomain of it; http is accepted only on a loopback host, for a
+      test double. Any other value is bad_config.
