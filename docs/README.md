@@ -26,6 +26,7 @@ permissions:
 [Splunk](../fetchers/splunk/README.md) ·
 [SentinelOne](../fetchers/sentinelone/README.md) ·
 [KnowBe4](../fetchers/knowbe4/README.md) ·
+[GitHub](../fetchers/github/README.md) ·
 [GitLab](../fetchers/gitlab/README.md) ·
 [Kubernetes](../fetchers/k8s/README.md) ·
 [Rippling](../fetchers/rippling/README.md) ·

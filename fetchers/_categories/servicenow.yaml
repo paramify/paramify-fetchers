@@ -1,6 +1,6 @@
 display_name: ServiceNow
 description: >
-  ServiceNow platform evidence. Customer service cases and ITSM change records
-  pulled from scoped-application REST APIs using a shared service-account
-  credential over basic auth. Each fetcher takes the full endpoint URL, because
-  the scoped-app path differs per instance.
+  ServiceNow platform evidence. Customer service cases, ITSM change records and
+  incident after action reports pulled from scoped-application REST APIs using a
+  shared service-account credential over basic auth. Each fetcher takes the full
+  endpoint URL, because the scoped-app path differs per instance.

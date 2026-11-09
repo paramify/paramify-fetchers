@@ -18,17 +18,19 @@ base_url, overrides config, the event-stream shape), stacked as panels:
 
 from __future__ import annotations
 
+from rich.table import Table
 from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Button, Checkbox, DataTable, RichLog, Static, TabbedContent
+from textual.widgets import Button, Checkbox, RichLog, Static, TabbedContent
 
 from framework import api
 from framework.tui import palette
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
+from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal, PickerModal
 
 
@@ -122,10 +124,12 @@ class UploadPage(ButtonRowNav, Vertical):
     def compose(self) -> ComposeResult:
         with Vertical(id="evidence-panel", classes="panel"):
             yield DataTable(id="evidence-summary")
+            yield Static("", id="evidence-notes", classes="panel-notes")
             with Horizontal(id="evidence-actions"):
                 yield Button("Upload to Paramify", variant="primary", id="upload-submit", disabled=True)
         with Vertical(id="issues-panel", classes="panel"):
             yield DataTable(id="issues-summary")
+            yield Static("", id="issues-notes", classes="panel-notes")
             with Horizontal(id="issues-actions"):
                 yield Button("Send to Pipeline", variant="primary", id="issues-submit", disabled=True)
         with Vertical(id="scripts-panel", classes="panel"):
@@ -275,6 +279,7 @@ class UploadPage(ButtonRowNav, Vertical):
         self._preflight = None
         table = self.query_one("#evidence-summary", DataTable)
         table.clear()
+        self._notes("evidence", [])
         upload = self.query_one("#upload-submit", Button)
         upload.disabled = True
 
@@ -283,7 +288,7 @@ class UploadPage(ButtonRowNav, Vertical):
         try:
             latest = self._latest("evidence")
         except Exception as exc:
-            table.add_row("status", Text(f"cannot list runs: {exc}", style=palette.FAIL))
+            self._notes("evidence", [("status", f"cannot list runs: {exc}", palette.FAIL)])
             return
         if latest is None:
             table.add_row("status", Text(
@@ -298,7 +303,7 @@ class UploadPage(ButtonRowNav, Vertical):
         try:
             preflight = api.upload_preflight(self._run_dir, self.app.root_path)
         except Exception as exc:
-            table.add_row("preflight", Text(str(exc), style=palette.FAIL))
+            self._notes("evidence", [("preflight", str(exc), palette.FAIL)])
             return
 
         self._preflight = preflight
@@ -315,8 +320,7 @@ class UploadPage(ButtonRowNav, Vertical):
         if preflight["ok"]:
             upload.disabled = False
         else:
-            for err in preflight["errors"]:
-                table.add_row("preflight error", Text(err, style=palette.FAIL))
+            self._notes("evidence", [("preflight error", err, palette.FAIL) for err in preflight["errors"]])
 
     def _rebuild_issues(self) -> None:
         """Issue-report readiness for the newest run that collected any.
@@ -330,13 +334,14 @@ class UploadPage(ButtonRowNav, Vertical):
         self._issues_run_dir = None
         table = self.query_one("#issues-summary", DataTable)
         table.clear()
+        self._notes("issues", [])
         submit = self.query_one("#issues-submit", Button)
         submit.disabled = True
 
         try:
             latest = self._latest("issue_report")
         except Exception as exc:
-            table.add_row("status", Text(f"cannot list runs: {exc}", style=palette.FAIL))
+            self._notes("issues", [("status", f"cannot list runs: {exc}", palette.FAIL)])
             return
         if latest is None:
             table.add_row("status", Text("no run collected scan reports", style="dim"))
@@ -348,7 +353,7 @@ class UploadPage(ButtonRowNav, Vertical):
         try:
             preflight = api.issues_upload_preflight(self._issues_run_dir, self.app.root_path)
         except Exception as exc:
-            table.add_row("preflight", Text(str(exc), style=palette.FAIL))
+            self._notes("issues", [("preflight", str(exc), palette.FAIL)])
             return
 
         self._issues_preflight = preflight
@@ -375,13 +380,12 @@ class UploadPage(ButtonRowNav, Vertical):
             table.add_row(label, value)
         # Non-gating: a report with no assessment is skipped by the uploader, not
         # a reason to refuse the batch. Shown so it is not a surprise afterwards.
-        for warning in preflight.get("warnings") or []:
-            table.add_row("warning", Text(warning, style=palette.WARN))
+        notes = [("warning", warning, palette.WARN) for warning in preflight.get("warnings") or []]
         if preflight["ok"]:
             submit.disabled = False
         else:
-            for err in preflight["errors"]:
-                table.add_row("preflight error", Text(err, style=palette.FAIL))
+            notes += [("preflight error", err, palette.FAIL) for err in preflight["errors"]]
+        self._notes("issues", notes)
 
     def _rebuild_scripts(self) -> None:
         """Scripts-sync readiness (repo-scoped). Preview/Sync enabled whenever
@@ -419,6 +423,20 @@ class UploadPage(ButtonRowNav, Vertical):
             self.query_one("#scripts-plan-summary", Static).update(
                 Text("Preview (ctrl+p) computes the plan — which scripts create / update / drift", style="dim")
             )
+
+    def _notes(self, panel: str, notes: list) -> None:
+        """Show (label, message, style) lines under a panel's table, or hide the
+        notes when there are none. Prose goes here, not in a row: a DataTable cell
+        never wraps, so a long preflight error ran off the panel behind a
+        horizontal scrollbar."""
+        grid = Table.grid(padding=(0, 2))
+        grid.add_column(style="dim", no_wrap=True)
+        grid.add_column()
+        for label, message, style in notes:
+            grid.add_row(label, Text(message, style=style))
+        static = self.query_one(f"#{panel}-notes", Static)
+        static.update(grid)
+        static.display = bool(notes)
 
     @staticmethod
     def _result_text(run: dict) -> Text:
