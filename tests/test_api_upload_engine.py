@@ -393,6 +393,48 @@ def test_stack_override_reaches_delivery(fake, root, tmp_path):
     assert out["entries"]["x"]["channel"] == "CH-2"
 
 
+def fanout_run(tmp_path: Path, paramify=None) -> Path:
+    """A run of one entry that fanned out over three targets, as the runner writes it:
+    one invocation per target, each with its own file and the entry's key."""
+    run = tmp_path / "run-fanout"
+    run.mkdir()
+    names = ["east", "west", "gov"]
+    files = {f"x_{n}.json": env(fetcher="x", target={"name": n}) for n in names}
+    invocations = [dict(inv("x", [f"x_{n}.json"]), target={"name": n}) for n in names]
+    return build(run, files, invocations, paramify or {"x": {"use": "x"}})
+
+
+def test_fanout_entry_is_one_batch_on_the_request_with_a_file_per_target(fake, root, tmp_path):
+    st = fake.add_stack("Prod")
+    ev = fake.add_evidence("EVD-X", channels=[st.id])
+    today = date.today()
+    ar = fake.add_request(ev.id, ev.channels[0].id, today - timedelta(days=5), today + timedelta(days=5))
+    run = fanout_run(tmp_path, {"x": {"use": "x", "stack": st.id}})
+
+    plan = api.plan_upload(run, root, online=True)
+    [action] = [a for a in plan.actions if a.verb == "deliver"]
+    assert action.summary == "deliver 3 files to AR-1 (stack Prod, channel CH-1): new batch"
+
+    out = api.upload_run(run, root)
+    entry = out["entries"]["x"]
+    assert out["ok"] is True and entry["state"] == "delivered" and entry["mode"] == "batch"
+    assert out["uploaded"] == 3
+    [batch] = fake._batches
+    assert batch["artifactRequestId"] == ar.id and batch["artifactCount"] == 3
+    assert submits(fake) == [f"/batches/{batch['id']}/submit"]
+    notes = {a["originalFileName"]: a["note"] for a in fake._artifacts}
+    assert set(notes) == {"x_east.json", "x_west.json", "x_gov.json"}
+    assert all(a["batchId"] == batch["id"] for a in fake._artifacts)
+    for n in ("east", "west", "gov"):
+        assert f'target={{"name":"{n}"}}; entry=x' in notes[f"x_{n}.json"]
+
+    fake.calls.clear()
+    again = api.upload_run(run, root)
+    assert again["entries"]["x"]["state"] == "noop"
+    assert (again["uploaded"], again["skipped_duplicate"]) == (0, 3)
+    assert len(fake._batches) == 1 and submits(fake) == []
+
+
 def test_no_tags_turns_tags_off(fake, root, tmp_path):
     out = api.upload_run(two_files(tmp_path), root, custom_tags=False)
     assert out["tags"]["enabled"] is False and out["tags"]["reason"] == "--no-tags"
