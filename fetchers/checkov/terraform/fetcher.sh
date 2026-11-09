@@ -236,9 +236,11 @@ if [ -n "$SKIP_RESOURCES_LIST" ]; then
     RESOURCE_SKIPPED=$(( FAILED_BEFORE - $(jq '(.results.failed_checks // []) | length' "$NORM") ))
 fi
 
-PASSED=$(jq '(.results.passed_checks // []) | length' "$NORM")
-FAILED=$(jq '(.results.failed_checks // []) | length' "$NORM")
-SKIPPED=$(jq '(.results.skipped_checks // []) | length' "$NORM")
+# --quiet omits passed/skipped detail arrays. Checkov's summary remains
+# authoritative; the resource filter transfers failures without changing total.
+PASSED=$(jq '.summary.passed // ((.results.passed_checks // []) | length)' "$NORM")
+FAILED=$(jq --argjson moved "$RESOURCE_SKIPPED" 'if .summary.failed != null then .summary.failed - $moved else ((.results.failed_checks // []) | length) end' "$NORM")
+SKIPPED=$(jq --argjson moved "$RESOURCE_SKIPPED" 'if .summary.skipped != null then .summary.skipped + $moved else ((.results.skipped_checks // []) | length) end' "$NORM")
 TOTAL=$((PASSED + FAILED + SKIPPED))
 PCT=$(awk "BEGIN { if ($TOTAL > 0) printf \"%.2f\", ($PASSED / $TOTAL) * 100; else print 0 }")
 
