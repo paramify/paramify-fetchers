@@ -37,10 +37,10 @@ organization, each with its own token and API host.
 | `api_url` | `GITHUB_API_URL` | no | `https://api.github.com` (default), `https://api.<sub>.ghe.com` (GHE.com), `https://<host>/api/v3` (GitHub Enterprise Server) |
 | `repositories` | `GITHUB_REPOSITORIES` | no | Comma-separated names; unset collects every repository the token can see. The inventory ignores it |
 | `include_archived` | `GITHUB_INCLUDE_ARCHIVED` | no | Default `false`. The inventory ignores it and always includes archived repositories, because they are still assets |
+| secret `token` | `GITHUB_TOKEN` | yes | Per target |
 
 The inventory names each filter that it ignored in `metadata.filters_ignored`.
 It does not fail on them, so all fetchers can share one target.
-| secret `token` | `GITHUB_TOKEN` | yes | Per target |
 
 ## Creating the token
 
@@ -222,7 +222,10 @@ repositories; each returns well-formed, misleading data without an error.
   requirement changed is judged against today's requirement.
 - **Direct pushes are found by commit date.** `history(since:)` filters on the
   commit date, not the push date. A commit made before the window and pushed
-  in it is not in `direct_pushes`.
+  in it is not in `direct_pushes`. Also, the walk along the first-parent line
+  stops at the first commit with a commit date before the window, for example
+  from a wrong clock or a set date. The commits older than that one on the
+  line are not checked, even when they are in the window.
 - **GitHub Enterprise Server has not been tested.** These fetchers ran against
   github.com only. Some endpoints are recent (for example
   `fork-pr-contributor-approval`, `artifact-and-log-retention` and

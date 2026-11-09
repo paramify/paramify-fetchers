@@ -232,6 +232,8 @@ def first_parent_chain(commits):
     """The commits on the branch's own line, tip first: each commit's first parent, back to the window's edge.
 
     A commit off this line came in through a merge commit on it, and that merge commit is the one to check.
+    The walk stops at the first commit that is not in the window list, so a commit on the line with a commit
+    date before the window (a wrong clock or a set date) also hides the older commits behind it (README).
     """
     by_oid = {c.get("oid"): c for c in commits}
     chain, oid = [], commits[0].get("oid") if commits else None
