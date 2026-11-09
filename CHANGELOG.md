@@ -10,6 +10,41 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Breaking
+
+- **Datadog evidence: some fields are removed, renamed, or now mean something
+  else.** Re-check any validator or query that reads these fields:
+  - `datadog_siem_signals` 0.2.0: `status` is now the signal's triage state
+    (`open`, `under_review` or `archived`), and `summary.status_counts` counts
+    those states. Before, `status` held the signal's `status` attribute, which
+    is its severity. `severity` now has that value; before, it was always
+    null.
+  - `datadog_siem_configuration` 0.2.0: each suppression rule has Datadog's
+    own field names. `isEnabled` is now `enabled`, `startDate` is now
+    `start_date` and `expirationDate` is now `expiration_date`. `rule_id` is
+    removed; `rule_query` gives the rules that a suppression applies to.
+    `data.notification_integrations` and
+    `summary.notification_integrations_count` are removed (see **Removed**).
+    A failure now writes `error_code`, `metadata.partial_failure` and
+    `metadata.api_failures`.
+  - `datadog_siem_detection_rules` 0.2.0: the evidence holds only custom
+    Cloud SIEM rules (`isDefault` false, type `log_detection` or
+    `signal_correlation`). Default rules and the rules of other products are
+    left out, so `total_rules`, `enabled_rules` and `rules_by_type` can be
+    lower. The new `summary.rules_excluded` counts the rules left out.
+    `summary.rules_never_triggered_count` is removed (see **Removed**).
+  - `datadog_incidents_list` 0.2.0: `postmortem_id`,
+    `summary.incidents_with_postmortem` and
+    `summary.resolved_without_postmortem_ids` are `null`. A v2 incident has no
+    postmortem attribute, and the fetcher does not read attachments, so these
+    values are unknown. Before, they read as 0 and as every resolved incident.
+  - `datadog_log_indexes` 0.2.0: `summary.audit_indexes_below_90_days` is
+    `null`, not 0, when no audit index has a retention to check.
+  - Every Datadog fetcher that pages: when a page or a per-item read fails
+    after the first page, the summary figures counted from the list are
+    `null`, the status is `partial_failure`, and the run exits 1. Before, the
+    figures were numbers that looked complete, and the run exited 0.
+
 ### Added
 
 - **Sophos Central fetchers (new `sophos` category).** Five fetchers read the
@@ -32,6 +67,14 @@ schemas and the `paramify` CLI — not the internal code.
   `sophos.com`. No fetcher reads the per-endpoint tamper protection route,
   because it returns passwords. The fetchers are verified against a local test
   double only. They have not yet run against a live Sophos tenant.
+- **GitHub fetchers (15).** Branch protection, pull request reviews and
+  checks, Actions security, release integrity, deployment controls,
+  Dependabot, code scanning and secret scanning alerts, vulnerability
+  disclosure, organization security settings, access review, non-user
+  credentials, the audit log (Enterprise Cloud), significant change
+  notifications, and `github_repository_inventory`. One target per
+  organization, on github.com, GHE.com or GitHub Enterprise Server. See
+  `fetchers/github/README.md`.
 
 - **`azure_devops_work_items` 0.2.0: approval comments that start with an @mention, and the approved percentage.**
   - **`approval_mentions`** (`AZURE_DEVOPS_APPROVAL_MENTIONS`, `false` by
@@ -1994,7 +2037,24 @@ schemas and the `paramify` CLI — not the internal code.
   the CA counts are null when the CA read fails. `authentication_methods` now reads
   null, not an empty list, when the methods policy can't be read.
 
+### Removed
+
+- **Datadog evidence fields with no source in the API.**
+  - `datadog_siem_detection_rules`: `summary.rules_never_triggered_count`. It
+    was always 0, because the rules API gives no data about when a rule fired.
+  - `datadog_siem_configuration`: `data.notification_integrations` and
+    `summary.notification_integrations_count`. They came from an endpoint that
+    does not exist, so they were always empty. `data.referenced_webhooks` and
+    `summary.notification_types` replace them.
+  - `datadog_siem_configuration`: the suppression rule field `rule_id`.
+
 ### Fixed
+
+- **Checkov Terraform/Kubernetes 0.2.1:** preserve Checkov summary counts when
+  `--quiet` omits passed/skipped details. Terraform resource exclusions move a
+  failure to skipped without dropping quiet-mode passes or changing the total.
+  Clarify that `metadata.skip_checks` records CLI skips; discovered Checkov
+  configuration must also be retained to review effective exclusions.
 
 - **`azure_key_vault_key_rotation` 0.5.0: unlisted vaults no longer read as zero expired certificates.**
   `expired_certificates` and `certificates_expiring_within_30_days` are null when any
@@ -2003,6 +2063,123 @@ schemas and the `paramify` CLI — not the internal code.
   refused list still exits 0 and shows in `certificate_not_authorized_vaults`. New
   `certificates_without_expiry` counts listed certificates with no expiry date, which
   are in neither expiry count.
+
+- **Datadog: a failed page no longer reads as a complete collection.** Before,
+  a request error on any page stopped the walk, and the fetcher reported
+  `success` with the records it had. An auth error on the first page read as
+  "no monitors" or "no hosts", with exit 0. Paging now uses one shared helper,
+  `fetchers/datadog/_shared/datadog_paging.py`. An error on the first page
+  fails the run with `auth_failed`, `not_authorized`, `rate_limited` or
+  `target_unreachable`. An error on a later page keeps the records collected,
+  sets `status: partial_failure`, records the page reached in
+  `metadata.api_failures`, sets each summary figure counted from the list to
+  `null`, and exits 1 with `partial_failure`. Every result now carries
+  `metadata.partial_failure` and `metadata.api_failures`, including the empty,
+  `not_available` and failed results. A missing environment variable fails with
+  `bad_config`. A 429 is retried up to three times, after the wait in the
+  `X-RateLimit-Reset` header (at most 60 seconds). In the SIEM
+  fetchers, a 403 or 404 on the first page reads as `not_available` only when
+  the content pack states endpoint reports `onboarding` content packs, the same
+  rule as `datadog_siem_configuration` below. Otherwise it is a failure, with
+  the check's result in `siem_state`. On a later page, it is a partial failure.
+  The rule lives in `fetchers/datadog/_shared/datadog_siem_state.py`. Changed:
+  `datadog_apm_services`, `datadog_infra_agent_checks` and
+  `datadog_monitors_list` (0.1.0 → 0.1.1), and `datadog_incidents_list`,
+  `datadog_incident_timelines`, `datadog_siem_detection_rules` and
+  `datadog_siem_signals` (0.1.0 → 0.2.0, with the field changes in the next
+  entry and under **Breaking**). Also:
+  - `datadog_incidents_list` and `datadog_incident_timelines` read only the
+    first 100 incidents. They stopped on a `meta.pagination.total` field that
+    the API doesn't return. They now read pages until a short page.
+  - `datadog_incident_timelines` reported "No incidents found" with exit 0
+    when the first incidents page failed, for example with a 401 or 403. That
+    is now a failure. A failed timeline read for one incident gave an empty
+    timeline. It now gives `timeline_cells: null` for that incident, an entry
+    in `metadata.api_failures` and `status: partial_failure`.
+  - The incidents date filter (`filter[created][start]` and
+    `filter[created][end]`) is not a documented parameter. Both incident
+    fetchers still send it, but they now also drop each incident created
+    before the lookback window, so the evidence and the summary cover only
+    the window. The new `summary.incidents_outside_lookback_dropped` counts
+    the incidents dropped.
+  - `is_default=false` is not a documented parameter of the detection rules
+    endpoint. `datadog_siem_detection_rules` now keeps only custom Cloud SIEM
+    rules itself.
+  - `datadog_infra_agent_checks` reported "No hosts found" when the host count
+    request timed out or returned a body that is not JSON. That is now a failure.
+- **Datadog fetchers read fields where the API puts them.** Several evidence
+  fields were always null, 0 or a constant, so a validator that read them
+  failed, or passed on a value that never changed:
+  - `datadog_incidents_list` 0.2.0: `commander_id` comes from
+    `relationships.commander_user`. `resolution_hours` and
+    `summary.avg_resolution_hours` parse timestamps with fractional seconds
+    (`…00.000Z`). `status` reads the incident `state`.
+  - `datadog_incident_timelines` 0.2.0: each timeline cell keeps its `content`
+    text, `important` flag and `id`. An after-action review can now read what
+    each entry says.
+  - `datadog_log_archives` 0.1.1: `summary.enabled_archives` counts archives in
+    state `WORKING` or `WORKING_AUTH_LEGACY`. The API has no `ENABLED` state.
+    The new `summary.archives_by_state` counts each state. `includeTags`
+    reads `include_tags`, and Azure archives show `storage_account`.
+  - `datadog_log_indexes` 0.2.0: the audit-index figures do not pick indexes
+    by keywords in the filter query, because that left other audit indexes
+    out. They cover every index, or only the indexes in the new optional
+    `audit_indexes` config (`DATADOG_AUDIT_INDEXES`).
+    `summary.audit_index_selection`, `summary.audit_indexes`,
+    `summary.audit_indexes_not_found` and the `is_audit_index` flag on each
+    index show which indexes the figures count.
+  - `datadog_monitors_list` 0.1.1: `thresholds`, `notify_no_data` and
+    `no_data_timeframe` come from `options`. `query` and `message` keep their
+    full text, not the first 200 characters. The new `notification_targets`
+    lists the @-mentions in the message.
+  - `datadog_siem_detection_rules` 0.2.0: each rule keeps its
+    `detection_method`, `queries` and `cases`.
+    `summary.rules_updated_last_90_days` reads `updatedAt` as epoch
+    milliseconds. We removed `summary.rules_never_triggered_count`. It was
+    always 0, and the rules API gives no data about when a rule fired.
+  - `datadog_siem_signals` 0.2.0: `severity`, `status` (the triage state) and
+    the rule come from the nested `attributes` of each signal, where the
+    search endpoint puts them.
+- **`datadog_siem_configuration` reads the documented endpoints and no longer
+  reports Cloud SIEM as off by mistake** (0.1.0 → 0.2.0). It called
+  `/api/v2/security_monitoring/configuration/suppression_rules`, which Datadog
+  does not document, and read the 404 as "Security Monitoring (SIEM) is not
+  enabled". Organizations with Cloud SIEM on got evidence that said it was off.
+  It now reads `/configuration/suppressions`. Cloud SIEM is reported as not
+  active only when Datadog's content pack states endpoint (in preview) returns
+  `onboarding` content packs, the documented signal. If that read fails,
+  `summary.siem_enabled` is `null`. A 403 or 404 on any other read now fails
+  the run (exit 1) with the error in `metadata.api_failures`, and the evidence
+  is still written. A read that stops on a later page, or a webhook read that
+  fails with a status other than 404, gives `status: partial_failure` and exit
+  1, and the figures that depend on it (for example `missing_webhooks`) are
+  `null`, not empty. The fetcher now uses the shared paging and Cloud SIEM
+  state helpers. The webhook list came from an endpoint that does not exist, so it
+  was always empty. Datadog has no endpoint that lists webhooks, so the fetcher
+  now reads only the webhooks that a notification target names
+  (`@webhook-<name>`), and flags those that do not exist. `notification_types`
+  came from words in webhook names. It now comes from the targets of enabled
+  signal notification rules and of enabled Cloud SIEM detection rules (`email`,
+  `slack`, `pagerduty`, `webhook`, `teams`, `team`, `opsgenie`, `jira`,
+  `servicenow`, `incident` or `other`), and is `null` when either source can't
+  be read. Output changes: new `data.siem_state`, `data.notification_rules`,
+  `data.detection_rule_notifications`, `data.referenced_webhooks`,
+  `summary.siem_enabled`, `summary.notification_rules_count`,
+  `summary.enabled_notification_rules`,
+  `summary.detection_rules_with_notifications`,
+  `summary.referenced_webhooks_count`, `summary.missing_webhooks`,
+  `metadata.partial_failure` and `metadata.api_failures`;
+  `data.notification_integrations` and `summary.notification_integrations_count`
+  are removed; each suppression rule now has Datadog's own field names
+  (`enabled`, `start_date`, `expiration_date`, `rule_query`,
+  `suppression_query`, `data_exclusion_query`, `version`) in place of
+  `isEnabled`, `startDate`, `expirationDate` and `rule_id`. The not-active
+  result has `status: not_available` as before, with a new message. The
+  fetcher needs `security_monitoring_suppressions_read`,
+  `security_monitoring_notification_profiles_read`,
+  `security_monitoring_filters_read` (or `logs_read_index_data`) and
+  `integrations_read`. **Re-check any validator or query that reads this
+  evidence.**
 
 - **`azure_app_service_backups` 0.3.1: an app with no restore point misses the RPO.**
   On a plan that supports backups, an app with no restore point at all, when both the
