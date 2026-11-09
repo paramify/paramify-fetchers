@@ -47,6 +47,26 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Sophos Central fetchers (new `sophos` category).** Five fetchers read the
+  Sophos Central REST APIs, one target for each tenant:
+  - `sophos_endpoint_protection`: for each endpoint, whether its protection
+    services run, whether tamper protection is on, whether Intercept X or
+    Endpoint Protection is installed, and the threat status.
+  - `sophos_endpoint_check_in`: for each endpoint, the hours since its agent
+    last communicated, and whether it is online.
+  - `sophos_agent_updates`: for each endpoint, the days since its agent last
+    updated, and whether its protection package is current.
+  - `sophos_threat_protection_policies`: for each threat protection policy,
+    whether a scheduled scan is configured and whether on-access scanning is on.
+  - `sophos_endpoint_inventory`: every endpoint, one inventory record each.
+
+  They need a Sophos Central API credential with the **Service Principal
+  Read-Only** role (`SOPHOS_CLIENT_ID`, `SOPHOS_CLIENT_SECRET`). For a partner
+  or organization credential, also set the tenant id (`SOPHOS_TENANT_ID`). The
+  client sends the credential and the token only to `https` hosts on
+  `sophos.com`. No fetcher reads the per-endpoint tamper protection route,
+  because it returns passwords. The fetchers are verified against a local test
+  double only. They have not yet run against a live Sophos tenant.
 - **GitHub fetchers (15).** Branch protection, pull request reviews and
   checks, Actions security, release integrity, deployment controls,
   Dependabot, code scanning and secret scanning alerts, vulnerability
