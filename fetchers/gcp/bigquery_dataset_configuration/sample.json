@@ -1,0 +1,119 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_bigquery_dataset_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.datasets[]",
+      "records": 2,
+      "fields": {
+        "access_entries": 2,
+        "access_entry_count": 2,
+        "access_entry_counts_by_principal_type": 2,
+        "access_roles": 2,
+        "cmek": 2,
+        "creation_time": 2,
+        "default_partition_expiration_ms": 0,
+        "default_table_expiration_days": 1,
+        "default_table_expiration_ms": 1,
+        "domain_access": 0,
+        "friendly_name": 0,
+        "has_default_table_expiration": 2,
+        "id": 2,
+        "kms_key_name": 1,
+        "labels": 0,
+        "last_modified_time": 2,
+        "location": 2,
+        "max_time_travel_hours": 2,
+        "name": 2,
+        "project": 2,
+        "public_access_entries": 0,
+        "publicly_accessible": 2
+      }
+    },
+    {
+      "path": "results.datasets[].access_entries[]",
+      "records": 6,
+      "fields": {
+        "principal": 6,
+        "principal_type": 6,
+        "public": 6,
+        "role": 6
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:33Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "datasets": [
+        {
+          "access_entries": [
+            {
+              "principal": "projectOwners",
+              "principal_type": "specialGroup",
+              "public": false,
+              "role": "OWNER"
+            }
+          ],
+          "access_entry_count": 4,
+          "access_entry_counts_by_principal_type": {
+            "specialGroup": 3,
+            "userByEmail": 1
+          },
+          "access_roles": [
+            "OWNER",
+            "READER",
+            "WRITER"
+          ],
+          "cmek": false,
+          "creation_time": "1786976398521",
+          "default_partition_expiration_ms": null,
+          "default_table_expiration_days": 0,
+          "default_table_expiration_ms": "3600000",
+          "domain_access": [],
+          "friendly_name": null,
+          "has_default_table_expiration": true,
+          "id": "example-project:example_plain",
+          "kms_key_name": null,
+          "labels": {},
+          "last_modified_time": "1786976398521",
+          "location": "us-central1",
+          "max_time_travel_hours": "168",
+          "name": "example_plain",
+          "project": "example-project",
+          "public_access_entries": [],
+          "publicly_accessible": false
+        }
+      ]
+    },
+    "summary": {
+      "bigquery_api_readable": true,
+      "cmek_datasets": 1,
+      "cmek_percentage": 50,
+      "datasets_with_all_authenticated_users": 0,
+      "datasets_with_all_users": 0,
+      "datasets_with_default_table_expiration": 1,
+      "datasets_with_domain_access": 0,
+      "distinct_kms_keys": [
+        "projects/example-project/locations/us-central1/keyRings/example-test/cryptoKeys/bq-key"
+      ],
+      "google_managed_datasets": 1,
+      "locations": [
+        "us-central1"
+      ],
+      "non_public_dataset_percentage": 100,
+      "publicly_accessible_datasets": 0,
+      "total_datasets": 2
+    }
+  }
+}

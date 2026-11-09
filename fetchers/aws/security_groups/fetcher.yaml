@@ -35,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SECURITY-GROUPS
   name: Security Groups
-  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-security-groups'
+  instructions: 'Script: aws/security_groups/fetcher.sh. Commands executed: aws ec2 describe-security-groups'

@@ -1,0 +1,15 @@
+validator: oci_bucket_inventory_present
+cases:
+  - name: buckets_were_collected
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_buckets": 5, "public_buckets": 0}}'
+
+  - name: no_buckets_collected
+    expect: FAIL
+    note: >
+      The point of the validator: its partners' zeros are only meaningful when something was counted.
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_buckets": 0, "public_buckets": 0}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"bucketCount": 5, "public_buckets": 0}}'

@@ -1,0 +1,79 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_cloudwatch_high_availability",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 3,
+      "fields": {
+        "Type": 3,
+        "PolicyInfo": 1,
+        "AlarmInfo": 2
+      }
+    },
+    {
+      "path": "results[].PolicyInfo.Alarms[]",
+      "records": 1,
+      "fields": {
+        "AlarmName": 1,
+        "AlarmARN": 1
+      }
+    },
+    {
+      "path": "results[].AlarmInfo.Dimensions[]",
+      "records": 2,
+      "fields": {
+        "Name": 2,
+        "Value": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:17Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "Type": "CloudWatch_Alarm",
+        "AlarmInfo": {
+          "AlarmName": "pft-sqs-backlog",
+          "AlarmArn": "arn:aws:cloudwatch:us-east-2:111111111111:alarm:pft-sqs-backlog",
+          "AlarmConfigurationUpdatedTimestamp": "2026-09-28T11:04:53.366000-06:00",
+          "ActionsEnabled": true,
+          "OKActions": [],
+          "AlarmActions": [
+            "arn:aws:sns:us-east-2:111111111111:pft-plain"
+          ],
+          "InsufficientDataActions": [],
+          "StateValue": "OK",
+          "StateReason": "Threshold Crossed: no datapoints were received for 1 period and 1 missing datapoint was treated as [NonBreaching].",
+          "StateReasonData": "{\"version\":\"1.0\",\"queryDate\":\"2026-09-28T17:05:59.285+0000\",\"statistic\":\"Maximum\",\"period\":300,\"recentDatapoints\":[],\"threshold\":100.0,\"evaluatedDatapoints\":[{\"timestamp\":\"2026-09-28T16:59:00.000+0000\"}]}",
+          "StateUpdatedTimestamp": "2026-09-28T11:05:59.286000-06:00",
+          "MetricName": "ApproximateNumberOfMessagesVisible",
+          "Namespace": "AWS/SQS",
+          "Statistic": "Maximum",
+          "Dimensions": [
+            {
+              "Name": "QueueName",
+              "Value": "pft-sse-sqs"
+            }
+          ],
+          "Period": 300,
+          "EvaluationPeriods": 1,
+          "Threshold": 100.0,
+          "ComparisonOperator": "GreaterThanThreshold",
+          "TreatMissingData": "notBreaching",
+          "StateTransitionedTimestamp": "2026-09-28T11:05:59.286000-06:00"
+        }
+      }
+    ]
+  }
+}

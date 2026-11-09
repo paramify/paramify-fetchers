@@ -45,6 +45,6 @@ evidence_set:
   reference_id: EVD-GCP-VPC-CONFIG
   name: VPC Network Configuration
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls: compute
+    Script: gcp/vpc_network_configuration/fetcher.py. Google Cloud client library calls: compute
     networks.list(), subnetworks.aggregatedList(). One evidence file per
     project.

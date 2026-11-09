@@ -59,7 +59,7 @@ evidence_set:
   reference_id: EVD-PARAMIFY-VER-RPT-AVI
   name: Paramify Accepted Vulnerability Info (VER-RPT-AVI)
   instructions: >-
-    Script: fetcher.py. Reads issues and deviations for PARAMIFY_PROJECT_ID from
+    Script: paramify/accepted_vulnerabilities/fetcher.py. Reads issues and deviations for PARAMIFY_PROJECT_ID from
     the Paramify REST API (GET /issues), applies the shared accepted-vulnerability
     definition (accepted deviation or 192-day-open per VER-TFR-MAV), and writes
     the FedRAMP Accepted Vulnerability Info JSON.

@@ -63,7 +63,7 @@ evidence_set:
   reference_id: EVD-ZENDESK-HELP-CENTER-SECTION
   name: Zendesk Help Center Section Articles
   instructions: >
-    Script: fetcher.py. Anonymous GETs, no credential (`anonymous: true`), so
+    Script: zendesk/help_center_section/fetcher.py. Anonymous GETs, no credential (`anonymous: true`), so
     only public articles are visible. GET
     /api/v2/help_center/<locale>/sections/<id>.json for the section, then
     /api/v2/help_center/<locale>/sections/<id>/articles.json?per_page=100,

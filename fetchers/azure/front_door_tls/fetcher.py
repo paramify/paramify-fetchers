@@ -35,14 +35,20 @@ from frontdoor import (  # noqa: E402
     custom_domains,
     endpoints_with_routes,
     front_door_profiles,
+    in_scope_totals,
+    profile_scope,
     route_hosts,
     route_https,
     route_serving,
     rule_sets_with_rules,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import ScopeExclusions, excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_front_door_tls")
 
+SCOPE_EXCLUSIONS_ENV = "AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS"
+EXCLUDED_KINDS = ("custom_domain", "endpoint", "route", "secret")
 EXPIRY_WARNING_DAYS = 30
 # A predefined cipher-suite set fixes the floor; minimumTlsVersion applies only to Customized.
 CIPHER_SUITE_SET_FLOOR = {"TLS10_2019": "TLS10", "TLS12_2022": "TLS12", "TLS12_2023": "TLS12"}
@@ -117,8 +123,9 @@ def effective_minimum_tls(domain: dict) -> tuple[str | None, str]:
     return None, "unset"
 
 
-def route_record(profile: dict, endpoint: dict, route: dict, domains_by_key: dict, rule_sets_by_key: dict) -> dict:
-    hosts = route_hosts(endpoint, route, domains_by_key)
+def route_record(profile: dict, endpoint: dict, route: dict, domains_by_key: dict, rule_sets_by_key: dict,
+                 excluded_hosts=()) -> dict:
+    hosts = [h for h in route_hosts(endpoint, route, domains_by_key) if arm_key(h["id"]) not in excluded_hosts]
     return {
         "profile": profile["name"],
         "profile_sku": profile["sku"],
@@ -167,8 +174,27 @@ def domain_record(profile: dict, domain: dict, secrets_by_key: dict, routed: set
     }
 
 
-def tls_for_profile(collected: dict, now: datetime) -> dict:
+def secrets_in_scope(profile: dict, secrets: list[dict], domains: list[dict], excluded_hosts: dict) -> tuple[list[dict], list[dict]]:
+    """The profile's secrets minus those only out-of-scope custom domains use, and those secrets."""
+    users: dict = {}
+    for d in domains:
+        if d["secret_id"]:
+            users.setdefault(arm_key(d["secret_id"]), []).append(d)
+    kept, excluded = [], []
+    for secret in secrets:
+        using = users.get(arm_key(secret["id"]), [])
+        if using and all(arm_key(d["id"]) in excluded_hosts for d in using):
+            excluded.append(excluded_item("secret", secret["name"], None, reason="only_excluded_domains",
+                                          profile=profile["name"], id=secret["id"],
+                                          custom_domains=[d["host_name"] for d in using]))
+        else:
+            kept.append(secret)
+    return kept, excluded
+
+
+def tls_for_profile(collected: dict, now: datetime, exclusions: ScopeExclusions | None = None) -> dict:
     profile = collected["profile"]
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions())
     domains_by_key = {arm_key(d["id"]): d for d in collected["custom_domains"]}
     secrets_by_key = {arm_key(s["id"]): s for s in collected["secrets"]}
     routes, routed, served = [], set(), set()
@@ -178,9 +204,13 @@ def tls_for_profile(collected: dict, now: datetime) -> dict:
             routed |= keys
             if route_serving(endpoint, route):
                 served |= keys
-            routes.append(route_record(profile, endpoint, route, domains_by_key, collected["rule_sets"]))
-    domains = [domain_record(profile, d, secrets_by_key, routed, served, now) for d in collected["custom_domains"]]
-    return {"routes": routes, "custom_domains": domains}
+            if arm_key(route["id"]) not in scope["routes"]:
+                routes.append(route_record(profile, endpoint, route, domains_by_key, collected["rule_sets"], scope["hosts"]))
+    domains = [domain_record(profile, d, secrets_by_key, routed, served, now)
+               for d in collected["custom_domains"] if arm_key(d["id"]) not in scope["hosts"]]
+    secrets, excluded_secrets = secrets_in_scope(profile, collected["secrets"], collected["custom_domains"], scope["hosts"])
+    return {"routes": routes, "custom_domains": domains, "secrets": secrets, "excluded": scope["excluded"] + excluded_secrets,
+            "in_scope": scope["in_scope"]}
 
 
 def summarize(profiles: list[dict], skipped_by_sku: dict, routes: list[dict], domains: list[dict], secrets: list[dict]) -> dict:
@@ -227,11 +257,21 @@ def summarize(profiles: list[dict], skipped_by_sku: dict, routes: list[dict], do
 
 # --- collection (lazy azure imports) ---
 
-def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[dict], dict]:
+def collect_profiles(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+                     excluded: list | None = None) -> tuple[list[dict] | None, dict]:
+    """Profiles the exclusions take out are appended to `excluded` and get no further reads; None when the profile
+    list wasn't read."""
     cdn = cdn_client(subscription_id, cred, collector)
     if cdn is None:
-        return [], {}
+        return None, {}
     profiles, skipped = front_door_profiles(cdn, collector)
+    if profiles is None:
+        return None, skipped
+    if exclusions:
+        # A Front Door profile is global, so location: reaches it only as location:global.
+        profiles, out = exclusions.split(profiles, "profile", location=lambda p: "global")
+        if excluded is not None:
+            excluded += out
     collected = []
     for profile in profiles:
         rg, name = resource_group_from_id(profile["id"]), profile["name"]
@@ -265,14 +305,17 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    collected: list[dict] = []
+    collected: list[dict] | None = None
     skipped_by_sku: dict = {}
+    resources = ResourceExclusions.from_env()
+    resources.record_invalid(collector)
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Cdn")
         if registration == NOT_REGISTERED:
             logger.warning("Microsoft.Cdn is not registered on subscription %s", subscription_id)
-        collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector)
+        collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector, resources, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -282,18 +325,27 @@ def main() -> int:
             ),
         )
 
+    resources.warn_unmatched(logger)
+    listed = collected is not None
+    collected = collected or []
+
     now = datetime.now(timezone.utc)
-    profiles, routes, domains, secrets = [], [], [], []
+    # Scope exclusions apply to the profiles left in scope.
+    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV, kinds=("route",))
+    exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
+    profiles, routes, domains, secrets, scopes = [], [], [], [], []
     for c in collected:
-        tls = tls_for_profile(c, now)
+        tls = tls_for_profile(c, now, exclusions)
+        scopes.append(tls["in_scope"])
         routes += tls["routes"]
         domains += tls["custom_domains"]
-        secrets += c["secrets"]
+        excluded += tls["excluded"]
+        secrets += tls["secrets"]
         profiles.append({
             **c["profile"],
             "route_count": len(tls["routes"]),
             "custom_domain_count": len(tls["custom_domains"]),
-            "secret_count": len(c["secrets"]),
+            "secret_count": len(tls["secrets"]),
             "rule_set_count": len(c["rule_sets"]),
         })
 
@@ -306,12 +358,16 @@ def main() -> int:
             "custom_domains": domains,
             "profiles": profiles,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(profiles, skipped_by_sku, routes, domains, secrets),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, EXCLUDED_KINDS, {**in_scope_totals(scopes), "secrets": len(secrets)}),
+            **resources.summary(excluded, ("profile",), {"profiles": len(profiles) if listed else None}),
         },
     )
+    exclusions.warn_unmatched(logger)
     filename = f"azure_front_door_tls_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)
 

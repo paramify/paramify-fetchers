@@ -42,4 +42,4 @@ ksis:
 evidence_set:
   reference_id: EVD-IAM-ROLES
   name: IAM Roles
-  instructions: 'Script: fetcher.sh. Commands executed: aws iam list-roles, aws iam get-account-authorization-details --filter Role, aws iam get-account-password-policy'
+  instructions: 'Script: aws/iam_roles/fetcher.sh. Commands executed: aws iam list-roles, aws iam get-account-authorization-details --filter Role, aws iam get-account-password-policy'

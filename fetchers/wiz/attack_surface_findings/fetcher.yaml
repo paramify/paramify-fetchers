@@ -79,7 +79,7 @@ evidence_set:
   reference_id: EVD-WIZ-ATTACK-SURFACE
   name: Wiz Attack Surface Findings
   instructions: >-
-    Script: fetcher.py. Read-only service account (read:attack_surface; Wiz ASM
+    Script: wiz/attack_surface_findings/fetcher.py. Read-only service account (read:attack_surface; Wiz ASM
     license). Pages the attackSurfaceFindings connection. Summarizes findings by
     status and severity, exposed resources with open findings, top rules and
     technologies, and open findings past the remediation window.

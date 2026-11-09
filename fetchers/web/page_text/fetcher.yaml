@@ -50,7 +50,7 @@ evidence_set:
   reference_id: EVD-WEB-PAGE-TEXT
   name: Public Web Page Text
   instructions: >
-    Script: fetcher.py. One anonymous GET of the target URL: 30s timeout, at
+    Script: web/page_text/fetcher.py. One anonymous GET of the target URL: 30s timeout, at
     most 5 redirects, body capped at 5 MB, TLS verified. Records the final URL
     and each redirect, the HTTP status and Content-Type, `sha256` of the body
     (after gzip is removed) and `text_sha256` of `text` (UTF-8).

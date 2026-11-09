@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-ACCESS-ANALYZER
   name: IAM Access Analyzer Findings
-  instructions: 'Script: fetcher.sh. Commands executed: aws accessanalyzer list-analyzers, aws accessanalyzer list-findings (filtered to ACTIVE findings, per ACTIVE analyzer).'
+  instructions: 'Script: aws/access_analyzer_findings/fetcher.sh. Commands executed: aws accessanalyzer list-analyzers, aws accessanalyzer list-findings (filtered to ACTIVE findings, per ACTIVE analyzer).'

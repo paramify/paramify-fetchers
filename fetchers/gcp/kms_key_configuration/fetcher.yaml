@@ -46,7 +46,7 @@ evidence_set:
   reference_id: EVD-GCP-KMS-KEYS
   name: Cloud KMS Key Configuration and Rotation
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls: cloudkms
+    Script: gcp/kms_key_configuration/fetcher.py. Google Cloud client library calls: cloudkms
     locations.list(), then keyRings.list() per location, cryptoKeys.list()
     per ring, and getIamPolicy() on each ring and key. No key material is
     read. One evidence file per project.

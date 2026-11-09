@@ -1,5 +1,5 @@
 name: azure_network_flow_logs
-version: 0.1.0
+version: 0.2.0
 description: >
   Inventories Azure Network Watcher and flow logs in the subscription, and works out which virtual
   networks' traffic is logged. For every Network Watcher: its region. For every flow log: what it
@@ -8,6 +8,37 @@ description: >
   whether Traffic Analytics sends it to a Log Analytics workspace. For every virtual network and
   subnet: whether an enabled flow log covers it, and through which target.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Network Watcher, flow log, virtual network or subnet is
+      listed under excluded with the pattern and left out of every count
+      and verdict. A flow log leaves only on an id: pattern naming it or
+      with an excluded target, whether a virtual network, subnet, network
+      interface or NSG (reason target_matched). Excluding its Network
+      Watcher, or the watcher's resource group (such as
+      NetworkWatcherRG), leaves the flow log in scope, since it still
+      logs an in-scope network. A subnet leaves with its virtual network,
+      and a virtual network whose every subnet is excluded leaves too
+      (reason subnets_matched). Coverage is still worked out against
+      every flow log and watcher.
+      A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -47,7 +78,7 @@ evidence_set:
   reference_id: EVD-AZURE-NETWORK-FLOW-LOGS
   name: Azure Network Watcher and Flow Logs
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-network NetworkManagementClient
+    Script: azure/network_flow_logs/fetcher.py. Azure SDK calls: azure-mgmt-network NetworkManagementClient
     network_watchers.list_all(); flow_logs.list(resource_group, watcher) for each watcher;
     virtual_networks.list_all() for each VNet's subnets; and, when an NSG flow log exists,
     network_security_groups.list_all() to see where each NSG is attached.
@@ -93,3 +124,19 @@ evidence_set:
     counts regions with VNets and no Network Watcher. provider_registration_status (registered /
     not_registered / unknown) is the Microsoft.Network resource provider's state, so zero flow logs on
     an unregistered subscription reads as "service not in use" rather than "in use, none configured".
+    Network Watchers, flow logs, virtual networks and subnets the patterns
+    take out are listed under results.excluded, each with the pattern that
+    matched; a flow log removed with its target also names matched_id. A
+    flow log under an excluded watcher stays in scope, and a virtual
+    network whose subnets are all excluded is listed with reason
+    subnets_matched and leaves every count. Summary fields:
+    resource_exclusion_patterns (the configured patterns, empty when none
+    are set), resource_exclusion_patterns_unmatched (patterns that matched
+    nothing, such as a mistyped name), excluded_network_watchers,
+    excluded_flow_logs, excluded_virtual_networks, excluded_subnets (how
+    many the patterns took out) and in_scope_network_watchers,
+    in_scope_flow_logs, in_scope_virtual_networks, in_scope_subnets (how
+    many stayed). The watcher and flow log counts are null when the
+    watcher list couldn't be read, and the virtual network and subnet
+    counts when the virtual network list couldn't. results.excluded is
+    always present, empty when nothing is excluded.

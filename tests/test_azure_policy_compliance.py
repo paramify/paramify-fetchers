@@ -422,7 +422,7 @@ def test_main_exit_code_for_a_refused_or_failed_detail_read(monkeypatch, tmp_pat
     def refused_read(resource, resource_id, query_options):
         raise queued.pop(0)
 
-    def collect(subscription_id, cred, collector, limits):
+    def collect(subscription_id, cred, collector, limits, exclusions=None):
         collected = fx.empty_collection()
         collected["states"] = [state(APP)]
         collected["details"] = fx.collect_evaluation_details(
@@ -507,7 +507,7 @@ def test_collect_recurrence_reads_history_once_then_each_flipping_pair(monkeypat
 
     client = fake_client(policy_states={"list_query_results_for_subscription": query})
     out = fx.collect_recurrence(client, "s1", 1, fx.Collector(logging.getLogger("t")), now=NOW)
-    assert seen[0][0] == "default" and seen[0][1] == f"groupby(({fx.HISTORY_GROUP_KEYS}))/aggregate($count as n)"
+    assert seen[0][0] == "default" and seen[0][1] == f"groupby(({fx.PAIR_GROUP_KEYS}))/aggregate($count as n)"
     assert "aggregate($count as evaluations)" in seen[1][1]
     assert seen[1][3] == datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
     assert len(seen) == 3 and seen[2][2] == "Timestamp asc"
@@ -523,7 +523,7 @@ def test_collect_recurrence_reads_history_once_then_each_flipping_pair(monkeypat
     assert fx.collect_recurrence(client, "s1", 0, fx.Collector(logging.getLogger("t")), now=NOW)[
         "history_truncated"] is True
 
-    monkeypatch.setattr(fx, "MAX_HISTORY_ROWS", 2)
+    monkeypatch.setattr(fx, "MAX_GROUP_ROWS", 2)
     out = fx.collect_recurrence(client, "s1", 0, fx.Collector(logging.getLogger("t")), now=NOW)
     # 0 reads no pair, which is not truncation.
     assert out["history_truncated"] is True and out["pairs_truncated"] is False
@@ -688,7 +688,8 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit(monke
          "policy_assignment_id": ASSIGN, "policy_definition_reference_id": "r2", "total_deployments": 2},
     ]
     monkeypatch.setattr(fx, "RESOURCE_FILTER_BATCH", 1)
-    rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 10, fx.Collector(logging.getLogger("t")))
+    collector = fx.Collector(logging.getLogger("t"))
+    rows, truncated, _ = fx.collect_remediation_deployments(client, "s1", tasks, 10, collector)
     assert listed == [("subscription", "t1"), ("resource_group", "rg1", "t2"), ("subscription", "t3")]
 
     def query(ref, *resources):
@@ -707,14 +708,14 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit(monke
     assert filters == [query("r1", VM, NSG)]
 
     listed.clear()
-    rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 1, fx.Collector(logging.getLogger("t")))
+    rows, truncated, _ = fx.collect_remediation_deployments(client, "s1", tasks, 1, collector)
     assert len(rows) == 1 and truncated is True
     assert listed == [("subscription", "t1")]
 
     # 0 skips them: nothing is listed and nothing reads as truncated.
     listed.clear()
     assert fx.collect_remediation_deployments(client, "s1", tasks, 0, fx.Collector(logging.getLogger("t"))) == (
-        [], False)
+        [], False, [])
     assert listed == []
 
 
@@ -746,11 +747,66 @@ def test_collect_remediation_deployments_at_management_group_and_resource():
          "policy_assignment_id": ASSIGN},
     ]
     collector = fx.Collector(logging.getLogger("t"))
-    rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 10, collector)
+    rows, truncated, _ = fx.collect_remediation_deployments(client, "s1", tasks, 10, collector)
     assert listed == [("management_group", "mg1", "t3"), ("resource", NSG.lstrip("/"), "t4")]
     assert [(r["remediation_task_id"].rsplit("/", 1)[-1], r["error_code"], r["now_compliant"]) for r in rows] == [
         ("t3", "Denied", None), ("t4", "Denied", None)]
     assert truncated is False and collector.ok
+
+
+# --- in-scope recount ---
+
+def test_in_scope_compliance_recounts_initiative_members_and_falls_back_to_the_evaluated_effect():
+    record = fx.assignment_record({
+        "policy_assignment_id": ASSIGN, "policy_set_definition_id": "/providers/x/policySetDefinitions/s1",
+        "results": {"non_compliant_resources": 3, "non_compliant_policies": 2,
+                    "resource_details": {"NonCompliant": 3, "Compliant": 1}},
+        "policy_definitions": [
+            {"policy_definition_id": DEF, "policy_definition_reference_id": "R1", "effect": "deny",
+             "results": {"non_compliant_resources": 3}},
+            {"policy_definition_id": DEF, "policy_definition_reference_id": "r2", "effect": "audit",
+             "results": {"non_compliant_resources": 1}},
+        ],
+    })
+    kv = f"{RG}/providers/Microsoft.KeyVault/vaults/kv1"
+    pairs = [{**state(VM, assignment=ASSIGN.upper()), "compliance_state": "noncompliant"},
+             {**state(NSG), "compliance_state": "noncompliant"},
+             {**state(NSG, ref="r3"), "compliance_state": "noncompliant"},
+             {**state(NSG, ref="r2"), "compliance_state": "compliant"},
+             {**state(kv, ref="r2"), "compliance_state": "compliant"},
+             {**state(kv), "compliance_state": "unknown"}]
+    listed = [{**state(NSG, ref="r3"), "policy_definition_action": "modify"}]
+    service = {"non_compliant_resources": 3, "non_compliant_policies": 2,
+               "resource_details": {"noncompliant": 3, "compliant": 1}, "policy_details": {"noncompliant": 2}}
+    results, (rebuilt,) = fx.in_scope_compliance(service, [record], pairs, listed)
+    # r2 fails only out of scope; r3 is not in the service's list, so a listed state's effect is used.
+    assert [(m["policy_definition_reference_id"], m["effect"], m["non_compliant_resources"])
+            for m in rebuilt["non_compliant_member_policies"]] == [("R1", "deny", 2), ("r3", "modify", 1)]
+    assert (rebuilt["non_compliant_resources"], rebuilt["non_compliant_policies"], rebuilt["is_compliant"],
+            rebuilt["member_policy_count"], rebuilt["compliant_resources"], rebuilt["compliance_percentage"]) == (
+        2, 2, False, 2, 1, 33)
+    # kv1 is compliant with r2 and unknown to r1: compliant ranks higher.
+    assert rebuilt["resource_details"] == {"Compliant": 1, "NonCompliant": 2}
+    # At subscription scope a policy is an assignment, as the service counts them: the initiative once.
+    assert (results["non_compliant_resources"], results["non_compliant_policies"], results["resource_details"]) == (
+        2, 1, {"compliant": 1, "noncompliant": 2})
+    assert results["policy_details"] == {"noncompliant": 1}
+    results, (unknown,) = fx.in_scope_compliance(service, [record], None, listed)
+    assert (results["non_compliant_resources"], unknown["is_compliant"], unknown["non_compliant_member_policies"]) == (
+        None, None, None)
+    assert (results["resource_details"], unknown["resource_details"]) == (
+        {"noncompliant": None, "compliant": None}, {"NonCompliant": None, "Compliant": None})
+    summary = fx.in_scope_summary(results, [unknown], [])
+    assert (summary["compliant_resources"], summary["resources_evaluated"], summary["compliant_assignments"]) == (
+        None, None, None)
+
+
+def test_rolled_up_counts_each_key_once_under_its_highest_ranked_state():
+    pairs = [{"resource_id": "a", "compliance_state": s} for s in ("unknown", "exempt", "Conflict", "error")]
+    pairs += [{"resource_id": "b", "compliance_state": s} for s in ("exempt", "protected")]
+    pairs += [{"resource_id": "c", "compliance_state": "NewState"}, {"resource_id": "c", "compliance_state": "unknown"}]
+    assert fx.rolled_up(pairs, lambda p: p["resource_id"], {"Exempt": 9}) == {
+        "Exempt": 0, "error": 1, "protected": 1, "unknown": 1}
 
 
 # --- wiring ---
@@ -766,7 +822,7 @@ def test_main_writes_the_new_results_and_summary(monkeypatch, tmp_path):
     monkeypatch.setattr(fx, "provider_registration_status", lambda *a: "registered")
     seen = {}
 
-    def collect(subscription_id, cred, collector, limits):
+    def collect(subscription_id, cred, collector, limits, exclusions=None):
         seen.update(limits)
         return fx.empty_collection()
 

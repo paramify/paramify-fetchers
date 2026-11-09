@@ -24,4 +24,4 @@ ksis:
 evidence_set:
   reference_id: EVD-EKS-POD-INVENTORY
   name: EKS Pod Inventory
-  instructions: 'Script: eks_pod_inventory.sh. Commands executed: kubectl get pods, kubectl describe pods'
+  instructions: 'Script: k8s/eks_pod_inventory/fetcher.sh. Commands executed: kubectl get pods, kubectl describe pods'

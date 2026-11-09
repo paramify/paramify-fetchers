@@ -58,7 +58,11 @@ their checks.
 
 - **Contract** — from `describe <fetcher> --json`: required vs optional
   `secrets`, `config`, `target_schema`, and the `supports_targets` flag (fanout
-  or single). Note which secrets are `per_target`.
+  or single). Note which secrets are `per_target`, and which config fields are
+  `type: patterns` (pattern lists, such as `resource_exclusions`; `prefixes` and
+  `bare` say what each pattern may start with; `exclusion: false` marks a list
+  that shows more as it grows, such as `value_paths`, which `manifest exclude`
+  never edits: set it with `set-config`).
 - **Current manifest** — `paramify manifest show --json`
   (or read the file). Determine:
   - Is the fetcher present in `run.fetchers:` at all?
@@ -77,13 +81,30 @@ their checks.
    unknown fetcher, fanout/target mismatch (targets on a single fetcher or none
    on a fanout one), missing required config (platform or per-fetcher), and
    missing secrets including per-target ones. Treat its `errors[]` as the gap list.
+   It also refuses a pattern its list doesn't take (an unknown or missing
+   prefix, a space or comma inside one, a duplicate) and a config key nothing
+   declares. Its `notes[]` name, for each category-wide pattern list, the
+   entries that take it, the ones with their own list, and the ones that don't
+   declare the field: tell the user which evidence the exclusions cover.
 
-2. **Presence gap (validate can't see this):** if the fetcher is **absent** from
+2. **Comparator inputs:** a comparator (`describe` shows `depends_on`) reads
+   only its inputs' evidence from the same run, so every input must be in the
+   manifest too. `manifest add <comparator>` adds them; `validate` reports one
+   still missing as `reads <input>, which is not in the manifest`. A bad input is
+   `<comparator>: depends_on …` (unknown, not JSON evidence, or a comparator
+   that can't run) or `<comparator>: dependency cycle: a -> b -> a`; fix the
+   root cause it names. A comparator takes no secrets,
+   targets or category config. Its only other gap is a required field in its own
+   `config_schema`, set on its entry with `paramify manifest set-config <name>
+   key=value` (never under `platforms.<category>.config`, which it ignores). Its
+   inputs still need their own wiring.
+
+3. **Presence gap (validate can't see this):** if the fetcher is **absent** from
    `run.fetchers:`, `validate` says nothing about it — it only checks entries
    that exist. So an absent fetcher = a `manifest add` is needed, even on a clean
    `validate`. Check presence yourself in Phase 1.
 
-3. **Env-var gap (validate can't see this either):** `validate` confirms a
+4. **Env-var gap (validate can't see this either):** `validate` confirms a
    secret has a `${env:VAR}` ref, not that `VAR` is exported. Best-effort, check
    each referenced var is set (presence only — never print values):
    ```bash
@@ -101,9 +122,13 @@ Build the exact command sequence from the gaps. Map each gap to one command:
 | Gap | Command |
 |-----|---------|
 | Fetcher absent | `manifest add <fetcher>` |
+| Comparator absent | `manifest add <comparator>` (adds its inputs too; the runner runs every fetcher before any comparator) |
+| Comparator input absent | `manifest add <input>` |
 | Missing secret | `manifest set-secret <fetcher> <secret_name> <ENV_VAR>` |
 | Missing per-fetcher config | `manifest set-config <fetcher> key=value` |
 | Missing platform config | `manifest set-platform-config <category> key=value` |
+| Something out of scope (a pattern list) | `manifest exclude <category\|fetcher> <pattern> --reason "<why>"` (a category list reaches every entry without its own; a fetcher's first pattern copies the category list in, since its own list replaces it) |
+| A pattern that shouldn't be there | `manifest unexclude <category\|fetcher> <pattern>` |
 | Fanout needs targets | `manifest add-target <fetcher> field=val ... --secret name=ENV_VAR` |
 | A target's field is wrong | `manifest set-target <fetcher> <index> field=val ...` (replaces that target; its secrets are kept) |
 | Ambient-cred var stripped | `manifest set-passthrough <category> VAR [VAR ...]` |
@@ -136,7 +161,7 @@ first when several edits are involved.
 2. **Hand back the run command** and state the boundary plainly: a clean
    `validate` means the wiring is correct, **not** that credentials work or the
    data is right — that's the user's real run to confirm. Remind them the
-   `${env:VAR}` vars must be set in the shell first (Phase 2 step 3).
+   `${env:VAR}` vars must be set in the shell first (Phase 2 step 4).
    ```bash
    paramify run <manifest>
    ```
@@ -151,6 +176,10 @@ first when several edits are involved.
 - Hand-editing the manifest YAML when a `manifest` subcommand does it (and
   re-validates).
 - Putting a **secret value** in the manifest instead of a `${env:VAR}` ref.
+- Setting a pattern list through `${env:VAR}`, a `.env` file or the shell. The
+  runner refuses a reference there and never reads one from the environment;
+  the patterns and their reasons go in the manifest, where each run records
+  them in the evidence's `metadata.config_patterns`.
 - Assuming a fetcher runs because the directory exists — it must be in
   `run.fetchers:`.
 - Treating a clean `validate` as proof the creds work or the env vars are set.

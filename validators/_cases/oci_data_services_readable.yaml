@@ -1,0 +1,13 @@
+validator: oci_data_services_readable
+cases:
+  - name: oci_data_services_readable_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"data_services_readable": true}}'
+
+  - name: oci_data_services_readable_fails
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"data_services_readable": false}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"data-services-readable": true}}'

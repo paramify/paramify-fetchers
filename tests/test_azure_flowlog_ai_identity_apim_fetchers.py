@@ -996,6 +996,9 @@ def test_federated_credential_api_version_fallback(error, retried):
         ("Sites.Read.All", mi.MICROSOFT_GRAPH_APP_ID, True),
         ("User.Read.All", mi.MICROSOFT_GRAPH_APP_ID, False),
         ("Directory.ReadWrite.All", mi.MICROSOFT_GRAPH_APP_ID, True),
+        # The judgment shared with azure_entra_service_principals: privileged without "ReadWrite" in the name.
+        ("User.ManageIdentities.All", mi.MICROSOFT_GRAPH_APP_ID, True),
+        ("calendars.readwrite", mi.MICROSOFT_GRAPH_APP_ID, True),
         ("Orders.ReadWrite", "11111111-2222-3333-4444-555555555555", False),  # a custom API, not Graph
         ("Directory.ReadWrite.All", None, None),  # resource could not be read
         (None, mi.MICROSOFT_GRAPH_APP_ID, None),  # role id not resolved

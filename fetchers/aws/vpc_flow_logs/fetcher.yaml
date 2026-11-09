@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-VPC-FLOW-LOGS
   name: VPC Flow Logs
-  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-vpcs, aws ec2 describe-flow-logs.'
+  instructions: 'Script: aws/vpc_flow_logs/fetcher.sh. Commands executed: aws ec2 describe-vpcs, aws ec2 describe-flow-logs.'

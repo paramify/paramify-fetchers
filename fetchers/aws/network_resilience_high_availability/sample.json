@@ -1,0 +1,72 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_network_resilience_high_availability",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 8,
+      "fields": {
+        "Type": 8,
+        "SubnetInfo": 8
+      }
+    },
+    {
+      "path": "results[].SubnetInfo.Tags[]",
+      "records": 15,
+      "fields": {
+        "Key": 15,
+        "Value": 15
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:13:03Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "Type": "VPC_Subnet",
+        "SubnetInfo": {
+          "AvailabilityZoneId": "use2-az2",
+          "MapCustomerOwnedIpOnLaunch": false,
+          "OwnerId": "111111111111",
+          "AssignIpv6AddressOnCreation": false,
+          "Ipv6CidrBlockAssociationSet": [],
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "pft-private-1"
+            }
+          ],
+          "SubnetArn": "arn:aws:ec2:us-east-2:111111111111:subnet/subnet-0189b9682dd8910c2",
+          "EnableDns64": false,
+          "Ipv6Native": false,
+          "PrivateDnsNameOptionsOnLaunch": {
+            "HostnameType": "ip-name",
+            "EnableResourceNameDnsARecord": false,
+            "EnableResourceNameDnsAAAARecord": false
+          },
+          "BlockPublicAccessStates": {
+            "InternetGatewayBlockMode": "off"
+          },
+          "SubnetId": "subnet-0189b9682dd8910c2",
+          "State": "available",
+          "VpcId": "vpc-0effedbf104e8ed6f",
+          "CidrBlock": "10.0.0.1/24",
+          "AvailableIpAddressCount": 250,
+          "AvailabilityZone": "us-east-2b",
+          "DefaultForAz": false,
+          "MapPublicIpOnLaunch": false
+        }
+      }
+    ]
+  }
+}

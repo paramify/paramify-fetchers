@@ -71,6 +71,19 @@ paramify tui                   # the terminal UI
 > Back-compat: `python -m framework.runner <cmd>` and `python -m framework.tui`
 > still work. They do exactly the same as the matching `paramify` subcommands.
 
+### Tab completion
+
+To complete commands and options with Tab, install completion for your shell
+once, then open a new shell:
+
+```bash
+paramify --install-completion
+```
+
+`paramify samples show <Tab>` also completes fetcher names. It lists only the
+fetchers that have a sample. `paramify` must be on your `PATH` (for example, an
+active virtual environment) when you press Tab.
+
 ## Preflight with `paramify doctor`
 
 Before a real run, `paramify doctor <manifest>` examines the environment:
@@ -174,10 +187,17 @@ paramify manifest add-target <fetcher> k=v ... [--secret name=ENV_VAR ...]
 paramify manifest set-target <fetcher> <index> k=v ... [--secret name=ENV_VAR ...]
 paramify manifest remove-target <fetcher> <index>
 paramify manifest set-platform-config <category> key=value
+paramify manifest exclude <category|fetcher> <pattern> [--reason TEXT] [--field NAME]
+paramify manifest unexclude <category|fetcher> [pattern] [--field NAME] [--all]
 paramify manifest set-passthrough <category> ENV_VAR ...
 paramify manifest set-output-dir <dir>
 paramify manifest show [--json]
 ```
+
+`exclude` and `unexclude` edit exclusion lists, such as resource exclusions
+([pattern lists](config_injection_guide.md#5-leave-resources-out-of-scope)).
+They never touch a pattern list that shows more when it grows, such as
+`azure_change_provenance`'s `value_paths`; set that one with `set-config`.
 
 Every `manifest` subcommand also accepts `--json` and returns a stable
 `{"ok", "path", "errors"}` object. Thus an agent can build a manifest step by

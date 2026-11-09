@@ -1,0 +1,21 @@
+key: oci_dependency_audit_present
+name: OCI Dependency Audit Present
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one Application Dependency Management vulnerability audit
+  completed. Its partner concludes from a zero — no audit whose headline was
+  lowered by its own ignore list — and a zero is equally what a tenancy with
+  no audits produces. Counts completion by lifecycle (ACTIVE), never by
+  `is_success`, which is Oracle's pass/fail against the team's own thresholds.
+  Does NOT assert anything about posture. Fails when the summary key is
+  renamed.
+regex: '"audits_completed":\s*(?<audits_completed>[1-9][0-9]*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-DEP-VULNS

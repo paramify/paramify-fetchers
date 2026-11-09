@@ -69,11 +69,13 @@ azure-mgmt-security>=7.0.0,<8
 # through Graph rather than ARM.
 azure-mgmt-authorization>=4.0.0,<5
 msgraph-sdk>=1.61.0,<2
+# Reads the subject and expiry of the CAs trusted for certificate sign-in.
+cryptography>=42.0.0,<51
 
 # Managed databases.
 azure-mgmt-sql>=4.0.0,<5
 azure-mgmt-rdbms>=10.1.1,<11
-azure-mgmt-postgresqlflexibleservers>=2.0.0,<3
+azure-mgmt-postgresqlflexibleservers>=2.0.0,<4
 azure-mgmt-cosmosdb>=10.0.0,<11
 azure-mgmt-redisenterprise>=3.1.0,<4
 azure-mgmt-redis>=14.5.0,<15
@@ -90,7 +92,7 @@ azure-mgmt-kusto>=4.0.0,<5
 azure-mgmt-eventhub>=12.0.0,<13
 
 # Compute and containers.
-azure-mgmt-compute>=38.2.0,<39
+azure-mgmt-compute>=38.2.0,<40
 azure-mgmt-containerservice>=41.5.0,<42
 azure-mgmt-containerregistry>=15.0.0,<16
 
@@ -99,6 +101,7 @@ azure-mgmt-containerregistry>=15.0.0,<16
 # models at all, so diagnostic_settings collects nothing.
 azure-mgmt-keyvault>=14.0.1,<15
 azure-keyvault-keys>=4.11.1,<5
+azure-keyvault-certificates>=4.11.3,<5
 azure-mgmt-monitor>=6.0.2,<7
 # Log Analytics workspaces: retention, access mode, table retention, data exports.
 azure-mgmt-loganalytics>=14.0.0,<15
@@ -137,3 +140,11 @@ google-cloud-bigquery
 google-cloud-secret-manager
 google-cloud-kms
 google-cloud-api-keys
+
+# Oracle Cloud Infrastructure. One distribution covers every OCI service — the
+# SDK is generated from one spec and ships all clients in the single `oci` package.
+oci
+
+# Qualys category (fetchers/qualys/*) — the VM/PC API answers in XML that names an
+# external DTD; defusedxml parses it with entities and external references refused.
+defusedxml

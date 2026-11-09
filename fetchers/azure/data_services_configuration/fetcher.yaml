@@ -1,5 +1,5 @@
 name: azure_data_services_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   Inventories three data services in the subscription: Azure DocumentDB / Cosmos DB for MongoDB
   vCore clusters (Microsoft.DocumentDB/mongoClusters), Azure Data Explorer clusters (Microsoft.Kusto)
@@ -12,6 +12,30 @@ description: >
   assignment with its role. For Event Hubs also: every shared access policy with its rights, and each
   event hub's retention and capture.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Mongo vCore cluster, Data Explorer cluster or Event Hubs
+      namespace is listed under excluded with the pattern and left out
+      of every count and verdict; its firewall rules, databases,
+      principals, event hubs and authorization rules leave with it and
+      are not read. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -55,7 +79,7 @@ evidence_set:
   reference_id: EVD-AZURE-DATA-SERVICES-CONFIG
   name: Azure Data Services Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-mongocluster MongoClusterMgmtClient
+    Script: azure/data_services_configuration/fetcher.py. Azure SDK calls: azure-mgmt-mongocluster MongoClusterMgmtClient
     mongo_clusters.list() and firewall_rules.list_by_mongo_cluster per cluster; azure-mgmt-kusto
     KustoManagementClient clusters.list(), cluster_principal_assignments.list, databases.list_by_cluster and
     database_principal_assignments.list per cluster and database; azure-mgmt-eventhub
@@ -107,3 +131,18 @@ evidence_set:
     Lists that could not be read are null and set metadata.partial_failure.
     provider_registration_status_mongo_clusters (Microsoft.DocumentDB), _data_explorer
     (Microsoft.Kusto) and _event_hubs (Microsoft.EventHub) are reported separately.
+
+    Clusters and namespaces the resource_exclusions patterns take out are listed under
+    results.excluded instead, each with the pattern that matched (kind mongo_cluster,
+    data_explorer_cluster or event_hub_namespace); their children are never read, so the principal,
+    event hub and database counts cover only in-scope parents.
+
+    Which resources are left out of scope?
+      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no Mongo vCore cluster, Data Explorer cluster or Event Hubs namespace, such as a mistyped name
+      - excluded_mongo_clusters — Number of Mongo vCore clusters left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them; null if the list couldn't be read
+      - excluded_data_explorer_clusters — Number of Data Explorer clusters left out of scope the same way; their databases and principals leave with them; null if the list couldn't be read
+      - excluded_event_hub_namespaces — Number of Event Hubs namespaces left out of scope the same way; their event hubs and authorization rules leave with them; null if the list couldn't be read
+      - in_scope_mongo_clusters — Number of Mongo vCore clusters read and in scope; null if the list couldn't be read
+      - in_scope_data_explorer_clusters — Number of Data Explorer clusters read and in scope; null if the list couldn't be read
+      - in_scope_event_hub_namespaces — Number of Event Hubs namespaces read and in scope; null if the list couldn't be read, and 0 for all three kinds means there are none or the patterns took out every one, which a check can catch by requiring more than 0

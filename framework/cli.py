@@ -88,12 +88,18 @@ from typing import Callable, List, NoReturn, Optional
 
 import typer
 
-from framework import api, paramify_auth
+from framework import api, paramify_auth, patterns
 from framework import cli_style as style
 from framework.issue_reports import (
     CLOSE_CYCLE_FIELD,
     CLOSE_CYCLE_VALUES,
     ISSUE_REPORTS_DIR,
+)
+from framework.runner.executor import is_credential_env_name
+from framework.secret_resolver import (
+    env_var_name,
+    is_env_ref_attempt,
+    is_partial_env_ref,
 )
 
 _DEFAULT_MANIFEST = "manifest.yaml"
@@ -105,7 +111,6 @@ _HELP_OPTS = {"help_option_names": ["-h", "--help"]}
 
 app = typer.Typer(
     no_args_is_help=True,
-    add_completion=False,
     context_settings=_HELP_OPTS,
     help="Paramify fetcher framework — discover, build, run, and inspect evidence fetchers.",
 )
@@ -226,7 +231,25 @@ def _parse_kv(arg: str, path, json_out: bool):
     return arg.split("=", 1)
 
 
-def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool):
+def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool, target: bool = False):
+    if typ == patterns.TYPE:
+        if "${env:" in value:
+            _fail(path, f"config '{key}': {patterns.ENV_REF_REFUSAL}", json_out)
+        return patterns.from_cli(value)
+    # The runner resolves ${env:VAR} in string config fields only, so anywhere else
+    # a reference would be saved as literal text (or coerced to false).
+    if is_env_ref_attempt(value) or is_partial_env_ref(value):
+        if target:
+            _fail(path, f"{key}: target fields aren't resolved, so ${{env:}} references don't work there", json_out)
+        if is_partial_env_ref(value):
+            _fail(path, f"config '{key}': a ${{env:}} reference must be the whole value, not part of it", json_out)
+        var = env_var_name(value)
+        if var and is_credential_env_name(var):
+            _fail(path, f"config '{key}' reads ${{env:{var}}}, which holds a secret; config references can't read "
+                        f"secrets", json_out)
+        if typ != "string":
+            _fail(path, f"config '{key}' is {typ}; ${{env:}} references work on string config fields only", json_out)
+        return value
     try:
         return _coerce(value, typ)
     except ValueError:
@@ -258,14 +281,21 @@ def _config_type(root: Path, fetcher_name: str, key: str) -> str:
     return "string"
 
 
-def _platform_config_type(root: Path, category: str, key: str) -> str:
-    cat = api.catalog(root)
+def _platform_config_type(root: Path, category: str, key: str, cat: Optional[dict] = None) -> str:
+    cat = cat or api.catalog(root)
     for c in cat["categories"]:
         if c["name"] == category and c.get("platform"):
             for fld in c["platform"]["config"]:
                 if fld["name"] == key:
                     return fld["type"]
     return "string"
+
+
+def _category_fetcher_types(root: Path, category: str, key: str, cat: Optional[dict] = None) -> List[str]:
+    """The types the category's fetchers declare for `key`, since a platform value reaches each of them."""
+    cat = cat or api.catalog(root)
+    return [fld["type"] for c in cat["categories"] if c["name"] == category
+            for f in c["fetchers"] for fld in f["config"] if fld["name"] == key]
 
 
 def _target_field_type(root: Path, fetcher_name: str, key: str) -> str:
@@ -288,6 +318,8 @@ def _human_run_printer():
             _err(f"  {style.mark('SKIP')}  {style.name(ev['fetcher'])} {style.dim('(' + ev['reason'] + ')')}")
         elif kind == "fetcher_start":
             targets = style.dim(f"  ({ev['targets']} targets)") if ev["fanout"] else ""
+            if ev.get("depends_on"):
+                targets = style.dim(f"  (reads {', '.join(ev['depends_on'])})")
             typer.echo(f"  {style.dim('RUN')}   {style.name(ev['fetcher'])}{targets}")
         elif kind == "fetcher_note":
             _err(f"        {style.mark('NOTE')}  {style.dim(ev['note'])}")
@@ -651,9 +683,13 @@ def list_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
         # styled value formatted to a width lands short by the length of its escape.
         col = "{:50s}".format(f["name"])
         ver = "v{:8s}".format(f["version"])
+        reads = (
+            f" {style.dim('reads=')}{style.env(','.join(f['depends_on']))}"
+            if f.get("depends_on") else ""
+        )
         typer.echo(
             f"  {style.name(col)} {style.dim(ver)} [{style.dim('{:6s}'.format(tag))}]"
-            f" {style.dim('category=')}{style.env(f['category'] or '-')}"
+            f" {style.dim('category=')}{style.env(f['category'] or '-')}{reads}"
         )
 
 
@@ -698,6 +734,11 @@ def describe_cmd(
     )
     typer.echo(f"  {f['description']}")
     typer.echo(f"  {style.dim('supports_targets:')} {f['supports_targets']}")
+    if f.get("depends_on"):
+        typer.echo(
+            f"  {style.dim('depends_on:')} {', '.join(style.name(d) for d in f['depends_on'])}"
+            f"  {style.dim('(a comparator: runs after these in the same run)')}"
+        )
     for label, fields in (("config", f["config"]), ("secrets", f["secrets"]),
                           ("target_schema", f["target_schema"])):
         if fields:
@@ -709,6 +750,10 @@ def describe_cmd(
                     if fld.get("default") is not None else ""
                 )
                 var = f"  {style.dim('env=')}{style.env(fld['env'])}" if fld.get("env") else ""
+                if fld.get("type") == patterns.TYPE:
+                    # Written in the manifest only; the env var is the runner's hand-off, not a user setting.
+                    takes = api.grammar_text(fld.get("prefixes") or (), fld.get("bare", True))
+                    var = f"  {style.dim('takes=')}{style.env(takes)}"
                 typer.echo(
                     f"    - {style.env(fld['name'])} {style.dim('(' + fld['type'] + ',')} "
                     f"{req}{style.dim(')')}{extra}{var}"
@@ -1082,9 +1127,25 @@ def samples_status(
     )
 
 
+def _complete_sampled_fetcher(incomplete: str) -> List[tuple]:
+    """Tab completion for `samples show`: only fetchers that have a sample, each
+    with its version and capture date as the hint. Outside the repo, nothing."""
+    try:
+        rows = api.sample_status(api.find_repo_root())
+    except Exception:
+        return []
+    return [
+        (r["fetcher"], f"v{r['sample_version']} {r['source']} {r['captured_on'] or ''}".rstrip())
+        for r in rows
+        if r["has_sample"] and r["fetcher"].startswith(incomplete)
+    ]
+
+
 @samples_app.command("show")
 def samples_show(
-    fetcher: str = typer.Argument(..., help="Fetcher name"),
+    fetcher: str = typer.Argument(
+        ..., help="Fetcher name", autocompletion=_complete_sampled_fetcher,
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Show one fetcher's sample: how many records were seen, how often each
@@ -1194,18 +1255,24 @@ def validate_cmd(
         else:
             _err(f"Validation failed: {e}")
         raise typer.Exit(1)
-    errors = api.validate(m, root)
+    discovered = {"fetchers": api.discover_fetchers(root), "platforms": api.discover_platforms(root)}
+    errors = api.validate(m, root, **discovered)
+    notes = api.validate_notes(m, root, **discovered)
     if json_out:
-        typer.echo(json.dumps({"ok": not errors, "errors": errors}, indent=2))
+        typer.echo(json.dumps({"ok": not errors, "errors": errors, "notes": notes}, indent=2))
         raise typer.Exit(0 if not errors else 1)
     if errors:
         for err in errors:
             _err(f"  {style.fail('ERROR')}  {err}")
+        for note in notes:
+            _err(f"  {style.dim('NOTE')}   {note}")
         raise typer.Exit(1)
     n = len(m.get("run", {}).get("fetchers", []))
     typer.echo(
         f"{style.verdict(True, 'OK')}  manifest valid; {style.dim(str(n) + ' fetcher entries')}"
     )
+    for note in notes:
+        typer.echo(f"  {style.dim('NOTE')}   {note}")
 
 
 @app.command("run")
@@ -1514,7 +1581,9 @@ def _read_for_edit(path: Path, json_out: bool) -> dict:
         raise typer.Exit(1)
 
 
-def _save_and_report(manifest: dict, path: Path, root: Path, json_out: bool, *, verb: str = "Wrote") -> None:
+def _save_and_report(
+    manifest: dict, path: Path, root: Path, json_out: bool, *, verb: str = "Wrote", extra: Optional[dict] = None,
+) -> None:
     """Dump + validate, then report. Exit 0 even when not-yet-runnable (errors are
     surfaced) so a manifest can be built incrementally; exit 1 only if the dump is
     rejected as structurally invalid."""
@@ -1528,7 +1597,7 @@ def _save_and_report(manifest: dict, path: Path, root: Path, json_out: bool, *, 
         raise typer.Exit(1)
     errors = api.validate(manifest, root)
     if json_out:
-        typer.echo(json.dumps({"ok": not errors, "path": str(path), "errors": errors}, indent=2))
+        typer.echo(json.dumps({"ok": not errors, "path": str(path), "errors": errors, **(extra or {})}, indent=2))
         return
     typer.echo(f"{style.dim(verb)} {style.path(str(path))}")
     if errors:
@@ -1580,12 +1649,16 @@ def manifest_add(
     file: str = typer.Option(_DEFAULT_MANIFEST, "-f", "--file", help="Manifest path"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
-    """Add a fetcher entry to the manifest."""
+    """Add a fetcher entry to the manifest; for a comparator, its inputs too."""
     root = api.find_repo_root()
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
-    api.add_entry(m, fetcher)
-    _save_and_report(m, path, root, json_out)
+    added = api.add_entry(m, fetcher, api.discover(root)["fetchers"])
+    if not json_out:
+        for name, reader in added.items():
+            typer.echo(f"added {style.name(name)}" + (style.dim(f" (input of {reader})") if reader else ""))
+    _save_and_report(m, path, root, json_out,
+                     extra={"added": [{"name": n, "input_of": r} for n, r in added.items()]})
 
 
 @manifest_app.command("remove")
@@ -1650,7 +1723,7 @@ def manifest_add_target(
     vals = {}
     for kv in (values or []):
         k, raw = _parse_kv(kv, path, json_out)
-        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out)
+        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out, target=True)
     secret_env = {}
     for s in (secret or []):
         k, v = _parse_kv(s, path, json_out)
@@ -1679,7 +1752,7 @@ def manifest_set_target(
     vals = {}
     for kv in (values or []):
         k, raw = _parse_kv(kv, path, json_out)
-        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out)
+        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out, target=True)
     secret_env = {}
     for sv in (secret or []):
         k, v = _parse_kv(sv, path, json_out)
@@ -1718,7 +1791,14 @@ def manifest_set_platform_config(
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
-    value = _coerce_or_fail(raw, _platform_config_type(root, category, key), key, path, json_out)
+    cat = api.catalog(root)
+    typ = _platform_config_type(root, category, key, cat)
+    fetcher_types = _category_fetcher_types(root, category, key, cat)
+    if typ == "string" and patterns.TYPE in fetcher_types:
+        typ = patterns.TYPE
+    elif is_env_ref_attempt(raw) and typ == "string":
+        typ = next((t for t in fetcher_types if t != "string"), typ)
+    value = _coerce_or_fail(raw, typ, key, path, json_out)
     api.set_platform_config(m, category, key, value)
     _save_and_report(m, path, root, json_out)
 
@@ -1736,6 +1816,90 @@ def manifest_set_passthrough(
     m = _read_for_edit(path, json_out)
     api.set_passthrough_env(m, category, env_vars)
     _save_and_report(m, path, root, json_out)
+
+
+def _pattern_target(root: Path, target: str, path, json_out: bool):
+    """(scope, fields, mixed, category): the category is the one a fetcher target inherits pattern lists from."""
+    fetchers = api.discover_fetchers(root)
+    try:
+        scope, fields, mixed = api.pattern_fields(target, fetchers, api.discover_platforms(root))
+    except LookupError as e:
+        _fail(path, str(e), json_out)
+    return scope, fields, mixed, api.platform_category(fetchers[target]) if scope == "entry" else None
+
+
+def _pattern_names(items) -> str:
+    return ", ".join(item.pattern for item in items)
+
+
+@manifest_app.command("exclude")
+def manifest_exclude(
+    target: str = typer.Argument(..., help="A category (every fetcher of it) or a fetcher name"),
+    pattern: str = typer.Argument(..., help="The pattern, such as location:eastus2 or rg:rg-sandbox-*"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Why it is out of scope, kept with the pattern"),
+    field: Optional[str] = typer.Option(None, "--field", help="The pattern list, when more than one takes it"),
+    file: str = typer.Option(_DEFAULT_MANIFEST, "-f", "--file", help="Manifest path"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Add a pattern to a category's or a fetcher's pattern list, such as its resource exclusions."""
+    root = api.find_repo_root()
+    path = _resolve_manifest_arg(root, file, json_out)
+    m = _read_for_edit(path, json_out)
+    scope, fields, mixed, category = _pattern_target(root, target, path, json_out)
+    try:
+        name = api.pick_pattern_field(fields, pattern, field)
+        outcome, copied = api.add_pattern(m, scope, target, name, pattern, reason, category)
+    except ValueError as e:
+        hint = ""
+        if mixed and (field in mixed or field is None and str(e).startswith("no pattern list")):
+            hint = (f"; {', '.join(mixed)} takes different patterns in different {target} fetchers, so set it on "
+                    f"each fetcher (paramify manifest exclude <fetcher> {pattern})")
+        _fail(path, f"{e}{hint}", json_out)
+    where = f"{api.pattern_location(scope, target)}.{name}"
+    if copied and not json_out:
+        typer.echo(f"Copied {len(copied)} platform pattern{'' if len(copied) == 1 else 's'} from "
+                   f"platforms.{category}.config.{name} so {target} keeps them: {_pattern_names(copied)}")
+    _save_and_report(m, path, root, json_out, verb=f"{outcome.capitalize()} {pattern} in {where}:",
+                     extra={"field": name, "outcome": outcome, "copied": [c.pattern for c in copied]})
+
+
+@manifest_app.command("unexclude")
+def manifest_unexclude(
+    target: str = typer.Argument(..., help="A category or a fetcher name"),
+    pattern: Optional[str] = typer.Argument(None, help="The pattern to remove"),
+    field: Optional[str] = typer.Option(None, "--field", help="The pattern list, when more than one holds it"),
+    all_: bool = typer.Option(False, "--all", help="Remove every pattern from --field"),
+    file: str = typer.Option(_DEFAULT_MANIFEST, "-f", "--file", help="Manifest path"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Remove a pattern from a category's or a fetcher's pattern list."""
+    root = api.find_repo_root()
+    path = _resolve_manifest_arg(root, file, json_out)
+    m = _read_for_edit(path, json_out)
+    scope, fields, mixed, category = _pattern_target(root, target, path, json_out)
+    names = [field] if field else [*fields, *mixed]
+    if all_ and (pattern is not None or not field) or not all_ and pattern is None:
+        _fail(path, "give a pattern, or --all with --field", json_out)
+    if field and field not in fields and field not in mixed:
+        _fail(path, f"{field!r} is not a pattern list of {target}", json_out)
+    try:
+        removed = {n: api.remove_pattern(m, scope, target, n, None if all_ else pattern, category) for n in names}
+    except ValueError as e:
+        _fail(path, str(e), json_out)
+    hit = [n for n, k in removed.items() if k is not None]
+    if not hit:
+        _fail(path, f"{pattern or field} is not in {target}'s pattern lists", json_out)
+    # An emptied fetcher list stays as [] while its category lists patterns, so they don't come back to it.
+    own = next((e.get("config") or {} for e in m["run"].get("fetchers") or [] if e.get("use") == target), {})
+    kept_empty = [n for n in hit if scope == "entry" and own.get(n) == []]
+    if not json_out:
+        for n in kept_empty:
+            typer.echo(f"{target} keeps {n}: [], so platforms.{category}.config.{n} still doesn't apply to it "
+                       f"({_pattern_names(api.category_patterns(m, category, n))}); to take it again, delete "
+                       f"{n} from {target}'s config")
+    gone = ", ".join(f"{api.pattern_location(scope, target)}.{n}" for n in hit)
+    _save_and_report(m, path, root, json_out, verb=f"Removed {pattern or 'every pattern'} from {gone}:",
+                     extra={"fields": hit, "removed": sum(removed[n] or 0 for n in hit), "kept_empty": kept_empty})
 
 
 @manifest_app.command("set-output-dir")

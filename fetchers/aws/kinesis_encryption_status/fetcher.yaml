@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-KINESIS-ENC
   name: Kinesis Data Stream Encryption
-  instructions: 'Script: fetcher.sh. Commands executed: aws kinesis list-streams, aws kinesis describe-stream-summary.'
+  instructions: 'Script: aws/kinesis_encryption_status/fetcher.sh. Commands executed: aws kinesis list-streams, aws kinesis describe-stream-summary.'

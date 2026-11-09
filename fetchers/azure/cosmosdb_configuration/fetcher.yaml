@@ -1,5 +1,5 @@
 name: azure_cosmosdb_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   For each Azure Cosmos DB database account in the subscription, reports the API kind
   and the posture around it: whether the data is encrypted with a customer-managed Key
@@ -11,6 +11,27 @@ description: >
   encrypted at rest, so the evidence that varies is CMK vs platform-managed, not
   "encrypted: true/false".
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Cosmos DB database account is listed under excluded with
+      the pattern and left out of every count and verdict. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -53,6 +74,16 @@ evidence_set:
   reference_id: EVD-AZURE-COSMOSDB-CONFIG
   name: Azure Cosmos DB Account Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK call (azure-mgmt-cosmosdb CosmosDBManagementClient):
+    Script: azure/cosmosdb_configuration/fetcher.py. Azure SDK call (azure-mgmt-cosmosdb CosmosDBManagementClient):
     database_accounts.list(). Records each account's encryption key source,
     authentication, network exposure, failover and backup policy.
+
+    Cosmos DB accounts the resource_exclusions patterns take out are listed under results.excluded
+    instead, each with the pattern that matched; every count and percentage covers only the accounts
+    that stayed.
+
+    Which resources are left out of scope?
+      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every account is in scope
+      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no Cosmos DB account, such as a mistyped name
+      - excluded_cosmosdb_accounts — Number of accounts left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them; null if the list couldn't be read
+      - in_scope_cosmosdb_accounts — Number of accounts read and in scope; null if the list couldn't be read, and 0 means there are none or the patterns took out every account, which a check can catch by requiring more than 0

@@ -1,0 +1,113 @@
+name: oci_compute_instances
+version: 0.1.0
+description: >-
+  Shows each compute instance's metadata endpoint, boot integrity, in-transit encryption, Oracle Cloud Agent state and public exposure through its VNICs.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_compute_instances.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect instances from. Optional — omit to collect
+      from the tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — instances live
+      in workload compartments, not the tenancy root.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-CNA-MAT      # Minimal attack surface — public IPs, legacy metadata endpoints, NSG coverage
+  - KSI-SVC-VRI      # Cryptographic validation of resource integrity — secure boot, measured boot, TPM
+  - KSI-SVC-SIN      # Information secured — in-transit encryption, memory encryption
+
+evidence_set:
+  reference_id: EVD-OCI-COMPUTE-INSTANCES
+  name: Instance Hardening and Exposure
+  instructions: |
+    Script: oci/compute_instances/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope. Instance metadata values are never read, only their key names.
+
+    Commands Executed:
+    - identity.list_compartments — the compartments beneath the target
+    - compute.list_instances (per compartment) — instances with their launch, platform and agent configuration
+    - compute.list_vnic_attachments (per compartment) — which VNICs belong to which instance
+    - virtual_network.get_vnic (per attached VNIC) — its public IP, network security groups and source/destination check, which the attachment leaves out
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_compute_instances_<compartment>_<region>.json — every live instance with its metadata-service, boot-integrity, in-transit encryption and agent settings, and its VNICs with public IPs and network security groups.
+
+    Summary fields:
+
+    Which instances exist?
+    - compute_readable — True if the instance listing was read in at least one compartment; false if every listing failed
+    - total_instances — Number of live instances (terminated ones left out)
+    - running_instances — Number of instances in the RUNNING, STARTING or PROVISIONING state
+
+    Is the legacy metadata endpoint off?
+    - instances_with_legacy_metadata_endpoint — Number of instances whose legacy (IMDSv1-style) metadata endpoint is explicitly enabled
+    - instances_with_unknown_metadata_endpoint_setting — Number of instances whose response carries no metadata-endpoint setting
+    - legacy_metadata_disabled_percentage — Percentage of instances with a known setting that disable the legacy endpoint = instances with it disabled / (total_instances minus instances_with_unknown_metadata_endpoint_setting) × 100, a whole number; 0 when none is known
+
+    Is boot integrity protected?
+    - shielded_instance_capable_instances — Number of instances on a shape that supports shielded instances (a platform configuration is present)
+    - instances_on_shapes_without_shielded_support — Number of instances on shapes that cannot offer secure boot at all; they are left out of the counts below
+    - secure_boot_enabled — Number of capable instances with secure boot on
+    - measured_boot_enabled — Number of capable instances with measured boot on
+    - tpm_enabled — Number of capable instances with the trusted platform module on
+    - memory_encryption_enabled — Number of capable instances with memory encryption on
+    - secure_boot_percentage_of_capable — Percentage of capable instances with secure boot = secure_boot_enabled / shielded_instance_capable_instances × 100, a whole number; 0 when none is capable
+
+    Is traffic to volumes encrypted?
+    - in_transit_encryption_enabled — Number of instances launched with paravirtualized in-transit encryption on
+    - in_transit_encryption_disabled — Number of instances launched with it explicitly off
+    - in_transit_encryption_unknown — Number of instances whose launch options carry no setting
+
+    Is anything watching the host?
+    - instances_with_all_plugins_disabled — Number of instances with every Oracle Cloud Agent plugin disabled
+    - instances_with_monitoring_disabled — Number of instances with agent monitoring disabled
+    - instances_with_management_disabled — Number of instances with agent management disabled
+    - instances_running_vulnerability_scanning — Number of instances with the Vulnerability Scanning plugin enabled
+
+    What is reachable from outside?
+    - instances_with_unreadable_vnics — Number of instances with a VNIC that could not be read; their exposure is unknown and they are left out of the counts below
+    - instances_with_public_ip — Number of instances (VNICs read) with a public IP on any VNIC
+    - public_instance_percentage — Percentage of instances with VNICs read that have a public IP = instances_with_public_ip / instances with VNICs read × 100, a whole number; 0 when none was read
+    - public_instances_without_nsg — Number of public instances with at least one VNIC in no network security group
+    - instances_with_source_dest_check_disabled — Number of VNICs that skip the source/destination check and so may forward traffic they did not originate
+    - instance_names_with_public_ip — List of instance names, with the last characters of their OCID, that have a public IP

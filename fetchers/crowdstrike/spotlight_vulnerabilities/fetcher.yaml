@@ -58,7 +58,7 @@ evidence_set:
   reference_id: EVD-CS-SPOTLIGHT-VULNS
   name: CrowdStrike Spotlight Vulnerabilities
   instructions: >-
-    Script: fetcher.py. Authenticates at POST /oauth2/token, then pages
+    Script: crowdstrike/spotlight_vulnerabilities/fetcher.py. Authenticates at POST /oauth2/token, then pages
     GET /spotlight/combined/vulnerabilities/v1 with the configured FQL filter
     and the host_info/cve/remediation facets, following the `after` cursor.
     Summarizes findings by severity, ExPRT rating, exploit status, remediation

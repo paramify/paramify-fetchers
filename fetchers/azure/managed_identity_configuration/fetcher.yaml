@@ -1,5 +1,5 @@
 name: azure_managed_identity_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   Inventories the Azure managed identities in the subscription — the non-user accounts Azure
   resources sign in as. For every user-assigned identity: the resources it is attached to, its
@@ -9,6 +9,41 @@ description: >
   judged by what its permissions allow — full control, granting access, reading keys, full data
   access — not by its name, so custom roles are judged the same way as built-in ones.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope,
+      as case-insensitive glob patterns listed in the manifest, each with
+      a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as
+      eastus2; a resource with no location never matches one) or
+      id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching user-
+      assigned identity is listed under excluded with the pattern and left
+      out of every count and verdict. A system-assigned identity follows
+      the resource it belongs to: a pattern matching that resource's id,
+      resource group or region takes the identity out. An in-scope
+      identity keeps every role assignment and attached resource, even at
+      an excluded scope or on an excluded resource; they are its own
+      access. An identity a pattern matches stays in scope while it holds an
+      Azure role at an in-scope scope (the subscription or wider, a group or
+      resource no pattern matches, or a user-assigned identity kept this way),
+      since whoever controls it reaches into the boundary through it; it
+      carries kept_by_identity_rule, the pattern it was kept despite. If the
+      role-assignment list couldn't be read, every identity a pattern
+      matches stays this way, since what it reaches is unknown.
+      Excluded identities get no federated-credential or
+      Microsoft Graph reads. A pattern without one of these prefixes fails the
+      run.
+      Set it once under platforms.azure.config for every Azure fetcher
+      that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -48,7 +83,7 @@ evidence_set:
   reference_id: EVD-AZURE-MANAGED-IDENTITY-CONFIG
   name: Azure Managed Identity Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-msi ManagedServiceIdentityClient
+    Script: azure/managed_identity_configuration/fetcher.py. Azure SDK calls: azure-mgmt-msi ManagedServiceIdentityClient
     user_assigned_identities.list_by_subscription(); Azure Resource Graph
     (resources | where isnotnull(identity)) for every resource's identity block, paged to the end and
     checked against the reported total; azure-mgmt-authorization
@@ -87,9 +122,12 @@ evidence_set:
     identity's graph_app_roles is then null and counted in identities_graph_roles_unknown), failed, or
     not_read when there were no identities to look up. Each
     Graph permission records its resource, the resource's app id and the permission name. privileged is
-    judged only for Microsoft Graph's own permissions: true for ReadWrite or FullControl permissions,
-    Mail.Send, and tenant-wide reads of mail, files, sites, chats, calendars, contacts and notes (such as
-    Mail.Read, Files.Read.All, Sites.Read.All); false for other Graph permissions and for any other API;
+    judged only for Microsoft Graph's own permissions, the same way azure_entra_service_principals judges
+    an application permission, ignoring case: true for ReadWrite or FullControl permissions, Mail.Send,
+    tenant-wide reads of mail, files, sites, chats, calendars, contacts and notes (such as Mail.Read,
+    Files.Read.All, Sites.Read.All), and permissions that let the holder grant itself more access, take
+    over users' sign-in or change the tenant's security controls (such as User.ManageIdentities.All);
+    false for other Graph permissions and for any other API;
     null when the permission or its resource could not be resolved, which also counts the identity in
     identities_graph_roles_unknown. Default access (no app role) is not privileged.
     Role assignments are those visible from this subscription; assignments the same identity holds in
@@ -97,3 +135,14 @@ evidence_set:
     group and root scopes. Lists that could not be read are null and set metadata.partial_failure.
     provider_registration_status (registered / not_registered / unknown) is the
     Microsoft.ManagedIdentity resource provider's state.
+    Identities the resource_exclusions patterns take out are listed under results.excluded
+    instead, each with the pattern that matched (a system-assigned identity is named by the
+    resource it belongs to). The summary gives resource_exclusion_patterns (the configured
+    patterns, empty when none are set), resource_exclusion_patterns_unmatched (patterns that
+    matched no identity or resource holding one, such as a mistyped name),
+    excluded_user_assigned_identities and excluded_system_assigned_identities (how many the
+    patterns took out, null if the list couldn't be read; no other count includes them) and in_scope_user_assigned_identities and
+    in_scope_system_assigned_identities (how many stayed; null if that list couldn't be read). An identity a pattern matches stays
+    in scope, and counts in in_scope_*, while it holds an Azure role at an in-scope scope or on
+    a user-assigned identity kept this way, or while the role-assignment list couldn't be read; its record
+    carries kept_by_identity_rule, the pattern it was kept despite.

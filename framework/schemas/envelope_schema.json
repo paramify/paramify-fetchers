@@ -37,6 +37,44 @@
             "description": { "type": "string" },
             "frequency": { "type": "string" }
           }
+        },
+        "inputs": {
+          "type": "array",
+          "description": "A comparator's inputs, written by the runner from its own records: one row per input file from the same run, or one per input that wrote none. Present only on a comparator's envelope. See docs/comparators.md.",
+          "items": {
+            "type": "object",
+            "required": ["fetcher_name", "status"],
+            "properties": {
+              "fetcher_name": { "type": "string" },
+              "target": { "type": ["object", "null"] },
+              "run_id": { "type": ["string", "null"] },
+              "collected_at": { "type": ["string", "null"] },
+              "status": { "type": "string", "enum": ["success", "failed", "missing"] },
+              "file": { "type": ["string", "null"], "description": "Path relative to the run directory." }
+            }
+          }
+        },
+        "config_patterns": {
+          "type": "object",
+          "description": "The pattern lists (`type: patterns` config fields, such as resource_exclusions) the fetcher received, keyed by field: each pattern in manifest order, its reason (null when the manifest gives none), and the manifest layer that set the list. Present only when the fetcher received at least one pattern. See docs/config_injection_guide.md.",
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["pattern", "reason", "source"],
+              "additionalProperties": false,
+              "properties": {
+                "pattern": { "type": "string" },
+                "reason": { "type": ["string", "null"] },
+                "source": {
+                  "type": "string",
+                  "enum": ["entry", "platform", "default"],
+                  "description": "entry: the fetcher's own manifest entry; platform: platforms.<category>.config; default: the field's fetcher.yaml default."
+                }
+              }
+            }
+          }
         }
       }
     },

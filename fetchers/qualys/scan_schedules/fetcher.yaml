@@ -1,0 +1,93 @@
+name: qualys_scan_schedules
+version: 0.1.0
+description: >-
+  Shows which Qualys VMDR scan schedules are active and how often they run,
+  whether their option profiles scan with authentication, and how recent scans
+  ended.
+category: qualys
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: qualys_scan_schedules.json
+
+secrets: []          # username / password, api_url and private_cloud_host come from _categories/qualys.yaml
+
+ksis:
+  - KSI-CNA-EIS
+
+evidence_set:
+  reference_id: EVD-QUALYS-SCAN-SCHEDULES
+  name: Qualys Scan Schedules
+  instructions: |
+    Script: qualys/scan_schedules/fetcher.py
+
+    Access: A local Qualys user with the Reader role and API access, assigned the All asset group. A subscription setting can hide schedules on unassigned assets from a Reader, so the evidence records which asset groups it sees. Assumed from the API guide, not seen on a live subscription: a user that sees the All group sees every asset. Under tag-based user scoping that may not hold, and then every count here is too low while scope_all still reads true.
+
+    Commands Executed:
+    - GET /api/2.0/fo/asset/group/?action=list — the asset groups the API user can see, to show whether its scope covers every asset
+    - GET /api/4.0/fo/subscription/option_profile/vm/?action=list — every VM option profile, keeping only its title and the authentication types it enables; no other profile setting is stored
+    - GET /api/5.0/fo/schedule/scan/?action=list — every VM scan schedule, active or not, with its recurrence, target and option profile
+    - GET /api/3.0/fo/scan/?action=list&launched_after_datetime=(now minus the window) — the VM scans launched within the window and how each ended
+
+    Output: qualys_scan_schedules.json — one item per schedule with its recurrence, the longest gap in days between its runs (a month counts as 31 days), target asset groups, option profile and that profile's authentication types; one item per scan launched in the window with its type and state; and each option profile's authentication types. Assumed from the API guide, not seen on a live subscription: the v4 option profile list call (/api/4.0/fo/subscription/option_profile/vm/?action=list) answers on the subscription's platform with each profile's title in BASIC_INFO/GROUP_NAME; if it does not, the option profile read fails, every active schedule reads authentication unread, and the run exits non-zero. Also assumed: an option profile's SCAN/AUTHENTICATION lists the authentication types it enables; if it lists the types available instead, active_schedules_with_authentication overstates, and if it is missing, every schedule's authentication reads unread. Also assumed: a schedule's ACTIVE is 0 when inactive and 1, 2 or 3 when active; if 2 or 3 mean paused, every count of active schedules includes schedules that do not run, among them active_schedules, active_schedules_within_window, active_schedules_with_authentication, active_schedules_without_authentication and active_schedules_authentication_unread. A read that failed leaves its fields null and the run exits non-zero.
+
+    Summary fields:
+
+    Which scan schedules exist?
+    - total_schedules — Number of VM scan schedules the API user can see
+    - active_schedules — Number of those that are active
+    - inactive_schedules — Number that are deactivated
+    - active_schedules_by_recurrence — Number of active schedules for each recurrence:
+      - daily (every so many days)
+      - weekly (every so many weeks)
+      - monthly (every so many months)
+      - once (a single launch, not recurring)
+      - not_returned (Qualys gave no schedule details)
+
+    How often do the active schedules run?
+    - scan_window_days — The window in days, from the scan_window_days setting (default 31, so a monthly schedule fits)
+    - active_schedules_within_window — Number of active recurring schedules whose longest gap between runs fits in the window
+    - active_schedules_over_window — Number of active recurring schedules whose longest gap between runs is longer than the window
+    - active_schedules_interval_unread — Number of active recurring schedules whose interval could not be read
+
+    Do they scan with authentication?
+    - active_schedules_with_authentication — Number of active schedules whose option profile enables at least one authentication type
+    - active_schedules_without_authentication — Number of active schedules whose option profile enables none
+    - active_schedules_authentication_unread — Number of active schedules whose option profile was not found or could not be read
+    - option_profiles — Number of VM option profiles; null if they could not be read
+    - option_profiles_with_authentication — Number of option profiles that enable at least one authentication type; null if that could not be read
+
+    Did scans run in the window?
+    - scans_in_window — Number of VM scans launched within the window; null if the scan list could not be read
+    - scans_by_state — Number of those scans for each state Qualys reports:
+      - finished (completed)
+      - running (still running)
+      - queued (waiting to start)
+      - loading (results being processed)
+      - paused (paused)
+      - canceled (canceled before it finished)
+      - error (ended with an error)
+      - other (a state not listed here)
+      - not_returned (Qualys gave no state)
+    - scans_by_type — Number of those scans for each way they were launched:
+      - scheduled (by a schedule)
+      - on_demand (by a person)
+      - api (through the API)
+      - other (a launch type not listed here)
+      - not_returned (Qualys gave no type)
+    - scheduled_scans_finished_in_window — Number of scans launched by a schedule within the window that finished
+
+    Does the API user see every asset?
+    - scope_all — True if the built-in All asset group is among the groups the API user sees; false if not; null if the groups could not be read
+    - visible_asset_groups — Number of asset groups the API user sees; null if they could not be read
+  description: >-
+    Shows which Qualys VMDR scan schedules are active and how often they run,
+    whether their option profiles scan with authentication, and how recent scans
+    ended.

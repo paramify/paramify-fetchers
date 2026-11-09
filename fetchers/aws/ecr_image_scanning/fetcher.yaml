@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-ECR-IMAGE-SCANNING
   name: ECR Image Scanning Configuration
-  instructions: 'Script: fetcher.sh. Commands executed: aws ecr describe-repositories, aws ecr get-registry-scanning-configuration, aws ecr describe-images, aws ecr describe-image-scan-findings.'
+  instructions: 'Script: aws/ecr_image_scanning/fetcher.sh. Commands executed: aws ecr describe-repositories, aws ecr get-registry-scanning-configuration, aws ecr describe-images, aws ecr describe-image-scan-findings.'

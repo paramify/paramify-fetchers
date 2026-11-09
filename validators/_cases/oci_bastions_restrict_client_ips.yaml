@@ -1,0 +1,14 @@
+validator: oci_bastions_restrict_client_ips
+cases:
+  - name: allow_list_in_place
+    expect: PASS
+    note: the live bastion, allow-list 10.0.0.0/16
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_bastions": 1, "bastions_open_to_any_client_ip": 0}}'
+
+  - name: open_to_the_internet
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_bastions": 1, "bastions_open_to_any_client_ip": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"open_bastions": 0}}'

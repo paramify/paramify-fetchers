@@ -46,6 +46,8 @@ The keys worth checking:
 | `run_id`, `collected_at` | Which run, and when |
 | `target` | The project, account, or page a fan-out fetcher ran against; `null` otherwise |
 | `evidence_set` | The Paramify evidence set it uploads to |
+| `inputs` | On a [comparator](comparators_guide.md#6-read-the-verdicts) only: the files from this run it compared |
+| `config_patterns` | Only when the fetcher received a [pattern list](config_injection_guide.md#5-leave-resources-out-of-scope): each pattern, its reason, and whether the entry, the platform or the field's default set it |
 
 ## 3. Spot a failed collection
 

@@ -477,3 +477,21 @@ def test_launch_refuses_a_manifest_that_does_not_exist(monkeypatch, tmp_path):
 
     with pytest.raises(SystemExit, match="no such manifest"):
         tui_main.launch("ghost")
+
+
+def test_adding_a_comparator_adds_its_inputs(tmp_path):
+    manifest = _write_manifest(tmp_path)
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.press(*"demo_policy_check", "enter")
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+    _run(body, manifest)
+    uses = [e["use"] for e in api.read_manifest(manifest)["run"]["fetchers"]]
+    assert uses[-2:] == ["demo_policy_check", "demo_hello"]

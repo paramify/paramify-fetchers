@@ -31,8 +31,12 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from diagnostics import audit_logging_summary  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_container_workloads_configuration")
+
+KINDS = ("environment", "container_app", "job", "container_group")
 
 # A plain (non-secret) environment variable whose name suggests it carries a credential.
 SECRET_NAME_MARKERS = (
@@ -415,7 +419,25 @@ def summarize(environments, apps, jobs, groups) -> dict:
     }
 
 
-def collect(subscription_id, cred, collector: Collector) -> tuple:
+def split_workloads(items: list[dict], kind: str, excluded_envs: dict, exclusions: ResourceExclusions) -> tuple:
+    """An app or job leaves scope when a pattern matches it, or with its managed environment."""
+    kept, excluded = exclusions.split(items, kind)
+    in_scope = []
+    for item in kept:
+        env = excluded_envs.get((item["environment_id"] or "").lower())
+        if env is None:
+            in_scope.append(item)
+        else:
+            excluded.append(excluded_item(
+                kind, item["name"], env["pattern"], "environment_matched", id=item["id"],
+                resource_group=item["resource_group"], location=item["location"], matched_id=env["id"]))
+    return in_scope, excluded
+
+
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None) -> tuple:
+    """Excluded resources go to `excluded` and get no per-resource reads."""
+    exclusions = exclusions or ResourceExclusions()
     def _clients():
         from azure.mgmt.appcontainers import ContainerAppsAPIClient  # lazy
         from azure.mgmt.containerinstance import (
@@ -427,29 +449,36 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
 
     clients = collector.guard("container clients (init)", _clients)
     if clients is None:
-        return [], [], [], []
+        return None, None, None, None
     apps_client, aci_client = clients
 
     environments = collector.guard(
         "appcontainers.managed_environments.list_by_subscription",
         lambda: [project_environment(e) for e in apps_client.managed_environments.list_by_subscription()],
-        default=[],
     )
     apps = collector.guard(
         "appcontainers.container_apps.list_by_subscription",
         lambda: [project_workload("container_app", a) for a in apps_client.container_apps.list_by_subscription()],
-        default=[],
     )
     jobs = collector.guard(
         "appcontainers.jobs.list_by_subscription",
         lambda: [project_workload("job", j) for j in apps_client.jobs.list_by_subscription()],
-        default=[],
     )
     groups = collector.guard(
         "containerinstance.container_groups.list",
         lambda: [project_container_group(g) for g in aci_client.container_groups.list()],
-        default=[],
     )
+    read = tuple(listed is not None for listed in (environments, apps, jobs, groups))
+    environments, apps, jobs, groups = environments or [], apps or [], jobs or [], groups or []
+    all_environments = environments
+    environments, out = exclusions.split(environments, "environment")
+    excluded_envs = {e["id"].lower(): e for e in out if e["id"]}
+    apps, out_apps = split_workloads(apps, "container_app", excluded_envs, exclusions)
+    jobs, out_jobs = split_workloads(jobs, "job", excluded_envs, exclusions)
+    groups, out_groups = exclusions.split(groups, "container_group")
+    if excluded is not None:
+        excluded += sorted(out + out_apps + out_jobs + out_groups, key=lambda e: (e["kind"], e["id"] or ""))
+    exclusions.warn_unmatched(logger)
     monitor = (
         collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))
         if environments or groups
@@ -464,7 +493,7 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
             lambda: list_diagnostic_settings(monitor, resource["id"]),
         )
 
-    env_by_id = {(e["id"] or "").lower(): e for e in environments}
+    env_by_id = {(e["id"] or "").lower(): e for e in all_environments}
     for env in environments:
         env["diagnostic_settings"] = diagnostics_for(env)
         env["audit_logs_exported"] = environment_logs_exported(env["app_logs_destination"], env["diagnostic_settings"])
@@ -489,7 +518,8 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
         )["audit_logging_enabled"]
         group["logs_exported"] = True if group["log_analytics_configured"] else via_settings
     key = lambda r: r["id"] or ""  # noqa: E731
-    return sorted(environments, key=key), sorted(apps, key=key), sorted(jobs, key=key), sorted(groups, key=key)
+    # None for a list that wasn't read.
+    return tuple(sorted(records, key=key) if ok else None for records, ok in zip((environments, apps, jobs, groups), read))
 
 
 def main() -> int:
@@ -507,10 +537,12 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    environments: list = []
-    apps: list = []
-    jobs: list = []
-    groups: list = []
+    environments: list | None = None
+    apps: list | None = None
+    jobs: list | None = None
+    groups: list | None = None
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     registration = {}
     if subscription_id and cred is not None:
         for namespace in ("Microsoft.App", "Microsoft.ContainerInstance"):
@@ -521,7 +553,7 @@ def main() -> int:
                     namespace,
                     subscription_id,
                 )
-        environments, apps, jobs, groups = collect(subscription_id, cred, collector)
+        environments, apps, jobs, groups = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -537,6 +569,11 @@ def main() -> int:
         ),
     }
 
+    exclusions.record_invalid(collector)
+    in_scope = {name: None if records is None else len(records) for name, records in (
+        ("environments", environments), ("container_apps", apps), ("jobs", jobs), ("container_groups", groups))}
+    environments, apps, jobs, groups = environments or [], apps or [], jobs or [], groups or []
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -546,9 +583,14 @@ def main() -> int:
             "container_apps": apps,
             "jobs": jobs,
             "container_groups": groups,
+            "excluded": excluded,
             **registration,
         },
-        summary={**summarize(environments, apps, jobs, groups), **registration},
+        summary={
+            **summarize(environments, apps, jobs, groups),
+            **registration,
+            **exclusions.summary(excluded, KINDS, in_scope),
+        },
     )
     filename = f"azure_container_workloads_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

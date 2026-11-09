@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-FIREHOSE-ENC
   name: Firehose Encryption
-  instructions: 'Script: fetcher.sh. Commands executed: aws firehose list-delivery-streams, aws firehose describe-delivery-stream.'
+  instructions: 'Script: aws/firehose_encryption_status/fetcher.sh. Commands executed: aws firehose list-delivery-streams, aws firehose describe-delivery-stream.'

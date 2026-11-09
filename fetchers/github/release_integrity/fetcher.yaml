@@ -1,0 +1,74 @@
+name: github_release_integrity
+version: 0.1.0
+description: >-
+  Whether released software can be verified and cannot be swapped: build
+  provenance attestations on each release asset (looked up by the asset's
+  sha256 digest, statement checked to name it), immutable releases at the
+  organization and repository, and active tag rulesets that block moving or
+  deleting each release's tag.
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: github_release_integrity.json
+  aggregation: per_target
+
+config_schema:
+  releases_per_repository:
+    type: integer
+    required: false
+    default: 10
+    env: GITHUB_RELEASES_PER_REPOSITORY
+    description: >-
+      The newest releases checked per repository. Each asset costs one call.
+
+secrets: []
+
+ksis:
+  - KSI-SVC-VRI
+  - KSI-SCR-MIT
+
+evidence_set:
+  reference_id: EVD-GITHUB-RELEASE-INTEGRITY
+  name: GitHub Release Integrity
+  instructions: >-
+    Script: github/release_integrity/fetcher.py. Per repository, the newest releases with each asset's sha256 digest and
+    the attestations GitHub holds for it (count, predicate types, whether the
+    statement names the digest; signatures are not verified), whether each
+    release is immutable, and whether active tag rulesets block deleting and
+    moving its tag. Organization immutable-release policy.

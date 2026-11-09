@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-MEMORYDB-ENC
   name: MemoryDB Encryption
-  instructions: 'Script: fetcher.sh. Commands executed: aws memorydb describe-clusters.'
+  instructions: 'Script: aws/memorydb_encryption_status/fetcher.sh. Commands executed: aws memorydb describe-clusters.'

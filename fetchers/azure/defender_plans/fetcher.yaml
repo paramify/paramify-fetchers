@@ -1,5 +1,5 @@
 name: azure_defender_plans
-version: 0.2.0
+version: 0.3.0
 description: >
   Every Microsoft Defender for Cloud pricing plan on the subscription (Servers,
   Storage Accounts, Containers, SQL, Key Vault, App Services, …) with its pricing
@@ -17,7 +17,14 @@ description: >
   plans that do not cover every resource (an enabled plan Azure reports no
   coverage status for is listed there as unknown, never read as covered), and
   deprecated and inherited plans; it
-  makes no judgement about which plans a system needs. A subscription that never
+  makes no judgement about which plans a system needs. It also reads the
+  subscription's Defender for Cloud security contacts: the notification addresses,
+  whether a phone number is set, whether alert notifications are on and from which
+  minimal severity, and whether owners or other roles are notified. The contact
+  list is null (and the run fails) when it could not be read, and empty when there
+  are none. The contacts are read over raw ARM at api-version 2020-01-01-preview,
+  the newest one Azure Government offers, and either response shape (a bare list
+  or a value page) is accepted. A subscription that never
   registered the Microsoft.Security resource provider reports
   provider_registration_status: not_registered, which is valid evidence ("not in
   use") rather than a collection failure. Needs Reader (or Security Reader).
@@ -55,12 +62,27 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 ksis:
   - KSI-CNA-EIS      # Automated services persistently assess resource security — which Defender plans are enabled
   - KSI-SVC-EIS      # Evaluate and improve security — the per-plan vulnerability-scanning extensions
+  - KSI-MLA-RVL      # Security contacts: whether Defender alerts are routed to a person (same reading as alert_rules)
 
 evidence_set:
   reference_id: EVD-AZURE-DEFENDER
   name: Microsoft Defender for Cloud Plans
   instructions: >
-    Script: fetcher.py. Azure SDK call (azure-mgmt-security SecurityCenter):
+    Script: azure/defender_plans/fetcher.py. Azure SDK call (azure-mgmt-security SecurityCenter):
     pricings.list(scope_id="subscriptions/<subscription_id>") (api-version
     2024-01-01) for every Defender for Cloud plan, with its tier, sub-plan,
     enablement time, coverage status, enforcement, deprecation and inheritance.
+    Raw ARM call: GET /subscriptions/<subscription_id>/providers/Microsoft.Security/securityContacts
+    (api-version 2020-01-01-preview, the newest Azure Government offers; a bare
+    list or a value page with nextLink, followed to the end) for the
+    subscription's Defender for Cloud security contacts, listed under
+    results.security_contacts with each contact's notification addresses and
+    their count, whether a phone number is set, whether alert notifications are
+    on and from which minimal severity, and whether owners or other roles are
+    notified. results.security_contacts is null when the list could not be read
+    (the run fails) and empty when there are none. The summary adds
+    security_contacts (number of contacts), security_contacts_with_alert_notifications_on,
+    security_contacts_with_role_notifications_on, security_contact_emails (number
+    of notification addresses across every contact) and
+    alert_notification_minimal_severities (the distinct minimal severities set);
+    all null when the list could not be read.

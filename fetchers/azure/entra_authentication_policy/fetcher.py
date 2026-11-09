@@ -25,12 +25,23 @@ is enabled. Four tenant-level reads:
   banned-password list needs P1. On a Free tenant the directory setting can still
   read as enabled while the custom list is not enforced, so the list is reported as
   enforced only when it is both configured and licensed.
+- `GET /organization/{id}/certificateBasedAuthConfiguration` and, when granted
+  PublicKeyInfrastructure.Read.All, the PKI-based trust store
+  (`GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations` and each
+  one's certificateAuthorities): the certificate authorities trusted for
+  certificate-based sign-in, each with its expiry (read from the certificate) and
+  revocation list.
+- With X.509 enabled, `GET /users` ($select authorizationInfo) and each targeted
+  group's transitive members: which enabled member accounts the X.509 method targets,
+  whether a username binding can match each to a certificate, and which weaker
+  methods still apply to them.
 """
 
 import asyncio
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -50,6 +61,7 @@ from entra_graph import (  # noqa: E402
     aguard,
     graph_attr,
     graph_list,
+    is_denied,
     paginate,
     resolve_tenant,
     tenant_filename_key,
@@ -98,6 +110,35 @@ PREMIUM_P2_PLAN = "AAD_PREMIUM_P2"
 TIER_FREE = "free"
 TIER_P1 = "p1"
 TIER_P2 = "p2"
+
+# A method target naming every user, in place of a group id.
+ALL_USERS = "all_users"
+# Email one-time passcodes sign in guests only, so they are no member's sign-in method.
+GUEST_ONLY_METHODS = frozenset({"email"})
+# The two places Entra keeps the CAs trusted for certificate sign-in, and how each read went.
+STORE_CLASSIC = "certificate_based_auth_configuration"
+STORE_PKI = "public_key_infrastructure"
+STORE_READ = "read"
+STORE_NOT_AUTHORIZED = "not_authorized"
+STORE_NOT_AVAILABLE = "not_available"
+STORE_FAILED = "failed"
+# Optional: without one, its store reads null and names the grant, and the run still succeeds.
+CLASSIC_PERMISSION = "Organization.Read.All"
+PKI_PERMISSION = "PublicKeyInfrastructure.Read.All"
+# The certificate field each certificate user id type names (X509:<SKI>… is a SubjectKeyIdentifier id).
+CERTIFICATE_ID_FIELDS = {"pn": "PrincipalName", "rfc822": "RFC822Name", "ski": "SubjectKeyIdentifier",
+                         "sha1-pukey": "SHA1PublicKey", "s": "Subject"}
+ISSUER_ID_FIELDS = ("IssuerAndSerialNumber", "IssuerAndSubject")
+# User properties holding a name: only the certificate shows whether it carries that name.
+NAME_PROPERTIES = {"userprincipalname": "user_principal_name",
+                   "onpremisesuserprincipalname": "on_premises_user_principal_name"}
+MAPPING_ID = "certificate_user_id"
+MAPPING_UNVERIFIED = "unverified"
+MAPPING_NONE = "none"
+# The evidence lists at most this many of the targeted users that fail a check.
+MAX_LISTED_USERS = 100
+USER_SELECT = ("id", "userPrincipalName", "userType", "accountEnabled", "onPremisesUserPrincipalName",
+               "authorizationInfo")
 
 
 # --- projections: the only code here that touches a Graph model ---
@@ -152,6 +193,18 @@ def project_method_settings(method_id: str, config) -> dict:
             ),
             "certificate_user_binding_count": len(
                 getattr(config, "certificate_user_bindings", None) or []
+            ),
+            "certificate_user_bindings": sorted(
+                (
+                    {
+                        "x509_certificate_field": graph_attr(b, "x509_certificate_field"),
+                        "user_property": graph_attr(b, "user_property"),
+                        "priority": graph_attr(b, "priority"),
+                        "trust_affinity_level": graph_attr(b, "trust_affinity_level"),
+                    }
+                    for b in getattr(config, "certificate_user_bindings", None) or []
+                ),
+                key=lambda b: (b["priority"] is None, b["priority"] or 0),
             ),
         }
     if mid == "microsoftauthenticator":
@@ -271,6 +324,98 @@ def project_sku(sku) -> dict:
             }
             - {None}
         ),
+    }
+
+
+def certificate_details(der) -> dict:
+    """The certificate's subject, validity and SHA-1 thumbprint; None throughout when it is missing or unreadable."""
+    details = {"subject": None, "not_before": None, "not_after": None, "thumbprint": None}
+    if not der:
+        return details
+    # Lazy, but outside the try: a missing package fails the run instead of reading as an unreadable certificate.
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+
+    try:
+        data = bytes(der)
+        cert = (x509.load_pem_x509_certificate(data) if data.lstrip().startswith(b"-----BEGIN")
+                else x509.load_der_x509_certificate(data))
+    except Exception as exc:  # noqa: BLE001 — an unreadable certificate leaves its dates unknown
+        logger.warning("a trusted certificate authority's certificate could not be read: %s", type(exc).__name__)
+        return details
+    return {
+        "subject": cert.subject.rfc4514_string(),
+        "not_before": _utc(cert.not_valid_before_utc),
+        "not_after": _utc(cert.not_valid_after_utc),
+        # SHA-1 is Entra's own thumbprint (the PKI store's `thumbprint`), compared in distinct_authorities: an
+        # identifier, not a security hash.
+        "thumbprint": cert.fingerprint(hashes.SHA1()).hex().upper(),
+    }
+
+
+def _utc(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def project_certificate_authority(authority) -> dict:
+    """One trusted `CertificateAuthority`; the certificate itself is kept out, its subject and dates read from it."""
+    return {
+        "trust_store": STORE_CLASSIC,
+        "display_name": None,
+        "issuer": graph_attr(authority, "issuer"),
+        "issuer_ski": graph_attr(authority, "issuer_ski"),
+        "is_root_authority": graph_attr(authority, "is_root_authority"),
+        "certificate_revocation_list_url": graph_attr(authority, "certificate_revocation_list_url") or None,
+        "delta_certificate_revocation_list_url": graph_attr(authority, "delta_certificate_revocation_list_url") or None,
+        **certificate_details(getattr(authority, "certificate", None)),
+    }
+
+
+def project_pki_authority(authority) -> dict:
+    """One `CertificateAuthorityDetail` from the PKI-based trust store, in the classic store's shape."""
+    kind = str(graph_attr(authority, "certificate_authority_type") or "").lower()
+    details = certificate_details(getattr(authority, "certificate", None))
+    expires = getattr(authority, "expiration_date_time", None)
+    return {
+        "trust_store": STORE_PKI,
+        "display_name": graph_attr(authority, "display_name"),
+        "issuer": graph_attr(authority, "issuer"),
+        "issuer_ski": graph_attr(authority, "issuer_subject_key_identifier"),
+        "is_root_authority": True if kind == "root" else False if kind == "intermediate" else None,
+        "certificate_revocation_list_url": graph_attr(authority, "certificate_revocation_list_url") or None,
+        "delta_certificate_revocation_list_url":
+            graph_attr(authority, "delta_certificate_revocation_list_url") or None,
+        **details,
+        # The service's own expiry and thumbprint stand in when the certificate can't be read.
+        "not_after": details["not_after"] or (_utc(expires) if isinstance(expires, datetime) else None),
+        "thumbprint": details["thumbprint"] or (str(graph_attr(authority, "thumbprint") or "").upper() or None),
+    }
+
+
+def certificate_id_field(value) -> str | None:
+    """The certificate field a certificate user id is for; None when its format isn't one Entra documents."""
+    text = str(value or "")
+    if not text.lower().startswith("x509:<"):
+        return None
+    tag, _, rest = text[6:].partition(">")
+    if tag.lower() == "i":
+        rest = rest.upper()
+        return ISSUER_ID_FIELDS[0] if "<SR>" in rest else ISSUER_ID_FIELDS[1] if "<S>" in rest else None
+    return CERTIFICATE_ID_FIELDS.get(tag.lower())
+
+
+def project_user(user) -> dict:
+    """A user's sign-in identifiers; of its certificate user ids only the count and the types are kept."""
+    info = getattr(user, "authorization_info", None)
+    ids = getattr(info, "certificate_user_ids", None) or []
+    return {
+        "id": graph_attr(user, "id"),
+        "user_principal_name": graph_attr(user, "user_principal_name"),
+        "user_type": graph_attr(user, "user_type"),
+        "account_enabled": graph_attr(user, "account_enabled"),
+        "on_premises_user_principal_name": graph_attr(user, "on_premises_user_principal_name"),
+        "certificate_user_ids_count": len(ids),
+        "certificate_user_id_types": sorted({certificate_id_field(i) for i in ids} - {None}),
     }
 
 
@@ -406,6 +551,208 @@ def method_records(policy: dict | None) -> list[dict]:
     return records
 
 
+def authority_record(authority: dict, now: datetime) -> dict:
+    """A trusted CA with its type, whether it publishes a revocation list, and whether it has expired."""
+    root = authority.get("is_root_authority")
+    not_after = authority.get("not_after")
+    expires = datetime.strptime(not_after, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) if not_after else None
+    return {
+        **authority,
+        "authority_type": None if root is None else "root" if root else "intermediate",
+        "has_crl": bool(authority.get("certificate_revocation_list_url")),
+        "expired": None if expires is None else expires <= now,
+        "days_until_expiry": None if expires is None else (expires - now).days,
+    }
+
+
+def _reaches(targets: list[dict], user_id: str, members: dict) -> bool | None:
+    """Whether the targets name the user, directly, as every user or through a group; None when a group is unread."""
+    unread = False
+    for target in targets:
+        tid = str(target.get("id") or "").lower()
+        if tid == ALL_USERS or tid == user_id:
+            return True
+        if str(target.get("target_type") or "").lower() == "user":
+            continue
+        group = members.get(tid)
+        if group is None:
+            unread = True
+        elif user_id in group:
+            return True
+    return None if unread else False
+
+
+def method_applies(method: dict, user_id: str, members: dict) -> bool | None:
+    """Whether an enabled method reaches the user and doesn't exclude them; None when that needs an unread group."""
+    if not method.get("enabled"):
+        return False
+    uid = str(user_id or "").lower()
+    included = _reaches(method.get("include_targets") or [], uid, members)
+    excluded = _reaches(method.get("exclude_targets") or [], uid, members)
+    if excluded or included is False:
+        return False
+    return None if included is None or excluded is None else True
+
+
+def target_groups(methods: list[dict]) -> set[str]:
+    """The group ids the enabled methods include or exclude, lower-cased."""
+    return {
+        str(t.get("id") or "").lower()
+        for m in methods if m.get("enabled")
+        for t in (m.get("include_targets") or []) + (m.get("exclude_targets") or [])
+        if str(t.get("target_type") or "").lower() != "user" and str(t.get("id") or "").lower() not in ("", ALL_USERS)
+    }
+
+
+def is_weaker_method(method: dict) -> bool:
+    """A member sign-in method other than X.509 that isn't phishing-resistant."""
+    mid = method["id"].lower()
+    return mid != METHOD_X509 and mid not in GUEST_ONLY_METHODS and not method["is_phishing_resistant_method"]
+
+
+def _binding_matches(binding: dict, user: dict) -> bool | None:
+    """Whether the binding can match the user to a certificate; None when only the certificate could tell."""
+    prop = str(binding.get("user_property") or "").lower()
+    field = str(binding.get("x509_certificate_field") or "").lower()
+    if prop == "certificateuserids":
+        known = {f.lower() for f in (*CERTIFICATE_ID_FIELDS.values(), *ISSUER_ID_FIELDS)}
+        if field not in known:
+            return None
+        return field in {t.lower() for t in user.get("certificate_user_id_types") or []}
+    if prop in NAME_PROPERTIES:
+        return None if user.get(NAME_PROPERTIES[prop]) else False
+    return None
+
+
+def _any(values: list) -> bool | None:
+    """True if any is True, else None if any is None, else False."""
+    return True if True in values else None if None in values else False
+
+
+def certificate_user_record(user: dict, bindings: list[dict], methods: list[dict], members: dict) -> dict:
+    """A user the X.509 method targets: whether a binding matches them to a certificate, and the weaker methods
+    that still reach them."""
+    matches = {i: _binding_matches(b, user) for i, b in enumerate(bindings)}
+    high = [matches[i] for i, b in enumerate(bindings) if str(b.get("trust_affinity_level") or "").lower() == "high"]
+    reach = {m["id"]: method_applies(m, user["id"], members) for m in methods if m["enabled"] and is_weaker_method(m)}
+    mapped = _any(list(matches.values())) if bindings else None
+    return {
+        "id": user["id"],
+        "user_principal_name": user.get("user_principal_name"),
+        "certificate_user_ids_count": user.get("certificate_user_ids_count"),
+        "certificate_user_id_types": user.get("certificate_user_id_types") or [],
+        # None when the policy reports no bindings: the rules that would match the user are unknown.
+        "mapping": None if not bindings else {True: MAPPING_ID, None: MAPPING_UNVERIFIED, False: MAPPING_NONE}[mapped],
+        "mapped": mapped,
+        "mapped_high_affinity": _any(high) if bindings else None,
+        "weaker_methods_enabled": sorted(mid for mid, applies in reach.items() if applies),
+        "weaker_methods_unknown": sorted(mid for mid, applies in reach.items() if applies is None),
+        "weaker_method_enabled": _any(list(reach.values())),
+        "weak_method_enabled": _any([a for mid, a in reach.items() if mid.lower() in WEAK_METHODS]),
+    }
+
+
+def certificate_users(policy: dict | None, methods: list[dict], users: list[dict] | None,
+                      members: dict) -> list[dict] | None:
+    """Every enabled member account the X.509 method targets; [] when it is off, None when that can't be told."""
+    if policy is None:
+        return None
+    x509 = next((m for m in methods if m["id"].lower() == METHOD_X509), None)
+    if not (x509 or {}).get("enabled"):
+        return []
+    if users is None:
+        return None
+    bindings = (x509.get("settings") or {}).get("certificate_user_bindings") or []
+    records = []
+    for user in users:
+        if user.get("account_enabled") is False or str(user.get("user_type") or "").lower() == "guest":
+            continue
+        applies = method_applies(x509, user["id"], members)
+        if applies is None:
+            return None
+        if applies:
+            records.append(certificate_user_record(user, bindings, methods, members))
+    return sorted(records, key=lambda r: str(r.get("user_principal_name") or r["id"]).lower())
+
+
+def fails_a_check(user: dict) -> bool:
+    """Not matched to a certificate by a certificate user id, without any, or reached (or maybe) by a weaker method."""
+    return (user["mapping"] != MAPPING_ID or not user["certificate_user_ids_count"]
+            or user["weaker_method_enabled"] is not False)
+
+
+def listed_users(users: list[dict] | None) -> list[dict] | None:
+    """The targeted users that fail a check, the first MAX_LISTED_USERS of them; the counts cover every user."""
+    return None if users is None else [u for u in users if fails_a_check(u)][:MAX_LISTED_USERS]
+
+
+def _count(records: list[dict] | None, test) -> int | None:
+    """How many records pass; None when the list is unknown or any record's answer is."""
+    if records is None:
+        return None
+    answers = [test(r) for r in records]
+    return None if None in answers else sum(1 for a in answers if a)
+
+
+def _ski(authority: dict) -> str:
+    return "".join(ch for ch in str(authority.get("issuer_ski") or "") if ch.isalnum()).lower()
+
+
+def distinct_authorities(authorities: list[dict]) -> list[dict]:
+    """One record per CA. A CA in both stores (same thumbprint, or the same key identifier when a certificate
+    can't be read) is expired or CRL-less if either entry is."""
+    groups: list[list[dict]] = []
+    for authority in sorted(authorities, key=lambda a: not a.get("thumbprint")):
+        thumbprint, ski = authority.get("thumbprint"), _ski(authority)
+        same = next((g for g in groups if (thumbprint and any(a.get("thumbprint") == thumbprint for a in g))
+                     or (not thumbprint and ski and any(_ski(a) == ski for a in g))), None)
+        if same is None:
+            groups.append([authority])
+        else:
+            same.append(authority)
+    return [{"expired": _known_any([a["expired"] for a in entries]), "has_crl": all(a["has_crl"] for a in entries)}
+            for entries in groups]
+
+
+def _known_any(values: list) -> bool | None:
+    """Readings of one certificate: True if any is True, else False if any is known, else None."""
+    return True if True in values else False if False in values else None
+
+
+def summarize_certificates(authorities: list[dict] | None, users: list[dict] | None,
+                           stores: dict | None = None) -> dict:
+    """The CA and certificate-mapping counts; the CA counts are null unless every trust store was read, so an
+    unread store is never counted as empty."""
+    stores = stores or {}
+    complete = authorities is not None and all(
+        (stores.get(store) or {}).get("status") == STORE_READ for store in (STORE_CLASSIC, STORE_PKI))
+    distinct = distinct_authorities(authorities) if complete else None
+    classic, pki = stores.get(STORE_CLASSIC) or {}, stores.get(STORE_PKI) or {}
+    return {
+        "trusted_certificate_authorities": len(distinct) if distinct is not None else None,
+        "expired_certificate_authorities": _count(distinct, lambda a: a["expired"] is True),
+        "certificate_authorities_expiry_unknown": _count(distinct, lambda a: a["expired"] is None),
+        "certificate_authorities_without_crl": _count(distinct, lambda a: not a["has_crl"]),
+        "classic_store_certificate_authorities": classic.get("certificate_authorities"),
+        "classic_store_status": classic.get("status"),
+        "classic_store_missing_permission": classic.get("missing_permission"),
+        "pki_store_certificate_authorities": pki.get("certificate_authorities"),
+        "pki_store_status": pki.get("status"),
+        "pki_store_missing_permission": pki.get("missing_permission"),
+        "x509_targeted_users": len(users) if users is not None else None,
+        "x509_targeted_users_unmapped": _count(
+            users, lambda u: None if u["mapping"] is None else u["mapping"] == MAPPING_NONE),
+        "x509_targeted_users_mapping_unverified": _count(
+            users, lambda u: None if u["mapping"] is None else u["mapping"] == MAPPING_UNVERIFIED),
+        "x509_targeted_users_without_certificate_user_ids": _count(
+            users, lambda u: not u["certificate_user_ids_count"]),
+        "x509_targeted_users_with_weaker_methods": _count(users, lambda u: u["weaker_method_enabled"]),
+        "x509_targeted_users_with_weak_methods": _count(users, lambda u: u["weak_method_enabled"]),
+        "x509_certificate_users_truncated": (
+            None if users is None else sum(1 for u in users if fails_a_check(u)) > MAX_LISTED_USERS),
+    }
+
+
 def summarize(
     policy: dict | None,
     methods: list[dict],
@@ -511,18 +858,133 @@ async def _collect(collector: Collector, cred):
         if len(collector.failures) > before:
             skus = None
 
+        policy = project_methods_policy(policy_model) if policy_model is not None else None
+        authorities, stores = await _certificate_authorities(collector, client, tenant.get("tenant_id"))
+        users, members = await _certificate_targets(collector, client, method_records(policy))
+
         return {
             "tenant": tenant,
-            "policy": project_methods_policy(policy_model) if policy_model is not None else None,
+            "policy": policy,
             "security_defaults_enabled": graph_attr(security_defaults, "is_enabled")
             if security_defaults is not None
             else None,
             "settings": settings,
             "template_defaults": project_template_defaults(template) if template is not None else None,
             "skus": skus,
+            "authorities": authorities,
+            "certificate_authority_stores": stores,
+            "users": users,
+            "members": members,
         }
 
     return await with_graph_client(collector, cred, _work, default=None)
+
+
+async def _certificate_authorities(collector: Collector, client, tenant_id) -> tuple:
+    """(both stores' CAs, None unless both were read; {store: its status, CA count, the grant it lacks, and its own
+    CAs, None when unread})."""
+    classic, classic_status = await _classic_store(collector, client, tenant_id)
+    pki, pki_status = await _pki_store(collector, client)
+    stores = {
+        store: {"status": status, "certificate_authorities": len(cas) if cas is not None else None,
+                "missing_permission": permission if status == STORE_NOT_AUTHORIZED else None, "authorities": cas}
+        for store, cas, status, permission in ((STORE_CLASSIC, classic, classic_status, CLASSIC_PERMISSION),
+                                               (STORE_PKI, pki, pki_status, PKI_PERMISSION))
+    }
+    # An unread store is unknown, never empty, so the combined list needs both.
+    both = classic_status == STORE_READ and pki_status == STORE_READ
+    return (classic + pki if both else None), stores
+
+
+async def _classic_store(collector: Collector, client, tenant_id) -> tuple:
+    """(every CA in the tenant's classic certificate-based authentication configuration, read status); a refused
+    read doesn't fail the run."""
+    operation = "graph.organization.certificateBasedAuthConfiguration.get"
+    if not tenant_id:
+        collector.record(operation, RuntimeError("the tenant id is unknown, so its trusted CAs can't be read"))
+        return None, STORE_FAILED
+    try:
+        configs = await paginate(collector, operation, client.organization.by_organization_id(
+            tenant_id).certificate_based_auth_configuration, raise_on_error=True)
+    except Exception as exc:  # noqa: BLE001 — classified: a refusal is the optional grant missing
+        if is_denied(exc):
+            logger.warning("the classic trust store was refused (needs %s); its CAs read null", CLASSIC_PERMISSION)
+            return None, STORE_NOT_AUTHORIZED
+        collector.record(operation, exc)
+        return None, STORE_FAILED
+    return [project_certificate_authority(a)
+            for c in configs for a in getattr(c, "certificate_authorities", None) or []], STORE_READ
+
+
+async def _pki_store(collector: Collector, client) -> tuple:
+    """(the PKI-based trust store's CAs, read status); a refused read, or a cloud without the API, doesn't fail
+    the run."""
+    operation = "graph.directory.publicKeyInfrastructure.certificateBasedAuthConfigurations"
+    authorities: list[dict] = []
+    try:
+        builder = client.directory.public_key_infrastructure.certificate_based_auth_configurations
+        for pki in await paginate(collector, f"{operation}.get", builder, raise_on_error=True):
+            pid = str(graph_attr(pki, "id") or "")
+            authorities.extend(project_pki_authority(a) for a in await paginate(
+                collector, f"{operation}({pid}).certificateAuthorities.get",
+                builder.by_certificate_based_auth_pki_id(pid).certificate_authorities, raise_on_error=True))
+    except Exception as exc:  # noqa: BLE001 — classified: a refusal is the optional grant missing
+        if is_denied(exc):
+            logger.warning("the PKI-based trust store was refused (needs %s); its CAs read null", PKI_PERMISSION)
+            return None, STORE_NOT_AUTHORIZED
+        if getattr(exc, "response_status_code", None) in (400, 404):
+            logger.warning("the PKI-based trust store isn't available here; its CAs read null")
+            return None, STORE_NOT_AVAILABLE
+        collector.record(operation, exc)
+        return None, STORE_FAILED
+    return authorities, STORE_READ
+
+
+async def _certificate_targets(collector: Collector, client, methods: list[dict]) -> tuple:
+    """(users, {group id: member ids or None}), read only when X.509 is enabled; users is None when its read failed.
+    When X.509 targets groups only, its users come from those groups instead of the whole directory."""
+    x509 = next((m for m in methods if m["enabled"] and m["id"].lower() == METHOD_X509), None)
+    if x509 is None:
+        return None, {}
+    from kiota_abstractions.base_request_configuration import RequestConfiguration
+    from msgraph.generated.groups.item.transitive_members.graph_user.graph_user_request_builder import (
+        GraphUserRequestBuilder,
+    )
+    from msgraph.generated.users.users_request_builder import UsersRequestBuilder
+
+    include = target_groups([{"enabled": True, "include_targets": x509.get("include_targets") or []}])
+    groups_only = all(str(t.get("target_type") or "").lower() != "user" and str(t.get("id") or "").lower() != ALL_USERS
+                      for t in x509.get("include_targets") or [])
+    users = None
+    if not groups_only:
+        config = RequestConfiguration(query_parameters=UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
+            select=list(USER_SELECT), top=999))
+        before = len(collector.failures)
+        users = [project_user(u)
+                 for u in await paginate(collector, "graph.users.get(authorizationInfo)", client.users, config)]
+        if len(collector.failures) > before:
+            users = None
+    group_config = RequestConfiguration(
+        query_parameters=GraphUserRequestBuilder.GraphUserRequestBuilderGetQueryParameters(
+            select=list(USER_SELECT), top=999))
+    members: dict[str, set | None] = {}
+    found: dict[str, dict] = {}
+    for gid in sorted(target_groups(methods)):
+        before = len(collector.failures)
+        rows = await paginate(collector, f"graph.groups({gid}).transitiveMembers.graphUser.get",
+                              client.groups.by_group_id(gid).transitive_members.graph_user, group_config)
+        if len(collector.failures) > before:
+            members[gid] = None
+            continue
+        projected = [project_user(r) for r in rows]
+        members[gid] = {str(u["id"] or "").lower() for u in projected}
+        if gid in include:
+            found.update((str(u["id"] or "").lower(), u) for u in projected)
+    if groups_only:
+        users = None if any(members.get(g) is None for g in include) else list(found.values())
+    logger.info("Read %s user(s) and %d targeted group(s) for X.509 sign-in",
+                len(users) if users is not None else "no", len(members))
+    return users, members
 
 
 def main() -> int:
@@ -550,6 +1012,18 @@ def main() -> int:
         collected.get("settings"), collected.get("template_defaults"), tier
     )
     tenant = collected["tenant"]
+    now = datetime.now(timezone.utc)
+    def records(raw):
+        return None if raw is None else sorted(
+            (authority_record(a, now) for a in raw),
+            key=lambda a: (a["trust_store"], str(a.get("subject") or a.get("issuer") or ""),
+                           str(a.get("issuer_ski") or "")))
+
+    authorities = records(collected.get("authorities"))
+    stores = collected.get("certificate_authority_stores")
+    for store in (stores or {}).values():
+        store["authorities"] = records(store.get("authorities"))
+    users = certificate_users(policy, methods, collected.get("users"), collected.get("members") or {})
 
     # No `provider_registration_status()` call, deliberately: Graph is not an ARM
     # resource provider. Every tenant has an authentication methods policy on every
@@ -567,15 +1041,19 @@ def main() -> int:
                 if policy is not None
                 else None
             ),
-            "authentication_methods": methods,
+            "authentication_methods": methods if policy is not None else None,
             "security_defaults_enabled": collected.get("security_defaults_enabled"),
             "password_protection": passwords,
             "entra_id_tier": tier,
             "subscribed_skus": collected.get("skus"),
+            "trusted_certificate_authorities": authorities,
+            "certificate_authority_stores": stores,
+            "x509_certificate_users": listed_users(users),
         },
-        summary=summarize(
-            policy, methods, collected.get("security_defaults_enabled"), tier, passwords
-        ),
+        summary={
+            **summarize(policy, methods, collected.get("security_defaults_enabled"), tier, passwords),
+            **summarize_certificates(authorities, users, stores),
+        },
     )
 
     filename = f"azure_entra_authentication_policy_{tenant_filename_key(tenant)}.json"
