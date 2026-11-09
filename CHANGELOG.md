@@ -15,11 +15,11 @@ schemas and the `paramify` CLI — not the internal code.
 - **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
   Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
   - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from
-    the identity the `azure_devops_*` fetchers use (DefaultAzureCredential: the
+    the same DefaultAzureCredential chain the `azure_devops_*` fetchers use (the
     `AZURE_*` service principal variables, workload or managed identity, or
-    `az login`) and sends it as a Bearer header. It reuses those fetchers' helper
-    through `fetchers/checkov/_shared/ado_token.py`, and needs `python3` with
-    `azure-identity`, which the `checkov` extra now installs.
+    `az login`) and sends it as a Bearer header. `fetchers/checkov/_shared/ado_token.py`
+    gets the token; it needs `python3` with `azure-identity`, which the `checkov`
+    extra now installs.
   - The checkov category lets the same `AZURE_*` identity variables through as
     the azure category.
   - A PAT still wins, and with neither a PAT nor an Entra identity the fetcher

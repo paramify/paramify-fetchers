@@ -974,10 +974,27 @@ class _Credential:
         return type("AccessToken", (), {"token": ENTRA, "expires_on": 0})()
 
 
-def test_ado_token_reuses_the_azure_devops_fetchers_credential_and_resource(ado_token, monkeypatch, capsys):
+def test_ado_token_asks_for_the_resource_the_azure_devops_fetchers_use():
+    # Only the test reaches across categories; the helper keeps its own copy of the id.
+    spec = importlib.util.spec_from_file_location(
+        "devops_rest_for_test", REPO_ROOT / "fetchers" / "azure" / "_shared" / "devops_rest.py")
+    devops_rest = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(REPO_ROOT / "fetchers" / "azure" / "_shared"))
+    try:
+        spec.loader.exec_module(devops_rest)
+    finally:
+        sys.path.remove(str(REPO_ROOT / "fetchers" / "azure" / "_shared"))
+    assert _ado_token_module().ADO_RESOURCE == devops_rest.ADO_RESOURCE
+
+
+def test_importing_ado_token_leaves_sys_path_unchanged():
+    before = list(sys.path)
+    _ado_token_module()
+    assert sys.path == before
+
+
+def test_ado_token_prints_the_token_for_azure_devops(ado_token, monkeypatch, capsys):
     mod = ado_token
-    import devops_rest
-    assert mod.entra_credential is devops_rest.entra_credential
     cred = _Credential()
     monkeypatch.setattr(mod, "entra_credential", lambda: cred)
     assert mod.main() == 0

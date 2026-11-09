@@ -1,17 +1,22 @@
-"""Prints an Entra access token for Azure DevOps, signed in the way the azure_devops_* fetchers sign in."""
+"""Prints an Entra access token for Azure DevOps, from the DefaultAzureCredential chain the azure_devops_* fetchers use."""
 
 from __future__ import annotations
 
 import logging
 import sys
-from pathlib import Path
+from typing import Any
 
-# Reuse the azure_devops_* fetchers' credential chain and resource id rather than copying them.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "azure" / "_shared"))
-from devops_rest import ADO_RESOURCE, entra_credential  # noqa: E402
-
+# Azure DevOps' first-party application, the audience of an Entra token for it (as in azure/_shared/devops_rest.py).
+ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798"
 NO_TOKEN = 3
 NO_SDK = 4
+
+
+def entra_credential() -> Any:
+    """The ambient Entra identity (service principal, workload or managed identity, az login)."""
+    from azure.identity import DefaultAzureCredential  # lazy
+
+    return DefaultAzureCredential()
 
 
 def main() -> int:
