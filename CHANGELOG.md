@@ -12,6 +12,173 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_devops_work_items` 0.2.0: approval comments that start with an @mention, and the approved percentage.**
+  - **`approval_mentions`** (`AZURE_DEVOPS_APPROVAL_MENTIONS`, `false` by
+    default). Set to `true`, a comment line that starts with one or more
+    @mentions counts as approval when the rest of the line matches
+    `approval_pattern`: with the default pattern, "@Jane Doe approved",
+    "@A @B approved" and "@Jane Doe, approved" count, while "@Jane Doe not
+    approved", "@Jane Doe approved?" and "@Jane Doe please approve" don't. Every
+    mention then reads as the word `@mention`, so a pattern never sees the names:
+    one made with the mention picker (or a markdown comment's `@<id>`) whatever
+    the name's length, and an `@word` typed as plain text, which is one word
+    long. Quoted text and a later move back or rejection still don't count. Off,
+    comments are read exactly as in 0.1.0, where a markdown comment's
+    "@<id> approved" already counted. `azure_change_work_items` reads each item's
+    approval from this evidence, so with the setting on, a mention approval
+    counts there too.
+  - **`approval_types`** (`AZURE_DEVOPS_APPROVAL_TYPES`) names which of the
+    `work_item_types` need an approval. Empty, as by default, every one does. A
+    name that isn't in `work_item_types` is `bad_config`, as the comparator's
+    `CHANGE_RECORD_APPROVAL_TYPES` is, since the type meant would need no
+    approval. Each item gains `approval_required`, and the results' `selection`
+    records both settings.
+  - **Summary.** `approval_types`, `approval_mentions`,
+    `finished_change_items_needing_approval`,
+    `finished_change_items_needing_approval_approved` and
+    `finished_change_items_approved_percentage`. They count finished change items
+    of the approval types only: an open one may still be waiting on its approval,
+    and a refused one (its state or reason naming Rejected, or its state named
+    Removed) was turned down rather than left unapproved. The percentage is a whole
+    number, 0 when no finished item needs an approval, and null when a project's
+    items or any change item's history or comments couldn't be read. The tests now
+    check every summary field against the instructions.
+  - `examples/azure_devops_change_approvals.yaml` shows the settings.
+
+- **`azure_defender_vulnerability_findings`**
+  (`EVD-AZURE-DEFENDER-VULNERABILITY-FINDINGS`): Defender for Cloud vulnerability
+  findings below the recommendation level, read from the securityresources
+  sub-assessments in Azure Resource Graph. One row per container image (registry,
+  repository, digest) and per server with open findings by severity, fix
+  availability, latest scan and oldest open finding; the open findings themselves
+  with CVE id, severity, CVSS, package and fixed version, exploit-steps flag,
+  published date and age. Handles the MDVM (`AzureContainerRegistryVulnerability`)
+  and legacy (`ContainerRegistryVulnerability`) container schemas and
+  `ServerVulnerability`. Totals are computed by Resource Graph, so the evidence
+  cap on the listed findings (`AZURE_VULN_MAX_FINDINGS`, most severe first) never
+  changes a count. No sub-assessments reads as zero with
+  `findings_source_present: false`; a failed read leaves its section null and
+  fails the run. Reader on the subscription is enough. Ages count from each
+  CVE's published date, not from first detection, which sub-assessments do not
+  carry; each finding's `last_scanned_at` is the latest assessment time. Each finding is keyed to the Azure resource its sub-assessment sits
+  under (the registry or machine), not to `resourceDetails.id`, which is a
+  repository path in the legacy schema; exclusions match that resource, and
+  `open_findings_in_scope` gives the open count after exclusions. Only
+  CVE-shaped ids are reported as CVEs. Maps to KSI-SCR-MON and KSI-SVC-EIS.
+- **`azure_sentinel_data_sources` 0.4.0: Basic and Auxiliary tables can be measured.**
+  The query API refuses these tables. Set `basic_logs_lookback_hours`
+  (`BASIC_LOGS_LOOKBACK_HOURS`, as `azure_resource_diagnostic_settings` names
+  it) above 0, and each one is read through the Log Analytics `/search` endpoint
+  (`AzureRestClient.search()`), one table at a time, for its newest record time
+  and record count over that many hours. The hours are capped at the ingestion
+  window and at the 720 `/search` reaches. The setting is off (0) by default,
+  because `/search` bills per GB scanned, so the query asks for nothing else. A
+  value of 0 or less leaves it off, and so does one that isn't a whole number,
+  with a warning. Off, nothing changes from 0.3.0: these tables are not
+  measured (which is not unknown), aren't counted as sources, and leave their
+  connectors unmeasured. On:
+  - **A table with data** joins `tables` and counts as a source, so
+    `sources_ingesting` and `min_sources_ingesting` can rise.
+  - **Connectors.** A connector whose data type is the whole table reads
+    connected or not connected. One that filters a table with data stays
+    unmeasured, since answering it would bill another scan.
+  - **An empty table** is measured only when the search covers the whole
+    window (an ingestion window of 30 days or less, since `/search` reaches 30
+    days). With fewer hours, it stays not measured.
+  - **A table new to the Auxiliary plan.** After a table is created on, or
+    switched to, the Auxiliary plan, a search spanning the date its lake data
+    starts answers with a `PartialLakeDataWarning`, until that date is older
+    than the hours searched (up to the whole window). The table is then
+    searched again in two parts, cut exactly at that date, and the answers are
+    combined (newest record time, summed count), with the date in the table's
+    new `lake_data_start` field. If `/search` includes both ends of an
+    interval, a record stamped exactly at that date counts in both parts; only
+    the table's `records` can be off by it. When the warning names no date,
+    names two different dates or names one outside the hours searched, or when
+    a part still warns, the first answer's newest record time stands, its count
+    reads null, and a table with nothing found is not measured. Either way the
+    workspace's `notes` say so.
+  - **A failed search**, or one that returns no result row, leaves its table
+    unmeasured, lists it in `tables_search_failed` and fails the run. Any
+    partial error other than that warning counts as failed. `sources_ingesting`
+    then reads null, as it does when the table plans couldn't be read.
+
+  Every table gains a `plan` field. Each workspace gains `tables_searched` and
+  `tables_search_failed`. `tables_not_measured` lists the Basic and Auxiliary
+  tables that weren't measured, for whatever reason. The summary gains
+  `basic_logs_lookback_hours`, the hours each table is searched over (0 when
+  off), and the fetcher's tests now check every summary field against its
+  instructions. The shared Azure query client's `QueryError` now carries the
+  error's `details[]` and a partial error's result. Its message is unchanged,
+  so every check that reads it (a missing table, the failure codes) reads the
+  same.
+
+- **Qualys VMDR fetchers, a new `qualys` category.** Four evidence fetchers read
+  the Qualys VM/PC XML API with one read-only API user (Basic auth, the
+  `X-Requested-With` header Qualys requires):
+  - `qualys_scan_coverage`: each host's last vulnerability scan and last
+    authenticated scan against `scan_window_days` (default 31, so a monthly scan
+    counts as within it), the subscription IPs that have no host record, and
+    excluded IPs. IPv4 is counted by address and IPv6 by range, so one IPv6 /64
+    can't swamp the count, and excluded addresses are not counted as gaps.
+  - `qualys_scan_schedules`: active scan schedules and their longest gap between
+    runs, whether each option profile enables authentication, and how the scans
+    launched in the window ended.
+  - `qualys_vulnerability_findings`: open detections (New, Active, Re-Opened) by
+    severity and type, with each one's age against `remediation_days`. The age
+    counts from the last reopening when Qualys reopened a detection, and from
+    first found otherwise. Ignored and disabled detections are counted, not
+    dropped.
+  - `qualys_vulnerability_remediation`: detections fixed within the lookback,
+    fixed within or after their timeframe, and the detections reopened in it
+    whatever their status now (Qualys sets a reopened detection to Active at its
+    next scan).
+
+  `QUALYS_API_URL` is required with no default, because subscriptions live on
+  different platforms (US1–US4, GOV1, EU and others). Credentials go only to a
+  `qualysapi.` host on a Qualys domain, or to the private cloud host named in
+  `QUALYS_PRIVATE_CLOUD_HOST`; any other URL fails as `bad_config` before a
+  request is sent. A Reader sees only the hosts in its asset groups, so every
+  fetcher records whether the API user sees the built-in All group
+  (`scope_all`). The shared client branches on the Qualys
+  error code rather than the HTTP status, because 409 covers rate and concurrency
+  limits, an unfinished registration and SecureID. It retries only the limits.
+  Each next page re-sends the original filters with the `id_min` from Qualys's
+  next-page URL, and refuses a URL on another host. A page that fails means the
+  run writes no summary. Responses are parsed with `defusedxml`. It is a new
+  dependency, in the new `qualys` extra and in `dev`. The `remediation_days`
+  default (`5:30,4:30,3:90,2:180,1:180`) follows FedRAMP's historical
+  continuous-monitoring timeframes as a convention; set your own policy's values.
+  Raw scan output (`RESULTS`) is never requested, and option profiles keep only
+  their title and authentication types. The fetchers are tested against a double
+  built from the documented API shapes, not a live subscription; the points
+  taken from the guide alone (All-group scope, tracking-method values, the option
+  profile authentication element, schedule `ACTIVE` values) are stated as
+  assumptions in each fetcher's instructions.
+
+- **`azure_defender_plans` 0.3.0: security contacts.** The subscription's Defender for
+  Cloud security contacts: notification addresses, whether a phone is set, whether
+  alert notifications are on and from which minimal severity, and role-based
+  notification. `results.security_contacts` is null (and the run fails) when the list
+  could not be read, and empty when there are none. Maps to KSI-MLA-RVL as well.
+  The contacts are read over raw ARM at api-version 2020-01-01-preview, because
+  Azure Government offers only that and 2017-08-01-preview and answers with a bare
+  JSON list that azure-mgmt-security 7.0 cannot deserialize (seen on a live run);
+  both a bare list and a value page are accepted.
+- **`azure_vm_hardening_status` 0.3.0: OS patch settings.** Every VM and scale set
+  reports `patch_settings` (OS, patch mode, assessment mode, bypass of platform safety
+  checks on a user schedule) with the derived `automatic_patching` (AutomaticByPlatform
+  or AutomaticByOS; `patch_modes` tells Azure-orchestrated from in-guest Windows
+  Update) and
+  `assessment_automatic`, both null when Azure returned no patch mode (never read as
+  Manual). The summary counts automatic, manual-or-image-default and unknown
+  for VMs and scale sets.
+- **`azure_aks_cluster_configuration` 0.3.0: node security per agent pool.** Each
+  pool now reports `enable_fips` (the FIPS-enabled node image), `node_image_version`,
+  Trusted Launch (`secure_boot_enabled`, `vtpm_enabled`) and `ssh_access`. Each is
+  null, not false, when Azure did not return it; the summary counts FIPS-enabled,
+  FIPS-disabled and unknown pools apart, and `all_agent_pools_fips` is null until
+  every pool has answered (and when there are no pools).
 - **`azure_entra_app_registrations` 0.2.0: each credential's issued lifetime.** Every
   secret and certificate gets `lifetime_days` (end date minus start date, null when
   either is missing or the end precedes the start) and `issued_beyond_approved_lifetime`.
@@ -24,6 +191,13 @@ schemas and the `paramify` CLI — not the internal code.
   (`AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS`), default 365 (a convention: FedRAMP KSI-SVC-ASM
   asks for regular rotation and sets no number), capped at 3650; a value that isn't a whole
   number from 1 up fails the run as `bad_config`. No new calls.
+
+- **Qualys issue reports:** `qualys_vmdr_vulnerability_findings` collects
+  complete scoped VMDR detections with mandatory KnowledgeBase and QVS/CISA
+  enrichment. `qualys_stig_compliance_report` collects all evaluated postures
+  for each selected STIG policy, preserving results and exceptions. Both use
+  documented CSV intake contracts, complete pagination, and atomic report
+  publication; setup and synthetic examples live under `fetchers/qualys/`.
 
 - **`azure_entra_mfa_status` 0.4.0: a phishing-resistant count.** Each user gets
   `is_phishing_resistant`, true when `methods_registered` holds a FIDO2 security key,
@@ -81,6 +255,64 @@ schemas and the `paramify` CLI — not the internal code.
   that have zones, and reports the regions in use, `multi_region`, and the resources
   sitting in regions with no zones. A failed Resource Graph query leaves every
   count from the resources null, not 0. Reader is enough.
+- **`azure_firewall_configuration`** (`EVD-AZURE-FIREWALL-CONFIGURATION`): every
+  Azure Firewall and Firewall Policy with its rule collection groups and rules
+  (the classic rule collections on a firewall without a policy too), the policy
+  chain a firewall inherits through base policies, threat intelligence mode,
+  IDPS, TLS inspection, DNS proxy, management IP configuration, public and
+  private IPs, and which rule and threat log categories its diagnostic settings
+  export. Flags allow-all network rules, allow-any-FQDN application rules and
+  DNAT rules to port 22 or 3389 (published or translated) or from any source,
+  counts rules from a policy in another subscription that a firewall here uses,
+  and judges per firewall
+  whether its rules filter egress: no network rule open to any destination on
+  every port, whatever its source (`egress_open_network_rules`, so a rule from
+  10.0.0.0/8 counts), and no any-FQDN application rule, so a firewall with no
+  rules counts, since Azure Firewall
+  denies whatever no rule allows. Routing is not checked here
+  (`azure_vnet_egress_routing` reports it). A failed firewall or policy list
+  leaves the counts that depend on it null, not 0. A policy or base policy in another
+  subscription is read when the credential may; otherwise that firewall's rule
+  and setting fields read null, never false. Resource exclusions apply to
+  firewalls and policies. KSI-CNA-RNT, CNA-ULN, CNA-MAT, MLA-LET.
+- **`azure_bastion_configuration`** (`EVD-AZURE-BASTION-CONFIGURATION`): every
+  Bastion host's SKU, scale units, shareable links, IP connect, native client
+  tunneling, file copy, copy-paste, Kerberos, session recording, private-only
+  mode, IP allow-list, zones, whether its subnet has a network security group and
+  whether BastionAuditLogs is exported; and for every virtual machine whether a
+  Bastion reaches it in its own virtual network or through a connected peering
+  whose link on the Bastion's side allows virtual network access (Developer SKU
+  hosts do not reach peered networks), including Bastion hosts in a peered
+  subscription when the credential may list them. Only hosts in the Succeeded
+  state with a known SKU count as a path. A path that cannot be decided reads
+  unknown and nulls the coverage counts, and unread interface data nulls the
+  public IP and path counts. A failed host or machine list leaves its counts
+  null, not 0. KSI-CNA-RNT, CNA-MAT, MLA-LET.
+- **`azure_resource_locks`** (`EVD-AZURE-RESOURCE-LOCKS`): every management lock
+  in the subscription with its level, scope and scope kind, and for each resource
+  of a protected type (Log Analytics workspaces, Backup vaults, Recovery Services
+  vaults, key vaults and storage accounts by default; `AZURE_LOCK_PROTECTED_TYPES`
+  overrides, accepting nested types such as `microsoft.sql/servers/databases`;
+  an entry that is not provider/type, or a setting with no entry, fails the run as
+  `bad_config`, and a type that matches nothing is listed in
+  `protected_resource_types_unmatched`) whether a CanNotDelete or ReadOnly lock on
+  the resource, its resource group or the subscription is in effect. Lock fields
+  read null when the lock list was not read. KSI-MLA-ALA, RPL-ABO, CNA-DFP.
+
+- **`azure_pim_activations`** (`EVD-AZURE-PIM-ACTIVATIONS`): Azure resource PIM
+  activity on the subscription. Every role assignment schedule request Azure
+  still holds at the subscription and below (self-activations, admin
+  assignments, extensions, renewals and removals) with its requester, role,
+  scope, requested duration, justification, ticket, approval and outcome, and
+  the activations in force now. Counts self-activations by role, scope level
+  and outcome, those without a justification, ticket or approval, activations
+  of Owner, Contributor, User Access Administrator and RBAC Administrator,
+  admin assignments that grant standing access, and the oldest and newest
+  request seen. A tenant without PIM (a 400 with the error code
+  AadPremiumLicenseRequired or TenantNotOnboarded) reports `pim_available`
+  false rather than failing; any other failed list leaves its counts null and
+  fails the run, and `pim_available` is null when both lists fail. Reader is
+  enough. KSI-IAM-JIT, CMT-LMC.
 - **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
   Unhealthy assessment reports `days_open` (from `status_change_date`, null when
   missing; it starts again at 0 when a finding turns Healthy and then Unhealthy
@@ -1114,6 +1346,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The uploader guide explains the collection frequency of an evidence set.**
+  A new section in [`docs/uploader_guide.md`](docs/uploader_guide.md#set-the-collection-frequency)
+  gives the default (`THREE_DAY`), the values, and how to set `frequency` in
+  `upload.yaml`. It tells you that the upload writes the frequency only when it
+  creates a set, and it gives a loop that changes the sets that exist through
+  the API.
+
 - **`azure_waf_ddos_activity` 0.2.0: DDoS figures include IPs protected by a network-level DDoS plan.**
   The existing figures `protected_ips_with_attack_alert_reaching_receiver`,
   `protected_ips_without_attack_alert`, `public_ips_attacked` and
@@ -1735,6 +1974,14 @@ schemas and the `paramify` CLI — not the internal code.
   null, not an empty list, when the methods policy can't be read.
 
 ### Fixed
+
+- **`azure_key_vault_key_rotation` 0.5.0: unlisted vaults no longer read as zero expired certificates.**
+  `expired_certificates` and `certificates_expiring_within_30_days` are null when any
+  in-scope vault's certificates could not be listed (refused with 401 or 403, failed, or
+  no data-plane address), where they read 0 and let a check pass with nothing read. A
+  refused list still exits 0 and shows in `certificate_not_authorized_vaults`. New
+  `certificates_without_expiry` counts listed certificates with no expiry date, which
+  are in neither expiry count.
 
 - **`azure_app_service_backups` 0.3.1: an app with no restore point misses the RPO.**
   On a plan that supports backups, an app with no restore point at all, when both the
