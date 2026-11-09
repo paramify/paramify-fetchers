@@ -1,5 +1,5 @@
 name: gitlab_significant_change_notifications
-version: 0.1.0
+version: 0.1.1
 description: >
   FedRAMP Significant Change Notification evidence. Finds GitLab merge requests
   flagged as significant changes (ticked "Significant Change — SCN required"

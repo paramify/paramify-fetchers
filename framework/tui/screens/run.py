@@ -22,10 +22,11 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Button, DataTable, RichLog, Static
+from textual.widgets import Button, RichLog, Static
 
 from framework import api
 from framework.tui import palette
+from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal
 
 _BAR_WIDTH = 20

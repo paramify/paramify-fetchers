@@ -10,13 +10,15 @@
 # Output: $EVIDENCE_DIR/checkov_bicep_<source>.json
 # Target env (per source): CHECKOV_REPO_URL (required), CHECKOV_CLONE_BRANCH, CHECKOV_SOURCE_TYPE,
 #                          CHECKOV_TFVC_PATH, CHECKOV_TFVC_VERSION
-# Secret (per source):     GIT_CLONE_TOKEN (git) or TFVC_TOKEN (tfvc); omit for public sources
+# Secret (per source):     GIT_CLONE_TOKEN (git) or TFVC_TOKEN (tfvc); omit for public sources.
+#                          Without TFVC_TOKEN a tfvc source signs in as the ambient Entra identity, if any
+# Passthrough env:         AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ... (that Entra identity)
 # Config env:            CHECKOV_SOFT_FAIL, CHECKOV_COMPACT, CHECKOV_SKIP_CHECKS,
 #                        CHECKOV_USE_DEFAULT_SKIP_CHECKS, CHECKOV_SKIP_RESOURCES,
 #                        CHECKOV_SKIP_PATHS, CHECKOV_BICEP_CHECKS,
 #                        CHECKOV_EXTERNAL_CHECKS_DIR, CHECKOV_REPO_ID, CHECKOV_GIT_USERNAME
-# Required tools:        checkov, jq, plus git (git source) or curl + unzip (tfvc source),
-#                        and python3 when skip_paths is set
+# Required tools:        checkov, jq, plus git (git source) or curl (tfvc source),
+#                        and python3 when skip_paths is set; Entra sign-in needs python3 with azure-identity
 #
 # Exit codes: 0 = at least one check ran and every Bicep/ARM file parsed (findings are evidence);
 #             1 = could not fetch the source / checkov failed / nothing to scan / zero checks ran /
@@ -70,7 +72,7 @@ case "$SOURCE_TYPE" in
     git)
         TOOLS=(git checkov jq) ;;
     tfvc)
-        TOOLS=(curl unzip checkov jq)
+        TOOLS=(curl checkov jq)
         REPO_URL="${REPO_URL%/}"
         case "$REPO_URL" in https://*|http://*) ;; *)
             report_failure "source_type tfvc needs repo_url to be the Azure DevOps project URL (https://dev.azure.com/<org>/<project>), got $REPO_URL" bad_config
@@ -176,7 +178,7 @@ SKIP_RESOURCES+=("${_SPLIT[@]}")
 SKIP_RESOURCES_JSON="$(json_list "${SKIP_RESOURCES[@]}")"
 
 # What was actually fetched; checkov_clone_repo / checkov_fetch_tfvc overwrite these.
-SCANNED_BRANCH="$BRANCH"; BRANCH_FALLBACK=false; COMMIT_SHA=unknown; CHANGESET=""; CHANGESET_DATE=""
+SCANNED_BRANCH="$BRANCH"; BRANCH_FALLBACK=false; COMMIT_SHA=unknown; CHANGESET=""; CHANGESET_DATE=""; TFVC_AUTH_MODE=""
 
 # Provenance + scan configuration, shared by every result this fetcher writes. A tfvc source
 # records its folder and changeset where a git source records its branch and commit.
@@ -184,13 +186,16 @@ metadata_json() {
     jq -n --arg type "$SOURCE_TYPE" --arg repo "$REPO_URL" --arg branch "$SCANNED_BRANCH" --arg requested "$BRANCH" \
           --argjson fallback "$BRANCH_FALLBACK" --arg sha "$COMMIT_SHA" --arg ts "$TIMESTAMP" \
           --arg path "$TFVC_PATH" --arg version "$TFVC_VERSION" \
-          --argjson changeset "${CHANGESET:-null}" --arg csdate "$CHANGESET_DATE" \
+          --argjson changeset "${CHANGESET:-null}" --arg csdate "$CHANGESET_DATE" --arg authmode "$TFVC_AUTH_MODE" \
           --argjson checks "$CHECKS_JSON" --arg skips "$SKIP_CHECKS_LIST" --argjson defaults "$DEFAULT_SKIPS_APPLIED" \
           --argjson skipres "$SKIP_RESOURCES_JSON" --argjson skippaths "$SKIP_PATHS_JSON" \
        '{source_type: $type, repo_url: $repo}
         + (if $type == "tfvc" then
              {tfvc_path: $path, requested_version: $version, changeset: $changeset,
-              changeset_date: (if $csdate == "" then null else $csdate end)}
+              changeset_date: (if $csdate == "" then null else $csdate end),
+              auth_mode: (if $authmode == "" then null else $authmode end),
+              # TFVC lists only what the identity may read, so a hidden subfolder is absent, not reported.
+              listing_scope: "readable_by_identity"}
            else
              {branch: $branch, requested_branch: $requested, branch_fallback: $fallback, commit_sha: $sha}
            end)
@@ -227,7 +232,8 @@ if [ "$SOURCE_TYPE" = "tfvc" ]; then
         exit 1
     fi
     WHERE="$TFVC_PATH in $REPO_URL (changeset $CHANGESET)"
-    log_info "Downloaded $WHERE"
+    log_info "Downloaded $WHERE (auth: $TFVC_AUTH_MODE)"
+    [ -n "$TFVC_AUTH_NOTE" ] && log_info "Read anonymously: $TFVC_AUTH_NOTE"
 else
     if ! checkov_clone_repo "$REPO_URL" "$BRANCH" "$TOKEN" "$GIT_USER" "$COMPONENT"; then
         write_status_json error "git clone failed"
@@ -238,6 +244,9 @@ else
     WHERE="$REPO_URL (branch $SCANNED_BRANCH, commit ${COMMIT_SHA:0:12})"
     log_info "Cloned $REPO_URL @ ${COMMIT_SHA:0:12} (branch $SCANNED_BRANCH)"
 fi
+# Only the TFVC sign-in above needs the Entra identity; checkov never gets it.
+unset AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_FEDERATED_TOKEN_FILE AZURE_AUTHORITY_HOST \
+      MSI_ENDPOINT IDENTITY_ENDPOINT IDENTITY_HEADER
 
 # checkov's ARM runner reads every .json; only deploymentTemplate schemas are templates (not parameter files).
 BICEP_FILES=$(find "$CLONE_DIR" -path "$CLONE_DIR/.git" -prune -o -type f -name '*.bicep' -print | wc -l | tr -d ' ')
@@ -247,7 +256,9 @@ if [ "$BICEP_FILES" -eq 0 ] && [ "$ARM_FILES" -eq 0 ]; then
     MSG="No Bicep (.bicep) or ARM template (.json with a deploymentTemplate \$schema) files in $WHERE; nothing was scanned"
     write_status_json no_files "$MSG" 0 0
     log_info "Evidence saved to $OUTPUT_JSON (status=no_files)"
-    report_failure "$MSG - check the source and its path or branch, or use checkov_terraform if this repo is Terraform" bad_config
+    HINT="check the source and its path or branch, or use checkov_terraform if this repo is Terraform"
+    [ "$SOURCE_TYPE" = "tfvc" ] && HINT="$HINT; TFVC also leaves out folders the identity may not read"
+    report_failure "$MSG - $HINT" bad_config
     exit 1
 fi
 

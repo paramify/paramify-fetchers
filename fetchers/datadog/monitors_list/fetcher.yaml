@@ -1,5 +1,5 @@
 name: datadog_monitors_list
-version: 0.1.0
+version: 0.1.1
 description: Retrieves Datadog monitor configurations to prove persistent alerting is defined for infrastructure and security events.
 category: datadog
 
@@ -27,4 +27,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-MONITORS
   name: Datadog Monitors List
-  instructions: 'Script: datadog/monitors_list/fetcher.py. Calls GET /api/v1/monitor with pagination. Extracts monitor name, type, overall_state, query, thresholds, and notify settings. Writes JSON monitor list.'
+  instructions: 'Script: datadog/monitors_list/fetcher.py. Calls GET /api/v1/monitor with pagination. Extracts monitor name, type, overall_state, the full query and message, the @-notification targets in the message, and thresholds, notify_no_data and no_data_timeframe from options. Writes JSON monitor list.'
