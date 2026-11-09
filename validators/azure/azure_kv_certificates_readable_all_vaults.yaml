@@ -6,8 +6,9 @@ statement: >
   The certificate list was readable in every key vault (certificate_accessible_vaults
   equals a non-zero total_key_vaults) and every listed certificate's policy was
   readable. Without it, a vault that answered 403 reads as holding no weak
-  certificate keys. Integrity partner for azure_kv_no_weak_key_sizes;
-  azure_kv_no_expired_certificates fails on unreadable vaults by itself.
+  certificate keys. Integrity partner for azure_kv_no_weak_key_sizes.
+  azure_kv_no_expired_certificates fails on unreadable vaults by itself from
+  azure_key_vault_key_rotation 0.5.0; on earlier evidence this validator is its integrity partner.
 
 # Two backreferences: accessible vaults = total vaults (non-zero), readable policies = total certificates.
 regex: '^\s*\{(?=[\s\S]*?"total_key_vaults":\s*(?<total_key_vaults>[1-9]\d*)\b)(?=[\s\S]*?"certificate_accessible_vaults":\s*\k<total_key_vaults>(?!\d))(?=[\s\S]*?"total_certificates":\s*(?<total_certificates>\d+)\b)(?=[\s\S]*?"certificates_with_readable_policy":\s*\k<total_certificates>(?!\d))'

@@ -4,9 +4,10 @@ type: AUTOMATED
 role: configuration
 statement: >
   No Key Vault certificate and no App Service certificate is past its expiry date. Supports
-  KSI-SVC-SIN and KSI-SVC-VRI for expired certificates. Fails when any in-scope vault's
-  certificates could not be listed, because the fetcher then reports expired_certificates as null
-  rather than 0. It does not prove that a certificate with no expiry date is valid (such a
+  KSI-SVC-SIN and KSI-SVC-VRI for expired certificates. Needs azure_key_vault_key_rotation 0.5.0
+  or later: it then reports expired_certificates as null when any in-scope vault's certificates
+  could not be listed, and this validator fails on null. Earlier evidence reads 0 for such a vault,
+  and only azure_kv_certificates_readable_all_vaults catches that. It does not prove that a certificate with no expiry date is valid (such a
   certificate is not counted as expired), and does not assert renewal policy, certificates expiring
   soon, or certificates held outside Key Vault and App Service.
 
