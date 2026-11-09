@@ -16,6 +16,16 @@ The rule this module enforces: a failed request never ends a walk quietly.
   to `with_paging_status`, which marks the evidence `partial_failure`, never
   `success`.
 
+A 429 (rate limited) is retried: the helper waits for the number of seconds in
+the `X-RateLimit-Reset` header (at most `MAX_RATE_LIMIT_WAIT`), up to
+`RATE_LIMIT_RETRIES` times, before it raises.
+
+When a walk stops early, `with_paging_status` also sets the summary figures to
+null (all but the ones the fetcher names in `keep_summary`, such as the
+lookback window). A count built from an incomplete list is a lower bound, not
+a total, and a validator must not read it as complete. The records collected
+stay in `data`.
+
 A 403 or 404 that means "this product is not enabled" (Cloud SIEM, for
 example) is the fetcher's call to make, on the first page only. It reads
 `PagingError.status_code` and decides; this module treats every error the same.
@@ -36,7 +46,8 @@ Pagination schemes, as the Datadog API reference documents them:
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+import time
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import requests
 
@@ -47,6 +58,12 @@ DEFAULT_TIMEOUT = 30
 # same full page forever. 10,000 pages of 100 is a million records, far above
 # any real estate; reaching it is reported as a partial failure, not success.
 MAX_PAGES = 10_000
+
+# A 429 is retried this many times. Each wait is the X-RateLimit-Reset header
+# (seconds until the limit resets), or a short backoff when it is absent, and
+# never more than MAX_RATE_LIMIT_WAIT seconds.
+RATE_LIMIT_RETRIES = 3
+MAX_RATE_LIMIT_WAIT = 60.0
 
 # `report_failure` codes (fetchers/_lib/fetcher_status.py) for a failed request.
 _HTTP_CODES = {401: "auth_failed", 403: "not_authorized", 429: "rate_limited"}
@@ -116,10 +133,40 @@ def request_json(
     body: Optional[Dict[str, Any]] = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> Any:
-    """One request. Raises on a transport error, an HTTP error or a body that is not JSON."""
-    response = requests.request(method, url, headers=headers, params=params, json=body, timeout=timeout)
-    response.raise_for_status()
-    return response.json()
+    """One request. Raises on a transport error, an HTTP error or a body that is not JSON.
+
+    A 429 is retried up to RATE_LIMIT_RETRIES times (see `rate_limit_wait`);
+    the last 429 raises like any other HTTP error.
+    """
+    attempt = 0
+    while True:
+        response = requests.request(method, url, headers=headers, params=params, json=body, timeout=timeout)
+        if response.status_code == 429 and attempt < RATE_LIMIT_RETRIES:
+            wait = rate_limit_wait(response, attempt)
+            logger.warning("%s %s: rate limited (429), retry %d in %.0fs", method, url, attempt + 1, wait)
+            time.sleep(wait)
+            attempt += 1
+            continue
+        response.raise_for_status()
+        return response.json()
+
+
+def rate_limit_wait(response: Any, attempt: int) -> float:
+    """Seconds to wait before retrying a 429.
+
+    Datadog sends `X-RateLimit-Reset`, the seconds until the limit resets. With
+    no usable header the wait is 2, 4, 8... seconds. Never more than
+    MAX_RATE_LIMIT_WAIT.
+    """
+    headers = getattr(response, "headers", None) or {}
+    raw = headers.get("X-RateLimit-Reset")
+    wait = float(2 ** (attempt + 1))
+    if raw is not None:
+        try:
+            wait = float(raw)
+        except (TypeError, ValueError):
+            pass
+    return min(max(wait, 1.0), MAX_RATE_LIMIT_WAIT)
 
 
 def walk(operation: str, fetch: PageFetch, start: Any, describe: Callable[[Any], str]) -> PagedRecords:
@@ -240,22 +287,43 @@ def paginate_cursor(
     return walk(operation, fetch, "", lambda _cursor: f"page {counter['page']}")
 
 
-def with_paging_status(result: Dict[str, Any], *walks: Iterable[Any]) -> Dict[str, Any]:
+def request_failure(operation: str, cause: BaseException, **extra: Any) -> Dict[str, Any]:
+    """One `api_failures[]` entry for a single request that is not part of a walk."""
+    entry = PagingError(operation, "single request", 0, [], cause).api_failure()
+    entry.update(extra)
+    return entry
+
+
+def with_paging_status(
+    result: Dict[str, Any],
+    *walks: Iterable[Any],
+    keep_summary: Sequence[str] = (),
+    other_failures: Sequence[Dict[str, Any]] = (),
+) -> Dict[str, Any]:
     """Record the paging outcome on a fetcher's result.
 
     Adds `metadata.partial_failure` and `metadata.api_failures` to every result.
-    If any walk stopped early, the status becomes `partial_failure` and the
-    message names the page reached, whatever status the fetcher computed.
+    If any walk stopped early, or `other_failures` has an entry (a failed
+    request outside a walk, in the `request_failure` shape), the status becomes
+    `partial_failure` and the message names what failed, whatever status the
+    fetcher computed. Every summary figure except the keys in `keep_summary`
+    then becomes null: it was counted from an incomplete list. The records
+    collected stay in `data`.
     """
     errors = [w.error for w in walks if isinstance(w, PagedRecords) and w.error is not None]
+    failures = [e.api_failure() for e in errors] + [dict(f) for f in other_failures]
     metadata = dict(result.get("metadata") or {})
-    metadata["partial_failure"] = bool(errors)
-    metadata["api_failures"] = [e.api_failure() for e in errors]
+    metadata["partial_failure"] = bool(failures)
+    metadata["api_failures"] = failures
     result["metadata"] = metadata
-    if errors:
+    if failures:
         result["status"] = "partial_failure"
         result["error_code"] = "partial_failure"
-        result["message"] = "Incomplete collection: " + "; ".join(str(e) for e in errors)
+        reasons = [str(e) for e in errors] + [f"{f.get('operation')}: {f.get('message')}" for f in other_failures]
+        result["message"] = "Incomplete collection: " + "; ".join(reasons)
+        summary = result.get("summary")
+        if isinstance(summary, dict):
+            result["summary"] = {k: (v if k in keep_summary else None) for k, v in summary.items()}
     return result
 
 
@@ -267,5 +335,17 @@ def failure_result(error: PagingError, endpoint: str, timestamp: str) -> Dict[st
         "message": str(error),
         "api_endpoint": endpoint,
         "metadata": {"partial_failure": False, "api_failures": [error.api_failure()]},
+        "retrieved_at": timestamp,
+    }
+
+
+def error_result(message: str, timestamp: str, error_code: Optional[str] = None) -> Dict[str, Any]:
+    """The result for a run that failed before any request, for example on a
+    missing environment variable (`error_code: bad_config`)."""
+    return {
+        "status": "error",
+        "error_code": error_code,
+        "message": message,
+        "metadata": {"partial_failure": False, "api_failures": []},
         "retrieved_at": timestamp,
     }

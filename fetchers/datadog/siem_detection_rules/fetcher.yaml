@@ -28,4 +28,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-SIEM-RULES
   name: Datadog SIEM Detection Rules
-  instructions: 'Script: datadog/siem_detection_rules/fetcher.py. Calls GET /api/v2/security_monitoring/rules with pagination, filtered to custom rules. Extracts rule name, type, severity, enabled state, and detection method (options.detectionMethod, the queries and the cases with their conditions and notifications). Writes JSON rules list.'
+  instructions: 'Script: datadog/siem_detection_rules/fetcher.py. Calls GET /api/v2/security_monitoring/rules with pagination. Keeps only custom Cloud SIEM rules: isDefault false and type log_detection or signal_correlation (summary.rules_excluded counts the others). Extracts rule name, type, severity, enabled state, and detection method (options.detectionMethod, the queries and the cases with their conditions and notifications). Writes JSON rules list.'

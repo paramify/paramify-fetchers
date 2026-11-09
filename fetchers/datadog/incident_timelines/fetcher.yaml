@@ -1,5 +1,5 @@
 name: datadog_incident_timelines
-version: 0.1.1
+version: 0.2.0
 description: Retrieves per-incident timeline entries from Datadog to support after-action reviews and incident response documentation.
 category: datadog
 
@@ -28,4 +28,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-INCIDENT-TIMELINES
   name: Datadog Incident Timelines
-  instructions: 'Script: datadog/incident_timelines/fetcher.py. Calls GET /api/v2/incidents then GET /api/v2/incidents/{id}/timeline for each. Lookback window controlled by DATADOG_INCIDENTS_LOOKBACK_DAYS (default 90). Keeps each timeline cell''s type, timestamps, author, important flag and content text. Writes JSON timeline data.'
+  instructions: 'Script: datadog/incident_timelines/fetcher.py. Calls GET /api/v2/incidents with offset pagination, then GET /api/v2/incidents/{id}/relationships/timeline_cells for each incident. Lookback window controlled by DATADOG_INCIDENTS_LOOKBACK_DAYS (default 90); an incident created before the window is dropped. Keeps each timeline cell''s type, timestamps, author, important flag and content text. A failed timeline read gives timeline_cells null for that incident, an entry in metadata.api_failures and status partial_failure. Writes JSON timeline data.'

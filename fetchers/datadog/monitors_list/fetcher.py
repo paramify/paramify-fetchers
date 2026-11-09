@@ -26,6 +26,7 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 
 from datadog_paging import (  # noqa: E402
     PagingError,
+    error_result,
     failure_result,
     paginate_page_number,
     with_paging_status,
@@ -120,8 +121,11 @@ def extract_monitor_fields(monitor: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_monitors_list() -> Dict[str, Any]:
-    base_url = get_base_url()
-    headers = get_dd_headers()
+    try:
+        base_url = get_base_url()
+        headers = get_dd_headers()
+    except RuntimeError as e:
+        return error_result(str(e), current_timestamp(), "bad_config")
     endpoint = f"{base_url}/api/v1/monitor"
 
     try:
@@ -153,10 +157,8 @@ def get_monitors_list() -> Dict[str, Any]:
 
     except PagingError as e:
         return failure_result(e, endpoint, current_timestamp())
-    except RuntimeError as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
     except Exception as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+        return error_result(str(e), current_timestamp())
 
 
 def main() -> int:

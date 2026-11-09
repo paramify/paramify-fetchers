@@ -14,7 +14,11 @@ What this proves, for every fetcher that pages:
   - a 401 on the first page is a failure (auth_failed, exit 1), never "empty";
   - a Cloud SIEM 403 or 404 on the first page reads as "not enabled" only when
     the content pack states report onboarding; otherwise it is a failure, and
-    the same status on a later page is a partial failure.
+    the same status on a later page is a partial failure;
+  - after a later-page error, every summary figure counted from the list is
+    null, not a number that looks complete;
+  - a 429 is retried after the X-RateLimit-Reset wait;
+  - a missing environment variable is a bad_config failure.
 
 What it cannot prove: that a live Datadog tenant pages exactly the way the API
 reference says it does. That needs one run against a real organization.
@@ -25,6 +29,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -44,9 +49,10 @@ BASE_URL = "https://api.datadog.example.invalid"
 
 
 class FakeResponse:
-    def __init__(self, status: int, body: Any) -> None:
+    def __init__(self, status: int, body: Any, headers: Optional[Dict[str, str]] = None) -> None:
         self.status_code = status
         self._body = body
+        self.headers = headers or {}
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
@@ -159,6 +165,9 @@ def hosts_body(chunk: List[Dict[str, Any]], _idx: int, _more: bool) -> Any:
     return {"host_list": chunk, "total_returned": len(chunk)}
 
 
+# A creation time inside every lookback window the tests use.
+RECENT = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
 FETCHERS: Dict[str, Dict[str, Any]] = {
     "apm_services": {
         "scheme": Scheme("GET", "/api/v2/services/definitions", 100, by_number("page[number]"), data_body),
@@ -172,12 +181,13 @@ FETCHERS: Dict[str, Dict[str, Any]] = {
     },
     "incidents_list": {
         "scheme": Scheme("GET", "/api/v2/incidents", 100, by_offset("page[offset]"), incidents_body),
-        "record": lambda i: {"id": f"inc-{i}", "attributes": {"title": f"incident {i}"}},
+        "record": lambda i: {"id": f"inc-{i}", "attributes": {"title": f"incident {i}", "created": RECENT}},
         "total": 250,
     },
     "siem_detection_rules": {
         "scheme": Scheme("GET", "/api/v2/security_monitoring/rules", 100, by_number("page[number]"), data_body),
-        "record": lambda i: {"id": f"rule-{i}", "name": f"rule {i}", "isEnabled": True},
+        "record": lambda i: {"id": f"rule-{i}", "name": f"rule {i}", "isEnabled": True,
+                             "isDefault": False, "type": "log_detection"},
         "total": 250,
     },
     "siem_signals": {
@@ -212,7 +222,7 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return tmp_path
 
 
-def run(short: str, fake: FakeDatadog, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def run(short: str, fake: Callable[..., FakeResponse], monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     module = load(short)
     # main() reads a .env file; keep the test off the working tree.
     monkeypatch.setattr(module, "load_dotenv", lambda *a, **k: None)
@@ -271,6 +281,35 @@ def test_mid_pagination_error_is_partial_failure(short: str, env: Path, monkeypa
     assert failure["page"] in status["error"]
 
 
+# Summary keys that do not come from the paged list, so they stay set after a
+# later-page error. Every other summary figure must be null.
+KEPT_SUMMARY: Dict[str, set] = {
+    "incidents_list": {"lookback_days"},
+    "siem_signals": {"lookback_days", "date_range"},
+}
+TOTAL_KEY = {
+    "apm_services": "total_services",
+    "monitors_list": "total_monitors",
+    "incidents_list": "total_incidents",
+    "siem_detection_rules": "total_rules",
+    "siem_signals": "total_signals",
+    "infra_agent_checks": "total_check_runs",
+}
+
+
+@pytest.mark.parametrize("short", ALL)
+def test_mid_pagination_error_nulls_the_summary_counts(short: str, env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A count from an incomplete list is a lower bound. It must not read as a total."""
+    fake = fake_for(short, fail_at=1, fail_status=500)
+    _code, evidence, _status = run(short, fake, monkeypatch, env)
+
+    summary = evidence["summary"]
+    assert summary[TOTAL_KEY[short]] is None
+    assert {k for k, v in summary.items() if v is not None} == KEPT_SUMMARY.get(short, set())
+    # The records read stay in the evidence.
+    assert len(evidence["data"]) == evidence["record_count"] > 0
+
+
 @pytest.mark.parametrize("short", ALL)
 def test_mid_pagination_connection_error_is_partial_failure(
     short: str, env: Path, monkeypatch: pytest.MonkeyPatch
@@ -296,7 +335,7 @@ def test_mid_pagination_bad_json_is_partial_failure(short: str, env: Path, monke
             return FakeResponse(200, ValueError("Expecting value: line 1 column 1"))
         return response
 
-    code, evidence, _status = run(short, broken_second_page, monkeypatch, env)  # type: ignore[arg-type]
+    code, evidence, _status = run(short, broken_second_page, monkeypatch, env)
     assert code == 1
     assert evidence["status"] == "partial_failure"
 
@@ -342,7 +381,7 @@ def test_infra_host_count_bad_json_is_failure(env: Path, monkeypatch: pytest.Mon
     def fake(method: str, url: str, **kwargs: Any) -> FakeResponse:
         return FakeResponse(200, ValueError("Expecting value"))
 
-    code, evidence, _status = run("infra_agent_checks", fake, monkeypatch, env)  # type: ignore[arg-type]
+    code, evidence, _status = run("infra_agent_checks", fake, monkeypatch, env)
     assert code == 1
     assert evidence["status"] == "error"
 
@@ -357,6 +396,7 @@ def test_genuinely_empty_is_still_partial_or_empty(short: str, env: Path, monkey
     assert code == 0
     assert status is None
     assert evidence["status"] == "partial_or_empty"
+    assert evidence["metadata"] == {"partial_failure": False, "api_failures": []}
 
 
 CONTENT_PACKS = "/api/v2/security_monitoring/content_packs/states"
@@ -387,6 +427,7 @@ def test_siem_off_on_first_page_is_not_available_only_on_the_onboarding_signal(
     assert status is None
     assert evidence["status"] == "not_available"
     assert evidence["data"]["siem_state"]["enabled"] is False
+    assert evidence["metadata"] == {"partial_failure": False, "api_failures": []}
 
 
 @pytest.mark.parametrize("short", ["siem_detection_rules", "siem_signals"])
@@ -462,3 +503,168 @@ def test_a_non_list_page_body_is_an_error(monkeypatch: pytest.MonkeyPatch) -> No
         )
     assert caught.value.pages_completed == 0
     assert isinstance(caught.value.cause, ValueError)
+
+
+# --- rate limits ---------------------------------------------------------------
+
+
+def test_429_is_retried_after_the_reset_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    waits: List[float] = []
+    monkeypatch.setattr(datadog_paging.time, "sleep", waits.append)
+    answers = [
+        FakeResponse(429, {"errors": ["Rate limit exceeded"]}, {"X-RateLimit-Reset": "7"}),
+        FakeResponse(200, [{"id": 1}]),
+    ]
+    monkeypatch.setattr(datadog_paging.requests, "request", lambda *a, **k: answers.pop(0))
+
+    records = datadog_paging.paginate_page_number(
+        BASE_URL + "/api/v1/monitor", {}, operation="Datadog list monitors",
+        page_size=100, size_param="page_size", number_param="page", records_key=None,
+    )
+    assert list(records) == [{"id": 1}]
+    assert records.error is None
+    assert waits == [7.0]
+
+
+def test_429_wait_has_a_cap_and_a_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    capped = FakeResponse(429, {}, {"X-RateLimit-Reset": "3600"})
+    assert datadog_paging.rate_limit_wait(capped, 0) == datadog_paging.MAX_RATE_LIMIT_WAIT
+    no_header = FakeResponse(429, {})
+    assert [datadog_paging.rate_limit_wait(no_header, n) for n in range(3)] == [2.0, 4.0, 8.0]
+
+
+def test_429_that_does_not_clear_fails_as_rate_limited(env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(datadog_paging.time, "sleep", lambda _s: None)
+    calls: List[int] = []
+
+    def always_429(*_a: Any, **_k: Any) -> FakeResponse:
+        calls.append(1)
+        return FakeResponse(429, {"errors": ["Rate limit exceeded"]}, {"X-RateLimit-Reset": "1"})
+
+    code, evidence, status = run("monitors_list", always_429, monkeypatch, env)
+    assert code == 1
+    assert evidence["status"] == "error"
+    assert status is not None and status["code"] == "rate_limited"
+    assert len(calls) == datadog_paging.RATE_LIMIT_RETRIES + 1
+
+
+def test_429_on_a_later_page_is_retried_not_partial(env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(datadog_paging.time, "sleep", lambda _s: None)
+    fake = fake_for("monitors_list")
+    limited = {"done": False}
+
+    def once_429_on_page_1(method: str, url: str, headers: Any = None, params: Any = None,
+                           json: Any = None, timeout: Any = None) -> FakeResponse:
+        if params and params.get("page") == 1 and not limited["done"]:
+            limited["done"] = True
+            return FakeResponse(429, {"errors": ["Rate limit exceeded"]}, {"X-RateLimit-Reset": "1"})
+        return fake(method, url, headers, params, json, timeout)
+
+    code, evidence, _status = run("monitors_list", once_429_on_page_1, monkeypatch, env)
+    assert code == 0
+    assert evidence["status"] == "success"
+    assert evidence["summary"]["total_monitors"] == 250
+
+
+# --- missing configuration -------------------------------------------------------
+
+
+@pytest.mark.parametrize("short", ALL + ["incident_timelines"])
+def test_missing_api_key_is_bad_config(short: str, env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DATADOG_API_KEY")
+
+    def no_calls(*_a: Any, **_k: Any) -> FakeResponse:
+        raise AssertionError("no request without credentials")
+
+    code, evidence, status = run(short, no_calls, monkeypatch, env)
+    assert code == 1
+    assert evidence["status"] == "error"
+    assert evidence["error_code"] == "bad_config"
+    assert evidence["metadata"] == {"partial_failure": False, "api_failures": []}
+    assert status is not None and status["code"] == "bad_config"
+
+
+# --- incident timelines ------------------------------------------------------------
+
+
+TIMELINE_PREFIX = "/api/v2/incidents/"
+TIMELINE_SUFFIX = "/relationships/timeline_cells"
+
+
+def timelines_fake(
+    incidents: FakeDatadog, failing: Optional[Dict[str, int]] = None
+) -> Callable[..., FakeResponse]:
+    """`incidents` for the incidents walk, plus one markdown cell per incident
+    timeline; the incident ids in `failing` answer with their status."""
+    failing = failing or {}
+
+    def call(method: str, url: str, headers: Any = None, params: Any = None,
+             json: Any = None, timeout: Any = None) -> FakeResponse:
+        path = url[len(BASE_URL):]
+        if path.startswith(TIMELINE_PREFIX) and path.endswith(TIMELINE_SUFFIX):
+            incident_id = path[len(TIMELINE_PREFIX):-len(TIMELINE_SUFFIX)]
+            if incident_id in failing:
+                return FakeResponse(failing[incident_id], {"errors": ["synthetic failure"]})
+            cell = {"id": f"cell-{incident_id}", "attributes": {"cell_type": "markdown",
+                                                               "content": {"content": "note"}}}
+            return FakeResponse(200, {"data": [cell]})
+        return incidents(method, url, headers, params, json, timeout)
+
+    return call
+
+
+def run_timelines(fake: Callable[..., FakeResponse], monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    return run("incident_timelines", fake, monkeypatch, tmp_path)
+
+
+def test_timelines_walk_does_not_need_a_total(env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The old walk read `meta.pagination.total`, which the API does not send, and stopped after 100."""
+    incidents = fake_for("incidents_list", total=230)
+    code, evidence, _status = run_timelines(timelines_fake(incidents), monkeypatch, env)
+
+    assert code == 0
+    assert evidence["status"] == "success"
+    assert len(evidence["data"]) == 230
+    assert evidence["summary"]["total_timeline_cells"] == 230
+    assert incidents.pages_served == [0, 1, 2]
+    assert evidence["metadata"] == {"partial_failure": False, "api_failures": []}
+
+
+def test_timelines_first_page_401_is_failure_not_empty(env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    incidents = fake_for("incidents_list", fail_at=0, fail_status=401)
+    code, evidence, status = run_timelines(timelines_fake(incidents), monkeypatch, env)
+
+    assert code == 1
+    assert evidence["status"] == "error"
+    assert evidence.get("message") != "No incidents found in the lookback window"
+    assert status == {"code": "auth_failed", "error": evidence["message"]}
+
+
+def test_timelines_later_incidents_page_error_is_partial_failure(env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    incidents = fake_for("incidents_list", fail_at=1, fail_status=500)
+    code, evidence, status = run_timelines(timelines_fake(incidents), monkeypatch, env)
+
+    assert code == 1
+    assert evidence["status"] == "partial_failure"
+    assert len(evidence["data"]) == 100
+    assert evidence["summary"]["total_timeline_cells"] is None
+    assert status is not None and status["code"] == "partial_failure"
+
+
+def test_timelines_failed_timeline_read_is_not_an_empty_timeline(env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    incidents = fake_for("incidents_list", total=3)
+    code, evidence, status = run_timelines(timelines_fake(incidents, {"inc-1": 403}), monkeypatch, env)
+
+    assert code == 1
+    assert evidence["status"] == "partial_failure"
+    by_id = {t["incident_id"]: t for t in evidence["data"]}
+    assert by_id["inc-1"]["timeline_cells"] is None
+    assert by_id["inc-1"]["cell_count"] is None
+    assert by_id["inc-0"]["cell_count"] == 1
+    [failure] = evidence["metadata"]["api_failures"]
+    assert failure["incident_id"] == "inc-1"
+    assert failure["status_code"] == 403
+    assert evidence["metadata"]["partial_failure"] is True
+    assert evidence["summary"]["incidents_with_timeline"] is None
+    assert evidence["summary"]["lookback_days"] == 90
+    assert status is not None and status["code"] == "partial_failure"

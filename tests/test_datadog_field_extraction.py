@@ -70,14 +70,20 @@ class FakeResponse:
 # --- incidents_list --------------------------------------------------------
 
 
+def _days_ago(days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
 def incident(
     incident_id: str,
     detected: str = "2026-09-19T10:00:00.000Z",
     resolved: str = "2026-09-19T13:30:00.000Z",
     state: str = "resolved",
     commander: str = "00000000-0000-0000-0000-00000000c0de",
+    created: str = "",
 ) -> Dict[str, Any]:
-    """Shape of one data[] item from GET /api/v2/incidents."""
+    """Shape of one data[] item from GET /api/v2/incidents. Created 5 days ago
+    unless `created` is given, so it is inside the default 90-day window."""
     return {
         "id": incident_id,
         "type": "incidents",
@@ -85,7 +91,7 @@ def incident(
             "title": "Database latency",
             "severity": "SEV-2",
             "state": state,
-            "created": "2026-09-19T09:58:00.000Z",
+            "created": created or _days_ago(5),
             "detected": detected,
             "resolved": resolved,
             "customer_impact_scope": "Some API calls were slow",
@@ -159,6 +165,49 @@ def test_incidents_summary_averages_resolution_hours(monkeypatch):
     assert result["summary"]["avg_resolution_hours"] == 3.0
     assert result["summary"]["incidents_by_status"] == {"resolved": 2, "active": 1}
     assert [r["commander_id"] for r in result["data"]] == ["00000000-0000-0000-0000-00000000c0de"] * 3
+
+
+def test_incidents_older_than_the_window_are_dropped(monkeypatch):
+    """The date filter is not a documented parameter. If the API ignores it, an
+    old incident must still stay out of the evidence and the summary."""
+    raw = [
+        incident("inc-new", created=_days_ago(10)),
+        incident("inc-old", created=_days_ago(400), resolved="2026-09-19T20:00:00.000Z"),
+    ]
+    monkeypatch.setattr(incidents_list, "fetch_all_incidents", lambda *a, **k: raw)
+    result = incidents_list.get_incidents_list()
+    assert [r["id"] for r in result["data"]] == ["inc-new"]
+    assert result["summary"]["total_incidents"] == 1
+    assert result["summary"]["incidents_by_status"] == {"resolved": 1}
+    assert result["summary"]["avg_resolution_hours"] == 3.5
+    assert result["summary"]["incidents_outside_lookback_dropped"] == 1
+
+
+def test_incident_timelines_drop_incidents_older_than_the_window(monkeypatch):
+    raw = [incident("inc-new", created=_days_ago(10)), incident("inc-old", created=_days_ago(400))]
+    read: List[str] = []
+
+    def cells(_base: str, _headers: Dict[str, str], incident_id: str) -> List[Dict[str, Any]]:
+        read.append(incident_id)
+        return []
+
+    monkeypatch.setattr(incident_timelines, "fetch_incidents", lambda *a, **k: raw)
+    monkeypatch.setattr(incident_timelines, "fetch_timeline_cells", cells)
+    result = incident_timelines.get_incident_timelines()
+    assert read == ["inc-new"]
+    assert [t["incident_id"] for t in result["data"]] == ["inc-new"]
+    assert result["summary"]["incidents_outside_lookback_dropped"] == 1
+
+
+def test_postmortem_figures_are_unknown_not_zero(monkeypatch):
+    """A v2 incident carries no postmortem, and the fetcher does not read
+    attachments, so the figures are null, not 0 or every resolved incident."""
+    raw = [incident("inc-1"), incident("inc-2", state="active", resolved=None)]
+    monkeypatch.setattr(incidents_list, "fetch_all_incidents", lambda *a, **k: raw)
+    result = incidents_list.get_incidents_list()
+    assert result["summary"]["incidents_with_postmortem"] is None
+    assert result["summary"]["resolved_without_postmortem_ids"] is None
+    assert [r["postmortem_id"] for r in result["data"]] == [None, None]
 
 
 # --- incident_timelines ----------------------------------------------------
@@ -319,7 +368,9 @@ def test_audit_indexes_configured_but_none_found(monkeypatch):
     summary = _run_indexes(monkeypatch)["summary"]
     assert summary["audit_indexes"] == []
     assert summary["min_retention_days_audit_indexes"] is None
-    assert summary["audit_indexes_below_90_days"] == 0
+    # Null, not 0: no index was checked.
+    assert summary["audit_indexes_below_90_days"] is None
+    assert summary["audit_indexes_not_found"] == ["nope"]
 
 
 # --- monitors_list ---------------------------------------------------------
@@ -453,6 +504,24 @@ def test_rules_summary_counts_epoch_millisecond_updates(monkeypatch):
     assert "rules_never_triggered_count" not in summary
 
 
+def test_rules_keep_only_custom_cloud_siem_rules(monkeypatch):
+    """`is_default=false` is not a documented parameter, and the endpoint also
+    returns other products' rules. The fetcher filters both out itself."""
+    now = _ms(datetime.now(timezone.utc))
+    custom = rule(now)
+    default = dict(rule(now), id="default-1", isDefault=True)
+    workload = dict(rule(now), id="workload-1", type="workload_security")
+    correlation = dict(rule(now), id="correlation-1", type="signal_correlation")
+    monkeypatch.setattr(
+        siem_detection_rules, "fetch_all_rules", lambda *a, **k: [custom, default, workload, correlation]
+    )
+    result = siem_detection_rules.get_siem_detection_rules()
+    assert [r["id"] for r in result["data"]] == ["abc-def-ghi", "correlation-1"]
+    assert result["summary"]["total_rules"] == 2
+    assert result["summary"]["rules_by_type"] == {"log_detection": 1, "signal_correlation": 1}
+    assert result["summary"]["rules_excluded"] == 2
+
+
 @pytest.mark.parametrize(
     "value, expected",
     [
@@ -526,6 +595,8 @@ def test_signals_summary_counts(monkeypatch):
 
 
 def test_evidence_written_only_under_tmp(tmp_path, monkeypatch):
+    # main() reads a .env file; keep the test off the working tree.
+    monkeypatch.setattr(siem_signals, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(siem_signals, "fetch_all_signals", lambda *a, **k: [search_signal()])
     assert siem_signals.main() == 0
     written: List[Path] = list(tmp_path.iterdir())

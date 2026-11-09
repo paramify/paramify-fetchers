@@ -24,6 +24,10 @@ from datadog_paging import request_json
 
 CONTENT_PACKS_PATH = "/api/v2/security_monitoring/content_packs/states"
 
+# Detection rule types that Cloud SIEM owns. GET /api/v2/security_monitoring/rules
+# also returns Workload Protection, CSM and App and API Protection rules.
+SIEM_RULE_TYPES = frozenset({"log_detection", "signal_correlation"})
+
 NOT_ACTIVE_MESSAGE = (
     "Cloud SIEM is not active for this organization "
     "(content pack states report onboarding)"

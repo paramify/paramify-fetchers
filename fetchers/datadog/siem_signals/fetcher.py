@@ -25,6 +25,7 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 
 from datadog_paging import (  # noqa: E402
     PagingError,
+    error_result,
     failure_result,
     paginate_cursor,
     with_paging_status,
@@ -129,8 +130,11 @@ def extract_signal_fields(signal: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_siem_signals() -> Dict[str, Any]:
-    base_url = get_base_url()
-    headers = get_dd_headers()
+    try:
+        base_url = get_base_url()
+        headers = get_dd_headers()
+    except RuntimeError as e:
+        return error_result(str(e), current_timestamp(), "bad_config")
     endpoint = f"{base_url}/api/v2/security_monitoring/signals/search"
 
     lookback_days = int(os.environ.get("DATADOG_SIGNALS_LOOKBACK_DAYS", "30"))
@@ -172,27 +176,25 @@ def get_siem_signals() -> Dict[str, Any]:
                 "date_range": {"from": from_ts, "to": to_ts},
             },
             "retrieved_at": current_timestamp(),
-        }, signals)
+        }, signals, keep_summary=("lookback_days", "date_range"))
 
     except PagingError as e:
         if e.status_code in SIEM_GATE_STATUSES:
             siem_state = read_siem_state(base_url, headers)
             if siem_state["enabled"] is False:
-                return {
+                return with_paging_status({
                     "status": "not_available",
                     "message": NOT_ACTIVE_MESSAGE,
                     "api_endpoint": endpoint,
                     "data": {"siem_state": siem_state},
                     "retrieved_at": current_timestamp(),
-                }
+                })
             result = failure_result(e, endpoint, current_timestamp())
             result["siem_state"] = siem_state
             return result
         return failure_result(e, endpoint, current_timestamp())
-    except RuntimeError as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
     except Exception as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+        return error_result(str(e), current_timestamp())
 
 
 def main() -> int:

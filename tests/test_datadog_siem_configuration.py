@@ -1,6 +1,7 @@
 """Cover for datadog_siem_configuration against a fake Datadog API.
 
-No network and no credentials: ``requests.get`` in the fetcher module is
+No network and no credentials: ``requests.request``, which the shared helper
+in fetchers/datadog/_shared/datadog_paging.py makes every call through, is
 replaced by a router that answers each path with a response shaped like the
 examples in Datadog's API reference (Security Monitoring: Get content pack
 states, Get all suppression rules, Get the list of signal-based notification
@@ -8,8 +9,11 @@ rules, List rules; Webhooks Integration: Get a webhook integration).
 
 What this proves: Cloud SIEM reads as not active only on the documented
 `onboarding` content pack signal, never on a 404 or 403; a failed sub-read fails
-the run instead of passing as "not enabled"; and `notification_types` comes from
-configured notification targets, not webhook names. What it cannot prove: that
+the run instead of passing as "not enabled"; a read that stops part way, or a
+webhook read that fails with a status other than 404, is a partial failure
+with null figures, never an empty `missing_webhooks`; every failure is in
+`metadata.api_failures`; and `notification_types` comes from configured
+notification targets, not webhook names. What it cannot prove: that
 the preview content pack states endpoint is served on every Datadog site
 (including GovCloud) and that real targets carry the leading `@`. That still
 needs a live tenant.
@@ -23,6 +27,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pytest
+import requests
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER = REPO_ROOT / "fetchers" / "datadog" / "siem_configuration" / "fetcher.py"
@@ -48,6 +53,11 @@ class FakeResponse:
         self.status_code = status
         self._body = body
         self.text = json.dumps(body)
+        self.headers: Dict[str, str] = {}
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(f"{self.status_code} Error", response=self)  # type: ignore[arg-type]
 
     def json(self) -> Any:
         return self._body
@@ -139,7 +149,8 @@ def run(monkeypatch, tmp_path):
         module = load_fetcher()
         calls: List[str] = []
 
-        def fake_get(url, headers=None, params=None, timeout=None):
+        def fake_request(method, url, headers=None, params=None, json=None, timeout=None):
+            assert method == "GET"
             assert url.startswith(BASE), url
             path = url[len(BASE):]
             calls.append(path)
@@ -147,7 +158,7 @@ def run(monkeypatch, tmp_path):
             route = routes.get(path)
             return route(params) if route else error(404)
 
-        monkeypatch.setattr(module.requests, "get", fake_get)
+        monkeypatch.setattr(module.requests, "request", fake_request)
         monkeypatch.setattr(module, "load_dotenv", lambda *a, **k: None)
         monkeypatch.setenv("DATADOG_API_KEY", "api-key-for-test")
         monkeypatch.setenv("DATADOG_APP_KEY", "app-key-for-test")
@@ -179,7 +190,8 @@ def test_enabled_with_suppressions_reports_enabled(run, tmp_path):
     assert first["enabled"] is True
     assert first["start_date"] == 1703187336000
     assert first["suppression_query"] == "env:staging"
-    assert ev["errors"] == []
+    assert ev["metadata"] == {"partial_failure": False, "api_failures": []}
+    assert "errors" not in ev
     assert status_file(tmp_path) is None
     # The documented path, not the old `suppression_rules` one.
     assert SUPPRESSIONS in calls
@@ -198,7 +210,11 @@ def test_404_on_a_sub_call_is_not_reported_as_siem_not_enabled(run, tmp_path):
     assert ev["summary"]["suppression_rules_count"] is None
     assert ev["data"]["suppression_rules"] is None
     assert "not enabled" not in json.dumps(ev).lower()
-    assert any(e["endpoint"] == SUPPRESSIONS and e["status_code"] == 404 for e in ev["errors"])
+    [failure] = ev["metadata"]["api_failures"]
+    assert failure["operation"] == "Datadog list suppression rules"
+    assert failure["status_code"] == 404
+    assert ev["metadata"]["partial_failure"] is True
+    assert ev["error_code"] == "partial_failure"
     assert status_file(tmp_path)["code"] == "partial_failure"
 
 
@@ -211,6 +227,8 @@ def test_403_on_a_sub_call_fails_as_not_authorized(run, tmp_path):
     assert code == 1
     assert ev["summary"]["siem_enabled"] is True
     assert ev["summary"]["notification_types"] is None
+    assert ev["error_code"] == "not_authorized"
+    assert ev["metadata"]["api_failures"][0]["operation"] == "Datadog list signal notification rules"
     assert status_file(tmp_path)["code"] == "not_authorized"
 
 
@@ -224,7 +242,10 @@ def test_unreadable_siem_state_is_unknown_not_disabled(run, tmp_path):
     assert ev["status"] == "success"
     assert ev["summary"]["siem_enabled"] is None
     assert ev["data"]["siem_state"]["status_code"] == 404
-    assert ev["errors"][0]["endpoint"] == CONTENT_PACKS
+    assert CONTENT_PACKS in ev["data"]["siem_state"]["error"]
+    # The preview endpoint's failure leaves the state unknown; it is not a
+    # failed read of the configuration.
+    assert ev["metadata"] == {"partial_failure": False, "api_failures": []}
     assert ev["summary"]["suppression_rules_count"] == 2
 
 
@@ -238,6 +259,7 @@ def test_onboarding_content_packs_report_not_enabled(run, tmp_path):
     assert ev["status"] == "not_available"
     assert ev["summary"]["siem_enabled"] is False
     assert "not active" in ev["message"]
+    assert ev["metadata"] == {"partial_failure": False, "api_failures": []}
     assert calls == [CONTENT_PACKS]
 
 
@@ -300,6 +322,83 @@ def test_suppressions_are_paged(run):
 
     assert ev["summary"]["suppression_rules_count"] == 150
     assert calls.count(SUPPRESSIONS) == 2
+
+
+def test_webhook_read_403_is_a_partial_failure_not_an_empty_list(run, tmp_path):
+    routes = default_routes()
+    routes[WEBHOOKS + "soar-intake"] = lambda p: error(403)
+
+    code, ev, _ = run(routes)
+
+    assert code == 1
+    assert ev["status"] == "partial_failure"
+    assert ev["data"]["referenced_webhooks"] == [{"name": "soar-intake", "found": None, "url_domain": None}]
+    # Unknown, not "no webhook is missing".
+    assert ev["summary"]["missing_webhooks"] is None
+    assert ev["metadata"]["partial_failure"] is True
+    [failure] = ev["metadata"]["api_failures"]
+    assert failure["operation"] == "Datadog read webhook"
+    assert failure["status_code"] == 403
+    assert failure["webhook"] == "soar-intake"
+    assert status_file(tmp_path)["code"] == "partial_failure"
+
+
+def test_suppressions_later_page_failure_nulls_the_counts(run, tmp_path):
+    def page(params):
+        if params["page[number]"] == 1:
+            return FakeResponse(500, {"errors": ["synthetic failure"]})
+        return FakeResponse(200, {"data": [
+            {"id": f"s{i}", "type": "suppressions", "attributes": {"name": f"s{i}", "enabled": True}}
+            for i in range(100)
+        ]})
+
+    routes = default_routes()
+    routes[SUPPRESSIONS] = page
+
+    code, ev, _ = run(routes)
+
+    assert code == 1
+    assert ev["status"] == "partial_failure"
+    # The records read stay in the evidence; the counts from them are null.
+    assert len(ev["data"]["suppression_rules"]) == 100
+    assert ev["summary"]["suppression_rules_count"] is None
+    assert ev["summary"]["enabled_suppression_rules"] is None
+    assert ev["summary"]["notification_rules_count"] == 2
+    [failure] = ev["metadata"]["api_failures"]
+    assert failure["page"] == "page 1"
+    assert failure["pages_completed"] == 1
+    assert status_file(tmp_path)["code"] == "partial_failure"
+
+
+def test_rules_later_page_failure_nulls_the_notification_figures(run):
+    def page(params):
+        if params["page[number]"] == 1:
+            return FakeResponse(503, {"errors": ["synthetic failure"]})
+        rules = [{"id": f"r{i}", "name": f"r{i}", "type": "log_detection", "isEnabled": True,
+                  "cases": [{"status": "high", "notifications": ["@slack-secops"]}]} for i in range(100)]
+        return FakeResponse(200, {"data": rules})
+
+    routes = default_routes()
+    routes[RULES] = page
+
+    code, ev, _ = run(routes)
+
+    assert code == 1
+    assert ev["status"] == "partial_failure"
+    assert len(ev["data"]["detection_rule_notifications"]) == 100
+    assert ev["summary"]["detection_rules_with_notifications"] is None
+    assert ev["summary"]["notification_types"] is None
+    assert ev["summary"]["missing_webhooks"] is None
+
+
+def test_missing_api_key_is_bad_config(monkeypatch):
+    module = load_fetcher()
+    monkeypatch.delenv("DATADOG_API_KEY", raising=False)
+    monkeypatch.setenv("DATADOG_APP_KEY", "app-key-for-test")
+    result = module.get_siem_configuration()
+    assert result["status"] == "error"
+    assert result["error_code"] == "bad_config"
+    assert result["metadata"] == {"partial_failure": False, "api_failures": []}
 
 
 @pytest.mark.parametrize("target,expected", [

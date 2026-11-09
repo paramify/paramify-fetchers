@@ -25,6 +25,7 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 
 from datadog_paging import (  # noqa: E402
     PagingError,
+    error_result,
     failure_result,
     paginate_page_number,
     with_paging_status,
@@ -82,8 +83,11 @@ def extract_service_fields(service: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_apm_services() -> Dict[str, Any]:
-    base_url = get_base_url()
-    headers = get_dd_headers()
+    try:
+        base_url = get_base_url()
+        headers = get_dd_headers()
+    except RuntimeError as e:
+        return error_result(str(e), current_timestamp(), "bad_config")
     endpoint = f"{base_url}/api/v2/services/definitions"
 
     try:
@@ -120,10 +124,8 @@ def get_apm_services() -> Dict[str, Any]:
 
     except PagingError as e:
         return failure_result(e, endpoint, current_timestamp())
-    except RuntimeError as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
     except Exception as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+        return error_result(str(e), current_timestamp())
 
 
 def main() -> int:

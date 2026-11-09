@@ -25,11 +25,16 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 
 from datadog_paging import (  # noqa: E402
     PagingError,
+    error_result,
     failure_result,
     paginate_page_number,
     with_paging_status,
 )
-from datadog_siem_state import NOT_ACTIVE_MESSAGE, read_siem_state  # noqa: E402
+from datadog_siem_state import (  # noqa: E402
+    NOT_ACTIVE_MESSAGE,
+    SIEM_RULE_TYPES,
+    read_siem_state,
+)
 from fetcher_status import report_failure  # noqa: E402
 
 logger = logging.getLogger("datadog_siem_detection_rules")
@@ -67,9 +72,11 @@ def get_base_url() -> str:
 
 
 def fetch_all_rules(base_url: str, headers: Dict[str, str]) -> List[Dict[str, Any]]:
-    """Every custom detection rule. GET /api/v2/security_monitoring/rules pages
-    with `page[size]` (max 100) and `page[number]`. Raises PagingError if the
-    first page fails; a later failure comes back on the returned list's `.error`."""
+    """Every detection rule. GET /api/v2/security_monitoring/rules pages with
+    `page[size]` (max 100) and `page[number]`. `is_default=false` is not a
+    documented parameter, so `is_custom_siem_rule` filters the result too.
+    Raises PagingError if the first page fails; a later failure comes back on
+    the returned list's `.error`."""
     return paginate_page_number(
         f"{base_url}/api/v2/security_monitoring/rules",
         headers,
@@ -77,6 +84,13 @@ def fetch_all_rules(base_url: str, headers: Dict[str, str]) -> List[Dict[str, An
         page_size=100,
         params={"is_default": "false"},
     )
+
+
+def is_custom_siem_rule(rule: Dict[str, Any]) -> bool:
+    """A custom Cloud SIEM rule: `isDefault` is false and the type is a Cloud
+    SIEM type. The endpoint also returns Datadog's default rules and Workload
+    Protection, CSM and App and API Protection rules."""
+    return rule.get("isDefault") is False and rule.get("type") in SIEM_RULE_TYPES
 
 
 def _extract_query(query: Dict[str, Any]) -> Dict[str, Any]:
@@ -152,14 +166,18 @@ def count_rules_updated_since(rules: List[Dict[str, Any]], cutoff: datetime) -> 
 
 
 def get_siem_detection_rules() -> Dict[str, Any]:
-    base_url = get_base_url()
-    headers = get_dd_headers()
+    try:
+        base_url = get_base_url()
+        headers = get_dd_headers()
+    except RuntimeError as e:
+        return error_result(str(e), current_timestamp(), "bad_config")
     endpoint = f"{base_url}/api/v2/security_monitoring/rules"
 
     try:
         rules = fetch_all_rules(base_url, headers)
+        custom = [r for r in rules if is_custom_siem_rule(r)]
 
-        extracted = [extract_rule_fields(r) for r in rules]
+        extracted = [extract_rule_fields(r) for r in custom]
 
         enabled_rules = [r for r in extracted if r.get("isEnabled")]
         disabled_rules = [r for r in extracted if not r.get("isEnabled")]
@@ -185,6 +203,9 @@ def get_siem_detection_rules() -> Dict[str, Any]:
                 "rules_updated_last_90_days": rules_updated_recently,
                 "rules_by_type": type_counts,
                 "rules_by_severity": severity_counts,
+                # Default rules and rules of other products that the API
+                # returned and the fetcher left out.
+                "rules_excluded": len(rules) - len(custom),
             },
             "retrieved_at": current_timestamp(),
         }, rules)
@@ -193,21 +214,19 @@ def get_siem_detection_rules() -> Dict[str, Any]:
         if e.status_code in SIEM_GATE_STATUSES:
             siem_state = read_siem_state(base_url, headers)
             if siem_state["enabled"] is False:
-                return {
+                return with_paging_status({
                     "status": "not_available",
                     "message": NOT_ACTIVE_MESSAGE,
                     "api_endpoint": endpoint,
                     "data": {"siem_state": siem_state},
                     "retrieved_at": current_timestamp(),
-                }
+                })
             result = failure_result(e, endpoint, current_timestamp())
             result["siem_state"] = siem_state
             return result
         return failure_result(e, endpoint, current_timestamp())
-    except RuntimeError as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
     except Exception as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+        return error_result(str(e), current_timestamp())
 
 
 def main() -> int:

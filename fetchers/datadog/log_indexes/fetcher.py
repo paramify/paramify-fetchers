@@ -103,7 +103,10 @@ def summarize_audit_indexes(extracted: List[Dict[str, Any]], audit_names: List[s
         "audit_indexes": [idx.get("name") for idx in audit],
         "audit_indexes_not_found": [n for n in audit_names if n not in present],
         "min_retention_days_audit_indexes": min(retentions) if retentions else None,
-        "audit_indexes_below_90_days": sum(1 for v in retentions if v < 90),
+        # Null, not 0, when no audit index has a retention to check (none
+        # matched, or the organization has no indexes): 0 would read as "all
+        # audit indexes keep logs 90 days or more".
+        "audit_indexes_below_90_days": sum(1 for v in retentions if v < 90) if retentions else None,
     }
 
 

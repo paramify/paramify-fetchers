@@ -23,10 +23,16 @@ sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
 # Paging shared by the Datadog fetchers lives in the category's _shared/.
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 
+from datadog_incidents import (  # noqa: E402
+    INCIDENTS_PATH,
+    drop_incidents_before,
+    parse_timestamp,
+    walk_incidents,
+)
 from datadog_paging import (  # noqa: E402
     PagingError,
+    error_result,
     failure_result,
-    paginate_offset,
     with_paging_status,
 )
 from fetcher_status import report_failure  # noqa: E402
@@ -67,33 +73,7 @@ def fetch_all_incidents(
     and `page[offset]`; its `meta.pagination` has no total, so the walk stops
     on a short page. Raises PagingError if the first page fails; a later
     failure comes back on the returned list's `.error`."""
-    return paginate_offset(
-        f"{base_url}/api/v2/incidents",
-        headers,
-        operation="Datadog list incidents",
-        page_size=100,
-        params={
-            "filter[created][start]": from_ts,
-            "filter[created][end]": to_ts,
-        },
-    )
-
-
-def parse_timestamp(value: Optional[str]) -> Optional[datetime]:
-    """Parse a Datadog ISO 8601 timestamp, with or without fractional seconds.
-
-    The v2 incidents API returns values such as ``2019-09-19T10:00:00.000Z``.
-    A value with no offset is read as UTC.
-    """
-    if not value or not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
+    return walk_incidents(base_url, headers, from_ts, to_ts)
 
 
 def parse_resolution_hours(detected: Optional[str], resolved: Optional[str]) -> Optional[float]:
@@ -147,14 +127,24 @@ def extract_incident_fields(incident: Dict[str, Any]) -> Dict[str, Any]:
         "customer_impact_scope": attrs.get("customer_impact_scope"),
         "customer_impact_duration": attrs.get("customer_impact_duration"),
         "commander_id": commander_id,
-        "postmortem_id": attrs.get("postmortem_id"),
+        # Unknown: a v2 incident has no postmortem attribute. A postmortem is
+        # an incident attachment, which this fetcher does not read.
+        "postmortem_id": None,
     }
 
 
+# Summary figures that do not come from the incident list. They stay when the
+# walk stops early; every other figure becomes null.
+KEEP_SUMMARY = ("lookback_days", "incidents_with_postmortem", "resolved_without_postmortem_ids")
+
+
 def get_incidents_list() -> Dict[str, Any]:
-    base_url = get_base_url()
-    headers = get_dd_headers()
-    endpoint = f"{base_url}/api/v2/incidents"
+    try:
+        base_url = get_base_url()
+        headers = get_dd_headers()
+    except RuntimeError as e:
+        return error_result(str(e), current_timestamp(), "bad_config")
+    endpoint = f"{base_url}{INCIDENTS_PATH}"
 
     lookback_days = int(os.environ.get("DATADOG_INCIDENTS_LOOKBACK_DAYS", "90"))
     now = datetime.now(timezone.utc)
@@ -163,11 +153,19 @@ def get_incidents_list() -> Dict[str, Any]:
     to_ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     try:
-        incidents = fetch_all_incidents(base_url, headers, from_ts, to_ts)
+        walked = fetch_all_incidents(base_url, headers, from_ts, to_ts)
+        # The date filter is not documented; drop what it did not.
+        incidents, outside_window = drop_incidents_before(walked, from_dt)
         extracted = [extract_incident_fields(i) for i in incidents]
+        # Postmortems are not read (see extract_incident_fields), so these are
+        # unknown, not "none".
+        postmortem_summary: Dict[str, Any] = {
+            "incidents_with_postmortem": None,
+            "resolved_without_postmortem_ids": None,
+        }
 
         if not extracted:
-            return {
+            return with_paging_status({
                 "status": "partial_or_empty",
                 "message": "No incidents found in the lookback window",
                 "api_endpoint": endpoint,
@@ -177,12 +175,13 @@ def get_incidents_list() -> Dict[str, Any]:
                     "total_incidents": 0,
                     "incidents_by_severity": {},
                     "incidents_by_status": {},
-                    "incidents_with_postmortem": 0,
+                    **postmortem_summary,
                     "avg_resolution_hours": None,
+                    "incidents_outside_lookback_dropped": outside_window,
                     "lookback_days": lookback_days,
                 },
                 "retrieved_at": current_timestamp(),
-            }
+            }, walked, keep_summary=KEEP_SUMMARY)
 
         severity_counts: Dict[str, int] = dict(Counter(
             i.get("severity", "UNKNOWN") or "UNKNOWN" for i in extracted
@@ -190,12 +189,6 @@ def get_incidents_list() -> Dict[str, Any]:
         status_counts: Dict[str, int] = dict(Counter(
             i.get("status", "unknown") or "unknown" for i in extracted
         ))
-        incidents_with_postmortem = sum(1 for i in extracted if i.get("postmortem_id"))
-
-        resolved_without_postmortem_ids = [
-            i["id"] for i in extracted
-            if i.get("status") == "resolved" and not i.get("postmortem_id")
-        ]
 
         resolution_times = [
             i["resolution_hours"] for i in extracted if i.get("resolution_hours") is not None
@@ -211,20 +204,18 @@ def get_incidents_list() -> Dict[str, Any]:
                 "total_incidents": len(extracted),
                 "incidents_by_severity": severity_counts,
                 "incidents_by_status": status_counts,
-                "incidents_with_postmortem": incidents_with_postmortem,
-                "resolved_without_postmortem_ids": resolved_without_postmortem_ids,
+                **postmortem_summary,
                 "avg_resolution_hours": avg_resolution,
+                "incidents_outside_lookback_dropped": outside_window,
                 "lookback_days": lookback_days,
             },
             "retrieved_at": current_timestamp(),
-        }, incidents)
+        }, walked, keep_summary=KEEP_SUMMARY)
 
     except PagingError as e:
         return failure_result(e, endpoint, current_timestamp())
-    except RuntimeError as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
     except Exception as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+        return error_result(str(e), current_timestamp())
 
 
 def main() -> int:

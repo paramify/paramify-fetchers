@@ -21,6 +21,14 @@ Endpoints (Datadog API reference, docs.datadoghq.com/api/latest/):
 
 A 404 or 403 is never read as "Cloud SIEM is not enabled". Only the
 `onboarding` signal above gives that verdict.
+
+Every request goes through the shared helpers in `_shared/` (paging, the 429
+retry and the Cloud SIEM state rule). Each failed request is one entry in
+`metadata.api_failures`, the same shape as the other Datadog fetchers. A read
+that fails outright fails the run (`status: error`). A read that stops on a
+later page, or a webhook read that fails with a status other than 404, gives
+`status: partial_failure`. Either way the run exits 1, and each summary figure
+that depends on the failed read is null.
 """
 
 import json
@@ -42,11 +50,19 @@ sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
 # The Cloud SIEM state rule shared by the Datadog SIEM fetchers lives in _shared/.
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 
+from datadog_paging import (  # noqa: E402
+    PagedRecords,
+    PagingError,
+    error_result,
+    paginate_page_number,
+    request_failure,
+    request_json,
+)
 from datadog_siem_state import (  # noqa: E402
     CONTENT_PACKS_PATH,
     NOT_ACTIVE_MESSAGE,
-    siem_state_from_content_packs,
-    unknown_siem_state,
+    SIEM_RULE_TYPES,
+    read_siem_state,
 )
 from fetcher_status import report_failure  # noqa: E402
 
@@ -58,12 +74,6 @@ DETECTION_RULES_PATH = "/api/v2/security_monitoring/rules"
 WEBHOOK_PATH = "/api/v1/integration/webhooks/configuration/webhooks/{name}"
 
 PAGE_SIZE = 100
-# A guard against a server that never returns a short page.
-MAX_PAGES = 500
-
-# Detection rule types that Cloud SIEM owns. The rules endpoint also returns
-# Workload Protection, CSM and App and API Protection rules.
-SIEM_RULE_TYPES = {"log_detection", "signal_correlation"}
 
 # Handle prefixes from Datadog's notification docs (`@<INTEGRATION>-<VALUES>`).
 # `teams` is Microsoft Teams; `team` is a Datadog Team handle.
@@ -78,16 +88,6 @@ KNOWN_HANDLE_PREFIXES = {
     "servicenow",
     "incident",
 }
-
-
-class ApiError(Exception):
-    def __init__(self, endpoint: str, message: str, status_code: Optional[int] = None):
-        super().__init__(message)
-        self.endpoint = endpoint
-        self.status_code = status_code
-
-    def as_record(self) -> Dict[str, Any]:
-        return {"endpoint": self.endpoint, "status_code": self.status_code, "error": str(self)}
 
 
 def current_timestamp() -> str:
@@ -111,57 +111,6 @@ def get_dd_headers() -> Dict[str, str]:
 
 def get_base_url() -> str:
     return os.environ.get("DATADOG_BASE_URL", "https://api.ddog-gov.com").rstrip("/")
-
-
-def api_get(base_url: str, path: str, headers: Dict[str, str],
-            params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """GET one JSON object, or raise ApiError naming the path and status."""
-    try:
-        response = requests.get(f"{base_url}{path}", headers=headers, params=params, timeout=30)
-    except requests.exceptions.RequestException as e:
-        raise ApiError(path, f"request failed: {e}") from e
-    if response.status_code >= 400:
-        raise ApiError(path, f"HTTP {response.status_code}: {response.text[:300]}", response.status_code)
-    try:
-        payload = response.json()
-    except ValueError as e:
-        raise ApiError(path, f"response is not JSON (HTTP {response.status_code})", response.status_code) from e
-    if not isinstance(payload, dict):
-        raise ApiError(path, "response is not a JSON object", response.status_code)
-    return payload
-
-
-def get_paged(base_url: str, path: str, headers: Dict[str, str]) -> List[Dict[str, Any]]:
-    """All `data` items from a page[number]/page[size] endpoint (pages start at 0).
-
-    Items are de-duplicated by `id`, and a page that adds nothing new ends the
-    read, so a server that numbers pages from 1 cannot double-count page one.
-    """
-    items: List[Dict[str, Any]] = []
-    seen: Set[Any] = set()
-    for page_number in range(MAX_PAGES):
-        payload = api_get(base_url, path, headers,
-                          params={"page[size]": PAGE_SIZE, "page[number]": page_number})
-        data = payload.get("data") or []
-        new = [i for i in data if i.get("id") is None or i.get("id") not in seen]
-        seen.update(i.get("id") for i in new if i.get("id") is not None)
-        items.extend(new)
-        if len(data) < PAGE_SIZE or not new:
-            return items
-    raise ApiError(path, f"more than {MAX_PAGES} pages; stopped to avoid an endless read")
-
-
-# --------------------------------------------------------------------------- #
-# Cloud SIEM state
-# --------------------------------------------------------------------------- #
-
-def read_siem_state(base_url: str, headers: Dict[str, str]) -> Dict[str, Any]:
-    """`enabled` is True, False, or None (unknown). Never False without the signal."""
-    try:
-        payload = api_get(base_url, CONTENT_PACKS_PATH, headers)
-    except ApiError as e:
-        return unknown_siem_state(str(e), e.status_code)
-    return siem_state_from_content_packs(payload)
 
 
 # --------------------------------------------------------------------------- #
@@ -233,16 +182,28 @@ def summarize_targets(targets: Iterable[str]) -> Tuple[List[str], List[str]]:
     return sorted(types), sorted(webhooks)
 
 
-def read_webhook(base_url: str, headers: Dict[str, str], name: str) -> Tuple[Dict[str, Any], Optional[ApiError]]:
-    """One referenced webhook. Logs the URL's domain only, never the full URL."""
+def read_webhook(
+    base_url: str, headers: Dict[str, str], name: str
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """One referenced webhook, and an `api_failures` entry if the read failed.
+
+    Logs the URL's domain only, never the full URL. A 404 is the documented
+    "Item Not Found": the target names a webhook that does not exist, so that
+    notification reaches nobody (`found: false`, not a failure). Any other
+    failure leaves `found` null and is returned as a failure.
+    """
     path = WEBHOOK_PATH.format(name=quote(name, safe=""))
     try:
-        payload = api_get(base_url, path, headers)
-    except ApiError as e:
-        # 404 is the documented "Item Not Found": a target names a webhook that
-        # does not exist, so that notification reaches nobody.
-        found = False if e.status_code == 404 else None
-        return {"name": name, "found": found, "url_domain": None}, (None if found is False else e)
+        payload = request_json("GET", f"{base_url}{path}", headers)
+    except (requests.exceptions.RequestException, ValueError) as e:
+        status_code = getattr(getattr(e, "response", None), "status_code", None)
+        if status_code == 404:
+            return {"name": name, "found": False, "url_domain": None}, None
+        return (
+            {"name": name, "found": None, "url_domain": None},
+            request_failure("Datadog read webhook", e, webhook=name),
+        )
+    payload = payload if isinstance(payload, dict) else {}
     raw_url = payload.get("url") or ""
     return {
         "name": payload.get("name") or name,
@@ -251,8 +212,9 @@ def read_webhook(base_url: str, headers: Dict[str, str], name: str) -> Tuple[Dic
     }, None
 
 
-def failure_code(errors: List[ApiError]) -> str:
-    codes = {e.status_code for e in errors}
+def failure_code(failures: List[Dict[str, Any]]) -> str:
+    """The `report_failure` code for reads that failed outright."""
+    codes = {f.get("status_code") for f in failures}
     if codes == {401}:
         return "auth_failed"
     if 403 in codes or 401 in codes:
@@ -264,12 +226,23 @@ def failure_code(errors: List[ApiError]) -> str:
     return "partial_failure"
 
 
+def _walk(
+    base_url: str, path: str, headers: Dict[str, str], operation: str, fatal: List[Dict[str, Any]]
+) -> Optional[PagedRecords]:
+    """A page[number] walk, or None (with an entry in `fatal`) if its first page failed."""
+    try:
+        return paginate_page_number(f"{base_url}{path}", headers, operation=operation, page_size=PAGE_SIZE)
+    except PagingError as e:
+        fatal.append(e.api_failure())
+        return None
+
+
 def get_siem_configuration() -> Dict[str, Any]:
     try:
         base_url = get_base_url()
         headers = get_dd_headers()
     except RuntimeError as e:
-        return {"status": "error", "code": "bad_config", "message": str(e), "retrieved_at": current_timestamp()}
+        return error_result(str(e), current_timestamp(), "bad_config")
 
     endpoints = [SUPPRESSIONS_PATH, CONTENT_PACKS_PATH, NOTIFICATION_RULES_PATH, DETECTION_RULES_PATH]
     siem_state = read_siem_state(base_url, headers)
@@ -281,29 +254,46 @@ def get_siem_configuration() -> Dict[str, Any]:
             "api_endpoint": f"{base_url}{CONTENT_PACKS_PATH}",
             "data": {"siem_state": siem_state},
             "summary": {"siem_enabled": False},
+            "metadata": {"partial_failure": False, "api_failures": []},
             "retrieved_at": current_timestamp(),
         }
 
-    fatal: List[ApiError] = []
-    warnings: List[ApiError] = []
+    # Reads that failed outright (status error), and reads that stopped part
+    # way or webhook reads that failed (status partial_failure).
+    fatal: List[Dict[str, Any]] = []
+    partial: List[Dict[str, Any]] = []
 
-    suppressions: Optional[List[Dict[str, Any]]] = None
-    try:
-        suppressions = [extract_suppression(i) for i in get_paged(base_url, SUPPRESSIONS_PATH, headers)]
-    except ApiError as e:
-        fatal.append(e)
+    def note_incomplete(walked: Optional[PagedRecords]) -> bool:
+        """True when the walk read every page."""
+        if walked is None:
+            return False
+        if walked.error is not None:
+            partial.append(walked.error.api_failure())
+            return False
+        return True
+
+    suppressions_walk = _walk(base_url, SUPPRESSIONS_PATH, headers, "Datadog list suppression rules", fatal)
+    suppressions_complete = note_incomplete(suppressions_walk)
+    suppressions = (
+        None if suppressions_walk is None else [extract_suppression(i) for i in suppressions_walk]
+    )
 
     notification_rules: Optional[List[Dict[str, Any]]] = None
     try:
-        payload = api_get(base_url, NOTIFICATION_RULES_PATH, headers)
-        notification_rules = [extract_notification_rule(i) for i in payload.get("data") or []]
-    except ApiError as e:
-        fatal.append(e)
+        payload = request_json("GET", f"{base_url}{NOTIFICATION_RULES_PATH}", headers)
+        items = payload.get("data") if isinstance(payload, dict) else None
+        if items is not None and not isinstance(items, list):
+            raise ValueError(f"expected a list at data, got {type(items).__name__}")
+        notification_rules = [extract_notification_rule(i) for i in items or []]
+    except (requests.exceptions.RequestException, ValueError) as e:
+        fatal.append(request_failure("Datadog list signal notification rules", e))
 
+    rules_walk = _walk(base_url, DETECTION_RULES_PATH, headers, "Datadog list security monitoring rules", fatal)
+    rules_complete = note_incomplete(rules_walk)
     rule_notifications: Optional[List[Dict[str, Any]]] = None
-    try:
+    if rules_walk is not None:
         rule_notifications = []
-        for rule in get_paged(base_url, DETECTION_RULES_PATH, headers):
+        for rule in rules_walk:
             if not rule.get("isEnabled") or rule.get("type") not in SIEM_RULE_TYPES:
                 continue
             targets = detection_rule_targets(rule)
@@ -314,33 +304,32 @@ def get_siem_configuration() -> Dict[str, Any]:
                     "rule_type": rule.get("type"),
                     "targets": targets,
                 })
-    except ApiError as e:
-        rule_notifications = None
-        fatal.append(e)
 
     # Where notifications go comes only from enabled configuration. Unknown
-    # (null) when either source could not be read.
+    # (null) when either source could not be read in full.
     notification_types: Optional[List[str]] = None
     referenced_webhooks: Optional[List[Dict[str, Any]]] = None
+    webhook_failures: List[Dict[str, Any]] = []
     if notification_rules is not None and rule_notifications is not None:
         targets = [t for r in notification_rules if r.get("enabled") for t in r["targets"]]
         targets += [t for r in rule_notifications for t in r["targets"]]
-        notification_types, webhook_names = summarize_targets(targets)
+        types, webhook_names = summarize_targets(targets)
+        notification_types = types if rules_complete else None
         referenced_webhooks = []
         for name in webhook_names:
-            record, err = read_webhook(base_url, headers, name)
+            record, failure = read_webhook(base_url, headers, name)
             referenced_webhooks.append(record)
-            if err is not None:
-                warnings.append(err)
+            if failure is not None:
+                webhook_failures.append(failure)
             endpoints.append(WEBHOOK_PATH.format(name=quote(name, safe="")))
+    partial.extend(webhook_failures)
 
-    errors = [e.as_record() for e in fatal + warnings]
-    if siem_state.get("error"):
-        errors.insert(0, {"endpoint": CONTENT_PACKS_PATH, "status_code": siem_state.get("status_code"),
-                          "error": siem_state["error"]})
+    # A webhook list is complete only when every source of targets was read in
+    # full and every webhook read answered.
+    webhooks_known = referenced_webhooks is not None and rules_complete and not webhook_failures
 
     result: Dict[str, Any] = {
-        "status": "success" if not fatal else "error",
+        "status": "success",
         "api_endpoint": f"{base_url}{SUPPRESSIONS_PATH}",
         "api_endpoints_additional": [f"{base_url}{p}" for p in endpoints[1:]],
         "record_count": len(suppressions or []) + len(notification_rules or []),
@@ -353,9 +342,12 @@ def get_siem_configuration() -> Dict[str, Any]:
         },
         "summary": {
             "siem_enabled": siem_state["enabled"],
-            "suppression_rules_count": None if suppressions is None else len(suppressions),
+            "suppression_rules_count": (
+                len(suppressions) if suppressions is not None and suppressions_complete else None
+            ),
             "enabled_suppression_rules": (
-                None if suppressions is None else sum(1 for r in suppressions if r.get("enabled"))
+                sum(1 for r in suppressions if r.get("enabled"))
+                if suppressions is not None and suppressions_complete else None
             ),
             "notification_rules_count": None if notification_rules is None else len(notification_rules),
             "enabled_notification_rules": (
@@ -363,21 +355,33 @@ def get_siem_configuration() -> Dict[str, Any]:
                 else sum(1 for r in notification_rules if r.get("enabled"))
             ),
             "detection_rules_with_notifications": (
-                None if rule_notifications is None else len(rule_notifications)
+                len(rule_notifications) if rule_notifications is not None and rules_complete else None
             ),
-            "referenced_webhooks_count": None if referenced_webhooks is None else len(referenced_webhooks),
+            "referenced_webhooks_count": (
+                len(referenced_webhooks) if referenced_webhooks is not None and rules_complete else None
+            ),
             "missing_webhooks": (
-                None if referenced_webhooks is None
-                else sorted(w["name"] for w in referenced_webhooks if w["found"] is False)
+                sorted(w["name"] for w in referenced_webhooks or [] if w["found"] is False)
+                if webhooks_known else None
             ),
             "notification_types": notification_types,
         },
-        "errors": errors,
+        "metadata": {
+            "partial_failure": bool(fatal or partial),
+            "api_failures": fatal + partial,
+        },
         "retrieved_at": current_timestamp(),
     }
     if fatal:
-        result["code"] = failure_code(fatal)
-        result["message"] = "; ".join(f"{e.endpoint}: {e}" for e in fatal)
+        result["status"] = "error"
+        result["error_code"] = failure_code(fatal)
+        result["message"] = "; ".join(f"{f['operation']}: {f['message']}" for f in fatal + partial)
+    elif partial:
+        result["status"] = "partial_failure"
+        result["error_code"] = "partial_failure"
+        result["message"] = "Incomplete collection: " + "; ".join(
+            f"{f['operation']}: {f['message']}" for f in partial
+        )
     return result
 
 
@@ -402,7 +406,7 @@ def main() -> int:
     # Last line on stderr wins: the runner reads its tail into the envelope's metadata.error.
     if result.get("status") not in {"success", "not_available"}:
         reason = result.get("message", "unknown error")
-        report_failure(reason, result.get("code"))
+        report_failure(reason, result.get("error_code"))
         return 1
     return 0
 

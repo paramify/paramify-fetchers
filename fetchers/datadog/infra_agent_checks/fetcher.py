@@ -32,6 +32,7 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from datadog_paging import (  # noqa: E402
     PagedRecords,
     PagingError,
+    error_result,
     failure_result,
     paginate_offset,
     request_json,
@@ -124,15 +125,18 @@ def parse_agent_checks(host: Dict[str, Any]) -> List[Tuple[str, str, str]]:
 
 
 def get_infra_agent_checks() -> Dict[str, Any]:
-    base_url = get_base_url()
-    headers = get_dd_headers()
+    try:
+        base_url = get_base_url()
+        headers = get_dd_headers()
+    except RuntimeError as e:
+        return error_result(str(e), current_timestamp(), "bad_config")
     endpoint = f"{base_url}/api/v1/hosts"
 
     try:
         hosts = fetch_hosts_with_checks(base_url, headers)
 
         if not hosts:
-            return {
+            return with_paging_status({
                 "status": "partial_or_empty",
                 "message": "No hosts found",
                 "api_endpoint": endpoint,
@@ -147,7 +151,7 @@ def get_infra_agent_checks() -> Dict[str, Any]:
                     "checks_by_name": {},
                 },
                 "retrieved_at": current_timestamp(),
-            }
+            }, hosts)
 
         all_check_records = []
         checks_by_name: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -210,10 +214,8 @@ def get_infra_agent_checks() -> Dict[str, Any]:
 
     except PagingError as e:
         return failure_result(e, endpoint, current_timestamp())
-    except RuntimeError as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
     except Exception as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+        return error_result(str(e), current_timestamp())
 
 
 def main() -> int:
