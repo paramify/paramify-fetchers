@@ -66,8 +66,11 @@ class ArmError(Exception):
 
 
 class QueryError(Exception):
-    def __init__(self, code: str, message: str):
-        self.code = code
+    """details: (code, message) per error.details[] entry; rows: the result a PartialError came with, if any."""
+
+    def __init__(self, code: str, message: str, details: Optional[List[Tuple[Optional[str], str]]] = None,
+                 rows: Optional[List[Dict[str, Any]]] = None):
+        self.code, self.details, self.rows = code, list(details or []), rows
         super().__init__(f"{code}: {message}")
 
 
@@ -236,21 +239,33 @@ class AzureRestClient:
         )
         if response.status_code >= 400:
             code, message = _error_parts(response)
-            raise QueryError(f"({response.status_code}) {code}", _innermost(response) or message)
+            raise QueryError(f"({response.status_code}) {code}", _innermost(response) or message, _details(response))
         body = response.json()
-        if body.get("error"):
-            raise QueryError("PartialError", _innermost_error(body["error"]))
         tables = body.get("tables") or []
-        if not tables:
-            return []
-        columns = [c["name"] for c in tables[0].get("columns") or []]
-        return [dict(zip(columns, row)) for row in tables[0].get("rows") or []]
+        columns = [c["name"] for c in tables[0].get("columns") or []] if tables else []
+        rows = [dict(zip(columns, row)) for row in tables[0].get("rows") or []] if tables else []
+        if body.get("error"):
+            # The message stays the innermost one: table_missing and the failure classifiers match on its text.
+            raise QueryError("PartialError", _innermost_error(body["error"]), _error_details(body["error"]), rows)
+        return rows
 
 
 def _innermost_error(err: Dict[str, Any]) -> str:
     while err.get("innererror"):
         err = err["innererror"]
     return err.get("message") or err.get("code") or "partial result"
+
+
+def _error_details(err: Dict[str, Any]) -> List[Tuple[Optional[str], str]]:
+    return [(d.get("code"), _innermost_error(d)) for d in err.get("details") or [] if isinstance(d, dict)]
+
+
+def _details(response) -> List[Tuple[Optional[str], str]]:
+    try:
+        err = response.json().get("error")
+    except ValueError:
+        return []
+    return _error_details(err) if isinstance(err, dict) else []
 
 
 def _innermost(response) -> Optional[str]:

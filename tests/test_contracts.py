@@ -249,6 +249,7 @@ TEXT_FORMAT_FETCHERS = (
     "azure/waf_ddos_activity",
     "azure/zone_redundancy",
     "oci",
+    "qualys",
 )
 # Fetchers whose instructions listed summary fields before their tests checked them; each leaves once its tests
 # call assert_summary_documented, and SUMMARY_DOCS_PENDING_MAX drops with it. A new fetcher calls the fixture instead.
@@ -262,7 +263,6 @@ SUMMARY_DOCS_PENDING = (
     "azure/change_work_items",
     "azure/ddos_protection",
     "azure/devops_permissions",
-    "azure/devops_work_items",
     "azure/dns_configuration",
     "azure/entra_emergency_accounts",
     "azure/entra_risky_users",
@@ -276,7 +276,6 @@ SUMMARY_DOCS_PENDING = (
     "azure/rbac_role_assignments",
     "azure/resource_diagnostic_settings",
     "azure/sentinel_analytics_rules",
-    "azure/sentinel_data_sources",
     "azure/sentinel_incidents",
     "azure/sentinel_playbooks",
     "azure/service_availability",
@@ -302,7 +301,7 @@ SUMMARY_DOCS_PENDING = (
     "oci/vault_keys",
     "oci/zpr_policies",
 )
-SUMMARY_DOCS_PENDING_MAX = 48
+SUMMARY_DOCS_PENDING_MAX = 46
 MAX_DESCRIPTION_WORDS = 30
 MAX_INSTRUCTIONS_CHARS = 20_000
 MAX_FIELD_LINE_CHARS = 800

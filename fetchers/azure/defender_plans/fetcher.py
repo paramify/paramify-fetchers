@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from arm_rest import MAX_PAGES, arm_rest_client, get_json  # noqa: E402
 from azure_common import (  # noqa: E402
     Collector,
     arm_client_kwargs,
@@ -291,6 +292,125 @@ def collect_pricings(subscription_id, cred, collector: Collector) -> tuple[list[
     return sorted(plans, key=lambda r: r.get("resource_name") or ""), REGISTERED
 
 
+# --- security contacts (who Defender for Cloud notifies) ----------------------
+
+# Read over raw ARM, not azure-mgmt-security: Azure Government supports only
+# 2020-01-01-preview and 2017-08-01-preview for securityContacts, and answers the list
+# with a bare JSON array instead of a {"value": [...]} page, which the SDK cannot
+# deserialize ("Unable to deserialize to object: type"). Both shapes are accepted here.
+SECURITY_CONTACTS_API = "2020-01-01-preview"
+
+
+def _dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def project_security_contact(contact: dict) -> dict:
+    """Read one securityContacts item from the ARM JSON (2020-01-01-preview shape)."""
+    props = _dict(_dict(contact).get("properties"))
+    alerts = _dict(props.get("alertNotifications"))
+    by_role = _dict(props.get("notificationsByRole"))
+    return {
+        "name": _dict(contact).get("name"),
+        "emails": props.get("emails"),
+        "phone": props.get("phone"),
+        "alert_notifications_state": alerts.get("state"),
+        "alert_notifications_minimal_severity": alerts.get("minimalSeverity"),
+        "notifications_by_role_state": by_role.get("state"),
+        "notifications_by_role_roles": by_role.get("roles"),
+    }
+
+
+def security_contact_items(body) -> list:
+    """The contacts in a securityContacts response: a bare list (Azure Government) or a {"value": [...]} page."""
+    if isinstance(body, list):
+        return body
+    if isinstance(body, dict) and isinstance(body.get("value"), list):
+        return body["value"]
+    raise ValueError(f"unexpected securityContacts response shape: {type(body).__name__}")
+
+
+def security_contact_record(contact: dict) -> dict:
+    """Normalize one projected security contact.
+
+    `emails` is a semicolon-separated string in ARM; it is split and counted, and the
+    addresses are kept because they are the evidence (who is notified). The phone
+    number is reduced to whether one is set.
+    """
+    raw_emails = contact.get("emails") or ""
+    # ARM sends one semicolon-separated string; accept a list too, so a future SDK that
+    # splits it does not turn the whole list into one bogus address.
+    parts = raw_emails if isinstance(raw_emails, (list, tuple)) else str(raw_emails).split(";")
+    emails = sorted({str(e).strip() for e in parts if str(e).strip()})
+    state = contact.get("alert_notifications_state")
+    role_state = contact.get("notifications_by_role_state")
+    return {
+        "name": contact.get("name"),
+        "emails": emails,
+        "email_count": len(emails),
+        "phone_set": bool(contact.get("phone")),
+        "alert_notifications_state": state,
+        "alert_notifications_minimal_severity": contact.get("alert_notifications_minimal_severity"),
+        "alert_notifications_on": (None if state is None else str(state).lower() == "on"),
+        "notifications_by_role_state": role_state,
+        "notifications_by_role_roles": sorted(str(r) for r in (contact.get("notifications_by_role_roles") or [])),
+        "notifications_by_role_on": (None if role_state is None else str(role_state).lower() == "on"),
+    }
+
+
+def summarize_security_contacts(contacts: list[dict] | None) -> dict:
+    """Counts for the contacts; every key null when the list could not be read (None), 0 when it is empty."""
+    if contacts is None:
+        return {"security_contacts": None, "security_contacts_with_alert_notifications_on": None,
+                "security_contacts_with_role_notifications_on": None, "security_contact_emails": None,
+                "alert_notification_minimal_severities": None}
+    return {
+        "security_contacts": len(contacts),
+        "security_contacts_with_alert_notifications_on": sum(1 for c in contacts if c["alert_notifications_on"]),
+        "security_contacts_with_role_notifications_on": sum(1 for c in contacts if c["notifications_by_role_on"]),
+        "security_contact_emails": sum(c["email_count"] for c in contacts),
+        "alert_notification_minimal_severities": sorted(
+            {str(c["alert_notifications_minimal_severity"]) for c in contacts
+             if c["alert_notifications_minimal_severity"] is not None}),
+    }
+
+
+def collect_security_contacts(subscription_id, cred, collector: Collector) -> list[dict] | None:
+    """GET securityContacts over raw ARM: the subscription's Defender for Cloud notification contacts.
+
+    Returns None (not []) when the read failed, so the summary reads null rather than
+    "no contacts". A subscription where Microsoft.Security is not registered has no
+    contacts to read and is reported as [] without a failure, matching collect_pricings.
+    A {"value": [...]} page that carries a nextLink is followed to the end.
+    """
+    client = collector.guard("arm_rest.ARMPipelineClient (init)", lambda: arm_rest_client(cred))
+    if client is None:
+        return None
+    url = (f"/subscriptions/{subscription_id}/providers/Microsoft.Security/securityContacts"
+           f"?api-version={SECURITY_CONTACTS_API}")
+    items: list = []
+    seen: set = set()
+    pages = 0
+    try:
+        while url:
+            body = get_json(client, url)
+            pages += 1
+            items.extend(security_contact_items(body))
+            url = body.get("nextLink") if isinstance(body, dict) else None
+            # The same bound arm_rest.list_all uses: a repeated or endless nextLink is a failure, not a hang.
+            if url and (url in seen or pages >= MAX_PAGES):
+                raise RuntimeError(f"securityContacts paging did not terminate after {pages} page(s)")
+            if url:
+                seen.add(url)
+    except Exception as exc:  # noqa: BLE001 (boundary: classify, do not crash the run)
+        if is_provider_not_registered(exc):
+            return []
+        collector.record("security.securityContacts.list", exc)
+        return None
+    contacts = [security_contact_record(project_security_contact(c)) for c in items]
+    return sorted(contacts, key=lambda c: c.get("name") or "")
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -310,8 +430,10 @@ def main() -> int:
 
     plans: list[dict] = []
     registration_status = UNKNOWN
+    contacts: list[dict] | None = None
     if subscription_id and cred is not None:
         plans, registration_status = collect_pricings(subscription_id, cred, collector)
+        contacts = collect_security_contacts(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -329,8 +451,10 @@ def main() -> int:
             "defender_plans": plans,
             # Also in results so a validator can assert the service is in use at all.
             "provider_registration_status": registration_status,
+            # None when the read failed (recorded in api_failures), [] when there are none.
+            "security_contacts": contacts,
         },
-        summary=summarize(plans, registration_status),
+        summary={**summarize(plans, registration_status), **summarize_security_contacts(contacts)},
     )
 
     filename = f"azure_defender_plans_{sanitize_for_filename(subscription_id or 'unknown')}.json"

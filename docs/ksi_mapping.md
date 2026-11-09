@@ -48,7 +48,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ca-2.1`, `ca-7.1`
 
-*12 fetchers:* [`azure_defender_assessments`](../fetchers/azure/defender_assessments), [`azure_defender_plans`](../fetchers/azure/defender_plans), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`crowdstrike_prevention_policies`](../fetchers/crowdstrike/prevention_policies), [`github_org_security_settings`](../fetchers/github/org_security_settings), [`oci_cloud_guard_posture`](../fetchers/oci/cloud_guard_posture), [`sentinelone_agents`](../fetchers/sentinelone/agents), [`wiz_cloud_configuration_posture`](../fetchers/wiz/cloud_configuration_posture), [`wiz_posture_issues`](../fetchers/wiz/posture_issues), [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage)
+*14 fetchers:* [`azure_defender_assessments`](../fetchers/azure/defender_assessments), [`azure_defender_plans`](../fetchers/azure/defender_plans), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`crowdstrike_prevention_policies`](../fetchers/crowdstrike/prevention_policies), [`github_org_security_settings`](../fetchers/github/org_security_settings), [`oci_cloud_guard_posture`](../fetchers/oci/cloud_guard_posture), [`qualys_scan_coverage`](../fetchers/qualys/scan_coverage), [`qualys_scan_schedules`](../fetchers/qualys/scan_schedules), [`sentinelone_agents`](../fetchers/sentinelone/agents), [`wiz_cloud_configuration_posture`](../fetchers/wiz/cloud_configuration_posture), [`wiz_posture_issues`](../fetchers/wiz/posture_issues), [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage)
 
 #### `KSI-CNA-IBP` — Implementing Best Practices
 
@@ -120,7 +120,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-7.1`, `cm-12.1`, `ma-2`, `pl-8`, `sc-7`, `sc-39`, `si-2.2`, `si-4`, `sr-10`
 
-*21 fetchers:* [`aws_guard_duty_findings`](../fetchers/aws/guard_duty_findings), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), [`aws_ssm_patch_compliance`](../fetchers/aws/ssm_patch_compliance), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_defender_assessments`](../fetchers/azure/defender_assessments), [`azure_defender_plans`](../fetchers/azure/defender_plans), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`crowdstrike_spotlight_vulnerabilities`](../fetchers/crowdstrike/spotlight_vulnerabilities), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`github_code_scanning_alerts`](../fetchers/github/code_scanning_alerts), [`github_dependabot_alerts`](../fetchers/github/dependabot_alerts), [`paramify_accepted_vulnerabilities`](../fetchers/paramify/accepted_vulnerabilities), [`paramify_historical_ver_activity`](../fetchers/paramify/historical_ver_activity), [`paramify_vulnerability_detail_report`](../fetchers/paramify/vulnerability_detail_report), [`wiz_attack_surface_findings`](../fetchers/wiz/attack_surface_findings), [`wiz_container_vulnerabilities`](../fetchers/wiz/container_vulnerabilities), [`wiz_infrastructure_vulnerabilities`](../fetchers/wiz/infrastructure_vulnerabilities), [`wiz_posture_issues`](../fetchers/wiz/posture_issues)
+*25 fetchers:* [`aws_guard_duty_findings`](../fetchers/aws/guard_duty_findings), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), [`aws_ssm_patch_compliance`](../fetchers/aws/ssm_patch_compliance), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_defender_assessments`](../fetchers/azure/defender_assessments), [`azure_defender_plans`](../fetchers/azure/defender_plans), [`azure_defender_vulnerability_findings`](../fetchers/azure/defender_vulnerability_findings), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`crowdstrike_spotlight_vulnerabilities`](../fetchers/crowdstrike/spotlight_vulnerabilities), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`github_code_scanning_alerts`](../fetchers/github/code_scanning_alerts), [`github_dependabot_alerts`](../fetchers/github/dependabot_alerts), [`paramify_accepted_vulnerabilities`](../fetchers/paramify/accepted_vulnerabilities), [`paramify_historical_ver_activity`](../fetchers/paramify/historical_ver_activity), [`paramify_vulnerability_detail_report`](../fetchers/paramify/vulnerability_detail_report), [`qualys_scan_coverage`](../fetchers/qualys/scan_coverage), [`qualys_vulnerability_findings`](../fetchers/qualys/vulnerability_findings), [`qualys_vulnerability_remediation`](../fetchers/qualys/vulnerability_remediation), [`wiz_attack_surface_findings`](../fetchers/wiz/attack_surface_findings), [`wiz_container_vulnerabilities`](../fetchers/wiz/container_vulnerabilities), [`wiz_infrastructure_vulnerabilities`](../fetchers/wiz/infrastructure_vulnerabilities), [`wiz_posture_issues`](../fetchers/wiz/posture_issues)
 
 #### `KSI-SVC-PRR` — Preventing Residual Risk *(optional at Low)*
 
@@ -202,7 +202,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2.4`, `ac-6.9`, `au-2`, `au-6`, `au-6.1`, `si-4`, `si-4.4`
 
-*19 fetchers:* [`aws_cloudwatch_high_availability`](../fetchers/aws/cloudwatch_high_availability), [`aws_guard_duty`](../fetchers/aws/guard_duty), [`aws_guard_duty_findings`](../fetchers/aws/guard_duty_findings), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_alert_rules`](../fetchers/azure/alert_rules), [`azure_log_analytics_query_audit`](../fetchers/azure/log_analytics_query_audit), [`azure_monitor_fired_alerts`](../fetchers/azure/monitor_fired_alerts), [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`azure_sentinel_playbooks`](../fetchers/azure/sentinel_playbooks), [`crowdstrike_detections`](../fetchers/crowdstrike/detections), [`datadog_monitors_list`](../fetchers/datadog/monitors_list), [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules), [`datadog_siem_signals`](../fetchers/datadog/siem_signals), [`sentinelone_activities`](../fetchers/sentinelone/activities), [`sentinelone_cloud_detection_rules`](../fetchers/sentinelone/cloud_detection_rules), [`splunk_alert_delivery`](../fetchers/splunk/alert_delivery), [`splunk_alert_rules`](../fetchers/splunk/alert_rules)
+*20 fetchers:* [`aws_cloudwatch_high_availability`](../fetchers/aws/cloudwatch_high_availability), [`aws_guard_duty`](../fetchers/aws/guard_duty), [`aws_guard_duty_findings`](../fetchers/aws/guard_duty_findings), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_alert_rules`](../fetchers/azure/alert_rules), [`azure_defender_plans`](../fetchers/azure/defender_plans), [`azure_log_analytics_query_audit`](../fetchers/azure/log_analytics_query_audit), [`azure_monitor_fired_alerts`](../fetchers/azure/monitor_fired_alerts), [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`azure_sentinel_playbooks`](../fetchers/azure/sentinel_playbooks), [`crowdstrike_detections`](../fetchers/crowdstrike/detections), [`datadog_monitors_list`](../fetchers/datadog/monitors_list), [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules), [`datadog_siem_signals`](../fetchers/datadog/siem_signals), [`sentinelone_activities`](../fetchers/sentinelone/activities), [`sentinelone_cloud_detection_rules`](../fetchers/sentinelone/cloud_detection_rules), [`splunk_alert_delivery`](../fetchers/splunk/alert_delivery), [`splunk_alert_rules`](../fetchers/splunk/alert_rules)
 
 ### IAM — Identity and Access Management  (6/6)
 
@@ -378,7 +378,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-20`, `ca-3`, `ir-6.3`, `ps-7`, `ra-5`, `sa-9`, `si-5`, `sr-5`, `sr-6`, `sr-8`
 
-*7 fetchers:* [`aws_ecr_image_scanning`](../fetchers/aws/ecr_image_scanning), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories), `fedramp_marketplace_vendor_certification_status`, `fedramp_marketplace_workspace_vendor_certification_status`, [`github_dependabot_alerts`](../fetchers/github/dependabot_alerts), [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities)
+*9 fetchers:* [`aws_ecr_image_scanning`](../fetchers/aws/ecr_image_scanning), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), [`azure_defender_vulnerability_findings`](../fetchers/azure/defender_vulnerability_findings), [`azure_service_health_advisories`](../fetchers/azure/service_health_advisories), `fedramp_marketplace_vendor_certification_status`, `fedramp_marketplace_workspace_vendor_certification_status`, [`github_dependabot_alerts`](../fetchers/github/dependabot_alerts), [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities), [`qualys_vulnerability_findings`](../fetchers/qualys/vulnerability_findings)
 
 ### CED — Cybersecurity Education  (1/1)
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-315 of 327 fetchers carry a mapping.
+320 of 334 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -505,7 +505,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (102)
+### azure  (103)
 
 | Fetcher | Indicators |
 |---|---|
@@ -534,8 +534,9 @@ python tools/gen_ksi_mapping.py
 | [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration) | `KSI-CNA-MAT`, `KSI-CNA-ULN`, `KSI-SVC-ASM`, `KSI-SVC-SIN` |
 | [`azure_ddos_protection`](../fetchers/azure/ddos_protection) | `KSI-CNA-RVP` |
 | [`azure_defender_assessments`](../fetchers/azure/defender_assessments) | `KSI-CNA-EIS`, `KSI-SVC-EIS` |
-| [`azure_defender_plans`](../fetchers/azure/defender_plans) | `KSI-CNA-EIS`, `KSI-SVC-EIS` |
+| [`azure_defender_plans`](../fetchers/azure/defender_plans) | `KSI-CNA-EIS`, `KSI-MLA-RVL`, `KSI-SVC-EIS` |
 | [`azure_defender_regulatory_compliance`](../fetchers/azure/defender_regulatory_compliance) | `KSI-CNA-IBP` |
+| [`azure_defender_vulnerability_findings`](../fetchers/azure/defender_vulnerability_findings) | `KSI-SCR-MON`, `KSI-SVC-EIS` |
 | [`azure_devops_audit_streams`](../fetchers/azure/devops_audit_streams) | `KSI-MLA-LET` |
 | [`azure_devops_identities`](../fetchers/azure/devops_identities) | `KSI-IAM-AAM`, `KSI-IAM-JIT` |
 | [`azure_devops_permissions`](../fetchers/azure/devops_permissions) | `KSI-IAM-ELP` |
@@ -794,6 +795,15 @@ python tools/gen_ksi_mapping.py
 | [`paramify_historical_ver_activity`](../fetchers/paramify/historical_ver_activity) | `KSI-SVC-EIS` |
 | [`paramify_vulnerability_detail_report`](../fetchers/paramify/vulnerability_detail_report) | `KSI-SVC-EIS` |
 
+### qualys  (4)
+
+| Fetcher | Indicators |
+|---|---|
+| [`qualys_scan_coverage`](../fetchers/qualys/scan_coverage) | `KSI-CNA-EIS`, `KSI-SVC-EIS` |
+| [`qualys_scan_schedules`](../fetchers/qualys/scan_schedules) | `KSI-CNA-EIS` |
+| [`qualys_vulnerability_findings`](../fetchers/qualys/vulnerability_findings) | `KSI-SCR-MON`, `KSI-SVC-EIS` |
+| [`qualys_vulnerability_remediation`](../fetchers/qualys/vulnerability_remediation) | `KSI-SVC-EIS` |
+
 ### rippling  (3)
 
 | Fetcher | Indicators |
@@ -842,4 +852,4 @@ python tools/gen_ksi_mapping.py
 
 ### Unmapped
 
-[`aws_discovery_beta`](../fetchers/aws/discovery_beta), [`demo_hello`](../fetchers/demo/hello), [`demo_policy_check`](../comparators/demo/policy_check), [`knowbe4_discovery_beta`](../fetchers/knowbe4/discovery_beta), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`web_page_text`](../fetchers/web/page_text), [`web_vulnerability_disclosure`](../fetchers/web/vulnerability_disclosure), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings), [`zendesk_help_center_section`](../fetchers/zendesk/help_center_section) — deliberately carry no mapping.
+[`aws_discovery_beta`](../fetchers/aws/discovery_beta), [`demo_hello`](../fetchers/demo/hello), [`demo_policy_check`](../comparators/demo/policy_check), [`knowbe4_discovery_beta`](../fetchers/knowbe4/discovery_beta), [`qualys_stig_compliance_report`](../fetchers/qualys/stig_compliance_report), [`qualys_vmdr_vulnerability_findings`](../fetchers/qualys/vmdr_vulnerability_findings), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`web_page_text`](../fetchers/web/page_text), [`web_vulnerability_disclosure`](../fetchers/web/vulnerability_disclosure), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings), [`zendesk_help_center_section`](../fetchers/zendesk/help_center_section) — deliberately carry no mapping.
