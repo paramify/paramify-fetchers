@@ -71,6 +71,8 @@ WINDOWS_AZURE_SERVICE_MANAGEMENT_API = "797f4846-ba00-4fd7-ba43-dac1f8f63013"
 
 # conditions.applications.includeApplications value meaning "every cloud app".
 ALL_APPLICATIONS = "All"
+# The legacy literal for guests and external users inside includeUsers/excludeUsers.
+GUESTS_LITERAL = "GuestsOrExternalUsers"
 # conditions.users.includeUsers value meaning "every user in the tenant".
 ALL_USERS = "All"
 
@@ -93,6 +95,14 @@ def project_filter(conditional_access_filter) -> dict | None:
     if conditional_access_filter is None:
         return None
     return {"mode": graph_attr(conditional_access_filter, "mode"), "rule": graph_attr(conditional_access_filter, "rule")}
+
+
+def project_guests(spec) -> dict | None:
+    """guestOrExternalUserTypes and the tenant scope kind; tenant ids are never read."""
+    if spec is None:
+        return None
+    return {"types": sorted(str(t) for t in graph_list(spec, "guest_or_external_user_types")),
+            "tenants": graph_attr(graph_attr(spec, "external_tenants"), "membership_kind")}
 
 
 def project_conditional_access_policy(policy) -> dict:
@@ -132,6 +142,8 @@ def project_conditional_access_policy(policy) -> dict:
         "exclude_groups": graph_list(users, "exclude_groups"),
         "include_roles": graph_list(users, "include_roles"),
         "exclude_roles": graph_list(users, "exclude_roles"),
+        "include_guests_or_external_users": project_guests(graph_attr(users, "include_guests_or_external_users")),
+        "exclude_guests_or_external_users": project_guests(graph_attr(users, "exclude_guests_or_external_users")),
         # --- what it applies to ---
         "include_applications": graph_list(applications, "include_applications"),
         "exclude_applications": graph_list(applications, "exclude_applications"),
@@ -270,6 +282,8 @@ def policy_record(policy: dict, strengths: dict | None = None) -> dict:
             "exclude_groups": sorted(policy.get("exclude_groups") or []),
             "include_roles": sorted(policy.get("include_roles") or []),
             "exclude_roles": sorted(policy.get("exclude_roles") or []),
+            "include_guests_or_external_users": policy.get("include_guests_or_external_users"),
+            "exclude_guests_or_external_users": policy.get("exclude_guests_or_external_users"),
         },
         "target_resources": {
             "include": sorted(include_apps),
@@ -320,6 +334,7 @@ def policy_record(policy: dict, strengths: dict | None = None) -> dict:
             (policy.get("exclude_users") or [])
             or (policy.get("exclude_groups") or [])
             or (policy.get("exclude_roles") or [])
+            or bool(policy.get("exclude_guests_or_external_users"))
         ),
         "targets_legacy_authentication": bool(
             LEGACY_CLIENT_APP_TYPES.intersection(
@@ -329,25 +344,6 @@ def policy_record(policy: dict, strengths: dict | None = None) -> dict:
     }
 
 
-def _protects(policy: dict, resource: str) -> bool:
-    """Whether an ENFORCED policy requires MFA for all users on `resource`.
-
-    Ported from Prowler's entra_conditional_access_policy_require_mfa_for_admin_portals
-    and ..._for_management_api: enabled (not report-only), includes All users, targets
-    that resource, and grants on MFA. All four are needed — an enabled MFA policy scoped
-    to one pilot group protects nobody in particular.
-
-    Deviation: a policy targeting `All` applications covers the resource too, which
-    Prowler's literal membership test misses.
-    """
-    if not policy["is_enforced"] or not policy["requires_mfa"]:
-        return False
-    if not policy["targets_all_users"]:
-        return False
-    included = policy["target_resources"]["include"]
-    return resource in included or ALL_APPLICATIONS in included
-
-
 def _client_app_types(policy: dict) -> set:
     types = {str(t).lower() for t in policy["conditions"]["client_app_types"]}
     if not types or "all" in types:
@@ -355,11 +351,12 @@ def _client_app_types(policy: dict) -> set:
     return {CLIENT_APP_TYPES.get(t, t) for t in types}
 
 
-def _mfa_for_everyone(policy: dict) -> bool:
-    """Enforced MFA with no alternative, for all users on all cloud apps with none excluded, unnarrowed."""
+def _unnarrowed(policy: dict, resource: str | None = None) -> bool:
+    """Enforced, on every cloud app (or `resource`), with no excluded app and no condition besides client app types."""
     c = policy["conditions"]
-    return (policy["is_enforced"] and policy["requires_mfa_without_alternative"] and policy["targets_all_users"]
-            and policy["targets_all_applications"] and not policy["target_resources"]["exclude"]
+    included = policy["target_resources"]["include"]
+    covered = ALL_APPLICATIONS in included or (resource is not None and resource in included)
+    return (policy["is_enforced"] and covered and not policy["target_resources"]["exclude"]
             and not policy["target_resources"]["application_filter"]
             and not c["sign_in_risk_levels"] and not c["user_risk_levels"]
             and not c["service_principal_risk_levels"] and not c["insider_risk_levels"]
@@ -368,22 +365,46 @@ def _mfa_for_everyone(policy: dict) -> bool:
             and all(str(v).lower() == "all" for v in c["include_locations"]) and not c["exclude_locations"])
 
 
+def _mfa_for_everyone(policy: dict) -> bool:
+    """Enforced MFA with no alternative, for all users on all cloud apps with none excluded, unnarrowed."""
+    return policy["requires_mfa_without_alternative"] and policy["targets_all_users"] and _unnarrowed(policy)
+
+
+def _mfa_for_all_sign_ins(policy: dict, resource: str | None = None) -> bool:
+    """`_mfa_for_everyone`, on `resource` when given, and for all four client app types."""
+    return (policy["requires_mfa_without_alternative"] and policy["targets_all_users"]
+            and _unnarrowed(policy, resource) and _client_app_types(policy) == set(CLIENT_APP_TYPES.values()))
+
+
+def _phishing_resistant_for_all_sign_ins(policy: dict) -> bool:
+    """Phishing-resistant MFA for all users on all cloud apps, for all client app types, excluding no role."""
+    return (bool(policy["requires_phishing_resistant_mfa"]) and policy["targets_all_users"]
+            and not policy["users"]["exclude_roles"] and _unnarrowed(policy)
+            and _client_app_types(policy) == set(CLIENT_APP_TYPES.values()))
+
+
 def phishing_resistant_summary(enforced: list[dict], strengths_readable: bool, policies_readable: bool) -> dict:
     """Null when the policies or any enforced policy's strength couldn't be read, so unread never reads as absent."""
     known = policies_readable and strengths_readable and all(
         p["requires_phishing_resistant_mfa"] is not None for p in enforced
     )
     strong = [p for p in enforced if p["requires_phishing_resistant_mfa"]]
+    role_covering = [p for p in strong if _unnarrowed(p) and _client_app_types(p) == set(CLIENT_APP_TYPES.values())]
     return {
         "authentication_strengths_readable": strengths_readable,
         "enforced_policies_requiring_phishing_resistant_mfa": len(strong) if known else None,
         "enforced_phishing_resistant_mfa_for_all_users_and_apps": sum(
-            1 for p in strong if p["targets_all_users"] and p["targets_all_applications"]
+            1 for p in strong if _phishing_resistant_for_all_sign_ins(p)
         ) if known else None,
         "phishing_resistant_mfa_role_template_ids": sorted(
-            {r for p in strong if p["targets_all_applications"] for r in p["users"]["include_roles"]}
+            {r for p in role_covering for r in p["users"]["include_roles"]}
         ) if known else None,
     }
+
+
+def _guest_principal(spec: dict) -> str:
+    """One principal per distinct guest exclusion: its types and tenant scope kind, never tenant ids."""
+    return f"{GUESTS_LITERAL}:{','.join(spec['types'])}:{spec['tenants']}"
 
 
 def summarize(policies: list[dict], strengths_readable: bool = True, policies_readable: bool = True) -> dict:
@@ -421,21 +442,17 @@ def summarize(policies: list[dict], strengths_readable: bool = True, policies_re
         "enforced_policies_targeting_all_applications": sum(
             1 for p in enforced if p["targets_all_applications"]
         ),
-        "enforced_mfa_for_all_users_and_apps": sum(
-            1
-            for p in enforced
-            if p["requires_mfa"] and p["targets_all_users"] and p["targets_all_applications"]
-        ),
+        "enforced_mfa_for_all_users_and_apps": sum(1 for p in enforced if _mfa_for_all_sign_ins(p)),
         # Policies can split the client types between them, e.g. one for browsers and one for apps.
         "mfa_client_app_types_for_all_users_and_apps": sorted(
             {t for p in enforced if _mfa_for_everyone(p) for t in _client_app_types(p)}
         ),
         # --- the two resources the CIS Azure benchmark names ---
         "mfa_required_for_admin_portals": any(
-            _protects(p, MICROSOFT_ADMIN_PORTALS) for p in policies
+            _mfa_for_all_sign_ins(p, MICROSOFT_ADMIN_PORTALS) for p in policies
         ),
         "mfa_required_for_azure_management_api": any(
-            _protects(p, WINDOWS_AZURE_SERVICE_MANAGEMENT_API) for p in policies
+            _mfa_for_all_sign_ins(p, WINDOWS_AZURE_SERVICE_MANAGEMENT_API) for p in policies
         ),
         "enforced_policies_targeting_legacy_authentication": sum(
             1 for p in enforced if p["targets_legacy_authentication"]
@@ -449,6 +466,18 @@ def summarize(policies: list[dict], strengths_readable: bool = True, policies_re
                 for key in ("exclude", "exclude_groups", "exclude_roles")
                 for principal in p["users"][key]
             }
+            | {
+                _guest_principal(p["users"]["exclude_guests_or_external_users"])
+                for p in enforced
+                if p["users"]["exclude_guests_or_external_users"]
+            }
+        ),
+        "enforced_policies_excluding_guests_or_external_users": sum(
+            1 for p in enforced
+            if p["users"]["exclude_guests_or_external_users"] or GUESTS_LITERAL in p["users"]["exclude"]
+        ),
+        "excluded_guest_or_external_user_types": sorted(
+            {t for p in enforced for t in (p["users"]["exclude_guests_or_external_users"] or {}).get("types", [])}
         ),
     }
     if not policies_readable:

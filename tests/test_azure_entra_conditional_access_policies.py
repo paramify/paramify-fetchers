@@ -329,3 +329,165 @@ def test_strength_record_with_no_combinations_is_not_phishing_resistant():
     record = ca.strength_record({"id": "x", "displayName": "Empty", "allowedCombinations": []})
     assert record["phishing_resistant"] is False and record["allowed_combinations"] == []
     assert json.loads(json.dumps(record)) == record
+
+
+# --- the all-users figures: a policy counts only when nothing narrows it (risk, OR, conditions) ---
+
+ADMIN_PORTALS = "MicrosoftAdminPortals"
+
+
+def _figures(monkeypatch, *policies):
+    _got, _strengths, s, _collector = _run(monkeypatch, _graph(list(policies), [PHISHING_RESISTANT, PASSWORD_ONLY]))
+    return {k: s[k] for k in (
+        "enforced_mfa_for_all_users_and_apps", "enforced_phishing_resistant_mfa_for_all_users_and_apps",
+        "mfa_required_for_admin_portals", "mfa_required_for_azure_management_api",
+        "phishing_resistant_mfa_role_template_ids")}
+
+
+def _mfa_policy(pid="p", apps=("All",), **extra):
+    policy = _policy(pid, pid, controls=("mfa",), apps=apps)
+    policy["conditions"].update(extra)
+    return policy
+
+
+def _strong_policy(pid="p", **extra):
+    policy = _policy(pid, pid, strength=PHISHING_RESISTANT)
+    policy["conditions"].update(extra)
+    return policy
+
+
+def test_plain_all_users_policy_counts_everywhere(monkeypatch):
+    f = _figures(monkeypatch, _mfa_policy(), _strong_policy())
+    assert f["enforced_mfa_for_all_users_and_apps"] == 2
+    assert f["enforced_phishing_resistant_mfa_for_all_users_and_apps"] == 1
+    assert f["mfa_required_for_admin_portals"] is True and f["mfa_required_for_azure_management_api"] is True
+    # A policy naming one resource covers that resource only.
+    named = _figures(monkeypatch, _mfa_policy(apps=(ADMIN_PORTALS,)))
+    assert named["mfa_required_for_admin_portals"] is True
+    assert named["mfa_required_for_azure_management_api"] is False
+
+
+def test_risk_only_all_users_policy_does_not_count(monkeypatch):
+    for key, value in (("signInRiskLevels", ["high"]), ("userRiskLevels", ["high"])):
+        f = _figures(monkeypatch, _mfa_policy(**{key: value}), _strong_policy(**{key: value}))
+        assert f["enforced_mfa_for_all_users_and_apps"] == 0, key
+        assert f["enforced_phishing_resistant_mfa_for_all_users_and_apps"] == 0, key
+        assert f["mfa_required_for_admin_portals"] is False and f["mfa_required_for_azure_management_api"] is False
+        assert f["phishing_resistant_mfa_role_template_ids"] == []
+
+
+def test_mfa_or_compliant_device_does_not_count(monkeypatch):
+    either = _policy("p-or", "MFA or device", controls=("mfa", "compliantDevice"))
+    both = _policy("p-and", "MFA and device", controls=("mfa", "compliantDevice"), operator="AND")
+    assert _figures(monkeypatch, either)["enforced_mfa_for_all_users_and_apps"] == 0
+    assert _figures(monkeypatch, either)["mfa_required_for_admin_portals"] is False
+    assert _figures(monkeypatch, both)["enforced_mfa_for_all_users_and_apps"] == 1
+    strong_or = _policy("p-pr-or", "Strength or device", strength=PHISHING_RESISTANT, controls=("compliantDevice",))
+    assert _figures(monkeypatch, strong_or)["enforced_phishing_resistant_mfa_for_all_users_and_apps"] == 0
+
+
+NARROWING = {
+    "sign_in_risk": {"signInRiskLevels": ["medium"]},
+    "user_risk": {"userRiskLevels": ["high"]},
+    "service_principal_risk": {"servicePrincipalRiskLevels": ["high"]},
+    "insider_risk": {"insiderRiskLevels": "minor,moderate"},
+    "client_app_types": {"clientAppTypes": ["browser"]},
+    "platforms": {"platforms": {"includePlatforms": ["android", "iOS"]}},
+    "excluded_platforms": {"platforms": {"includePlatforms": ["all"], "excludePlatforms": ["linux"]}},
+    "locations": {"locations": {"includeLocations": ["AllTrusted"]}},
+    "excluded_locations": {"locations": {"includeLocations": ["All"], "excludeLocations": ["AllTrusted"]}},
+    "device_filter": {"devices": {"deviceFilter": {"mode": "exclude", "rule": "device.isCompliant -eq True"}}},
+    "authentication_flows": {"authenticationFlows": {"transferMethods": "deviceCodeFlow"}},
+    "application_filter": {"applications": {"includeApplications": ["All"], "applicationFilter": {
+        "mode": "exclude", "rule": 'CustomSecurityAttribute.Tier -eq "Legacy"'}}},
+    "excluded_apps": {"applications": {"includeApplications": ["All"], "excludeApplications": ["app-1"]}},
+}
+
+
+@pytest.mark.parametrize("name", sorted(NARROWING))
+def test_each_narrowing_condition_disqualifies_the_figures(monkeypatch, name):
+    f = _figures(monkeypatch, _mfa_policy(**NARROWING[name]), _strong_policy(**NARROWING[name]))
+    assert f["enforced_mfa_for_all_users_and_apps"] == 0
+    assert f["enforced_phishing_resistant_mfa_for_all_users_and_apps"] == 0
+    assert f["mfa_required_for_admin_portals"] is False and f["mfa_required_for_azure_management_api"] is False
+
+
+def test_unrestricted_conditions_do_not_disqualify(monkeypatch):
+    open_conditions = {"clientAppTypes": ["all"], "platforms": {"includePlatforms": ["all"]},
+                       "locations": {"includeLocations": ["All"]}, "authenticationFlows": {"transferMethods": "none"}}
+    f = _figures(monkeypatch, _mfa_policy(**open_conditions))
+    assert f["enforced_mfa_for_all_users_and_apps"] == 1 and f["mfa_required_for_admin_portals"] is True
+
+
+def test_policies_for_separate_client_types_do_not_add_up_to_the_count(monkeypatch):
+    f = _figures(monkeypatch, _mfa_policy("p-web", clientAppTypes=["browser"]),
+                 _mfa_policy("p-apps", clientAppTypes=["mobileAppsAndDesktopClients", "exchangeActiveSync", "other"]))
+    assert f["enforced_mfa_for_all_users_and_apps"] == 0 and f["mfa_required_for_admin_portals"] is False
+
+
+def test_excluded_roles_disqualify_the_phishing_resistant_all_users_figure_only(monkeypatch):
+    excluding = _strong_policy("p-ex")
+    excluding["conditions"]["users"] = {"includeUsers": ["All"], "excludeRoles": [GLOBAL_ADMIN]}
+    assert _figures(monkeypatch, excluding)["enforced_phishing_resistant_mfa_for_all_users_and_apps"] == 0
+    # Excluded users and groups are reported as exclusions, not checked here.
+    excluding["conditions"]["users"] = {"includeUsers": ["All"], "excludeGroups": ["g"]}
+    assert _figures(monkeypatch, excluding)["enforced_phishing_resistant_mfa_for_all_users_and_apps"] == 1
+
+
+def test_role_figure_lists_only_unnarrowed_policies(monkeypatch):
+    plain = _policy("p-admins", "Admins", strength=PHISHING_RESISTANT, users={"includeRoles": [GLOBAL_ADMIN]})
+    risky = _policy("p-risk", "Risky admins", strength=PHISHING_RESISTANT, users={"includeRoles": ["role-2"]})
+    risky["conditions"]["signInRiskLevels"] = ["high"]
+    assert _figures(monkeypatch, plain, risky)["phishing_resistant_mfa_role_template_ids"] == [GLOBAL_ADMIN]
+
+
+# --- guest and external-user exclusions (both forms) ---
+
+EXCLUDED_GUESTS = {
+    "guestOrExternalUserTypes": "internalGuest,b2bCollaborationGuest",
+    "externalTenants": {"@odata.type": "#microsoft.graph.conditionalAccessEnumeratedExternalTenants",
+                        "membershipKind": "enumerated", "members": ["00000000-0000-0000-0000-0000000000f1"]},
+}
+
+
+def _guest_policy(pid, users):
+    return _policy(pid, pid, controls=("mfa",), users={"includeUsers": ["All"], **users})
+
+
+def test_guest_exclusion_object_counts_as_a_user_exclusion(monkeypatch):
+    policies, _strengths, s, _c = _run(monkeypatch, _graph([
+        _guest_policy("p-object", {"excludeGuestsOrExternalUsers": EXCLUDED_GUESTS}),
+        _guest_policy("p-none", {})]))
+    by_id = {p["id"]: p for p in policies}
+    assert by_id["p-object"]["has_user_exclusions"] is True and by_id["p-none"]["has_user_exclusions"] is False
+    assert by_id["p-object"]["users"]["exclude_guests_or_external_users"] == {
+        "types": ["b2bCollaborationGuest", "internalGuest"], "tenants": "enumerated"}
+    assert "00000000-0000-0000-0000-0000000000f1" not in json.dumps(policies)
+    assert s["enforced_policies_with_exclusions"] == 1 and s["distinct_excluded_principals"] == 1
+    assert s["enforced_policies_excluding_guests_or_external_users"] == 1
+    assert s["excluded_guest_or_external_user_types"] == ["b2bCollaborationGuest", "internalGuest"]
+
+
+def test_legacy_guest_literal_counts_too_and_include_form_is_recorded(monkeypatch):
+    policies, _strengths, s, _c = _run(monkeypatch, _graph([
+        _guest_policy("p-literal", {"excludeUsers": ["GuestsOrExternalUsers"]}),
+        _policy("p-include", "Guests only", controls=("mfa",), users={"includeGuestsOrExternalUsers": {
+            "guestOrExternalUserTypes": "b2bCollaborationGuest",
+            "externalTenants": {"@odata.type": "#microsoft.graph.conditionalAccessAllExternalTenants",
+                                "membershipKind": "all"}}})]))
+    by_id = {p["id"]: p for p in policies}
+    assert by_id["p-literal"]["has_user_exclusions"] is True
+    assert by_id["p-include"]["users"]["include_guests_or_external_users"] == {
+        "types": ["b2bCollaborationGuest"], "tenants": "all"}
+    assert by_id["p-include"]["users"]["exclude_guests_or_external_users"] is None
+    assert s["enforced_policies_with_exclusions"] == 1
+    assert s["enforced_policies_excluding_guests_or_external_users"] == 1
+    assert s["excluded_guest_or_external_user_types"] == []
+
+
+def test_same_guest_exclusion_in_two_policies_is_one_principal(monkeypatch):
+    _p, _s, s, _c = _run(monkeypatch, _graph([
+        _guest_policy("p-a", {"excludeGuestsOrExternalUsers": EXCLUDED_GUESTS}),
+        _guest_policy("p-b", {"excludeGuestsOrExternalUsers": EXCLUDED_GUESTS}),
+        _guest_policy("p-c", {"excludeGuestsOrExternalUsers": {"guestOrExternalUserTypes": "serviceProvider"}})]))
+    assert s["enforced_policies_with_exclusions"] == 3 and s["distinct_excluded_principals"] == 2
