@@ -93,7 +93,7 @@ exec "$STUB_REAL_PYTHON" "$@"
 
 # Prints $STUB_REPORT with __ROOT__ replaced by the --directory it was given; logs any Azure identity it was handed.
 _STUB_CHECKOV = r"""#!/bin/bash
-env | grep -E '^(AZURE_|MSI_|IDENTITY_)' > "$STUB_LOG/checkov.env"
+env | grep -E '^(AZURE_(TENANT_ID|CLIENT_ID|CLIENT_SECRET|FEDERATED_TOKEN_FILE|AUTHORITY_HOST)|MSI_ENDPOINT|IDENTITY_ENDPOINT|IDENTITY_HEADER)=' > "$STUB_LOG/checkov.env"
 printf '%s\n' "$*" > "$STUB_LOG/checkov.args"
 printf '%s\n' "$@" > "$STUB_LOG/checkov.argv"
 dir=""; prev=""
