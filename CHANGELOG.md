@@ -12,6 +12,26 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
+  Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
+  - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from
+    the identity the `azure_devops_*` fetchers use (DefaultAzureCredential: the
+    `AZURE_*` service principal variables, workload or managed identity, or
+    `az login`) and sends it as a Bearer header. It reuses those fetchers' helper
+    through `fetchers/checkov/_shared/ado_token.py`, and needs `python3` with
+    `azure-identity`, which the `checkov` extra now installs.
+  - The checkov category lets the same `AZURE_*` identity variables through as
+    the azure category.
+  - A PAT still wins, and with neither a PAT nor an Entra identity the fetcher
+    reads anonymously, as before, for a public project. A public project that
+    refuses the ambient Entra identity is read anonymously too.
+  - `metadata.auth_mode` records `pat`, `entra` or `anonymous`.
+  - Failures classify as the `azure_devops_*` fetchers classify them. A refused
+    PAT or Entra identity (401, or 203/302 to sign-in) is `auth_failed`, and a
+    403 is `not_authorized`. So are the answers Azure DevOps gives in place of a
+    403 (`TF14098`, `TF200016`, `TF401019`, `VS800075`), which were
+    `bad_config` or `internal_error` before. None of these runs a scan.
+
 - **`azure_devops_work_items` 0.2.0: approval comments that start with an @mention, and the approved percentage.**
   - **`approval_mentions`** (`AZURE_DEVOPS_APPROVAL_MENTIONS`, `false` by
     default). Set to `true`, a comment line that starts with one or more

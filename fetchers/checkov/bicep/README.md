@@ -16,7 +16,7 @@ source per invocation. It can also read an Azure DevOps TFVC folder, which
 | `tfvc_path` | `CHECKOV_TFVC_PATH` | for `tfvc` | server path of the folder to scan, e.g. `$/<project>/infra` |
 | `tfvc_version` | `CHECKOV_TFVC_VERSION` | no | `tfvc` only; `latest` (default) or a changeset number, `1234` or `C1234` |
 | secret `clone_token` | `GIT_CLONE_TOKEN` | no | git only; omit for public repos; for Azure DevOps, a PAT with **Code (Read)** |
-| secret `tfvc_token` | `TFVC_TOKEN` | no | `tfvc` only; a read-only PAT with **Code (Read)**; omit for a public project |
+| secret `tfvc_token` | `TFVC_TOKEN` | no | `tfvc` only; a read-only PAT with **Code (Read)**; omit to [sign in with Entra](#sign-in) or for a public project |
 
 ## TFVC source
 With `source_type: tfvc` the fetcher makes two read-only calls to the
@@ -32,20 +32,39 @@ With `source_type: tfvc` the fetcher makes two read-only calls to the
    run cannot mix two versions of the folder.
 
 The evidence records `source_type: tfvc` and, in `metadata`, `tfvc_path`,
-`requested_version`, `changeset` and `changeset_date`, where a git source records
-its `branch` and `commit_sha`. The PAT is sent as an `Authorization` header on
-curl's stdin, so it never appears in a process listing, a log or the evidence.
+`requested_version`, `changeset`, `changeset_date` and `auth_mode`, where a git
+source records its `branch` and `commit_sha`. Credentials are sent as an
+`Authorization` header on curl's stdin, so they never appear in a process
+listing, a log or the evidence.
+
+### Sign-in
+The fetcher reads TFVC with the first of these that works, and records which in
+`metadata.auth_mode`:
+
+1. `pat`: the `tfvc_token` secret, a PAT with Code (Read).
+2. `entra`: with no token, an Entra token for Azure DevOps from the identity the
+   `azure_devops_*` fetchers use
+   ([DefaultAzureCredential](../../azure/README.md#credential-setup): the
+   `AZURE_*` service-principal variables, workload or managed identity, or
+   `az login`). The identity must be a member of the
+   organization with Code (Read) on the project, e.g. through the project's
+   Readers group. This needs `python3` with `azure-identity` (in the `checkov`
+   extra).
+3. `anonymous`: no credentials, for a public project. This also covers a public
+   project that refuses the ambient Entra identity.
 
 ```bash
 paramify manifest add-target checkov_bicep \
   repo_url=https://dev.azure.com/<org>/<project> source_type=tfvc \
   'tfvc_path=$/<project>/infra' \
-  --secret tfvc_token=AZURE_DEVOPS_CODE_READ_PAT
+  --secret tfvc_token=AZURE_DEVOPS_CODE_READ_PAT    # leave out to sign in with Entra
 ```
 
-A rejected PAT (`401`, or `203` with the sign-in page) fails with `auth_failed`,
-a PAT without Code (Read) with `not_authorized`, and a path or changeset that does
-not exist with `bad_config`.
+A rejected PAT or Entra identity (`401`, or `203`/`302` to the sign-in page) fails
+with `auth_failed`, as the `azure_devops_*` fetchers do. A credential without
+Code (Read) fails with `not_authorized`, as does an answer Azure DevOps gives
+instead of a 403 (`TF14098`, `TF200016`, `TF401019`, `VS800075`). A path or
+changeset that does not exist fails with `bad_config`. None of these runs a scan.
 
 ## Config
 `soft_fail`, `compact`, `repo_id`, `skip_checks`, `skip_resources`, `skip_paths`,

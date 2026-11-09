@@ -30,7 +30,8 @@ dependencies = [
 # (select_on_focus, blurred cursor styles) differs enough that the TUI is not the
 # same app on 1.x.
 tui = ["textual>=8,<9"]
-checkov = ["checkov"]
+# azure-identity: checkov_bicep's TFVC source signs in to Azure DevOps with Entra when no PAT is set.
+checkov = ["checkov", "azure-identity>=1.25.3,<2"]
 # cryptography: tests/test_azure_entra_authentication_policy.py builds test
 # certificates with it, and the `test` job installs dev but not the azure extra.
 # defusedxml: the qualys tests need it, and the same `test` job runs them.

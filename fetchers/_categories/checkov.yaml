@@ -7,16 +7,20 @@ description: >
   runs `checkov` over its Terraform / Kubernetes / Bicep / ARM source, emitting the scan result
   as JSON evidence. Single repo per invocation; the runner fans out across repos.
 
-# No ambient cloud-identity passthrough is needed: acquisition is an explicit
-# `git clone` authenticated with the per-target GIT_CLONE_TOKEN secret, not an
-# instance role. Every other knob is declared per-fetcher in its fetcher.yaml
-# config_schema; a manifest can still set shared values once under
+# A git clone is authenticated only by the per-target GIT_CLONE_TOKEN secret. The one
+# ambient identity is for checkov_bicep's TFVC source: with no TFVC_TOKEN it signs in to
+# Azure DevOps as the Entra identity the azure_devops_* fetchers use, so the same
+# DefaultAzureCredential variables the azure category lets through are let through here
+# (see _categories/azure.yaml for the order). Every other knob is declared per-fetcher in
+# its fetcher.yaml config_schema; a manifest can still set shared values once under
 # platforms.checkov.config (e.g. soft_fail) since both fetchers declare the field.
 #
 # Runner dependency: the `checkov` CLI and `git` must be on PATH. `checkov` is in
 # the top-level requirements.txt; `git` is a system tool. `curl` and `unzip` are
-# used only by checkov_bicep's TFVC source, and `python3` only by checkov_bicep
-# to check that its skip_paths are valid regular expressions.
+# used only by checkov_bicep's TFVC source, and `python3` only by checkov_bicep:
+# to check that its skip_paths are valid regular expressions, and for Entra sign-in,
+# which also needs azure-identity (in the checkov extra). That package is not listed
+# below because a PAT or a public project needs no sign-in.
 requires:
   tools:
     - checkov
@@ -29,3 +33,14 @@ requires:
   # other environment will not match the pin this repo installs.
   python_packages:
     - checkov
+
+auth:
+  passthrough_env:
+    - AZURE_TENANT_ID
+    - AZURE_CLIENT_ID
+    - AZURE_CLIENT_SECRET
+    - AZURE_FEDERATED_TOKEN_FILE
+    - AZURE_AUTHORITY_HOST
+    - MSI_ENDPOINT
+    - IDENTITY_ENDPOINT
+    - IDENTITY_HEADER

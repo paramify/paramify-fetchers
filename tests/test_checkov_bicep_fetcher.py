@@ -11,11 +11,14 @@ Run: ``pytest tests/test_checkov_bicep_fetcher.py``
 from __future__ import annotations
 
 import base64
+import importlib.util
 import io
 import json
+import logging
 import os
 import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -42,6 +45,7 @@ exit 1
 """
 
 # Serves $STUB_TFVC/<route>.status and <route>.body, logging argv and the --config it read on stdin.
+# A request with credentials gets <route>.authed.status instead, when that file exists.
 _STUB_CURL = r"""#!/bin/bash
 argv="$*"; out=""; accept=""; url=""; cfg=""
 while [ $# -gt 0 ]; do
@@ -62,9 +66,22 @@ case "$url" in
 esac
 printf 'ARGV %s\nURL %s\nACCEPT %s\nCONFIG %s\n' "$argv" "$url" "$accept" "$cfg" >> "$STUB_LOG/curl.log"
 status="$(cat "$STUB_TFVC/$route.status" 2>/dev/null || echo 404)"
+[ -n "$cfg" ] && [ -f "$STUB_TFVC/$route.authed.status" ] && status="$(cat "$STUB_TFVC/$route.authed.status")"
 if [ "$status" = "000" ]; then echo "curl: (6) Could not resolve host" >&2; printf '000'; exit 6; fi
 cp "$STUB_TFVC/$route.body" "$out" 2>/dev/null || : > "$out"
 printf '%s' "$status"
+"""
+
+# Stands in for the Entra sign-in (ado_token.py): prints $STUB_ENTRA_TOKEN, else fails with $STUB_ENTRA_ERROR.
+# Every other python3 call runs the real interpreter.
+_STUB_PYTHON3 = r"""#!/bin/bash
+case "$*" in *ado_token.py*)
+    printf '%s\n' "$*" >> "$STUB_LOG/python3.log"
+    [ -n "$STUB_ENTRA_TOKEN" ] && { printf '%s\n' "$STUB_ENTRA_TOKEN"; exit 0; }
+    printf '%s\n' "${STUB_ENTRA_ERROR:-CredentialUnavailableError: no Entra identity in this environment}" >&2
+    exit 3 ;;
+esac
+exec "$STUB_REAL_PYTHON" "$@"
 """
 
 # Prints $STUB_REPORT with __ROOT__ replaced by the --directory it was given.
@@ -120,17 +137,20 @@ def make_repo(root: Path, files: dict) -> Path:
 def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, fetcher=FETCHER, **env_over):
     """Run the fetcher; returns (exit code, payload or None, status-file dict or None, tmp_path).
 
-    tfvc maps a curl route (changesets, changeset, items) to (HTTP status, body bytes or JSON).
+    tfvc maps a curl route (changesets, changeset, items) to (HTTP status, body bytes or JSON); a
+    "<route>.authed" key sets the status of that route's requests that carry credentials.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "git").write_text(_STUB_GIT)
     (bin_dir / "curl").write_text(_STUB_CURL)
+    (bin_dir / "python3").write_text(_STUB_PYTHON3)
     tfvc_dir = tmp_path / "tfvc"
     tfvc_dir.mkdir()
     for route, (status, body) in (tfvc or {}).items():
         (tfvc_dir / f"{route}.status").write_text(str(status))
-        (tfvc_dir / f"{route}.body").write_bytes(body if isinstance(body, bytes) else json.dumps(body).encode())
+        if body is not None:
+            (tfvc_dir / f"{route}.body").write_bytes(body if isinstance(body, bytes) else json.dumps(body).encode())
     if not real_checkov:
         (bin_dir / "checkov").write_text(_STUB_CHECKOV)
     for f in bin_dir.iterdir():
@@ -153,6 +173,7 @@ def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, fet
         "STUB_LOG": str(log),
         "STUB_SHA": SHA,
         "STUB_TFVC": str(tfvc_dir),
+        "STUB_REAL_PYTHON": sys.executable,
         **env_over,
     }
     proc = subprocess.run(["bash", str(fetcher)], cwd=tmp_path, env=env,
@@ -563,9 +584,11 @@ def test_tfvc_latest_pins_the_newest_changeset_and_records_it(tmp_path):
     assert payload["source_type"] == "tfvc"
     assert payload["source"] == PROJECT
     meta = payload["metadata"]
-    assert {k: meta[k] for k in ("source_type", "repo_url", "tfvc_path", "requested_version", "changeset", "changeset_date")} == {
+    assert {k: meta[k] for k in ("source_type", "repo_url", "tfvc_path", "requested_version", "changeset", "changeset_date",
+                                 "auth_mode")} == {
         "source_type": "tfvc", "repo_url": PROJECT, "tfvc_path": TFVC_PATH, "requested_version": "latest",
-        "changeset": 4217, "changeset_date": "2026-10-01T12:00:00Z"}
+        "changeset": 4217, "changeset_date": "2026-10-01T12:00:00Z", "auth_mode": "pat"}
+    assert not (tmp / "log" / "python3.log").exists()   # a PAT never tries Entra sign-in
     assert "commit_sha" not in meta and "branch" not in meta
     assert payload["file_counts"] == {"bicep": 1, "arm_templates": 1}
 
@@ -597,11 +620,108 @@ def test_tfvc_named_changeset(tmp_path):
     assert "versionDescriptor.version=1200&" in download["URL"]
 
 
-def test_tfvc_without_token_sends_no_credentials(tmp_path):
-    code, _, _, tmp = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": (200, TEMPLATES)},
-                          GIT_CLONE_TOKEN="git-only-token", **TFVC_ENV)
+def test_tfvc_without_token_or_entra_identity_sends_no_credentials(tmp_path):
+    code, payload, _, tmp = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": (200, TEMPLATES)},
+                                GIT_CLONE_TOKEN="git-only-token", **TFVC_ENV)
     assert code == 0
     assert all(c["CONFIG"] == "" for c in curl_calls(tmp))
+    assert len(curl_calls(tmp)) == 2
+    assert payload["metadata"]["auth_mode"] == "anonymous"
+    assert "-I " in (tmp / "log" / "python3.log").read_text()     # Entra sign-in was tried first
+
+
+# --- TFVC source: Entra sign-in ------------------------------------------------------
+
+ENTRA = "eyJ0eXAiOiJKV1QifQ.eyJhdWQiOiJhZG8ifQ.c2lnbmF0dXJl"
+
+
+def test_tfvc_without_token_signs_in_with_entra(tmp_path):
+    code, payload, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": (200, TEMPLATES)},
+                                     STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
+    assert code == 0, status
+    assert payload["status"] == "success"
+    assert payload["metadata"]["auth_mode"] == "entra"
+    lookup, download = curl_calls(tmp)
+    assert lookup["CONFIG"] == download["CONFIG"] == f'header = "Authorization: Bearer {ENTRA}"'
+    assert all(ENTRA not in c["ARGV"] for c in (lookup, download))
+    assert ENTRA not in (next((tmp / "evidence").glob("checkov_bicep_*.json"))).read_text()
+
+
+def test_tfvc_pat_wins_over_entra(tmp_path):
+    code, payload, _, tmp = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": (200, TEMPLATES)},
+                                TFVC_TOKEN=PAT, STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
+    assert code == 0
+    assert payload["metadata"]["auth_mode"] == "pat"
+    assert all(c["CONFIG"].startswith('header = "Authorization: Basic ') for c in curl_calls(tmp))
+    assert not (tmp / "log" / "python3.log").exists()
+
+
+def test_tfvc_public_project_that_refuses_the_entra_identity_is_read_anonymously(tmp_path):
+    code, payload, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc={
+        "changesets": (200, LATEST), "changesets.authed": (401, None), "items": (200, TEMPLATES)},
+        STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
+    assert code == 0, status
+    assert payload["metadata"]["auth_mode"] == "anonymous"
+    assert [bool(c["CONFIG"]) for c in curl_calls(tmp)] == [True, False, False]
+    assert payload["metadata"]["changeset"] == 4217
+
+
+def test_checkov_category_lets_the_same_entra_identity_through_as_the_azure_category():
+    from framework.config_loader import discover_platforms
+
+    platforms = discover_platforms(REPO_ROOT)
+    assert platforms["checkov"].passthrough_env == platforms["azure"].passthrough_env
+
+
+TF400813 = {"message": "TF400813: The user 'x' is not authorized to access this resource."}
+
+
+@pytest.mark.parametrize("routes,code_expected,needle", [
+    ({"changesets": (401, TF400813)}, "auth_failed", "did not accept the Entra identity"),
+    ({"changesets": (203, b"<html>Sign In</html>")}, "auth_failed", "did not accept the Entra identity"),
+    ({"changesets": (302, b"<html>Object moved</html>")}, "auth_failed", "did not accept the Entra identity"),
+    ({"changesets": (403, {"message": "TF400813: no."})}, "not_authorized", "Entra identity cannot read"),
+    ({"changesets": (404, {"message": "TF200016: The following project does not exist: Infra."})},
+     "not_authorized", "Entra identity cannot see"),
+    ({"changesets": (200, LATEST), "items": (500, {"message": "TF14098: Access Denied: needs Read permission(s)."})},
+     "not_authorized", "Entra identity cannot see"),
+    ({"changesets": (200, LATEST), "items": (403, {"message": "Forbidden"})}, "not_authorized", "Entra identity cannot read"),
+])
+def test_tfvc_entra_refusals_classify_like_the_azure_devops_fetchers_and_scan_nothing(tmp_path, routes, code_expected, needle):
+    code, payload, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc=routes, STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
+    assert code == 1
+    assert status["code"] == code_expected
+    assert needle in status["error"]
+    assert payload["status"] == "error"
+    assert payload["metadata"]["auth_mode"] == "entra"
+    assert payload["summary"]["total_checks"] is None
+    assert not (tmp / "log" / "checkov.args").exists()
+    assert ENTRA not in json.dumps(payload) + status["error"]
+
+
+def test_tfvc_refused_entra_identity_is_reported_when_anonymous_is_refused_too(tmp_path):
+    code, payload, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (401, TF400813)},
+                                     STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
+    assert (code, status["code"]) == (1, "auth_failed")
+    assert "TF400813" in status["error"]
+    assert [bool(c["CONFIG"]) for c in curl_calls(tmp)] == [True, False]   # one anonymous retry, no download
+
+
+def test_tfvc_sign_in_required_names_why_entra_sign_in_was_unavailable(tmp_path):
+    code, payload, status, _ = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (401, b"")},
+                                   STUB_ENTRA_ERROR="ClientAuthenticationError: AADSTS7000215: Invalid client secret.",
+                                   **TFVC_ENV)
+    assert (code, status["code"]) == (1, "auth_failed")
+    assert "no tfvc_token was set" in status["error"]
+    assert "Entra sign-in was not available: ClientAuthenticationError: AADSTS7000215" in status["error"]
+    assert payload["metadata"]["auth_mode"] == "anonymous"
+
+
+def test_tfvc_permission_masking_answer_is_not_authorized_with_a_pat_too(tmp_path):
+    code, _, status, _ = run(tmp_path, {}, ONE_PASS, TFVC_TOKEN=PAT, tfvc={
+        "changesets": (404, {"message": "TF200016: The following project does not exist: Infra."})}, **TFVC_ENV)
+    assert (code, status["code"]) == (1, "not_authorized")
+    assert "the token cannot see this project" in status["error"]
 
 
 @pytest.mark.parametrize("http,body,code_expected", [
@@ -753,3 +873,69 @@ def test_real_checkov_skips_space_separated_check_ids(tmp_path):
     ran = {c["check_id"] for k in ("passed_checks", "failed_checks", "skipped_checks") for c in r[k]}
     assert ran and not ran & {"CKV_AZURE_3", "CKV_AZURE_44"}
     assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_3", "CKV_AZURE_44"]
+
+
+# --- the Entra sign-in helper (ado_token.py) ---------------------------------------------
+
+@pytest.fixture
+def ado_token():
+    """The helper module; main() turns logging off for its own process, so it is turned back on here."""
+    yield _ado_token_module()
+    logging.disable(logging.NOTSET)
+
+
+def _ado_token_module():
+    spec = importlib.util.spec_from_file_location(
+        "checkov_ado_token", REPO_ROOT / "fetchers" / "checkov" / "_shared" / "ado_token.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _Credential:
+    def __init__(self, error=None):
+        self.error, self.scopes = error, []
+
+    def get_token(self, *scopes):
+        self.scopes.extend(scopes)
+        if self.error:
+            raise self.error
+        return type("AccessToken", (), {"token": ENTRA, "expires_on": 0})()
+
+
+def test_ado_token_reuses_the_azure_devops_fetchers_credential_and_resource(ado_token, monkeypatch, capsys):
+    mod = ado_token
+    import devops_rest
+    assert mod.entra_credential is devops_rest.entra_credential
+    cred = _Credential()
+    monkeypatch.setattr(mod, "entra_credential", lambda: cred)
+    assert mod.main() == 0
+    assert capsys.readouterr().out == ENTRA + "\n"
+    assert cred.scopes == ["499b84ac-1321-427f-aa17-267ca6975798/.default"]
+
+
+def test_ado_token_sign_in_failure_is_one_line_on_stderr(ado_token, monkeypatch, capsys):
+    mod = ado_token
+
+    class ClientAuthenticationError(Exception):
+        pass
+
+    error = ClientAuthenticationError("DefaultAzureCredential failed to retrieve a token.\n"
+                                      "Attempted credentials:\n\tEnvironmentCredential: not configured")
+    monkeypatch.setattr(mod, "entra_credential", lambda: _Credential(error))
+    assert mod.main() == mod.NO_TOKEN
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == ("ClientAuthenticationError: DefaultAzureCredential failed to retrieve a token. "
+                   "Attempted credentials: EnvironmentCredential: not configured\n")
+
+
+def test_ado_token_without_azure_identity(ado_token, monkeypatch, capsys):
+    mod = ado_token
+
+    def missing():
+        raise ImportError("No module named 'azure'")
+
+    monkeypatch.setattr(mod, "entra_credential", missing)
+    assert mod.main() == mod.NO_SDK
+    assert "azure-identity" in capsys.readouterr().err

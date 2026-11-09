@@ -10,13 +10,15 @@
 # Output: $EVIDENCE_DIR/checkov_bicep_<source>.json
 # Target env (per source): CHECKOV_REPO_URL (required), CHECKOV_CLONE_BRANCH, CHECKOV_SOURCE_TYPE,
 #                          CHECKOV_TFVC_PATH, CHECKOV_TFVC_VERSION
-# Secret (per source):     GIT_CLONE_TOKEN (git) or TFVC_TOKEN (tfvc); omit for public sources
+# Secret (per source):     GIT_CLONE_TOKEN (git) or TFVC_TOKEN (tfvc); omit for public sources.
+#                          Without TFVC_TOKEN a tfvc source signs in as the ambient Entra identity, if any
+# Passthrough env:         AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ... (that Entra identity)
 # Config env:            CHECKOV_SOFT_FAIL, CHECKOV_COMPACT, CHECKOV_SKIP_CHECKS,
 #                        CHECKOV_USE_DEFAULT_SKIP_CHECKS, CHECKOV_SKIP_RESOURCES,
 #                        CHECKOV_SKIP_PATHS, CHECKOV_BICEP_CHECKS,
 #                        CHECKOV_EXTERNAL_CHECKS_DIR, CHECKOV_REPO_ID, CHECKOV_GIT_USERNAME
 # Required tools:        checkov, jq, plus git (git source) or curl + unzip (tfvc source),
-#                        and python3 when skip_paths is set
+#                        and python3 when skip_paths is set; Entra sign-in needs python3 with azure-identity
 #
 # Exit codes: 0 = at least one check ran and every Bicep/ARM file parsed (findings are evidence);
 #             1 = could not fetch the source / checkov failed / nothing to scan / zero checks ran /
@@ -176,7 +178,7 @@ SKIP_RESOURCES+=("${_SPLIT[@]}")
 SKIP_RESOURCES_JSON="$(json_list "${SKIP_RESOURCES[@]}")"
 
 # What was actually fetched; checkov_clone_repo / checkov_fetch_tfvc overwrite these.
-SCANNED_BRANCH="$BRANCH"; BRANCH_FALLBACK=false; COMMIT_SHA=unknown; CHANGESET=""; CHANGESET_DATE=""
+SCANNED_BRANCH="$BRANCH"; BRANCH_FALLBACK=false; COMMIT_SHA=unknown; CHANGESET=""; CHANGESET_DATE=""; TFVC_AUTH_MODE=""
 
 # Provenance + scan configuration, shared by every result this fetcher writes. A tfvc source
 # records its folder and changeset where a git source records its branch and commit.
@@ -184,13 +186,14 @@ metadata_json() {
     jq -n --arg type "$SOURCE_TYPE" --arg repo "$REPO_URL" --arg branch "$SCANNED_BRANCH" --arg requested "$BRANCH" \
           --argjson fallback "$BRANCH_FALLBACK" --arg sha "$COMMIT_SHA" --arg ts "$TIMESTAMP" \
           --arg path "$TFVC_PATH" --arg version "$TFVC_VERSION" \
-          --argjson changeset "${CHANGESET:-null}" --arg csdate "$CHANGESET_DATE" \
+          --argjson changeset "${CHANGESET:-null}" --arg csdate "$CHANGESET_DATE" --arg authmode "$TFVC_AUTH_MODE" \
           --argjson checks "$CHECKS_JSON" --arg skips "$SKIP_CHECKS_LIST" --argjson defaults "$DEFAULT_SKIPS_APPLIED" \
           --argjson skipres "$SKIP_RESOURCES_JSON" --argjson skippaths "$SKIP_PATHS_JSON" \
        '{source_type: $type, repo_url: $repo}
         + (if $type == "tfvc" then
              {tfvc_path: $path, requested_version: $version, changeset: $changeset,
-              changeset_date: (if $csdate == "" then null else $csdate end)}
+              changeset_date: (if $csdate == "" then null else $csdate end),
+              auth_mode: (if $authmode == "" then null else $authmode end)}
            else
              {branch: $branch, requested_branch: $requested, branch_fallback: $fallback, commit_sha: $sha}
            end)
@@ -227,7 +230,7 @@ if [ "$SOURCE_TYPE" = "tfvc" ]; then
         exit 1
     fi
     WHERE="$TFVC_PATH in $REPO_URL (changeset $CHANGESET)"
-    log_info "Downloaded $WHERE"
+    log_info "Downloaded $WHERE (auth: $TFVC_AUTH_MODE)"
 else
     if ! checkov_clone_repo "$REPO_URL" "$BRANCH" "$TOKEN" "$GIT_USER" "$COMPONENT"; then
         write_status_json error "git clone failed"
