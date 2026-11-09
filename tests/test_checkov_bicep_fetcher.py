@@ -2,7 +2,7 @@
 
 The fetcher runs the way the runner execs it, with stub ``git``, ``curl`` and
 ``checkov`` binaries on PATH: git "clones" a fixture directory, curl serves canned
-Azure DevOps TFVC responses (a changeset lookup and the folder as a zip), and
+Azure DevOps TFVC responses (a changeset lookup, the folder listing and its files), and
 checkov prints a canned report. The real-checkov tests run when it is installed.
 
 Run: ``pytest tests/test_checkov_bicep_fetcher.py``
@@ -12,15 +12,14 @@ from __future__ import annotations
 
 import base64
 import importlib.util
-import io
 import json
 import logging
 import os
 import shutil
 import subprocess
 import sys
-import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
@@ -45,7 +44,9 @@ exit 1
 """
 
 # Serves $STUB_TFVC/<route>.status and <route>.body, logging argv and the --config it read on stdin.
-# A request with credentials gets <route>.authed.status instead, when that file exists.
+# A request with credentials gets <route>.authed.status instead, when that file exists. Route "items" is the
+# folder listing; a file download (route "file") serves $STUB_TFVC/files/<its URL-encoded path>, 404 when absent,
+# unless file.status is set.
 _STUB_CURL = r"""#!/bin/bash
 argv="$*"; out=""; accept=""; url=""; cfg=""
 while [ $# -gt 0 ]; do
@@ -61,14 +62,20 @@ done
 case "$url" in
     */_apis/tfvc/changesets/[0-9]*) route=changeset ;;
     */_apis/tfvc/changesets\?*)     route=changesets ;;
+    */_apis/tfvc/items\?path=*)     route=file ;;
     */_apis/tfvc/items\?*)          route=items ;;
     *) route=unknown ;;
 esac
 printf 'ARGV %s\nURL %s\nACCEPT %s\nCONFIG %s\n' "$argv" "$url" "$accept" "$cfg" >> "$STUB_LOG/curl.log"
 status="$(cat "$STUB_TFVC/$route.status" 2>/dev/null || echo 404)"
+body="$STUB_TFVC/$route.body"
+if [ "$route" = file ] && [ ! -f "$STUB_TFVC/file.status" ]; then
+    item="${url#*\?path=}"; body="$STUB_TFVC/files/${item%%&*}"
+    if [ -f "$body" ]; then status=200; else status=404; fi
+fi
 [ -n "$cfg" ] && [ -f "$STUB_TFVC/$route.authed.status" ] && status="$(cat "$STUB_TFVC/$route.authed.status")"
 if [ "$status" = "000" ]; then echo "curl: (6) Could not resolve host" >&2; printf '000'; exit 6; fi
-cp "$STUB_TFVC/$route.body" "$out" 2>/dev/null || : > "$out"
+cp "$body" "$out" 2>/dev/null || : > "$out"
 printf '%s' "$status"
 """
 
@@ -137,8 +144,9 @@ def make_repo(root: Path, files: dict) -> Path:
 def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, fetcher=FETCHER, **env_over):
     """Run the fetcher; returns (exit code, payload or None, status-file dict or None, tmp_path).
 
-    tfvc maps a curl route (changesets, changeset, items) to (HTTP status, body bytes or JSON); a
-    "<route>.authed" key sets the status of that route's requests that carry credentials.
+    tfvc maps a curl route (changesets, changeset, items, file) to (HTTP status, body bytes or JSON); a
+    "<route>.authed" key sets the status of that route's requests that carry credentials. An "items" body
+    that is a Tree serves its listing, and its files to the downloads.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -146,8 +154,13 @@ def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, fet
     (bin_dir / "curl").write_text(_STUB_CURL)
     (bin_dir / "python3").write_text(_STUB_PYTHON3)
     tfvc_dir = tmp_path / "tfvc"
-    tfvc_dir.mkdir()
+    (tfvc_dir / "files").mkdir(parents=True)
     for route, (status, body) in (tfvc or {}).items():
+        if isinstance(body, Tree):
+            for server_path, content in body.files().items():
+                (tfvc_dir / "files" / quote(server_path, safe="")).write_bytes(
+                    content.encode() if isinstance(content, str) else json.dumps(content).encode())
+            body = body.listing()
         (tfvc_dir / f"{route}.status").write_text(str(status))
         if body is not None:
             (tfvc_dir / f"{route}.body").write_bytes(body if isinstance(body, bytes) else json.dumps(body).encode())
@@ -192,7 +205,7 @@ def flag_values(tmp, flag):
 
 @pytest.fixture(autouse=True)
 def _require_tools():
-    for tool in ("bash", "jq", "unzip"):
+    for tool in ("bash", "jq"):
         if shutil.which(tool) is None:
             pytest.skip(f"{tool} not on PATH")
 
@@ -552,16 +565,25 @@ LATEST = {"count": 1, "value": [{"changesetId": 4217, "createdDate": "2026-10-01
 ONE_PASS = report("arm", passed=[check("CKV_AZURE_2", "x", "/ARM Templates/azuredeploy.json")])
 
 
-def zipped(files: dict) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        for rel, content in files.items():
-            z.writestr(rel, content if isinstance(content, str) else json.dumps(content))
-    return buf.getvalue()
+class Tree:
+    """A TFVC folder as the caller can see it: its files by path under root, served as the listing and the downloads."""
+
+    def __init__(self, files: dict, root: str = TFVC_PATH):
+        self.root, self._files = root, files
+
+    def files(self) -> dict:
+        return {f"{self.root}/{rel}": content for rel, content in self._files.items()}
+
+    def listing(self) -> dict:
+        folders = sorted({f"{self.root}/{rel.rsplit('/', 1)[0]}" for rel in self._files if "/" in rel})
+        items = ([{"path": self.root, "isFolder": True}] + [{"path": p, "isFolder": True} for p in folders]
+                 + [{"path": p, "version": 4217} for p in self.files()])
+        return {"count": len(items), "value": items}
 
 
-TEMPLATES = zipped({"ARM Templates/azuredeploy.json": ARM, "ARM Templates/azuredeploy.parameters.json": PARAMS,
-                    "ARM Templates/modules/main.bicep": BICEP})
+TEMPLATES = Tree({"azuredeploy.json": ARM, "azuredeploy.parameters.json": PARAMS, "modules/main.bicep": BICEP,
+                  "README.md": "# docs\n"})
+TEMPLATE_DOWNLOADS = 3   # the .json and .bicep files; README.md is not downloaded
 
 
 def curl_calls(tmp):
@@ -592,15 +614,20 @@ def test_tfvc_latest_pins_the_newest_changeset_and_records_it(tmp_path):
     assert "commit_sha" not in meta and "branch" not in meta
     assert payload["file_counts"] == {"bicep": 1, "arm_templates": 1}
 
-    lookup, download = curl_calls(tmp)
+    lookup, listing, *downloads = curl_calls(tmp)
+    pin = "versionDescriptor.versionType=changeset&versionDescriptor.version=4217&api-version=7.1"
     assert lookup["URL"] == f"{PROJECT}/_apis/tfvc/changesets?%24top=1&api-version=7.1"
     assert lookup["ACCEPT"] == "application/json"
-    assert download["URL"] == (f"{PROJECT}/_apis/tfvc/items?path=%24%2FInfra%2FARM%20Templates&recursionLevel=Full"
-                               "&versionDescriptor.versionType=changeset&versionDescriptor.version=4217&api-version=7.1")
-    assert download["ACCEPT"] == "application/zip"
+    # A folder is listed with scopePath: path with recursionLevel Full is refused with a 400.
+    assert listing["URL"] == f"{PROJECT}/_apis/tfvc/items?scopePath=%24%2FInfra%2FARM%20Templates&recursionLevel=Full&{pin}"
+    assert listing["ACCEPT"] == "application/json"
+    assert sorted(d["URL"] for d in downloads) == [
+        f"{PROJECT}/_apis/tfvc/items?path=%24%2FInfra%2FARM%20Templates%2F{name}&{pin}"
+        for name in ("azuredeploy.json", "azuredeploy.parameters.json", "modules%2Fmain.bicep")]
+    assert {d["ACCEPT"] for d in downloads} == {"application/octet-stream"}
     basic = base64.b64encode(f":{PAT}".encode()).decode()
-    assert lookup["CONFIG"] == download["CONFIG"] == f'header = "Authorization: Basic {basic}"'
-    assert all(PAT not in c["ARGV"] and basic not in c["ARGV"] for c in (lookup, download))
+    assert {c["CONFIG"] for c in curl_calls(tmp)} == {f'header = "Authorization: Basic {basic}"'}
+    assert all(PAT not in c["ARGV"] and basic not in c["ARGV"] for c in curl_calls(tmp))
 
     out = next((tmp / "evidence").glob("checkov_bicep_*.json"))
     assert out.name == "checkov_bicep_dev.azure.com_contoso_Infra___Infra_ARM_Templates.json"
@@ -615,9 +642,10 @@ def test_tfvc_named_changeset(tmp_path):
         CHECKOV_TFVC_VERSION="C1200", **TFVC_ENV)
     assert code == 0
     assert (payload["metadata"]["requested_version"], payload["metadata"]["changeset"]) == ("1200", 1200)
-    lookup, download = curl_calls(tmp)
+    lookup, *reads = curl_calls(tmp)
     assert lookup["URL"] == f"{PROJECT}/_apis/tfvc/changesets/1200?api-version=7.1"
-    assert "versionDescriptor.version=1200&" in download["URL"]
+    assert len(reads) == 1 + TEMPLATE_DOWNLOADS
+    assert all("versionDescriptor.version=1200&" in r["URL"] for r in reads)
 
 
 def test_tfvc_without_token_or_entra_identity_sends_no_credentials(tmp_path):
@@ -625,7 +653,7 @@ def test_tfvc_without_token_or_entra_identity_sends_no_credentials(tmp_path):
                                 GIT_CLONE_TOKEN="git-only-token", **TFVC_ENV)
     assert code == 0
     assert all(c["CONFIG"] == "" for c in curl_calls(tmp))
-    assert len(curl_calls(tmp)) == 2
+    assert len(curl_calls(tmp)) == 2 + TEMPLATE_DOWNLOADS
     assert payload["metadata"]["auth_mode"] == "anonymous"
     assert "-I " in (tmp / "log" / "python3.log").read_text()     # Entra sign-in was tried first
 
@@ -641,9 +669,9 @@ def test_tfvc_without_token_signs_in_with_entra(tmp_path):
     assert code == 0, status
     assert payload["status"] == "success"
     assert payload["metadata"]["auth_mode"] == "entra"
-    lookup, download = curl_calls(tmp)
-    assert lookup["CONFIG"] == download["CONFIG"] == f'header = "Authorization: Bearer {ENTRA}"'
-    assert all(ENTRA not in c["ARGV"] for c in (lookup, download))
+    assert {c["CONFIG"] for c in curl_calls(tmp)} == {f'header = "Authorization: Bearer {ENTRA}"'}
+    assert len(curl_calls(tmp)) == 2 + TEMPLATE_DOWNLOADS
+    assert all(ENTRA not in c["ARGV"] for c in curl_calls(tmp))
     assert ENTRA not in (next((tmp / "evidence").glob("checkov_bicep_*.json"))).read_text()
 
 
@@ -662,7 +690,7 @@ def test_tfvc_public_project_that_refuses_the_entra_identity_is_read_anonymously
         STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
     assert code == 0, status
     assert payload["metadata"]["auth_mode"] == "anonymous"
-    assert [bool(c["CONFIG"]) for c in curl_calls(tmp)] == [True, False, False]
+    assert [bool(c["CONFIG"]) for c in curl_calls(tmp)] == [True, False, False] + [False] * TEMPLATE_DOWNLOADS
     assert payload["metadata"]["changeset"] == 4217
 
 
@@ -686,6 +714,9 @@ TF400813 = {"message": "TF400813: The user 'x' is not authorized to access this 
     ({"changesets": (200, LATEST), "items": (500, {"message": "TF14098: Access Denied: needs Read permission(s)."})},
      "not_authorized", "Entra identity cannot see"),
     ({"changesets": (200, LATEST), "items": (403, {"message": "Forbidden"})}, "not_authorized", "Entra identity cannot read"),
+    ({"changesets": (200, LATEST), "items": (200, TEMPLATES),
+      "file": (500, {"message": "TF14098: Access Denied: needs Read permission(s)."})},
+     "not_authorized", "Entra identity cannot see"),
 ])
 def test_tfvc_entra_refusals_classify_like_the_azure_devops_fetchers_and_scan_nothing(tmp_path, routes, code_expected, needle):
     code, payload, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc=routes, STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
@@ -757,13 +788,45 @@ def test_tfvc_sign_in_redirect_without_token_says_none_was_set(tmp_path):
     assert "no tfvc_token was set" in status["error"]
 
 
-def test_tfvc_missing_folder_is_bad_config(tmp_path):
-    missing = {"message": "TF401174: The item $/Infra/ARM Templates could not be found at the specified version."}
-    code, payload, status, _ = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": (404, missing)}, **TFVC_ENV)
-    assert code == 1
-    assert status["code"] == "bad_config"
-    assert "TF401174" in status["error"]
+MISSING = {"message": "TF401174: The item $/Infra/ARM Templates could not be found at the specified version."}
+
+
+# TFVC hides the folders a caller may not read: the denied folder is missing (a 404, or a listing without it) and
+# its readable parent lists without it.
+@pytest.mark.parametrize("listing", [(404, MISSING), (200, {"count": 0, "value": []}),
+                                     (200, Tree({"README.md": "# docs\n"}, root="$/Infra"))],
+                         ids=["404", "empty-listing", "listing-without-the-folder"])
+def test_tfvc_folder_the_identity_cannot_read_is_not_authorized_and_scans_nothing(tmp_path, listing):
+    code, payload, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": listing},
+                                     STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
+    assert (code, status["code"]) == (1, "not_authorized")
+    assert "cannot see this path, or it does not exist" in status["error"]
+    assert payload["status"] == "error"
     assert payload["metadata"]["changeset"] == 4217
+    assert payload["summary"]["total_checks"] is None
+    assert len(curl_calls(tmp)) == 2            # no downloads
+    assert not (tmp / "log" / "checkov.args").exists()
+
+
+def test_tfvc_readable_folder_whose_subfolder_is_denied_is_no_files_not_a_clean_scan(tmp_path):
+    # The parent is readable; its denied child is left out of the listing, so nothing is there to scan.
+    code, payload, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc={
+        "changesets": (200, LATEST), "items": (200, Tree({"README.md": "# docs\n"}, root="$/Infra"))},
+        STUB_ENTRA_TOKEN=ENTRA, **{**TFVC_ENV, "CHECKOV_TFVC_PATH": "$/Infra"})
+    assert code == 1
+    assert payload["status"] == "no_files"
+    assert payload["summary"]["total_checks"] is None
+    assert "TFVC also leaves out folders the identity may not read" in status["error"]
+    assert not (tmp / "log" / "checkov.args").exists()
+
+
+def test_tfvc_listing_item_outside_the_folder_is_refused(tmp_path):
+    outside = {"count": 2, "value": [{"path": TFVC_PATH, "isFolder": True}, {"path": "$/Infra/other/x.json"}]}
+    code, payload, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": (200, outside)},
+                                     **TFVC_ENV)
+    assert (code, status["code"]) == (1, "internal_error")
+    assert "returned an item outside it" in status["error"]
+    assert len(curl_calls(tmp)) == 2
 
 
 def test_tfvc_project_without_history(tmp_path):
@@ -774,18 +837,18 @@ def test_tfvc_project_without_history(tmp_path):
     assert len(curl_calls(tmp)) == 1
 
 
-def test_tfvc_download_that_is_not_a_zip(tmp_path):
+def test_tfvc_listing_that_is_not_an_item_list(tmp_path):
     code, payload, status, _ = run(tmp_path, {}, ONE_PASS,
                                    tfvc={"changesets": (200, LATEST), "items": (200, b"<html>Sign In</html>")}, **TFVC_ENV)
     assert code == 1
     assert status["code"] == "internal_error"
-    assert "did not return a zip archive" in status["error"]
+    assert "did not return an item list" in status["error"]
     assert payload["status"] == "error"
 
 
 def test_tfvc_folder_without_templates_is_no_files(tmp_path):
     code, payload, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc={
-        "changesets": (200, LATEST), "items": (200, zipped({"ARM Templates/README.md": "# docs\n"}))}, **TFVC_ENV)
+        "changesets": (200, LATEST), "items": (200, Tree({"README.md": "# docs\n"}))}, **TFVC_ENV)
     assert code == 1
     assert payload["status"] == "no_files"
     assert payload["metadata"]["changeset"] == 4217

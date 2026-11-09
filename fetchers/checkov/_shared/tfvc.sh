@@ -1,6 +1,6 @@
 #!/bin/bash
-# Shared helper for the checkov "scanner" fetchers: download an Azure DevOps TFVC
-# folder through the REST API, pinned to one changeset. Source it from a fetcher:
+# Shared helper for the checkov "scanner" fetchers: download the .bicep and .json files of an
+# Azure DevOps TFVC folder through the REST API, pinned to one changeset. Source it from a fetcher:
 #
 #   . "$(dirname "$0")/../_shared/tfvc.sh"
 #   checkov_fetch_tfvc "$PROJECT_URL" "$TFVC_PATH" "$VERSION" "$TOKEN" || ...
@@ -64,7 +64,7 @@ _tfvc_http_error() {
 
 checkov_fetch_tfvc() {
     local project_url="${1%/}" path="$2" version="${3:-latest}" token="$4"
-    local api="${1%/}/_apis/tfvc" auth="" bearer enc work code cs_url
+    local api="${1%/}/_apis/tfvc" auth="" bearer enc work code cs_url pin top item rel
     TFVC_ERROR=""; TFVC_ERROR_CODE=""; CHANGESET=""; CHANGESET_DATE=""; TFVC_AUTH_MODE=anonymous; _TFVC_ENTRA_WHY=""
     enc="$(jq -rn --arg p "$path" '$p | @uri')"
     work="$(mktemp -d -t checkov_tfvc.XXXXXX)"
@@ -99,20 +99,48 @@ checkov_fetch_tfvc() {
         rm -rf "$work"; return 1
     fi
 
-    code="$(_tfvc_get "$api/items?path=$enc&recursionLevel=Full&versionDescriptor.versionType=changeset&versionDescriptor.version=$CHANGESET&api-version=$CHECKOV_TFVC_API_VERSION" \
-        application/zip "$work/source.zip" "$auth")"
+    # A folder takes scopePath (path with recursionLevel Full is a 400), and the API zips no TFVC folder, so
+    # list it at that changeset and download each file checkov's bicep and arm frameworks read.
+    pin="versionDescriptor.versionType=changeset&versionDescriptor.version=$CHANGESET&api-version=$CHECKOV_TFVC_API_VERSION"
+    code="$(_tfvc_get "$api/items?scopePath=$enc&recursionLevel=Full&$pin" application/json "$work/items.json" "$auth")"
+    if [ "$code" = "200" ] && ! jq -e '.value | type == "array"' "$work/items.json" >/dev/null 2>&1; then
+        _tfvc_fail "listing of $path at changeset $CHANGESET did not return an item list" internal_error
+        rm -rf "$work"; return 1
+    fi
+    # TFVC hides what the caller may not read, so a folder it cannot see is missing, not refused.
+    if [ "$code" = "404" ] || { [ "$code" = "200" ] && ! jq -e --arg p "${path%/}" \
+            'any(.value[]; (.path | ascii_downcase) == ($p | ascii_downcase))' "$work/items.json" >/dev/null; }; then
+        _tfvc_fail "listing of $path at changeset $CHANGESET: HTTP $code without the folder; the identity cannot see this path, or it does not exist (TFVC leaves out folders the identity may not read)" not_authorized
+        rm -rf "$work"; return 1
+    fi
     if [ "$code" != "200" ]; then
-        _tfvc_http_error "download of $path at changeset $CHANGESET" "$code" "$work/source.zip"; rm -rf "$work"; return 1
+        _tfvc_http_error "listing of $path at changeset $CHANGESET" "$code" "$work/items.json"; rm -rf "$work"; return 1
     fi
-    if ! unzip -tq "$work/source.zip" >/dev/null 2>&1; then
-        _tfvc_fail "download of $path at changeset $CHANGESET did not return a zip archive" internal_error
-        rm -rf "$work"; return 1
-    fi
+    # One line per .bicep/.json file: its server path URL-encoded, a tab, then its path under the folder's own name
+    # (empty when the item is outside the folder).
+    top="${path%/}"; top="${top##*/}"
+    jq -r --arg p "${path%/}" --arg top "$top" '
+        ($p | ascii_downcase) as $lp
+        | .value[] | select((.isFolder // false) | not) | .path
+        | select(test("\\.(bicep|json)$"; "i"))
+        | [@uri, (if ascii_downcase == $lp then $top
+                  elif ascii_downcase | startswith($lp + "/") then $top + "/" + .[($lp | length) + 1:]
+                  else "" end)]
+        | @tsv' "$work/items.json" > "$work/files.tsv"
     CLONE_DIR="$(mktemp -d -t checkov_clone.XXXXXX)"
-    if ! unzip -q "$work/source.zip" -d "$CLONE_DIR" >/dev/null 2>&1; then
-        _tfvc_fail "could not extract $path at changeset $CHANGESET" internal_error
-        rm -rf "$work"; return 1
-    fi
+    while IFS=$'\t' read -r item rel; do
+        case "/$rel/" in //|*/../*|*/./*|///*)
+            _tfvc_fail "listing of $path at changeset $CHANGESET returned an item outside it" internal_error
+            rm -rf "$work"; return 1 ;;
+        esac
+        code="$(_tfvc_get "$api/items?path=$item&$pin" application/octet-stream "$work/item" "$auth")"
+        if [ "$code" != "200" ]; then
+            _tfvc_http_error "download of $rel at changeset $CHANGESET" "$code" "$work/item"; rm -rf "$work"; return 1
+        fi
+        if ! { mkdir -p "$CLONE_DIR/$(dirname "$rel")" && mv "$work/item" "$CLONE_DIR/$rel"; }; then
+            _tfvc_fail "could not save $rel" internal_error; rm -rf "$work"; return 1
+        fi
+    done < "$work/files.tsv"
     rm -rf "$work"
     return 0
 }

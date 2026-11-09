@@ -31,6 +31,15 @@ schemas and the `paramify` CLI — not the internal code.
     403 is `not_authorized`. So are the answers Azure DevOps gives in place of a
     403 (`TF14098`, `TF200016`, `TF401019`, `VS800075`), which were
     `bad_config` or `internal_error` before. None of these runs a scan.
+  - **Fixed: the TFVC source can read a folder.** 0.2.x asked for the folder
+    with `path` and `recursionLevel=Full`, which Azure DevOps refuses with a 400,
+    so every TFVC run failed with `bad_config`. The fetcher now lists the folder
+    with `scopePath` and downloads each `.bicep` and `.json` file in it at the
+    same changeset, and no longer needs `unzip`.
+  - TFVC leaves out of a listing the folders the identity may not read. A
+    `tfvc_path` the identity cannot see (a 404, or a listing without it) fails
+    with `not_authorized`, and so does a path that does not exist. A readable
+    folder whose template subfolders are hidden fails with `no_files`.
 
 - **`azure_devops_work_items` 0.2.0: approval comments that start with an @mention, and the approved percentage.**
   - **`approval_mentions`** (`AZURE_DEVOPS_APPROVAL_MENTIONS`, `false` by

@@ -19,17 +19,24 @@ source per invocation. It can also read an Azure DevOps TFVC folder, which
 | secret `tfvc_token` | `TFVC_TOKEN` | no | `tfvc` only; a read-only PAT with **Code (Read)**; omit to [sign in with Entra](#sign-in) or for a public project |
 
 ## TFVC source
-With `source_type: tfvc` the fetcher makes two read-only calls to the
+With `source_type: tfvc` the fetcher makes read-only calls to the
 [TFVC REST API](https://learn.microsoft.com/en-us/rest/api/azure/devops/tfvc/items/get?view=azure-devops-rest-7.1)
-(api-version 7.1) and needs `curl` and `unzip` instead of `git`:
+(api-version 7.1) and needs `curl` instead of `git`:
 
 1. It finds the changeset to read. `latest` asks for the project's newest
    changeset (`_apis/tfvc/changesets?$top=1`); a named one is read with
    `_apis/tfvc/changesets/<id>`.
-2. It downloads `tfvc_path` at that changeset as one zip
-   (`_apis/tfvc/items?path=…&recursionLevel=Full&versionDescriptor.versionType=changeset`,
-   `Accept: application/zip`). Pinning the version means a check-in during the
-   run cannot mix two versions of the folder.
+2. It lists `tfvc_path` at that changeset
+   (`_apis/tfvc/items?scopePath=…&recursionLevel=Full&versionDescriptor.versionType=changeset`).
+3. It downloads each `.bicep` and `.json` file in the listing at the same
+   changeset (`_apis/tfvc/items?path=<file>`, `Accept: application/octet-stream`),
+   the only files checkov's bicep and arm frameworks read. Pinning the version
+   means a check-in during the run cannot mix two versions of the folder.
+
+TFVC leaves out of a listing the folders the identity may not read. A
+`tfvc_path` the identity cannot see therefore fails with `not_authorized` ("cannot
+see this path, or it does not exist"), and a readable folder whose template
+subfolders are hidden fails with `no_files`. Neither reads as a clean scan.
 
 The evidence records `source_type: tfvc` and, in `metadata`, `tfvc_path`,
 `requested_version`, `changeset`, `changeset_date` and `auth_mode`, where a git

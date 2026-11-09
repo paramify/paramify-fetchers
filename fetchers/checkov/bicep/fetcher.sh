@@ -17,7 +17,7 @@
 #                        CHECKOV_USE_DEFAULT_SKIP_CHECKS, CHECKOV_SKIP_RESOURCES,
 #                        CHECKOV_SKIP_PATHS, CHECKOV_BICEP_CHECKS,
 #                        CHECKOV_EXTERNAL_CHECKS_DIR, CHECKOV_REPO_ID, CHECKOV_GIT_USERNAME
-# Required tools:        checkov, jq, plus git (git source) or curl + unzip (tfvc source),
+# Required tools:        checkov, jq, plus git (git source) or curl (tfvc source),
 #                        and python3 when skip_paths is set; Entra sign-in needs python3 with azure-identity
 #
 # Exit codes: 0 = at least one check ran and every Bicep/ARM file parsed (findings are evidence);
@@ -72,7 +72,7 @@ case "$SOURCE_TYPE" in
     git)
         TOOLS=(git checkov jq) ;;
     tfvc)
-        TOOLS=(curl unzip checkov jq)
+        TOOLS=(curl checkov jq)
         REPO_URL="${REPO_URL%/}"
         case "$REPO_URL" in https://*|http://*) ;; *)
             report_failure "source_type tfvc needs repo_url to be the Azure DevOps project URL (https://dev.azure.com/<org>/<project>), got $REPO_URL" bad_config
@@ -250,7 +250,9 @@ if [ "$BICEP_FILES" -eq 0 ] && [ "$ARM_FILES" -eq 0 ]; then
     MSG="No Bicep (.bicep) or ARM template (.json with a deploymentTemplate \$schema) files in $WHERE; nothing was scanned"
     write_status_json no_files "$MSG" 0 0
     log_info "Evidence saved to $OUTPUT_JSON (status=no_files)"
-    report_failure "$MSG - check the source and its path or branch, or use checkov_terraform if this repo is Terraform" bad_config
+    HINT="check the source and its path or branch, or use checkov_terraform if this repo is Terraform"
+    [ "$SOURCE_TYPE" = "tfvc" ] && HINT="$HINT; TFVC also leaves out folders the identity may not read"
+    report_failure "$MSG - $HINT" bad_config
     exit 1
 fi
 
