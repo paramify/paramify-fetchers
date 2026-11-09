@@ -797,3 +797,47 @@ def test_policy_deployment_limit_counts_only_in_scope_deployments(monkeypatch):
     rows, truncated, excluded = pc.collect_remediation_deployments(client, "s1", tasks, 1, collector)
     assert [d["remediated_resource_id"] for d in rows] == [VM_EAST2] and truncated is True
     assert excluded == [] and listed == ["t1"]
+
+
+# --- an unread list leaves the unmatched patterns null ---
+
+def test_inventory_unmatched_patterns_are_null_when_the_inventory_was_not_read(monkeypatch, tmp_path, caplog):
+    _env(monkeypatch, tmp_path, inv, PATTERNS)
+    monkeypatch.setattr(inv, "credential", lambda: object())
+    monkeypatch.setattr(inv, "resource_graph_client", lambda cred: object())
+    monkeypatch.setattr(inv, "query_all", lambda client, sub, query: None)
+    with caplog.at_level(logging.WARNING):
+        inv.main()
+    evidence = json.loads((tmp_path / "azure_resource_inventory_s1.json").read_text())
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+    assert run_inventory(monkeypatch, tmp_path, PATTERNS)[1]["summary"]["resource_exclusion_patterns_unmatched"] == [
+        "rg:typo"]
+
+
+def test_residual_unmatched_patterns_are_null_when_a_query_was_not_read(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path, rr, PATTERNS)
+    _residual_fakes(monkeypatch)
+    read = rr.query_all
+    monkeypatch.setattr(rr, "query_all", lambda client, sub, query: None if query == rr.ASSIGNMENTS_QUERY
+                        else read(client, sub, query))
+    rr.main()
+    evidence = json.loads((tmp_path / "azure_residual_resources_s1.json").read_text())
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+
+
+def test_defender_unmatched_patterns_are_null_when_the_list_was_not_read(monkeypatch, tmp_path, caplog):
+    _env(monkeypatch, tmp_path, da, PATTERNS)
+    monkeypatch.setattr(da, "credential", lambda: object())
+    monkeypatch.setattr(da, "collect_assessments", lambda sub, cred, collector: ([], da.UNKNOWN))
+    with caplog.at_level(logging.WARNING):
+        da.main()
+    evidence = json.loads((tmp_path / "azure_defender_assessments_s1.json").read_text())
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
+def test_policy_unmatched_patterns_are_null_when_a_list_was_not_read(monkeypatch, tmp_path):
+    for fail in ("deployments", "tasks"):
+        evidence = run_policy(monkeypatch, tmp_path, PATTERNS, fail=(fail,))[1]
+        assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None, fail

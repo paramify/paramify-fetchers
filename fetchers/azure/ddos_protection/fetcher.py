@@ -295,6 +295,8 @@ def main() -> int:
     read = {"ddos_protection_plans": raw[0] is not None, "virtual_networks": raw[1] is not None,
             "public_ips": raw[2] is not None}
     plans, vnets, ips, excluded = build_scoped(*(r or [] for r in raw), exclusions)
+    if not all(read.values()):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     evidence = build_payload(
         subscription_id=subscription_id,

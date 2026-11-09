@@ -738,6 +738,7 @@ def test_a_list_that_wasnt_read_leaves_its_exclusion_counts_null(run, unread, re
     code, evidence = run(monkeypatch, tmp_path)
     summary = evidence["summary"]
     assert code == 1
+    assert summary["resource_exclusion_patterns_unmatched"] is None
     # Listeners and backend settings have no excluded count of their own: they leave with their gateway.
     assert {k: (summary[f"in_scope_{k}"], summary.get(f"excluded_{k}")) for k in unread} == dict.fromkeys(
         unread, (None, None))

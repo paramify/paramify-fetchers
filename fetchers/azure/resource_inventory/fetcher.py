@@ -475,6 +475,8 @@ def main() -> int:
             ),
         )
 
+    if not collected["pages"]:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     resources, excluded = collected["resources"], collected["excluded"]

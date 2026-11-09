@@ -312,6 +312,8 @@ def main() -> int:
             ),
         )
 
+    if gateways is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     listed = gateways is not None
     gateways, connections, local_gateways = gateways or [], connections or [], local_gateways or []

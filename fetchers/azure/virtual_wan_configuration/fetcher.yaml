@@ -1,5 +1,5 @@
 name: azure_virtual_wan_configuration
-version: 0.2.0
+version: 0.2.1
 description: >
   For every Azure Virtual WAN in the subscription, reports its type, whether VPN encryption is
   disabled and whether branch-to-branch / VNet-to-VNet transit is allowed; for every virtual hub,
@@ -97,7 +97,7 @@ evidence_set:
     in its reason. Summary fields: resource_exclusion_patterns (the
     configured patterns, empty when none are set),
     resource_exclusion_patterns_unmatched (patterns that matched nothing,
-    such as a mistyped name), excluded_virtual_wans,
+    such as a mistyped name, or null when a resource list couldn't be read), excluded_virtual_wans,
     excluded_virtual_hubs, excluded_vpn_gateways, excluded_vpn_sites,
     excluded_p2s_vpn_gateways, excluded_vpn_server_configurations (how
     many the patterns took out) and in_scope_virtual_wans,

@@ -1318,6 +1318,7 @@ def main() -> int:
     exclusions.record_invalid(collector)
 
     collected = empty_collection()
+    read = False
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked first: with Microsoft.PolicyInsights unregistered there is no compliance
@@ -1333,6 +1334,7 @@ def main() -> int:
             )
         else:
             collected = collect_compliance(subscription_id, cred, collector, limits, exclusions)
+            read = True
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -1343,6 +1345,10 @@ def main() -> int:
             ),
         )
 
+    # A list that wasn't read in full can't show a pattern matched nothing.
+    if not (read and collected["deployments_complete"] and limits["non_compliant"] > 0) or any(
+            f["operation"].startswith("policyinsights.") for f in collector.failures):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     service_results = collected["subscription_results"]

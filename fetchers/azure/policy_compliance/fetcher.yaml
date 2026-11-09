@@ -1,5 +1,5 @@
 name: azure_policy_compliance
-version: 0.5.0
+version: 0.5.1
 description: >
   Reads what Azure Policy found on the subscription: the service's counts of
   non-compliant resources and policies, overall and per assignment, and a bounded
@@ -173,7 +173,7 @@ evidence_set:
     results.excluded instead (a state's or deployment's entry carries its
     resource's id); the summary gives resource_exclusion_patterns (the configured
     patterns, empty when none are set), resource_exclusion_patterns_unmatched
-    (patterns that matched nothing, such as a mistyped name),
+    (patterns that matched nothing, such as a mistyped name, or null when a policy list couldn't be read),
     excluded_policy_assignments, excluded_policy_states, excluded_remediation_tasks
     and excluded_remediation_deployments (how many the patterns took out; no
     itemized count includes them), and in_scope_policy_assignments,

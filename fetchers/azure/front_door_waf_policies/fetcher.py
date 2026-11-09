@@ -112,6 +112,8 @@ def main() -> int:
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
     front_door, excluded = exclusions.split(sorted(front_door, key=lambda p: (p["id"] or "").lower()), "waf_policy")
+    if not listed:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     policies = sorted((waf_policy_record(p, definitions) for p in front_door), key=lambda r: (r["id"] or "").lower())
 

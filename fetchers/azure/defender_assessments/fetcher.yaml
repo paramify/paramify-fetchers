@@ -1,5 +1,5 @@
 name: azure_defender_assessments
-version: 0.4.0
+version: 0.4.1
 description: >
   Every Microsoft Defender for Cloud security assessment result on the
   subscription — one record per (resource, check) pair, each with its
@@ -129,7 +129,7 @@ evidence_set:
     results.excluded instead (the entry's id is that resource's id); the summary
     gives resource_exclusion_patterns (the configured patterns, empty when none are
     set), resource_exclusion_patterns_unmatched (patterns that matched no
-    assessment, such as a mistyped name), excluded_assessments (how many the
+    assessment, such as a mistyped name, or null when the assessment list couldn't be read), excluded_assessments (how many the
     patterns took out; no other count includes them) and in_scope_assessments (how
     many stayed, the same as total_assessments).
     Each Unhealthy record carries days_open (whole days from status_change_date to
