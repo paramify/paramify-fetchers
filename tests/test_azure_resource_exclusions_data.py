@@ -509,5 +509,7 @@ def test_rotation_a_refused_per_vault_list_leaves_unmatched_patterns_null(fail, 
 
 def test_backup_a_refused_protected_item_list_leaves_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
     code, evidence, _ = run_backup(monkeypatch, tmp_path, PATTERNS, fail=("protected_items:rsv-in",))
-    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    summary = evidence["summary"]
+    assert code == 1 and summary["resource_exclusion_patterns_unmatched"] is None
+    assert isinstance(summary["in_scope_restore_jobs"], int) and isinstance(summary["excluded_restore_jobs"], int)
     assert "matched nothing" not in caplog.text

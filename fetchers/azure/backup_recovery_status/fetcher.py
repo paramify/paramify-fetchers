@@ -942,8 +942,8 @@ def main() -> int:
     vaults = read_restore_job_details(subscription_id, cred, collector, vaults)
     items_read = not any(f["operation"].startswith("recoveryservicesbackup.backup_protected_items.list")
                          for f in collector.failures)
-    restores_read = listed and items_read and all(v["restore_jobs_read"] for v in vaults)
-    if not restores_read:
+    restores_read = listed and all(v["restore_jobs_read"] for v in vaults)
+    if not (restores_read and items_read):
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
