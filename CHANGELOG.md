@@ -2102,6 +2102,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_ai_services_configuration` 0.2.1 names its search service counts.**
+  When the search service list is not read, the counts that become null are the
+  ones in an explicit `SEARCH_KEYS` set, not those whose key happens to contain
+  `search_service`, and a test checks every summary key falls in exactly one
+  group. Output is unchanged.
 - **The TUI's Paramify tab fits a 160x50 terminal.** Below 242 columns the
   scripts-sync panel was squeezed to its border, its buttons drawn over the log,
   and a missing-token preflight error ran off the evidence panel behind a
