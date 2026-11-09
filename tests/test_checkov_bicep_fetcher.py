@@ -717,6 +717,14 @@ def test_tfvc_sign_in_required_names_why_entra_sign_in_was_unavailable(tmp_path)
     assert payload["metadata"]["auth_mode"] == "anonymous"
 
 
+def test_tfvc_anonymous_refusal_names_why_entra_sign_in_was_unavailable(tmp_path):
+    code, _, status, _ = run(tmp_path, {}, ONE_PASS, tfvc={
+        "changesets": (404, {"message": "TF200016: The following project does not exist: Infra."})},
+        STUB_ENTRA_ERROR="the azure-identity package is not installed for this python3", **TFVC_ENV)
+    assert (code, status["code"]) == (1, "not_authorized")
+    assert "Entra sign-in was not available: the azure-identity package is not installed" in status["error"]
+
+
 def test_tfvc_permission_masking_answer_is_not_authorized_with_a_pat_too(tmp_path):
     code, _, status, _ = run(tmp_path, {}, ONE_PASS, TFVC_TOKEN=PAT, tfvc={
         "changesets": (404, {"message": "TF200016: The following project does not exist: Infra."})}, **TFVC_ENV)

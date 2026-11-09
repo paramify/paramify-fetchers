@@ -40,7 +40,7 @@ _tfvc_http_error() {
     case "$TFVC_AUTH_MODE" in
         pat)   who="the token" ;;
         entra) who="the Entra identity" ;;
-        *)     who="an anonymous caller" ;;
+        *)     who="an anonymous caller (no tfvc_token, and Entra sign-in was not available: ${_TFVC_ENTRA_WHY:-no reason given})" ;;
     esac
     if [[ "$detail" =~ (^|[^A-Z0-9])($_TFVC_MASKING_CODES)([^0-9]|$) ]]; then
         _tfvc_fail "$what: HTTP $code ($detail); $who cannot see this project or path, or it does not exist (reading it needs Code (Read))" not_authorized
