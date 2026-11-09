@@ -34,6 +34,7 @@ from azure_common import (  # noqa: E402
 )
 from diagnostics import audit_logging_summary  # noqa: E402
 from foundry_connections import compact, connection_fields  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_ai_services_configuration")
 
@@ -54,6 +55,7 @@ HARM_CATEGORIES = ("hate", "sexual", "violence", "selfharm")
 SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2}
 DEFAULT_HARM_THRESHOLD = "medium"
 FIRST_PARTY_PUBLISHERS = {"openai", "microsoft"}
+KINDS = ("account", "search_service")
 
 
 def network_exposure(public_network_access, default_action) -> str:
@@ -422,6 +424,17 @@ def summarize(accounts: list[dict], search_services: list[dict]) -> dict:
     return summary
 
 
+def null_unread(summary: dict, accounts_read: bool, search_read: bool, scope: bool = False) -> dict:
+    """Null every count that depends on a list that was not read, never 0."""
+    def is_search(key: str) -> bool:
+        return "search_service" in key
+
+    dead = {k for k in summary if (is_search(k) and not search_read) or (not is_search(k) and not accounts_read)}
+    if scope:
+        dead &= {k for k in summary if k.startswith(("excluded_", "in_scope_"))}
+    return {k: None if k in dead else v for k, v in summary.items()}
+
+
 def collect_account(client, rest, monitor, account: dict, collector: Collector) -> dict:
     rg, name = account["resource_group"], account["name"]
     label = f"{rg}/{name}"
@@ -483,7 +496,10 @@ def collect_account(client, rest, monitor, account: dict, collector: Collector) 
     }
 
 
-def collect(subscription_id, cred, collector: Collector) -> tuple:
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            excluded: list | None = None) -> tuple:
+    """Accounts and search services the exclusions take out go to `excluded` and get no reads."""
+    exclusions = exclusions or ResourceExclusions()
     def _client():
         from azure.mgmt.cognitiveservices import (
             CognitiveServicesManagementClient,  # lazy
@@ -496,11 +512,10 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
     client = collector.guard("cognitiveservices.CognitiveServicesManagementClient (init)", _client)
     rest = collector.guard("arm_rest.arm_rest_client (init)", lambda: arm_rest_client(cred))
     if client is None or rest is None:
-        return [], []
+        return None, None
     accounts = collector.guard(
         "cognitiveservices.accounts.list",
         lambda: [project_account(a) for a in client.accounts.list()],
-        default=[],
     )
     search = collector.guard(
         "search.searchServices.list",
@@ -510,15 +525,21 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
                 rest, f"/subscriptions/{subscription_id}/providers/Microsoft.Search/searchServices", SEARCH_API
             )["items"]
         ],
-        default=[],
     )
+    out_accounts = out_search = []
+    if accounts is not None:
+        accounts, out_accounts = exclusions.split(accounts, "account")
+    if search is not None:
+        search, out_search = exclusions.split(search, "search_service")
+    if excluded is not None:
+        excluded += sorted(out_accounts + out_search, key=lambda e: (e["kind"], e["id"] or ""))
     monitor = (
         collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))
         if accounts or search
         else None
     )
-    records = [collect_account(client, rest, monitor, a, collector) for a in accounts]
-    for service in search:
+    records = None if accounts is None else [collect_account(client, rest, monitor, a, collector) for a in accounts]
+    for service in search or []:
         diagnostics = None
         if monitor is not None:
             diagnostics = collector.guard(
@@ -528,8 +549,8 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
         service["diagnostic_settings"] = diagnostics
         service["audit_logs_exported"] = audit_logs_exported(diagnostics, SEARCH_AUDIT_CATEGORIES)
     return (
-        sorted(records, key=lambda r: r["id"] or ""),
-        sorted(search, key=lambda r: r["id"] or ""),
+        None if records is None else sorted(records, key=lambda r: r["id"] or ""),
+        None if search is None else sorted(search, key=lambda r: r["id"] or ""),
     )
 
 
@@ -548,8 +569,10 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    accounts: list = []
-    search_services: list = []
+    accounts: list | None = None
+    search_services: list | None = None
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.CognitiveServices")
@@ -558,7 +581,7 @@ def main() -> int:
                 "Microsoft.CognitiveServices is not registered on subscription %s — reporting status not_registered",
                 subscription_id,
             )
-        accounts, search_services = collect(subscription_id, cred, collector)
+        accounts, search_services = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -568,6 +591,11 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    exclusions.warn_unmatched(logger)
+
+    accounts_read, search_read = accounts is not None, search_services is not None
+    accounts, search_services = accounts or [], search_services or []
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -576,8 +604,16 @@ def main() -> int:
             "accounts": accounts,
             "search_services": search_services,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(accounts, search_services), "provider_registration_status": registration},
+        summary={
+            **null_unread(summarize(accounts, search_services), accounts_read, search_read),
+            "provider_registration_status": registration,
+            **null_unread(
+                exclusions.summary(excluded, KINDS, {"accounts": len(accounts), "search_services": len(search_services)}),
+                accounts_read, search_read, scope=True,
+            ),
+        },
     )
     filename = f"azure_ai_services_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

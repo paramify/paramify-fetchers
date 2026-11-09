@@ -12,7 +12,8 @@ Stdlib-only, like fetchers/_lib: the runner execs a comparator with no PYTHONPAT
 
 All but missing are compared; anything but complete makes the result partial
 (exit 1). A missing input, or a comparison that raised, makes every summary
-value null, never 0.
+value null, never 0. A comparison that raises ConfigError, a setting its inputs
+show is wrong, keeps its results and summary and exits 1 with bad_config.
 
 `run` is a comparator's whole main(), so a comparator is only its comparison:
 
@@ -40,12 +41,20 @@ from fetcher_status import report_failure  # noqa: E402
 
 __all__ = [
     "COMPLETE", "PARTIAL", "FAILED", "MISSING", "INPUTS_ENV",
-    "Input", "InputFile", "Inputs", "build_payload", "load_inputs", "run",
+    "ConfigError", "Input", "InputFile", "Inputs", "build_payload", "load_inputs", "run",
 ]
 
 INPUTS_ENV = "COMPARATOR_INPUTS"
 COMPLETE, PARTIAL, FAILED, MISSING = "complete", "partial", "failed", "missing"
 _ENVELOPE_KEYS = {"schema_version", "metadata", "payload"}
+
+
+class ConfigError(ValueError):
+    """Raised by check() for a setting its inputs show is wrong; its results and summary are still written."""
+
+    def __init__(self, message: str, results: List[Any], summary: Dict[str, Any]):
+        super().__init__(message)
+        self.results, self.summary = results, summary
 
 
 @dataclass
@@ -122,16 +131,20 @@ def load_inputs(path: Optional[Union[str, Path]] = None) -> Inputs:
 
 def build_payload(
     inputs: Inputs, results: List[Any], summary: Dict[str, Any], error: Optional[str] = None,
+    bad_config: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The comparator's evidence, `{metadata, results, summary}`, with the policy applied.
 
     `error` is why the comparison itself failed; the file is still written, with null counts.
+    `bad_config` is a setting the comparison found wrong; its counts are kept.
     """
     if inputs.missing or error:
         results, summary = [], dict.fromkeys(summary)
     failures = inputs.failures
     if error:
         failures.append({"operation": "compare inputs", "type": "internal_error", "message": error})
+    elif bad_config:
+        failures.append({"operation": "check settings", "type": "bad_config", "message": bad_config})
     return {
         "metadata": {
             "datetime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -161,7 +174,8 @@ def run(
     output_path = Path(os.environ.get("EVIDENCE_DIR", "./evidence")) / output
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    error = None
+    error: Optional[str] = None
+    bad_config: Optional[str] = None
     try:
         inputs = load_inputs()
     except (RuntimeError, OSError, ValueError) as exc:
@@ -171,12 +185,14 @@ def run(
     if error is None and not inputs.missing:
         try:
             results, summary = check(inputs)
+        except ConfigError as exc:
+            results, summary, bad_config = exc.results, exc.summary, str(exc)
         except Exception as exc:  # a failed input can hold a shape check() never expected
             error = f"cannot compare the inputs: {exc.__class__.__name__}: {exc}"
 
     # Serialized before the file is opened, so a result that isn't JSON leaves no half-written file.
     try:
-        text = json.dumps(build_payload(inputs, results, summary, error), indent=2, sort_keys=True)
+        text = json.dumps(build_payload(inputs, results, summary, error, bad_config), indent=2, sort_keys=True)
     except (TypeError, ValueError) as exc:
         error = f"cannot write the comparison: {exc.__class__.__name__}: {exc}"
         text = json.dumps(build_payload(inputs, [], dict.fromkeys(summary_keys), error), indent=2, sort_keys=True)
@@ -186,6 +202,9 @@ def run(
     # After the "saved" line, so the reason is the last thing on stderr.
     if error:
         report_failure(error, "internal_error")
+        return 1
+    if bad_config:
+        report_failure(bad_config, "bad_config")
         return 1
     if not inputs.complete:
         report_failure(inputs.reason(), "input_failed")
