@@ -1,5 +1,5 @@
 name: azure_container_registry_configuration
-version: 0.2.0
+version: 0.2.1
 description: >
   For every container registry in the subscription, reports who can reach it and who
   can pull from it: the SKU and login server, whether the shared admin account is
@@ -84,6 +84,6 @@ evidence_set:
     Registries the resource_exclusions patterns take out are listed under results.excluded
     instead, each with the pattern that matched; the summary gives resource_exclusion_patterns
     (the configured patterns, empty when none are set), resource_exclusion_patterns_unmatched
-    (patterns that matched no registry, such as a mistyped name), excluded_registries (how many
+    (patterns that matched no registry, such as a mistyped name, or null when the registry list could not be read), excluded_registries (how many
     the patterns took out, null if the list couldn't be read; no other count includes them) and in_scope_registries (how many
     stayed; null if the list couldn't be read, and 0 means there are none or the patterns took out every registry).
