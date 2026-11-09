@@ -19,8 +19,8 @@ description: >
 # the top-level requirements.txt; `git` is a system tool. `curl` is used only by
 # checkov_bicep's TFVC source, and `python3` only by checkov_bicep:
 # to check that its skip_paths are valid regular expressions, and for Entra sign-in,
-# which also needs azure-identity (in the checkov extra). That package is not listed
-# below because a PAT or a public project needs no sign-in.
+# which also imports azure-identity (installed by the checkov extra). Without it a TFVC
+# source still reads with a PAT or anonymously, and says why Entra sign-in was skipped.
 requires:
   tools:
     - checkov
@@ -32,6 +32,7 @@ requires:
   # other environment will not match the pin this repo installs.
   python_packages:
     - checkov
+    - azure-identity
 
 auth:
   passthrough_env:
