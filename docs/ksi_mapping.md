@@ -398,7 +398,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ir-3`, `ir-4`, `ir-4.1`, `ir-8`
 
-*3 fetchers:* [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`datadog_incident_timelines`](../fetchers/datadog/incident_timelines), [`jira_incident_postmortems`](../fetchers/jira/incident_postmortems)
+*4 fetchers:* [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`datadog_incident_timelines`](../fetchers/datadog/incident_timelines), [`jira_incident_postmortems`](../fetchers/jira/incident_postmortems), [`servicenow_after_action_reports`](../fetchers/servicenow/after_action_reports)
 
 #### `KSI-INR-RIR` — Reviewing Incident Response Procedures
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-324 of 339 fetchers carry a mapping.
+325 of 340 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -821,6 +821,12 @@ python tools/gen_ksi_mapping.py
 | [`sentinelone_cloud_detection_rules`](../fetchers/sentinelone/cloud_detection_rules) | `KSI-MLA-RVL` |
 | [`sentinelone_user_config`](../fetchers/sentinelone/user_config) | `KSI-IAM-APM`, `KSI-IAM-ELP` |
 | [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets) | `KSI-PIY-GIV` |
+
+### servicenow  (1)
+
+| Fetcher | Indicators |
+|---|---|
+| [`servicenow_after_action_reports`](../fetchers/servicenow/after_action_reports) | `KSI-INR-AAR` |
 
 ### sophos  (4)
 

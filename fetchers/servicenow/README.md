@@ -1,7 +1,7 @@
 # ServiceNow Fetchers
 
-Two fetchers pull evidence from ServiceNow Scripted REST APIs using basic auth
-with a shared service-account credential.
+Three fetchers pull evidence from ServiceNow REST APIs using basic auth with a
+shared service-account credential.
 
 Each fetcher takes the **full endpoint URL**, path included. The path is not
 assembled from a base URL, because these are scoped-application APIs and the
@@ -19,8 +19,8 @@ declares its endpoint. The engine does the request and the checks. See
 
 | Variable | Required | Description |
 |---|---|---|
-| `SERVICENOW_USERNAME` | Yes | Service-account username. Shared by both fetchers. |
-| `SERVICENOW_PASSWORD` | Yes | Service-account password. Shared by both fetchers. |
+| `SERVICENOW_USERNAME` | Yes | Service-account username. Shared by all fetchers. |
+| `SERVICENOW_PASSWORD` | Yes | Service-account password. Shared by all fetchers. |
 
 ### `servicenow_cases`
 
@@ -42,6 +42,16 @@ declares its endpoint. The engine does the request and the checks. See
 |---|---|---|
 | `last_run` | No | Watermark timestamp in `YYYY-MM-DD HH:MM:SS` format, sent as `sysparm_last_run`. When set, the API returns only changes modified since that time. Omit for a full pull. |
 
+### `servicenow_after_action_reports`
+
+| Variable | Required | Description |
+|---|---|---|
+| `SERVICENOW_AFTER_ACTION_REPORTS_API_URL` | Yes | Full URL of the after action reports endpoint, e.g. `https://<instance>.example.com/api/<scope>/paramify_itsm/after_action_reports` |
+
+| Config key | Required | Description |
+|---|---|---|
+| `last_run` | No | Watermark timestamp in `YYYY-MM-DD HH:MM:SS` format, sent as `sysparm_last_run`. When set, the API returns only reports modified since that time. Omit for a full pull. |
+
 `last_run` is manifest **config**, not a secret — a timestamp is not a
 credential, and declaring it as an optional secret made it impossible to omit
 (the runner honors `required: false` on a secret only when the manifest leaves
@@ -49,7 +59,7 @@ the key out, but the TUI wires every declared secret to a `${env:VAR}`
 reference). It also reads from the env var `SERVICENOW_<FETCHER>_LAST_RUN` when
 the runner injects it.
 
-Neither fetcher persists a watermark of its own, so an incremental pull is only
+No fetcher persists a watermark of its own, so an incremental pull is only
 as correct as the value you pass it. Evidence is normally a point-in-time full
 set; a delta yields partial evidence that a completeness validator cannot
 meaningfully assert against.
@@ -62,11 +72,12 @@ meaningfully assert against.
 |---|---|
 | `servicenow_cases` | `$EVIDENCE_DIR/servicenow_cases.json` |
 | `servicenow_changes` | `$EVIDENCE_DIR/servicenow_changes.json` |
+| `servicenow_after_action_reports` | `$EVIDENCE_DIR/servicenow_after_action_reports.json` |
 
-Both fetchers write the JSON response from the API without changing its
+`servicenow_cases` and `servicenow_changes` write the JSON response from the API without changing its
 content. The runner wraps each file in an evidence envelope.
 
-A run fails, and writes no evidence file, when:
+A run of either of these two fails, and writes no evidence file, when:
 
 | Condition | Failure code |
 |---|---|
@@ -80,6 +91,10 @@ A run fails, and writes no evidence file, when:
 | A 200 response that is not JSON, for example a login or hibernation page | `bad_config` |
 | A 200 response with `result.status` other than `success` | none |
 | The evidence file cannot be written | `internal_error` |
+
+`servicenow_after_action_reports` writes the raw JSON response without any
+transformation. It does not use the shared engine, so the table above does not
+apply to it.
 
 ---
 
@@ -102,6 +117,11 @@ run:
     # optional — omit for a full pull
     # config:
     #   last_run: '2026-08-01 00:00:00'
+  - use: servicenow_after_action_reports
+    secrets:
+      username: ${env:SERVICENOW_USERNAME}
+      password: ${env:SERVICENOW_PASSWORD}
+      api_url: ${env:SERVICENOW_AFTER_ACTION_REPORTS_API_URL}
 ```
 
 The framework is secret-source-agnostic: populate the runner's environment by
