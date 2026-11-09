@@ -1,5 +1,5 @@
 name: checkov_kubernetes
-version: 0.2.0
+version: 0.2.1
 description: >
   Runs Checkov IaC security scanning over the Kubernetes manifests in a repo.
   Clones the repo (generic git, any host) and scans its .yaml/.yml files with the
@@ -62,7 +62,9 @@ config_schema:
     description: >-
       CSV of CKV_K8S_/CKV2_K8S_ check IDs to skip; added to _shared/skip-checks-k8s.default.txt
       unless use_default_skip_checks is false. Skipped checks do not appear in
-      checkov's results; the effective list is recorded in metadata.skip_checks.
+      checkov's results; the CLI list is recorded in metadata.skip_checks. Checkov may also read
+      discovered repository, working-directory or home configuration; retain those
+      configurations with the source revision when reviewing exclusions.
   use_default_skip_checks:
     type: boolean
     default: true
@@ -95,4 +97,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CHECKOV-KUBERNETES
   name: Checkov Kubernetes IaC Scan
-  instructions: 'Script: checkov/kubernetes/fetcher.sh. Shallow-clones the target repo and runs the checkov CLI (--framework kubernetes) over its .yaml/.yml manifests, merging default + configured skip-checks, and records passed/failed/skipped checks with repo+commit provenance. metadata records the branch actually scanned (branch_fallback when the requested branch could not be cloned) and the effective skip-check list, since checks passed to --skip-check do not appear in the results.'
+  instructions: 'Script: checkov/kubernetes/fetcher.sh. Shallow-clones the target repo and runs the checkov CLI (--framework kubernetes) over its .yaml/.yml manifests, merging default + configured skip-checks, and records passed/failed/skipped checks with repo+commit provenance. metadata records the branch actually scanned (branch_fallback when the requested branch could not be cloned) and the CLI skip-check list, since checks passed to --skip-check do not appear in the results.'

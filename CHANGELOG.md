@@ -2010,6 +2010,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Checkov Terraform/Kubernetes 0.2.1:** preserve Checkov summary counts when
+  `--quiet` omits passed/skipped details. Terraform resource exclusions move a
+  failure to skipped without dropping quiet-mode passes or changing the total.
+  Clarify that `metadata.skip_checks` records CLI skips; discovered Checkov
+  configuration must also be retained to review effective exclusions.
+
 - **`azure_key_vault_key_rotation` 0.5.0: unlisted vaults no longer read as zero expired certificates.**
   `expired_certificates` and `certificates_expiring_within_30_days` are null when any
   in-scope vault's certificates could not be listed (refused with 401 or 403, failed, or
