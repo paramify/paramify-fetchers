@@ -688,27 +688,19 @@ def test_tfvc_pat_wins_over_entra(tmp_path):
     assert not (tmp / "log" / "python3.log").exists()
 
 
-def test_tfvc_public_project_that_refuses_the_entra_identity_is_read_anonymously(tmp_path):
+def test_tfvc_refused_entra_identity_fails_and_never_reads_anonymously(tmp_path):
+    # Even when the project allows anonymous reads: an anonymous caller sees only its public folders.
     code, payload, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc={
         "changesets": (200, LATEST), "changesets.authed": (401, None), "items": (200, TEMPLATES)},
         STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
-    assert code == 0, status
-    assert payload["metadata"]["auth_mode"] == "anonymous"
-    assert [bool(c["CONFIG"]) for c in curl_calls(tmp)] == [True, False, False] + [False] * TEMPLATE_DOWNLOADS
-    assert payload["metadata"]["changeset"] == 4217
-    stderr = (tmp / "log" / "stderr").read_text()
-    assert "Read anonymously: Azure DevOps refused the Entra identity (HTTP 401 on the changeset lookup)" in stderr
-    assert ENTRA not in stderr
-
-
-def test_anonymous_refusal_after_a_refused_entra_identity_says_it_was_refused(tmp_path):
-    code, _, status, _ = run(tmp_path, {}, ONE_PASS, tfvc={
-        "changesets": (200, LATEST), "changesets.authed": (401, None), "items": (401, b"")},
-        STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
     assert (code, status["code"]) == (1, "auth_failed")
-    assert "refused the Entra identity" in status["error"]
-    assert "was not available" not in status["error"]
-    assert ENTRA not in status["error"]
+    assert "did not accept the Entra identity" in status["error"]
+    assert payload["metadata"]["auth_mode"] == "entra"
+    assert payload["summary"]["total_checks"] is None
+    assert [bool(c["CONFIG"]) for c in curl_calls(tmp)] == [True]   # no anonymous retry, no download
+    assert not (tmp / "log" / "checkov.args").exists()
+    assert "Read anonymously" not in (tmp / "log" / "stderr").read_text()
+    assert ENTRA not in json.dumps(payload) + status["error"]
 
 
 def test_a_pat_or_entra_read_logs_no_anonymous_note(tmp_path):
@@ -771,12 +763,12 @@ def test_tfvc_entra_refusals_classify_like_the_azure_devops_fetchers_and_scan_no
     assert ENTRA not in json.dumps(payload) + status["error"]
 
 
-def test_tfvc_refused_entra_identity_is_reported_when_anonymous_is_refused_too(tmp_path):
+def test_tfvc_refused_entra_identity_reports_the_azure_devops_message(tmp_path):
     code, payload, status, tmp = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (401, TF400813)},
                                      STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
     assert (code, status["code"]) == (1, "auth_failed")
     assert "TF400813" in status["error"]
-    assert [bool(c["CONFIG"]) for c in curl_calls(tmp)] == [True, False]   # one anonymous retry, no download
+    assert [bool(c["CONFIG"]) for c in curl_calls(tmp)] == [True]   # no anonymous retry, no download
 
 
 def test_tfvc_sign_in_required_names_why_entra_sign_in_was_unavailable(tmp_path):
@@ -859,6 +851,20 @@ def test_tfvc_readable_folder_whose_subfolder_is_denied_is_no_files_not_a_clean_
     assert payload["summary"]["total_checks"] is None
     assert "TFVC also leaves out folders the identity may not read" in status["error"]
     assert not (tmp / "log" / "checkov.args").exists()
+
+
+def test_tfvc_evidence_records_that_the_listing_covers_only_what_the_identity_can_read(tmp_path):
+    # A hidden subfolder beside readable templates is simply absent from the listing; the evidence says so.
+    code, payload, status, _ = run(tmp_path, {}, ONE_PASS, tfvc={"changesets": (200, LATEST), "items": (200, TEMPLATES)},
+                                   STUB_ENTRA_TOKEN=ENTRA, **TFVC_ENV)
+    assert code == 0, status
+    assert payload["metadata"]["listing_scope"] == "readable_by_identity"
+
+
+def test_git_evidence_has_no_listing_scope(tmp_path):
+    code, payload, status, _ = run(tmp_path, {"azuredeploy.json": ARM}, ONE_PASS)
+    assert code == 0, status
+    assert "listing_scope" not in payload["metadata"]
 
 
 def test_tfvc_listing_jq_cannot_read_fails_instead_of_scanning_a_subset(tmp_path):
@@ -1078,4 +1084,6 @@ def test_ado_token_without_azure_identity(ado_token, monkeypatch, capsys):
 
     monkeypatch.setattr(mod, "entra_credential", missing)
     assert mod.main() == mod.NO_SDK
-    assert "azure-identity" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "azure-identity" in err
+    assert sys.executable in err   # names the interpreter, which comes from PATH

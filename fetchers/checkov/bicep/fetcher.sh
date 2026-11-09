@@ -193,7 +193,9 @@ metadata_json() {
         + (if $type == "tfvc" then
              {tfvc_path: $path, requested_version: $version, changeset: $changeset,
               changeset_date: (if $csdate == "" then null else $csdate end),
-              auth_mode: (if $authmode == "" then null else $authmode end)}
+              auth_mode: (if $authmode == "" then null else $authmode end),
+              # TFVC lists only what the identity may read, so a hidden subfolder is absent, not reported.
+              listing_scope: "readable_by_identity"}
            else
              {branch: $branch, requested_branch: $requested, branch_fallback: $fallback, commit_sha: $sha}
            end)

@@ -25,13 +25,16 @@ schemas and the `paramify` CLI — not the internal code.
     sees them: `checkov_bicep` unsets them once its source is fetched, and
     `checkov_terraform` and `checkov_kubernetes` unset them at start, so the
     `checkov` CLI never gets the client secret.
-  - When the TFVC source falls back to an anonymous read, it logs why: Entra
-    sign-in was not available (and the reason), or Azure DevOps refused the
-    identity and the project allowed an anonymous read.
+  - When the TFVC source reads anonymously, it logs why Entra sign-in was not
+    available. The message names the Python interpreter that lacked
+    `azure-identity`.
   - A PAT still wins, and with neither a PAT nor an Entra identity the fetcher
-    reads anonymously, as before, for a public project. A public project that
-    refuses the ambient Entra identity is read anonymously too.
-  - `metadata.auth_mode` records `pat`, `entra` or `anonymous`.
+    reads anonymously, as before, for a public project. An Entra identity that
+    Azure DevOps refuses fails with `auth_failed`; it never falls back to an
+    anonymous read, which would see only the public folders.
+  - `metadata.auth_mode` records `pat`, `entra` or `anonymous`, and
+    `metadata.listing_scope: readable_by_identity` records that TFVC lists only
+    the folders the identity may read.
   - Failures classify as the `azure_devops_*` fetchers classify them. A refused
     PAT or Entra identity (401, or 203/302 to sign-in) is `auth_failed`, and a
     403 is `not_authorized`. So are the answers Azure DevOps gives in place of a

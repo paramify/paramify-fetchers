@@ -87,12 +87,8 @@ checkov_fetch_tfvc() {
         *)      cs_url="$api/changesets/${version#[Cc]}?api-version=$CHECKOV_TFVC_API_VERSION" ;;
     esac
     code="$(_tfvc_get "$cs_url" application/json "$work/changeset.json" "$auth")"
-    # A public project may refuse an ambient identity from another organization yet allow anonymous reads.
-    if [ "$TFVC_AUTH_MODE" = entra ] && [[ "$code" =~ ^(203|302|401)$ ]] &&
-       [ "$(_tfvc_get "$cs_url" application/json "$work/anonymous.json" "")" = 200 ]; then
-        TFVC_AUTH_NOTE="Azure DevOps refused the Entra identity (HTTP $code on the changeset lookup); the project allowed an anonymous read"
-        auth=""; TFVC_AUTH_MODE=anonymous; code=200; mv "$work/anonymous.json" "$work/changeset.json"
-    fi
+    # A refused Entra identity fails; it never falls back to anonymous. An anonymous caller sees only the public
+    # folders of a project, so the scan would cover a subset and still read as success.
     if [ "$code" != "200" ]; then
         _tfvc_http_error "changeset lookup ($version)" "$code" "$work/changeset.json"; rm -rf "$work"; return 1
     fi

@@ -25,7 +25,9 @@ def main() -> int:
     try:
         credential = entra_credential()
     except ImportError:
-        print("the azure-identity package is not installed for this python3", file=sys.stderr)
+        # Name the interpreter: python3 comes from PATH, which may not be the venv that installed the checkov extra.
+        print(f"the azure-identity package is not installed for {sys.executable} (activate the venv with the checkov extra)",
+              file=sys.stderr)
         return NO_SDK
     try:
         token = credential.get_token(f"{ADO_RESOURCE}/.default").token

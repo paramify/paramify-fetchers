@@ -36,7 +36,10 @@ With `source_type: tfvc` the fetcher makes read-only calls to the
 TFVC leaves out of a listing the folders the identity may not read. A
 `tfvc_path` the identity cannot see therefore fails with `not_authorized` ("cannot
 see this path, or it does not exist"), and a readable folder whose template
-subfolders are hidden fails with `no_files`. Neither reads as a clean scan.
+subfolders are hidden fails with `no_files`. Neither reads as a clean scan. A
+hidden subfolder beside readable templates is not detectable: the scan covers what
+the identity can read, and `metadata.listing_scope: readable_by_identity` records
+that. Give the identity Code (Read) on the whole `tfvc_path`.
 
 The evidence records `source_type: tfvc` and, in `metadata`, `tfvc_path`,
 `requested_version`, `changeset`, `changeset_date` and `auth_mode`, where a git
@@ -55,10 +58,12 @@ The fetcher reads TFVC with the first of these that works, and records which in
    `AZURE_*` service-principal variables, workload or managed identity, or
    `az login`). The identity must be a member of the
    organization with Code (Read) on the project, e.g. through the project's
-   Readers group. This needs `python3` with `azure-identity` (in the `checkov`
-   extra).
-3. `anonymous`: no credentials, for a public project. This also covers a public
-   project that refuses the ambient Entra identity.
+   Readers group. This needs the `python3` first on PATH to have `azure-identity`
+   (in the `checkov` extra), so activate that venv.
+3. `anonymous`: no credentials, for a public project, when no Entra identity is
+   available. An Entra identity that Azure DevOps refuses fails with
+   `auth_failed`; it does not fall back to an anonymous read, which would see only
+   the public folders.
 
 ```bash
 paramify manifest add-target checkov_bicep \
