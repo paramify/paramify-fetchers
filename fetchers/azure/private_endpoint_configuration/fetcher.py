@@ -422,6 +422,9 @@ def main() -> int:
             ),
         )
 
+    unread_ops = ("network.NetworkManagementClient (init)", "network.private_endpoints.list_by_subscription")
+    if not (subscription_id and cred is not None) or any(f["operation"].startswith(unread_ops) for f in collector.failures):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

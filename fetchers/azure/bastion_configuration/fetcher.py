@@ -298,6 +298,8 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
     kept_hosts, excluded_hosts = exclusions.split(raw_hosts or [], "bastion_host")
     raw_vms, excluded_vms = exclusions.split(raw_vms or [], "virtual_machine")
     exclusions.record_invalid(collector)
+    if not (hosts_read and vms_read):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     subnets = {arm_id_key(sn.get("id")): sn for vnet in raw_vnets or [] for sn in dig(vnet, "properties", "subnets") or []}

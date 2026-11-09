@@ -733,6 +733,9 @@ def main() -> int:
     virtual_networks, excluded_vnets = exclusions.split(virtual_networks, "virtual_network")
     network_interfaces, excluded_nics = split_network_interfaces(network_interfaces, exclusions)
     excluded += excluded_vnets + excluded_nics
+    unread_ops = "network."
+    if not (subscription_id and cred is not None) or any(f["operation"].startswith(unread_ops) for f in collector.failures):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

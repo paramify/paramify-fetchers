@@ -365,13 +365,15 @@ LISTS = {cosmos: "cosmosdb.database_accounts.list", databricks: "databricks.work
 
 
 @pytest.mark.parametrize("case", SIMPLE, ids=IDS)
-def test_a_refused_list_leaves_its_exclusion_counts_null(case, monkeypatch, tmp_path):
+def test_a_refused_list_leaves_its_exclusion_counts_null(case, monkeypatch, tmp_path, caplog):
     m, filename, _, kind, plural, _, modules, _ = case
     _refuse(monkeypatch, m, LISTS[m])
     _, modules_ = modules()
     code, evidence = _run(m, monkeypatch, tmp_path, PATTERNS, filename, modules_)
     assert code == 1
     assert (evidence["summary"][f"in_scope_{plural}"], evidence["summary"][f"excluded_{kind}s"]) == (None, None)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
 
 
 def test_a_refused_list_leaves_the_redis_cache_and_data_services_counts_null(monkeypatch, tmp_path):
@@ -380,12 +382,14 @@ def test_a_refused_list_leaves_the_redis_cache_and_data_services_counts_null(mon
     code, evidence = _run(redis_cache, monkeypatch, tmp_path, PATTERNS, "azure_redis_cache_configuration", modules)
     assert code == 1
     assert (evidence["summary"]["in_scope_redis_caches"], evidence["summary"]["excluded_redis_caches"]) == (None, None)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     _refuse(monkeypatch, data_services, "eventhub.namespaces.list")
     code, evidence, _ = _data_services(PATTERNS, monkeypatch, tmp_path)
     s = evidence["summary"]
     assert code == 1
     assert (s["in_scope_event_hub_namespaces"], s["excluded_event_hub_namespaces"]) == (None, None)
     assert (s["in_scope_mongo_clusters"], s["excluded_mongo_clusters"]) == (1, 1)
+    assert s["resource_exclusion_patterns_unmatched"] is None
 
 
 @pytest.mark.parametrize("refused, unknown", [
@@ -398,6 +402,7 @@ def test_a_refused_data_services_list_leaves_only_its_counts_null(refused, unkno
     counts = {k: v for k, v in evidence["summary"].items() if k.startswith(("in_scope_", "excluded_"))}
     assert code == 1
     assert {k for k, v in counts.items() if v is None} == {f"in_scope_{unknown}", f"excluded_{unknown}"}
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
 
 
 INITS = {cosmos: "cosmosdb.CosmosDBManagementClient (init)",
@@ -415,6 +420,7 @@ def test_a_client_that_couldnt_be_built_leaves_the_exclusion_counts_null(case, m
     code, evidence = _run(m, monkeypatch, tmp_path, PATTERNS, filename, modules_)
     assert code == 1
     assert (evidence["summary"][f"in_scope_{plural}"], evidence["summary"][f"excluded_{kind}s"]) == (None, None)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
 
 
 def test_a_client_that_couldnt_be_built_leaves_the_redis_cache_and_data_services_counts_null(monkeypatch, tmp_path):
@@ -423,7 +429,9 @@ def test_a_client_that_couldnt_be_built_leaves_the_redis_cache_and_data_services
     code, evidence = _run(redis_cache, monkeypatch, tmp_path, PATTERNS, "azure_redis_cache_configuration", modules)
     assert code == 1
     assert (evidence["summary"]["in_scope_redis_caches"], evidence["summary"]["excluded_redis_caches"]) == (None, None)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     _refuse(monkeypatch, data_services, "data services clients (init)")
     code, evidence, _ = _data_services(PATTERNS, monkeypatch, tmp_path)
     counts = {k: v for k, v in evidence["summary"].items() if k.startswith(("in_scope_", "excluded_"))}
     assert code == 1 and len(counts) == 6 and set(counts.values()) == {None}
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None

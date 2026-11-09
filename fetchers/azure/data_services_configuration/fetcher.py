@@ -612,6 +612,8 @@ def main() -> int:
             ),
         )
 
+    if any(r is None for r in (mongo, kusto, eventhub)):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     in_scope = {name: None if records is None else len(records) for name, records in (
         ("mongo_clusters", mongo), ("data_explorer_clusters", kusto), ("event_hub_namespaces", eventhub))}

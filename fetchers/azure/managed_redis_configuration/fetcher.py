@@ -255,8 +255,10 @@ def main() -> int:
             ),
         )
 
-    exclusions.warn_unmatched(logger)
     listed = clusters is not None
+    if not listed:
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
     clusters = clusters or []
 
     evidence = build_payload(

@@ -909,6 +909,13 @@ def main() -> int:
     vnets, subnets, tables, nics, firewalls, hubs, excluded = split_records(
         exclusions, vnets, subnets, tables, nics, firewalls, hubs
     )
+    unread_ops = (
+        "network.NetworkManagementClient (init)", "network.virtual_networks.list_all", "network.route_tables.list_all",
+        "network.network_interfaces.list_all", "network.azure_firewalls.list_all", "network.firewall_policies.list_all",
+        "network.virtual_hubs.list",
+    )
+    if not (subscription_id and cred is not None) or any(f["operation"].startswith(unread_ops) for f in collector.failures):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     evidence = build_payload(
         subscription_id=subscription_id,
