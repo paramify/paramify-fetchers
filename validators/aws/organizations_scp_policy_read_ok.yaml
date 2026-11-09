@@ -1,0 +1,24 @@
+key: organizations_scp_policy_read_ok
+name: Organizations SCPs Were Read
+type: AUTOMATED
+role: integrity
+statement: The service control policies in the evidence were actually read. PolicyRead.Status is ok, or not_enabled for an account that is not in an AWS Organization.
+
+# Proves the SCP read was complete. From a member account that is neither
+# the management account nor a delegated administrator, the SCP calls
+# are AccessDenied; the evidence then has PolicyRead.Status "denied" and null
+# lists. "denied" and "error" mean the SCPs could not be read, never that there
+# are none, so only ok / not_enabled match and anything else is zero matches.
+# The status values are in the regex rather than a MATCH_GROUP rule so a missing
+# or renamed PolicyRead block fails the same way (0.2.0 evidence has none).
+#
+# "Status" is capitalised, so it cannot collide with the envelope's "status".
+regex: '"PolicyRead":\s*\{\s*"Status":\s*"(?<policy_read_status>ok|not_enabled)"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-ORGANIZATIONS-SCP

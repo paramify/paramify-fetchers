@@ -35,8 +35,8 @@ MAX_RETRIES = 4
 MAX_RETRY_WAIT = 120
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _ADO_CODE = re.compile(r"\b((?:TF|VS)\d{5,6})\b")
-# "Not found" answers ADO gives when the caller may not see the thing.
-_PERMISSION_MASKING_CODES = {"VS800075", "TF401019", "TF200016"}
+# Answers ADO gives instead of a 403 when the caller may not see the thing: "not found", or TFVC's 500 TF14098.
+_PERMISSION_MASKING_CODES = {"VS800075", "TF401019", "TF200016", "TF14098"}
 
 _LOGGER = logging.getLogger("devops_rest")
 
@@ -185,7 +185,8 @@ class DevOpsClient:
                     raise
                 time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
                 continue
-            if response.status_code not in RETRY_STATUSES or attempt == MAX_RETRIES:
+            if response.status_code not in RETRY_STATUSES or attempt == MAX_RETRIES \
+                    or _error(response).code in _PERMISSION_MASKING_CODES:
                 break
             wait = _retry_wait(response, attempt)
             _LOGGER.warning("%s %s answered %s; retrying in %.0fs", method, url.split("?")[0], response.status_code, wait)
@@ -227,7 +228,13 @@ class DevOpsClient:
 
     def iter(self, path: str, api_version: str = API_VERSION, params: Optional[Dict[str, Any]] = None,
              service: Optional[str] = None, item_key: Union[str, Sequence[str]] = "value") -> Iterator[Dict[str, Any]]:
-        """Every item across pages (header or body continuation token, else a same-host nextLink), from the first item key a page fills."""
+        """Every item across pages."""
+        for page in self.pages(path, api_version, params, service, item_key):
+            yield from page
+
+    def pages(self, path: str, api_version: str = API_VERSION, params: Optional[Dict[str, Any]] = None,
+              service: Optional[str] = None, item_key: Union[str, Sequence[str]] = "value") -> Iterator[Any]:
+        """Each page's items (header or body continuation token, else a same-host nextLink), from the first item key a page fills."""
         keys = (item_key,) if isinstance(item_key, str) else tuple(item_key)
         url: Optional[str] = self.url(path, service)
         base_params = {**(params or {}), "api-version": api_version}
@@ -236,8 +243,7 @@ class DevOpsClient:
         while url:
             response = self._send("GET", url, params=query)
             body = self._json(response)
-            items = body if isinstance(body, list) else next((body[k] for k in keys if body.get(k)), [])
-            yield from items
+            yield body if isinstance(body, list) else next((body[k] for k in keys if body.get(k)), [])
             token = (response.headers or {}).get("x-ms-continuationtoken")
             if not token and isinstance(body, dict) and body.get("hasMore") is not False:
                 token = body.get("continuationToken")

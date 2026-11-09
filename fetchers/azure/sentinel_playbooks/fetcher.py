@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Microsoft Sentinel playbooks (Logic Apps): what triggers them, what they do to accounts, who they notify, and which automation rules run them."""
+"""Microsoft Sentinel playbooks (Logic Apps): what triggers them, what they do to accounts, who they notify, which automation rules run them, and how their recent runs ended."""
 
 import json
 import logging
 import re
 import sys
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
@@ -13,8 +14,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_rest import (  # noqa: E402
     SI_API,
+    ArmError,
     basename,
     discover_workspaces,
+    int_config,
     parse_time,
     resource_group_from_id,
     run_subscription,
@@ -31,6 +34,18 @@ EMAIL_RE = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 CONNECTION_REF = re.compile(r"\['([^']+)'\]\['connectionId'\]")
 # Graph/Entra operations that disable, sign out, or flag an account; matched on the action's serialized inputs.
 ACCOUNT_CONTAINMENT_MARKERS = ('"accountenabled": false', "revokesigninsessions", "confirmcompromised", "dismissriskyuser")
+UNREADABLE_STATUSES = frozenset({401, 403, 404})
+LOOKBACK_ENV = "SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS"
+DEFAULT_LOOKBACK_DAYS = 90
+# Logic Apps keep 90 days of run history unless a workflow's retention is changed.
+MAX_LOOKBACK_DAYS = 90
+RECENT_RUNS = 10
+FAILED_STATUSES = frozenset({"Failed", "TimedOut", "Aborted", "Faulted"})
+NO_RUN_HISTORY = dict.fromkeys(
+    ("runs_in_lookback", "runs_by_status", "failed_runs", "last_run_status", "last_run_time",
+     "last_success_time", "last_failure_time", "recent_runs"),
+    None,
+)
 
 logger = logging.getLogger(NAME)
 
@@ -93,6 +108,60 @@ def get_workflow(client, workflow_id: str) -> Dict[str, Any]:
     return client.get(workflow_id, LOGIC_API)
 
 
+def runs_path(workflow_id: str) -> Tuple[str, str]:
+    """The runs list and its api-version; a Standard workflow's runs come through its app's workflow host runtime."""
+    if not is_standard(workflow_id):
+        return f"{workflow_id}/runs", LOGIC_API
+    cut = workflow_id.lower().rindex("/workflows/")
+    site, name = workflow_id[:cut], workflow_id[cut + len("/workflows/"):]
+    return f"{site}/hostruntime/runtime/webhooks/workflow/api/management/workflows/{name}/runs", WEB_API
+
+
+def run_record(run: Dict[str, Any]) -> Dict[str, Any]:
+    props = run.get("properties") or {}
+    status = props.get("status")
+    error_code = as_dict(props.get("error")).get("code") or (props.get("code") if status in FAILED_STATUSES else None)
+    return {
+        "name": run.get("name"),
+        "status": status,
+        "start_time": props.get("startTime"),
+        "end_time": props.get("endTime"),
+        "trigger": as_dict(props.get("trigger")).get("name"),
+        "error_code": error_code,
+    }
+
+
+def run_history(client, workflow_id: str, since: datetime) -> Dict[str, Any]:
+    path, api = runs_path(workflow_id)
+    listed = client.list(path, api, {"$filter": f"StartTime ge {since.strftime('%Y-%m-%dT%H:%M:%SZ')}"})
+    latest = datetime.max.replace(tzinfo=timezone.utc)
+    timed = [(parse_time((r.get("properties") or {}).get("startTime")) or latest, run_record(r)) for r in listed]
+    # Filtered again here in case the service ignores the filter; a run not started yet counts as the newest.
+    runs = [run for at, run in sorted(timed, key=lambda t: t[0], reverse=True) if at >= since]
+    counts = Counter(run["status"] or "Unknown" for run in runs)
+    return {
+        "runs_in_lookback": len(runs),
+        "runs_by_status": dict(sorted(counts.items())),
+        "failed_runs": sum(counts[status] for status in FAILED_STATUSES),
+        "last_run_status": runs[0]["status"] if runs else None,
+        "last_run_time": runs[0]["start_time"] if runs else None,
+        "last_success_time": next((r["start_time"] for r in runs if r["status"] == "Succeeded"), None),
+        "last_failure_time": next((r["start_time"] for r in runs if r["status"] in FAILED_STATUSES), None),
+        "recent_runs": runs[:RECENT_RUNS],
+    }
+
+
+def read_run_history(client, workflow_id: str, since: datetime, collector, notes: List[str]) -> Tuple[bool, Dict[str, Any]]:
+    try:
+        return True, run_history(client, workflow_id, since)
+    except Exception as exc:  # noqa: BLE001
+        if unreadable(exc):
+            notes.append(f"run history of playbook {workflow_id} could not be read, so its run fields are null: {exc}")
+        else:
+            collector.record(f"workflows.runs.list({basename(workflow_id)})", exc)
+        return False, dict(NO_RUN_HISTORY)
+
+
 def trigger_kind(path: Optional[str]) -> str:
     path = (path or "").lower()
     if "incident" in path:
@@ -118,8 +187,18 @@ def recipients(body: Dict[str, Any]) -> Tuple[List[str], int]:
     return sorted(static), dynamic
 
 
+def unreadable(exc: BaseException) -> bool:
+    """A playbook in a subscription or resource group the credential can't read, or one since deleted."""
+    return isinstance(exc, ArmError) and (exc.status in UNREADABLE_STATUSES or exc.code.lower() == "subscriptionnotfound")
+
+
 def analyse(workflow: Dict[str, Any]) -> Dict[str, Any]:
     definition = (workflow.get("properties") or {}).get("definition") or {}
+    if not definition:
+        # Everything below comes from the definition, so an unread one is unknown, not "does nothing".
+        return dict.fromkeys(
+            ("triggers", "sentinel_triggered", "connectors_used", "capabilities", "email_recipients", "dynamic_recipient_fields")
+        )
     apis = connection_apis(workflow)
     triggers = []
     for name, trigger in (definition.get("triggers") or {}).items():
@@ -188,7 +267,16 @@ def automation_references(client, subscription_id: str, collector, ids: Dict[str
     return refs
 
 
+def lookback_days() -> int:
+    days = int_config(LOOKBACK_ENV, DEFAULT_LOOKBACK_DAYS)
+    if days > MAX_LOOKBACK_DAYS:
+        logger.warning("%s=%d is outside 1-%d; using %d", LOOKBACK_ENV, days, MAX_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS)
+    return min(days, MAX_LOOKBACK_DAYS)
+
+
 def collect(client, subscription_id: str, collector) -> tuple:
+    days = lookback_days()
+    since = datetime.now(timezone.utc) - timedelta(days=days)
     ids: Dict[str, str] = {}
     refs = automation_references(client, subscription_id, collector, ids)
     listed = collector.guard(
@@ -198,9 +286,17 @@ def collect(client, subscription_id: str, collector) -> tuple:
     if listed is None:
         return {"playbooks": None}, {}
     by_id = {(w.get("id") or "").lower(): w for w in listed}
+    notes: List[str] = []
     for playbook_id in sorted(set(refs) - set(by_id)):
         # A rule may run a playbook from another subscription or resource group the list didn't return.
-        found = collector.guard(f"workflows.get({basename(playbook_id)})", lambda p=ids[playbook_id]: get_workflow(client, p))
+        try:
+            found = get_workflow(client, ids[playbook_id])
+        except Exception as exc:  # noqa: BLE001
+            if unreadable(exc):
+                notes.append(f"playbook {ids[playbook_id]} that an automation rule runs could not be read, so it is unresolved: {exc}")
+            else:
+                collector.record(f"workflows.get({basename(playbook_id)})", exc)
+            continue
         if found:
             by_id[playbook_id] = found
 
@@ -215,6 +311,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
         if not analysis["sentinel_triggered"] and not wired:
             continue
         enabled = (workflow.get("properties") or {}).get("state") == "Enabled"
+        runs_read, runs = read_run_history(client, workflow.get("id") or ids.get(key, key), since, collector, notes)
         playbooks.append({
             "name": workflow.get("name"),
             "id": workflow.get("id"),
@@ -225,22 +322,44 @@ def collect(client, subscription_id: str, collector) -> tuple:
             **analysis,
             "automation_rules": wired,
             "run_by_active_automation_rule": enabled and any(r["active"] for r in wired),
+            "run_history_read": runs_read,
+            **runs,
         })
 
     live = [p for p in playbooks if p["run_by_active_automation_rule"]]
+    # A live playbook with no definition might contain or notify, so the counts it could change read unknown.
+    unread_live = sum(1 for p in live if not p["definition_read"])
+    # Likewise a live playbook whose runs weren't read leaves every run count unknown.
+    unread_runs = sum(1 for p in live if not p["run_history_read"])
     summary = {
         "logic_apps_scanned": len(listed),
         "playbooks": len(playbooks),
         "enabled_playbooks": sum(1 for p in playbooks if p["enabled"]),
         "run_by_active_automation_rule": len(live),
-        "live_account_containment_playbooks": sum(1 for p in live if p["capabilities"]["account_containment"]),
-        "live_notifying_playbooks": sum(1 for p in live if p["capabilities"]["email"] or p["capabilities"]["teams"]),
-        "notification_recipients": sorted({e for p in live for e in p["email_recipients"]}),
+        "live_playbooks_without_definition": unread_live,
+        "live_account_containment_playbooks": None if unread_live else sum(
+            1 for p in live if p["capabilities"]["account_containment"]
+        ),
+        "live_notifying_playbooks": None if unread_live else sum(
+            1 for p in live if p["capabilities"]["email"] or p["capabilities"]["teams"]
+        ),
+        "notification_recipients": None if unread_live else sorted({e for p in live for e in p["email_recipients"]}),
         "standard_playbooks": sum(1 for p in playbooks if p["plan"] == "standard"),
         "playbooks_without_definition": sorted(p["id"] for p in playbooks if not p["definition_read"]),
         "automation_rule_references_unresolved": sorted(set(refs) - set(by_id)),
+        "run_lookback_days": days,
+        "playbooks_run_history_unread": sorted(p["id"] for p in playbooks if not p["run_history_read"]),
+        "live_playbooks_run_history_unread": unread_runs,
+        "live_playbooks_last_run_succeeded": None if unread_runs else sum(
+            1 for p in live if p["last_run_status"] == "Succeeded"
+        ),
+        "live_playbooks_last_run_failed": None if unread_runs else sum(
+            1 for p in live if p["last_run_status"] in FAILED_STATUSES
+        ),
+        "live_playbooks_without_runs": None if unread_runs else sum(1 for p in live if p["runs_in_lookback"] == 0),
+        "live_playbook_failed_runs": None if unread_runs else sum(p["failed_runs"] for p in live),
     }
-    return {"playbooks": playbooks}, summary
+    return {"playbooks": playbooks, "notes": notes}, summary
 
 
 def main() -> int:

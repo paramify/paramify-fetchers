@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import enum
 import importlib.util
+import json
 import logging
 import sys
 from datetime import datetime, timezone
@@ -194,6 +195,56 @@ def test_expiry_summary_counts_only_unexpired_within_thirty_days():
         ("expired", "2026-10-01T00:00:00Z"), ("soon", "2026-11-01T00:00:00Z"), ("later", "2027-06-01T00:00:00Z")]]
     summary = kv.summarize_certificates([{"certificates_status": "accessible", "certificates": records}], [])
     assert (summary["expired_certificates"], summary["certificates_expiring_within_30_days"]) == (1, 1)
+
+
+def listed_vault(*expires, name="kv-one"):
+    records = [kv.certificate_record({"name": f"c{i}", "expires": e}, None, False, NOW) for i, e in enumerate(expires)]
+    return {"id": VAULT_ID, "name": name, "certificates_status": "accessible", "certificates": records}
+
+
+def refused_vault(name="kv-refused"):
+    return {"id": VAULT_ID, "name": name, "certificates_status": "not_authorized", "certificates": []}
+
+
+def test_refused_vault_nulls_the_expiry_counts():
+    summary = kv.summarize_certificates([refused_vault()], [])
+    assert (summary["expired_certificates"], summary["certificates_expiring_within_30_days"]) == (None, None)
+    assert (summary["certificate_not_authorized_vaults"], summary["total_certificates"]) == (1, 0)
+
+
+def test_partial_list_nulls_counts_even_with_an_expired_certificate_in_the_listed_vault():
+    summary = kv.summarize_certificates(
+        [listed_vault("2026-10-01T00:00:00Z"), refused_vault()], [])
+    assert (summary["expired_certificates"], summary["certificates_expiring_within_30_days"]) == (None, None)
+    assert (summary["certificate_accessible_vaults"], summary["certificate_not_authorized_vaults"],
+            summary["total_certificates"]) == (1, 1, 1)
+
+
+@pytest.mark.parametrize("status", ["failed", "not_attempted"])
+def test_any_unlisted_vault_nulls_the_counts(status):
+    summary = kv.summarize_certificates([{"certificates_status": status, "certificates": []}], [])
+    assert (summary["expired_certificates"], summary["certificates_expiring_within_30_days"]) == (None, None)
+
+
+def test_certificate_without_expiry_is_counted_apart_from_both_expiry_counts():
+    summary = kv.summarize_certificates([listed_vault(None, "2026-10-01T00:00:00Z", "2027-06-01T00:00:00Z")], [])
+    assert (summary["certificates_without_expiry"], summary["expired_certificates"],
+            summary["certificates_expiring_within_30_days"], summary["total_certificates"]) == (1, 1, 0, 3)
+
+
+def test_summary_matches_the_instructions_with_a_refused_vault(monkeypatch, tmp_path, assert_summary_documented):
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setattr(kv, "resolve_subscription", lambda c: {"subscription_id": "sub", "subscription_source": "env"})
+    monkeypatch.setattr(kv, "credential", lambda: object())
+    monkeypatch.setattr(kv, "provider_registration_status", lambda *a, **k: "registered")
+    monkeypatch.setattr(kv, "collect_key_vaults", lambda *a, **k: [kv.vault_record(refused_vault())])
+    monkeypatch.setattr(kv, "collect_app_service_certificates", lambda *a, **k: [])
+    assert kv.main() == 0
+    evidence = json.loads(next(tmp_path.glob("azure_key_vault_key_rotation_*.json")).read_text())
+    summary = evidence["summary"]
+    assert_summary_documented("azure/key_vault_key_rotation", summary)
+    assert (summary["expired_certificates"], summary["certificates_expiring_within_30_days"]) == (None, None)
+    assert evidence["metadata"]["partial_failure"] is False
 
 
 def test_offset_timestamps_are_brought_to_utc():

@@ -356,6 +356,10 @@ API_TO_CLI = {
     "add_entry": "manifest add",
     "set_secret": "manifest set-secret",
     "set_fetcher_config": "manifest set-config",
+    # The entry form's pattern-list box: a whole list at once, which exclude/unexclude/set-config write piecewise.
+    "set_pattern_list": "manifest exclude / manifest unexclude / manifest set-config",
+    "category_patterns": "<implicit: the inherited list the form opens on; manifest show prints it>",
+    "grammar_text": "describe",
     "set_output_dir": "manifest set-output-dir",
     "remove_entry": "manifest remove",
     "add_target": "manifest add-target",
@@ -794,11 +798,11 @@ def test_set_platform_config_bad_int_json(in_repo, tmp_path):
 def test_set_config_keeps_env_reference_on_a_string_field(in_repo, tmp_path):
     m = str(tmp_path / "m.yaml")
     runner.invoke(app, ["manifest", "init", "-f", m])
-    runner.invoke(app, ["manifest", "add", "azure_front_door_origins", "-f", m])
-    _json(runner.invoke(app, ["manifest", "set-config", "azure_front_door_origins",
-                              "scope_exclusions=${env:MY_VALUE}", "-f", m, "--json"]))
+    runner.invoke(app, ["manifest", "add", "azure_storage_encryption_status", "-f", m])
+    _json(runner.invoke(app, ["manifest", "set-config", "azure_storage_encryption_status",
+                              "owner_tag_keys=${env:MY_VALUE}", "-f", m, "--json"]))
     shown = _json(runner.invoke(app, ["manifest", "show", "-f", m, "--json"]))
-    assert _entry(shown, "azure_front_door_origins")["config"]["scope_exclusions"] == "${env:MY_VALUE}"
+    assert _entry(shown, "azure_storage_encryption_status")["config"]["owner_tag_keys"] == "${env:MY_VALUE}"
 
 
 @pytest.mark.parametrize("command", [
@@ -820,12 +824,16 @@ def test_env_reference_on_a_typed_config_field_is_refused(in_repo, tmp_path, com
 
 
 @pytest.mark.parametrize("command, message", [
-    (["set-config", "azure_front_door_tls", "scope_exclusions=${env:PARAMIFY_UPLOAD_API_TOKEN}"],
-     "config 'scope_exclusions' reads ${env:PARAMIFY_UPLOAD_API_TOKEN}, which holds a secret"),
-    (["set-platform-config", "azure", "scope_exclusions=${env:AZURE_CLIENT_SECRET}"],
-     "config 'scope_exclusions' reads ${env:AZURE_CLIENT_SECRET}, which holds a secret"),
-    (["set-config", "azure_front_door_tls", "scope_exclusions=qa.* ${env:MY_VALUE}"],
+    (["set-config", "azure_storage_encryption_status", "owner_tag_keys=${env:PARAMIFY_UPLOAD_API_TOKEN}"],
+     "config 'owner_tag_keys' reads ${env:PARAMIFY_UPLOAD_API_TOKEN}, which holds a secret"),
+    (["set-platform-config", "azure", "owner_tag_keys=${env:AZURE_CLIENT_SECRET}"],
+     "config 'owner_tag_keys' reads ${env:AZURE_CLIENT_SECRET}, which holds a secret"),
+    (["set-config", "azure_storage_encryption_status", "owner_tag_keys=Owner ${env:MY_VALUE}"],
      "a ${env:} reference must be the whole value"),
+    (["set-config", "azure_front_door_tls", "scope_exclusions=${env:MY_VALUE}"],
+     "${env:} references aren't read for a pattern list"),
+    (["set-platform-config", "azure", "resource_exclusions=${env:AZURE_RESOURCE_EXCLUSIONS}"],
+     "${env:} references aren't read for a pattern list"),
 ])
 def test_env_reference_to_a_secret_or_inside_a_value_is_refused(in_repo, tmp_path, command, message):
     m = str(tmp_path / "m.yaml")

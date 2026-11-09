@@ -1,5 +1,5 @@
 name: azure_policy_compliance
-version: 0.2.0
+version: 0.5.0
 description: >
   Reads what Azure Policy found on the subscription: the service's counts of
   non-compliant resources and policies, overall and per assignment, and a bounded
@@ -37,6 +37,7 @@ config_schema:
       How many non-compliant (resource, policy) records to itemize. The summary
       counts are complete regardless; this bounds only the list, and
       non_compliant_states_truncated says when it was reached. 0 skips the list.
+      With resource_exclusions set, excluded states don't count toward it.
   max_evaluation_detail_resources:
     type: integer
     required: false
@@ -68,7 +69,51 @@ config_schema:
     description: >
       How many remediation deployments to itemize across all remediation tasks;
       remediation_deployments_truncated says when there were more. 0 skips them.
+      Deployments the resource_exclusions patterns take out don't count toward it.
+      With patterns set, remediation_failed_deployments and
+      remediation_successful_deployments are counted from this list, so they are
+      null when it is truncated or skipped, or when the task list or any task's
+      deployment list fails.
       Azure deletes a task 60 days after its last change, so older ones are gone.
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a record with no region
+      never matches one) or id:<resource id> (also matches that resource's child
+      resources). * matches any run of characters and ? one character. A
+      non-compliant state or remediation deployment follows the resource it is
+      about, matched by that resource's id, group and region; a policy assignment
+      or remediation task follows the scope it was made at, so one made at the
+      subscription or a management group stays. Each match is listed under
+      excluded with the pattern and left out of every itemized count; an excluded
+      state is not read for evaluation details, an excluded task is not read for
+      its deployments, and an excluded deployment's resource is not read for its
+      latest state. 30-day history pairs follow their resource too, by its id,
+      group and region, and are dropped before recurrence is read. The service's
+      counts cannot be split by resource, so with patterns set every latest
+      (resource, policy) state is read grouped on the server, the in-scope ones
+      kept by resource id, group and region, and the subscription's and each
+      assignment's counts (non-compliant and compliant resources, policies,
+      resources evaluated, compliance percentages, every by-state map,
+      is_compliant and failing members) are recounted from them, each resource
+      or policy once under its highest-ranked state as Azure ranks them (at
+      subscription scope a policy is an assignment, an initiative counting once,
+      as the service counts them); they are null when that read fails or is cut
+      short. The failed and successful
+      deployment totals are recounted from the in-scope listed deployments, null
+      when that list is truncated or a read for it fails. policy_group_details
+      and remediation_tasks_by_provisioning_state still come from the service and
+      include excluded resources. A pattern without one of these prefixes
+      fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
 
 target_schema:
   subscription_id:
@@ -103,17 +148,58 @@ evidence_set:
     PolicyInsightsClient): resource.providers.get("Microsoft.PolicyInsights"), then
     policy_states.summarize_for_subscription("latest", <subscription_id>),
     policy_states.list_query_results_for_subscription("latest", <subscription_id>,
-    query_options=QueryOptions(filter="complianceState eq 'NonCompliant'", top=N+1)),
+    query_options=QueryOptions(filter="complianceState eq 'NonCompliant'", top=N+1);
+    no top when resource_exclusions is set, the limit then counting in-scope states only),
     per listed resource policy_states.list_query_results_for_resource("latest",
     <resource_id>, query_options=QueryOptions(filter="ComplianceState eq
     'NonCompliant'", expand="PolicyEvaluationDetails")),
     policy_states.list_query_results_for_subscription("default", ...) over the last 30
-    days grouped per (resource, policy, compliance state) and a count of those groups,
+    days grouped per (resource, region, policy, compliance state) and a count of those groups,
     and per intermittent pair the same query filtered to that pair and ordered by
     time, remediations.list_for_subscription(), and per task
     remediations.list_deployments_at_subscription / _at_resource_group /
     _at_management_group / _at_resource, then latest-state queries (resource, state,
     time) for the task's policy, filtered to its remediated resources 20 at a time.
+    With resource_exclusions set, also policy_states.list_query_results_for_subscription("latest",
+    <subscription_id>, query_options=QueryOptions(apply="groupby((ResourceId, ResourceLocation,
+    PolicyAssignmentId, PolicyDefinitionId, PolicyDefinitionReferenceId, ComplianceState))"))
+    after the same query counting those groups, up to 50,000 groups (a count over that
+    skips the read).
     Reader on the subscription. A per-resource details read refused with a 403 or an
     AuthorizationFailed error code is retried once (at most 3 retries a run), then
     marks that resource's states not_authorized instead of failing the run.
+    Assignments, non-compliant states, remediation tasks and remediation
+    deployments the resource_exclusions patterns take out are listed under
+    results.excluded instead (a state's or deployment's entry carries its
+    resource's id); the summary gives resource_exclusion_patterns (the configured
+    patterns, empty when none are set), resource_exclusion_patterns_unmatched
+    (patterns that matched nothing, such as a mistyped name),
+    excluded_policy_assignments, excluded_policy_states, excluded_remediation_tasks
+    and excluded_remediation_deployments (how many the patterns took out; no
+    itemized count includes them), and in_scope_policy_assignments,
+    in_scope_policy_states, in_scope_remediation_tasks and
+    in_scope_remediation_deployments (how many stayed). With patterns set,
+    non_compliant_resources, non_compliant_policies, compliant_resources,
+    resources_evaluated, resource_compliance_percentage, resources_by_compliance_state,
+    policies_by_compliance_state, non_compliant_assignments, compliant_assignments
+    and the same figures in results.subscription_compliance and
+    results.assignment_compliance (each assignment's counts, resource_details,
+    compliance_percentage, is_compliant and failing members) are recounted over the
+    in-scope latest (resource, policy) states: a resource counts once under its
+    highest-ranked state (NonCompliant, Compliant, Error, Conflict, Protected,
+    Exempt, Unknown), a policy the same way (at subscription scope an assignment,
+    an initiative counting once, as the service counts them; within an assignment
+    a member policy), and a by-state map
+    keeps the service's states, at 0 when none is in scope. They are null (each
+    map's values too) unless the grouped read came back whole, and
+    in_scope_states_status says how it went: read (every group, so the recount
+    stands; an empty count with no groups means nothing was evaluated), truncated
+    (fewer groups than the service counted, or more than 50,000), uncounted (groups
+    came back but the count didn't, so they can't be shown whole) or failed (the read
+    or its count failed, and the run exits non-zero); null without patterns. remediation_failed_deployments and
+    remediation_successful_deployments are recounted over the in-scope listed
+    deployments, null when that list is truncated, skipped or not read in full. A
+    failing member the service did not list takes the effect a listed state of it
+    ran under, else null. policy_group_details and
+    remediation_tasks_by_provisioning_state are still the service's and include
+    excluded resources. Without patterns every count is the service's own.

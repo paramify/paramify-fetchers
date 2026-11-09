@@ -1,0 +1,60 @@
+# Example: leave resources outside the authorization boundary out of scope, with a
+# reason for each pattern. Every name, region and resource group below is synthetic.
+#
+# A pattern list (`type: patterns`) lives in the manifest only: ${env:} references
+# and .env files aren't read for one. Each item is a pattern, or a pattern with a
+# reason. The run writes every pattern, its reason and where it was set into each
+# evidence file's `metadata.config_patterns`. See docs/config_injection_guide.md.
+#
+# `paramify validate` checks each pattern against the prefixes its field takes, and
+# notes which entries take the platform list and which don't declare the field.
+
+run:
+  output_dir: ./evidence
+
+  platforms:
+    azure:
+      config:
+        # Every Azure fetcher that declares resource_exclusions takes this list,
+        # unless its entry sets its own.
+        resource_exclusions:
+          - pattern: location:regioneast
+            reason: Region outside the authorization boundary
+          - pattern: rg:rg-sandbox-*
+            reason: Developer sandboxes; no customer data
+          - id:/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-shared/providers/Microsoft.KeyVault/vaults/kv-build-cache
+
+  fetchers:
+    # Takes the platform list.
+    - use: azure_key_vault_configuration
+
+    # Its own list replaces the platform list, so it repeats what still applies.
+    # `paramify manifest exclude azure_resource_inventory <pattern>` copies the
+    # platform list in before adding the first pattern of its own.
+    - use: azure_resource_inventory
+      config:
+        resource_exclusions:
+          - pattern: location:regioneast
+            reason: Region outside the authorization boundary
+          - pattern: rg:rg-sandbox-*
+            reason: Developer sandboxes; no customer data
+          - pattern: rg:rg-load-test
+            reason: Short-lived load-test environment
+
+    # scope_exclusions takes different prefixes in Front Door (route: and host
+    # names) and DNS (record names only), so it is set per entry.
+    - use: azure_front_door_origins
+      config:
+        scope_exclusions:
+          - pattern: route:qa-*
+            reason: QA routes; not production traffic
+          - qa.example.com
+
+    - use: azure_dns_configuration
+      config:
+        scope_exclusions:
+          - pattern: staging
+            reason: Staging records in every zone
+
+    # Doesn't declare resource_exclusions; `validate` names it in its note.
+    - use: azure_defender_plans

@@ -1,0 +1,116 @@
+name: azure_bastion_configuration
+version: 0.1.0
+description: >-
+  Shows how each Azure Bastion host is configured and logged, and which virtual machines a Bastion can reach, so administrative access needs no exposed port.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_bastion_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id. Optional - omit to use the first enabled subscription the
+      ambient credential can see.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope,
+      as case-insensitive glob patterns listed in the manifest, each with
+      a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as
+      usgovvirginia; a resource with no location never matches one) or
+      id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching Bastion host or virtual machine is listed under excluded with the pattern and left out of every count and judgement. A pattern that matches nothing is reported; a bare pattern fails the run.
+
+secrets: []          # DefaultAzureCredential only - see _categories/azure.yaml
+
+ksis:
+  - KSI-CNA-RNT   # administrative access brokered through Bastion instead of inbound ports on each VM
+  - KSI-CNA-MAT   # Bastion features that widen the access path are reviewed
+  - KSI-MLA-LET   # Bastion session audit logs exported for review
+
+evidence_set:
+  reference_id: EVD-AZURE-BASTION-CONFIGURATION
+  name: Azure Bastion Configuration
+  instructions: |
+    Script: azure/bastion_configuration/fetcher.py
+
+    Access: Reader on the subscription. Optional: Reader on a subscription whose virtual network is peered with one of this subscription's; without it a virtual machine reachable only through a Bastion in that subscription reads unknown, and the run succeeds. A subscription that never registered Microsoft.Network or Microsoft.Compute reads as having no hosts or no virtual machines.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.Network/bastionHosts — every Bastion host with its SKU, scale units, features, IP allow-list, zones and subnet
+    - GET Microsoft.Insights/diagnosticSettings (per host) — whether BastionAuditLogs goes to a workspace, storage account or event hub
+    - GET Microsoft.Compute/virtualMachines — every virtual machine and its network interfaces
+    - GET Microsoft.Network/networkInterfaces — each interface's subnet and public IP address
+    - GET Microsoft.Network/virtualNetworks — each virtual network's subnets and their network security groups, and its peerings with their state and whether they allow virtual network access
+    - GET Microsoft.Network/bastionHosts (per peered subscription) — the Bastion hosts a connected peering could lead to, when the credential may list them
+
+    Output: azure_bastion_configuration_<subscription>.json — each Bastion host with its configuration, subnet NSG and log export; each virtual machine with its virtual networks, public IPs and the Bastion path that reaches it; the peered subscriptions read; and the resources left out of scope.
+
+    Summary fields:
+
+    What Bastion hosts exist?
+    - bastion_hosts_read — True if the host list was read; false if it failed, and then every host count below is null, not 0, and the run fails
+    - bastion_hosts — Number of Bastion hosts in scope
+    - bastion_hosts_by_sku — Number of hosts for each SKU (developer, basic, standard, premium, or unknown when the API reports none)
+    - virtual_networks_with_bastion — Number of distinct virtual networks that hold a Bastion host
+    - bastion_hosts_with_public_ip — Number of hosts with a public IP address, which is how users reach a Bastion that is not private-only
+    - bastion_hosts_private_only — Number of hosts in private-only mode (Premium SKU), reachable only from a private address; a host reads null when the API version in use does not report the setting, and is not counted
+
+    Which access features are on?
+    - bastion_hosts_with_shareable_links — Number of hosts that allow shareable links, which open a session to a VM from a link without the Azure portal's own sign-in to that host
+    - bastion_hosts_with_ip_connect — Number of hosts that allow IP-based connections to any reachable address, not only to Azure virtual machines
+    - bastion_hosts_with_native_client_tunneling — Number of hosts that allow native client tunneling (SSH and RDP clients through the Azure CLI)
+    - bastion_hosts_with_file_copy — Number of hosts that allow file transfer in a session
+    - bastion_hosts_with_copy_paste_disabled — Number of hosts with clipboard copy and paste disabled
+    - bastion_hosts_with_kerberos — Number of hosts with Kerberos authentication enabled
+    - bastion_hosts_with_session_recording — Number of hosts that record sessions (Premium SKU); a host reads null when the API version in use does not report the setting, and is not counted
+    - bastion_hosts_with_ip_allowlist — Number of hosts whose network access control lists restrict the source addresses that may connect; the API reports this list for the Developer SKU, so other SKUs read 0 here and are restricted through the subnet network security group
+
+    Is the Bastion subnet protected and logged?
+    - bastion_hosts_with_subnet_nsg — Number of hosts whose AzureBastionSubnet has a network security group, counting only hosts that have a subnet; null if the virtual network list was not read or a host's subnet is not in it
+    - bastion_hosts_without_subnet_nsg — Number of hosts whose subnet has no network security group, counting only hosts that have a subnet; null if the virtual network list was not read or a host's subnet is not in it
+    - bastion_hosts_exporting_audit_logs — Number of hosts whose diagnostic settings export BastionAuditLogs, by name or through the allLogs or audit group; null if a host's diagnostic settings could not be read
+    - bastion_hosts_without_audit_log_export — Number of hosts with no setting that exports BastionAuditLogs; null if a host's diagnostic settings could not be read
+
+    Can a Bastion reach the virtual machines?
+    - virtual_machines_read — True if the virtual machine list and the network interface list were read; false if either failed, and then every path reads unknown and the public IP, in-VNet and peering counts, the without-path count and the percentage read null
+    - virtual_machines — Number of virtual machines in scope; scale set instances are not assessed; null if the machine list was not read
+    - virtual_machines_with_public_ip — Number of virtual machines with a public IP address on a network interface, which is a path to the machine that does not go through Bastion; null if any machine's network interfaces could not be read
+    - virtual_machines_with_bastion_in_vnet — Number of virtual machines in a virtual network that holds a Bastion host; null if the machine, interface or host list was not read
+    - virtual_machines_with_bastion_via_peering — Number of virtual machines whose virtual network has a connected peering to a virtual network holding a ready Bastion host of the Basic, Standard or Premium SKU (the Developer SKU does not reach peered networks), in this or a readable peered subscription; where the Bastion's virtual network is in this subscription, its own peering link must also allow virtual network access, and for a Bastion in another subscription that link is not read; null if the machine, interface, host or virtual network list was not read
+    - virtual_machines_without_bastion_path — Number of virtual machines no in-scope or readable Bastion can reach; null if any machine's path is unknown or the host, interface or virtual network list was not read
+    - virtual_machines_with_unknown_bastion_path — Number of virtual machines whose path could not be decided: the host, interface or virtual network list not read, an interface missing from the list, a machine with no interface, a Bastion host that is not in the Succeeded state or reports no SKU, or a peering into a subscription whose Bastion hosts could not be listed; null if the machine list was not read
+    - bastion_path_percentage — Percentage of virtual machines a Bastion can reach: (virtual_machines_with_bastion_in_vnet + virtual_machines_with_bastion_via_peering) * 100 / virtual_machines, 0 when there are none; null if any path is unknown or a list was not read
+
+    What was left out of scope?
+    - resource_exclusion_patterns — List of the resource_exclusions patterns as given
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name
+    - excluded_bastion_hosts — Number of Bastion hosts a pattern took out of scope; null if the host list was not read
+    - excluded_virtual_machines — Number of virtual machines a pattern took out of scope; null if the machine list was not read
+    - in_scope_bastion_hosts — Number of Bastion hosts assessed; null if the host list was not read
+    - in_scope_virtual_machines — Number of virtual machines assessed; null if the machine list was not read
