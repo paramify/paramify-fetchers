@@ -1,5 +1,5 @@
 name: azure_log_analytics_query_audit
-version: 0.2.0
+version: 0.2.1
 description: >
   For every Log Analytics workspace in the subscription, Sentinel or not: whether
   query auditing is on (a diagnostic setting exporting the workspace's Audit
@@ -11,7 +11,7 @@ description: >
   instead, each with the pattern that matched, and every count covers only
   in-scope workspaces. The summary echoes resource_exclusion_patterns, lists
   resource_exclusion_patterns_unmatched (patterns that matched no workspace,
-  such as a mistyped name), and counts excluded_workspaces and
+  such as a mistyped name, or null when the workspace list could not be read), and counts excluded_workspaces and
   in_scope_workspaces (0 when none was found or the patterns took out every
   workspace, which a check can catch by requiring more than 0; both are null
   when the workspace list couldn't be read).

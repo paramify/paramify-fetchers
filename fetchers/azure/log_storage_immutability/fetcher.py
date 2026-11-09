@@ -82,6 +82,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
         lambda: client.list(f"/subscriptions/{subscription_id}/providers/Microsoft.Storage/storageAccounts", STORAGE_API),
     )
     if accounts is None:
+        exclusions.mark_unread()
         exclusions.warn_unmatched(logger)
         # Unknown, not none: the account list wasn't read.
         counts = exclusions.summary([], KINDS, {"storage_accounts": None, "containers": None})

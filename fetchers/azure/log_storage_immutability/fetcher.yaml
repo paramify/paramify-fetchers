@@ -1,5 +1,5 @@
 name: azure_log_storage_immutability
-version: 0.2.0
+version: 0.2.1
 description: >
   Whether archived logs in Azure Storage can be altered or deleted. In every
   storage account in the subscription, finds the blob containers Azure Monitor
@@ -15,7 +15,7 @@ description: >
   every count covers only what stays in scope (storage_accounts_scanned counts
   in-scope accounts). The summary echoes resource_exclusion_patterns, lists
   resource_exclusion_patterns_unmatched (patterns that matched no storage
-  account or log container, such as a mistyped name), and counts
+  account or log container, such as a mistyped name, or null when the storage account list could not be read), and counts
   excluded_storage_accounts, excluded_containers, in_scope_storage_accounts and
   in_scope_containers (in-scope log containers; 0 accounts when none was found
   or the patterns took out every one, which a check can catch by requiring more
