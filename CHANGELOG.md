@@ -47,6 +47,43 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
+  Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
+  - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from
+    the same DefaultAzureCredential chain the `azure_devops_*` fetchers use (the
+    `AZURE_*` service principal variables, workload or managed identity, or
+    `az login`) and sends it as a Bearer header. `fetchers/checkov/_shared/ado_token.py`
+    gets the token; it needs `python3` with `azure-identity`, which the `checkov`
+    extra now installs.
+  - The checkov category lets the same `AZURE_*` identity variables through as
+    the azure category, and declares `azure-identity`. Only the TFVC sign-in
+    sees them: `checkov_bicep` unsets them once its source is fetched, and
+    `checkov_terraform` and `checkov_kubernetes` unset them at start, so the
+    `checkov` CLI never gets the client secret.
+  - When the TFVC source reads anonymously, it logs why Entra sign-in was not
+    available. The message names the Python interpreter that lacked
+    `azure-identity`.
+  - A PAT still wins, and with neither a PAT nor an Entra identity the fetcher
+    reads anonymously, as before, for a public project. An Entra identity that
+    Azure DevOps refuses fails with `auth_failed`; it never falls back to an
+    anonymous read, which would see only the public folders.
+  - `metadata.auth_mode` records `pat`, `entra` or `anonymous`, and
+    `metadata.listing_scope: readable_by_identity` records that TFVC lists only
+    the folders the identity may read.
+  - Failures classify as the `azure_devops_*` fetchers classify them. A refused
+    PAT or Entra identity (401, or 203/302 to sign-in) is `auth_failed`, and a
+    403 is `not_authorized`. So are the answers Azure DevOps gives in place of a
+    403 (`TF14098`, `TF200016`, `TF401019`, `VS800075`), which were
+    `bad_config` or `internal_error` before. None of these runs a scan.
+  - **Fixed: the TFVC source can read a folder.** 0.2.x asked for the folder
+    with `path` and `recursionLevel=Full`, which Azure DevOps refuses with a 400,
+    so every TFVC run failed with `bad_config`. The fetcher now lists the folder
+    with `scopePath` and downloads each `.bicep` and `.json` file in it at the
+    same changeset, and no longer needs `unzip`.
+  - TFVC leaves out of a listing the folders the identity may not read. A
+    `tfvc_path` the identity cannot see (a 404, or a listing without it) fails
+    with `not_authorized`, and so does a path that does not exist. A readable
+    folder whose template subfolders are hidden fails with `no_files`.
 - **Sophos Central fetchers (new `sophos` category).** Five fetchers read the
   Sophos Central REST APIs, one target for each tenant:
   - `sophos_endpoint_protection`: for each endpoint, whether its protection
