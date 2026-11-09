@@ -772,3 +772,15 @@ def _runners():
 @pytest.mark.parametrize("family", ["backend", "listeners", "waf", "ddos", "flow", "wan", "vpn"])
 def test_a_bare_pattern_fails_the_run(family, monkeypatch, tmp_path, capsys):
     assert _runners()[family](monkeypatch, tmp_path, "rg-out") == 1
+
+
+@pytest.mark.parametrize("operation", [
+    "network.virtual_network_gateways.list(rg-out)",
+    "network.virtual_network_gateway_connections.list(rg-out)",
+    "network.local_network_gateways.list(rg-out)",
+])
+def test_vpn_a_refused_resource_group_list_leaves_unmatched_patterns_null(operation, monkeypatch, tmp_path, caplog):
+    _refuse(monkeypatch, vpn, operation)
+    code, evidence, _ = _run_vpn(monkeypatch, tmp_path, "id:*/virtualNetworkGateways/gw-out")
+    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text

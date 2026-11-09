@@ -680,3 +680,9 @@ def test_diagnostic_settings_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence, read = run_rds(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["results"]["excluded"] == [] and evidence["summary"]["in_scope_resources"] == 6 == len(read)
+
+
+def test_sql_backups_unread_failover_history_leaves_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
+    code, evidence = run_sql(monkeypatch, tmp_path, backups, PATTERNS, activity=DENIED)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text

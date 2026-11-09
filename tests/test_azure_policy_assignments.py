@@ -613,3 +613,18 @@ def test_refused_api_version_fails_the_run_and_keeps_the_reason(monkeypatch, tmp
     assert evidence["summary"]["exemptions_read_status"] == "api_version_unavailable"
     assert evidence["summary"]["active_exemptions_lifting_enforcement"] is None
     assert evidence["metadata"]["partial_failure"] is True
+
+
+def test_unread_exemptions_leave_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
+    monkeypatch.setattr(fx, "load_dotenv", lambda: None)
+    monkeypatch.setattr(fx, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
+    monkeypatch.setattr(fx, "credential", lambda: object())
+    monkeypatch.setattr(fx, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(fx, "collect_policy_assignments", lambda *a: [])
+    monkeypatch.setattr(fx, "collect_policy_exemptions", lambda *a: (None, fx.EXEMPTIONS_NOT_READ))
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:typo")
+    fx.main()
+    summary = json.loads((tmp_path / "azure_policy_assignments_s1.json").read_text())["summary"]
+    assert summary["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text

@@ -942,6 +942,7 @@ def collect_certificates(vault: dict, cred, collector: Collector, now: datetime)
 UNREAD_LIST_OPERATIONS = {
     "keyvault.KeyVaultManagementClient (init)", "keyvault.vaults.list_by_subscription",
     "web.WebSiteManagementClient (init)", "web.certificates.list",
+    "keyvault.keys.list", "keyvault.secrets.list",
 }
 
 
@@ -1079,7 +1080,8 @@ def main() -> int:
         app_service_certificates, "app_service_certificate")
     excluded += excluded_certificates
     lists_read = bool(subscription_id and cred is not None) and not any(
-        f["operation"] in UNREAD_LIST_OPERATIONS for f in collector.failures)
+        f["operation"] in UNREAD_LIST_OPERATIONS or f["operation"].split(" (")[0] in UNREAD_LIST_OPERATIONS
+        for f in collector.failures)
     if not lists_read:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)

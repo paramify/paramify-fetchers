@@ -1346,7 +1346,8 @@ def main() -> int:
         )
 
     # A list that wasn't read in full can't show a pattern matched nothing.
-    if not (read and collected["deployments_complete"] and limits["non_compliant"] > 0) or any(
+    if not (read and collected["deployments_complete"] and limits["non_compliant"] > 0) \
+            or collected["latest_pairs_status"] not in (None, LATEST_READ) or any(
             f["operation"].startswith("policyinsights.") for f in collector.failures):
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)

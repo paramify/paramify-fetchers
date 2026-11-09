@@ -637,7 +637,7 @@ def main() -> int:
         None if events is None else failover_records(events), instances, groups, excluded, exclusions)
     excluded += out
     groups = [group_failover_fields(g, failovers) for g in groups]
-    if not (subscription_id and cred is not None):
+    if failovers is None or not (subscription_id and cred is not None):
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     boundary = exclusions.summary(excluded, ("managed_instance", "instance_failover_group", "failover"), {

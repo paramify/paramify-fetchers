@@ -790,3 +790,14 @@ def test_service_log_counts_are_null_when_their_list_was_refused(monkeypatch, tm
     assert (summary[f"in_scope_{unknown}"], summary[f"excluded_{unknown}"]) == (None, None)
     assert summary["resource_exclusion_patterns_unmatched"] is None
     assert {k: summary[k] for k in known} == known
+
+
+def test_immutability_a_refused_container_list_leaves_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
+    good = _storage_client()
+    refused = RefusedClient(good.lists, good.gets, refused=[f"{ST_IN}/blobServices/default/containers"])
+    _rest_env(monkeypatch, tmp_path, "id:*/containers/insights-logs-audit", refused)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    code = immutability.main()
+    assert code == 1
+    assert _evidence(tmp_path, immutability.NAME)["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text

@@ -1,5 +1,5 @@
 name: azure_policy_assignments
-version: 0.4.0
+version: 0.4.1
 description: >
   Every Azure Policy assignment in effect on the subscription — its own and the ones
   inherited from a management group: display name, the referenced policy definition

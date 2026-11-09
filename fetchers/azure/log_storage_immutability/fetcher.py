@@ -90,11 +90,14 @@ def collect(client, subscription_id: str, collector) -> tuple:
         return {"accounts": None, "excluded": []}, counts
     accounts, excluded = exclusions.split(accounts, "storage_account")
     out: List[Dict[str, Any]] = []
+    containers_unread = False
     for account in sorted(accounts, key=lambda a: (a.get("id") or "").lower()):
         containers = collector.guard(
             f"storage.blobContainers.list({account.get('name')})",
             lambda a=account: list_containers(client, a),
         )
+        if containers is None:
+            containers_unread = True
         logs, out_containers = split_containers(exclusions, account, [c for c in containers or [] if log_type(c.get("name"))])
         excluded += out_containers
         if not logs:
@@ -120,6 +123,8 @@ def collect(client, subscription_id: str, collector) -> tuple:
 
     containers = [c for a in out for c in a["log_containers"]]
     retention = [c["retention_days"] for c in containers if c["retention_days"] is not None]
+    if containers_unread:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     summary = {
         "storage_accounts_scanned": len(accounts),

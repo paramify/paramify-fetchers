@@ -42,6 +42,11 @@ from vpn_crypto import (  # noqa: E402
 logger = logging.getLogger("azure_vpn_gateway_configuration")
 
 IPSEC_CONNECTION_TYPES = ("ipsec", "vnet2vnet")
+GROUP_LIST_OPERATIONS = (
+    "network.virtual_network_gateways.list(",
+    "network.virtual_network_gateway_connections.list(",
+    "network.local_network_gateways.list(",
+)
 
 
 def project_gateway(gw) -> dict:
@@ -312,7 +317,7 @@ def main() -> int:
             ),
         )
 
-    if gateways is None:
+    if gateways is None or any(f["operation"].startswith(GROUP_LIST_OPERATIONS) for f in collector.failures):
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     listed = gateways is not None

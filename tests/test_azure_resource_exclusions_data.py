@@ -181,7 +181,11 @@ def run_rotation(monkeypatch, tmp_path, patterns, fail=()):
         if "list" in fail:
             collector.record("keyvault.vaults.list_by_subscription", RuntimeError("(AuthorizationFailed) 403"))
             return []
-        return copy.deepcopy(ROTATION_VAULTS)
+        vaults = copy.deepcopy(ROTATION_VAULTS)
+        for op in ("keys", "secrets"):
+            if op in fail:
+                collector.record(f"keyvault.{op}.list ({vaults[0]['name']})", RuntimeError("(AuthorizationFailed) 403"))
+        return vaults
 
     return _run(rotation, monkeypatch, tmp_path, patterns, "azure_key_vault_key_rotation",
                 collect_key_vaults=collect_vaults,
@@ -346,6 +350,7 @@ def run_backup(monkeypatch, tmp_path, patterns, fail=()):
         def call(vault_name, resource_group_name, **_):
             read.append((operation, vault_name))
             _refuse(vault_name, fail)
+            _refuse(f"{operation}:{vault_name}", fail)
             return answer(vault_ids[vault_name], protects[vault_name])
         return call
 
@@ -492,4 +497,17 @@ def test_a_refused_list_leaves_the_unmatched_patterns_null(monkeypatch, tmp_path
     code, evidence = run(monkeypatch, tmp_path, PATTERNS, fail=("list",))[:2]
     assert code == 1
     assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
+@pytest.mark.parametrize("fail", ["keys", "secrets"])
+def test_rotation_a_refused_per_vault_list_leaves_unmatched_patterns_null(fail, monkeypatch, tmp_path, caplog):
+    code, evidence = run_rotation(monkeypatch, tmp_path, PATTERNS, fail=(fail,))
+    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
+def test_backup_a_refused_protected_item_list_leaves_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
+    code, evidence, _ = run_backup(monkeypatch, tmp_path, PATTERNS, fail=("protected_items:rsv-in",))
+    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     assert "matched nothing" not in caplog.text

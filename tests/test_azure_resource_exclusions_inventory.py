@@ -710,6 +710,8 @@ def test_policy_recounts_are_null_when_the_latest_pairs_are_not_read_in_full(mon
         if fail == "latest_over_cap":
             # The count is over the cap, so the groups aren't read at all.
             assert len([c for c in calls if c[0] == "latest"]) == 1
+        if status in ("truncated", "uncounted"):
+            assert summary["resource_exclusion_patterns_unmatched"] is None, fail
         for key in ("non_compliant_resources", "non_compliant_policies", "compliant_resources", "resources_evaluated",
                     "resource_compliance_percentage", "non_compliant_assignments", "compliant_assignments"):
             assert summary[key] is None, (fail, key)
