@@ -1462,6 +1462,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`collection_succeeded` now covers two Entra evidence sets.** It is listed
+  against `EVD-AZURE-ENTRA-APP-CREDS` (`azure_entra_app_registrations`) and
+  `EVD-AZURE-ENTRA-SERVICE-PRINCIPALS` (`azure_entra_service_principals`), so a
+  failed run of either fetcher fails its evidence set. Consumers that keep their
+  own criteria for these sets get collection health from this registry file.
+
 - **The uploader guide explains the collection frequency of an evidence set.**
   A new section in [`docs/uploader_guide.md`](docs/uploader_guide.md#set-the-collection-frequency)
   gives the default (`THREE_DAY`), the values, and how to set `frequency` in
