@@ -2102,6 +2102,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_app_registrations` 0.2.1: a failed applications read nulls
+  every summary count.** When the Graph applications read was denied, failed or
+  stopped part-way, the counts (credentials, expired, expiring, without expiry,
+  the rotation percentage and the rest) read 0 or a short number. They are now
+  null, as `credentials_issued_beyond_approved_lifetime` and
+  `credentials_without_lifetime` already were; `approved_lifetime_days` and
+  `rotation_threshold_days` are settings and stay. `partial_failure` and the
+  exit code are unchanged.
+
 - **`azure_ai_services_configuration` 0.2.1 names its search service counts.**
   When the search service list is not read, the counts that become null are the
   ones in an explicit `SEARCH_KEYS` set, not those whose key happens to contain
