@@ -11,12 +11,21 @@ statement: >
   azure_key_vault_key_rotation 0.5.0; on earlier evidence this validator is its integrity partner.
 
 # Two backreferences: accessible vaults = total vaults (non-zero), readable policies = total certificates.
-regex: '^\s*\{(?=[\s\S]*?"total_key_vaults":\s*(?<total_key_vaults>[1-9]\d*)\b)(?=[\s\S]*?"certificate_accessible_vaults":\s*\k<total_key_vaults>(?!\d))(?=[\s\S]*?"total_certificates":\s*(?<total_certificates>\d+)\b)(?=[\s\S]*?"certificates_with_readable_policy":\s*\k<total_certificates>(?!\d))'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"certificate_accessible_vaults":\s*(?<certificate_accessible_vaults>\d+))(?=[\s\S]*?"total_key_vaults":\s*(?<total_key_vaults>\d+))(?=[\s\S]*?"certificates_with_readable_policy":\s*(?<certificates_with_readable_policy>\d+))(?=[\s\S]*?"total_certificates":\s*(?<total_certificates>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]; MATCH_GROUP[2] GREATER_THAN 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[4]
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # certificate_accessible_vaults
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_key_vaults
+    criteria: GREATER_THAN
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # certificates_with_readable_policy
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 4 }
 
 evidence_sets:
   - EVD-AZURE-KEYVAULT-ROTATION

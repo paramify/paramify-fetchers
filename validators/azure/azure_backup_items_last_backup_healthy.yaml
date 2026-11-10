@@ -8,9 +8,9 @@ statement: >
   Azure Backup. It does not assert when that backup ran or that it meets an RPO (the fetcher has no
   backup-age field), retention, or that a restore was tested.
 
-# Backreference: healthy-last-backup items must equal a non-zero total_protected_items.
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"total_protected_items":\s*(?<total_protected_items>\d+),\s*"total_recovery_services_vaults")(?=[\s\S]*?"protected_items_with_healthy_last_backup":\s*(?<protected_items_with_healthy_last_backup>\d+))'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] GREATER_THAN 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[2]
+# Rows: protected_items_with_healthy_last_backup equals total_protected_items, which is above 0.
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"protected_items_with_healthy_last_backup":\s*(?<protected_items_with_healthy_last_backup>\d+))(?=[\s\S]*?"total_protected_items":\s*(?<total_protected_items>\d+),\s*"total_recovery_services_vaults")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] EQUALS MATCH_GROUP[3]; MATCH_GROUP[3] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
@@ -18,12 +18,12 @@ validation_rules:
   - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "false" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_protected_items
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # protected_items_with_healthy_last_backup
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 3 }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # total_protected_items
     criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # protected_items_with_healthy_last_backup
-    criteria: EQUALS
-    value: { type: MATCH_GROUP, groupNumber: 2 }
 
 evidence_sets:
   - EVD-AZURE-BACKUP-RECOVERY

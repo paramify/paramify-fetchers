@@ -11,9 +11,9 @@ statement: >
   origin health, that both regions serve at once (active-active, a stricter customization), or the
   App Service plans behind the origins.
 
-# Lookahead captures persist, so the backreference compares the two summary counts in either key order.
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"serving_origin_groups":\s*(?<serving_origin_groups>\d+))(?=[\s\S]*?"serving_groups_multi_region_failover":\s*(?<serving_groups_multi_region_failover>\d+))'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] GREATER_THAN 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[2]
+# Rows: serving_groups_multi_region_failover equals serving_origin_groups, which is above 0.
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"serving_groups_multi_region_failover":\s*(?<serving_groups_multi_region_failover>\d+))(?=[\s\S]*?"serving_origin_groups":\s*(?<serving_origin_groups>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] EQUALS MATCH_GROUP[3]; MATCH_GROUP[3] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
@@ -21,12 +21,12 @@ validation_rules:
   - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "false" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # serving_origin_groups
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # serving_groups_multi_region_failover
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 3 }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # serving_origin_groups
     criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # serving_groups_multi_region_failover
-    criteria: EQUALS
-    value: { type: MATCH_GROUP, groupNumber: 2 }
 
 evidence_sets:
   - EVD-AZURE-FRONTDOOR-ORIGINS

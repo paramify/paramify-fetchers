@@ -9,15 +9,12 @@ statement: >-
   reflects the credentials rather than a renamed field or a failed read. Asserts nothing about posture.
 
 # partial_failure first: a denied read writes "total_credentials": 0, which would otherwise match.
-regex: '"partial_failure":\s*(?<partial_failure>true|false|null)[\s\S]*?(?:"days_until_expiry":\s*(?:-?\d+|null)|"total_credentials":\s*0(?![\d.]))'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false
+regex: '"partial_failure":\s*false[\s\S]*?(?:"days_until_expiry":\s*(?:-?\d+|null)|"total_credentials":\s*0(?![\d.]))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
-    criteria: EQUALS
-    value: { type: CUSTOM_TEXT, customText: "false" }
 
 evidence_sets:
   - EVD-AZURE-ENTRA-APP-CREDS

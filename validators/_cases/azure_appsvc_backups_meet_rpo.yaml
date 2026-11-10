@@ -63,7 +63,7 @@ cases:
 
   - name: recovery_point_objective_hours_wrong
     expect: FAIL
-    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"settings": {"recovery_point_objective_hours": 0}}, "summary": {"all_web_apps_backed_up": true, "all_web_apps_meet_recovery_point_objective": true, "apps_meeting_recovery_point_objective": 3, "recovery_point_objective_hours": 24, "total_web_apps": 3}}}'
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"settings": {"recovery_point_objective_hours": 0}}, "summary": {"all_web_apps_backed_up": true, "all_web_apps_meet_recovery_point_objective": true, "apps_meeting_recovery_point_objective": 3, "recovery_point_objective_hours": 0, "total_web_apps": 3}}}'
 
   - name: all_web_apps_backed_up_wrong
     expect: FAIL

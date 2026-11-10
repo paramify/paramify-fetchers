@@ -9,18 +9,12 @@ statement: >
   condition is a lookahead inside one rule object, so key order does not matter and a brace or quote
   inside a rule name cannot end the object early.
 
-regex: '\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"enabled":\s*(?<enabled>true|false|null))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"kind":\s*(?<kind>"(?:[^"\\]|\\.)*"|null|true|false|-?\d+(?:\.\d+)?))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"query_frequency":\s*"P[^"]+")'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS "Scheduled"
+regex: '\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"enabled":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"kind":\s*"Scheduled")(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"query_frequency":\s*"P[^"]+")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # enabled
-    criteria: EQUALS
-    value: { type: CUSTOM_TEXT, customText: "true" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # kind
-    criteria: EQUALS
-    value: { type: CUSTOM_TEXT, customText: "\"Scheduled\"" }
 
 evidence_sets:
   - EVD-AZURE-SENTINEL-ANALYTICS-RULES

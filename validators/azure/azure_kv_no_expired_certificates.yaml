@@ -11,7 +11,7 @@ statement: >
   certificate is not counted as expired), and does not assert renewal policy, certificates expiring
   soon, or certificates held outside Key Vault and App Service.
 
-# expired_certificates is null when any vault's certificates were unreadable, which the 0 match rejects.
+# expired_certificates is null when any vault's certificates were unreadable, which the EQUALS 0 row rejects.
 regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"expired_certificates":\s*(?<expired_certificates>null|\d+(?:\.\d+)?))(?=[\s\S]*?"expired_app_service_certificates":\s*(?<expired_app_service_certificates>null|\d+(?:\.\d+)?))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0
 validation_rules:

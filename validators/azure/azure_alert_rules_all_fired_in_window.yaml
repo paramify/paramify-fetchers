@@ -11,20 +11,20 @@ statement: >
   event was raised or that the notification arrived.
 
 regex: '"partial_failure":\s*(?<partial_failure>true|false|null)[\s\S]*?"enabled_alert_rules":\s*(?<enabled_alert_rules>\d+),\s*"enabled_rules_never_fired":\s*(?<enabled_rules_never_fired>null|\d+(?:\.\d+)?),'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] GREATER_THAN 0; MATCH_GROUP[3] EQUALS 0
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] GREATER_THAN 0; MATCH_GROUP[3] EQUALS 0; MATCH_GROUP[1] EQUALS false
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
-    criteria: EQUALS
-    value: { type: CUSTOM_TEXT, customText: "false" }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # enabled_alert_rules
     criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # enabled_rules_never_fired
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
 
 evidence_sets:
   - EVD-AZURE-MONITOR-FIRED-ALERTS

@@ -12,7 +12,7 @@ statement: >-
   public IP entry points. Does not prove: Front Door or other edge protection; WAF policy; that
   attacks are alerted on or mitigation reviewed; unattached IPs; or other subscriptions.
 
-regex: '"partial_failure":\s*(?<partial_failure>true|false|null)[\s\S]*?"summary":\s*\{(?=[\s\S]*?"attached_public_ips_by_effective_protection":\s*\{[^}]*"unknown":\s*(?<unknown>null|\d+(?:\.\d+)?))(?=[\s\S]*?"attached_public_ips_unprotected":\s*(?<attached_public_ips_unprotected>null|\d+(?:\.\d+)?))'
+regex: '"partial_failure":\s*(?<partial_failure>true|false|null)[\s\S]*?"summary":\s*\{(?=[\s\S]*?"attached_public_ips_unprotected":\s*(?<attached_public_ips_unprotected>null|\d+(?:\.\d+)?))(?=[\s\S]*?"attached_public_ips_by_effective_protection":\s*\{[^}]*"unknown":\s*(?<unknown>null|\d+(?:\.\d+)?))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
@@ -21,10 +21,10 @@ validation_rules:
   - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "false" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # unknown
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # attached_public_ips_unprotected
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # attached_public_ips_unprotected
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # unknown
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
 

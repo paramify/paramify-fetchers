@@ -14,11 +14,14 @@ statement: >
 
 # Form A on the summary rollup. The [1-9] prefix encodes ">= 1" in the regex, so zero
 # enforcing assignments and a renamed key both leave nothing to match and FAIL.
-regex: '"actually_enforcing_assignments":\s*(?<actually_enforcing_assignments>[1-9][0-9]*)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"actually_enforcing_assignments":\s*(?<actually_enforcing_assignments>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # actually_enforcing_assignments
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:

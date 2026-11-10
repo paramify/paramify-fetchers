@@ -21,20 +21,20 @@ statement: >-
   for some events, so a missing resource list does not mean an advisory doesn't apply.
 
 regex: '"partial_failure":\s*(?<partial_failure>true|false|null)[\s\S]*?"summary":\s*\{[\s\S]*?"events":\s*\d+,[\s\S]*?"events_from_resource_graph":\s*\d+,[\s\S]*?"events_in_resource_graph_not_found":\s*(?<events_in_resource_graph_not_found>null|\d+(?:\.\d+)?)[\s\S]*?"lookback_days":\s*(?:9\d|[1-9]\d{2,})\b[\s\S]*?"provider_registration_status":\s*(?<provider_registration_status>"(?:[^"\\]|\\.)*"|null|true|false|-?\d+(?:\.\d+)?)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS "registered"
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS "registered"; MATCH_GROUP[1] EQUALS false
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
-    criteria: EQUALS
-    value: { type: CUSTOM_TEXT, customText: "false" }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # events_in_resource_graph_not_found
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # provider_registration_status
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "\"registered\"" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
 
 evidence_sets:
   - EVD-AZURE-SERVICE-HEALTH

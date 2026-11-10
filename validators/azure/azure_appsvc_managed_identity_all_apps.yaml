@@ -10,19 +10,19 @@ statement: >
   registrations, service principals or federated credentials, which are the Entra ID share of the
   check.
 
-# Backreference: matches only when managed_identity_apps equals a non-zero total_web_apps.
+# Rows: managed_identity_apps equals total_web_apps, which is above 0.
 regex: '"managed_identity_apps":\s*(?<managed_identity_apps>\d+),[^{}]*?"total_web_apps":\s*(?<total_web_apps>\d+)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] GREATER_THAN 0; MATCH_GROUP[2] EQUALS MATCH_GROUP[1]
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]; MATCH_GROUP[2] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # managed_identity_apps
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_web_apps
     criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_web_apps
-    criteria: EQUALS
-    value: { type: MATCH_GROUP, groupNumber: 1 }
 
 evidence_sets:
   - EVD-AZURE-APPSVC-CONFIG

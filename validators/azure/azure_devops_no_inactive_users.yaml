@@ -16,7 +16,7 @@ statement: >-
 # inactive_users is null when the entitlements weren't read; anchored after "summary" because
 # results repeats inactivity_threshold_days.
 regex: '"partial_failure":\s*(?<partial_failure>true|false|null)[\s\S]*?"summary":\s*\{[\s\S]*?"inactive_users":\s*\[\s*\],[\s\S]*?"inactivity_threshold_days":\s*(?:[1-8]?\d|90)(?!\d)[\s\S]*?"last_access_collected":\s*(?<last_access_collected>true|false|null)[\s\S]*?"users_total":\s*(?<users_total>\d+)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] EQUALS true; MATCH_GROUP[3] GREATER_THAN 0
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[3] GREATER_THAN 0; MATCH_GROUP[2] EQUALS true
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
@@ -24,12 +24,12 @@ validation_rules:
   - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "false" }
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # last_access_collected
-    criteria: EQUALS
-    value: { type: CUSTOM_TEXT, customText: "true" }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # users_total
     criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # last_access_collected
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
 
 evidence_sets:
   - EVD-AZURE-DEVOPS-IDENTITIES
