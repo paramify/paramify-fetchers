@@ -74,7 +74,7 @@ evidence_set:
     - data_exports.list_by_workspace() (per in-scope workspace) — data export rules and their destinations
     - intelligence_packs.list() (per in-scope workspace) — the solutions switched on, including Sentinel (SecurityInsights)
 
-    Output: azure_log_analytics_workspaces_<subscription>.json — each in-scope workspace with its SKU, retention, daily cap, network access, access control mode, shared-key setting, table counts by plan and retention, the tables with non-default retention or custom, its data export rules and whether Sentinel is onboarded, plus the workspaces left out and why.
+    Output: azure_log_analytics_workspaces_<subscription>.json — each in-scope workspace with its SKU, retention, daily cap, network access, access control mode, shared-key setting, table counts by plan and retention and the shortest table retention, the tables with non-default retention or custom, its dedicated cluster link, its data export rules and whether Sentinel is onboarded, plus the workspaces left out and why.
 
     Summary fields:
 
@@ -108,4 +108,4 @@ evidence_set:
 
     Is Microsoft Sentinel onboarded?
     - sentinel_onboarded_workspaces — Number of workspaces with Sentinel onboarded, meaning the SecurityInsights solution is switched on in the workspace
-    - sentinel_onboarded — True if at least one in-scope workspace has Sentinel onboarded; false if none does, including when a resource_exclusions pattern takes out the workspace Sentinel is onboarded to
+    - sentinel_onboarded — True if at least one in-scope workspace has Sentinel onboarded; false if none does or none was read, including when a resource_exclusions pattern takes out the workspace Sentinel is onboarded to, and when the solutions couldn't be read (the run then fails); never null

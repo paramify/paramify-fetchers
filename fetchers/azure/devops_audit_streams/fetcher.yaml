@@ -1,7 +1,7 @@
 name: azure_devops_audit_streams
 version: 0.1.1
 description: >-
-  Shows whether an Azure DevOps organization records audit events and streams them to a destination that keeps them beyond Azure DevOps' 90 days.
+  Shows whether an Azure DevOps organization records audit events, streams them out of Azure DevOps, which keeps them only 90 days, and whether streamed events arrive.
 category: azure
 
 supports_targets: true
@@ -68,7 +68,7 @@ evidence_set:
   instructions: |
     Script: azure/devops_audit_streams/fetcher.py
 
-    Access: A user with the View audit log and Manage audit streams permissions, signed in with a personal access token that has Read Audit Log (vso.auditlog), or with Entra ID when no token is set. Listing audit streams needs Manage audit streams, as Azure DevOps has no read-only permission for it; without it, the stream fields are null and the run is not_authorized. Only the Entra sign-in can read the Log Audit Events policy; with a token, auditing is judged from the audit log. Optional: Log Analytics Reader on an Azure Monitor Logs stream's workspace, for the ingestion check.
+    Access: A user with the View audit log and Manage audit streams permissions, signed in with a personal access token that has Read Audit Log (vso.auditlog), or with Entra ID when no token is set. Listing audit streams needs Manage audit streams, as Azure DevOps has no read-only permission for it; without it, the stream fields are null and the run is not_authorized. Only the Entra sign-in can read the Log Audit Events policy; with a token, auditing is judged from the audit log. Log Analytics Reader on each Azure Monitor Logs stream's workspace, for the ingestion check; without it, azure_monitor_streams_with_rows and azure_monitor_streams_missing_rows are null and the run fails.
 
     Commands Executed:
     - GET _apis/connectionData — identifies the signed-in user (token or Entra ID)
@@ -78,7 +78,7 @@ evidence_set:
     - GET Microsoft.OperationalInsights/workspaces/{name} (per Azure Monitor Logs stream whose workspace is named by resource id) — its workspace id
     - KQL on AzureDevOpsAuditing (per workspace) — whether this organization's events arrived in the window
 
-    Output: azure_devops_audit_streams_<organization>.json — whether auditing is on, each audit stream with its destination (endpoint identifiers only, never tokens or keys) and status, for Azure Monitor Logs streams whether this organization's events are arriving, and the newest audit log events.
+    Output: azure_devops_audit_streams_<organization>.json — whether auditing is on, each audit stream with its destination type, status and reason, last update and destination (endpoint identifiers only, never tokens or keys), which source the auditing answer came from, for Azure Monitor Logs streams whether this organization's events are arriving, and the newest audit log events.
 
     Summary fields:
 

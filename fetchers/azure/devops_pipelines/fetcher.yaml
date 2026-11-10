@@ -88,7 +88,7 @@ evidence_set:
     - GET _apis/policy/configurations (per project) — branch policies that apply to each default branch
     - GET _apis/release/definitions and GET _apis/release/deployments (per project) — classic release pipelines and their deployments in the window
 
-    Output: azure_devops_pipelines_<organization>.json — per project, each pipeline with what its final YAML tests, scans, validates, deploys and signs and whether a failing test stops each deploy, its runs and test results, each environment's checks and deployments, each repository's default-branch policies, and counts of classic releases.
+    Output: azure_devops_pipelines_<organization>.json — per project, each pipeline with what its final YAML tests, scans, validates, deploys and signs and whether a failing test stops each deploy, its runs and test results, each environment's checks and deployments, each traced to its run, branch, commit and test results, each repository's default-branch policies, and counts of classic releases.
 
     Summary fields:
 
@@ -99,7 +99,7 @@ evidence_set:
     - yaml_pipelines — Number of pipelines defined in YAML
     - classic_pipelines — Number of classic (designer) build pipelines, which are listed but whose steps aren't analysed
     - disabled_pipelines — Number of pipelines whose queue status is disabled
-    - yaml_pipelines_analyzed — Number of YAML pipelines whose YAML was read and parsed: from the preview run (templates expanded) or, when the preview is refused, the file on the default branch. Steps are sorted into test, scan, validation, deploy, signing, verification and SBOM categories by task name and inputs or by the tools a script runs; disabled steps are ignored
+    - yaml_pipelines_analyzed — Number of YAML pipelines whose YAML was read and parsed: from the preview run (templates expanded) or, when the preview is refused, the file on the default branch. Steps are sorted into test, scan, validation, deploy, signing, verification and SBOM categories by task name and inputs or by the tools a script runs; disabled steps are ignored; the evidence keeps the commit (and file object id) and SHA-256 of the YAML read, so it can be fetched again and re-checked; templates from other repositories are read at the refs the YAML names
     - yaml_pipelines_with_templates_expanded — Number of analyzed YAML pipelines read from the preview run, so steps inside templates are visible
     - yaml_pipelines_not_analyzed — List of YAML pipelines (project/pipeline) whose YAML couldn't be read or parsed, so their steps weren't checked
 
@@ -115,7 +115,7 @@ evidence_set:
     Does a failing test stop a deploy?
     - deploying_pipelines — Number of analyzed pipelines with a deployment job or an infrastructure or application deploy step
     - deploying_pipelines_with_tests — Number of deploying pipelines with at least one test step
-    - deploying_pipelines_with_tests_gating_deploys — Number of deploying pipelines where every deploy would be skipped by a failing gating test, through later steps of the same job, jobs that depend on it or stages that depend on its stage, each with a condition that keeps succeeded(). A test step doesn't gate when it has continueOnError, only publishes results, or has a condition that may skip it
+    - deploying_pipelines_with_tests_gating_deploys — Number of deploying pipelines where every deploy would be skipped by a failing gating test, through later steps of the same job, jobs that depend on it or stages that depend on its stage (by default, the stage before), each with no condition or one that keeps succeeded(); a condition using always(), succeededOrFailed(), failed(), canceled(), or() or not() runs after a failure. A test step doesn't gate when it or its job has continueOnError, it only publishes results (PublishTestResults without failTaskOnFailedTests, or code coverage), or a step, job or stage condition may skip it
     - deploying_pipelines_without_tests — List of deploying pipelines (project/pipeline) with no test step
     - deploying_pipelines_with_ungated_deploys — List of deploying pipelines (project/pipeline) with a deploy that still runs when a gating test fails; each deploy and its reason are listed in the evidence
 
@@ -125,7 +125,7 @@ evidence_set:
     - pipelines_with_test_runs_in_window — Number of pipelines with at least one published test run in the window
     - tests_total — Number of tests in the test runs matched to a pipeline
     - tests_passed — Number of those tests that passed
-    - tests_not_passed — Number of those tests that did not pass, not counting tests marked not applicable
+    - tests_not_passed — Number of those tests that did not pass, not counting tests marked not applicable; taken from each run's totals, so it doesn't drop as failures are triaged
 
     Are deployments approved and traceable?
     - environments_total — Number of deployment environments
@@ -149,7 +149,7 @@ evidence_set:
     What are the project and classic release settings?
     - projects_with_classic_pipeline_creation_disabled — Number of projects that disable creating classic pipelines
     - classic_release_definitions — Number of classic release pipelines; they are counted, not analysed
-    - classic_release_deployments_in_window — Number of classic release deployments started in the window, read up to 100 per project
+    - classic_release_deployments_in_window — Number of classic release deployments started in the window
 
     What isn't collected?
     - not_collected — What the fetcher deliberately doesn't collect, by area: projects, pipelines and repositories the identity can't see; the stages, approvals, gates and tasks of classic releases; the steps of classic build pipelines; who approved each deployment; and who may bypass branch policies

@@ -1,7 +1,7 @@
 name: azure_change_provenance
 version: 0.3.1
 description: >-
-  Labels each change to the subscription over the last 14 days as made by a pipeline, a deployment, a person's deployment or a direct edit, with values before and after.
+  Labels each change to the subscription over up to 14 days by origin, such as pipeline, deployment, a person's deployment or direct edit, with some settings' values before and after.
 category: azure
 
 supports_targets: true
@@ -137,7 +137,7 @@ evidence_set:
     - resource_groups.list() — the resource groups, to read each one's deployments
     - deployments.list_by_resource_group() (per resource group) — each group's deployment history, to match changes to deployments
 
-    Output: azure_change_provenance_<subscription>.json — every change in the lookback window labelled by origin (pipeline, deployment, manual deployment, direct edit, platform or unattributed), the before and after values of allowlisted settings changed outside a pipeline, and the deployment history the changes were matched against.
+    Output: azure_change_provenance_<subscription>.json — every change in the lookback window labelled by origin (pipeline, deployment, manual deployment, direct edit, platform or unattributed), the before and after values of allowlisted settings changed outside a pipeline, and the deployment history the changes were matched against, each deployment with its correlation id, run times, state, template hash and link, output resources, who ran it and its origin, plus the value settings in effect.
 
     Summary fields:
 
@@ -148,10 +148,10 @@ evidence_set:
     - in_scope_changes — Number of changes left after exclusions, the same as total_changes; null when a change table could not be read
 
     How many changes were made, and how?
-    - total_changes — Number of in-scope changes in the lookback window (at most 14 days, the length of Resource Graph's change history). A change that names its caller is matched to a deployment by correlation id; one with caller System or Unspecified takes the origin of the nearest named change to the same resource within 10 minutes, else of a deployment whose output resources include its target and whose run, with 10 minutes of slack, covers its timestamp
+    - total_changes — Number of in-scope changes in the lookback window (at most 14 days, the length of Resource Graph's change history). A change that names its caller is matched to a deployment by correlation id; one with no caller, or a caller or caller type of System or Unspecified, takes the origin of the nearest named change to the same resource within 10 minutes, else of a deployment whose output resources include its target and whose run, with 10 minutes of slack, covers its timestamp (manual_deployment when that deployment's matched changes were, or none matched and it is Portal-named); run it at least every 14 days
     - changes_via_deployment — Number of changes made by an ARM deployment run by an application or managed identity, or run by a configured pipeline_principals identity
     - changes_via_pipeline — Number of changes a configured pipeline_principals identity made outside any deployment, as Terraform and other tools that call ARM directly do
-    - manual_deployment_changes — Number of changes made by a deployment a person ran: the caller is a User, the client is the Azure Portal, or the deployment is named as a Portal create wizard names its own. A configured pipeline principal's deployment never counts here
+    - manual_deployment_changes — Number of changes made by a deployment a person ran: the caller is a User, the client is the Azure Portal, or the deployment is named as a Portal create wizard names its own. A configured pipeline principal's deployment never counts here; a missing template link isn't used as a signal, as CLI and pipeline runs of a local template have none either
     - direct_changes — Number of changes a named caller made outside any deployment or pipeline, such as from the portal or the CLI
     - platform_changes — Number of changes Azure itself made, recorded with caller or caller type System, that match no deployment
     - unattributed_changes — Number of changes with no recorded caller that match no deployment or nearby named change; Resource Graph restamps timestamps for hours, so a callerless change whose named partner has drifted past the window lands here or in platform_changes
@@ -181,4 +181,4 @@ evidence_set:
     - property_values_shown — Number of changed property values that passed both checks on those changes, counting any past a change's 25-entry listing; each is cut at 200 characters; null when any change's values couldn't be read or a change table couldn't be read
     - property_values_withheld_by_reason — Number of changed property values withheld on those changes for each reason; a withheld value shows only its path and the reason, never the value; null when any change's values couldn't be read or a change table couldn't be read:
       - not_allowlisted (not secret-looking, but its path isn't on the list of paths whose values are shown)
-      - secret (its path names a secret or free-form content, such as a password, key, token, connection string, header, body, environment variable or app setting, or its value looks like one, such as a password assignment, credential, JWT, key or URL with a user; checked first on every path, whatever value_paths lists)
+      - secret (its path names a secret or free-form content, such as a password, key, token, connection string, header, body, environment variable or app setting, or its value looks like one, such as a password assignment, credential, JWT, key or URL with a user; checked first on every path, whatever value_paths lists; true or false and Key Vault access-policy permission names are never secret; the check can't catch a short unmarked password or a secret in generic free-form content, so path:* shows whatever such content holds)

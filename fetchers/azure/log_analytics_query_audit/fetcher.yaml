@@ -88,9 +88,9 @@ evidence_set:
     - GET Microsoft.SecurityInsights/onboardingStates (per workspace) — whether Sentinel is on
     - GET Microsoft.Insights/diagnosticSettings (per workspace) — whether the Audit category is exported, and where
     - GET the audit destination workspace and its tables/LAQueryLogs (per workspace with a workspace destination) — the audit table's retention
-    - KQL on LAQueryLogs, run twice (per workspace with a workspace destination) — human and application queries per week, and queries per user; this fetcher's own queries are left out
+    - KQL on LAQueryLogs, run twice (per workspace with a workspace destination) — queries per week by people (a signed-in user, so AADEmail is set) and by applications, and queries per user; this fetcher's own queries are left out
 
-    Output: azure_log_analytics_query_audit_<subscription>.json — for each workspace, whether query auditing is on and where it goes, queries per week split into people and applications, and each user who queried with a count and last query, plus the workspaces left out and why.
+    Output: azure_log_analytics_query_audit_<subscription>.json — for each workspace, whether query auditing is on and where it goes, queries per week split into people and applications, and each user who queried with a count and last query, plus the workspaces left out and why; weeks that start before LAQueryLogs' retention read null (not retained) and never count as weeks without human queries.
 
     Summary fields:
 

@@ -77,7 +77,7 @@ evidence_set:
     - activity_log_alerts.list_by_subscription_id() — activity log alert rules and their conditions
     - GET Microsoft.Insights/actionGroups — action groups and their receivers
     - GET Microsoft.AlertsManagement/actionRules — processing rules that suppress or add action groups
-    - GET <action group id> (per group in another subscription) — its receivers
+    - GET <action group id> (per referenced action group not in the subscription's own list, such as one in another subscription; an id that isn't an action group path is never fetched) — its receivers
 
     Output: azure_activity_log_alerts_<subscription>.json — each activity log alert with the operations it fires on, the receivers it notifies (phone numbers cut to the last four digits, webhooks to their host) and whether it reaches a person, plus the operations it's judged against and the resources left out.
 
@@ -125,7 +125,7 @@ evidence_set:
     Do the alerts reach a person?
     - alerts_routing_to_enabled_receiver — Number of enabled alerts that always notify an action group that is enabled and has at least one enabled receiver (email and SMS receivers count only when their status is Enabled, so Disabled and NotSpecified send nothing)
     - alerts_routing_unknown — Number of enabled alerts where it's unknown whether they notify anyone, because an action group couldn't be read or a deliverable one is added only some of the time
-    - alerts_suppressed — Number of enabled alerts whose notifications an active suppression rule always switches off: one covering the alert's whole scope, with no conditions or schedule
+    - alerts_suppressed — Number of enabled alerts whose notifications an active suppression rule always switches off: one covering the alert's whole scope, with no conditions, and either no schedule or a one-off schedule window that is in force now
     - alerts_possibly_suppressed — Number of enabled alerts that a suppression rule might switch off: it covers only part of the alert's scope, has conditions, or has a schedule that can't be evaluated
     - alerts_reaching_human — Number of enabled alerts that notify a person (by email, SMS, voice call, app push, Azure role or ITSM ticket) and aren't suppressed
     - alerts_reaching_human_unknown — Number of enabled alerts where it's unknown whether they reach a person: they notify only code (webhooks, Logic Apps, Functions, runbooks or Event Hubs), an action group couldn't be read, or a suppression rule might apply

@@ -135,9 +135,9 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource, such as a mistyped name; null if the resource list couldn't be read
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource, such as a mistyped name; null if the resource list couldn't be read or Resource Graph returned no total
     - excluded_resources — Number of resources left out of scope because a pattern matched their resource group, region or id, a storage account's added services included; each is listed under excluded with the pattern, is not read, and no other count includes them
-    - in_scope_resources — Number of resources in scope and checked, the added storage services included, so it equals resources_evaluated; 0 means none was found or the patterns took out every resource, which a check can catch by requiring more than 0. resources_enumerated and resource_graph_total_records still count every resource Resource Graph returned, so they stay equal
+    - in_scope_resources — Number of resources in scope and checked, the added storage services included, so it equals resources_evaluated; 0 means none was found, the patterns took out every resource, or the resource list couldn't be read (resource_exclusion_patterns_unmatched is then null), which a check can catch by requiring more than 0. resources_enumerated and resource_graph_total_records still count every resource Resource Graph returned, so they stay equal
 
     Do resources export their logs?
     - resources_emitting_logs — Number of log-producing resources (resources whose type produces resource logs). A SQL server's master database counts like any database: its setting is where server-level auditing is exported, while the server itself has metrics only

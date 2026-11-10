@@ -60,7 +60,7 @@ evidence_set:
     - provider_registration_status — Whether the Azure Monitor provider (Microsoft.Insights) is registered on the subscription: registered, not_registered or unknown
 
     Is the Activity Log exported, and where to?
-    - activity_log_exported — True if the subscription has at least one diagnostic setting, whatever categories it turns on; false if it has none, so the Activity Log is kept 90 days and then discarded
+    - activity_log_exported — True if the subscription has at least one diagnostic setting, whatever categories it turns on; false if it has none, so the Activity Log is kept 90 days and then discarded; also false when the settings couldn't be read, with metadata.partial_failure true
     - settings_with_storage_account — Number of settings that send the Activity Log to a storage account
     - settings_with_log_analytics_workspace — Number of settings that send the Activity Log to a Log Analytics workspace
     - settings_with_event_hub — Number of settings that send the Activity Log to an event hub

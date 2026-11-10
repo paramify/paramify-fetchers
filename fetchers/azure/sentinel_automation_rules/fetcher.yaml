@@ -81,7 +81,7 @@ evidence_set:
     - GET Microsoft.SecurityInsights/onboardingStates (per workspace) — tells which workspaces have Sentinel on
     - GET Microsoft.SecurityInsights/automationRules (per Sentinel workspace) — each automation rule with its trigger, conditions and actions
 
-    Output: azure_sentinel_automation_rules_<subscription>.json — for each Sentinel workspace, every automation rule with its order, trigger, conditions (counted, not copied), actions and who last changed it, plus the playbooks active rules run and the workspaces left out of scope.
+    Output: azure_sentinel_automation_rules_<subscription>.json — for each Sentinel workspace, every automation rule with its order, trigger, conditions (property and operator, with values counted rather than copied), actions (a playbook's Logic App id, the status, severity, classification or owner set, or the task added) and who created and last changed it, plus each workspace's active rules, active actions by type and the playbooks they run, and the workspaces left out of scope.
 
     Summary fields:
 
