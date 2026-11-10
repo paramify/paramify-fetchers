@@ -2102,6 +2102,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_policy_compliance` 0.6.0: unread reads give null counts, and an
+  unread remediation task can no longer read as complete.**
+  - `deployments_complete` could read true on a run that missed a task's
+    deployment list: a later task's read replaced the record of unread tasks.
+    A task whose deployments could not be listed now keeps it false.
+  - A remediation task at a scope the fetcher doesn't recognise now fails the
+    run, where before it was skipped with only a log line.
+  - When the compliance summary could not be read, `non_compliant_resources`,
+    `non_compliant_policies`, `compliant_resources`, `resources_evaluated`,
+    `resource_compliance_percentage`, `assignments_evaluated`,
+    `non_compliant_assignments` and `compliant_assignments` read null, not 0.
+    When the remediation task list could not be read, `remediation_tasks`,
+    `remediation_tasks_by_provisioning_state` and the two deployment totals
+    read null, not 0. With the provider not registered they still read 0.
+
 - **Azure resource exclusions: `resource_exclusion_patterns_unmatched` is null
   when a resource list was not read.** Before, a list that failed (or had no
   credential or subscription) left every configured pattern in the field and

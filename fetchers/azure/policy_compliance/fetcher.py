@@ -647,8 +647,10 @@ def summarize(
     states: list[dict],
     states_truncated: bool,
     remediations: list[dict],
+    summary_read: bool = True,
+    tasks_read: bool = True,
 ) -> dict:
-    """Subscription-wide counts first (from the service), then what was itemized."""
+    """Subscription-wide counts first (from the service), then what was itemized; null where the read failed."""
     compliant, non_compliant = compliant_resource_counts(
         subscription_results.get("resource_details")
     )
@@ -658,19 +660,21 @@ def summarize(
         by_state[key] = by_state.get(key, 0) + 1
     return {
         # --- the headline: the service's own subscription-wide counts ---
-        "non_compliant_resources": subscription_results.get("non_compliant_resources") or 0,
-        "non_compliant_policies": subscription_results.get("non_compliant_policies") or 0,
-        "compliant_resources": compliant,
+        "non_compliant_resources": (subscription_results.get("non_compliant_resources") or 0) if summary_read else None,
+        "non_compliant_policies": (subscription_results.get("non_compliant_policies") or 0) if summary_read else None,
+        "compliant_resources": compliant if summary_read else None,
         # Zero here means nothing was evaluated in the window, which is what tells
         # "0 non-compliant" (a finding) from "0 non-compliant, nothing assessed".
-        "resources_evaluated": sum((subscription_results.get("resource_details") or {}).values()),
-        "resource_compliance_percentage": coverage_percentage(compliant, compliant + non_compliant),
+        "resources_evaluated": sum((subscription_results.get("resource_details") or {}).values())
+        if summary_read else None,
+        "resource_compliance_percentage": coverage_percentage(compliant, compliant + non_compliant)
+        if summary_read else None,
         "resources_by_compliance_state": subscription_results.get("resource_details") or {},
         "policies_by_compliance_state": subscription_results.get("policy_details") or {},
         # --- per assignment ---
-        "assignments_evaluated": len(assignments),
-        "non_compliant_assignments": sum(1 for a in assignments if not a["is_compliant"]),
-        "compliant_assignments": sum(1 for a in assignments if a["is_compliant"]),
+        "assignments_evaluated": len(assignments) if summary_read else None,
+        "non_compliant_assignments": sum(1 for a in assignments if not a["is_compliant"]) if summary_read else None,
+        "compliant_assignments": sum(1 for a in assignments if a["is_compliant"]) if summary_read else None,
         # --- the itemized list ---
         "listed_non_compliant_states": len(states),
         "listed_distinct_non_compliant_resources": len(
@@ -678,12 +682,12 @@ def summarize(
         ),
         "non_compliant_states_truncated": states_truncated,
         # --- remediation ---
-        "remediation_tasks": len(remediations),
-        "remediation_tasks_by_provisioning_state": dict(sorted(by_state.items())),
-        "remediation_failed_deployments": sum(r.get("failed_deployments") or 0 for r in remediations),
-        "remediation_successful_deployments": sum(
-            r.get("successful_deployments") or 0 for r in remediations
-        ),
+        "remediation_tasks": len(remediations) if tasks_read else None,
+        "remediation_tasks_by_provisioning_state": dict(sorted(by_state.items())) if tasks_read else None,
+        "remediation_failed_deployments": sum(r.get("failed_deployments") or 0 for r in remediations)
+        if tasks_read else None,
+        "remediation_successful_deployments": sum(r.get("successful_deployments") or 0 for r in remediations)
+        if tasks_read else None,
     }
 
 
@@ -888,6 +892,8 @@ def config_limit(env: str, default: int) -> int:
 def empty_collection() -> dict:
     return {
         "subscription_results": project_summary_results(None),
+        "summary_read": False,
+        "tasks_read": False,
         "assignments": [],
         "states": [],
         "states_truncated": False,
@@ -1123,7 +1129,9 @@ def collect_remediation_deployments(
         kind, scope = remediation_scope(task.get("id"))
         name = task.get("name")
         if kind not in listers:
-            logger.warning("remediation %s has an unrecognised scope; deployments not read", task.get("id"))
+            collector.record(
+                f"policyinsights.remediations.list_deployments (scope of {task.get('id')})",
+                ValueError("remediation scope not recognised; its deployments were not read"))
             unread.append(task.get("id"))
             continue
 
@@ -1154,9 +1162,9 @@ def collect_remediation_deployments(
                   arm_id_key(task.get("policy_definition_reference_id")))
         read = read_by_policy.setdefault(policy, set())
         current = current_by_policy.setdefault(policy, {})
-        unread = sorted({arm_id_key(d.get("remediated_resource_id")) for d in rows} - read - {""})
-        for at in range(0, len(unread), RESOURCE_FILTER_BATCH):
-            batch = unread[at:at + RESOURCE_FILTER_BATCH]
+        to_read = sorted({arm_id_key(d.get("remediated_resource_id")) for d in rows} - read - {""})
+        for at in range(0, len(to_read), RESOURCE_FILTER_BATCH):
+            batch = to_read[at:at + RESOURCE_FILTER_BATCH]
             read.update(batch)
             current.update(collector.guard(
                 f"policyinsights.policy_states.list_query_results_for_subscription (remediated {name})",
@@ -1203,6 +1211,7 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
         )
 
     summarized = collector.guard("policyinsights.policy_states.summarize_for_subscription", _summarize)
+    collected["summary_read"] = summarized is not None
     subscription_results, assignments = summarized or (collected["subscription_results"], [])
     # Only assignments made inside an excluded group or resource go; the service's counts can't be split by resource.
     assignments, excluded = exclusions.split(
@@ -1240,6 +1249,7 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
         "policyinsights.remediations.list_for_subscription",
         lambda: [project_remediation(r) for r in client.remediations.list_for_subscription()],
     )
+    collected["tasks_read"] = listed_tasks is not None
     remediations, excluded_tasks = exclusions.split(listed_tasks or [], "remediation_task")
     # The service's counts can't be split by resource, so with patterns they are recounted from every latest pair.
     latest_pairs, latest_status = (collect_latest_pairs(client, subscription_id, collector, exclusions)
@@ -1271,6 +1281,8 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
     )
     return {
         "subscription_results": subscription_results,
+        "summary_read": collected["summary_read"],
+        "tasks_read": collected["tasks_read"],
         "assignments": sorted(assignments, key=lambda a: a.get("policy_assignment_id") or ""),
         "states": sorted(
             states,
@@ -1361,6 +1373,9 @@ def main() -> int:
             collected["states"],
             collected["states_truncated"],
             collected["remediations"],
+            # Nothing is read when the provider is unregistered, which is "not in use": 0, not unknown.
+            summary_read=collected["summary_read"] or registration == NOT_REGISTERED,
+            tasks_read=collected["tasks_read"] or registration == NOT_REGISTERED,
         ),
         **summarize_evaluation_details(collected["states"], collected["details"]),
     }
