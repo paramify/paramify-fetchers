@@ -767,7 +767,7 @@ def test_collect_vnet_read_failure_leaves_targets_and_coverage_unknown(monkeypat
     monkeypatch.setattr(flow, "project_watcher", lambda w: dict(w))
     monkeypatch.setattr(flow, "project_flow_log", lambda f: dict(f))
     collector = _collector()
-    watchers, flow_logs, vnets = flow.collect(SUB.split("/")[-1], object(), collector)
+    watchers, flow_logs, vnets, _ = flow.collect(SUB.split("/")[-1], object(), collector)
     assert vnets is None
     assert flow_logs[0]["target_attached"] is None  # never "unattached" because the VNet list failed
     assert not collector.ok
@@ -782,6 +782,45 @@ def test_summary_with_unread_vnets_is_unknown_not_zero():
     assert summary["virtual_networks_read"] is False
     assert summary["total_virtual_networks"] is None and summary["virtual_networks_not_covered"] is None
     assert summary["enabled_flow_logs_target_unknown"] == 1
+
+
+def _read_summary(monkeypatch, watchers, list_logs):
+    client = _Client(
+        network_watchers=_Group(list_all=watchers),
+        flow_logs=_Group(list=list_logs),
+    )
+    _fake_module(monkeypatch, "azure.mgmt.network", NetworkManagementClient=lambda **k: client)
+    monkeypatch.setattr(flow, "project_watcher", lambda w: dict(w))
+    monkeypatch.setattr(flow, "project_flow_log", lambda f: dict(f))
+    collector = _collector()
+    watchers, flow_logs, vnets, logs_read = flow.collect(SUB.split("/")[-1], object(), collector)
+    return flow.summarize(watchers, flow_logs or [], vnets, logs_read), collector
+
+
+def test_unread_watcher_list_gives_null_flow_log_counts(monkeypatch):
+    summary, collector = _read_summary(monkeypatch, _raise(RuntimeError("(403) AuthorizationFailed")), lambda rg, n: [])
+    assert not collector.ok
+    for key in flow.FLOW_LOG_KEYS + ("enabled_flow_logs_retained_under_90_days", "total_network_watchers"):
+        assert summary[key] is None, key
+
+
+def test_one_failed_watcher_flow_log_list_gives_null_flow_log_counts(monkeypatch):
+    w = lambda n, loc: {"id": f"{SUB}/resourceGroups/nw/providers/Microsoft.Network/networkWatchers/{n}", "name": n, "location": loc}  # noqa: E731
+    log = {"id": "fl1", "name": "fl1", "target_resource_id": "x", "target_type": "virtual_network", "enabled": True,
+           "retention_days": 30, "retained_indefinitely": False, "legacy_nsg_flow_log": False,
+           "enabled_filtering_criteria": None, "traffic_analytics_enabled": False,
+           "traffic_analytics_interval_minutes": None}
+
+    def list_logs(rg, name):
+        if name == "w2":
+            raise RuntimeError("(403) AuthorizationFailed")
+        return [log]
+
+    summary, collector = _read_summary(monkeypatch, lambda: [w("w1", "eastus"), w("w2", "westus")], list_logs)
+    assert not collector.ok
+    assert summary["total_network_watchers"] == 2
+    for key in flow.FLOW_LOG_KEYS:
+        assert summary[key] is None, key
 
 
 # --- ai_services_configuration ----------------------------------------------- #

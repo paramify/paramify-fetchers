@@ -229,8 +229,20 @@ def vnet_record(vnet: dict, enabled_by_target: dict, uncertain_regions: set, wat
     }
 
 
-def summarize(watchers, flow_logs, vnet_records) -> dict:
-    """`vnet_records` is None when the VNet list could not be read; its coverage figures are then null."""
+FLOW_LOG_KEYS = (
+    "total_flow_logs", "enabled_flow_logs", "disabled_flow_logs", "flow_logs_by_target_type", "legacy_nsg_flow_logs",
+    "vnet_flow_logs", "enabled_flow_logs_filtered", "enabled_flow_logs_on_unattached_targets",
+    "enabled_flow_logs_with_traffic_analytics", "enabled_flow_logs_traffic_analytics_every_10_minutes",
+    "enabled_flow_logs_retained_indefinitely", "minimum_retention_days", "enabled_flow_logs_target_unknown",
+)
+
+
+def summarize(watchers, flow_logs, vnet_records, logs_read: bool = True) -> dict:
+    """`vnet_records` is None when the VNet list could not be read; its coverage figures are then null. `watchers` is
+    None, and `logs_read` False, when the watcher list or any watcher's flow-log list was not read: every figure built
+    from the flow logs is then null."""
+    watcher_count = None if watchers is None else len(watchers)
+    watchers = watchers or []
     vnets = vnet_records or []
     enabled = [f for f in flow_logs if f["enabled"]]
     subnets = [s for v in vnets for s in v["subnets"]]
@@ -242,7 +254,7 @@ def summarize(watchers, flow_logs, vnet_records) -> dict:
         return sum(1 for i in items if pred(i))
 
     summary = {
-        "total_network_watchers": len(watchers),
+        "total_network_watchers": watcher_count,
         "regions_with_virtual_networks": sorted({v["location"] for v in vnets}),
         # Populated only when the watcher list was read; a failed read never reads as "missing".
         "regions_with_virtual_networks_without_network_watcher": missing_watcher,
@@ -304,6 +316,9 @@ def summarize(watchers, flow_logs, vnet_records) -> dict:
         summary[f"enabled_flow_logs_retained_under_{days}_days"] = count(
             enabled, lambda f, days=days: f["retention_days"] is not None and f["retention_days"] < days
         )
+    if not logs_read:
+        for key in (*FLOW_LOG_KEYS, *(f"enabled_flow_logs_retained_under_{d}_days" for d in RETENTION_THRESHOLDS)):
+            summary[key] = None
     return summary
 
 
@@ -341,12 +356,12 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
 
     client = collector.guard("network.NetworkManagementClient (init)", _client)
     if client is None:
-        return None, None, None
+        return None, None, None, False
     watchers = collector.guard(
         "network.network_watchers.list_all",
         lambda: [project_watcher(w) for w in client.network_watchers.list_all()],
     )
-    flow_logs, uncertain_regions = [], set()
+    flow_logs, uncertain_regions, logs_read = [], set(), watchers is not None
     for watcher in watchers or []:
         rg = resource_group_from_id(watcher["id"])
         logs = collector.guard(
@@ -355,6 +370,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
         )
         if logs is None:
             uncertain_regions.add(watcher["location"])
+            logs_read = False
         else:
             flow_logs.extend(logs)
     vnets = collector.guard(
@@ -400,7 +416,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
         flow_logs, out_logs = split_flow_logs(flow_logs, out_vnets + out_subnets, exclusions)
         if excluded is not None:
             excluded += out_watchers + out_logs + out_vnets + out_subnets
-    return (watchers, flow_logs, records) if listed else (None, None, records)
+    return (watchers, flow_logs, records, logs_read) if listed else (None, None, records, False)
 
 
 def main() -> int:
@@ -421,6 +437,7 @@ def main() -> int:
     watchers: list | None = None
     flow_logs: list | None = None
     vnets: list | None = None
+    logs_read = False
     registration = REGISTRATION_UNKNOWN
     excluded: list = []
     exclusions = ResourceExclusions.from_env()
@@ -432,7 +449,7 @@ def main() -> int:
                 "Microsoft.Network is not registered on subscription %s — reporting status not_registered",
                 subscription_id,
             )
-        watchers, flow_logs, vnets = collect(subscription_id, cred, collector, exclusions, excluded)
+        watchers, flow_logs, vnets, logs_read = collect(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -442,7 +459,7 @@ def main() -> int:
             ),
         )
 
-    if any(r is None for r in (watchers, flow_logs, vnets)):
+    if not logs_read or any(r is None for r in (watchers, flow_logs, vnets)):
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     evidence = build_payload(
@@ -457,11 +474,11 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(watchers or [], flow_logs or [], vnets),
+            **summarize(watchers, flow_logs or [], vnets, logs_read),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("network_watcher", "flow_log", "virtual_network", "subnet"), {
                 "network_watchers": None if watchers is None else len(watchers),
-                "flow_logs": None if flow_logs is None else len(flow_logs),
+                "flow_logs": len(flow_logs) if logs_read and flow_logs is not None else None,
                 "virtual_networks": None if vnets is None else len(vnets),
                 "subnets": None if vnets is None else sum(len(v["subnets"]) for v in vnets)}),
         },
