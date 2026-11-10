@@ -2118,6 +2118,13 @@ schemas and the `paramify` CLI — not the internal code.
     read null, not 0. `listed_non_compliant_states` and
     `listed_distinct_non_compliant_resources` read null when the non-compliant
     states query failed. With the provider not registered they still read 0.
+  - With a `resource_exclusions` pattern set and the summary unread,
+    `non_compliant_assignments` and `compliant_assignments` read null, not 0.
+  - When the task list or any task's deployment list was not read,
+    `remediation_deployments_listed`, `remediation_deployments_by_status` and
+    the `remediated_resources_*` counts (and
+    `succeeded_remediations_now_non_compliant`) read null, not counts over the
+    partial list.
 
 - **Azure resource exclusions: `resource_exclusion_patterns_unmatched` is null
   when a resource list was not read.** Before, a list that failed (or had no

@@ -785,7 +785,8 @@ def in_scope_compliance(results: dict, assignments: list[dict], pairs: list[dict
     )
 
 
-def in_scope_summary(results: dict, assignments: list[dict], deployments: list[dict] | None) -> dict:
+def in_scope_summary(results: dict, assignments: list[dict], deployments: list[dict] | None,
+                     summary_read: bool = True) -> dict:
     """The summary fields recounted over in-scope records; deployments is None when that list is incomplete."""
     known = results.get("non_compliant_resources") is not None
     details = results.get("resource_details") or {}
@@ -799,8 +800,11 @@ def in_scope_summary(results: dict, assignments: list[dict], deployments: list[d
         "resource_compliance_percentage": coverage_percentage(compliant, compliant + non_compliant) if known else None,
         "resources_by_compliance_state": details,
         "policies_by_compliance_state": results.get("policy_details") or {},
-        "non_compliant_assignments": sum(1 for a in assignments if a["is_compliant"] is False) if known else None,
-        "compliant_assignments": sum(1 for a in assignments if a["is_compliant"]) if known else None,
+        # The assignment list comes from the summary, so an unread summary leaves it empty, not zero.
+        "non_compliant_assignments": (
+            sum(1 for a in assignments if a["is_compliant"] is False) if known and summary_read else None),
+        "compliant_assignments": (
+            sum(1 for a in assignments if a["is_compliant"]) if known and summary_read else None),
         "remediation_failed_deployments": statuses["failed"] if deployments is not None else None,
         "remediation_successful_deployments": statuses["succeeded"] if deployments is not None else None,
     }
@@ -845,10 +849,11 @@ def summarize_recurrence(
     }
 
 
-def summarize_remediation_deployments(deployments: list[dict], truncated: bool) -> dict:
-    """Deployments by status; the remediated_* counts are per resource, its latest deployment deciding."""
+def summarize_remediation_deployments(deployments: list[dict], truncated: bool, complete: bool = True) -> dict:
+    """Deployments by status; the remediated_* counts are per resource, its latest deployment deciding.
+    Null where the task list or a task's deployment list was not read, so a partial list can't read as 0."""
     resources = latest_deployment_per_resource(deployments)
-    return {
+    summary = {
         "remediation_deployments_listed": len(deployments),
         "remediation_deployments_truncated": truncated,
         "remediation_deployments_by_status": sorted_counts(
@@ -873,6 +878,11 @@ def summarize_remediation_deployments(deployments: list[dict], truncated: bool) 
             if d["now_compliant"] is None and d.get("reevaluated_since_deployment") is not False
         ),
     }
+    if not complete:
+        for key in summary:
+            if key != "remediation_deployments_truncated":
+                summary[key] = None
+    return summary
 
 
 def config_limit(env: str, default: int) -> int:
@@ -1395,7 +1405,8 @@ def main() -> int:
         deployments_known = (limits["remediation_deployments"] > 0 and collected["deployments_complete"]
                              and not collected["deployments_truncated"])
         summary.update(in_scope_summary(subscription_results, assignments,
-                                        collected["deployments"] if deployments_known else None))
+                                        collected["deployments"] if deployments_known else None,
+                                        summary_read=collected["summary_read"]))
     summary["in_scope_states_status"] = collected["latest_pairs_status"]
     recurrence = collected["recurrence"]
     evidence = build_payload(
@@ -1426,7 +1437,8 @@ def main() -> int:
                 recurrence["pairs_truncated"], recurrence["history_collected"],
             ),
             **summarize_remediation_deployments(
-                collected["deployments"], collected["deployments_truncated"]
+                collected["deployments"], collected["deployments_truncated"],
+                complete=collected["deployments_complete"] or registration == NOT_REGISTERED,
             ),
             "provider_registration_status": registration,
             **exclusions.summary(collected["excluded"], EXCLUDED_KINDS, {

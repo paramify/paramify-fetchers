@@ -948,6 +948,34 @@ def test_listed_state_counts_are_null_when_the_states_query_fails(monkeypatch, t
     assert summary["listed_distinct_non_compliant_resources"] is None
 
 
+DEPLOYMENT_COUNTS = ("remediation_deployments_listed", "remediation_deployments_by_status",
+                     "remediated_resources_listed", "remediated_resources_now_compliant",
+                     "remediated_resources_now_non_compliant", "succeeded_remediations_now_non_compliant",
+                     "remediated_resources_not_yet_reevaluated", "remediated_resources_compliance_unknown")
+
+
+def test_deployment_counts_are_null_when_a_deployment_list_was_not_read(monkeypatch, tmp_path):
+    summary = _run_main(monkeypatch, tmp_path, {**fx.empty_collection(), "tasks_read": True})
+    assert all(summary[k] is None for k in DEPLOYMENT_COUNTS)
+    assert summary["remediation_deployments_truncated"] is False
+
+
+def test_deployment_counts_read_zero_when_every_list_was_read(monkeypatch, tmp_path):
+    summary = _run_main(monkeypatch, tmp_path, {**fx.empty_collection(), "deployments_complete": True})
+    assert all(summary[k] in (0, {}) for k in DEPLOYMENT_COUNTS)
+    summary = _run_main(monkeypatch, tmp_path, fx.empty_collection(), registration=fx.NOT_REGISTERED)
+    assert all(summary[k] in (0, {}) for k in DEPLOYMENT_COUNTS)
+
+
+def test_assignment_counts_are_null_with_patterns_when_the_summary_was_not_read(monkeypatch, tmp_path):
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:other")
+    pair = {"resource_id": VM, "policy_assignment_id": ASSIGN, "policy_definition_id": DEF,
+            "policy_definition_reference_id": "r1", "compliance_state": "noncompliant"}
+    collected = {**fx.empty_collection(), "latest_pairs": [pair], "latest_pairs_status": fx.LATEST_READ}
+    summary = _run_main(monkeypatch, tmp_path, collected)
+    assert summary["non_compliant_assignments"] is None and summary["compliant_assignments"] is None
+
+
 def test_listed_state_counts_read_zero_when_the_list_was_read_and_empty(monkeypatch, tmp_path):
     summary = _run_main(monkeypatch, tmp_path, {**fx.empty_collection(), "states_read": True})
     assert summary["listed_non_compliant_states"] == 0
