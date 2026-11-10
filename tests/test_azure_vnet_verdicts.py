@@ -708,12 +708,12 @@ def _out_group(*rules):
     return {"security_rules": list(rules), "default_security_rules": [_DEFAULT_ALLOW]}
 
 
-@pytest.mark.parametrize("source", ["*", "0.0.0.0/0", "Internet", "VirtualNetwork"])
+@pytest.mark.parametrize("source", ["*", "0.0.0.0/0", "VirtualNetwork"])
 def test_catch_all_deny_with_a_covering_source_restricts_egress(source):
     assert nsg.unrestricted_internet_outbound(_out_group(_out_rule(100, "Deny", source=source))) is False
 
 
-@pytest.mark.parametrize("source", ["10.0.1.0/24", "10.0.0.0/8", "AzureLoadBalancer"])
+@pytest.mark.parametrize("source", ["10.0.1.0/24", "10.0.0.0/8", "AzureLoadBalancer", "Internet"])
 def test_source_limited_deny_leaves_egress_unrestricted(source):
     assert nsg.unrestricted_internet_outbound(_out_group(_out_rule(100, "Deny", source=source))) is True
 

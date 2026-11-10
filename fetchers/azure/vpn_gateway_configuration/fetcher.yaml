@@ -1,5 +1,5 @@
 name: azure_vpn_gateway_configuration
-version: 0.2.2
+version: 0.3.0
 description: >-
   Shows each VPN gateway's type, SKU and point-to-site setup, and whether each site-to-site or VNet-to-VNet connection uses IKEv2 and strong IPsec algorithms.
 category: azure

@@ -49,8 +49,7 @@ logger = logging.getLogger("azure_network_security_groups")
 # protocol", kept as literals so the summary math matches what Prowler would flag.
 INTERNET_SOURCE_PREFIXES = ("Internet", "*", "0.0.0.0/0")
 ANY_TCP_PROTOCOLS = ("TCP", "Tcp", "*")
-# A rule's source that covers every address a workload sends from, and a port range that covers every port.
-ANY_SOURCE_PREFIXES = ("*", "0.0.0.0/0", "Internet", "VirtualNetwork")
+# A port range that covers every port.
 ALL_PORTS = ("*", "0-65535")
 
 # The admin ports the summary counts Internet exposure for.
@@ -324,7 +323,7 @@ def _is_catch_all_internet_outbound(rule: dict) -> bool:
 
 
 def _source_covers_everything(rule: dict) -> bool:
-    return any(s in ANY_SOURCE_PREFIXES for s in _sources(rule))
+    return any(s in EVERY_SUBNET for s in _sources(rule))
 
 
 def unrestricted_internet_outbound(group: dict) -> bool:
