@@ -225,10 +225,12 @@ CONFIGS = (_x509(), _method("Sms"), _method("MicrosoftAuthenticator", include=("
            _method("Email"), _method("Voice", state="disabled"))
 
 
-def test_targeted_users_are_matched_to_certificates_and_their_weaker_methods_listed(monkeypatch, tmp_path):
+def test_targeted_users_are_matched_to_certificates_and_their_weaker_methods_listed(
+        monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, calls = run(monkeypatch, tmp_path, CONFIGS)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0
+    assert_summary_documented("azure/entra_authentication_policy", summary)
     # Guests, disabled accounts, excluded members and users outside the target groups are not targeted.
     users = {u["id"]: u for u in results["x509_certificate_users"]}
     assert sorted(users) == ["u1", "u2", "u7"]

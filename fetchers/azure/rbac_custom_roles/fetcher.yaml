@@ -1,14 +1,7 @@
 name: azure_rbac_custom_roles
 version: 0.2.2
-description: >
-  Every custom Azure RBAC role definition in the subscription with its assignable
-  scopes and its full permission set — control-plane actions and notActions, data-plane
-  dataActions and notDataActions — flagged for wildcard breadth and for the permissions
-  that let a holder escalate its own privileges (writing role assignments, rewriting
-  role definitions, writing deny assignments). Wildcards are matched with Azure's own
-  semantics, where `*` spans `/`, and notActions is subtracted, so a role granting `*`
-  minus the authorization writes is reported as Contributor-equivalent rather than as
-  an Owner.
+description: >-
+  Lists every custom Azure role in the subscription with its permissions, flagging wildcards and permissions that let a holder grant itself more access.
 category: azure
 
 supports_targets: true
@@ -74,22 +67,48 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-RBAC-CUSTOM-ROLES
   name: Azure RBAC Custom Role Definitions
-  instructions: >
-    Script: azure/rbac_custom_roles/fetcher.py. Azure SDK calls (azure-mgmt-authorization
-    AuthorizationManagementClient):
-    role_definitions.list(scope="/subscriptions/{id}"), reading assignableScopes and
-    permissions[{actions, notActions, dataActions, notDataActions}]; and
-    resource.providers.get for Microsoft.Authorization.
-    Custom roles the resource_exclusions patterns take out (every assignable
-    scope excluded) are listed under results.excluded instead, with reason
-    all_scopes_matched and matched_scopes naming each scope and its pattern; every
-    custom-role count and percentage covers only the roles left, while
-    total_role_definitions counts every role read (built-in, in-scope and
-    excluded custom roles). The summary gives resource_exclusion_patterns (the
-    configured patterns, empty when none are set),
-    resource_exclusion_patterns_unmatched (patterns that matched no assignable
-    scope of a role whose scopes are all resource groups or resources, such as a
-    mistyped name; null when the role list could not be read), excluded_custom_roles (how many the patterns took out; no
-    other count includes them) and in_scope_custom_roles (how many stayed, the
-    same as custom_role_definitions); both are null when the role list couldn't
-    be read.
+  instructions: |
+    Script: azure/rbac_custom_roles/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.Authorization — whether the provider is registered
+    - role_definitions.list() at the subscription scope — every built-in and custom role with its assignable scopes and its actions, notActions, dataActions and notDataActions; custom roles defined at a management group above the subscription are not returned
+
+    Output: azure_rbac_custom_roles_<subscription>.json — each custom role with where it can be assigned, its management and data permissions, its wildcards, and whether it can grant itself more access, plus the escalation permissions checked; custom roles the resource_exclusions patterns take out are listed under excluded instead, each with the pattern that matched every assignable scope.
+
+    Summary fields:
+
+    What was checked?
+    - total_role_definitions — Number of role definitions listed for the subscription, built-in, custom and excluded; 0 when the list could not be read
+    - builtin_role_definitions — Number of built-in role definitions; above 0 shows the list was read even when there are no custom roles
+    - custom_role_definitions — Number of custom role definitions in scope; every count and percentage below covers only these
+    - provider_registration_status — Whether Microsoft.Authorization is registered on the subscription: registered, not_registered or unknown
+
+    Which custom roles are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg: or id:; a location: pattern never matches, since an assignable scope carries no region); empty when none are set, so every role is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no assignable scope of a role whose scopes are all resource groups or resources, such as a mistyped name, or null when the role list could not be read
+    - excluded_custom_roles — Number of custom roles a pattern took out because every assignable scope is a resource group or resource it matches, each listed under excluded with each scope and its pattern; no other count includes them, and a role that may also be assigned on the subscription, a management group, the tenant root or an in-scope resource group stays; null if the role list could not be read
+    - in_scope_custom_roles — Number of custom roles that stayed in scope, the same as custom_role_definitions; null if the role list could not be read
+
+    Can a custom role grant its holder more access?
+    - custom_roles_with_privilege_escalation — Number of custom roles that grant at least one escalation permission: writing role assignments, role definitions or deny assignments. A role grants a permission when one of its actions matches it, with * matching any text including / (so */write and Microsoft.Authorization/* both match), and no notAction in the same permission block removes it; data actions are not checked
+    - custom_roles_that_can_assign_roles — Number of custom roles that grant Microsoft.Authorization/roleAssignments/write, so a holder can assign any role, Owner included, to anyone
+    - custom_roles_that_can_write_role_definitions — Number of custom roles that grant Microsoft.Authorization/roleDefinitions/write, so a holder can rewrite a role it already holds
+    - custom_roles_with_escalation_names — List of the names of custom roles that grant an escalation permission
+
+    How broad are custom roles?
+    - custom_roles_with_wildcard_actions — Number of custom roles with * anywhere in an action or data action, such as *, */read or Microsoft.Compute/*
+    - custom_roles_with_all_actions_wildcard — Number of custom roles with an action of exactly * (every management action)
+    - owner_equivalent_custom_roles — Number of custom roles with an action of * that still grant writing role assignments, which makes them equal to Owner
+    - contributor_equivalent_custom_roles — Number of custom roles with an action of * whose notActions remove writing role assignments, which makes them equal to Contributor
+    - custom_roles_with_data_actions — Number of custom roles with at least one data action (access to data inside resources, such as blobs or secrets)
+    - custom_roles_with_not_actions — Number of custom roles that subtract permissions with notActions or notDataActions
+    - custom_roles_with_root_assignable_scope — Number of custom roles assignable at the root scope (/), anywhere in the tenant
+    - custom_roles_administering_resource_locks — Number of custom roles that grant Microsoft.Authorization/locks/delete, so a holder can remove the locks that stop resources being deleted
+
+    How many custom roles follow least privilege?
+    - least_privilege_custom_roles — Number of custom roles with no * in any action or data action and no escalation permission
+    - least_privilege_percentage — Percentage of custom roles that are least-privilege = least_privilege_custom_roles / custom_role_definitions × 100 (a whole number, 0–100); 0 when custom_role_definitions is 0

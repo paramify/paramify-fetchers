@@ -2610,10 +2610,11 @@ EXTRA_ARM = {
 }
 
 
-def test_entra_diagnostic_settings(azure, tmp_path):
+def test_entra_diagnostic_settings(azure, tmp_path, assert_summary_documented):
     code, ev = run("entra_diagnostic_settings", tmp_path)
     assert code == 0
     s = ev["summary"]
+    assert_summary_documented("azure/entra_diagnostic_settings", s)
     assert s["key_categories_to_sentinel"] == {"AuditLogs": True, "SignInLogs": True}
     assert s["audit_and_signin_logs_to_sentinel"] is True and s["categories_not_exported"] == ["ProvisioningLogs"]
     coverage = {c["category"]: c for c in ev["results"]["category_coverage"]}
