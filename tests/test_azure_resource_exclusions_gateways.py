@@ -384,6 +384,20 @@ def test_flow_logs_without_patterns_adds_only_empty_exclusion_fields(monkeypatch
     }
 
 
+def test_flow_logs_summary_is_documented(monkeypatch, tmp_path, assert_summary_documented):
+    client, _ = _flow_client()
+    listed = client.flow_logs.list
+    extra = [NS(id=f"{NET_IN}/networkWatchers/w-in/flowLogs/{name}", name=name, location="regionwest", enabled=True,
+                target_resource_id=f"{NET_IN}/{kind}/x", retention_policy=None, format=None,
+                flow_analytics_configuration=None, storage_id=None, enabled_filtering_criteria=None)
+             for name, kind in (("fl-nsg", "networkSecurityGroups"), ("fl-other", "applicationGateways"))]
+    client.flow_logs = NS(list=lambda rg, name: listed(rg, name) + (extra if name == "w-in" else []))
+    _fake_azure(monkeypatch, client)
+    _environment(flow, monkeypatch, tmp_path, None)
+    assert flow.main() == 0
+    assert_summary_documented("azure/network_flow_logs", _read(tmp_path, "azure_network_flow_logs")["summary"])
+
+
 def test_flow_logs_exclusions_follow_targets_and_keep_coverage_verdicts(monkeypatch, tmp_path):
     def patterns(vnet_two):
         return (f"rg:rg-out, id:{NET_IN}/virtualNetworks/vnet-in/subnets/data, id:{vnet_two}/subnets/s2, "
