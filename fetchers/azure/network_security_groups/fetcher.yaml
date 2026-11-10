@@ -130,7 +130,7 @@ evidence_set:
     - nic_nsg_coverage_percentage — Percentage of network interfaces filtered by a group on the interface or its subnet = (total_network_interfaces - nics_without_any_nsg) / total_network_interfaces × 100 (rounded down to a whole number); 0 when total_network_interfaces is 0
 
     Can workload subnets reach each other on every port?
-    - workload_subnets_by_east_west_segmentation — Number of workload subnets for each east-west result; GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet, AzureFirewallManagementSubnet and RouteServerSubnet are left out, and a pair is judged from both subnets' groups, so an Allow that covers every port opens it and a Deny that covers every port and protocol segments it:
+    - workload_subnets_by_east_west_segmentation — Number of workload subnets for each east-west result; GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet, AzureFirewallManagementSubnet and RouteServerSubnet are left out, and a pair is judged from both subnets' groups, so an Allow that covers every port opens it and a Deny that covers every port and protocol segments it; network interface groups (which can only narrow a pair), traffic within one subnet and peered networks are not considered:
       - segmented (no other workload subnet in its network reaches it on every port)
       - partial (some other subnets reach it on every port)
       - unsegmented (every other workload subnet reaches it on every port)

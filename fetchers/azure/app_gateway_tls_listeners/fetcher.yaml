@@ -103,7 +103,7 @@ evidence_set:
     - public_plaintext_listeners — Number of plaintext_listeners on a frontend IP configuration that carries a public IP
 
     Do encrypted listeners require TLS 1.2 or later?
-    - listeners_below_tls12 — Number of encrypted listeners whose effective minimum TLS version is TLS 1.0 or 1.1; the policy comes from the listener's SSL profile, else the gateway, else the platform default
+    - listeners_below_tls12 — Number of encrypted listeners whose effective minimum TLS version is TLS 1.0 or 1.1; the policy comes from the listener's SSL profile, else the gateway, else the platform default, and a predefined policy name maps through Microsoft's table (AppGwSslPolicy20150501 is TLS 1.0, AppGwSslPolicy20170401 is TLS 1.1, and AppGwSslPolicy20170401S, 20220101 and 20220101S are TLS 1.2), while a legacy policy with only disabled protocols gets the lowest version not disabled
     - listeners_tls_version_unknown — Number of encrypted listeners whose effective minimum TLS version could not be determined, because no policy is set or reported or the policy name is not a known predefined one
 
     Is FIPS mode on?

@@ -86,7 +86,7 @@ evidence_set:
     Access: Reader on the subscription. Optional: Reader on the other subscriptions a Virtual WAN hub may sit in; without it, spokes whose hub is there read virtual_hub_unresolved. Reader does not grant effective route table reads, so the evidence is the configured routing, not the effective routes, and gateway-learned BGP routes are not visible.
 
     Commands Executed:
-    - subscriptions.list() — picks a subscription when none is set, and lists other subscriptions to search for a spoke's Virtual WAN hub (at most 50, in the order listed)
+    - subscriptions.list() — picks a subscription when none is set, and lists other subscriptions to search for a spoke's Virtual WAN hub (at most VIRTUAL_HUB_SEARCH_MAX_SUBSCRIPTIONS, default 50, in the order listed)
     - providers.get("Microsoft.Network") — tells "networking not in use" from "nothing there"
     - virtual_networks.list_all() — every virtual network with its subnets, route table links, NAT gateway, default outbound setting and service endpoints
     - virtual_network_peerings.list() (per virtual network) — the peerings, to find peers' address ranges and hub spokes
@@ -163,7 +163,7 @@ evidence_set:
 
     Where does each network interface's traffic go?
     - total_network_interfaces — Number of in-scope network interfaces
-    - network_interfaces_by_egress_path — Number of network interfaces for each egress path, which is the subnet's path except that an interface with a public IP on a default_outbound or none subnet is public_ip, and mixed covers an interface in subnets with different paths:
+    - network_interfaces_by_egress_path — Number of network interfaces for each egress path, which is the subnet's path except that an interface with a public IP on a default_outbound or none subnet is public_ip, and mixed covers an interface in subnets with different paths; load balancers are not collected, so an interface behind a public load balancer with outbound rules still reads default_outbound or none:
       - appliance (as for subnets)
       - blackhole (as for subnets)
       - gateway (as for subnets)

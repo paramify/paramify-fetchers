@@ -105,7 +105,7 @@ evidence_set:
     Is every web listener protected by a WAF that blocks attacks?
     - listeners_waf_enforcing — Number of web listeners whose effective WAF and every path-rule WAF are Enabled in Prevention mode; a listener's WAF is its own policy, else the gateway's policy, else the legacy WAF configuration
     - listeners_waf_detection_only — Number of web listeners whose effective WAF is Enabled in Detection mode, so it logs attacks but does not block them
-    - listeners_waf_disabled — Number of web listeners whose effective WAF state is Disabled
+    - listeners_waf_disabled — Number of web listeners whose effective WAF state is Disabled; a legacy WAF configuration whose enabled flag the API omits has no state and is not read as Disabled
     - listeners_without_waf — Number of web listeners with no WAF policy or legacy WAF configuration at all
     - public_listeners_not_enforcing — Number of web listeners on a public frontend IP whose WAF is not confirmed enforcing: it is not Enabled in Prevention mode, or it could not be read
 
