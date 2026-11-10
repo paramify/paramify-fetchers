@@ -60,7 +60,7 @@ If you have a question about this repo, ask DeepWiki. It answers in plain Englis
     <td align="center" width="128"><a href="fetchers/qualys/"><img src="fetchers/logos/qualys.svg" alt="Qualys" width="48" height="48"></a><br><sub>Qualys</sub></td>
   </tr>
   <tr>
-    <td align="center" width="128"><a href="fetchers/sophos/"><img src="fetchers/logos/sophos.svg" alt="Sophos" width="48" height="48"></a><br><sub>Sophos</sub></td>
+    <td align="center" width="128"><a href="fetchers/sophos/"><img src="fetchers/logos/sophos.png" alt="Sophos" width="48" height="48"></a><br><sub>Sophos</sub></td>
   </tr>
 </table>
 
