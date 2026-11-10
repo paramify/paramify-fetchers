@@ -542,10 +542,11 @@ def test_log_analytics_unread_workspace_list_leaves_unmatched_patterns_null(monk
     assert "matched nothing" not in caplog.text
 
 
-def test_log_analytics_excludes_by_group_and_region(monkeypatch, tmp_path):
+def test_log_analytics_excludes_by_group_and_region(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_law(monkeypatch, tmp_path, PATTERNS)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0
+    assert_summary_documented("azure/log_analytics_workspaces", summary)
     assert [w["name"] for w in results["workspaces"]] == ["law-in"]
     assert _excluded(results) == [("workspace", "law-out", "rg:rg-out"),
                                   ("workspace", "law-south", "location:regionsouth")]
