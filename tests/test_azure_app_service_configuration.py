@@ -7,7 +7,7 @@ import importlib.util
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace as ns
 
@@ -29,7 +29,7 @@ appsvc = _load("app_service_configuration")
 
 SUB = "00000000-0000-0000-0000-000000000001"
 SITES = f"/subscriptions/{SUB}/resourceGroups/rg-web/providers/Microsoft.Web/sites"
-NOW = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc)  # the collector reads the real clock, so fixture dates are relative to it
 DENIED = Exception("(AuthorizationFailed) The client does not have authorization to perform action")
 
 
@@ -42,6 +42,10 @@ class RawSettings(dict):
 
 def eol(year, month, day):
     return datetime(year, month, day, tzinfo=timezone.utc)
+
+
+def ahead(days):
+    return datetime.combine(NOW.date() + timedelta(days=days), datetime.min.time(), tzinfo=timezone.utc)
 
 
 def runtime(version, end_of_life=None, deprecated=None):
@@ -61,8 +65,8 @@ def stack(name, *minors):
 STACKS = [
     stack(
         "dotnet",
-        minor("8", windows_runtime_settings=runtime("v8.0", eol(2026, 11, 10)),
-              linux_runtime_settings=runtime("DOTNETCORE|8.0", eol(2026, 11, 10))),
+        minor("8", windows_runtime_settings=runtime("v8.0", ahead(11)),
+              linux_runtime_settings=runtime("DOTNETCORE|8.0", ahead(11))),
         minor("6", windows_runtime_settings=runtime("v6.0", eol(2024, 11, 12), True)),
         minor("v4.8", windows_runtime_settings=runtime("v4.0")),
     ),
@@ -70,21 +74,21 @@ STACKS = [
         "node",
         minor("20-lts", linux_runtime_settings=runtime("NODE|20-lts", eol(2026, 4, 30)),
               windows_runtime_settings=runtime("~20", eol(2026, 4, 30))),
-        minor("22-lts", windows_runtime_settings=runtime("~22", eol(2027, 4, 30))),
+        minor("22-lts", windows_runtime_settings=runtime("~22", ahead(180))),
     ),
     stack("php", minor("5.6", windows_runtime_settings=runtime("5.6", eol(2021, 2, 1), True)),
           minor("7.4", windows_runtime_settings=runtime("7.4", eol(2022, 11, 28), True))),
     # Java on Windows spells its runtimes as bare majors, which a Node version can collide with.
-    stack("java", minor("17", windows_runtime_settings=runtime("17", eol(2031, 9, 30))),
-          minor("21", windows_runtime_settings=runtime("21", eol(2031, 9, 30))),
-          minor("11", windows_runtime_settings=runtime("11", eol(2027, 9, 30)))),
-    stack("python", minor("3.12", linux_runtime_settings=runtime("PYTHON|3.12", eol(2028, 10, 31)))),
+    stack("java", minor("17", windows_runtime_settings=runtime("17", ahead(3000))),
+          minor("21", windows_runtime_settings=runtime("21", ahead(3000))),
+          minor("11", windows_runtime_settings=runtime("11", ahead(400)))),
+    stack("python", minor("3.12", linux_runtime_settings=runtime("PYTHON|3.12", ahead(900)))),
     stack(
         "javacontainers",
         minor("10.1",
               linux_container_settings=RawSettings(java11Runtime="TOMCAT|10.1-java11",
                                                    java17Runtime="TOMCAT|10.1-java17",
-                                                   end_of_life_date=eol(2027, 12, 31), runtimes=[]),
+                                                   end_of_life_date=ahead(500), runtimes=[]),
               windows_container_settings=ns(java_container="TOMCAT", java_container_version="10.1",
                                             end_of_life_date=None, is_deprecated=None)),
         minor("8.5", windows_container_settings=ns(java_container="TOMCAT", java_container_version="8.5",
