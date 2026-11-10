@@ -5,6 +5,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# Written by pytest-textual-snapshot when a TUI snapshot does not match.
+snapshot_report.html
 
 # --- Virtualenv ---
 .venv/

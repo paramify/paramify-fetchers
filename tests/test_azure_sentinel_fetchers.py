@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import logging
 import os
 import sys
 from collections import namedtuple
@@ -22,6 +23,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
+import requests
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -189,8 +191,11 @@ class FakeAzure:
             ("by Week", table(["Week", "Actor", "Queries", "Users"], [
                 [iso(sunday), "human", 4, 2], [iso(sunday), "application", 9, 0]])),
             ("by User", table(["User", "Queries", "LastQuery"], [["alice@contoso.com", 4, iso(NOW)]])),
+            # Basic and Auxiliary tables, read through /search: none received data.
+            ("/search", table(["LastIngested", "Records"], [[None, 0]])),
         ]
         self.calls = []
+        self.params = []
         self.graph_post_response = Resp(200, {"value": [
             {"id": "u-purger", "displayName": "Pat Purger", "userPrincipalName": "pat@contoso.com"},
             {"id": "sp-la", "displayName": "la-automation", "appId": "app-1"}]})
@@ -214,16 +219,20 @@ class FakeAzure:
             return body
         return Resp(200, body)
 
-    def post(self, url, json=None, headers=None, timeout=None):
+    def post(self, url, json=None, headers=None, timeout=None, params=None):
         if url.endswith("/directoryObjects/getByIds"):
             self.calls.append(("POST", url, ",".join(json["ids"])))
             return self.graph_post_response
         self.calls.append(("POST", url, json["query"]))
+        if params:
+            self.params.append((url, params))
         assert headers["x-ms-app"] == "paramify-fetchers"
         for fragment, body in self.queries:  # a fragment matches the query text or the workspace's query URL
             if fragment in json["query"] or fragment in url:
                 if isinstance(body, list):
                     body = body.pop(0) if len(body) > 1 else body[0]
+                if isinstance(body, Exception):
+                    raise body
                 return body if isinstance(body, Resp) else Resp(200, body)
         return Resp(400, {"error": {"code": "BadArgumentError", "message": "unrouted query"}})
 
@@ -638,10 +647,299 @@ def test_data_sources_parser_union_and_basic_table_queries(azure, tmp_path):
     assert code == 0 and "SophosXGFirewall" in union and "WizIssues_CL" in union and "StorageBlobLogs" not in union
     assert by_id["SophosXGFirewall"]["connected"] is True and by_id["Wiz"]["connected"] is True
     assert by_id["Wiz"]["data_types"][0]["table"] is None
-    # A Basic-plan table can't be read with /query, so it is unmeasured rather than empty.
+    # A Basic-plan table can't be read with /query, and /search is off by default, so it is unmeasured rather than empty.
     assert by_id["AzureStorage"]["connected"] is None and ws["tables_not_measured"] == ["StorageBlobLogs"]
+    assert ws["tables_searched"] == [] and not azure.params and ev["summary"]["basic_logs_lookback_hours"] == 0
     assert by_id["Broken"]["connected"] is None and any("connector Broken" in n for n in ws["notes"])
     assert "Broken" not in ws["connectors_not_connected"] and "AzureStorage" not in ws["connectors_not_connected"]
+
+
+def basic_tables_workspace(azure, monkeypatch, hours="336"):
+    """Connectors on a Basic table, bare and filtered, and on an Auxiliary one; only the Basic table has data."""
+    if hours is not None:
+        monkeypatch.setenv("BASIC_LOGS_LOOKBACK_HOURS", hours)
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [
+        ui_connector("AzureStorage", [("StorageBlobLogs", "StorageBlobLogs")]),
+        ui_connector("StorageReads", [("StorageBlobLogs (reads)", 'StorageBlobLogs | where Category == "StorageRead"')]),
+        ui_connector("AppLogs", [("AppLogs_CL", "AppLogs_CL")])]}
+    azure.arm[(f"{WS_A}/tables", "2023-09-01")]["value"].append({"name": "AppLogs_CL", "properties": {"plan": "Auxiliary"}})
+    azure.queries.insert(0, ("['StorageBlobLogs']", table(["LastIngested", "Records"], [[iso(NOW - timedelta(hours=2)), 7]])))
+
+
+def search_calls(azure):
+    return [q for _, url, q in azure.calls if url.endswith("/search")]
+
+
+def test_data_sources_basic_and_auxiliary_tables_are_not_measured_by_default(azure, tmp_path, monkeypatch):
+    basic_tables_workspace(azure, monkeypatch, hours=None)
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert code == 0 and ev["metadata"]["partial_failure"] is False and not search_calls(azure)
+    # Not measured is a choice, not a failure: the count stands, without these tables.
+    assert ws["tables_not_measured"] == ["AppLogs_CL", "StorageBlobLogs"]
+    assert (ws["tables_searched"], ws["tables_search_failed"], ws["sources_ingesting"]) == ([], [], 2)
+    assert all(by_id[i]["connected"] is None for i in ("AzureStorage", "StorageReads", "AppLogs"))
+    assert ev["summary"]["basic_logs_lookback_hours"] == 0 and ev["summary"]["min_sources_ingesting"] == 2
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "lots"])
+def test_data_sources_search_stays_off_unless_hours_are_positive(azure, tmp_path, monkeypatch, value):
+    basic_tables_workspace(azure, monkeypatch, hours=value)
+    code, ev = run("sentinel_data_sources", tmp_path)
+    assert code == 0 and not search_calls(azure) and ev["summary"]["basic_logs_lookback_hours"] == 0
+
+
+def test_data_sources_measures_basic_and_auxiliary_tables_through_search(azure, tmp_path, monkeypatch, assert_summary_documented):
+    basic_tables_workspace(azure, monkeypatch)
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    # One table per search, asking only for the newest record and a count over the window, timespan in the URL;
+    # /search bills per GB scanned, so the text is pinned.
+    assert search_calls(azure) == [
+        f"['{t}'] | where TimeGenerated > ago(336h) | summarize LastIngested = max(TimeGenerated), Records = count()"
+        for t in ("AppLogs_CL", "StorageBlobLogs")]
+    assert [(url.split("/")[-2:], params) for url, params in azure.params] == [(["cust-a", "search"], {"timespan": "PT336H"})] * 2
+    assert not any("StorageBlobLogs" in q or "AppLogs_CL" in q for _, url, q in azure.calls if url.endswith("/query"))
+    assert ws["tables_searched"] == ["AppLogs_CL", "StorageBlobLogs"]
+    assert ws["tables_not_measured"] == [] and ws["tables_search_failed"] == []
+    tables = {t["table"]: t for t in ws["tables"]}
+    assert (tables["StorageBlobLogs"]["plan"], tables["StorageBlobLogs"]["records"]) == ("Basic", 7)
+    assert tables["AzureActivity"]["plan"] == "Analytics" and "AppLogs_CL" not in tables
+    assert "StorageBlobLogs" in ws["source_tables"] and ws["sources_ingesting"] == 3
+    assert by_id["AzureStorage"]["connected"] is True
+    assert by_id["AzureStorage"]["last_data_received"] == iso(NOW - timedelta(hours=2))
+    # A filtered query on a Basic table with data would need another billed scan, so it stays unmeasured.
+    assert by_id["StorageReads"]["connected"] is None and "StorageReads" not in ws["connectors_not_connected"]
+    assert by_id["AppLogs"]["connected"] is False and "AppLogs" in ws["connectors_not_connected"]
+    assert ev["summary"]["basic_logs_lookback_hours"] == 336
+    assert_summary_documented("azure/sentinel_data_sources", ev["summary"])
+
+
+def test_data_sources_failed_search_is_unknown(azure, tmp_path, monkeypatch):
+    basic_tables_workspace(azure, monkeypatch)
+    azure.queries.insert(0, ("['StorageBlobLogs']", Resp(403, {"error": {"code": "Forbidden", "message": "no"}})))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert ws["tables_search_failed"] == ["StorageBlobLogs"] and ws["tables_not_measured"] == ["StorageBlobLogs"]
+    assert ws["tables_searched"] == ["AppLogs_CL"]
+    assert by_id["AzureStorage"]["connected"] is None and by_id["StorageReads"]["connected"] is None
+    # The table could be a source, so the count is unknown, not 2.
+    assert ws["sources_ingesting"] is None and ev["summary"]["min_sources_ingesting"] is None
+    assert ev["summary"]["workspaces_with_no_sources"] == 0
+
+
+@pytest.mark.parametrize("answer, tries", [
+    (Resp(429, {"error": {"code": "TooManyRequests", "message": "slow down"}}), 5),  # retried, then recorded
+    (requests.Timeout("read timed out"), 1),  # a POST isn't resent: the server may already have scanned
+    (Resp(200, {"tables": [{"name": "PrimaryResult", "columns": [], "rows": []}],
+                "error": {"code": "PartialError", "message": "partial"}}), 1),
+    (table(["LastIngested", "Records"], []), 1),  # summarize without by always answers one row
+])
+def test_data_sources_every_kind_of_failed_search_is_unknown(azure, tmp_path, monkeypatch, answer, tries):
+    basic_tables_workspace(azure, monkeypatch)
+    azure.queries.insert(0, ("['StorageBlobLogs']", answer))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert sum("StorageBlobLogs" in q for q in search_calls(azure)) == tries
+    assert ws["tables_search_failed"] == ["StorageBlobLogs"] and ws["sources_ingesting"] is None
+
+
+LAKE_START = iso(NOW - timedelta(days=2))[:-4] + "Z"  # milliseconds, as the warning writes it
+
+
+def lake_warning(rows, table_name="AppLogs_CL", start=LAKE_START, extra=()):
+    """HTTP 200 with a result and a PartialError whose details say the window spans the table's lake data start."""
+    return Resp(200, {**table(["LastIngested", "Records"], rows), "error": {
+        "code": "PartialError", "message": "There were some errors when processing your query.",
+        "details": [{"code": "PartialLakeDataWarning", "message": (
+            f"Table '{table_name}' has Auxiliary / Lake data starting from {start}. A query spanning this date might "
+            "return partial results. Please adjust your query time range to either before or after this date.")},
+            *extra]}})
+
+
+def test_query_error_carries_details_and_the_partial_result(azure):
+    azure.queries.insert(0, ("['AppLogs_CL']", lake_warning([[None, 0]])))
+    client = azure_rest.AzureRestClient(FakeCred(), session=azure)
+    with pytest.raises(azure_rest.QueryError) as caught:
+        client.search("cust-a", "['AppLogs_CL'] | count", "PT1H")
+    exc = caught.value
+    assert exc.code == "PartialError" and exc.rows == [{"LastIngested": None, "Records": 0}]
+    assert [c for c, _ in exc.details] == ["PartialLakeDataWarning"] and LAKE_START in exc.details[0][1]
+    # The message is the innermost one, as before details were read.
+    assert str(exc) == "PartialError: There were some errors when processing your query."
+
+
+@pytest.mark.parametrize("detail", [
+    {"code": "SemanticError", "message": "Failed to resolve table or column expression named 'LAQueryLogs'"},
+    {"code": "InsufficientAccessError", "message": "Forbidden: the caller can't read this table"},
+    {"code": "QueryThrottled", "message": "Too many requests (429)"},
+])
+def test_query_error_details_leave_the_message_and_its_readers_as_they_were(azure, detail):
+    # table_missing, the diagnostic-settings fetcher's ingestion_status and classify_failure_code match on str(exc).
+    body = {**table(["Records"], [[1]]), "error": {"code": "PartialError", "message": "There were some errors."}}
+    azure.queries.insert(0, ("LAQueryLogs", Resp(200, {**body, "error": {**body["error"], "details": [detail]}})))
+    client = azure_rest.AzureRestClient(FakeCred(), session=azure)
+    with pytest.raises(azure_rest.QueryError) as caught:
+        client.query("cust-a", "LAQueryLogs | count", "P1D")
+    exc = caught.value
+    assert str(exc) == "PartialError: There were some errors." and exc.details == [(detail["code"], detail["message"])]
+    assert azure_rest.table_missing(exc, "LAQueryLogs") is False
+    assert _load("resource_diagnostic_settings").ingestion_status(exc) == "error"
+    failures = [{"type": type(exc).__name__, "message": str(exc)}]
+    assert sys.modules["azure_common"].classify_failure_code(failures) == "partial_failure"
+
+
+@pytest.mark.parametrize("details, warning_only, start", [
+    ([("PartialLakeDataWarning", f"Table 'T' has Auxiliary / Lake data starting from {LAKE_START}. A query …")], True, LAKE_START),
+    ([("PartialLakeDataWarning", "Table 'T' has Auxiliary / Lake data. A query …")], True, None),
+    # Two different dates: no single cut, so no split.
+    ([("PartialLakeDataWarning", f"… starting from {LAKE_START}. …"),
+      ("PartialLakeDataWarning", "… starting from 2026-01-02T03:04:05.678Z. …")], True, None),
+    ([("PartialLakeDataWarning", f"… starting from {LAKE_START}. …"), ("EngineError", "boom")], False, None),
+    ([], False, None),
+], ids=["one-date", "no-date", "two-dates", "other-code", "no-details"])
+def test_data_sources_reads_the_lake_warning(details, warning_only, start):
+    m = MODS["sentinel_data_sources"]
+    exc = azure_rest.QueryError("PartialError", "There were some errors", details)
+    assert m.lake_warning_only(exc) is warning_only
+    assert (m.lake_start(exc) if warning_only else None) == start
+    assert not m.lake_warning_only(azure_rest.QueryError("(400) BadArgumentError", "x", details))
+
+
+def split_spans(azure, name):
+    return [p["timespan"] for (_, p), q in zip(azure.params, search_calls(azure)) if f"['{name}']" in q]
+
+
+@pytest.mark.parametrize("before, after, records, last", [
+    ([[None, 0]], [[None, 0]], 0, None),  # created at the lake start: nothing before it, and nothing since
+    ([[iso(NOW - timedelta(days=3)), 2]], [[iso(NOW - timedelta(hours=1)), 3]], 5, iso(NOW - timedelta(hours=1))),
+], ids=["empty", "data-both-sides"])
+def test_data_sources_splits_a_search_at_the_lake_data_start(azure, tmp_path, monkeypatch, before, after, records, last):
+    basic_tables_workspace(azure, monkeypatch)
+    azure.queries.insert(0, ("['AppLogs_CL']", [lake_warning([[None, 0]]), table(["LastIngested", "Records"], before),
+                                                table(["LastIngested", "Records"], after)]))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    # The window once more, cut at the exact warning date so the halves leave no gap; other tables search once.
+    spans = split_spans(azure, "AppLogs_CL")
+    assert len(spans) == 3 and spans[0] == "PT336H"
+    assert spans[1].endswith(f"/{LAKE_START}") and spans[2].startswith(f"{LAKE_START}/")
+    begin, end = (azure_rest.parse_time(t) for t in (spans[1].split("/")[0], spans[2].split("/")[1]))
+    assert end - begin == timedelta(hours=336)
+    assert len(split_spans(azure, "StorageBlobLogs")) == 1
+    assert "AppLogs_CL" in ws["tables_searched"] and ws["tables_search_failed"] == []
+    tables = {t["table"]: t for t in ws["tables"]}
+    if records:
+        assert (tables["AppLogs_CL"]["records"], tables["AppLogs_CL"]["last_ingested"]) == (records, last)
+        assert tables["AppLogs_CL"]["lake_data_start"] == LAKE_START and ws["sources_ingesting"] == 4
+    else:
+        # Measured and empty: the connector reads not connected, not unknown.
+        assert "AppLogs_CL" not in tables and ws["sources_ingesting"] == 3
+        assert next(c for c in ws["connectors"] if c["id"] == "AppLogs")["connected"] is False
+    assert any("AppLogs_CL: searched in two parts" in n for n in ws["notes"])
+
+
+@pytest.mark.parametrize("spanning, measured", [([[iso(NOW - timedelta(hours=1)), 4]], True), ([[None, 0]], False)],
+                         ids=["with-data", "empty"])
+def test_data_sources_split_that_still_warns_keeps_only_what_is_certain(azure, tmp_path, monkeypatch, spanning, measured):
+    basic_tables_workspace(azure, monkeypatch)
+    azure.queries.insert(0, ("['AppLogs_CL']", [lake_warning(spanning), lake_warning([[None, 0]]), table(["LastIngested", "Records"], [[None, 0]])]))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    # A warning is not a failure, and the second half isn't searched once the first still warns.
+    assert code == 0 and ev["metadata"]["partial_failure"] is False and len(split_spans(azure, "AppLogs_CL")) == 2
+    assert ws["tables_search_failed"] == []
+    tables = {t["table"]: t for t in ws["tables"]}
+    if measured:
+        # Its newest record is real; its count may be short, so it is unknown.
+        assert tables["AppLogs_CL"]["records"] is None and tables["AppLogs_CL"]["last_ingested"] == spanning[0][0]
+        assert "AppLogs_CL" in ws["tables_searched"] and ws["sources_ingesting"] == 4
+    else:
+        # Nothing found in a partial answer proves nothing: not measured, and the count stands without it.
+        assert "AppLogs_CL" in ws["tables_not_measured"] and "AppLogs_CL" not in ws["tables_searched"]
+        assert ws["sources_ingesting"] == 3
+        assert next(c for c in ws["connectors"] if c["id"] == "AppLogs")["connected"] is None
+    assert any("AppLogs_CL: a search spanning its lake data start" in n for n in ws["notes"])
+
+
+def test_data_sources_each_table_splits_up_to_the_time_its_own_search_ran(azure, tmp_path, monkeypatch):
+    basic_tables_workspace(azure, monkeypatch)
+    for name in ("StorageBlobLogs", "AppLogs_CL"):
+        azure.queries.insert(0, (f"['{name}']", [lake_warning([[None, 0]], table_name=name), table(["LastIngested", "Records"], [[None, 0]]),
+                                                 table(["LastIngested", "Records"], [[None, 0]])]))
+    clock = iter(datetime.now(timezone.utc) + timedelta(minutes=10 * i) for i in range(100))
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return next(clock)
+
+    monkeypatch.setattr(MODS["sentinel_data_sources"], "datetime", Clock)
+    code, _ = run("sentinel_data_sources", tmp_path)
+    ends = {name: azure_rest.parse_time(split_spans(azure, name)[2].split("/")[1]) for name in ("StorageBlobLogs", "AppLogs_CL")}
+    assert code == 0 and abs(ends["AppLogs_CL"] - ends["StorageBlobLogs"]) == timedelta(minutes=10)  # one clock read per table
+
+
+@pytest.mark.parametrize("answers, tries", [
+    ([lake_warning([[None, 0]], extra=[{"code": "EngineError", "message": "boom"}])], 1),  # not warning-only
+    ([Resp(200, {**table(["LastIngested", "Records"], [[None, 0]]),
+                 "error": {"code": "PartialError", "message": "x", "details": [{"code": "QueryThrottled", "message": "y"}]}})], 1),
+    ([lake_warning([[None, 0]]), Resp(403, {"error": {"code": "Forbidden", "message": "no"}})], 2),  # a half fails
+])
+def test_data_sources_other_partial_errors_still_fail_the_search(azure, tmp_path, monkeypatch, answers, tries):
+    basic_tables_workspace(azure, monkeypatch)
+    azure.queries.insert(0, ("['AppLogs_CL']", answers if len(answers) > 1 else answers[0]))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and len(split_spans(azure, "AppLogs_CL")) == tries
+    assert ws["tables_search_failed"] == ["AppLogs_CL"] and ws["sources_ingesting"] is None
+
+
+@pytest.mark.parametrize("start", [None, iso(NOW - timedelta(days=30))[:-4] + "Z"],
+                         ids=["no-date", "date-before-the-window"])
+def test_data_sources_lake_warning_without_a_date_in_the_window_is_not_split(azure, tmp_path, monkeypatch, start):
+    basic_tables_workspace(azure, monkeypatch)
+    warning = lake_warning([[None, 0]], start=start or "")
+    if start is None:
+        warning._body["error"]["details"][0]["message"] = "Table 'AppLogs_CL' has Auxiliary / Lake data. It may be partial."
+    azure.queries.insert(0, ("['AppLogs_CL']", warning))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and len(split_spans(azure, "AppLogs_CL")) == 1 and "AppLogs_CL" in ws["tables_not_measured"]
+
+
+def test_data_sources_search_without_table_plans_is_unknown(azure, tmp_path, monkeypatch):
+    monkeypatch.setenv("BASIC_LOGS_LOOKBACK_HOURS", "336")
+    azure.arm[(f"{WS_A}/tables", "2023-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    # With the search on, unread plans could hide a Basic or Auxiliary source.
+    assert code == 1 and not search_calls(azure) and ws["sources_ingesting"] is None
+
+
+@pytest.mark.parametrize("window, hours, records, measured, span", [
+    ("14", "24", 0, False, 24),     # less than the window: nothing found says nothing about the rest
+    ("14", "24", 5, True, 24),
+    ("14", "9999", 0, True, 336),   # capped at the window, which it then covers
+    ("45", "9999", 0, False, 720),  # capped at the 30 days /search reaches
+])
+def test_data_sources_search_span(azure, tmp_path, monkeypatch, window, hours, records, measured, span):
+    monkeypatch.setenv("SENTINEL_INGESTION_WINDOW_DAYS", window)
+    monkeypatch.setenv("BASIC_LOGS_LOOKBACK_HOURS", hours)
+    azure.queries.insert(0, ("/search", table(["LastIngested", "Records"], [[iso(NOW) if records else None, records]])))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and azure.params[0][1] == {"timespan": f"PT{span}H"} and f"ago({span}h)" in search_calls(azure)[0]
+    assert ws["tables_not_measured"] == ([] if measured else ["StorageBlobLogs"]) and ws["tables_search_failed"] == []
+    # Not measured over the window is not a failure, so the count stands.
+    assert ws["sources_ingesting"] == (3 if records else 2) and ev["summary"]["basic_logs_lookback_hours"] == span
 
 
 def test_data_sources_entra_id_protection_and_grouped_built_ins(azure, tmp_path):
@@ -721,7 +1019,9 @@ def test_data_sources_incomplete_listings_read_null(azure, tmp_path):
     assert code == 1 and ws["notes"][0].startswith("preview listing")
     assert (ws["connectors_total"], ws["connectors_connected"], ws["connectors_not_connected"], ws["connectors_quiet"],
             ws["connectors_configured_without_data"]) == (None, None, None, None, None)
-    assert ws["data_connectors_total"] is None and ws["tables_not_measured"] is None
+    assert ws["data_connectors_total"] is None and ws["tables_not_measured"] is None and ws["tables_searched"] is None
+    # With /search off, Basic and Auxiliary tables never count, so missing plans hide no source.
+    assert ws["sources_ingesting"] == 2
     # Without the table plans, no data can't be told from a Basic table.
     assert all(c["connected"] is None for c in ws["connectors"])
     assert {k: ev["summary"][k] for k in ("data_connectors_total", "connectors_connected", "connectors_not_connected",
@@ -730,10 +1030,13 @@ def test_data_sources_incomplete_listings_read_null(azure, tmp_path):
         "connectors_configured_without_data": None}
 
 
-def test_data_sources_unknown_ingestion_reads_null(azure, tmp_path):
+def test_data_sources_unknown_ingestion_reads_null(azure, tmp_path, monkeypatch):
+    monkeypatch.setenv("BASIC_LOGS_LOOKBACK_HOURS", "336")
     azure.queries[0] = ("union withsource=ParamifySourceTable", Resp(403, {"error": {"code": "Forbidden", "message": "no"}}))
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
+    # No /search scan is billed for a workspace whose ingestion couldn't be read.
+    assert not azure.params and ws["tables_not_measured"] == ["StorageBlobLogs"]
     assert code == 1 and ws["health_monitoring"] is None and ws["connectors_unhealthy"] is None
     assert {k: ev["summary"][k] for k in ("connectors_connected", "connectors_not_connected", "connectors_quiet",
                                           "connectors_configured_without_data", "connectors_unhealthy")} == {
@@ -1173,6 +1476,36 @@ def test_analytics_rules_without_alert_only_rules_missing_data_skip_the_connecto
     code, ev = run("sentinel_analytics_rules", tmp_path)
     assert code == 0 and ws_a(ev)["enabled_rules_quiet"] == [] and ev["summary"]["enabled_rules_quiet"] == 0
     assert not any(c[1] == f"{SI_A}/dataConnectors" for c in azure.calls)
+
+
+def test_analytics_rules_failed_alert_products_query_leaves_missing_data_unknown(azure, tmp_path):
+    incident_rules_workspace(azure, [incident_rule("ipc", "Azure Active Directory Identity Protection")],
+                             stable=[connection("aad", "AzureActiveDirectory")])
+    azure.queries.insert(0, ("by ProductName", Resp(403, {"error": {"code": "InsufficientAccessError", "message": "no"}})))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["rules"][0]["tables_without_data"] is None
+    assert ws["enabled_rules_missing_data"] is None and ws["enabled_rules_quiet"] is None
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"]) == (None, None)
+    assert ws["ingesting_tables_not_read"] == ["AzureActivity"]
+    assert not any(c[1] == f"{SI_A}/dataConnectors" for c in azure.calls)
+
+
+def test_analytics_rules_failed_alert_products_query_spares_workspaces_without_enabled_incident_rules(azure, tmp_path):
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
+        incident_rule("off", "Azure Advanced Threat Protection", enabled=False),
+        rule("act", "Scheduled", True, query="AzureActivity | take 1")]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": []}
+    azure.queries.insert(0, ("by ProductName", Resp(403, {"error": {"code": "InsufficientAccessError", "message": "no"}})))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["enabled_rules_missing_data"] == [] and ws["enabled_rules_quiet"] == []
+
+
+def test_both_sentinel_fetchers_share_one_defender_xdr_list():
+    shared = MODS["sentinel_analytics_rules"].DEFENDER_XDR_CARRIES
+    assert MODS["sentinel_data_sources"].DEFENDER_XDR_CARRIES is shared
+    assert {"OfficeIRM", "MicrosoftThreatProtection"} <= shared and not {"AzureSecurityCenter", "IOT"} & shared
 
 
 def test_analytics_rules_quiet_total_is_null_if_any_measured_workspace_is_unknown():
@@ -2148,6 +2481,24 @@ PLAYBOOK = {"id": PB, "name": "pb", "properties": {
                     "host": {"connection": {"name": "@parameters('$connections')['azuread']['connectionId']"}},
                     "method": "patch", "path": "/v1.0/users/@{encodeURIComponent('x')}",
                     "body": {"accountEnabled": False}}}}}}}}}}
+
+
+def wf_run(name, status, started, trigger="Microsoft_Sentinel_incident", error=None):
+    props = {"status": status, "startTime": iso(started), "endTime": iso(started + timedelta(seconds=40)),
+             "trigger": {"name": trigger, "status": "Succeeded"}}
+    if error:
+        props["code"], props["error"] = error, {"code": error, "message": "An action failed."}
+    return {"id": f"{PB}/runs/{name}", "name": name, "type": "Microsoft.Logic/workflows/runs", "properties": props}
+
+
+PB_RUNS = [
+    {"value": [wf_run("r-new", "Failed", NOW - timedelta(days=2), error="ActionFailed"),
+               wf_run("r-mid", "Succeeded", NOW - timedelta(days=5))],
+     "nextLink": f"https://management.azure.com{PB}/runs?api-version=2019-05-01&$skiptoken=p2"},
+    # The service filters on StartTime; a run outside the lookback still has to be left out if one comes back.
+    {"value": [wf_run("r-old", "Succeeded", NOW - timedelta(days=20)),
+               wf_run("r-stale", "Succeeded", NOW - timedelta(days=120))]},
+]
 NOT_A_PLAYBOOK = {"id": f"{RG}/providers/Microsoft.Logic/workflows/etl", "name": "etl",
                   "properties": {"state": "Enabled", "definition": {"triggers": {"Recurrence": {"type": "Recurrence"}},
                                                                      "actions": {"Compose": {"type": "Compose", "inputs": "noop"}}}}}
@@ -2212,6 +2563,8 @@ EXTRA_ARM = {
         "deleteRetentionPolicy": {"enabled": True, "days": 14}, "isVersioningEnabled": True}},
     (f"{SA}/stapp/blobServices/default/containers", "2023-05-01"): {"value": [container("images")]},
     (f"/subscriptions/{SUB}/providers/Microsoft.Logic/workflows", "2019-05-01"): {"value": [PLAYBOOK, NOT_A_PLAYBOOK]},
+    (f"{PB}/runs", "2019-05-01"): PB_RUNS[0],
+    (f"{PB}/runs", "2019-05-01", "p2"): PB_RUNS[1],
     ("/v1.0/identityProtection/riskyUsers", None): {"value": [
         {"id": "u-admin", "userPrincipalName": "admin@contoso.com", "riskLevel": "high", "riskState": "atRisk",
          "riskLastUpdatedDateTime": iso(NOW - timedelta(days=10))}],
@@ -2331,7 +2684,9 @@ def test_log_storage_immutability(azure, tmp_path):
     assert accounts[0]["blob_soft_delete_days"] == 14
     assert ev["summary"] == {"storage_accounts_scanned": 3, "accounts_with_log_containers": 1, "log_containers": 3,
                              "locked_policy": 1, "unlocked_policy_only": 1, "legal_hold": 0, "unprotected": 2,
-                             "min_retention_days": 30}
+                             "min_retention_days": 30, "resource_exclusion_patterns": [],
+                             "resource_exclusion_patterns_unmatched": [], "excluded_storage_accounts": 0,
+                             "excluded_containers": 0, "in_scope_storage_accounts": 3, "in_scope_containers": 3}
     assert not any("stfiles" in c[1] for c in azure.calls)
 
 
@@ -2348,6 +2703,118 @@ def test_sentinel_playbooks(azure, tmp_path):
     assert s["run_by_active_automation_rule"] == 1 and s["live_account_containment_playbooks"] == 1
     assert s["notification_recipients"] == ["secops@contoso.com"] and s["logic_apps_scanned"] == 2
     assert s["live_playbooks_without_definition"] == 0 and ev["results"]["notes"] == []
+
+
+def test_sentinel_playbooks_run_history(azure, tmp_path):
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    assert code == 0 and pb["run_history_read"] is True
+    assert pb["runs_in_lookback"] == 3 and pb["runs_by_status"] == {"Failed": 1, "Succeeded": 2}
+    assert pb["failed_runs"] == 1 and pb["last_run_status"] == "Failed"
+    assert [r["name"] for r in pb["recent_runs"]] == ["r-new", "r-mid", "r-old"]
+    assert pb["recent_runs"][0]["error_code"] == "ActionFailed" and pb["recent_runs"][1]["error_code"] is None
+    assert pb["recent_runs"][0]["trigger"] == "Microsoft_Sentinel_incident" and pb["recent_runs"][0]["end_time"]
+    assert pb["last_run_time"] == pb["recent_runs"][0]["start_time"]
+    assert pb["last_success_time"] == pb["recent_runs"][1]["start_time"]
+    assert pb["last_failure_time"] == pb["recent_runs"][0]["start_time"]
+    assert {k: ev["summary"][k] for k in RUN_SUMMARY} == {
+        "run_lookback_days": 90, "playbooks_run_history_unread": [], "live_playbooks_run_history_unread": 0,
+        "live_playbooks_last_run_succeeded": 0, "live_playbooks_last_run_failed": 1,
+        "live_playbooks_without_runs": 0, "live_playbook_failed_runs": 1}
+    assert not any(c[1].endswith("/etl/runs") for c in azure.calls)
+
+
+RUN_SUMMARY = ("run_lookback_days", "playbooks_run_history_unread", "live_playbooks_run_history_unread",
+               "live_playbooks_last_run_succeeded", "live_playbooks_last_run_failed", "live_playbooks_without_runs",
+               "live_playbook_failed_runs")
+
+
+def test_sentinel_playbooks_runs_are_filtered_on_the_lookback(azure, tmp_path, monkeypatch):
+    monkeypatch.setenv("SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS", "3")
+    filters = []
+    get = azure.get
+    azure.get = lambda url, params=None, **kw: (filters.append((params or {}).get("$filter")), get(url, params, **kw))[1]
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    since = (NOW - timedelta(days=3)).strftime("%Y-%m-%dT")
+    assert any(f and f.startswith(f"StartTime ge {since}") and f.endswith("Z") for f in filters)
+    assert code == 0 and ev["summary"]["run_lookback_days"] == 3
+    assert pb["runs_in_lookback"] == 1 and pb["last_success_time"] is None and pb["failed_runs"] == 1
+
+
+@pytest.mark.parametrize("raw, days, warned", [("30", 30, False), ("90", 90, False), ("365", 90, True), ("0", 90, False)])
+def test_sentinel_playbooks_lookback_is_capped_at_the_run_history_retention(monkeypatch, caplog, raw, days, warned):
+    monkeypatch.setenv("SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS", raw)
+    with caplog.at_level(logging.WARNING):
+        assert MODS["sentinel_playbooks"].lookback_days() == days
+    assert ("outside 1-90" in caplog.text) is warned
+
+
+def test_sentinel_playbooks_capped_lookback_is_what_the_evidence_reports(azure, tmp_path, monkeypatch):
+    monkeypatch.setenv("SENTINEL_PLAYBOOK_RUN_LOOKBACK_DAYS", "365")
+    filters = []
+    get = azure.get
+    azure.get = lambda url, params=None, **kw: (filters.append((params or {}).get("$filter")), get(url, params, **kw))[1]
+    code, ev = run("sentinel_playbooks", tmp_path)
+    since = (NOW - timedelta(days=90)).strftime("%Y-%m-%dT")
+    assert code == 0 and ev["summary"]["run_lookback_days"] == 90
+    assert any(f and f.startswith(f"StartTime ge {since}") for f in filters)
+
+
+def test_sentinel_playbooks_live_playbook_without_runs(azure, tmp_path):
+    azure.arm[(f"{PB}/runs", "2019-05-01")] = {"value": []}
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    s = ev["summary"]
+    assert code == 0 and pb["runs_in_lookback"] == 0 and pb["runs_by_status"] == {} and pb["recent_runs"] == []
+    assert pb["last_run_status"] is None and pb["last_success_time"] is None and pb["failed_runs"] == 0
+    assert s["live_playbooks_without_runs"] == 1 and s["live_playbooks_last_run_failed"] == 0
+    assert s["live_playbook_failed_runs"] == 0 and s["live_playbooks_last_run_succeeded"] == 0
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_sentinel_playbooks_unreadable_runs_read_null(azure, tmp_path, status):
+    azure.arm[(f"{PB}/runs", "2019-05-01")] = Resp(status, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    s = ev["summary"]
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    assert pb["run_history_read"] is False and pb["runs_in_lookback"] is None and pb["failed_runs"] is None
+    assert pb["recent_runs"] is None and pb["last_run_status"] is None and pb["runs_by_status"] is None
+    assert s["playbooks_run_history_unread"] == [PB] and s["live_playbooks_run_history_unread"] == 1
+    assert s["live_playbooks_last_run_failed"] is None and s["live_playbooks_last_run_succeeded"] is None
+    assert s["live_playbooks_without_runs"] is None and s["live_playbook_failed_runs"] is None
+    assert PB in ev["results"]["notes"][0] and "run history" in ev["results"]["notes"][0]
+    # What the playbook does is still reported.
+    assert s["live_account_containment_playbooks"] == 1
+
+
+def test_sentinel_playbooks_other_run_read_errors_fail(azure, tmp_path):
+    azure.arm[(f"{PB}/runs", "2019-05-01")] = Resp(400, {"error": {"code": "BadRequest", "message": "bad filter"}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    (pb,) = ev["results"]["playbooks"]
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and ev["results"]["notes"] == []
+    assert pb["run_history_read"] is False and ev["summary"]["live_playbook_failed_runs"] is None
+
+
+def test_sentinel_playbooks_disabled_playbook_runs_are_not_live(azure, tmp_path):
+    PLAYBOOK["properties"]["state"] = "Disabled"
+    try:
+        code, ev = run("sentinel_playbooks", tmp_path)
+    finally:
+        PLAYBOOK["properties"]["state"] = "Enabled"
+    (pb,) = ev["results"]["playbooks"]
+    s = ev["summary"]
+    assert code == 0 and pb["failed_runs"] == 1 and s["run_by_active_automation_rule"] == 0
+    assert s["live_playbook_failed_runs"] == 0 and s["live_playbooks_last_run_failed"] == 0
+
+
+def test_sentinel_playbooks_runs_path():
+    mod = MODS["sentinel_playbooks"]
+    assert mod.runs_path(PB) == (f"{PB}/runs", "2019-05-01")
+    assert mod.runs_path(STD) == (
+        f"{RG}/providers/Microsoft.Web/sites/la-std/hostruntime/runtime/webhooks/workflow/api/management/workflows/contain/runs",
+        "2024-04-01")
 
 
 def test_entra_risky_users(azure, tmp_path):
@@ -2603,9 +3070,15 @@ def _rule_runs(azure, playbook_id):
         {"order": 2, "actionType": "RunPlaybook", "actionConfiguration": {"logicAppResourceId": playbook_id}})
 
 
+STD_RUNS = f"{RG}/providers/Microsoft.Web/sites/la-std/hostruntime/runtime/webhooks/workflow/api/management/workflows/contain/runs"
+
+
 def _run_standard_playbook(azure, envelope):
     _rule_runs(azure, STD)
     azure.arm[(STD, "2024-04-01")] = envelope
+    azure.arm[(STD_RUNS, "2024-04-01")] = {"value": [
+        wf_run("08584", "Succeeded", NOW - timedelta(hours=3), trigger="incident"),
+        wf_run("08583", "TimedOut", NOW - timedelta(days=1), trigger="incident")]}
 
 
 def test_sentinel_playbooks_standard_workflow(azure, tmp_path):
@@ -2621,6 +3094,9 @@ def test_sentinel_playbooks_standard_workflow(azure, tmp_path):
     assert code == 0 and std["plan"] == "standard" and std["definition_read"] and std["enabled"]
     assert std["triggers"][0]["kind"] == "incident" and std["capabilities"]["account_containment"]
     assert ("GET", STD, "2024-04-01") in azure.calls and ev["summary"]["standard_playbooks"] == 1
+    assert ("GET", STD_RUNS, "2024-04-01") in azure.calls and std["run_history_read"]
+    assert std["last_run_status"] == "Succeeded" and std["failed_runs"] == 1 and std["recent_runs"][0]["trigger"] == "incident"
+    assert ev["summary"]["live_playbook_failed_runs"] == 2 and ev["summary"]["live_playbooks_last_run_failed"] == 1
 
 
 def test_sentinel_playbooks_standard_workflow_without_definition(azure, tmp_path):

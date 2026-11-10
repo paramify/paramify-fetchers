@@ -4,6 +4,7 @@
 import logging
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -16,12 +17,14 @@ from azure_rest import (  # noqa: E402
     QueryError,
     int_config,
     iso_duration_days,
+    parse_time,
     run_workspaces,
 )
 from sentinel_ingestion import (  # noqa: E402
     ALERT_PRODUCTS_QUERY,
     ALERTS_TABLE,
     DEFAULT_WINDOW_DAYS,
+    DEFENDER_XDR_CARRIES,
     INGESTION_QUERY,
     NON_SOURCE_TABLES,
     WINDOW_ENV,
@@ -63,6 +66,14 @@ QUERY_BATCH = 100
 _LET = re.compile(r"\s*let\b")
 # Basic and Auxiliary tables answer only /search: union * on /query skips them, and naming one fails to resolve.
 QUERYABLE_PLAN = "Analytics"
+# Off (0) by default: /search bills per GB scanned over the time range, so each table is asked for nothing more than this.
+BASIC_LOOKBACK_ENV = "BASIC_LOGS_LOOKBACK_HOURS"
+SEARCH_QUERY = "['{table}'] | where TimeGenerated > ago({hours}h) | summarize LastIngested = max(TimeGenerated), Records = count()"
+# How far back /search reads a Basic table; older data needs a search job.
+SEARCH_MAX_HOURS = 30 * 24
+# A search spanning the date a table's Auxiliary (lake) data starts, after a create or a switch, warns that it may be partial.
+LAKE_WARNING = "PartialLakeDataWarning"
+_LAKE_START = re.compile(r"starting from (\d{4}-\d{2}-\d{2}T[\d:.]+Z)")
 
 # Connection kinds whose Content Hub definition has another id: this kind is Entra ID Protection, not the Entra ID logs connector.
 KIND_DEFINITION = {"AzureActiveDirectory": "AzureActiveDirectoryIdentityProtection"}
@@ -70,12 +81,6 @@ DEFENDER_XDR_ALERT_PRODUCTS = (
     '"Microsoft Defender Advanced Threat Protection", "Office 365 Advanced Threat Protection", '
     '"Azure Advanced Threat Protection", "Microsoft Cloud App Security", "Microsoft 365 Defender", "Microsoft Defender XDR"'
 )
-# Defender XDR's own MtpAlerts list: the products whose alerts it carries. Defender for Cloud's and IoT's aren't among them.
-DEFENDER_XDR_CARRIES = frozenset({
-    "AzureActiveDirectory", "AzureAdvancedThreatProtection", "MicrosoftCloudAppSecurity",
-    "MicrosoftDefenderAdvancedThreatProtection", "MicrosoftThreatProtection", "OfficeATP", "OfficeIRM",
-})
-
 # Built-in connection kinds and what they fill, for a connection whose connector definition isn't installed.
 BUILT_IN_DATA_TYPES: Dict[str, List[Tuple[str, str]]] = {
     "AzureActiveDirectory": [("SecurityAlert (IPC)", 'SecurityAlert | where ProductName == "Azure Active Directory Identity Protection"')],
@@ -129,18 +134,97 @@ def project_connector(connector: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def project_tables(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def project_tables(
+    rows: List[Dict[str, Any]], plans: Optional[Dict[str, str]] = None, searched: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    """Tables that received data in the window: from union * on /query, and the Basic or Auxiliary ones from /search."""
+    found = {row["ParamifySourceTable"]: row for row in rows if row.get("ParamifySourceTable")}
+    found.update({name: s for name, s in (searched or {}).items() if s and (s["Records"] or s["LastIngested"])})
     tables = [
         {
-            "table": row.get("ParamifySourceTable"),
+            "table": name,
+            "plan": (plans or {}).get(name),
             "last_ingested": row.get("LastIngested"),
             "records": row.get("Records"),
-            "counts_as_source": row.get("ParamifySourceTable") not in NON_SOURCE_TABLES | {ALERTS_TABLE},
+            "lake_data_start": row.get("lake_data_start"),
+            "counts_as_source": name not in NON_SOURCE_TABLES | {ALERTS_TABLE},
         }
-        for row in rows
-        if row.get("ParamifySourceTable")
+        for name, row in found.items()
     ]
     return sorted(tables, key=lambda t: t["table"].lower())
+
+
+def search_hours(days: int) -> int:
+    """Hours of each Basic or Auxiliary table to search, capped at the window and at what /search reaches; 0 is off."""
+    return min(int_config(BASIC_LOOKBACK_ENV, 0), days * 24, SEARCH_MAX_HOURS)
+
+
+def lake_warning_only(exc: BaseException) -> bool:
+    return isinstance(exc, QueryError) and exc.code == "PartialError" and bool(exc.details) and all(
+        code == LAKE_WARNING for code, _ in exc.details)
+
+
+def lake_start(exc: QueryError) -> Optional[str]:
+    """The one lake start date a warning names, exactly as written, so the split leaves no gap."""
+    dates = {m.group(1) for _, message in exc.details if (m := _LAKE_START.search(message or ""))}
+    return dates.pop() if len(dates) == 1 else None
+
+
+def first_row(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not rows:  # summarize without by always answers one row, so none is a broken answer, not an empty table
+        raise LookupError("the search returned no result row")
+    return rows[0]
+
+
+def search_table(client, customer_id: str, name: str, hours: int, notes: List[str]) -> Dict[str, Any]:
+    """{} when not measured; a warning that the window spans the lake start is answered by searching each side of it."""
+    query = SEARCH_QUERY.format(table=name, hours=hours)
+    end = datetime.now(timezone.utc).replace(microsecond=0)  # per table, so a slow earlier search doesn't shift this one's halves
+    try:
+        row = first_row(client.search(customer_id, query, f"PT{hours}H"))
+        return {"LastIngested": row.get("LastIngested"), "Records": row.get("Records") or 0, "lake_data_start": None}
+    except QueryError as exc:
+        if not lake_warning_only(exc):
+            raise
+        warned = exc
+    start, cut = end - timedelta(hours=hours), lake_start(warned)
+    cut_time = parse_time(cut)
+    halves: List[Dict[str, Any]] = []
+    if cut and cut_time and start < cut_time < end:
+        for span in (f"{start:%Y-%m-%dT%H:%M:%SZ}/{cut}", f"{cut}/{end:%Y-%m-%dT%H:%M:%SZ}"):
+            try:
+                halves.append(first_row(client.search(customer_id, query, span)))
+            except QueryError as exc:
+                if not lake_warning_only(exc):
+                    raise
+                break
+    if len(halves) == 2:
+        times = [h.get("LastIngested") for h in halves if h.get("LastIngested")]
+        notes.append(f"{name}: searched in two parts, before and from its lake data start {cut}, since one search spanning it may be partial")
+        return {"LastIngested": max(times, key=parse_time) if times else None,
+                "Records": sum(h.get("Records") or 0 for h in halves), "lake_data_start": cut}
+    # The spanning answer is all there is: its newest record is real, its count may be short, and nothing found proves nothing.
+    last = (warned.rows or [{}])[0].get("LastIngested")
+    notes.append(f"{name}: a search spanning its lake data start {cut or 'date'} may be partial and couldn't be split cleanly, so "
+                 + ("its record count is unknown" if last else "it isn't measured"))
+    return {"LastIngested": last, "Records": None, "lake_data_start": cut} if last else {}
+
+
+def search_tables(client, ws: Dict[str, Any], names: List[str], hours: int, days: int, collector,
+                  notes: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Each Basic or Auxiliary table's last ingestion and count, None when its search failed; one not measured is left out."""
+    out: Dict[str, Optional[Dict[str, Any]]] = {}
+    for name in names:
+        result = collector.guard(
+            f"loganalytics.search({name}, {ws['name']})",
+            lambda name=name: search_table(client, ws["customer_id"], name, hours, notes),
+        )
+        if result is None:
+            out[name] = None
+        # An empty answer over less than the window doesn't prove the table had nothing in it.
+        elif result and (result["Records"] is None or result["Records"] or hours == days * 24):
+            out[name] = result
+    return out
 
 
 def project_alert_products(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -251,9 +335,9 @@ Pending = List[Tuple[Tuple[int, int], str, str]]
 
 
 def last_data_queries(
-    catalog: List[Dict[str, Any]], ingested: Dict[str, Any], plans: Optional[Dict[str, str]]
+    catalog: List[Dict[str, Any]], ingested: Dict[str, Any], plans: Optional[Dict[str, str]], searched: frozenset = frozenset()
 ) -> Tuple[Dict[Tuple[int, int], Any], Pending]:
-    """Answers taken straight from table ingestion, and the queries still to run; a table on a plan /query can't read is left unmeasured."""
+    """Answers taken from table ingestion, and the queries still to run; a filtered query on a Basic or Auxiliary table with data stays unmeasured, since /search would bill another scan."""
     known: Dict[Tuple[int, int], Any] = {}
     pending = []
     for ci, c in enumerate(catalog):
@@ -262,7 +346,7 @@ def last_data_queries(
             plan = (plans or {}).get(table or "")
             if table in ingested and _BARE_TABLE.match(query):
                 known[(ci, di)] = ingested[table]
-            elif plan == QUERYABLE_PLAN and table not in ingested:
+            elif (plan == QUERYABLE_PLAN or table in searched) and table not in ingested:
                 known[(ci, di)] = None
             elif plan in (None, QUERYABLE_PLAN):  # parser functions, union and let queries run as written
                 pending.append(((ci, di), query, f"{c['id']}: {name}"))
@@ -392,7 +476,12 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     else:
         collector.record(f"workspace customerId ({ws['name']})", LookupError("workspace has no customerId to query"))
 
-    tables = project_tables(rows) if rows is not None else None
+    hours = search_hours(days)
+    other_plans = sorted(n for n, p in (plans or {}).items() if p != QUERYABLE_PLAN)
+    searched = search_tables(client, ws, other_plans, hours, days, collector, notes) if rows is not None and hours else {}
+    searched_ok = frozenset(n for n, s in searched.items() if s)
+    search_failed = sorted(n for n, s in searched.items() if s is None)
+    tables = project_tables(rows, plans, searched) if rows is not None else None
     alert_rows = None
     if any(t["table"] == ALERTS_TABLE for t in tables or []):
         alert_rows = collector.guard(
@@ -413,7 +502,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     found: Optional[Dict[Tuple[int, int], Any]] = {}
     if tables is not None:
         ingested = {t["table"]: t["last_ingested"] for t in tables}
-        known, pending = last_data_queries(catalog, ingested, plans)
+        known, pending = last_data_queries(catalog, ingested, plans, searched_ok)
         found = collector.guard(
             f"loganalytics.query(connector last data, {ws['name']})",
             lambda: run_last_data(client, ws["customer_id"], pending, days, notes),
@@ -457,9 +546,14 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             sum(1 for h in health if health_rank(h["status"]) >= HEALTH_RANK["warning"]) if health is not None else None
         ),
         "tables": tables,
-        "tables_not_measured": sorted(n for n, p in plans.items() if p != QUERYABLE_PLAN) if plans is not None else None,
+        "tables_searched": sorted(searched_ok) if plans is not None else None,
+        "tables_search_failed": search_failed if plans is not None else None,
+        "tables_not_measured": [n for n in other_plans if n not in searched_ok] if plans is not None else None,
         "source_tables": sources if tables is not None else None,
-        "sources_ingesting": len(sources) if tables is not None else None,
+        # With the search on, a failed search or unread plans could hide a source.
+        "sources_ingesting": (
+            len(sources) if tables is not None and not (hours and (plans is None or search_failed)) else None
+        ),
         "alert_products": products if tables is not None else None,
         "non_source_tables": [t["table"] for t in tables or [] if not t["counts_as_source"] and t["table"] != ALERTS_TABLE],
         "notes": notes,
@@ -481,6 +575,7 @@ def _strict_total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]
 def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
     counts: List[int] = [w["sources_ingesting"] for w in workspaces if w.get("sources_ingesting") is not None]
     return {
+        "basic_logs_lookback_hours": search_hours(int_config(WINDOW_ENV, DEFAULT_WINDOW_DAYS)),
         "min_sources_ingesting": min(counts) if counts else None,
         "workspaces_with_2plus_sources": sum(1 for c in counts if c >= 2),
         "workspaces_with_no_sources": sum(1 for c in counts if c == 0),
@@ -495,7 +590,8 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def main() -> int:
-    return run_workspaces(fetcher=NAME, logger=logger, collect=collect, summarize=summarize)
+    return run_workspaces(fetcher=NAME, logger=logger, collect=collect, summarize=summarize,
+                          resource_exclusions=True)
 
 
 if __name__ == "__main__":

@@ -30,8 +30,16 @@ dependencies = [
 # (select_on_focus, blurred cursor styles) differs enough that the TUI is not the
 # same app on 1.x.
 tui = ["textual>=8,<9"]
-checkov = ["checkov"]
-dev = ["pytest", "pytest-xdist", "ruff", "mypy"]
+# azure-identity: checkov_bicep's TFVC source signs in to Azure DevOps with Entra when no PAT is set.
+checkov = ["checkov", "azure-identity>=1.25.3,<2"]
+# python-dotenv 1.2.0 is the first to honour PYTHON_DOTENV_DISABLED, which the TUI and
+# CLI regression tests set so a developer's .env never reaches the commands they run.
+# cryptography: tests/test_azure_entra_authentication_policy.py builds test
+# certificates with it, and the `test` job installs dev but not the azure extra.
+# defusedxml: the qualys tests need it, and the same `test` job runs them.
+dev = ["pytest", "pytest-xdist", "ruff", "mypy", "python-dotenv>=1.2.0", "cryptography>=42.0.0,<51", "defusedxml"]
+# TUI SVG snapshots; not in dev because its syrupy 4.8.0 pin caps pytest below 9.
+snapshots = ["pytest-textual-snapshot==1.1.0"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every
 # one producing wrong or empty evidence rather than an error. Keep the two files
@@ -50,9 +58,11 @@ azure = [
     "azure-mgmt-security>=7.0.0,<8",
     "azure-mgmt-authorization>=4.0.0,<5",
     "msgraph-sdk>=1.61.0,<2",
+    # Reads the subject and expiry of the CAs trusted for certificate sign-in.
+    "cryptography>=42.0.0,<51",
     "azure-mgmt-sql>=4.0.0,<5",
     "azure-mgmt-rdbms>=10.1.1,<11",
-    "azure-mgmt-postgresqlflexibleservers>=2.0.0,<3",
+    "azure-mgmt-postgresqlflexibleservers>=2.0.0,<4",
     "azure-mgmt-cosmosdb>=10.0.0,<11",
     "azure-mgmt-redisenterprise>=3.1.0,<4",
     "azure-mgmt-redis>=14.5.0,<15",
@@ -115,8 +125,11 @@ gcp = [
 # opens with pytest.importorskip("oci"), so without it installed they SKIP rather
 # than fail. Out of `all` for the same reason as Azure and GCP.
 oci = ["oci"]
-# Convenience: every front-end + dev tooling in one install.
-all = ["textual>=8,<9", "checkov", "pytest", "ruff", "mypy"]
+# Qualys returns XML that names an external DTD; the fetchers parse it with defusedxml.
+qualys = ["defusedxml"]
+# Convenience: every front-end + dev tooling in one install. azure-identity comes with checkov, for
+# checkov_bicep's Entra sign-in to TFVC; the azure-mgmt SDKs stay out (see the azure extra).
+all = ["textual>=8,<9", "checkov", "azure-identity>=1.25.3,<2", "pytest", "ruff", "mypy", "defusedxml"]
 
 # The single entry point. `paramify` steers every front-end: the headless
 # commands, plus `paramify tui`. (Renaming later is a one-line change here; add

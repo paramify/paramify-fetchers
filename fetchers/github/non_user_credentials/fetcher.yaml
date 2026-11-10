@@ -1,0 +1,79 @@
+name: github_non_user_credentials
+version: 0.1.0
+description: >-
+  Credentials that are not a person: deploy keys, installed GitHub Apps and
+  their permissions, approved fine-grained personal access tokens, Actions
+  secrets with their age, and webhooks that skip TLS verification or are
+  unsigned.
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: github_non_user_credentials.json
+  aggregation: per_target
+
+config_schema:
+  max_secret_age_days:
+    type: integer
+    required: false
+    default: 365
+    env: GITHUB_MAX_SECRET_AGE_DAYS
+    description: An Actions secret not updated for longer than this is listed in actions_secrets_older_than_max.
+  max_unused_days:
+    type: integer
+    required: false
+    default: 90
+    env: GITHUB_MAX_UNUSED_DAYS
+    description: An approved fine-grained token unused for longer than this counts as unused.
+
+secrets: []
+
+ksis:
+  - KSI-IAM-SNU
+  - KSI-SVC-ASM
+
+evidence_set:
+  reference_id: EVD-GITHUB-NON-USER-CREDENTIALS
+  name: GitHub Non-User Credentials
+  instructions: >-
+    Script: github/non_user_credentials/fetcher.py. Deploy keys per repository (read-only or write, age, last use), installed
+    apps with the permissions they hold and on how many repositories, approved
+    fine-grained tokens with expiry and last use (GitHub App tokens only;
+    null otherwise), Actions secrets by name and
+    last update (values are never readable), and webhooks with whether TLS is
+    verified and payloads are signed. Webhook URLs are reduced to their host.

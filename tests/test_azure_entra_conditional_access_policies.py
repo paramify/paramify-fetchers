@@ -113,11 +113,12 @@ def _tenant_policies():
     ]
 
 
-def test_strength_combinations_read_raw_and_judged(monkeypatch):
+def test_strength_combinations_read_raw_and_judged(monkeypatch, assert_summary_documented):
     policies, strengths, s, collector = _run(
         monkeypatch, _graph(_tenant_policies(), [PHISHING_RESISTANT, ANY_MFA, PASSWORD_ONLY]))
 
     assert collector.failures == []
+    assert_summary_documented("azure/entra_conditional_access_policies", s)
     by_id = {p["id"]: p for p in policies}
     # The SDK reads "password,sms" as None; the raw read keeps it.
     assert by_id["p-any"]["access_controls"]["authentication_strength_combinations"] == [
@@ -173,7 +174,7 @@ def test_denied_strength_read_is_not_authorized_and_nulls_the_figures(monkeypatc
 def test_denied_policy_read_is_not_authorized_and_unknown_not_zero(monkeypatch):
     policies, strengths, s, collector = _run(monkeypatch, _graph([], policies_status=403))
 
-    assert policies == [] and collector.failures
+    assert policies == [] and collector.failures and strengths is None
     assert collector.failures[0]["message"].endswith("(status 403)")
     assert classify_failure_code(collector.failures) == "not_authorized"
     # Every policy figure, not only the phishing-resistant ones, reads unknown.
@@ -233,6 +234,62 @@ def test_mfa_client_types_skip_alternatives_narrowing_and_partial_scope(monkeypa
     assert types == ["exchangeActiveSync", "mobileAppsAndDesktopClients"]
     assert by_id["p-or-weak"]["requires_mfa"] is True and by_id["p-or-weak"]["requires_mfa_without_alternative"] is False
     assert by_id["p-and"]["requires_mfa_without_alternative"] is True
+
+
+def test_mfa_client_types_skip_app_and_device_filters_flows_and_other_risks(monkeypatch):
+    def narrowed(pid, **conditions):
+        policy = _with(_policy(pid, pid, controls=("mfa",)), client_apps=("browser",))
+        policy["conditions"].update(conditions)
+        return policy
+
+    types, by_id = _client_types(
+        monkeypatch,
+        narrowed("p-device", devices={"deviceFilter": {"mode": "exclude", "rule": "device.isCompliant -eq True"}}),
+        narrowed("p-app-filter", applications={"includeApplications": ["All"], "applicationFilter": {
+            "mode": "exclude", "rule": 'CustomSecurityAttribute.Tier -eq "Legacy"'}}),
+        narrowed("p-flows", authenticationFlows={"transferMethods": "deviceCodeFlow,authenticationTransfer"}),
+        narrowed("p-insider", insiderRiskLevels="minor,moderate"),
+        narrowed("p-sp-risk", servicePrincipalRiskLevels=["high"]),
+        _with(_policy("p-apps", "MFA for apps", controls=("mfa",)), client_apps=("mobileAppsAndDesktopClients",)),
+        narrowed("p-no-flow", authenticationFlows={"transferMethods": "none"}, devices={}),
+    )
+    assert types == ["browser", "mobileAppsAndDesktopClients"]
+    assert sorted(pid for pid in by_id if ca._mfa_for_everyone(by_id[pid])) == ["p-apps", "p-no-flow"]
+    assert by_id["p-app-filter"]["target_resources"] == {
+        "include": ["All"], "exclude": [],
+        "application_filter": {"mode": "exclude", "rule": 'CustomSecurityAttribute.Tier -eq "Legacy"'}}
+    assert by_id["p-no-flow"]["target_resources"]["application_filter"] is None
+    conditions = {pid: by_id[pid]["conditions"] for pid in by_id}
+    assert conditions["p-device"]["device_filter"] == {"mode": "exclude", "rule": "device.isCompliant -eq True"}
+    assert conditions["p-flows"]["authentication_flow_transfer_methods"] == ["authenticationTransfer", "deviceCodeFlow"]
+    assert conditions["p-insider"]["insider_risk_levels"] == ["minor", "moderate"]
+    assert conditions["p-sp-risk"]["service_principal_risk_levels"] == ["high"]
+    assert conditions["p-no-flow"]["authentication_flow_transfer_methods"] == []
+    assert conditions["p-no-flow"]["device_filter"] is None
+    assert json.loads(json.dumps(by_id["p-device"])) == by_id["p-device"]
+
+
+def test_mfa_for_everyone_skips_an_include_mode_application_filter(monkeypatch):
+    policy = _with(_policy("p-include", "MFA", controls=("mfa",)), client_apps=("browser",))
+    policy["conditions"]["applications"]["applicationFilter"] = {
+        "mode": "include", "rule": 'CustomSecurityAttribute.Tier -eq "Core"'}
+    types, by_id = _client_types(monkeypatch, policy)
+    assert types == []
+    assert not ca._mfa_for_everyone(by_id["p-include"])
+    assert by_id["p-include"]["target_resources"]["application_filter"] == {
+        "mode": "include", "rule": 'CustomSecurityAttribute.Tier -eq "Core"'}
+
+
+def test_no_graph_client_leaves_the_strengths_unknown(monkeypatch):
+    async def no_client(collector, cred, work, default=None):
+        collector.record("graph.client", RuntimeError("no Graph client"))
+        return default
+
+    monkeypatch.setattr(ca, "with_graph_client", no_client)
+    collector = Collector(logging.getLogger("test"))
+    policies, _tenant, strengths, readable, policies_readable = asyncio.run(ca._collect(collector, object()))
+    assert policies == [] and strengths is None and policies_readable is False
+    assert ca.summarize(policies, readable, policies_readable)["total_policies"] is None
 
 
 def test_strengths_are_not_read_when_no_policy_uses_one(monkeypatch):

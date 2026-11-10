@@ -78,7 +78,9 @@ no targets. It collects wherever it runs.
 
 Wiz needs its API endpoint, which all Wiz fetchers share. `set-platform-config`
 writes it under `platforms.wiz`, so every Wiz fetcher in the manifest inherits
-it. A `set-config` on one fetcher overrides it.
+it. A `set-config` on one fetcher overrides it. Pattern lists, such as Azure's
+resource exclusions, take `manifest exclude` instead
+([pattern lists](config_injection_guide.md#5-leave-resources-out-of-scope)).
 
 ![Adding wiz_cloud_configuration_posture reports a required config key and two secrets; set-platform-config and two set-secret commands clear them](img/run_manifest/04-platform-config.png)
 

@@ -50,16 +50,33 @@ def get_base_url() -> str:
     return os.environ.get("DATADOG_BASE_URL", "https://api.ddog-gov.com").rstrip("/")
 
 
+# The v2 archive states (GET /api/v2/logs/config/archives). WORKING and
+# WORKING_AUTH_LEGACY mean Datadog is writing to the destination; FAILING and
+# UNKNOWN do not.
+WORKING_ARCHIVE_STATES = frozenset({"WORKING", "WORKING_AUTH_LEGACY"})
+
+
+def _first_present(mapping: Dict[str, Any], *keys: str) -> Any:
+    """The value of the first key that is present, so a real False is kept."""
+    for key in keys:
+        if key in mapping:
+            return mapping[key]
+    return None
+
+
 def extract_archive_fields(archive: Dict[str, Any]) -> Dict[str, Any]:
     attrs = archive.get("attributes", archive)
-    destination = attrs.get("destination", {})
+    destination = attrs.get("destination") or {}
     dest_type = destination.get("type", "unknown")
 
-    # Extract storage location without leaking full paths
+    # Extract storage location without leaking full paths. S3 and GCS archives
+    # name a bucket; Azure archives name a container (required) in a storage
+    # account (storage_account, also required).
+    storage_account = destination.get("storage_account") or destination.get("storageAccount")
     storage_location = (
         destination.get("bucket")
         or destination.get("container")
-        or destination.get("storageAccount")
+        or storage_account
         or ""
     )
 
@@ -69,10 +86,17 @@ def extract_archive_fields(archive: Dict[str, Any]) -> Dict[str, Any]:
         "state": attrs.get("state"),
         "destination_type": dest_type,
         "storage_location": storage_location,
+        "storage_account": storage_account,
         "destination_path": destination.get("path"),
-        "includeTags": attrs.get("includeTags"),
+        # The API field is include_tags; the camelCase key is kept for existing
+        # validators.
+        "includeTags": _first_present(attrs, "include_tags", "includeTags"),
         "query": attrs.get("query"),
     }
+
+
+def is_archive_working(archive: Dict[str, Any]) -> bool:
+    return str(archive.get("state") or "").upper() in WORKING_ARCHIVE_STATES
 
 
 def get_log_archives() -> Dict[str, Any]:
@@ -88,7 +112,7 @@ def get_log_archives() -> Dict[str, Any]:
         archives_raw = payload.get("data", [])
         extracted = [extract_archive_fields(a) for a in archives_raw]
 
-        enabled = [a for a in extracted if str(a.get("state", "")).upper() == "ENABLED"]
+        enabled = [a for a in extracted if is_archive_working(a)]
         dest_type_counts: Dict[str, int] = dict(Counter(
             a.get("destination_type", "unknown") for a in extracted
         ))
@@ -111,7 +135,10 @@ def get_log_archives() -> Dict[str, Any]:
             "data": extracted,
             "summary": {
                 "total_archives": len(extracted),
+                # Archives Datadog is writing to (state WORKING or
+                # WORKING_AUTH_LEGACY). The v2 API has no ENABLED state.
                 "enabled_archives": len(enabled),
+                "archives_by_state": dict(Counter(a.get("state") or "UNKNOWN" for a in extracted)),
                 "archives_by_destination_type": dest_type_counts,
                 "archives_summary": archives_summary,
             },

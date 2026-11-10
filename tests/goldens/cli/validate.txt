@@ -1,0 +1,5 @@
+$ paramify validate examples/demo.yaml
+exit 0
+--- stdout
+OK  manifest valid; 1 fetcher entries
+--- stderr

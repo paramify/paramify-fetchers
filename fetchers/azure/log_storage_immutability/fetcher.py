@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_rest import ArmError, dig, run_subscription  # noqa: E402
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 NAME = "azure_log_storage_immutability"
 STORAGE_API = "2023-05-01"
@@ -20,6 +21,7 @@ LOG_CONTAINER_PREFIXES = (
     ("insights-metrics-", "metrics"),
     ("am-", "workspace_export"),
 )
+KINDS = ("storage_account", "container")
 
 logger = logging.getLogger(NAME)
 
@@ -64,20 +66,36 @@ def project_container(container: Dict[str, Any], account_version_level: bool, ac
     }
 
 
+def split_containers(exclusions: ResourceExclusions, account: Dict[str, Any], containers: List[Dict[str, Any]]) -> tuple:
+    """(in-scope containers, excluded entries): an id: pattern can take one container out of an in-scope account."""
+    base = f"{account.get('id')}/blobServices/default/containers/"
+    return exclusions.split(containers, "container", resource_id=lambda c: c.get("id") or base + (c.get("name") or ""),
+                            location=lambda c: account.get("location"), resource_group=lambda c: None)
+
+
 def collect(client, subscription_id: str, collector) -> tuple:
+    """Accounts the resource exclusions take out are listed under excluded with no container or service read."""
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
     accounts = collector.guard(
         "storage.storageAccounts.list",
         lambda: client.list(f"/subscriptions/{subscription_id}/providers/Microsoft.Storage/storageAccounts", STORAGE_API),
     )
     if accounts is None:
-        return {"accounts": None}, {}
+        exclusions.warn_unmatched(logger)
+        # Unknown, not none: the account list wasn't read.
+        counts = exclusions.summary([], KINDS, {"storage_accounts": None, "containers": None})
+        counts.update(excluded_storage_accounts=None, excluded_containers=None)
+        return {"accounts": None, "excluded": []}, counts
+    accounts, excluded = exclusions.split(accounts, "storage_account")
     out: List[Dict[str, Any]] = []
     for account in sorted(accounts, key=lambda a: (a.get("id") or "").lower()):
         containers = collector.guard(
             f"storage.blobContainers.list({account.get('name')})",
             lambda a=account: list_containers(client, a),
         )
-        logs = [c for c in containers or [] if log_type(c.get("name"))]
+        logs, out_containers = split_containers(exclusions, account, [c for c in containers or [] if log_type(c.get("name"))])
+        excluded += out_containers
         if not logs:
             continue
         service = collector.guard(
@@ -101,6 +119,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
 
     containers = [c for a in out for c in a["log_containers"]]
     retention = [c["retention_days"] for c in containers if c["retention_days"] is not None]
+    exclusions.warn_unmatched(logger)
     summary = {
         "storage_accounts_scanned": len(accounts),
         "accounts_with_log_containers": len(out),
@@ -110,8 +129,9 @@ def collect(client, subscription_id: str, collector) -> tuple:
         "legal_hold": sum(1 for c in containers if c["legal_hold"]),
         "unprotected": sum(1 for c in containers if not c["protected"]),
         "min_retention_days": min(retention) if retention else None,
+        **exclusions.summary(excluded, KINDS, {"storage_accounts": len(accounts), "containers": len(containers)}),
     }
-    return {"accounts": out}, summary
+    return {"accounts": out, "excluded": sorted(excluded, key=lambda e: (e["kind"], (e["id"] or "").lower()))}, summary
 
 
 def main() -> int:

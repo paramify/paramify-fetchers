@@ -93,12 +93,13 @@ def _window(monkeypatch, days=None):
     return sign_ins.lookback_window(NOW)
 
 
-def test_sign_ins_summarized_per_user_and_app(monkeypatch):
+def test_sign_ins_summarized_per_user_and_app(monkeypatch, assert_summary_documented):
     client = FakeClient([SIGN_INS[:4], SIGN_INS[4:]])
     collector = _collector()
     results, s = sign_ins.collect(client, collector, _window(monkeypatch))
 
     assert collector.ok
+    assert_summary_documented("azure/entra_sign_ins", s)
     (version, path), = client.paths
     assert version == "beta" and path.startswith("/auditLogs/signIns?$filter=createdDateTime ge 2026-10-12T12:00:00Z")
     assert s["sign_in_logs"] == "read" and s["sign_ins_complete"] is True
