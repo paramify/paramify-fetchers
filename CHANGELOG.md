@@ -94,7 +94,16 @@ schemas and the `paramify` CLI — not the internal code.
     group-scoped query asks for the longer of the lookback and the 21 days.
     Without `groups`, every query and every figure is as in 0.2.0. The group
     scope is tested against a double and its KQL is checked with Microsoft's Kusto
-    parser; it has not yet run against a live workspace.
+    parser. A live run resolved the same members as a list exported from Entra.
+  - **Fixed: one person is counted once.** `users_signed_in`,
+    `users_with_single_factor_success`, the per-user list and
+    `non_interactive_users_signed_in` counted distinct user principal names, so a
+    user whose sign-ins Entra logged with no name, or with an id in its place, read
+    as extra users (seen live: 25 group members read as 26 users). Users are now
+    counted by Entra object id, and by the name only where the log has no usable
+    id (an attempt for an account that does not exist is logged under an all-zero
+    id). A listed user shows a real name when any of their rows has one, and none
+    otherwise. Sign-in counts are unchanged.
 - **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
   Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
   - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from

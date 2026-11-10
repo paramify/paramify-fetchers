@@ -70,6 +70,13 @@ WINDOWS_SIGN_IN_APP_ID = "38aa3b87-a06d-4817-b275-7a316988d93b"
 MULTI_FACTOR = "multiFactorAuthentication"
 SINGLE_FACTOR = "singleFactorAuthentication"
 RISKY_LEVELS = ("medium", "high")
+# Entra logs some sign-ins of a known user with no user principal name, or with an id in its place, and an attempt
+# for an account that does not exist under an all-zero user id. A person is therefore counted by the Entra object
+# id, and by the name only where the log has no usable id; counting names alone reads one person as several.
+NO_USER_ID = "00000000-0000-0000-0000-000000000000"
+_USER_KEY = f"UserKey = iff(isnotempty(Uid) and Uid != '{NO_USER_ID}', Uid, Upn)"
+# A name that is an id, not a user principal name; never shown as the user's name.
+ID_STYLE_NAME = r"^[0-9a-f]{8}-[0-9a-f]{4}-"
 
 # Changes to the tenant's authentication settings, listed in detail; any other Policy-category operation is counted.
 POLICY_OPERATIONS = (
@@ -257,8 +264,9 @@ def base_query(settings: Dict[str, Any], succeeded_only: bool = False) -> str:
         + ("| where tostring(ResultType) == '0' " if succeeded_only else "")
         + "| extend Ok = tostring(ResultType) == '0', Req = tostring(AuthenticationRequirement), "
         "CA = tostring(ConditionalAccessStatus), Risk = tolower(tostring(RiskLevelDuringSignIn)), "
-        "Upn = tolower(tostring(UserPrincipalName)), "
+        "Upn = tolower(tostring(UserPrincipalName)), Uid = tolower(tostring(UserId)), "
         f"DeviceLogon = tolower(tostring(AppId)) == '{WINDOWS_SIGN_IN_APP_ID}' "
+        f"| extend {_USER_KEY} "
         # At least one element, so a sign-in with no detail is kept with an empty set.
         "| extend D = todynamic(tostring(AuthenticationDetails)) "
         "| extend D = iff(array_length(D) > 0, D, dynamic([{}])) "
@@ -310,14 +318,17 @@ def users_query(settings: Dict[str, Any]) -> str:
     return base_query(settings) + (
         "| summarize SignIns = count(), Succeeded = countif(Ok), Failed = countif(not(Ok)), "
         "SucceededSingleFactor = countif(Ok and SingleFactor), "
-        "SucceededPhishingResistant = countif(Ok and PhishingResistant), LastSignIn = max(TimeGenerated) by Upn "
-        f"| order by Upn asc | take {settings['max_rows'] + 1}"
+        "SucceededPhishingResistant = countif(Ok and PhishingResistant), LastSignIn = max(TimeGenerated), "
+        # One row per person; the name shown is a real one when the log has any (the last by name, so it is stable).
+        f"Upn = maxif(Upn, isnotempty(Upn) and not(Upn matches regex @'{ID_STYLE_NAME}')) by UserKey "
+        f"| order by Upn asc, UserKey asc | take {settings['max_rows'] + 1} "
+        "| project Upn, SignIns, Succeeded, Failed, SucceededSingleFactor, SucceededPhishingResistant, LastSignIn"
     )
 
 
 def user_count_query(settings: Dict[str, Any]) -> str:
     return base_query(settings) + (
-        "| summarize SucceededSingleFactor = countif(Ok and SingleFactor) by Upn "
+        "| summarize SucceededSingleFactor = countif(Ok and SingleFactor) by UserKey "
         "| summarize Users = count(), UsersWithSingleFactorSuccess = countif(SucceededSingleFactor > 0)"
     )
 
@@ -345,9 +356,11 @@ def non_interactive_overview_query(settings: Dict[str, Any]) -> str:
         scope_prefix(settings)
         + f"{NON_INTERACTIVE_TABLE} | where TimeGenerated > ago({settings['lookback_days']}d) "
         + scope_filter(settings)
-        + "| extend Ok = tostring(ResultType) == '0', Risk = tolower(tostring(RiskLevelDuringSignIn)) "
+        + "| extend Ok = tostring(ResultType) == '0', Risk = tolower(tostring(RiskLevelDuringSignIn)), "
+        "Upn = tolower(tostring(UserPrincipalName)), Uid = tolower(tostring(UserId)) "
+        f"| extend {_USER_KEY} "
         "| summarize SignIns = count(), Succeeded = countif(Ok), Failed = countif(not(Ok)), "
-        "Users = dcountif(tolower(tostring(UserPrincipalName)), Ok), Apps = dcountif(tolower(tostring(AppId)), Ok), "
+        "Users = dcountif(UserKey, Ok), Apps = dcountif(tolower(tostring(AppId)), Ok), "
         f"Risky = countif(Ok and Risk in ({', '.join(repr(r) for r in RISKY_LEVELS)})), "
         "LastSignIn = max(TimeGenerated)"
     )

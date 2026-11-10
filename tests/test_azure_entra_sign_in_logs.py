@@ -88,8 +88,9 @@ def test_succeeded_only_queries_filter_before_parsing_the_details():
 
 
 def test_lists_ask_for_one_row_more_than_the_cap_to_detect_truncation():
-    for build in (sl.users_query, sl.single_factor_query, sl.audit_events_query):
+    for build in (sl.single_factor_query, sl.audit_events_query):
         assert build(SETTINGS).endswith("| take 3")
+    assert "| take 3 | project Upn, " in sl.users_query(SETTINGS), "cut first, then drop the key column"
     assert "take" not in sl.audit_count_query(SETTINGS)
 
 
@@ -160,7 +161,7 @@ QUERY_RESULTS = {
          "SucceededRisky", "FirstSignIn", "LastSignIn"],
         [[12, 10, 2, 9, 1, 0, 0, 4, 0, "2026-10-05T01:00:00Z", "2026-11-03T22:10:00Z"]]),
     "UsersWithSingleFactorSuccess": table(["Users", "UsersWithSingleFactorSuccess"], [[3, 1]]),
-    "by Upn | order by Upn": table(
+    "by UserKey | order by Upn": table(
         ["Upn", "SignIns", "Succeeded", "Failed", "SucceededSingleFactor", "SucceededPhishingResistant", "LastSignIn"],
         [["a@contoso.com", 5, 5, 0, 0, 4, "2026-11-03T22:10:00Z"], ["b@contoso.com", 4, 3, 1, 1, 0, "2026-11-02T10:00:00Z"],
          ["c@contoso.com", 3, 2, 1, 0, 0, "2026-11-01T10:00:00Z"]]),
@@ -176,7 +177,7 @@ QUERY_RESULTS = {
         ['["Password"]', "[]", 1]]),
     "summarize Changes = count() by OperationName": table(["OperationName", "Changes"], [
         ["Update conditional access policy", 1], ["Authentication Methods Policy Update", 1], ["Update named location", 1]]),
-    "Users = dcountif(tolower(tostring(UserPrincipalName)), Ok)": table(
+    "Users = dcountif(UserKey, Ok)": table(
         ["SignIns", "Succeeded", "Failed", "Users", "Apps", "Risky", "LastSignIn"], [[40, 38, 2, 3, 4, 1, "2026-11-03T23:00:00Z"]]),
     "by CA = tostring(ConditionalAccessStatus)": table(["CA", "SignIns"], [["success", 30], ["notApplied", 8]]),
     "Principals = dcountif(tostring(ServicePrincipalId), Ok)": table(
@@ -815,3 +816,32 @@ def test_a_stray_max_age_value_cannot_fail_a_run_without_a_group_scope(arm, tmp_
     assert sl.main() == 0
     assert not any("IdentityInfo" in q for q in session.queries)
     assert _evidence(tmp_path)["summary"]["group_scope_resolved"] is None
+
+
+# --- a person is counted once, however Entra names their sign-ins ---
+
+def test_users_are_counted_by_object_id_not_by_the_name_in_each_log_row():
+    """Seen live: 25 group members read as 26 users, because one member's sign-ins were logged with no name and
+    one with an id where the name goes."""
+    key = f"UserKey = iff(isnotempty(Uid) and Uid != '{sl.NO_USER_ID}', Uid, Upn)"
+    for settings in (SETTINGS, GROUPED):
+        base = sl.base_query(settings)
+        assert "Uid = tolower(tostring(UserId))" in base and f"| extend {key} " in base
+        assert "countif(Ok and SingleFactor) by UserKey | summarize Users = count()" in sl.user_count_query(settings)
+        users = sl.users_query(settings)
+        assert " by UserKey | order by Upn asc, UserKey asc | take 3 | project Upn, SignIns, " in users
+        # The name shown is never blank or an id when the person has a real one; the key itself is not returned.
+        assert "Upn = maxif(Upn, isnotempty(Upn) and not(Upn matches regex @'^[0-9a-f]{8}-[0-9a-f]{4}-')) by UserKey" in users
+        assert users.endswith("SucceededPhishingResistant, LastSignIn") and "project UserKey" not in users
+        non_interactive = sl.non_interactive_overview_query(settings)
+        assert f"| extend {key} " in non_interactive and "Users = dcountif(UserKey, Ok)" in non_interactive
+
+
+def test_an_attempt_for_an_unknown_account_is_keyed_by_the_name_typed():
+    """Entra files those under an all-zero id; keyed by it, every unknown account would read as one user."""
+    assert sl.NO_USER_ID == "00000000-0000-0000-0000-000000000000" and f"Uid != '{sl.NO_USER_ID}', Uid, Upn)" in sl._USER_KEY
+
+
+def test_a_user_with_no_usable_name_is_listed_without_one():
+    assert sl.user_record({"Upn": "", "SignIns": 7, "Succeeded": 7})["user_principal_name"] is None
+    assert sl.user_record({"Upn": None, "SignIns": 1})["sign_ins"] == 1

@@ -191,7 +191,7 @@ evidence_set:
     - succeeded_device_logons — Number of successful logons to Windows devices (the Windows Sign In app), counted apart from sign-ins to apps
     - multi_factor_percentage — Percentage of successful sign-ins that required MFA: succeeded_multi_factor * 100 / sign_ins_succeeded, 0 when there are none
     - all_successful_sign_ins_multi_factor — True if succeeded_single_factor is 0; false if it is above 0; null if the logs were not read or no sign-in succeeded
-    - users_signed_in — Number of users with at least one sign-in
+    - users_signed_in — Number of users with at least one sign-in, counted by Entra object id, so sign-ins Entra logged with no user name or with an id in its place count under their user rather than as extra users; an attempt for an account that does not exist is counted by the name typed
     - users_with_single_factor_success — Number of users with at least one successful single-factor sign-in
     - succeeded_by_requirement_provider — Number of successful sign-ins for each source of the authentication requirement, as Entra names it (multiConditionalAccess, securityDefaults, perUserMfa, identityProtection and others); a sign-in with more than one source counts under each
 
@@ -216,7 +216,7 @@ evidence_set:
     - non_interactive_sign_ins — Number of non-interactive user sign-ins in the lookback, within the user, group and app scope
     - non_interactive_succeeded — Number with ResultType 0
     - non_interactive_failed — Number with any other ResultType
-    - non_interactive_users_signed_in — Number of users with at least one successful non-interactive sign-in
+    - non_interactive_users_signed_in — Number of users with at least one successful non-interactive sign-in, counted by Entra object id as users_signed_in is
     - non_interactive_succeeded_risky — Number of successful ones rated medium or high risk during sign-in; needs Entra ID P2
 
     Which service principals signed in (counts per principal, no IPs or resources copied)?
