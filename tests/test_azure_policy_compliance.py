@@ -928,6 +928,32 @@ def test_counts_are_null_when_the_summary_and_task_reads_failed(monkeypatch, tmp
     assert all(summary[k] is None for k in SERVICE_COUNTS + TASK_COUNTS)
 
 
+@needs_sdk
+def test_listed_state_counts_are_null_when_the_states_query_fails(monkeypatch, tmp_path):
+    def boom(*a, **k):
+        raise RuntimeError("throttled")
+
+    client = fake_client(policy_states={"list_query_results_for_subscription": boom})
+    monkeypatch.setattr(fx, "collect_evaluation_details", lambda *a, **k: fx.empty_collection()["details"])
+    monkeypatch.setattr(fx, "collect_recurrence", lambda *a, **k: fx.empty_collection()["recurrence"])
+    monkeypatch.setattr(fx, "collect_remediation_deployments", lambda *a, **k: ([], False, []))
+    import azure.mgmt.policyinsights as pi
+    monkeypatch.setattr(pi, "PolicyInsightsClient", lambda **k: client)
+    collector = fx.Collector(logging.getLogger("t"))
+    limits = {"non_compliant": 10, "detail_resources": 1, "recurrence_pairs": 1, "remediation_deployments": 1}
+    collected = fx.collect_compliance("s1", object(), collector, limits)
+    assert collected["states_read"] is False and not collector.ok
+    summary = _run_main(monkeypatch, tmp_path, collected)
+    assert summary["listed_non_compliant_states"] is None
+    assert summary["listed_distinct_non_compliant_resources"] is None
+
+
+def test_listed_state_counts_read_zero_when_the_list_was_read_and_empty(monkeypatch, tmp_path):
+    summary = _run_main(monkeypatch, tmp_path, {**fx.empty_collection(), "states_read": True})
+    assert summary["listed_non_compliant_states"] == 0
+    assert summary["listed_distinct_non_compliant_resources"] == 0
+
+
 def test_counts_read_zero_when_both_reads_came_back_empty(monkeypatch, tmp_path):
     collected = {**fx.empty_collection(), "summary_read": True, "tasks_read": True}
     summary = _run_main(monkeypatch, tmp_path, collected)

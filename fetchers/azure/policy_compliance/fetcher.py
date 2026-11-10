@@ -649,6 +649,7 @@ def summarize(
     remediations: list[dict],
     summary_read: bool = True,
     tasks_read: bool = True,
+    states_read: bool = True,
 ) -> dict:
     """Subscription-wide counts first (from the service), then what was itemized; null where the read failed."""
     compliant, non_compliant = compliant_resource_counts(
@@ -676,10 +677,10 @@ def summarize(
         "non_compliant_assignments": sum(1 for a in assignments if not a["is_compliant"]) if summary_read else None,
         "compliant_assignments": sum(1 for a in assignments if a["is_compliant"]) if summary_read else None,
         # --- the itemized list ---
-        "listed_non_compliant_states": len(states),
+        "listed_non_compliant_states": len(states) if states_read else None,
         "listed_distinct_non_compliant_resources": len(
             {str(s.get("resource_id") or "").lower() for s in states if s.get("resource_id")}
-        ),
+        ) if states_read else None,
         "non_compliant_states_truncated": states_truncated,
         # --- remediation ---
         "remediation_tasks": len(remediations) if tasks_read else None,
@@ -894,6 +895,7 @@ def empty_collection() -> dict:
         "subscription_results": project_summary_results(None),
         "summary_read": False,
         "tasks_read": False,
+        "states_read": False,
         "assignments": [],
         "states": [],
         "states_truncated": False,
@@ -1243,7 +1245,11 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
                     break
                 states.append(record)
 
+        failed_before = len(collector.failures)
         collector.guard("policyinsights.policy_states.list_query_results_for_subscription", _states)
+        collected["states_read"] = len(collector.failures) == failed_before
+    else:
+        collected["states_read"] = True
 
     listed_tasks = collector.guard(
         "policyinsights.remediations.list_for_subscription",
@@ -1283,6 +1289,7 @@ def collect_compliance(subscription_id, cred, collector: Collector, limits: dict
         "subscription_results": subscription_results,
         "summary_read": collected["summary_read"],
         "tasks_read": collected["tasks_read"],
+        "states_read": collected["states_read"],
         "assignments": sorted(assignments, key=lambda a: a.get("policy_assignment_id") or ""),
         "states": sorted(
             states,
@@ -1376,6 +1383,7 @@ def main() -> int:
             # Nothing is read when the provider is unregistered, which is "not in use": 0, not unknown.
             summary_read=collected["summary_read"] or registration == NOT_REGISTERED,
             tasks_read=collected["tasks_read"] or registration == NOT_REGISTERED,
+            states_read=collected["states_read"] or registration == NOT_REGISTERED,
         ),
         **summarize_evaluation_details(collected["states"], collected["details"]),
     }

@@ -189,8 +189,8 @@ evidence_set:
     - compliant_assignments — Number of in-scope policy assignments with no non-compliant resource. With no resource_exclusions pattern set, by the service's per-assignment count (null when the summary could not be read); with one set, by each assignment's in-scope latest states, null when resources_evaluated is null
 
     Which resources are non-compliant?
-    - listed_non_compliant_states — Number of in-scope non-compliant (resource, policy) records listed in the evidence (at most the max_non_compliant_resources setting, default 1000; records a resource_exclusions pattern takes out don't count toward it)
-    - listed_distinct_non_compliant_resources — Number of distinct resources among the listed non-compliant records
+    - listed_non_compliant_states — Number of in-scope non-compliant (resource, policy) records listed in the evidence (at most the max_non_compliant_resources setting, default 1000; records a resource_exclusions pattern takes out don't count toward it); null when the non-compliant states query failed (the run fails)
+    - listed_distinct_non_compliant_resources — Number of distinct resources among the listed non-compliant records; null when the non-compliant states query failed (the run fails)
     - non_compliant_states_truncated — True if there were more in-scope non-compliant records than the list holds; false if every one is listed, or max_non_compliant_resources is 0 and the list is skipped
 
     Why did they fail?
