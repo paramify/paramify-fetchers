@@ -10,11 +10,14 @@ statement: >
   example, a failed preview listing, which the fetcher records as a note, not a failure).
 
 # connectors_total is per workspace; the summary has only data_connectors_total, which the quote keeps out.
-regex: '^\s*\{(?=[\s\S]*?"connectors_total":\s*[1-9])(?![\s\S]*?"connectors_total":\s*null)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"connectors_total":\s*(?<connectors_total>\d+))(?![\s\S]*?"connectors_total":\s*null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # connectors_total
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:

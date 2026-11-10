@@ -11,12 +11,24 @@ statement: >-
   current is checked against the customer's exception record. Does not credit Security
   Defaults, which also block legacy authentication.
 
-regex: '\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"is_enforced":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"blocks_access":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"targets_all_users":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"targets_all_applications":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"conditions":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"client_app_types":\s*\[(?=[^\]]*"exchangeActiveSync")(?=[^\]]*"other"))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude_locations":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude_platforms":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"include_locations":\s*\[\s*(?:"All"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"include_platforms":\s*\[\s*(?:"all"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"sign_in_risk_levels":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"user_risk_levels":\s*\[\s*\]))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"target_resources":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude":\s*\[\s*\]))'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"is_enforced":\s*(?<is_enforced>true|false|null))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"blocks_access":\s*(?<blocks_access>true|false|null))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"targets_all_users":\s*(?<targets_all_users>true|false|null))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"targets_all_applications":\s*(?<targets_all_applications>true|false|null))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"conditions":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"client_app_types":\s*\[(?=[^\]]*"exchangeActiveSync")(?=[^\]]*"other"))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude_locations":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude_platforms":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"include_locations":\s*\[\s*(?:"All"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"include_platforms":\s*\[\s*(?:"all"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"sign_in_risk_levels":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"user_risk_levels":\s*\[\s*\]))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"target_resources":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude":\s*\[\s*\]))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS true; MATCH_GROUP[3] EQUALS true; MATCH_GROUP[4] EQUALS true
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # is_enforced
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # blocks_access
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # targets_all_users
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }   # targets_all_applications
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
 
 evidence_sets:
   - EVD-AZURE-ENTRA-CA-POLICIES

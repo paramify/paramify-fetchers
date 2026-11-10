@@ -11,11 +11,20 @@ statement: >
   both regions were serving.
 
 # Positive lookaheads; with_health_data >= 1 keeps an unread metrics query from passing on unhealthy = 0.
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"serving_groups_region_unhealthy_last_hour":\s*0\b)(?=[\s\S]*?"serving_groups_with_health_data":\s*[1-9])'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"serving_groups_region_unhealthy_last_hour":\s*(?<serving_groups_region_unhealthy_last_hour>null|\d+(?:\.\d+)?))(?=[\s\S]*?"serving_groups_with_health_data":\s*(?<serving_groups_with_health_data>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # serving_groups_region_unhealthy_last_hour
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # serving_groups_with_health_data
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:

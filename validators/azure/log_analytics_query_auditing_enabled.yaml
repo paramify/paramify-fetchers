@@ -7,11 +7,17 @@ statement: >
   diagnostic setting, and at least one does: without it there are no reviewer/query records to show
   review frequency. Supports the reviewer and query records half of KSI-MLA-RVL.
 
-regex: '"workspaces_with_query_auditing":\s*[1-9]\d*,[^{}]*?"workspaces_without_query_auditing":\s*0\b'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"workspaces_with_query_auditing":\s*(?<workspaces_with_query_auditing>\d+),[^{}]*?"workspaces_without_query_auditing":\s*(?<workspaces_without_query_auditing>null|\d+(?:\.\d+)?)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] GREATER_THAN 0; MATCH_GROUP[2] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # workspaces_with_query_auditing
+    criteria: GREATER_THAN
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # workspaces_without_query_auditing
+    criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:

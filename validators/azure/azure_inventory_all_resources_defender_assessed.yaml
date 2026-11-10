@@ -15,12 +15,15 @@ statement: >
   keeps them outside the Resources table), or other subscriptions (one artifact per subscription).
 
 # Form A over the summary: the flag must read true and the uncovered-types map may hold only allowlisted types.
-regex: '^\s*\{(?=[\s\S]*?"all_assessable_resources_assessed_by_defender":\s*true)(?=[\s\S]*?"types_without_defender_assessment":\s*\{(?:\s*"(?:microsoft\.saas/resources)":\s*\d+\s*,?)*\s*\})'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"all_assessable_resources_assessed_by_defender":\s*(?<all_assessable_resources_assessed_by_defender>true|false|null))(?=[\s\S]*?"types_without_defender_assessment":\s*\{(?:\s*"(?:microsoft\.saas/resources)":\s*\d+\s*,?)*\s*\})'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # all_assessable_resources_assessed_by_defender
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
 
 evidence_sets:
   - EVD-AZURE-RESOURCE-INVENTORY

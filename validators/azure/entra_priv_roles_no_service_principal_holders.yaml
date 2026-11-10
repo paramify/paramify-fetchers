@@ -24,12 +24,18 @@ statement: >-
 # (is_privileged true) whose members list a ServicePrincipal with any other id. The lookahead after
 # partial_failure fails the read when the summary counts service principals but no member record is
 # typed ServicePrincipal, so a renamed key or value can't pass.
-regex: '"partial_failure":\s*false(?=[\s\S]*?"service_principals_in_privileged_roles":\s*0\b|[\s\S]*?"principal_type":\s*"ServicePrincipal")(?:(?!"is_privileged":\s*true,(?:[^{}\[\]"]|"(?:[^"\\]|\\.)*")*?"members":\s*\[\s*(?:\{(?:[^{}"]|"(?:[^"\\]|\\.)*")*\}\s*,\s*)*?\{(?:[^{}"]|"(?:[^"\\]|\\.)*")*?"id":\s*"(?!(?:00000000-0000-0000-0000-000000000000)")[^"]*",\s*"principal_type":\s*"ServicePrincipal")[\s\S])*?"global_administrator_role_activated":\s*true[\s\S]*?"service_principals_in_privileged_roles":\s*(?<service_principals_in_privileged_roles>\d+)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"partial_failure":\s*(?<partial_failure>true|false|null)(?=[\s\S]*?"service_principals_in_privileged_roles":\s*0\b|[\s\S]*?"principal_type":\s*"ServicePrincipal")(?:(?!"is_privileged":\s*true,(?:[^{}\[\]"]|"(?:[^"\\]|\\.)*")*?"members":\s*\[\s*(?:\{(?:[^{}"]|"(?:[^"\\]|\\.)*")*\}\s*,\s*)*?\{(?:[^{}"]|"(?:[^"\\]|\\.)*")*?"id":\s*"(?!(?:00000000-0000-0000-0000-000000000000)")[^"]*",\s*"principal_type":\s*"ServicePrincipal")[\s\S])*?"global_administrator_role_activated":\s*(?<global_administrator_role_activated>true|false|null)[\s\S]*?"service_principals_in_privileged_roles":\s*(?<service_principals_in_privileged_roles>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] EQUALS true
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # global_administrator_role_activated
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
 
 evidence_sets:
   - EVD-AZURE-ENTRA-PRIV-ROLES

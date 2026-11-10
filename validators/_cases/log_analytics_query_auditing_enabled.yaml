@@ -11,3 +11,11 @@ cases:
   - name: summary_renamed
     expect: FAIL
     artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"name": "law-ops","query_auditing_enabled": true,"weeks_in_window": 14,"weeks_not_retained": ["2026-01-11","2026-01-18","2026-01-25","2026-02-01","2026-02-08"],"weeks_retained": 9,"weeks_with_human_queries": 9,"weeks_without_human_queries": []}]},"summary": {"sentinel_workspaces": 0,"workspaces_collected": 1,"workspaces_unaudited": 0,"workspaces_with_query_auditing": 1}}}'
+
+  - name: workspaces_with_query_auditing_wrong
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"results": {"workspaces": [{"name": "law-ops", "query_auditing_enabled": true, "weeks_in_window": 14, "weeks_not_retained": ["2026-01-11", "2026-01-18", "2026-01-25", "2026-02-01", "2026-02-08"], "weeks_retained": 9, "weeks_with_human_queries": 9, "weeks_without_human_queries": []}]}, "summary": {"sentinel_workspaces": 0, "workspaces_collected": 1, "workspaces_with_query_auditing": 0, "workspaces_without_query_auditing": 0}}}'
+
+  - name: workspaces_without_query_auditing_wrong
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"results": {"workspaces": [{"name": "law-ops", "query_auditing_enabled": true, "weeks_in_window": 14, "weeks_not_retained": ["2026-01-11", "2026-01-18", "2026-01-25", "2026-02-01", "2026-02-08"], "weeks_retained": 9, "weeks_with_human_queries": 9, "weeks_without_human_queries": []}]}, "summary": {"sentinel_workspaces": 0, "workspaces_collected": 1, "workspaces_with_query_auditing": 1, "workspaces_without_query_auditing": 1}}}'

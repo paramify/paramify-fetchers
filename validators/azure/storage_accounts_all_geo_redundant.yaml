@@ -10,12 +10,21 @@ statement: >
   Service or other data stores.
 
 # Backreference: geo_redundant_accounts must equal a non-zero total_storage_accounts.
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_storage_accounts":\s*(?<total_storage_accounts>[1-9]\d*)\b)(?=[\s\S]*?"geo_redundant_accounts":\s*\k<total_storage_accounts>(?!\d))'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"total_storage_accounts":\s*(?<total_storage_accounts>\d+))(?=[\s\S]*?"geo_redundant_accounts":\s*(?<geo_redundant_accounts>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] GREATER_THAN 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[2]
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_storage_accounts
+    criteria: GREATER_THAN
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # geo_redundant_accounts
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
 
 evidence_sets:
   - EVD-AZURE-STORAGE-ENC

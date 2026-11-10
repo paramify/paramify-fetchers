@@ -10,12 +10,18 @@ statement: >
   that the thresholds are sensible.
 
 # Backreference: matches only when policies with rate-limit rules equal a non-zero total.
-regex: '"total_waf_policies":\s*(?<total_waf_policies>[1-9]\d*),[\s\S]*?"waf_policies_with_rate_limit_rules":\s*\k<total_waf_policies>(?!\d)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"total_waf_policies":\s*(?<total_waf_policies>\d+),[\s\S]*?"waf_policies_with_rate_limit_rules":\s*(?<waf_policies_with_rate_limit_rules>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] GREATER_THAN 0; MATCH_GROUP[2] EQUALS MATCH_GROUP[1]
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # total_waf_policies
+    criteria: GREATER_THAN
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # waf_policies_with_rate_limit_rules
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 1 }
 
 evidence_sets:
   - EVD-AZURE-FRONTDOOR-WAF

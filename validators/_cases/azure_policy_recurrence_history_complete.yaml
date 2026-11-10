@@ -20,3 +20,7 @@ cases:
     expect: FAIL
     note: the 6e74eb2 build had no history_collected flag
     artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"history_truncated":false,"recurrence_pairs_read":27,"recurrence_pairs_truncated":false,"recurring_non_compliant_pairs":0}}}'
+
+  - name: history_collected_wrong
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "payload": {"summary": {"history_collected": false, "history_truncated": false, "recurrence_pairs_read": 27, "recurrence_pairs_truncated": false, "recurring_non_compliant_pairs": 0}}}'

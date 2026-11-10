@@ -8,12 +8,18 @@ statement: >
   reflect posture, not renamed keys or an empty rule list. Integrity partner for the scheduled-query
   checks of KSI-MLA-RVL; on its own it shows only that scheduled-query alerting is in use.
 
-regex: '"enabled":\s*true,\s*"evaluation_frequency":\s*(?:null|"[^"]*"),\s*"id":\s*"[^"]*/[Mm]icrosoft\.[Ii]nsights/[Ss]cheduled[Qq]uery[Rr]ules/[^"]*",\s*"is_alerting_rule":\s*true'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"enabled":\s*(?<enabled>true|false|null),\s*"evaluation_frequency":\s*(?:null|"[^"]*"),\s*"id":\s*"[^"]*/[Mm]icrosoft\.[Ii]nsights/[Ss]cheduled[Qq]uery[Rr]ules/[^"]*",\s*"is_alerting_rule":\s*(?<is_alerting_rule>true|false|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS true
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # enabled
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # is_alerting_rule
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
 
 evidence_sets:
   - EVD-AZURE-ALERT-RULES

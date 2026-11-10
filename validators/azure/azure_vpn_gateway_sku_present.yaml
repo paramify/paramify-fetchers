@@ -9,12 +9,15 @@ statement: >
   azure_vpn_gateways_zone_redundant_sku, not here. Integrity partner supporting KSI-CNA-OFA. Fails
   when the subscription has no VPN gateways.
 
-regex: '"gateway_type":\s*"Vpn"(?:(?!"gateway_type")[\s\S])*?"sku_name":\s*"[^"]+"'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"gateway_type":\s*(?<gateway_type>"(?:[^"\\]|\\.)*"|null|true|false|-?\d+(?:\.\d+)?)(?:(?!"gateway_type")[\s\S])*?"sku_name":\s*"[^"]+"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS "Vpn"
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # gateway_type
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "\"Vpn\"" }
 
 evidence_sets:
   - EVD-AZURE-VPN-GATEWAY-CONFIG

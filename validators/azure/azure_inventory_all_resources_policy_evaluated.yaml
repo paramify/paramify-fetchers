@@ -16,12 +16,15 @@ statement: >
   the system boundary, resource groups or the subscription itself, or other subscriptions.
 
 # Form A over the summary: the flag must read true and the unevaluated-types map may hold only allowlisted types.
-regex: '^\s*\{(?=[\s\S]*?"all_evaluable_resources_evaluated_by_policy":\s*true)(?=[\s\S]*?"types_without_policy_evaluation":\s*\{(?:\s*"(?:microsoft\.saas/resources)":\s*\d+\s*,?)*\s*\})'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"all_evaluable_resources_evaluated_by_policy":\s*(?<all_evaluable_resources_evaluated_by_policy>true|false|null))(?=[\s\S]*?"types_without_policy_evaluation":\s*\{(?:\s*"(?:microsoft\.saas/resources)":\s*\d+\s*,?)*\s*\})'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # all_evaluable_resources_evaluated_by_policy
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
 
 evidence_sets:
   - EVD-AZURE-RESOURCE-INVENTORY

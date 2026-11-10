@@ -7,11 +7,17 @@ statement: >
   back non-empty, so an empty deprecated-plan map or plan list reflects posture rather
   than Defender not being in use or nothing being read. Not a compliance claim.
 
-regex: '^\s*\{(?=[\s\S]*?"provider_registration_status":\s*"registered")(?=[\s\S]*?"total_plans":\s*[1-9])'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"provider_registration_status":\s*(?<provider_registration_status>"(?:[^"\\]|\\.)*"|null|true|false|-?\d+(?:\.\d+)?))(?=[\s\S]*?"total_plans":\s*(?<total_plans>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS "registered"; MATCH_GROUP[2] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # provider_registration_status
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "\"registered\"" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_plans
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:

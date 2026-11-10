@@ -9,12 +9,21 @@ statement: >
   is disabled, the FTPS TLS version, or function apps.
 
 # Backreference: ftp_encrypted_or_disabled_apps must equal a non-zero total_web_apps.
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_web_apps":\s*(?<total_web_apps>[1-9]\d*)\b)(?=[\s\S]*?"ftp_encrypted_or_disabled_apps":\s*\k<total_web_apps>(?!\d))'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"total_web_apps":\s*(?<total_web_apps>\d+))(?=[\s\S]*?"ftp_encrypted_or_disabled_apps":\s*(?<ftp_encrypted_or_disabled_apps>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] GREATER_THAN 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[2]
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_web_apps
+    criteria: GREATER_THAN
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # ftp_encrypted_or_disabled_apps
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
 
 evidence_sets:
   - EVD-AZURE-APPSVC-CONFIG

@@ -8,11 +8,17 @@ statement: >
   renamed flag reads as no vault open to all networks. Integrity partner for
   azure_kv_no_vault_open_to_all_networks.
 
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_key_vaults":\s*[1-9])(?=[\s\S]*?"network_acl_default_deny":\s*(?:true|false))(?=[\s\S]*?"public_network_access_disabled":\s*(?:true|false))'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"total_key_vaults":\s*(?<total_key_vaults>\d+))(?=[\s\S]*?"network_acl_default_deny":\s*(?:true|false))(?=[\s\S]*?"public_network_access_disabled":\s*(?:true|false))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_key_vaults
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:

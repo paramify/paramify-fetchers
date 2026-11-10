@@ -22,11 +22,17 @@ statement: >
 # enforced, unexcluded non-benchmark record cannot splice onto a benchmark record
 # that is DoNotEnforce or excluded. The GUID is matched case-insensitively because
 # ARM upper-cases some management-group definition paths.
-regex: '"effect_class":\s*"(?:audit_only|enforcing)",\s*"enforced":\s*true,(?:(?!"actually_enforces")[\s\S])*?"excluded_scope_count":\s*0,(?:(?!"actually_enforces")[\s\S])*?"policy_definition_id":\s*"[^"]*/1[Ff]3[Aa][Ff][Dd][Ff]9-[Dd]0[Cc]9-4[Cc]3[Dd]-847[Ff]-89[Dd][Aa]613[Ee]70[Aa]8"'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"effect_class":\s*"(?:audit_only|enforcing)",\s*"enforced":\s*(?<enforced>true|false|null),(?:(?!"actually_enforces")[\s\S])*?"excluded_scope_count":\s*(?<excluded_scope_count>null|\d+(?:\.\d+)?),(?:(?!"actually_enforces")[\s\S])*?"policy_definition_id":\s*"[^"]*/1[Ff]3[Aa][Ff][Dd][Ff]9-[Dd]0[Cc]9-4[Cc]3[Dd]-847[Ff]-89[Dd][Aa]613[Ee]70[Aa]8"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # enforced
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # excluded_scope_count
+    criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:
