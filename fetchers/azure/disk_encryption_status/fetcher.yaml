@@ -1,15 +1,7 @@
 name: azure_disk_encryption_status
 version: 0.2.1
-description: >
-  For every managed disk in the subscription, reports which key encrypts it at rest
-  — the platform key (Microsoft-managed default), a customer-managed key held in a
-  disk encryption set, or both (double encryption) — plus whether Azure Disk
-  Encryption (dm-crypt / BitLocker) is on for the guest volume and which Key Vault
-  holds its keys, the disk's size / OS type / SKU / state, and its export exposure
-  (network access policy, public network access). Attached and unattached disks are
-  reported and summarized separately: an unattached disk still holds the data of the
-  VM it was detached from. Managed disks are always encrypted at rest, so the
-  evidence that varies is CMK vs platform key, not "encrypted: true/false".
+description: >-
+  Shows which key encrypts each managed disk at rest, whether Azure Disk Encryption is on, whether the disk is attached, and how exposed its export path is.
 category: azure
 
 config_schema:
@@ -71,14 +63,47 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-DISK-ENC
   name: Azure Managed Disk Encryption
-  instructions: >
-    Script: azure/disk_encryption_status/fetcher.py. Azure SDK calls: azure-mgmt-compute
-    ComputeManagementClient.disks.list(), preceded by azure-mgmt-resource
-    ResourceManagementClient.providers.get("Microsoft.Compute"). One evidence file per
-    subscription.
-    Disks the resource_exclusions patterns take out are listed under results.excluded instead,
-    each with the pattern that matched; the summary gives resource_exclusion_patterns (the
-    configured patterns, empty when none are set), resource_exclusion_patterns_unmatched
-    (patterns that matched no disk, such as a mistyped name, or null when the disk list could not be read), excluded_disks (how many the
-    patterns took out, null if the list couldn't be read; no other count includes them) and in_scope_disks (how many stayed; null
-    if the list couldn't be read, and 0 means there are none or the patterns took out every disk).
+  instructions: |
+    Script: azure/disk_encryption_status/fetcher.py
+
+    Access: Reader on the subscription. Key material is never read: only the Key Vault that holds a disk's Azure Disk Encryption keys is recorded, not the key or secret addresses.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Compute") — tells "no managed disks in use" from "no disks"
+    - disks.list() — every managed disk with its encryption, attachment, size, SKU and export settings
+
+    Output: azure_disk_encryption_status_<subscription>.json — every managed disk's encryption at rest, Azure Disk Encryption state, attachment and export exposure, plus the disks left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every disk is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no disk, such as a mistyped name; null when the disk list could not be read
+    - excluded_disks — Number of disks left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it; null when the disk list could not be read
+    - in_scope_disks — Number of disks read and in scope; null when the disk list could not be read; 0 means there are none or the patterns took out every disk, which a check can catch by requiring more than 0
+
+    Which disks exist?
+    - total_disks — Number of in-scope managed disks, attached or not
+    - attached_total_disks — Number of disks attached to a virtual machine (the disk names an owner or a shared-disk owner list)
+    - unattached_total_disks — Number of disks attached to no virtual machine; they still hold the data of the machine they were detached from
+    - provider_registration_status — Whether the Compute provider (Microsoft.Compute) is registered on the subscription: registered, not_registered or unknown
+    - os_disks — Number of disks that report an operating system type
+    - data_disks — Number of disks that report no operating system type
+
+    Which key encrypts the disks at rest?
+    - customer_managed_key_disks — Number of disks encrypted with a customer-managed key (an encryption type other than the platform key, held in a disk encryption set). Managed disks are always encrypted at rest, so this is what varies
+    - platform_managed_key_disks — Number of disks encrypted with Microsoft's platform-managed key (the default), or reporting no encryption type
+    - cmk_percentage — Percentage of disks using a customer-managed key = customer_managed_key_disks / total_disks × 100 (a whole number, rounded down; reads 0 when total_disks is 0)
+    - attached_customer_managed_key_disks — Number of attached disks encrypted with a customer-managed key
+    - attached_platform_managed_key_disks — Number of attached disks encrypted with the platform-managed key
+    - attached_cmk_percentage — Percentage of attached disks using a customer-managed key = attached_customer_managed_key_disks / attached_total_disks × 100 (a whole number, rounded down; reads 0 when attached_total_disks is 0)
+    - unattached_customer_managed_key_disks — Number of unattached disks encrypted with a customer-managed key
+    - unattached_platform_managed_key_disks — Number of unattached disks encrypted with the platform-managed key
+    - unattached_cmk_percentage — Percentage of unattached disks using a customer-managed key = unattached_customer_managed_key_disks / unattached_total_disks × 100 (a whole number, rounded down; reads 0 when unattached_total_disks is 0)
+    - double_encryption_disks — Number of disks with double encryption (platform and customer-managed keys together)
+    - disk_encryption_set_disks — Number of disks that name a disk encryption set
+    - azure_disk_encryption_disks — Number of disks with Azure Disk Encryption (BitLocker or dm-crypt on the guest volume) turned on
+
+    Is the disks' export path restricted?
+    - network_access_restricted_disks — Number of disks whose network access policy is DenyAll or AllowPrivate, which keeps a download link off the Internet; AllowAll, the default, is not restricted

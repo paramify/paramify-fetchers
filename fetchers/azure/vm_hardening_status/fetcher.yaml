@@ -1,21 +1,7 @@
 name: azure_vm_hardening_status
 version: 0.3.1
-description: >
-  For every virtual machine and virtual machine scale set in the subscription,
-  reports the hardening configuration: Trusted Launch (security type plus the UEFI
-  secure-boot and vTPM settings) and encryption at host, managed vs unmanaged
-  (page-blob) OS and data disks, whether Linux VMs enforce SSH-key authentication
-  (disable_password_authentication), the source image the VM was built from
-  (marketplace publisher/offer/sku or gallery image id), the guest extensions
-  installed on it, each scale set's load balancer backend pools and instance
-  ids, and the OS patch settings of every VM and scale set: patch mode
-  (AutomaticByPlatform, AutomaticByOS, Manual or ImageDefault), assessment mode,
-  and whether platform safety checks are bypassed on a user schedule, read as
-  automatic_patching (AutomaticByPlatform, where Azure orchestrates updates, or
-  AutomaticByOS, where Windows Update installs them in the guest; patch_modes
-  tells the two apart) and assessment_automatic. A VM whose OS returns no
-  patch settings reads null (unknown), never Manual, and the summary counts
-  unknown apart. Scale-set members are cross-referenced to their scale set.
+description: >-
+  Shows how hardened each virtual machine and scale set is: Trusted Launch, encryption at host, managed disks, SSH-key-only sign-in on Linux, guest extensions and OS patch settings.
 category: azure
 
 config_schema:
@@ -81,18 +67,73 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-VM-HARDENING
   name: Azure Virtual Machine Hardening
-  instructions: >
-    Script: azure/vm_hardening_status/fetcher.py. Azure SDK calls: azure-mgmt-compute
-    ComputeManagementClient.virtual_machines.list_all(),
-    virtual_machine_extensions.list(resource_group, vm_name) per VM,
-    virtual_machine_scale_sets.list_all(), and
-    virtual_machine_scale_set_vms.list(resource_group, scale_set_name) per scale set;
-    preceded by ResourceManagementClient.providers.get("Microsoft.Compute").
-    Virtual machines and scale sets the resource_exclusions patterns take out are listed under
-    results.excluded instead, each with the pattern that matched; the summary gives
-    resource_exclusion_patterns (the configured patterns, empty when none are set),
-    resource_exclusion_patterns_unmatched (patterns that matched no virtual machine or scale
-    set, such as a mistyped name, or null when the virtual machine or scale set list could not be read), excluded_virtual_machines and excluded_scale_sets (how many
-    the patterns took out, null if the list couldn't be read; no other count includes them) and in_scope_virtual_machines and
-    in_scope_scale_sets (how many stayed; null if the list couldn't be read, and 0 means there are none or the patterns took out every
-    one).
+  instructions: |
+    Script: azure/vm_hardening_status/fetcher.py
+
+    Access: Reader on the subscription. A refused extension or scale-set instance read fails the run and leaves that machine with no extensions or instances in the counts, rather than marking it unknown.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Compute") — tells "no virtual machines in use" from "no machines"
+    - virtual_machines.list_all() — every virtual machine with its security, storage, sign-in and patch settings
+    - virtual_machine_extensions.list() (per in-scope virtual machine) — the guest extensions installed on it
+    - virtual_machine_scale_sets.list_all() — every scale set with its security, image, load balancer and patch settings
+    - virtual_machine_scale_set_vms.list() (per in-scope scale set) — the instance ids it holds
+
+    Output: azure_vm_hardening_status_<subscription>.json — each virtual machine's and scale set's hardening settings and patch settings, plus the machines left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every machine and scale set is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no virtual machine or scale set, such as a mistyped name; null when the virtual machine list or the scale set list could not be read
+    - excluded_virtual_machines — Number of virtual machines left out of scope because a pattern matched their resource group, region or id, or their scale set's (a scale set's machines leave with it); each is listed under excluded with the pattern, and no other count includes it; null when the virtual machine list could not be read
+    - excluded_scale_sets — Number of scale sets left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it; null when the scale set list could not be read
+    - in_scope_virtual_machines — Number of virtual machines read and in scope; null when the virtual machine list could not be read; 0 means there are none or the patterns took out every machine, which a check can catch by requiring more than 0
+    - in_scope_scale_sets — Number of scale sets read and in scope; null when the scale set list could not be read; 0 means there are none or the patterns took out every scale set
+
+    Which machines and scale sets exist?
+    - total_virtual_machines — Number of in-scope virtual machines; every virtual machine count below is out of this total
+    - linux_vms — Number of virtual machines with a Linux configuration
+    - vms_in_scale_sets — Number of virtual machines that are members of a scale set
+    - total_scale_sets — Number of in-scope scale sets
+    - total_scale_set_instances — Number of instances across the in-scope scale sets
+    - empty_scale_sets — Number of scale sets with no instances, including those whose instance list could not be read
+    - provider_registration_status — Whether the Compute provider (Microsoft.Compute) is registered on the subscription: registered, not_registered or unknown
+
+    Is boot integrity protected?
+    - trusted_launch_vms — Number of virtual machines with security type TrustedLaunch, secure boot on and vTPM on; ConfidentialVM is not counted here
+    - trusted_launch_percentage — Percentage of virtual machines with Trusted Launch = trusted_launch_vms / total_virtual_machines × 100 (a whole number, rounded down; reads 0 when total_virtual_machines is 0)
+    - secure_boot_vms — Number of virtual machines with UEFI secure boot on
+    - vtpm_vms — Number of virtual machines with a virtual TPM on
+    - confidential_vms — Number of virtual machines with security type ConfidentialVM
+    - trusted_launch_scale_sets — Number of scale sets whose profile has security type TrustedLaunch, secure boot on and vTPM on
+
+    Are disks and host data protected?
+    - encryption_at_host_vms — Number of virtual machines with encryption at host on
+    - managed_disk_vms — Number of virtual machines whose OS disk and every data disk are managed disks; a machine with no storage profile is not counted
+    - unmanaged_disk_vms — Number of virtual machines not counted in managed_disk_vms, which use a disk stored as a page blob in a storage account or have no storage profile
+    - managed_disk_percentage — Percentage of virtual machines on managed disks only = managed_disk_vms / total_virtual_machines × 100 (a whole number, rounded down; reads 0 when total_virtual_machines is 0)
+
+    Do Linux machines require SSH keys?
+    - linux_ssh_key_only_vms — Number of Linux virtual machines with password authentication disabled, so only SSH keys sign in
+    - linux_ssh_key_only_percentage — Percentage of Linux virtual machines that require SSH keys = linux_ssh_key_only_vms / linux_vms × 100 (a whole number, rounded down; reads 0 when linux_vms is 0). Windows machines have no such setting and are left out of the denominator
+
+    Which guest extensions and load balancers are in use?
+    - vms_with_extensions — Number of virtual machines with at least one guest extension installed; a machine whose extension list could not be read is not counted
+    - total_extensions — Number of guest extensions installed across the in-scope virtual machines
+    - scale_sets_with_load_balancer — Number of scale sets with at least one load balancer backend pool
+
+    Are operating system patches applied automatically?
+    - vms_automatic_patching — Number of virtual machines whose patch mode is AutomaticByPlatform (Azure orchestrates updates) or AutomaticByOS (Windows Update installs them in the guest)
+    - vms_manual_or_image_default_patching — Number of virtual machines whose patch mode is Manual or ImageDefault
+    - vms_patch_mode_unknown — Number of virtual machines whose operating system returns no patch mode; they are never counted as Manual
+    - vms_automatic_patch_assessment — Number of virtual machines whose assessment mode is AutomaticByPlatform, so Azure assesses missing patches
+    - vms_patch_assessment_unknown — Number of virtual machines whose operating system returns no assessment mode
+    - vms_patch_modes — Number of virtual machines for each patch mode Azure reports (AutomaticByPlatform, AutomaticByOS, Manual or ImageDefault), which tells the two automatic modes apart; machines with no patch mode are left out
+    - scale_sets_automatic_patching — Number of scale sets whose patch mode is AutomaticByPlatform or AutomaticByOS
+    - scale_sets_manual_or_image_default_patching — Number of scale sets whose patch mode is Manual or ImageDefault
+    - scale_sets_patch_mode_unknown — Number of scale sets that return no patch mode; they are never counted as Manual
+    - scale_sets_automatic_patch_assessment — Number of scale sets whose assessment mode is AutomaticByPlatform
+    - scale_sets_patch_assessment_unknown — Number of scale sets that return no assessment mode
+    - scale_sets_patch_modes — Number of scale sets for each patch mode Azure reports (AutomaticByPlatform, AutomaticByOS, Manual or ImageDefault); scale sets with no patch mode are left out
