@@ -1,15 +1,7 @@
 name: azure_postgresql_configuration
 version: 0.2.1
-description: >
-  For each Azure Database for PostgreSQL flexible server in the subscription,
-  reports the settings that show transport encryption, authentication, audit logging
-  and durability are configured: require_secure_transport, Entra ID (Azure AD)
-  authentication with the administrators assigned to it, the log_checkpoints /
-  log_connections / log_disconnections / connection_throttling / log_retention_days
-  server parameters, every firewall rule with the 0.0.0.0-0.0.0.0 "allow all Azure
-  services" pseudo-rule flagged, geo-redundant backup, and the high-availability
-  mode. Server parameters are read by name rather than dumped, because a flexible
-  server exposes several hundred of them and the rest are engine tunables.
+description: >-
+  Shows whether each PostgreSQL flexible server requires encrypted connections, uses Entra ID sign-in, logs activity, keeps its firewall closed, and has geo-redundant backups and a standby.
 category: azure
 
 config_schema:
@@ -76,18 +68,55 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-POSTGRESQL-CONFIG
   name: Azure PostgreSQL Flexible Server Configuration
-  instructions: >
-    Script: azure/postgresql_configuration/fetcher.py. Azure SDK calls (azure-mgmt-postgresqlflexibleservers
-    PostgreSQLManagementClient): servers.list_by_subscription(), configurations.get()
-    for six named server parameters, firewall_rules.list_by_server(),
-    administrators_microsoft_entra.list_by_server().
+  instructions: |
+    Script: azure/postgresql_configuration/fetcher.py
 
-    Servers the resource_exclusions patterns take out are listed under results.excluded instead,
-    each with the pattern that matched; they get no per-server reads and every count, percentage and
-    firewall-rule or administrator total covers only the servers that stayed.
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.DBforPostgreSQL") — tells "not registered" apart from "no servers"
+    - servers.list_by_subscription() — every PostgreSQL flexible server with its sign-in, network, backup and high-availability settings (older SDK versions call it servers.list())
+    - configurations.get() (per in-scope server, six parameters) — require_secure_transport, log_checkpoints, log_connections, log_disconnections, connection_throttle.enable and logfiles.retention_days
+    - firewall_rules.list_by_server() (per in-scope server) — the IP ranges allowed to connect
+    - administrators_microsoft_entra.list_by_server() (per in-scope server) — the Entra users, groups or apps set as administrators
+
+    Output: azure_postgresql_configuration_<subscription>.json — each PostgreSQL flexible server with its secure transport, sign-in and logging settings, Entra administrators, firewall rules, and backup and high-availability settings, plus the servers left out of scope with the pattern that matched.
+
+    Summary fields:
 
     Which resources are left out of scope?
-      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every server is in scope
-      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no PostgreSQL server, such as a mistyped name, or null when the list could not be read
-      - excluded_postgresql_servers — Number of servers left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them; null if the list couldn't be read
-      - in_scope_postgresql_servers — Number of servers read and in scope; null if the list couldn't be read, and 0 means there are none or the patterns took out every server, which a check can catch by requiring more than 0
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every server is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no PostgreSQL server, such as a mistyped name; null if the server list couldn't be read
+    - excluded_postgresql_servers — Number of servers left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, gets no per-server reads, and no other count, firewall-rule total or administrator total includes it; null if the server list couldn't be read
+    - in_scope_postgresql_servers — Number of servers read and in scope; null if the server list couldn't be read, and 0 means there are none or the patterns took out every server, which a check can catch by requiring more than 0
+
+    What was checked?
+    - total_postgresql_servers — Number of in-scope Azure Database for PostgreSQL flexible servers; every count below is out of this total
+    - provider_registration_status — Whether the PostgreSQL provider (Microsoft.DBforPostgreSQL) is registered on the subscription: registered, not_registered or unknown
+
+    Are connections encrypted?
+    - require_secure_transport_servers — Number of servers with the require_secure_transport parameter ON, so unencrypted connections are refused
+    - require_secure_transport_percentage — Percentage of servers that refuse unencrypted connections = require_secure_transport_servers / total_postgresql_servers × 100 (a whole number, 0–100; reads 0 when total_postgresql_servers is 0). Servers whose parameter couldn't be read count in the total but not as refusing, so they lower it
+
+    Can people sign in with Entra ID?
+    - entra_id_authentication_servers — Number of servers with Microsoft Entra ID authentication enabled
+    - entra_id_authentication_configured_servers — Number of servers with Entra ID authentication enabled and at least one Entra administrator assigned
+    - total_entra_id_admins — Number of Entra ID administrators (users, groups or apps) across in-scope servers; a server with Entra ID authentication off reports none
+
+    Is server activity logged?
+    - log_checkpoints_servers — Number of servers with log_checkpoints ON, which writes each checkpoint to the server log
+    - log_connections_servers — Number of servers with log_connections ON, which logs each connection attempt
+    - log_disconnections_servers — Number of servers with log_disconnections ON, which logs the end and length of each session
+    - connection_throttling_servers — Number of servers with connection throttling (connection_throttle.enable) ON, which slows sign-in attempts from an IP address after repeated failures; the parameter was removed in PostgreSQL 16, so servers on 16 or later never count
+    - log_retention_compliant_servers — Number of servers that keep server logs (logfiles.retention_days) for 4 to 7 days: more than 3, and less than 8 since Azure's maximum is 7 and a larger value means the setting never took effect; a server with server logs off has no retention parameter and doesn't count
+
+    Is the server kept off the public internet?
+    - public_network_access_disabled_servers — Number of servers with public network access Disabled, so they're reached only through a virtual network or private endpoint
+    - servers_allowing_all_azure_services — Number of servers with the 0.0.0.0–0.0.0.0 firewall rule ("allow public access from any Azure service"), which admits compute in any Azure customer's subscription, not only the organization's own
+    - servers_allowing_entire_internet — Number of servers with a firewall rule for every IPv4 address (exactly 0.0.0.0–255.255.255.255; split or overlapping rules that add up to it aren't detected)
+    - total_firewall_rules — Number of firewall rules across in-scope servers
+
+    Will the server survive a zone or region loss?
+    - geo_redundant_backup_servers — Number of servers whose backups are geo-redundant (stored in a second region too)
+    - high_availability_servers — Number of servers with a high-availability mode other than Disabled (ZoneRedundant or SameZone); Disabled or no mode doesn't count
