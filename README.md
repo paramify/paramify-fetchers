@@ -61,6 +61,7 @@ If you have a question about this repo, ask DeepWiki. It answers in plain Englis
   </tr>
   <tr>
     <td align="center" width="128"><a href="fetchers/sophos/"><img src="fetchers/logos/sophos.png" alt="Sophos" width="48" height="48"></a><br><sub>Sophos</sub></td>
+    <td align="center" width="128"><a href="fetchers/cornerstone/"><img src="fetchers/logos/cornerstone.png" alt="Cornerstone" width="48" height="48"></a><br><sub>Cornerstone</sub></td>
   </tr>
 </table>
 
