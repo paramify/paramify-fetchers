@@ -125,13 +125,16 @@ def firewall_coverage(rules: list) -> dict:
     return {"firewall_allowed_address_count": count, "firewall_allowed_address_percentage": coverage_percentage(count)}
 
 
-def mongo_public_access(public_network_access, rules: list) -> str:
+def mongo_public_access(public_network_access, rules: list | None) -> str | None:
     """disabled / allow_all / broad / restricted / no_rules, judged on how wide the rules are together.
 
     The "allow Azure services" rule (0.0.0.0 - 0.0.0.0) admits every Azure-hosted client from any
-    tenant, so a cluster with it is broad however narrow its other rules are."""
+    tenant, so a cluster with it is broad however narrow its other rules are.
+    Disabled holds without the rules; otherwise None when they were not read."""
     if str(public_network_access or "").lower() == "disabled":
         return "disabled"
+    if rules is None:
+        return None
     count = firewall_coverage(rules)["firewall_allowed_address_count"]
     if count >= IPV4_ADDRESSES:
         return "allow_all"
@@ -361,7 +364,21 @@ def namespace_record(namespace: dict, rules, auth_rules, hubs) -> dict:
 
 # --------------------------------------------------------------------------- #
 
-def summarize(mongo: list, kusto: list, eventhub: list) -> dict:
+SERVICE_PREFIXES = {
+    "mongo": ("total_mongo_clusters", "mongo_clusters_"),
+    "kusto": ("total_data_explorer_clusters", "data_explorer_"),
+    "eventhub": ("total_event_hub", "event_hub"),
+}
+
+
+def summarize(mongo: list | None, kusto: list | None, eventhub: list | None) -> dict:
+    """A service whose list was not read (None) gives null for every count built from it."""
+    counts = service_counts(mongo or [], kusto or [], eventhub or [])
+    unread = [SERVICE_PREFIXES[k] for k, v in (("mongo", mongo), ("kusto", kusto), ("eventhub", eventhub)) if v is None]
+    return {k: None if any(k.startswith(p) for prefixes in unread for p in prefixes) else v for k, v in counts.items()}
+
+
+def service_counts(mongo: list, kusto: list, eventhub: list) -> dict:
     hubs = [h for n in eventhub for h in n["event_hubs"] or []]
     kusto_principals = [p for c in kusto for p in c["cluster_principals"] or []]
     kusto_principals += [p for c in kusto for d in c["databases"] or [] for p in d["principals"] or []]
@@ -483,7 +500,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions=None, exclud
             {
                 **cluster,
                 "firewall_rules": None if rules is None else sorted(rules, key=lambda r: r["name"] or ""),
-                "public_access": None if rules is None else mongo_public_access(cluster["public_network_access"], rules),
+                "public_access": mongo_public_access(cluster["public_network_access"], rules),
                 **(
                     {"firewall_allowed_address_count": None, "firewall_allowed_address_percentage": None}
                     if rules is None else firewall_coverage(rules)
@@ -617,16 +634,14 @@ def main() -> int:
     exclusions.warn_unmatched(logger)
     in_scope = {name: None if records is None else len(records) for name, records in (
         ("mongo_clusters", mongo), ("data_explorer_clusters", kusto), ("event_hub_namespaces", eventhub))}
-    mongo, kusto, eventhub = mongo or [], kusto or [], eventhub or []
-
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
-            "mongo_clusters": mongo,
-            "data_explorer_clusters": kusto,
-            "event_hub_namespaces": eventhub,
+            "mongo_clusters": mongo or [],
+            "data_explorer_clusters": kusto or [],
+            "event_hub_namespaces": eventhub or [],
             "excluded": excluded,
             **registration,
         },

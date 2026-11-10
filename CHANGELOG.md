@@ -2102,6 +2102,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_data_services_configuration` 0.3.0: a service list that was not
+  read gives null counts, and a MongoDB cluster with public access Disabled
+  reads as disabled without its firewall rules.**
+  - Before, an unread MongoDB, Data Explorer or Event Hubs list left every
+    total and count built from it at 0, which looks like "nothing to check".
+    They are now null, so a check can't pass on an empty read. The run still
+    exits 1 as `partial_failure`.
+  - Before, a cluster whose public network access is Disabled had
+    `public_access` null when its firewall rule list failed, so
+    `mongo_clusters_public_access_unknown` counted it. It is now `disabled`.
+    Other clusters stay null. Each cluster's `firewall_rules` still reads null.
+
 - **Azure resource exclusions: `resource_exclusion_patterns_unmatched` is null
   when a resource list was not read.** Before, a list that failed (or had no
   credential or subscription) left every configured pattern in the field and
