@@ -14,12 +14,15 @@ statement: >-
   assigned, worked or closed in time (azure_sentinel_incidents).
 
 # One rule object: its actions list holds a RunPlaybook with a Logic App or a ModifyProperties that sets an owner.
-regex: '"partial_failure":\s*false\b[\s\S]*?\{\s*"actions":\s*\[\s*(?:\{(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*\}\s*,\s*)*\{\s*"order":\s*[^,{}]*,\s*(?:"playbook_id":\s*"(?:[^"\\]|\\.)+",\s*"type":\s*"RunPlaybook"|"sets":\s*\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"owner":\s*"(?:[^"\\]|\\.)+"(?:"(?:[^"\\]|\\.)*"|[^{}"])*\},\s*"type":\s*"ModifyProperties")\s*\}(?:\s*,\s*\{(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*\})*\s*\],\s*"active":\s*true,\s*"conditions":\s*\[[^\]]*\],(?:"(?:[^"\\]|\\.)*"|[^"{}\[\]])*?"triggers_on":\s*"Incidents",\s*"triggers_when":\s*"Created"\s*\}'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"partial_failure":\s*(?<partial_failure>true|false|null)[\s\S]*?\{\s*"actions":\s*\[\s*(?:\{(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*\}\s*,\s*)*\{\s*"order":\s*[^,{}]*,\s*(?:"playbook_id":\s*"(?:[^"\\]|\\.)+",\s*"type":\s*"RunPlaybook"|"sets":\s*\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"owner":\s*"(?:[^"\\]|\\.)+"(?:"(?:[^"\\]|\\.)*"|[^{}"])*\},\s*"type":\s*"ModifyProperties")\s*\}(?:\s*,\s*\{(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*\})*\s*\],\s*"active":\s*true,\s*"conditions":\s*\[[^\]]*\],(?:"(?:[^"\\]|\\.)*"|[^"{}\[\]])*?"triggers_on":\s*"Incidents",\s*"triggers_when":\s*"Created"\s*\}'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
 
 evidence_sets:
   - EVD-AZURE-SENTINEL-AUTOMATION-RULES

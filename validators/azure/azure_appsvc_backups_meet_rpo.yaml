@@ -10,12 +10,24 @@ statement: >
   tested, the RTO, function apps, or other data stores.
 
 # all_web_apps_meet_recovery_point_objective is null, not true, while no RPO is set or no apps were found.
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"recovery_point_objective_hours":\s*[1-9])(?=[\s\S]*?"all_web_apps_backed_up":\s*true)(?=[\s\S]*?"all_web_apps_meet_recovery_point_objective":\s*true)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"recovery_point_objective_hours":\s*(?<recovery_point_objective_hours>\d+))(?=[\s\S]*?"all_web_apps_backed_up":\s*(?<all_web_apps_backed_up>true|false|null))(?=[\s\S]*?"all_web_apps_meet_recovery_point_objective":\s*(?<all_web_apps_meet_recovery_point_objective>true|false|null))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] GREATER_THAN 0; MATCH_GROUP[3] EQUALS true; MATCH_GROUP[4] EQUALS true
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # recovery_point_objective_hours
+    criteria: GREATER_THAN
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # all_web_apps_backed_up
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }   # all_web_apps_meet_recovery_point_objective
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
 
 evidence_sets:
   - EVD-AZURE-APPSVC-BACKUPS

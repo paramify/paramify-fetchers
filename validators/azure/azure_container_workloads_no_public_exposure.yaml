@@ -4,7 +4,9 @@ type: AUTOMATED
 role: configuration
 statement: >
   No Container Instances group has a public IP address and no internet-facing Container App
-  (external ingress in a non-internal environment) lacks client IP restriction rules on its ingress.
+  (external ingress in an environment whose network exposure is public: not internal-only and public
+  network access not Disabled; an environment that could not be read counts as public) lacks client
+  IP restriction rules on its ingress.
   Does NOT assert that the allow-listed ranges are approved, nor the network exposure of a Container
   Apps environment that hosts no internet-facing app. Passes with zero workloads. Supports
   KSI-CNA-RNT.

@@ -14,12 +14,18 @@ statement: >-
   dependencies; regional failover; deployment slots; or that a recovery exercise was run and
   recorded.
 
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false\b)(?=[\s\S]*?"all_apps_have_health_check":\s*true\b)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"all_apps_have_health_check":\s*(?<all_apps_have_health_check>true|false|null))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] EQUALS true
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # all_apps_have_health_check
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
 
 evidence_sets:
   - EVD-AZURE-SERVICE-AVAILABILITY

@@ -10,11 +10,17 @@ statement: >
   azure_kv_no_weak_key_sizes.
 
 # The positive pair proves the shape the violation regex relies on; the negative rules out unsized RSA or untyped keys.
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_keys":\s*[1-9])(?=[\s\S]*?"key_size":\s*\d+,\s*"key_type":\s*")(?![\s\S]*?"key_size":\s*null,\s*"key_type":\s*(?:null|"RSA))'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"total_keys":\s*(?<total_keys>\d+))(?=[\s\S]*?"key_size":\s*\d+,\s*"key_type":\s*")(?![\s\S]*?"key_size":\s*null,\s*"key_type":\s*(?:null|"RSA))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_keys
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:

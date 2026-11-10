@@ -8,10 +8,11 @@ statement: >
   overrode fails, because its default AllowInternetOutBound (65001) is that first rule. Reads the
   fetcher's unrestricted_internet_outbound_groups, which must be present and 0. Supports KSI-CNA-RNT
   for unrestricted egress rules. Does not read the exception list; does not judge narrower allows
-  above the Deny (port 443 to the Internet still passes); a catch-all Deny written as 0-65535 rather
-  than * is not recognised, so that NSG fails. Egress through a subnet with no NSG is
-  azure_nsg_workload_subnets_all_filtered. The catch-all test ignores the rule's source, so a
-  catch-all Deny scoped to one narrow source reads as restricted while other sources still egress.
+  above the Deny (port 443 to the Internet still passes). Egress through a subnet with no NSG is
+  azure_nsg_workload_subnets_all_filtered. From azure_network_security_groups 0.6.0, a catch-all
+  Deny counts only when its source covers every sender (*, 0.0.0.0/0 or VirtualNetwork), so one
+  scoped to a narrower source leaves the NSG unrestricted, and ports written as 0-65535 count as *.
+  Before 0.6.0 the source was ignored and 0-65535 was not recognised.
   Unattached NSGs count too. On an App Service VNet-integration subnet the NSG sees only traffic the
   app routes into the VNet.
 

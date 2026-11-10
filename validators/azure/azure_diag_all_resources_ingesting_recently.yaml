@@ -12,12 +12,27 @@ statement: >
   the workspace is approved. An idle resource whose logs are event-driven writes nothing and fails
   here too.
 
-regex: '"partial_failure":\s*false\b[\s\S]*?"all_log_analytics_resources_ingesting":\s*true,[\s\S]*?"resources_ingestion_unknown":\s*0,[\s\S]*?"resources_with_recent_ingestion":\s*[1-9]\d*,\s*"resources_without_recent_ingestion":\s*0\b'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"partial_failure":\s*(?<partial_failure>true|false|null)[\s\S]*?"all_log_analytics_resources_ingesting":\s*(?<all_log_analytics_resources_ingesting>true|false|null),[\s\S]*?"resources_ingestion_unknown":\s*(?<resources_ingestion_unknown>null|\d+(?:\.\d+)?),[\s\S]*?"resources_with_recent_ingestion":\s*(?<resources_with_recent_ingestion>\d+),\s*"resources_without_recent_ingestion":\s*(?<resources_without_recent_ingestion>null|\d+(?:\.\d+)?)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS true; MATCH_GROUP[3] EQUALS 0; MATCH_GROUP[5] EQUALS 0; MATCH_GROUP[4] GREATER_THAN 0; MATCH_GROUP[1] EQUALS false
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # all_log_analytics_resources_ingesting
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # resources_ingestion_unknown
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 5 }   # resources_without_recent_ingestion
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }   # resources_with_recent_ingestion
+    criteria: GREATER_THAN
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
 
 evidence_sets:
   - EVD-AZURE-RESOURCE-DIAG-SETTINGS

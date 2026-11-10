@@ -365,3 +365,11 @@ cases:
           }
         }
       }
+
+  - name: source_type_wrong
+    expect: FAIL
+    artifact: '{"schema_version": "1.0", "metadata": {"fetcher_name": "checkov_bicep", "target": {"repo_url": "https://dev.azure.com/org/project", "source_type": "git"}, "status": "success", "exit_code": 0}, "payload": {"metadata": {"source_type": "git", "repo_url": "https://dev.azure.com/org/project", "tfvc_path": "$/project/infra", "requested_version": "latest", "changeset": 4321, "changeset_date": "2026-10-20T10:00:00Z", "scan_timestamp": "2026-10-26T00:00:00Z", "partial_failure": false, "api_failures": []}, "framework": "bicep,arm", "scan_timestamp": "2026-10-26T00:00:00Z", "source_type": "git", "source": "https://dev.azure.com/org/project", "file_counts": {"bicep": 0, "arm_templates": 3}, "status": "success", "message": "", "summary": {"passed_checks": 10, "failed_checks": 2, "skipped_checks": 0, "total_checks": 12}}}'
+
+  - name: changeset_wrong
+    expect: FAIL
+    artifact: '{"schema_version": "1.0", "metadata": {"fetcher_name": "checkov_bicep", "target": {"repo_url": "https://dev.azure.com/org/project", "source_type": "tfvc"}, "status": "success", "exit_code": 0}, "payload": {"metadata": {"source_type": "tfvc", "repo_url": "https://dev.azure.com/org/project", "tfvc_path": "$/project/infra", "requested_version": "latest", "changeset": 0, "changeset_date": "2026-10-20T10:00:00Z", "scan_timestamp": "2026-10-26T00:00:00Z", "partial_failure": false, "api_failures": []}, "framework": "bicep,arm", "scan_timestamp": "2026-10-26T00:00:00Z", "source_type": "tfvc", "source": "https://dev.azure.com/org/project", "file_counts": {"bicep": 0, "arm_templates": 3}, "status": "success", "message": "", "summary": {"passed_checks": 10, "failed_checks": 2, "skipped_checks": 0, "total_checks": 12}}}'

@@ -11,11 +11,14 @@ statement: >
   unregistered, no evaluations, or an in-scope count that could not be read in full
   (null). Not a compliance claim.
 
-regex: '"resources_evaluated":\s*(?<resources_evaluated>[1-9]\d*)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"resources_evaluated":\s*(?<resources_evaluated>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # resources_evaluated
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:

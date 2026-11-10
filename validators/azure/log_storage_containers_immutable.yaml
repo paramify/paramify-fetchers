@@ -13,11 +13,17 @@ statement: >
   container without one.
 
 # Form A on the container records (min_retention_days counts Unlocked policies); the layout lookahead stops a renamed key hiding a short Locked policy, and a held container is skipped.
-regex: '^\s*\{(?=[\s\S]*?"log_containers":\s*[1-9]\d*,[^{}]*?"unprotected":\s*0\b)(?=[\s\S]*?"retention_days":\s*(?:null|\d+),\s*"time_based_policy_state":)(?![\s\S]*?\{(?:(?!"legal_hold":\s*true)[^{}])*?"retention_days":\s*(?:null|\d{1,2}|[12]\d\d|3[0-5]\d|36[0-4])\b,\s*"time_based_policy_state":\s*"Locked"(?:(?!"legal_hold":\s*true)[^{}])*\})'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"log_containers":\s*(?<log_containers>\d+),[^{}]*?"unprotected":\s*(?<unprotected>null|\d+(?:\.\d+)?))(?=[\s\S]*?"retention_days":\s*(?:null|\d+),\s*"time_based_policy_state":)(?![\s\S]*?\{(?:(?!"legal_hold":\s*true)[^{}])*?"retention_days":\s*(?:null|\d{1,2}|[12]\d\d|3[0-5]\d|36[0-4])\b,\s*"time_based_policy_state":\s*"Locked"(?:(?!"legal_hold":\s*true)[^{}])*\})'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] GREATER_THAN 0; MATCH_GROUP[2] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # log_containers
+    criteria: GREATER_THAN
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # unprotected
+    criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:

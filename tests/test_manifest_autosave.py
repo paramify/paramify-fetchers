@@ -11,7 +11,6 @@ or writes the repo's own manifests.
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -23,12 +22,10 @@ pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
 
 from textual.widgets import Input  # noqa: E402
 
-from framework.tui.app import FetcherApp  # noqa: E402
 from framework.tui.modals import ConfirmModal, FormModal, TargetsModal  # noqa: E402
 from framework.tui.screens.manifest import ManifestPage  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SIZE = (180, 50)
 
 
 def _manifest(tmp_path: Path):
@@ -61,15 +58,6 @@ def _targets(path: Path, name: str) -> list:
     return []
 
 
-def _run(coro_fn, manifest: Path):
-    async def main():
-        app = FetcherApp(manifest_path=str(manifest), root_override=str(REPO_ROOT))
-        async with app.run_test(size=SIZE) as pilot:
-            await pilot.pause()
-            return await coro_fn(app, pilot)
-
-    return asyncio.run(main())
-
 
 async def _manifest_tab(pilot):
     await pilot.press("2")
@@ -80,7 +68,7 @@ async def _manifest_tab(pilot):
 # Target edits
 # --------------------------------------------------------------------------- #
 
-def test_removing_a_target_is_on_disk_without_pressing_save(tmp_path):
+def test_removing_a_target_is_on_disk_without_pressing_save(tmp_path, run_tui):
     path, name, field = _manifest(tmp_path)
     assert len(_targets(path, name)) == 2
 
@@ -95,12 +83,12 @@ def test_removing_a_target_is_on_disk_without_pressing_save(tmp_path):
         await pilot.press("y")
         await pilot.pause()
 
-    _run(body, path)
+    run_tui(body, path)
     remaining = _targets(path, name)
     assert len(remaining) == 1 and remaining[0][field] == "second-value"
 
 
-def test_editing_a_target_is_on_disk_without_pressing_save(tmp_path):
+def test_editing_a_target_is_on_disk_without_pressing_save(tmp_path, run_tui):
     path, name, field = _manifest(tmp_path)
 
     async def body(app, pilot):
@@ -115,11 +103,11 @@ def test_editing_a_target_is_on_disk_without_pressing_save(tmp_path):
         await pilot.press("ctrl+s")
         await pilot.pause()
 
-    _run(body, path)
+    run_tui(body, path)
     assert _targets(path, name)[0][field] == "edited-value"
 
 
-def test_removing_a_fetcher_is_on_disk_without_pressing_save(tmp_path):
+def test_removing_a_fetcher_is_on_disk_without_pressing_save(tmp_path, run_tui):
     path, name, field = _manifest(tmp_path)
 
     async def body(app, pilot):
@@ -130,7 +118,7 @@ def test_removing_a_fetcher_is_on_disk_without_pressing_save(tmp_path):
         await pilot.press("y")
         await pilot.pause()
 
-    _run(body, path)
+    run_tui(body, path)
     assert _on_disk(path)["run"]["fetchers"] == []
 
 
@@ -138,7 +126,7 @@ def test_removing_a_fetcher_is_on_disk_without_pressing_save(tmp_path):
 # A save that cannot happen must not also cost the edit
 # --------------------------------------------------------------------------- #
 
-def test_a_failed_save_keeps_the_edit_in_memory_and_says_so(tmp_path, monkeypatch):
+def test_a_failed_save_keeps_the_edit_in_memory_and_says_so(tmp_path, monkeypatch, run_tui):
     path, name, field = _manifest(tmp_path)
 
     def boom(*a, **kw):
@@ -161,7 +149,7 @@ def test_a_failed_save_keeps_the_edit_in_memory_and_says_so(tmp_path, monkeypatc
         notes = [str(n.message) for n in app._notifications]
         return len(in_memory), notes
 
-    count, notes = _run(body, path)
+    count, notes = run_tui(body, path)
     assert count == 1                                   # the removal survived
     assert len(_targets(path, name)) == 2               # the file did not change
     assert any("not saved" in n.lower() for n in notes)
@@ -171,7 +159,7 @@ def test_a_failed_save_keeps_the_edit_in_memory_and_says_so(tmp_path, monkeypatc
 # Entry edits
 # --------------------------------------------------------------------------- #
 
-def test_entry_editor_keeps_an_env_reference_in_a_string_field(tmp_path):
+def test_entry_editor_keeps_an_env_reference_in_a_string_field(tmp_path, run_tui):
     m = api.init_manifest()
     api.set_output_dir(m, str(tmp_path / "evidence"))
     api.add_entry(m, "azure_storage_encryption_status")
@@ -187,12 +175,12 @@ def test_entry_editor_keeps_an_env_reference_in_a_string_field(tmp_path):
         await pilot.press("ctrl+s")
         await pilot.pause()
 
-    _run(body, path)
+    run_tui(body, path)
     [entry] = _on_disk(path)["run"]["fetchers"]
     assert entry["config"]["owner_tag_keys"] == "${env:OWNER_KEYS}"
 
 
-def test_entry_editor_leaves_a_pattern_list_and_its_reasons_alone(tmp_path):
+def test_entry_editor_leaves_a_pattern_list_and_its_reasons_alone(tmp_path, run_tui):
     patterns = [{"pattern": "route:qa-*", "reason": "QA routes"}, "qa.example.com"]
     m = api.init_manifest()
     api.set_output_dir(m, str(tmp_path / "evidence"))
@@ -210,6 +198,6 @@ def test_entry_editor_leaves_a_pattern_list_and_its_reasons_alone(tmp_path):
         await pilot.press("ctrl+s")
         await pilot.pause()
 
-    _run(body, path)
+    run_tui(body, path)
     [entry] = _on_disk(path)["run"]["fetchers"]
     assert entry["config"] == {"scope_exclusions": patterns, "metrics_lookback_days": 7}

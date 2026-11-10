@@ -1,0 +1,11 @@
+$ paramify upload --dry-run evidence/run-<run-id>
+exit 0
+--- stdout
+Uploading to production: https://app.paramify.com/api/v0
+Upload 1 file(s) from <repo>/evidence/run-<run-id> → https://app.paramify.com/api/v0 (dry-run)
+
+        [DRY] demo_hello.json  set=EVD-DEMO-HELLO  tags=Automated by Paramify Fetchers,Demo
+
+Done: uploaded=0 skipped_duplicate=0 skipped_failed=0 errors=0
+tags: applied=0 failed=0  provenance='Automated by Paramify Fetchers'
+--- stderr

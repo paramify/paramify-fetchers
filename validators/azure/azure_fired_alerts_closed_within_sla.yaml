@@ -11,12 +11,18 @@ statement: >
   did close (the oldest open alert is a timestamp a regex cannot age), per-severity targets, or
   anything about Sentinel incidents.
 
-regex: '"partial_failure":\s*false\b[\s\S]*?"alert_histories_unread":\s*0,[\s\S]*?"alerts_open":\s*(?:0,[\s\S]*?"all_alerts_listed":\s*true,[\s\S]*?"max_hours_to_close":\s*null|\d+,[\s\S]*?"all_alerts_listed":\s*true,[\s\S]*?"max_hours_to_close":\s*(?:(?:1[0-5]\d|16[0-7]|[1-9]?\d)(?:\.\d+)?|168(?:\.0+)?)(?![\d.eE]))'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"partial_failure":\s*(?<partial_failure>true|false|null)[\s\S]*?"alert_histories_unread":\s*(?<alert_histories_unread>null|\d+(?:\.\d+)?),[\s\S]*?"alerts_open":\s*(?:0,[\s\S]*?"all_alerts_listed":\s*true,[\s\S]*?"max_hours_to_close":\s*null|\d+,[\s\S]*?"all_alerts_listed":\s*true,[\s\S]*?"max_hours_to_close":\s*(?:(?:1[0-5]\d|16[0-7]|[1-9]?\d)(?:\.\d+)?|168(?:\.0+)?)(?![\d.eE]))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[1] EQUALS false
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # alert_histories_unread
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
 
 evidence_sets:
   - EVD-AZURE-MONITOR-FIRED-ALERTS

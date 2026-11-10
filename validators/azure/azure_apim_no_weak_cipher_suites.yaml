@@ -5,7 +5,8 @@ role: configuration
 statement: >
   No API Management service has a weak cipher suite on (a CBC-mode suite, one without forward
   secrecy, or 3DES); Azure leaves the CBC and RSA key-exchange suites on until they are explicitly
-  turned off. Does not assert protocol versions or FIPS validation; zero API Management services
+  turned off, and leaves 3DES on when unset only for a service created on or before 1 April 2018.
+  Does not assert protocol versions or FIPS validation; zero API Management services
   passes vacuously. Supports KSI-SVC-SIN.
 
 regex: '"services_with_weak_ciphers_enabled":\s*(?<services_with_weak_ciphers_enabled>\d+)'

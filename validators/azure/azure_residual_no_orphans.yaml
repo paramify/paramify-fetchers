@@ -10,12 +10,21 @@ statement: >
   assert ownership, tags, or approval of resources that are in use.
 
 # principal_check "complete" keeps an unrun lookup from reading as zero deleted-principal assignments.
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"principal_check":\s*"complete")(?=[\s\S]*?"total_orphans":\s*0\b)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"total_orphans":\s*(?<total_orphans>null|\d+(?:\.\d+)?))(?=[\s\S]*?"principal_check":\s*(?<principal_check>"(?:[^"\\]|\\.)*"|null|true|false|-?\d+(?:\.\d+)?))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS "complete"
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_orphans
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # principal_check
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "\"complete\"" }
 
 evidence_sets:
   - EVD-AZURE-RESIDUAL-RESOURCES

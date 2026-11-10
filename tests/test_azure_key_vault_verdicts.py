@@ -376,6 +376,49 @@ def test_app_service_certificate_list_failure_fails_the_run(monkeypatch, failing
         "web.WebSiteManagementClient (init)" if failing == "init" else "web.certificates.list")
 
 
+# --- a default rotation policy is not a configured one ---
+
+DEFAULT_POLICY = {"id": None, "expires_in": None, "created": None, "updated": None,
+                  "lifetime_actions": [{"action": "Notify", "time_after_create": None,
+                                        "time_before_expiry": "P30D"}]}
+SET_POLICY = {"id": "https://kv-one.vault.azure.net/keys/k1/rotationpolicy", "expires_in": "P1Y",
+              "created": "2026-01-01T00:00:00Z", "updated": "2026-01-01T00:00:00Z",
+              "lifetime_actions": [{"action": "Notify", "time_after_create": None,
+                                    "time_before_expiry": "P30D"}]}
+ROTATE_POLICY = {**SET_POLICY, "lifetime_actions": [
+    {"action": "Rotate", "time_after_create": None, "time_before_expiry": "P30D"}]}
+
+
+def _rotation_summary(policy):
+    keys = kv.merge_rotation_policies([kv.key_record({"name": "k1"})], {"k1": policy})
+    return keys[0], kv.summarize([{**kv.vault_record(vault()), "keys": keys}])
+
+
+def test_default_notify_only_policy_is_not_a_configured_policy():
+    key, summary = _rotation_summary(DEFAULT_POLICY)
+    assert key["rotation_policy_configured"] is False
+    assert key["rotation_policy_readable"] is True
+    assert (summary["keys_with_rotation_policy"], summary["keys_with_rotation_enabled"]) == (0, 0)
+    assert summary["keys_with_readable_rotation_policy"] == 1
+
+
+def test_a_set_notify_policy_counts_as_configured_but_does_not_rotate():
+    key, summary = _rotation_summary(SET_POLICY)
+    assert key["rotation_policy_configured"] is True
+    assert (summary["keys_with_rotation_policy"], summary["keys_with_rotation_enabled"]) == (1, 0)
+
+
+def test_a_set_rotate_policy_counts_as_configured_and_rotating():
+    key, summary = _rotation_summary(ROTATE_POLICY)
+    assert key["rotation_policy_configured"] is True and key["rotation_enabled"] is True
+    assert (summary["keys_with_rotation_policy"], summary["keys_with_rotation_enabled"]) == (1, 1)
+
+
+def test_a_policy_with_only_a_creation_time_is_configured():
+    assert kv.policy_is_configured({**DEFAULT_POLICY, "created": "2026-01-01T00:00:00Z"})
+    assert not kv.policy_is_configured(None)
+
+
 # --- the existing evidence is unchanged ---
 
 def test_existing_vault_and_summary_keys_are_kept():

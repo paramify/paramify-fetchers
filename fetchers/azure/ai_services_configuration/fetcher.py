@@ -424,12 +424,16 @@ def summarize(accounts: list[dict], search_services: list[dict]) -> dict:
     return summary
 
 
+SEARCH_KEYS = frozenset({
+    "total_search_services", "search_services_open_to_all_networks", "search_services_with_api_keys_enabled",
+    "search_services_cmk_enforced", "search_services_audit_logs_exported",
+    "excluded_search_services", "in_scope_search_services",
+})
+
+
 def null_unread(summary: dict, accounts_read: bool, search_read: bool, scope: bool = False) -> dict:
     """Null every count that depends on a list that was not read, never 0."""
-    def is_search(key: str) -> bool:
-        return "search_service" in key
-
-    dead = {k for k in summary if (is_search(k) and not search_read) or (not is_search(k) and not accounts_read)}
+    dead = {k for k in summary if (k in SEARCH_KEYS and not search_read) or (k not in SEARCH_KEYS and not accounts_read)}
     if scope:
         dead &= {k for k in summary if k.startswith(("excluded_", "in_scope_"))}
     return {k: None if k in dead else v for k, v in summary.items()}

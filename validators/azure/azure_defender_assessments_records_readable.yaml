@@ -13,12 +13,15 @@ statement: >
   so this evidence set passes on readable records even while a High finding within its SLA is open
   on a resource that is not an Azure SQL instance, server or database.
 
-regex: '^\s*\{(?=[\s\S]*?"provider_registration_status":\s*"registered")(?=[\s\S]*?"severity":\s*(?:"[^"]*"|null)\s*,[^{}]*?"status_code":\s*"(?:[Hh]ealthy|[Uu]nhealthy|[Nn]ot[Aa]pplicable)")'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"provider_registration_status":\s*(?<provider_registration_status>"(?:[^"\\]|\\.)*"|null|true|false|-?\d+(?:\.\d+)?))(?=[\s\S]*?"severity":\s*(?:"[^"]*"|null)\s*,[^{}]*?"status_code":\s*"(?:[Hh]ealthy|[Uu]nhealthy|[Nn]ot[Aa]pplicable)")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS "registered"
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # provider_registration_status
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "\"registered\"" }
 
 evidence_sets:
   - EVD-AZURE-DEFENDER-ASSESSMENTS

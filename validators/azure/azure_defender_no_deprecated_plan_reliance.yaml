@@ -18,11 +18,14 @@ statement: >
 # backreference, quoted, so Containers never matches ContainersX); Dns needs
 # VirtualMachines on P2 in summary.enabled_plan_sub_plans; total_plans > 0.
 # enabled_plan_sub_plans and enabled_plans sort after deprecated_plans_enabled.
-regex: '^\s*\{(?=[\s\S]*?"deprecated_plans_enabled":\s*\{)(?![\s\S]*?"deprecated_plans_enabled":\s*\{[^{}]*?"\w+":\s*\[(?:\s*\]|[^\]]*?"(?<replacement_plan>\w+)"(?![\s\S]*?"enabled_plans":\s*\[[^\]]*"\k<replacement_plan>")))(?![\s\S]*?"deprecated_plans_enabled":\s*\{[^{}]*?"Dns":(?![\s\S]*?"enabled_plan_sub_plans":\s*\{[^{}]*?"VirtualMachines":\s*"P2"))(?=[\s\S]*?"total_plans":\s*[1-9])'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '^\s*\{(?=[\s\S]*?"deprecated_plans_enabled":\s*\{)(?![\s\S]*?"deprecated_plans_enabled":\s*\{[^{}]*?"\w+":\s*\[(?:\s*\]|[^\]]*?"(?<replacement_plan>\w+)"(?![\s\S]*?"enabled_plans":\s*\[[^\]]*"\k<replacement_plan>")))(?![\s\S]*?"deprecated_plans_enabled":\s*\{[^{}]*?"Dns":(?![\s\S]*?"enabled_plan_sub_plans":\s*\{[^{}]*?"VirtualMachines":\s*"P2"))(?=[\s\S]*?"total_plans":\s*(?<total_plans>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_plans
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:

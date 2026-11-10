@@ -100,6 +100,7 @@ envelope from step 2, because that's what the uploader sends by default
 | A failed file was uploaded | That's the default, and the artifact's note records `status=failed`. To skip them, set `skip_failed: true` in the [upload config](../uploaders/paramify_evidence/README.md#config---config-optional). |
 | Upload says `missing/incomplete evidence_set` | The fetcher's `fetcher.yaml` has no `evidence_set` block. Add one ([`fetcher.yaml` setup](authoring_fetcher_guide.md#2-fill-in-fetcheryaml)). |
 | Upload says `not envelope-wrapped`, or the file shows `enveloped: False` | The file predates the envelope or wasn't written by the runner. Collect it again. |
+| Runner logs `cannot read as JSON` or `cannot serialize as JSON` | Check the fetcher's output and manifest target values. `NaN`, `Infinity` and `-Infinity` are not JSON numbers. The runner preserves the original file and skips wrapping it; it does not replace the value with zero or null. Other files continue through the existing per-file handling. Fix the producer or target configuration and collect again. |
 | `Got unexpected extra argument(s)` on a `run-*` path | The glob matched more than one run. Name the run directory. |
 
 **More detail:** [the schema](../framework/schemas/envelope_schema.json) ·

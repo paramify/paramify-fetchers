@@ -17,11 +17,17 @@ statement: >-
   or in projects the collecting identity can't see; or that Azure changes are recorded by these
   items (the comparator's validators).
 
-regex: '"summary":\s*\{(?=[\s\S]*?"approval_history_collected":\s*true\b)(?=[\s\S]*?"change_items_approved":\s*[1-9]\d*)(?=[\s\S]*?"change_items_approved_by_requester":\s*\[\s*\])'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"summary":\s*\{(?=[\s\S]*?"approval_history_collected":\s*(?<approval_history_collected>true|false|null))(?=[\s\S]*?"change_items_approved":\s*(?<change_items_approved>\d+))(?=[\s\S]*?"change_items_approved_by_requester":\s*\[\s*\])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # approval_history_collected
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # change_items_approved
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:

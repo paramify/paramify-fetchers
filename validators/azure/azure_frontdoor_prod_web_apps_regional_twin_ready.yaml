@@ -10,12 +10,21 @@ statement: >
   detectable through a shared origin group. It does not cover function apps, autoscale settings, or
   whether the twin runs the same code.
 
-# Backreference: regional_twin_ready must equal a non-zero production_web_apps.
-regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"production_web_apps":\s*(?<production_web_apps>[1-9]\d*)\b)(?=[\s\S]*?"production_web_apps_regional_twin_ready":\s*\k<production_web_apps>(?!\d))'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+# Rows: production_web_apps_regional_twin_ready equals production_web_apps, which is above 0.
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*(?<partial_failure>true|false|null))(?=[\s\S]*?"production_web_apps_regional_twin_ready":\s*(?<production_web_apps_regional_twin_ready>\d+))(?=[\s\S]*?"production_web_apps":\s*(?<production_web_apps>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false; MATCH_GROUP[2] EQUALS MATCH_GROUP[3]; MATCH_GROUP[3] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # partial_failure
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # production_web_apps_regional_twin_ready
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 3 }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # production_web_apps
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:
