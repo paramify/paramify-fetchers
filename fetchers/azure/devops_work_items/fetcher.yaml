@@ -2,7 +2,7 @@ name: azure_devops_work_items
 version: 0.2.0
 description: >-
   Shows Azure DevOps change and security work items with state, owner, planned
-  date and approval, the share of change items approved, self-approvals, linked
+  date and approval: the share of changes approved, self-approvals, linked
   changes, and open, overdue or unassigned security work.
 category: azure
 
