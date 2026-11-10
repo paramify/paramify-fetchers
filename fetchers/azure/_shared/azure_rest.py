@@ -174,6 +174,14 @@ class AzureRestClient:
             items.extend(body.get("value") or [])
         return items
 
+    def get_url(self, url: str, resource: str, params: Optional[Dict[str, str]] = None, verify: Any = None):
+        """A GET to a service outside ARM that takes an Entra token for `resource`, such as an AKS cluster's Kubernetes
+        API; `verify` is the CA bundle path for a server whose certificate a private CA signed. The raw response."""
+        kwargs: Dict[str, Any] = {"params": params, "timeout": HTTP_TIMEOUT}
+        if verify is not None:
+            kwargs["verify"] = verify
+        return self._send("get", url, resource, **kwargs)
+
     def post(self, path: str, api_version: str) -> Dict[str, Any]:
         """An ARM read action that takes no body, such as fetchEventDetails."""
         response = self._send("post", f"{self.arm}{path}", self.arm, params={"api-version": api_version}, timeout=HTTP_TIMEOUT)
