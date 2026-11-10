@@ -229,6 +229,7 @@ TEXT_FORMAT_FETCHERS = (
     "azure/activity_log_alerts",
     "azure/ai_hub_configuration",
     "azure/aks_cluster_configuration",
+    "azure/aks_workload_security",
     "azure/alert_rules",
     "azure/api_management_configuration",
     "azure/app_gateway_backend_tls",
