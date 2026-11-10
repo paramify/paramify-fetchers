@@ -2102,6 +2102,31 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_conditional_access_policies` 0.3.0: the all-users MFA figures
+  count only policies that apply to every sign-in.**
+  `enforced_mfa_for_all_users_and_apps`,
+  `enforced_phishing_resistant_mfa_for_all_users_and_apps`,
+  `mfa_required_for_admin_portals`, `mfa_required_for_azure_management_api` and
+  `phishing_resistant_mfa_role_template_ids` used to count a policy that
+  covered all users and apps, even one limited to risky sign-ins, or one that
+  accepted a compliant device instead of MFA. They now skip a policy with any
+  risk, client app type, platform, location, device filter, authentication flow
+  or application filter condition, and a policy where another grant control
+  can stand in for MFA. The all-users figures also skip a policy that excludes
+  any app; the admin-portal and management-API figures skip it only when the
+  excluded app is that resource. The phishing-resistant all-users figure also
+  skips a policy that excludes a role. Counts that were 1 can now be 0, and
+  the two booleans can now be false.
+- **`azure_entra_conditional_access_policies` 0.3.0: guest and external-user
+  exclusions are counted.** The `excludeGuestsOrExternalUsers` exclusion now
+  counts in `enforced_policies_with_exclusions` and
+  `distinct_excluded_principals`, which undercounted a policy whose only
+  exclusion was guests. Each policy's `users` records the guest types and the
+  tenant scope kind (`all` or `enumerated`, never tenant ids) for both
+  `include_guests_or_external_users` and `exclude_guests_or_external_users`;
+  `enforced_policies_excluding_guests_or_external_users` and
+  `excluded_guest_or_external_user_types` are new summary fields.
+
 - **`azure_entra_app_registrations` 0.2.1: a failed applications read nulls
   every summary count.** When the Graph applications read was denied, failed or
   stopped part-way, the counts (credentials, expired, expiring, without expiry,
