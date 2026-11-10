@@ -226,10 +226,20 @@ def test_instructions_open_with_the_entry_path() -> None:
 
 TEXT_FORMAT_FETCHERS = (
     "azure/alert_rules",
+    "azure/api_management_configuration",
+    "azure/app_gateway_backend_tls",
+    "azure/app_gateway_tls_listeners",
+    "azure/app_gateway_waf",
     "azure/app_service_backups",
+    "azure/app_service_configuration",
+    "azure/app_service_deployments",
+    "azure/app_service_plans",
     "azure/backup_vault_protection",
     "azure/bastion_configuration",
     "azure/change_work_items",
+    "azure/container_registry_configuration",
+    "azure/container_workloads_configuration",
+    "azure/ddos_protection",
     "azure/devops_identities",
     "azure/devops_service_connections",
     "azure/entra_access_reviews",
@@ -240,12 +250,20 @@ TEXT_FORMAT_FETCHERS = (
     "azure/entra_risky_users",
     "azure/entra_sign_ins",
     "azure/firewall_configuration",
+    "azure/front_door_waf_policies",
+    "azure/function_app_configuration",
     "azure/key_vault_key_rotation",
+    "azure/network_security_groups",
+    "azure/private_dns_zone_configuration",
+    "azure/private_endpoint_configuration",
     "azure/resource_locks",
     "azure/sentinel_playbooks",
     "azure/service_availability",
     "azure/service_health_advisories",
     "azure/sql_managed_instance_configuration",
+    "azure/virtual_wan_configuration",
+    "azure/vnet_egress_routing",
+    "azure/vpn_gateway_configuration",
     "azure/waf_ddos_activity",
     "azure/zone_redundancy",
     "oci",
@@ -256,13 +274,7 @@ TEXT_FORMAT_FETCHERS = (
 # call assert_summary_documented, and SUMMARY_DOCS_PENDING_MAX drops with it. A new fetcher calls the fixture instead.
 SUMMARY_DOCS_PENDING = (
     "azure/alert_rules",
-    "azure/app_gateway_backend_tls",
-    "azure/app_gateway_tls_listeners",
-    "azure/app_gateway_waf",
-    "azure/app_service_configuration",
-    "azure/app_service_deployments",
     "azure/change_work_items",
-    "azure/ddos_protection",
     "azure/devops_permissions",
     "azure/dns_configuration",
     "azure/entra_emergency_accounts",
@@ -284,8 +296,6 @@ SUMMARY_DOCS_PENDING = (
     "azure/service_log_records",
     "azure/sql_managed_instance_configuration",
     "azure/storage_encryption_status",
-    "azure/virtual_wan_configuration",
-    "azure/vpn_gateway_configuration",
     "oci/audit_logging_events",
     "oci/bastion_sessions",
     "oci/block_volume_encryption",
@@ -302,7 +312,7 @@ SUMMARY_DOCS_PENDING = (
     "oci/vault_keys",
     "oci/zpr_policies",
 )
-SUMMARY_DOCS_PENDING_MAX = 46
+SUMMARY_DOCS_PENDING_MAX = 38
 MAX_DESCRIPTION_WORDS = 30
 MAX_INSTRUCTIONS_CHARS = 20_000
 MAX_FIELD_LINE_CHARS = 800
