@@ -6,8 +6,9 @@ statement: >
   Every VPN-type virtual network gateway in the subscription runs in active-active mode, and at
   least one exists, so hybrid connectivity survives the loss of one gateway instance. Reads the
   summary rollups active_active_gateways = vpn_gateways. Does NOT assert a zone-redundant (AZ) SKU,
-  BGP, a second region, workload redundancy or tested failover; an ExpressRoute gateway flagged
-  active-active would also be counted in the numerator. Supports KSI-CNA-OFA.
+  BGP, a second region, workload redundancy or tested failover. From
+  azure_vpn_gateway_configuration 0.3.0, active_active_gateways counts only VPN-type gateways; before
+  0.3.0 an ExpressRoute gateway flagged active-active was also counted in it. Supports KSI-CNA-OFA.
 
 regex: '"active_active_gateways":\s*(?<active_active_gateways>\d+)[\s\S]*?"vpn_gateways":\s*(?<vpn_gateways>[1-9]\d*)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
