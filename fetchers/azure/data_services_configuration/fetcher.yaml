@@ -88,7 +88,7 @@ evidence_set:
     - event_hubs.list_by_namespace() and event_hubs.list_authorization_rules() (per namespace and event hub) — event hubs with their retention and capture, and each hub's shared access policies
     - diagnostic_settings.list() (per cluster and namespace) — whether audit logs are exported
 
-    Output: azure_data_services_configuration_<subscription>.json — each MongoDB vCore cluster, Data Explorer cluster and Event Hubs namespace with its network access, authentication, access rights, encryption and audit log export, plus the resources left out and why; no key, connection string or administrator password is read.
+    Output: azure_data_services_configuration_<subscription>.json — each MongoDB vCore cluster, Data Explorer cluster and Event Hubs namespace with its network access, authentication, access rights, encryption and audit log export, plus the resources left out and why; no key, connection string or administrator password is read, and a MongoDB cluster's tls_enforced_by_platform is always true, because the service accepts only TLS 1.2 or later and has no TLS setting to read.
 
     Summary fields:
 
@@ -106,7 +106,7 @@ evidence_set:
     - total_mongo_clusters — Number of in-scope MongoDB vCore (Azure DocumentDB) clusters; reads 0, not null, when the list could not be read, so read it together with in_scope_mongo_clusters
     - total_data_explorer_clusters — Number of in-scope Azure Data Explorer clusters; reads 0, not null, when the list could not be read, so read it together with in_scope_data_explorer_clusters
     - total_event_hub_namespaces — Number of in-scope Event Hubs namespaces; reads 0, not null, when the list could not be read, so read it together with in_scope_event_hub_namespaces
-    - total_event_hubs — Number of event hubs across all in-scope namespaces whose event hubs could be read
+    - total_event_hubs — Number of event hubs across all in-scope namespaces whose event hubs could be read; a namespace whose event hub list couldn't be read adds none, and no count shows it (the run fails)
     - provider_registration_status_mongo_clusters — Whether Microsoft.DocumentDB is registered on the subscription: registered, not_registered or unknown
     - provider_registration_status_data_explorer — Whether Microsoft.Kusto is registered on the subscription: registered, not_registered or unknown
     - provider_registration_status_event_hubs — Whether Microsoft.EventHub is registered on the subscription: registered, not_registered or unknown
@@ -150,7 +150,7 @@ evidence_set:
     - data_explorer_principal_assignments — Number of role assignments to users, groups or apps on in-scope Data Explorer clusters and their databases
     - data_explorer_admin_assignments — Number of Data Explorer role assignments with an admin role (AllDatabasesAdmin or Admin), which can change data or grant access
     - data_explorer_admin_user_assignments — Number of Data Explorer admin role assignments held by individual users rather than groups or apps
-    - data_explorer_clusters_principals_unknown — Number of Data Explorer clusters whose cluster role assignments, or the role assignments of any of its databases, couldn't be read
+    - data_explorer_clusters_principals_unknown — Number of Data Explorer clusters whose cluster role assignments, or the role assignments of any database that was listed, couldn't be read; a cluster whose database list couldn't be read isn't counted here (the run fails)
 
     Can Event Hubs namespaces be reached from the internet?
     - event_hub_namespaces_open_to_all_networks — Number of Event Hubs namespaces whose network exposure is open: public network access is on and the network rule set's default action is Allow (or unset), or Deny with an IP rule that admits every IPv4 address
@@ -161,7 +161,7 @@ evidence_set:
     Are Event Hubs namespaces configured securely?
     - event_hub_namespaces_tls_below_1_2 — Number of Event Hubs namespaces whose minimum TLS version is below 1.2 (1.0 or 1.1)
     - event_hub_namespaces_local_auth_enabled — Number of Event Hubs namespaces where shared access keys still work (disableLocalAuth isn't true; it defaults to false)
-    - event_hub_namespaces_shared_key_full_control — Number of Event Hubs namespaces where one shared key gives full control: local authentication is on and a namespace shared access policy has Manage rights
+    - event_hub_namespaces_shared_key_full_control — Number of Event Hubs namespaces where one shared key gives full control: local authentication is on and a namespace shared access policy has Manage rights; a namespace whose shared access policies couldn't be read isn't counted, and no count shows it (the run fails)
     - event_hub_namespaces_customer_managed_key — Number of Event Hubs namespaces encrypted with a customer-managed key (key source Microsoft.KeyVault)
     - event_hub_namespaces_zone_redundant — Number of Event Hubs namespaces spread across availability zones
     - event_hub_namespaces_geo_replicated — Number of Event Hubs namespaces replicated to at least one region besides the primary

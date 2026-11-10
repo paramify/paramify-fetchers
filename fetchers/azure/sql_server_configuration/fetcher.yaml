@@ -98,7 +98,7 @@ evidence_set:
     - provider_registration_status — Whether the SQL provider (Microsoft.Sql) is registered on the subscription: registered, not_registered or unknown
 
     Is the server closed to the public internet?
-    - public_network_access_disabled_servers — Number of servers with public network access Disabled or SecuredByPerimeter (behind a Network Security Perimeter), so they're reached only through private endpoints
+    - public_network_access_disabled_servers — Number of servers with public network access Disabled, so they're reached only through private endpoints, or SecuredByPerimeter, where a Network Security Perimeter's inbound access rules decide who connects and can still admit public IP ranges
     - servers_allowing_all_azure_services — Number of servers with the 0.0.0.0–0.0.0.0 firewall rule ("allow Azure services and resources to access this server"), which admits compute in any Azure customer's subscription, not only the organization's own
     - servers_allowing_entire_internet — Number of servers with a firewall rule for every IPv4 address (exactly 0.0.0.0–255.255.255.255; split or overlapping rules that add up to it aren't detected)
     - total_firewall_rules — Number of server-level firewall rules across in-scope servers (database-level rules aren't read); a server whose rules couldn't be read adds 0

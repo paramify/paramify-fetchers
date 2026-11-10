@@ -74,7 +74,7 @@ evidence_set:
     - managed_databases.list_by_instance() (per in-scope instance) — the databases on each instance
     - managed_database_transparent_data_encryption.get() (per user database) — whether transparent data encryption (TDE) is on
 
-    Output: azure_sql_managed_instance_encryption_<subscription>.json — each SQL Managed Instance with its encryption protector and the TDE state of every user database; system databases (master, model, msdb, tempdb) are kept but not queried or counted, and instances left out of scope are listed with the pattern that matched.
+    Output: azure_sql_managed_instance_encryption_<subscription>.json — each SQL Managed Instance with its encryption protector (null, and customer_managed_key with it, when the protector couldn't be read), the TDE state of every user database, and all_user_databases_tde_enabled: false once any user database is Disabled, otherwise null when a TDE state couldn't be read, the database list failed or the instance has no user databases, and true only when every user database answered Enabled; system databases (master, model, msdb, tempdb) are kept but not queried or counted, and instances left out of scope are listed with the pattern that matched.
 
     Summary fields:
 

@@ -101,7 +101,7 @@ evidence_set:
     Summary fields:
 
     What was checked?
-    - total_storage_accounts — Number of storage accounts in the subscription
+    - total_storage_accounts — Number of in-scope storage accounts; every account count and percentage below covers only these; reads 0, not null, when the storage account list could not be read, so read it together with in_scope_storage_accounts
     - provider_registration_status — Whether Azure Storage (Microsoft.Storage) is registered on the subscription: registered, not_registered or unknown
 
     Which resources are left out of scope?
@@ -154,7 +154,7 @@ evidence_set:
     Which containers can be read anonymously?
     - total_containers — Number of blob containers across all storage accounts whose containers were listed
     - containers_with_public_access_level — Number of blob containers set to the Blob or Container public access level
-    - anonymously_accessible_containers — Number of blob containers that can be read without signing in through the account's public endpoint: the container has a public access level, its account does not forbid public blob access (Azure allows it when the setting is on or was never set), and the account's network admits public clients. The network does not when public network access is Disabled, or when it isn't SecuredByPerimeter and the firewall's default action is Deny with no IP (IPv4 or IPv6) or virtual network rule; a Deny whose rule list the API didn't return counts as admitting. Not evaluated: which addresses a rule admits, network security perimeters, the trusted-services bypass and private endpoints
+    - anonymously_accessible_containers — Number of blob containers that can be read without signing in through the account's public endpoint: the container has a public access level, its account does not forbid public blob access (Azure allows it when the setting is on or was never set), and the account's network admits public clients. The network does not when public network access is Disabled, or when it isn't SecuredByPerimeter and the firewall's default action is Deny with no IP (IPv4 or IPv6) or virtual network rule; a Deny whose IPv4 or virtual network rule list the API didn't return counts as admitting, and a missing IPv6 list as none. Not evaluated: which addresses a rule admits, network security perimeters, the trusted-services bypass and private endpoints
     - accounts_with_containers_not_collected — Number of storage accounts whose container list failed; their containers are missing from the counts
 
     Is each account owned and classified?

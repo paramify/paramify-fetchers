@@ -134,8 +134,8 @@ evidence_set:
     - instances_zone_redundant — Number of instances with compute zone redundancy on, a setting separate from backup storage redundancy (Azure omits it when off, so absent counts as off)
     - instances_in_failover_group — Number of instances that are in an instance failover group
     - instances_failover_group_unknown — Number of instances whose failover group membership is unknown: the failover group list for their resource group and region failed and no other region's list showed them in a group
-    - total_instance_failover_groups — Number of in-scope instance failover groups, each counted once although Azure lists it from every region it spans; null if any failover group list failed
-    - failover_groups_manual_policy — Number of failover groups whose failover policy is Manual, so a failover needs someone to start it; null if any failover group list failed
+    - total_instance_failover_groups — Number of in-scope instance failover groups, each counted once although Azure lists it from every region it spans; null if a failover group list failed for a resource group and region holding an in-scope instance (a failed list where every instance is excluded is only logged as a warning, and the run doesn't fail)
+    - failover_groups_manual_policy — Number of failover groups whose failover policy is Manual, so a failover needs someone to start it; null if a failover group list failed for a resource group and region holding an in-scope instance
 
     Have failovers been run, and how long did they take?
     - failover_history_days — Number of days back from the run that the Activity Log was read for failovers (1 to 90, the days the Activity Log keeps)

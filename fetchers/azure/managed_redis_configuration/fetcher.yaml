@@ -91,7 +91,7 @@ evidence_set:
     - total_clusters — Number of in-scope clusters; every cluster count below is out of this total
     - total_databases — Number of databases read across the in-scope clusters; clusters whose database list could not be read add none
     - provider_registration_status — Whether the Redis provider (Microsoft.Cache) is registered on the subscription: registered, not_registered or unknown
-    - databases_unread_clusters — Number of clusters whose database list could not be read, so their tls_only and entra_only verdicts are null
+    - databases_unread_clusters — Number of clusters whose database list could not be read, so both per-cluster verdicts are null: tls_only (minimum TLS 1.2 or higher, at least one database, and every database Encrypted) and entra_only (at least one database, and every database with access-key authentication Disabled)
 
     Is traffic encrypted?
     - tls_only_clusters — Number of clusters with a minimum TLS version of 1.2 or higher, at least one database, and every database accepting only encrypted client connections; clusters whose database list could not be read are not counted
