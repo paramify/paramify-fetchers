@@ -292,6 +292,16 @@ def test_sql_encryption_counts_only_in_scope_instances_and_their_databases(monke
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
 
 
+def test_sql_encryption_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, evidence = run_sql(monkeypatch, tmp_path, encryption, PATTERNS)
+    assert_summary_documented("azure/sql_managed_instance_encryption", evidence["summary"])
+
+
+def test_sql_backups_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, evidence = run_sql(monkeypatch, tmp_path, backups, PATTERNS)
+    assert_summary_documented("azure/sql_managed_instance_backups", evidence["summary"])
+
+
 def test_sql_backups_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path):
     code, evidence = run_sql(monkeypatch, tmp_path, backups, None)
     summary, results = evidence["summary"], evidence["results"]

@@ -225,13 +225,20 @@ def test_instructions_open_with_the_entry_path() -> None:
 # --------------------------------------------------------------------------- #
 
 TEXT_FORMAT_FETCHERS = (
+    "azure/ai_hub_configuration",
+    "azure/aks_cluster_configuration",
     "azure/alert_rules",
     "azure/app_service_backups",
+    "azure/backup_recovery_status",
     "azure/backup_vault_protection",
     "azure/bastion_configuration",
     "azure/change_work_items",
+    "azure/cosmosdb_configuration",
+    "azure/data_services_configuration",
+    "azure/databricks_workspace_configuration",
     "azure/devops_identities",
     "azure/devops_service_connections",
+    "azure/disk_encryption_status",
     "azure/entra_access_reviews",
     "azure/entra_conditional_access_policies",
     "azure/entra_dormant_identities",
@@ -240,12 +247,23 @@ TEXT_FORMAT_FETCHERS = (
     "azure/entra_risky_users",
     "azure/entra_sign_ins",
     "azure/firewall_configuration",
+    "azure/key_vault_configuration",
     "azure/key_vault_key_rotation",
+    "azure/managed_redis_configuration",
+    "azure/mysql_configuration",
+    "azure/postgresql_configuration",
+    "azure/redis_cache_configuration",
     "azure/resource_locks",
     "azure/sentinel_playbooks",
     "azure/service_availability",
     "azure/service_health_advisories",
+    "azure/sql_encryption_status",
+    "azure/sql_managed_instance_backups",
     "azure/sql_managed_instance_configuration",
+    "azure/sql_managed_instance_encryption",
+    "azure/sql_server_configuration",
+    "azure/storage_encryption_status",
+    "azure/vm_hardening_status",
     "azure/waf_ddos_activity",
     "azure/zone_redundancy",
     "oci",
@@ -283,7 +301,6 @@ SUMMARY_DOCS_PENDING = (
     "azure/service_health_advisories",
     "azure/service_log_records",
     "azure/sql_managed_instance_configuration",
-    "azure/storage_encryption_status",
     "azure/virtual_wan_configuration",
     "azure/vpn_gateway_configuration",
     "oci/audit_logging_events",
@@ -302,7 +319,7 @@ SUMMARY_DOCS_PENDING = (
     "oci/vault_keys",
     "oci/zpr_policies",
 )
-SUMMARY_DOCS_PENDING_MAX = 46
+SUMMARY_DOCS_PENDING_MAX = 45
 MAX_DESCRIPTION_WORDS = 30
 MAX_INSTRUCTIONS_CHARS = 20_000
 MAX_FIELD_LINE_CHARS = 800
