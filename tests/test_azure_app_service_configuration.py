@@ -93,6 +93,16 @@ STACKS = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def frozen_runtime_clock(monkeypatch):
+    """collect_web_apps judges end of support against the real clock; pin it to NOW so the fixture's
+    end-of-life dates mean the same thing on every day the suite runs."""
+    attach = appsvc._attach_runtime_support
+    monkeypatch.setattr(appsvc, "_attach_runtime_support",
+                        lambda client, collector, apps, _now, node_versions:
+                        attach(client, collector, apps, NOW, node_versions))
+
+
 def index():
     return appsvc.runtime_index([e for s in STACKS for e in appsvc.project_web_app_stack(s)])
 
