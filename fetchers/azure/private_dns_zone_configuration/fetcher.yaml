@@ -80,7 +80,7 @@ evidence_set:
     - virtual_network_links.list() (per zone) — the links, with auto-registration, resolution policy and link state
     - record_sets.list() (per zone) — the records, with SOA records left out
     - private_dns_zone_groups.list() (per private endpoint whose network interface holds an IP of a private-link A record, in the endpoint's own subscription) — the zone group that registers a record
-    - Resource Graph queries, not scoped to a subscription — the virtual networks the zones link to and the networks peered with them, private endpoint network interfaces and connection states, other network interfaces and load balancer frontends holding private IPs, and the resource groups the credential can read
+    - Resource Graph queries, not scoped to a subscription — the virtual networks the zones link to and the networks peered with them, private endpoint network interfaces and connection states, other network interfaces and load balancer frontends holding private IPs, every private DNS zone and zone link the credential can read (for duplicate names), and the resource groups the credential can read
 
     Output: azure_private_dns_zone_configuration_<subscription>.json — each zone with its links and records, each private-link A record's per-IP status and the proof behind it, and the zones left out and why.
 
@@ -89,7 +89,7 @@ evidence_set:
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg: or id:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no private DNS zone, such as a mistyped name or a location: pattern, which never matches a global zone; null when the zone list could not be read
-    - excluded_private_dns_zones — Number of private DNS zones left out of scope because a pattern matched their resource group or id; each is listed under excluded with the pattern, and no other count includes it, its links or its records; null when the zone list could not be read
+    - excluded_private_dns_zones — Number of private DNS zones left out of scope because a pattern matched their resource group or id; each is listed under excluded with the pattern, and no other count includes it, its links or its records; 0 when the zone list could not be read
     - in_scope_private_dns_zones — Number of private DNS zones read and in scope; 0 means none was read or the patterns took out every zone
 
     Which zones were checked?
@@ -115,8 +115,8 @@ evidence_set:
     - links_virtual_network_unknown — Number of links whose network lookup failed
 
     Does every private-link record resolve to a live private endpoint?
-    - privatelink_a_records — Number of A records in private-link zones, which are the records that get a status; the zone apex and records in other zones get none
-    - privatelink_records_backed — Number of those records where every IP is backed: an Approved private endpoint holds the IP and one of its FQDNs is the record's name (or the name under the zone's public suffix), matched only within the networks the zone resolves for (its links and the networks peered with them, one hop), or the endpoint's own private DNS zone group registers this zone, this name and exactly these IPs
+    - privatelink_a_records — Number of A records in private-link zones, which are the records that get a status; the zone apex and records in other zones get none. Each record gets one status: backed when every IP is backed, partially_backed when some are, no_addresses when it has no IP, and otherwise the most serious of its IPs' statuses, in the order ip_mismatch, endpoint_not_approved, stale, unknown, unverified, platform_managed
+    - privatelink_records_backed — Number of private-link A records where every IP is backed: an Approved private endpoint holds the IP and one of its FQDNs is the record's name (or the name under the zone's public suffix; an endpoint that publishes no FQDNs is matched by IP alone), matched only within the networks the zone resolves for (its links and the networks peered with them, one hop), or the endpoint's own private DNS zone group registers this zone, this name and exactly these IPs, unless a network the zone resolves for finds the IP held by an endpoint serving another name, an endpoint that is not Approved, or another network interface or load balancer
     - privatelink_records_partially_backed — Number of those records where some IPs are backed and others are not, so a dead IP is not hidden by a live one
     - privatelink_records_ip_mismatch — Number of those records with an IP that a private endpoint holds but for a different name
     - privatelink_records_endpoint_not_approved — Number of those records whose serving private endpoint is Pending, Rejected or Disconnected

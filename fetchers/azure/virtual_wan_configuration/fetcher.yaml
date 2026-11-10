@@ -92,16 +92,16 @@ evidence_set:
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no Virtual WAN, hub, VPN gateway, VPN site, point-to-site gateway or server configuration, such as a mistyped name; null when a resource list could not be read
     - excluded_virtual_wans — Number of Virtual WANs left out of scope because a pattern matched; each is listed under excluded with the pattern, and the hubs and VPN sites under it leave with it, naming the WAN in matched_id; no other count includes them; null when the list could not be read
-    - excluded_virtual_hubs — Number of virtual hubs left out of scope the same way, or with their excluded Virtual WAN; their VPN gateways and point-to-site gateways leave with them; null when the list could not be read
-    - excluded_vpn_gateways — Number of hub site-to-site VPN gateways left out of scope the same way, or with their excluded hub; null when the list could not be read
-    - excluded_vpn_sites — Number of VPN sites left out of scope the same way, or with their excluded Virtual WAN; null when the list could not be read
-    - excluded_p2s_vpn_gateways — Number of point-to-site VPN gateways left out of scope the same way, or with their excluded hub; null when the list could not be read
+    - excluded_virtual_hubs — Number of virtual hubs left out of scope because a pattern matched them or their Virtual WAN; each is listed under excluded, and its VPN gateways and point-to-site gateways leave with it; null when the hub list, or with patterns set the Virtual WAN list, could not be read
+    - excluded_vpn_gateways — Number of hub site-to-site VPN gateways left out of scope because a pattern matched them, their hub or that hub's Virtual WAN; null when the VPN gateway list, or with patterns set the hub or Virtual WAN list, could not be read
+    - excluded_vpn_sites — Number of VPN sites left out of scope because a pattern matched them or their Virtual WAN; null when the VPN site list, or with patterns set the Virtual WAN list, could not be read
+    - excluded_p2s_vpn_gateways — Number of point-to-site VPN gateways left out of scope because a pattern matched them, their hub or that hub's Virtual WAN; null when the point-to-site gateway list, or with patterns set the hub or Virtual WAN list, could not be read
     - excluded_vpn_server_configurations — Number of VPN server configurations left out of scope because a pattern matched; null when the list could not be read
     - in_scope_virtual_wans — Number of Virtual WANs read and in scope; null when the list could not be read
     - in_scope_virtual_hubs — Number of virtual hubs read and in scope; null when the list, or with patterns set the list of their Virtual WANs, could not be read
-    - in_scope_vpn_gateways — Number of hub VPN gateways read and in scope; null when the list, or with patterns set the list of their hubs, could not be read
+    - in_scope_vpn_gateways — Number of hub VPN gateways read and in scope; null when the list, or with patterns set the hub or Virtual WAN list, could not be read
     - in_scope_vpn_sites — Number of VPN sites read and in scope; null when the list, or with patterns set the list of their Virtual WANs, could not be read
-    - in_scope_p2s_vpn_gateways — Number of point-to-site VPN gateways read and in scope; null when the list, or with patterns set the list of their hubs, could not be read
+    - in_scope_p2s_vpn_gateways — Number of point-to-site VPN gateways read and in scope; null when the list, or with patterns set the hub or Virtual WAN list, could not be read
     - in_scope_vpn_server_configurations — Number of VPN server configurations read and in scope; null when the list could not be read
 
     What was checked?

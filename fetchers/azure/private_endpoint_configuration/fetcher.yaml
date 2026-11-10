@@ -80,6 +80,7 @@ evidence_set:
     - private_dns_zone_groups.list() (per endpoint) — the zone groups that publish the endpoint's DNS records; a failed read leaves the answer null, counted as not published
     - Resource Graph query on the target resources and the endpoints' network interfaces, not scoped to a subscription — each target's existence and public network access, and each endpoint's private IPs
     - Resource Graph query on the endpoints' virtual networks — each endpoint subnet's network policy, network security group and route table
+    - Resource Graph query on resource groups, not scoped to a subscription, with subscriptions.list() — the resource groups and subscriptions the credential can read, so a missing target or subnet reads not_found only where its resource group is readable, and not_visible otherwise
 
     Output: azure_private_endpoint_configuration_<subscription>.json — each endpoint with its connections, approval, subnet, private IPs, zone groups and each target's public access, plus the endpoints left out and why.
 
@@ -88,7 +89,7 @@ evidence_set:
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no private endpoint, such as a mistyped name; null when the endpoint list could not be read
-    - excluded_private_endpoints — Number of private endpoints left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it or a target only it connects to; null when the endpoint list could not be read
+    - excluded_private_endpoints — Number of private endpoints left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it or a target only it connects to; 0 when the endpoint list could not be read
     - in_scope_private_endpoints — Number of private endpoints read and in scope; 0 means none was read or the patterns took out every endpoint
 
     Which endpoints were checked?

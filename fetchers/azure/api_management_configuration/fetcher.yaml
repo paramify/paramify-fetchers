@@ -75,7 +75,7 @@ evidence_set:
     - providers.get("Microsoft.ApiManagement") — tells an unregistered provider from no services
     - api_management_service.list() — services with their network, TLS, cipher, hostname and developer portal settings
     - sign_up_settings.get() (per service) — whether anyone can sign up on the developer portal
-    - policy.get() (per service) — which security elements the global policy contains
+    - policy.get() (per service) — which security elements the global policy contains: ip-filter, rate-limit, rate-limit-by-key, quota, quota-by-key, validate-jwt, validate-azure-ad-token, check-header, cors, validate-content, authentication-managed-identity and authentication-certificate, plus base when it keeps the base policy; elements inside XML comments do not count, and every product, API, operation and fragment policy is read the same way
     - product.list_by_service(), product_policy.get() and product_api.list_by_product() (per service and product) — products, their policies and the APIs in each
     - api.list_by_service(), api_policy.get(), api_operation.list_by_api() and api_operation_policy.get() (per service, API and operation) — APIs, operations and their policies
     - policy_fragment.list_by_service() and policy_fragment.get() (per service and fragment) — reusable policy fragments pulled into policies
@@ -108,7 +108,7 @@ evidence_set:
 
     Does the gateway accept only strong TLS?
     - services_with_legacy_tls_or_ssl_enabled — Number of services where TLS 1.0, TLS 1.1 or SSL 3.0 is on for clients or backends: set on, or unset on a service created on or before 1 April 2018, where Azure defaults it on
-    - services_with_weak_ciphers_enabled — Number of services with at least one weak cipher suite effectively on (CBC mode, no forward secrecy, or 3DES); Azure leaves the CBC and RSA key-exchange suites on until they are set to False, and the GCM and ECDHE suites it requires cannot be switched off and are not checked
+    - services_with_weak_ciphers_enabled — Number of services with at least one weak cipher suite effectively on (CBC mode, no forward secrecy, or 3DES); Azure leaves the nine CBC and RSA key-exchange suites, TLS_RSA_WITH_AES_128_GCM_SHA256 among them, on until they are set to False, and 3DES (TripleDes168) on when unset only for a service created on or before 1 April 2018; the ECDHE GCM suites Azure requires cannot be switched off and are not checked
     - services_minimum_api_version_enforced — Number of services whose minimum management API version is 2019-12-01 or later, Microsoft's recommended floor below which older versions can read secrets back
 
     Is the developer portal open to sign-ups?

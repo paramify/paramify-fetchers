@@ -127,13 +127,13 @@ evidence_set:
     - platform_subnets — Number of in-scope subnets named GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet, AzureFirewallManagementSubnet or RouteServerSubnet, whose routing Azure sets; every count below is about workload subnets unless it says otherwise
 
     Where does each subnet's Internet traffic go?
-    - workload_subnets_by_egress_path — Number of workload subnets for each egress path, worked out from the route table for IPv4; a default route is a user-defined 0.0.0.0/0 route or routes of one next-hop kind that together cover it, such as 0.0.0.0/1 and 128.0.0.0/1:
+    - workload_subnets_by_egress_path — Number of workload subnets for each egress path, worked out from the route table for IPv4; a default route is a user-defined 0.0.0.0/0 route or routes of one next-hop kind that together cover it, such as 0.0.0.0/1 and 128.0.0.0/1; load balancers are not collected and a machine's own public IP is judged per interface below, so a subnet whose machines leave through a public load balancer or their own public IPs still reads default_outbound or none:
       - appliance (default route to a virtual appliance, or through a Virtual WAN hub that propagates its default route)
       - blackhole (default route to None, so Internet traffic is dropped)
       - gateway (default route to a virtual network gateway)
       - nat_gateway (no default route, or one to Internet, and a NAT gateway on the subnet or the network's default public NAT gateway)
-      - default_outbound (no default route and default outbound access is on or unset, so Azure's implicit public IP is used)
-      - none (no default route and default outbound access is off, so there is no outbound path)
+      - default_outbound (no default route and default outbound access is on or unset, so Azure's implicit public IP is the subnet's fallback)
+      - none (no default route and default outbound access is off, so the subnet itself gives no outbound path)
       - other (default route to any other non-Internet next hop)
       - virtual_hub_unresolved (the spoke's hub was not found, so the hub's default route cannot be ruled in or out)
     - workload_subnets_default_outbound_effective — Number of workload subnets with default outbound access on; an unset value counts as on

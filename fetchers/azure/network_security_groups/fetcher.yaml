@@ -111,8 +111,8 @@ evidence_set:
     - outbound_allow_rules — Number of custom outbound rules whose access is Allow
     - outbound_deny_rules — Number of custom outbound rules whose access is Deny
     - internet_destined_allow_rules — Number of custom outbound Allow rules whose destination includes Internet, * or 0.0.0.0/0
-    - unrestricted_internet_outbound_groups — Number of groups that allow all-port Internet egress: the first catch-all rule toward the Internet, custom and default rules in priority order, is an Allow, which an untouched group's default AllowInternetOutBound is; a narrower Deny on one port does not count as an override
-    - restricted_internet_outbound_groups — Number of groups that are not in unrestricted_internet_outbound_groups: a catch-all Deny toward the Internet comes first, or no catch-all rule toward it is found
+    - unrestricted_internet_outbound_groups — Number of groups that allow all-port Internet egress: the first catch-all rule toward the Internet (outbound, protocol * and port * written as *, destination Internet, * or 0.0.0.0/0, whatever its source), custom and default rules in priority order, is an Allow, which an untouched group's default AllowInternetOutBound is; a Deny on fewer ports or protocols, or on 0-65535 written as a range, does not count as an override
+    - restricted_internet_outbound_groups — Number of groups that are not in unrestricted_internet_outbound_groups: a catch-all Deny toward the Internet comes first, even one limited to a narrow source, or no catch-all rule toward it is found
 
     Which virtual networks and subnets sit behind a group?
     - total_virtual_networks — Number of in-scope virtual networks
@@ -130,7 +130,7 @@ evidence_set:
     - nic_nsg_coverage_percentage — Percentage of network interfaces filtered by a group on the interface or its subnet = (total_network_interfaces - nics_without_any_nsg) / total_network_interfaces × 100 (rounded down to a whole number); 0 when total_network_interfaces is 0
 
     Can workload subnets reach each other on every port?
-    - workload_subnets_by_east_west_segmentation — Number of workload subnets for each east-west result; GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet, AzureFirewallManagementSubnet and RouteServerSubnet are left out, and a pair is judged from both subnets' groups, so an Allow that covers every port opens it and a Deny that covers every port and protocol segments it; network interface groups (which can only narrow a pair), traffic within one subnet and peered networks are not considered:
+    - workload_subnets_by_east_west_segmentation — Number of workload subnets for each east-west result; GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet, AzureFirewallManagementSubnet and RouteServerSubnet are left out. Each side of a pair, the source subnet's outbound rules and the destination's inbound rules, custom and default in priority order, is decided by its first Allow over TCP or any protocol on every port that touches both subnets, or Deny on every port and protocol that covers both; the pair is open when both sides allow (a subnet with no group allows) and segmented when either denies. Network interface groups (which can only narrow a pair), traffic within one subnet and peered networks are not considered:
       - segmented (no other workload subnet in its network reaches it on every port)
       - partial (some other subnets reach it on every port)
       - unsegmented (every other workload subnet reaches it on every port)

@@ -92,7 +92,7 @@ evidence_set:
     - provider_registration_status — Whether the App Service provider (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown
 
     Is each app reachable only privately?
-    - publicly_accessible_apps — Number of function apps whose public network access is not Disabled, which includes Enabled and not returned, since Azure treats that as Enabled
+    - publicly_accessible_apps — Number of function apps whose public network access is not Disabled, counting an app that returns no value as public; with a private endpoint an unset value can mean public access is off, so this can overcount
     - public_network_access_disabled_apps — Number of function apps whose public network access is Disabled
     - vnet_integrated_apps — Number of function apps connected to a virtual network subnet for their outbound traffic
 

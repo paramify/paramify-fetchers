@@ -88,7 +88,7 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no virtual network gateway, connection or local network gateway, such as a mistyped name; null when the resource group list could not be read
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no virtual network gateway, connection or local network gateway, such as a mistyped name; null when the resource group list, or any resource group's gateway, connection or local network gateway list, could not be read
     - excluded_virtual_network_gateways — Number of virtual network gateways left out of scope because a pattern matched; each is listed under excluded with the pattern, and no other count includes it; null when the resource group list could not be read
     - excluded_connections — Number of connections left out of scope because a pattern matched, or because their own gateway (the first one) was excluded, which names that gateway in matched_id; a connection to an excluded second gateway or local network gateway stays in scope with its verdict; null when the resource group list could not be read
     - excluded_local_network_gateways — Number of local network gateways left out of scope because a pattern matched; null when the resource group list could not be read
