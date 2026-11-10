@@ -225,13 +225,20 @@ def test_instructions_open_with_the_entry_path() -> None:
 # --------------------------------------------------------------------------- #
 
 TEXT_FORMAT_FETCHERS = (
+    "azure/activity_log_alerts",
     "azure/alert_rules",
     "azure/app_service_backups",
     "azure/backup_vault_protection",
     "azure/bastion_configuration",
+    "azure/change_provenance",
     "azure/change_work_items",
+    "azure/devops_audit_streams",
     "azure/devops_identities",
+    "azure/devops_permissions",
+    "azure/devops_pipelines",
     "azure/devops_service_connections",
+    "azure/devops_work_items",
+    "azure/diagnostic_settings",
     "azure/entra_access_reviews",
     "azure/entra_conditional_access_policies",
     "azure/entra_dormant_identities",
@@ -241,7 +248,17 @@ TEXT_FORMAT_FETCHERS = (
     "azure/entra_sign_ins",
     "azure/firewall_configuration",
     "azure/key_vault_key_rotation",
+    "azure/log_analytics_deletion_rights",
+    "azure/log_analytics_query_audit",
+    "azure/log_analytics_workspaces",
+    "azure/log_storage_immutability",
+    "azure/network_flow_logs",
+    "azure/network_traffic_activity",
+    "azure/resource_diagnostic_settings",
     "azure/resource_locks",
+    "azure/sentinel_analytics_rules",
+    "azure/sentinel_automation_rules",
+    "azure/sentinel_incidents",
     "azure/sentinel_playbooks",
     "azure/service_availability",
     "azure/service_health_advisories",
@@ -263,7 +280,6 @@ SUMMARY_DOCS_PENDING = (
     "azure/app_service_deployments",
     "azure/change_work_items",
     "azure/ddos_protection",
-    "azure/devops_permissions",
     "azure/dns_configuration",
     "azure/entra_emergency_accounts",
     "azure/entra_risky_users",
@@ -272,12 +288,7 @@ SUMMARY_DOCS_PENDING = (
     "azure/front_door_tls",
     "azure/front_door_waf_coverage",
     "azure/monitor_fired_alerts",
-    "azure/network_flow_logs",
-    "azure/network_traffic_activity",
     "azure/rbac_role_assignments",
-    "azure/resource_diagnostic_settings",
-    "azure/sentinel_analytics_rules",
-    "azure/sentinel_incidents",
     "azure/sentinel_playbooks",
     "azure/service_availability",
     "azure/service_health_advisories",
@@ -302,7 +313,7 @@ SUMMARY_DOCS_PENDING = (
     "oci/vault_keys",
     "oci/zpr_policies",
 )
-SUMMARY_DOCS_PENDING_MAX = 46
+SUMMARY_DOCS_PENDING_MAX = 40
 MAX_DESCRIPTION_WORDS = 30
 MAX_INSTRUCTIONS_CHARS = 20_000
 MAX_FIELD_LINE_CHARS = 800
