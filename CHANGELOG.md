@@ -61,6 +61,40 @@ schemas and the `paramify` CLI — not the internal code.
   to apps not on it or the service principals. The summary adds
   `scope_service_principal_app_ids`. An invalid scope value now fails as
   `bad_config`. Maps to KSI-IAM-SNU and KSI-MLA-LET as well.
+- **`azure_entra_sign_in_logs` 0.3.0: scope user sign-ins to the current members of Entra groups.**
+  `groups` (`ENTRA_LOG_GROUPS`) takes group display names. On every run the members
+  are worked out inside each query from the workspace's `IdentityInfo` table, which
+  Microsoft Sentinel UEBA fills from Entra ID, so no member list is kept and Microsoft
+  Graph is not used. Only each identity's newest record counts, read over 21 days
+  (Sentinel re-syncs the whole directory every 14). A sign-in is kept when its user
+  is a member by object id or by user principal name.
+  - **With `users`.** The listed users are added to the groups' members; `app_ids`
+    still narrows the result. Service-principal sign-ins and policy changes are
+    never scoped by it.
+  - **It never reads unscoped.** When `IdentityInfo` is missing (`bad_config`), keeps
+    under 14 days, has no record, has none newer than `identity_max_age_days`
+    (`ENTRA_LOG_IDENTITY_MAX_AGE_DAYS`, default 14, 1 to 21), cannot be queried, or
+    holds no member of any listed group and `users` is empty (`bad_config`), no user
+    sign-in query is sent, every user sign-in figure is null and the run fails.
+    A workspace with no user sign-in table is not asked for `IdentityInfo`.
+  - **Evidence.** Each workspace gains `group_scope`: the identities `IdentityInfo`
+    holds, its newest record and that record's age, the member count of each group,
+    the groups with no member, and the identities in a listed group only in an older
+    record. Members are counted, never named; a member is named only in the existing
+    lists of users who signed in. The summary gains `scope_groups`,
+    `group_scope_resolved`, `scope_group_members`, `scope_groups_without_members`,
+    `identity_info_latest_record` and `identity_info_age_hours`.
+  - **Limits.** `IdentityInfo` records group names, not ids, and Entra does not keep
+    names unique, so two groups with the same name are both in scope. Membership is
+    as of the run and applies to the whole lookback. Whether a nested group's
+    members count depends on how Sentinel records them. A name cannot contain a
+    comma; one with a double quote, a backslash or another character outside the
+    allowed set fails as `bad_config` before any query.
+  - The query API applies its timespan to every table a query reads, so a
+    group-scoped query asks for the longer of the lookback and the 21 days.
+    Without `groups`, every query and every figure is as in 0.2.0. The group
+    scope is tested against a double and its KQL is checked with Microsoft's Kusto
+    parser; it has not yet run against a live workspace.
 - **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
   Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
   - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from

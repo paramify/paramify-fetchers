@@ -1,5 +1,5 @@
 name: azure_entra_sign_in_logs
-version: 0.2.0
+version: 0.3.0
 description: >-
   Shows from the workspace's Entra sign-in logs whether successful sign-ins required MFA and phishing-resistant methods, the changes made to the authentication and Conditional Access policies, and, as counts only, the non-interactive user sign-ins and the service-principal (application) sign-ins that detections and least-privilege reviews depend on.
 category: azure
@@ -47,6 +47,45 @@ config_schema:
     default: 30
     env: ENTRA_LOG_LOOKBACK_DAYS
     description: How many days of SigninLogs, AuditLogs, AADNonInteractiveUserSignInLogs and AADServicePrincipalSignInLogs to summarize.
+  groups:
+    type: string
+    required: false
+    env: ENTRA_LOG_GROUPS
+    description: >
+      Comma-separated Entra group display names to limit the user sign-in evidence
+      (interactive and non-interactive) to the groups' current members, such as
+      the administrator groups of one authorization boundary. Optional. The
+      members are worked out on every run, inside the query, from the workspace's
+      IdentityInfo table, which Microsoft Sentinel UEBA fills from Entra ID; no
+      member list is kept and Microsoft Graph is not used. Names match without
+      case; a name cannot contain a comma. IdentityInfo records group names, not
+      ids, and Entra does not keep names unique, so two groups with the same name
+      are both in scope. With users also set, a sign-in is in
+      scope when its user is a group member or a listed user. With app_ids also
+      set, the sign-in must also be to a listed app. If IdentityInfo is missing,
+      has no record, is older than identity_max_age_days, or holds no member of
+      any listed group (and users is empty), the run fails and every user sign-in
+      figure is null; the logs are never read unscoped. Membership is as of the
+      run and applies to the whole lookback: someone added to a group yesterday is
+      in scope for every day read, and someone removed is out of it. Whether the
+      members of a nested group count depends on how Sentinel records them, so
+      check group_scope.members_by_group against Entra the first time. Service-principal
+      sign-ins and the policy change evidence are never scoped by it. A name with
+      a double quote, a backslash or another character outside letters, digits,
+      spaces and . ( ) & ' + @ # : / [ ] - fails the run as bad_config.
+  identity_max_age_days:
+    type: integer
+    required: false
+    default: 14
+    env: ENTRA_LOG_IDENTITY_MAX_AGE_DAYS
+    description: >
+      Used with groups: how many days old the newest IdentityInfo record may be
+      before the group members are treated as unknown and the run fails. The
+      default, 14, is how often Sentinel re-syncs the whole directory, so it only
+      catches a sync that has stopped; set it lower, such as 2, on a tenant whose
+      users change daily. From 1 to 21, the days of IdentityInfo read; a higher
+      value is capped at 21, and one that is not a whole number from 1 up fails
+      the run as bad_config.
   users:
     type: string
     required: false
@@ -54,10 +93,12 @@ config_schema:
     description: >
       Comma-separated user principal names to limit the user sign-in evidence
       (interactive and non-interactive) to, such as the administrators of one
-      authorization boundary. Optional — omit for every user in the tenant. With
-      app_ids also set, a sign-in must match both. Service-principal sign-ins and
-      the policy change evidence are never scoped by it. A value that is not a user
-      principal name fails the run as bad_config.
+      authorization boundary. Optional — omit for every user in the tenant, or
+      for only the members of groups. With groups also set, these users are added
+      to the groups' members. With app_ids also set, a sign-in must match both.
+      Service-principal sign-ins and the policy change evidence are never scoped
+      by it. A value that is not a user principal name fails the run as
+      bad_config.
   app_ids:
     type: string
     required: false
@@ -106,31 +147,38 @@ evidence_set:
   instructions: |
     Script: azure/entra_sign_in_logs/fetcher.py
 
-    Access: Reader on the subscription, which includes querying its workspaces' logs; or, to read only these four tables, a custom role on the workspace with Microsoft.OperationalInsights/workspaces/read, workspaces/tables/read (whether each table exists, and its retention) and Microsoft.SecurityInsights/onboardingStates/read (whether Sentinel is on), plus workspaces/query/read granted on its SigninLogs, AuditLogs, AADNonInteractiveUserSignInLogs and AADServicePrincipalSignInLogs tables; without the first three the run fails. No Microsoft Graph permission is used. Without query access the run fails as not_authorized.
+    Access: Reader on the subscription, which includes querying its workspaces' logs; or, to read only these four tables, a custom role on the workspace with Microsoft.OperationalInsights/workspaces/read, workspaces/tables/read (whether each table exists, and its retention) and Microsoft.SecurityInsights/onboardingStates/read (whether Sentinel is on), plus workspaces/query/read granted on its SigninLogs, AuditLogs, AADNonInteractiveUserSignInLogs and AADServicePrincipalSignInLogs tables, and on its IdentityInfo table when groups is set; without the first three the run fails. No Microsoft Graph permission is used. Without query access the run fails as not_authorized.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
     - GET Microsoft.OperationalInsights/workspaces and GET Microsoft.SecurityInsights/onboardingStates (per workspace) — the workspaces and whether Sentinel is on each
     - GET workspaces/{workspace}/tables/SigninLogs and tables/AuditLogs (per workspace) — whether Entra exports each table there, and its retention
+    - With groups set: GET workspaces/{workspace}/tables/IdentityInfo and two Log Analytics queries on IdentityInfo over the last 21 days (per workspace holding a user sign-in table) — whether Sentinel UEBA syncs identities there, the newest record and its age, and counts of the identities it holds and of the current members of each listed group; no member is named in the answer. Each user sign-in query below then starts by resolving the same members from IdentityInfo, so their names are returned only for those who signed in
     - Log Analytics query on SigninLogs within the lookback (per workspace, six queries) — interactive sign-ins with their result, authentication requirement, succeeded methods, requirement sources, Conditional Access status and risk, summarized and per user
     - Log Analytics query on AuditLogs within the lookback (per workspace, two queries) — changes to the authentication methods, MFA, security defaults and Conditional Access policies, and every other Policy-category change
     - GET workspaces/{workspace}/tables/AADNonInteractiveUserSignInLogs and tables/AADServicePrincipalSignInLogs (per workspace) — whether Entra exports each table there
     - Log Analytics query on AADNonInteractiveUserSignInLogs within the lookback (per workspace, two queries) — counts of non-interactive user sign-ins by result, user, app, risk and Conditional Access status; no per-event rows
     - Log Analytics query on AADServicePrincipalSignInLogs within the lookback (per workspace, two queries) — counts of service-principal sign-ins by result, and one capped row per service principal with its id, name, app id, counts and last sign-in; no IP addresses or resources
 
-    Output: azure_entra_sign_in_logs_<subscription>.json — per workspace, the sign-in summary and breakdowns, each user's counts, the successful single-factor sign-ins, and the policy change events.
+    Output: azure_entra_sign_in_logs_<subscription>.json — per workspace, the sign-in summary and breakdowns, each user's counts, the successful single-factor sign-ins, and the policy change events; with groups set, also group_scope, with how many identities IdentityInfo holds, how current it is, and the member count of each listed group.
 
     Summary fields:
 
     What was read?
     - workspaces_collected — Number of Log Analytics workspaces read in the subscription
     - lookback_days — How many days of logs were summarized (lookback_days setting, default 30)
-    - scope_users — List of the user principal names the sign-in evidence is limited to; empty means every user
+    - scope_users — List of the user principal names the user sign-in evidence is limited to, added to the members of scope_groups when both are set; with scope_groups also empty, every user is read
+    - scope_groups — List of the Entra group names whose current members the user sign-in evidence is limited to (groups setting); empty means no group scope
+    - group_scope_resolved — True if every workspace holding a user sign-in table resolved the groups' members from its IdentityInfo table; false if one had no IdentityInfo table, no record in the last 21 days, only records older than identity_max_age_days, a refused query, or no member of any listed group, and then every user sign-in field below is null; null if no group is set or no workspace holds a user sign-in table
+    - scope_group_members — Number of identities that are members of at least one listed group in their newest IdentityInfo record, summed across those workspaces; null unless group_scope_resolved is true
+    - scope_groups_without_members — List of the listed groups with no member in IdentityInfo: empty, misspelt, or holding only identities Sentinel does not sync; null unless group_scope_resolved is true
+    - identity_info_latest_record — Time of the newest IdentityInfo record, the oldest such time when several workspaces resolved the scope; shows how current the group members are; null unless group_scope_resolved is true
+    - identity_info_age_hours — Hours between that record and the query, the greatest when several workspaces resolved the scope; a record stamped in the future reads 0; null unless group_scope_resolved is true
     - scope_app_ids — List of the application ids the user sign-in evidence (interactive and non-interactive) is limited to; empty means every app
     - scope_service_principal_app_ids — List of the service-principal application ids the service-principal sign-in evidence is limited to; empty means every service principal
     - workspaces_with_sign_in_logs — Number of workspaces holding the SigninLogs table; the sign-in counts below are summed across them, so name one with the workspaces target field when Entra exports to several
     - sign_in_logs_workspaces — List of the names of those workspaces
-    - sign_in_logs_read — True if every such workspace's sign-in queries succeeded; false if there is none, a query failed, or a workspace's table lookup failed, and then every sign-in field below is null
+    - sign_in_logs_read — True if every such workspace's sign-in queries succeeded; false if there is none, a query failed, a workspace's table lookup failed, or the group scope did not resolve, and then every sign-in field below is null
     - latest_sign_in — Time of the newest sign-in in the logs, which shows whether Entra logs are still arriving
 
     Did successful sign-ins require MFA?
@@ -164,8 +212,8 @@ evidence_set:
 
     Were there non-interactive user sign-ins (token refreshes and background sign-ins, no per-event rows copied)?
     - workspaces_with_non_interactive_sign_in_logs — Number of workspaces holding the AADNonInteractiveUserSignInLogs table
-    - non_interactive_sign_in_logs_read — True if every such workspace's queries succeeded; false if there is none, a query failed, or a table lookup failed, and then the non_interactive_* fields are null
-    - non_interactive_sign_ins — Number of non-interactive user sign-ins in the lookback, within the user and app scope
+    - non_interactive_sign_in_logs_read — True if every such workspace's queries succeeded; false if there is none, a query failed, a table lookup failed, or the group scope did not resolve, and then the non_interactive_* fields are null
+    - non_interactive_sign_ins — Number of non-interactive user sign-ins in the lookback, within the user, group and app scope
     - non_interactive_succeeded — Number with ResultType 0
     - non_interactive_failed — Number with any other ResultType
     - non_interactive_users_signed_in — Number of users with at least one successful non-interactive sign-in
@@ -174,7 +222,7 @@ evidence_set:
     Which service principals signed in (counts per principal, no IPs or resources copied)?
     - workspaces_with_service_principal_sign_in_logs — Number of workspaces holding the AADServicePrincipalSignInLogs table
     - service_principal_sign_in_logs_read — True if every such workspace's queries succeeded; false if there is none, a query failed, or a table lookup failed, and then the service_principal_* fields are null
-    - service_principal_sign_ins — Number of service-principal sign-ins in the lookback, limited by the service_principal_app_ids scope only (the user and app_ids scopes never apply)
+    - service_principal_sign_ins — Number of service-principal sign-ins in the lookback, limited by the service_principal_app_ids scope only (the user, group and app_ids scopes never apply)
     - service_principal_succeeded — Number with ResultType 0
     - service_principal_failed — Number with any other ResultType
     - service_principal_principals_signed_in — Number of distinct service principals with at least one successful sign-in

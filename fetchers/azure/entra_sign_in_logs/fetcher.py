@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import Collector, coverage_percentage, sorted_counts  # noqa: E402
 from azure_rest import (  # noqa: E402
     AzureRestClient,
+    bounded_int_config,
     discover_workspaces,
     int_config,
     iso_duration_days,
@@ -34,8 +35,20 @@ APPS_ENV = "ENTRA_LOG_APP_IDS"
 # user's sign-in it is the app signed in to, so one list cannot narrow both without dropping one.
 SERVICE_PRINCIPAL_APPS_ENV = "ENTRA_LOG_SERVICE_PRINCIPAL_APP_IDS"
 MAX_ROWS_ENV = "ENTRA_LOG_MAX_ROWS"
+# Entra groups whose current members the user sign-ins are limited to. The members come from the workspace's
+# IdentityInfo table (Microsoft Sentinel UEBA) inside each query, so no list is kept and Microsoft Graph is not used.
+GROUPS_ENV = "ENTRA_LOG_GROUPS"
+IDENTITY_MAX_AGE_ENV = "ENTRA_LOG_IDENTITY_MAX_AGE_DAYS"
 DEFAULT_LOOKBACK_DAYS = 30
 DEFAULT_MAX_ROWS = 500
+
+IDENTITY_TABLE = "IdentityInfo"
+# Sentinel writes a record when a user changes, refreshes groups daily and re-syncs the whole directory every
+# 14 days, so an unchanged user's newest record can be that old. Reading 21 days leaves a margin: a re-sync that
+# runs late must not drop a member from the scope.
+IDENTITY_RESYNC_DAYS = 14
+IDENTITY_LOOKBACK_DAYS = 21
+DEFAULT_IDENTITY_MAX_AGE_DAYS = 14
 
 SIGNIN_TABLE = "SigninLogs"
 AUDIT_TABLE = "AuditLogs"
@@ -74,6 +87,9 @@ POLICY_OPERATIONS = (
 # What the users and app ids may contain: scope values go into the KQL inside double quotes.
 _UPN = re.compile(r"^[A-Za-z0-9._%+'@-]+$")
 _GUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+# A group display name also goes into the KQL inside double quotes: letters, digits, spaces and common punctuation,
+# never a double quote, a backslash or a control character. Matched whole (fullmatch).
+_GROUP = re.compile(r"[\w .()&'+@#:/\[\]-]{1,256}")
 
 
 # --- configuration ---
@@ -88,38 +104,144 @@ def settings_from_env(collector: Optional[Collector] = None) -> Dict[str, Any]:
     users = [u.lower() for u in _list_env(USERS_ENV)]
     apps = [a.lower() for a in _list_env(APPS_ENV)]
     sp_apps = [a.lower() for a in _list_env(SERVICE_PRINCIPAL_APPS_ENV)]
+    groups = _unique_names(_list_env(GROUPS_ENV))
     bad_users = [u for u in users if not _UPN.match(u)]
     bad_apps = [a for a in apps if not _GUID.match(a)]
     bad_sp_apps = [a for a in sp_apps if not _GUID.match(a)]
-    if (bad_users or bad_apps or bad_sp_apps) and collector is not None:
+    bad_groups = [g for g in groups if not _GROUP.fullmatch(g)]
+    if (bad_users or bad_apps or bad_sp_apps or bad_groups) and collector is not None:
         # The values stay out of the message: they are untrusted text and would be matched against the failure codes.
-        collector.record(f"config {USERS_ENV}/{APPS_ENV}/{SERVICE_PRINCIPAL_APPS_ENV}", ValueError(
-            f"invalid setting {USERS_ENV}/{APPS_ENV}/{SERVICE_PRINCIPAL_APPS_ENV}: {len(bad_users)} entry(ies) in {USERS_ENV} "
-            f"are not user principal names, {len(bad_apps)} in {APPS_ENV} and {len(bad_sp_apps)} in "
-            f"{SERVICE_PRINCIPAL_APPS_ENV} are not GUIDs"))
+        collector.record(f"config {USERS_ENV}/{APPS_ENV}/{SERVICE_PRINCIPAL_APPS_ENV}/{GROUPS_ENV}", ValueError(
+            f"invalid setting {USERS_ENV}/{APPS_ENV}/{SERVICE_PRINCIPAL_APPS_ENV}/{GROUPS_ENV}: {len(bad_users)} entry(ies) "
+            f"in {USERS_ENV} are not user principal names, {len(bad_apps)} in {APPS_ENV} and {len(bad_sp_apps)} in "
+            f"{SERVICE_PRINCIPAL_APPS_ENV} are not GUIDs, {len(bad_groups)} in {GROUPS_ENV} are not group names"))
     return {
         "lookback_days": int_config(LOOKBACK_ENV, DEFAULT_LOOKBACK_DAYS),
         "max_rows": int_config(MAX_ROWS_ENV, DEFAULT_MAX_ROWS),
         "users": [u for u in users if _UPN.match(u)],
         "app_ids": [a for a in apps if _GUID.match(a)],
         "service_principal_app_ids": [a for a in sp_apps if _GUID.match(a)],
-        "scope_invalid": bool(bad_users or bad_apps or bad_sp_apps),
+        "groups": [g for g in groups if _GROUP.fullmatch(g)],
+        # Read only with a group scope, so a stray value cannot fail a run that never uses it.
+        "identity_max_age_days": _identity_max_age_days(collector) if groups else DEFAULT_IDENTITY_MAX_AGE_DAYS,
+        "scope_invalid": bool(bad_users or bad_apps or bad_sp_apps or bad_groups),
     }
+
+
+def _unique_names(names: List[str]) -> List[str]:
+    """The names in the order given, without repeats that differ only by case (group names match without case)."""
+    seen, out = set(), []
+    for name in names:
+        if name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(name)
+    return out
+
+
+def _identity_max_age_days(collector: Optional[Collector]) -> int:
+    """How old the newest IdentityInfo record may be before the group members are treated as unknown; never more
+    than the days of IdentityInfo read, beyond which there is no record to be newer."""
+    if collector is None:
+        return min(int_config(IDENTITY_MAX_AGE_ENV, DEFAULT_IDENTITY_MAX_AGE_DAYS), IDENTITY_LOOKBACK_DAYS)
+    return bounded_int_config(collector, IDENTITY_MAX_AGE_ENV, DEFAULT_IDENTITY_MAX_AGE_DAYS, IDENTITY_LOOKBACK_DAYS)[0]
 
 
 def _dynamic(values: List[str]) -> str:
     return "dynamic([" + ", ".join(f'"{v}"' for v in values) + "])"
 
 
+def _identity_records() -> str:
+    """Every IdentityInfo record in the window, keyed by the Entra object id (the user principal name where a record has none)."""
+    return (
+        f"{IDENTITY_TABLE} | where TimeGenerated > ago({IDENTITY_LOOKBACK_DAYS}d) "
+        "| extend Oid = tolower(tostring(AccountObjectId)), IUpn = tolower(tostring(AccountUPN)) "
+        "| extend IdKey = iff(isnotempty(Oid), Oid, IUpn) | where isnotempty(IdKey) "
+    )
+
+
+# One person can have two IdentityInfo records under different keys (a cloud record with an object id and another
+# without one); counted by user principal name first, they are one member.
+_MEMBER = "Member = iff(isnotempty(IUpn), IUpn, Oid)"
+
+
+def _current_members() -> str:
+    """Continues _identity_records(): one row per identity and listed group it is in now. Only each identity's newest
+    record counts, so someone removed from a group leaves the scope once Sentinel records the change."""
+    return (
+        "| summarize arg_max(TimeGenerated, GroupMembership, Oid, IUpn) by IdKey "
+        "| mv-expand G = GroupMembership to typeof(string) | where G in~ (ScopeGroups) "
+    )
+
+
+def scope_prefix(settings: Dict[str, Any]) -> str:
+    """The let statements a group-scoped user sign-in query starts with; empty when no group is set. The members are
+    worked out by the workspace at query time: their names never reach this fetcher unless they signed in."""
+    groups = settings.get("groups") or []
+    if not groups:
+        return ""
+    return (
+        f"let ScopeGroups = {_dynamic(groups)}; "
+        "let ScopeMembers = materialize(" + _identity_records() + _current_members() + "| distinct Oid, IUpn); "
+        "let ScopeIds = ScopeMembers | where isnotempty(Oid) | distinct Oid; "
+        "let ScopeUpns = ScopeMembers | where isnotempty(IUpn) | distinct IUpn; "
+    )
+
+
 def scope_filter(settings: Dict[str, Any]) -> str:
-    """KQL filter for user sign-ins (interactive and non-interactive) by the configured users and the apps signed in to
-    (both must match when both are set); empty when unscoped. Service-principal sign-ins use service_principal_filter."""
+    """KQL filter for user sign-ins (interactive and non-interactive): the users in scope, and the apps signed in to
+    (both must match when both are set); empty when unscoped. A user is in scope as a current member of a listed
+    group (matched by object id, or by user principal name) or as one of the listed users; either is enough.
+    Service-principal sign-ins use service_principal_filter. A query with a group scope starts with scope_prefix()."""
     parts = []
-    if settings["users"]:
-        parts.append(f"| where tolower(UserPrincipalName) in ({_dynamic(settings['users'])}) ")
+    users = settings["users"]
+    if settings.get("groups"):
+        member = "tolower(tostring(UserId)) in (ScopeIds) or tolower(tostring(UserPrincipalName)) in (ScopeUpns)"
+        if users:
+            member += f" or tolower(tostring(UserPrincipalName)) in ({_dynamic(users)})"
+        parts.append(f"| where {member} ")
+    elif users:
+        parts.append(f"| where tolower(UserPrincipalName) in ({_dynamic(users)}) ")
     if settings["app_ids"]:
         parts.append(f"| where tolower(AppId) in ({_dynamic(settings['app_ids'])}) ")
     return "".join(parts)
+
+
+def query_days(settings: Dict[str, Any]) -> int:
+    """Days to ask the query API for on a user sign-in query. The API applies its timespan to every table a query
+    reads, so a group-scoped query asks for the longer of the lookback and the IdentityInfo window, or a short
+    lookback would cut the member list; each sign-in table is still cut to the lookback inside the query."""
+    if settings.get("groups"):
+        return max(settings["lookback_days"], IDENTITY_LOOKBACK_DAYS)
+    return settings["lookback_days"]
+
+
+def identity_stats_query(settings: Dict[str, Any]) -> str:
+    """One row on the IdentityInfo table the group scope rests on: its newest record and that record's age, how many
+    identities it holds, how many are in a listed group now, and how many were in an older record but are not now."""
+    in_scope = "| mv-expand G = GroupMembership to typeof(string) | where G in~ (ScopeGroups) "
+    return (
+        f"let ScopeGroups = {_dynamic(settings['groups'])}; "
+        "let Records = materialize(" + _identity_records() + "| project TimeGenerated, IdKey, GroupMembership, Oid, IUpn); "
+        "let Latest = materialize(Records | summarize arg_max(TimeGenerated, GroupMembership, Oid, IUpn) by IdKey); "
+        "let NowIn = materialize(Latest " + in_scope + "); "
+        # Compared by the record key, which a renamed user keeps, so a rename is not read as a removal.
+        "let EverIn = Records " + in_scope + "| distinct IdKey; "
+        "Records | summarize Newest = max(TimeGenerated) "
+        # Whole elapsed hours; null when the table holds no record.
+        "| extend AgeHours = tolong((now() - Newest) / 1h), "
+        f"Identities = toscalar(Latest | extend {_MEMBER} | distinct Member | count), "
+        f"Members = toscalar(NowIn | extend {_MEMBER} | distinct Member | count), "
+        "MembersOnlyInOlderRecords = toscalar(EverIn | where IdKey !in ((NowIn | distinct IdKey)) | count)"
+    )
+
+
+def identity_groups_query(settings: Dict[str, Any]) -> str:
+    """Current members per listed group (lower-cased name); a group with none has no row."""
+    return (
+        f"let ScopeGroups = {_dynamic(settings['groups'])}; "
+        + _identity_records() + _current_members()
+        + f"| extend {_MEMBER} | summarize by Member, Group = tolower(G) | summarize Members = count() by Group"
+    )
 
 
 # --- queries ---
@@ -128,7 +250,8 @@ def base_query(settings: Dict[str, Any], succeeded_only: bool = False) -> str:
     """One row per interactive sign-in: result, requirement, the methods that succeeded, and whether they are phishing resistant."""
     not_a_method = ", ".join(f'"{m}"' for m in NOT_A_METHOD)
     return (
-        f"{SIGNIN_TABLE} "
+        scope_prefix(settings)
+        + f"{SIGNIN_TABLE} "
         f"| where TimeGenerated > ago({settings['lookback_days']}d) "
         + scope_filter(settings)
         + ("| where tostring(ResultType) == '0' " if succeeded_only else "")
@@ -219,7 +342,8 @@ def service_principal_filter(settings: Dict[str, Any]) -> str:
 def non_interactive_overview_query(settings: Dict[str, Any]) -> str:
     """Counts over the non-interactive user sign-ins in scope; one row."""
     return (
-        f"{NON_INTERACTIVE_TABLE} | where TimeGenerated > ago({settings['lookback_days']}d) "
+        scope_prefix(settings)
+        + f"{NON_INTERACTIVE_TABLE} | where TimeGenerated > ago({settings['lookback_days']}d) "
         + scope_filter(settings)
         + "| extend Ok = tostring(ResultType) == '0', Risk = tolower(tostring(RiskLevelDuringSignIn)) "
         "| summarize SignIns = count(), Succeeded = countif(Ok), Failed = countif(not(Ok)), "
@@ -231,7 +355,8 @@ def non_interactive_overview_query(settings: Dict[str, Any]) -> str:
 
 def non_interactive_ca_query(settings: Dict[str, Any]) -> str:
     return (
-        f"{NON_INTERACTIVE_TABLE} | where TimeGenerated > ago({settings['lookback_days']}d) "
+        scope_prefix(settings)
+        + f"{NON_INTERACTIVE_TABLE} | where TimeGenerated > ago({settings['lookback_days']}d) "
         + scope_filter(settings)
         + "| where tostring(ResultType) == '0' "
         "| summarize SignIns = count() by CA = tostring(ConditionalAccessStatus)"
@@ -393,7 +518,7 @@ def _query(client, ws: Dict[str, Any], kql: str, days: int) -> List[Dict[str, An
 
 def collect_sign_ins(client, ws: Dict[str, Any], settings: Dict[str, Any], collector: Collector) -> Optional[Dict[str, Any]]:
     """The sign-in evidence for one workspace, or None when any query failed (recorded)."""
-    days, limit = settings["lookback_days"], settings["max_rows"]
+    days, limit = query_days(settings), settings["max_rows"]
     try:
         overview = (_query(client, ws, overview_query(settings), days) or [{}])[0]
         cube = _query(client, ws, cube_query(settings), days)
@@ -446,7 +571,7 @@ def service_principal_record(row: Dict[str, Any]) -> Dict[str, Any]:
 def collect_non_interactive(client, ws: Dict[str, Any], settings: Dict[str, Any],
                             collector: Collector) -> Optional[Dict[str, Any]]:
     """Counts of non-interactive user sign-ins for one workspace, or None when a query failed (recorded)."""
-    days = settings["lookback_days"]
+    days = query_days(settings)
     try:
         overview = (_query(client, ws, non_interactive_overview_query(settings), days) or [{}])[0]
         by_ca = _query(client, ws, non_interactive_ca_query(settings), days)
@@ -488,8 +613,109 @@ def collect_service_principals(client, ws: Dict[str, Any], settings: Dict[str, A
     }
 
 
+def _opt_int(value: Any) -> Optional[int]:
+    try:
+        return None if value in (None, "") else int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def collect_group_scope(client, ws: Dict[str, Any], settings: Dict[str, Any], collector: Collector) -> Dict[str, Any]:
+    """Whether the listed groups resolve to members in this workspace's IdentityInfo, with the counts that show it.
+
+    resolved stays False, with a failure recorded, when the table is missing, keeps too little, has no record, has
+    only stale ones, cannot be queried, or holds no member of any listed group. The caller then leaves the user
+    sign-in evidence unknown: reading the logs unscoped, or against members that may be out of date, would report
+    the wrong people's sign-ins. No member is named here; only counts are kept."""
+    groups = settings["groups"]
+    scope: Dict[str, Any] = {
+        "groups": groups, "resolved": False, "identity_table_present": None, "identity_retention_days": None,
+        "identity_lookback_days": IDENTITY_LOOKBACK_DAYS, "identity_max_age_days": settings["identity_max_age_days"],
+        "identities": None, "identity_latest_record": None, "identity_latest_record_age_hours": None,
+        "members": None, "members_by_group": None, "groups_without_members": None,
+        "members_only_in_older_records": None,
+    }
+    operation = f"loganalytics.query({IDENTITY_TABLE}, {ws['name']})"
+    exists = collector.guard(f"loganalytics.tables.get({IDENTITY_TABLE}, {ws['name']})",
+                             lambda: table_retention(client, ws["id"], IDENTITY_TABLE, ws.get("retention_in_days")))
+    if exists is None:
+        return scope
+    scope["identity_table_present"], scope["identity_retention_days"] = exists
+    if not exists[0]:
+        collector.record(operation, LookupError(
+            f"config conflict: {GROUPS_ENV} is set but this workspace has no {IDENTITY_TABLE} table (Microsoft Sentinel "
+            "UEBA is not syncing identities to it), so the groups' members cannot be resolved"))
+        return scope
+    if exists[1] and exists[1] < IDENTITY_RESYNC_DAYS:
+        collector.record(operation, LookupError(
+            f"{IDENTITY_TABLE} keeps {exists[1]} days, less than the {IDENTITY_RESYNC_DAYS}-day directory re-sync, so "
+            "members whose record is older would be missing"))
+        return scope
+    try:
+        stats = (_query(client, ws, identity_stats_query(settings), IDENTITY_LOOKBACK_DAYS) or [{}])[0]
+        rows = _query(client, ws, identity_groups_query(settings), IDENTITY_LOOKBACK_DAYS)
+    except Exception as exc:  # noqa: BLE001 — record, leave the members unknown
+        collector.record(operation, exc)
+        return scope
+    age = _opt_int(stats.get("AgeHours"))
+    scope["identities"] = _int(stats.get("Identities"))
+    scope["identity_latest_record"] = stats.get("Newest") or None
+    scope["identity_latest_record_age_hours"] = None if age is None else max(age, 0)
+    if not scope["identities"] or not scope["identity_latest_record"] or age is None:
+        collector.record(operation, LookupError(
+            f"{IDENTITY_TABLE} has no identity record in the last {IDENTITY_LOOKBACK_DAYS} days, so the groups' members "
+            "cannot be resolved"))
+        return scope
+    if age > settings["identity_max_age_days"] * 24:
+        collector.record(operation, LookupError(
+            f"the newest {IDENTITY_TABLE} record is {age} hours old, more than the {settings['identity_max_age_days']} "
+            f"day(s) allowed ({IDENTITY_MAX_AGE_ENV}), so the groups' members may be out of date"))
+        return scope
+    found = {str(r.get("Group") or "").lower(): _int(r.get("Members")) for r in rows}
+    scope["members"] = _int(stats.get("Members"))
+    scope["members_by_group"] = {g: found.get(g.lower(), 0) for g in groups}
+    scope["groups_without_members"] = [g for g in groups if not found.get(g.lower())]
+    scope["members_only_in_older_records"] = _int(stats.get("MembersOnlyInOlderRecords"))
+    if not scope["members"] and not settings["users"]:
+        collector.record(operation, LookupError(
+            f"config conflict: none of the {len(groups)} group(s) in {GROUPS_ENV} has a member in {IDENTITY_TABLE}; "
+            "check the names against Entra"))
+        return scope
+    scope["resolved"] = True
+    return scope
+
+
+def group_scope_notes(scope: Dict[str, Any]) -> List[str]:
+    notes = []
+    retention = scope.get("identity_retention_days")
+    if scope.get("identity_table_present") and retention and IDENTITY_RESYNC_DAYS <= retention < IDENTITY_LOOKBACK_DAYS:
+        notes.append(f"{IDENTITY_TABLE} keeps {retention} days, less than the {IDENTITY_LOOKBACK_DAYS} read, so a member "
+                     "whose record is older than that is missing from the scope")
+    for group in scope.get("groups_without_members") or []:
+        notes.append(f"group {group!r} has no member in {IDENTITY_TABLE}: it is empty, misspelt, or its members are "
+                     "not identities Sentinel syncs")
+    if scope.get("members_only_in_older_records"):
+        notes.append(f"{scope['members_only_in_older_records']} identity(ies) were in a listed group in an older "
+                     f"{IDENTITY_TABLE} record but not in their newest one, so they are out of scope")
+    return notes
+
+
+# The two tables of user sign-ins, which the user and group scope narrow.
+USER_SIGN_IN_BLOCKS = ("sign_in_logs", "non_interactive_sign_in_logs")
+
+
 def collect_workspace(client, ws: Dict[str, Any], settings: Dict[str, Any], collector: Collector) -> Dict[str, Any]:
-    result: Dict[str, Any] = {"lookback_days": settings["lookback_days"], "notes": []}
+    result: Dict[str, Any] = {"lookback_days": settings["lookback_days"], "notes": [], "group_scope": None}
+
+    def user_scope_resolved() -> bool:
+        """Resolves the group scope once, and only for a workspace that holds user sign-ins to narrow."""
+        if not settings.get("groups"):
+            return True
+        if result["group_scope"] is None:
+            result["group_scope"] = collect_group_scope(client, ws, settings, collector)
+            result["notes"].extend(group_scope_notes(result["group_scope"]))
+        return result["group_scope"]["resolved"]
+
     if not ws.get("customer_id"):
         collector.record(f"loganalytics.workspace({ws['name']})", LookupError("workspace has no customerId"))
     for table, key, reader in ((SIGNIN_TABLE, "sign_in_logs", collect_sign_ins), (AUDIT_TABLE, "audit_logs", collect_audit),
@@ -506,6 +732,9 @@ def collect_workspace(client, ws: Dict[str, Any], settings: Dict[str, Any], coll
             continue
         if exists[1] and exists[1] < settings["lookback_days"]:
             result["notes"].append(f"{table} keeps {exists[1]} days, less than the {settings['lookback_days']}-day lookback")
+        if key in USER_SIGN_IN_BLOCKS and not user_scope_resolved():
+            result[key] = None  # unknown, never read unscoped
+            continue
         result[key] = reader(client, ws, settings, collector)
     return result
 
@@ -533,6 +762,24 @@ def _block_summary(workspaces: List[Dict[str, Any]], block: str, prefix: str, ke
     return out
 
 
+def _group_scope_summary(workspaces: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dict[str, Any]:
+    """The group scope across the workspaces that needed it; the counts are null unless every one resolved."""
+    scopes = [w["group_scope"] for w in workspaces if w.get("group_scope")]
+    resolved = all(s["resolved"] for s in scopes) if scopes else None
+    ok = bool(resolved)
+    records = sorted(str(s.get("identity_latest_record") or "") for s in scopes)
+    ages = [s["identity_latest_record_age_hours"] for s in scopes if s.get("identity_latest_record_age_hours") is not None]
+    return {
+        "scope_groups": settings.get("groups") or [],
+        "group_scope_resolved": resolved,
+        "scope_group_members": sum(_int(s.get("members")) for s in scopes) if ok else None,
+        "scope_groups_without_members": sorted({g for s in scopes for g in s.get("groups_without_members") or []}) if ok else None,
+        # The stalest workspace decides: the oldest of the newest records, and the greatest age.
+        "identity_info_latest_record": (records[0] or None) if ok and records else None,
+        "identity_info_age_hours": max(ages) if ok and ages else None,
+    }
+
+
 def summarize(workspaces: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dict[str, Any]:
     # A workspace whose table lookup failed may hold the logs, so completeness is unknown.
     lookups_ok = all(w.get("sign_in_logs_table_present") is not None for w in workspaces)
@@ -552,6 +799,7 @@ def summarize(workspaces: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dic
     return {
         "lookback_days": settings["lookback_days"],
         "scope_users": settings["users"],
+        **_group_scope_summary(workspaces, settings),
         "scope_app_ids": settings["app_ids"],
         "scope_service_principal_app_ids": settings["service_principal_app_ids"],
         "workspaces_with_sign_in_logs": len(with_logs),
