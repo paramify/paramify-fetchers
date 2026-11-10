@@ -10,7 +10,7 @@ adds the envelope, not the fetcher. See docs/envelope_guide.md.
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, NoReturn
 
 from framework import inventory
 from framework.contract import Fetcher, InvocationResult
@@ -23,6 +23,10 @@ _ERROR_TAIL_CHARS = 4000
 # not just the boolean.
 ENVELOPE_KEYS = {"schema_version", "metadata", "payload"}
 _ENVELOPE_KEYS = ENVELOPE_KEYS  # back-compat for in-module use
+
+
+def _invalid_json_constant(value: str) -> NoReturn:
+    raise ValueError(f"Invalid JSON constant: {value}")
 
 
 def is_enveloped(obj) -> bool:
@@ -96,8 +100,8 @@ def wrap_outputs(
             continue
         path = run_dir / name
         try:
-            raw = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError) as e:
+            raw = json.loads(path.read_text(), parse_constant=_invalid_json_constant)
+        except (OSError, ValueError) as e:
             logger.warning("envelope: skipping %s (cannot read as JSON: %s)", name, e)
             continue
         if is_enveloped(raw):
@@ -121,4 +125,9 @@ def wrap_outputs(
         # cannot serialize. Without this the run aborts mid-manifest on a
         # TypeError that run_cmd does not catch, leaving the collected file
         # unenveloped and no _run_metadata.json at all.
-        path.write_text(json.dumps(envelope, indent=2, default=str))
+        try:
+            serialized = json.dumps(envelope, indent=2, default=str, allow_nan=False)
+        except ValueError as e:
+            logger.warning("envelope: skipping %s (cannot serialize as JSON: %s)", name, e)
+            continue
+        path.write_text(serialized)

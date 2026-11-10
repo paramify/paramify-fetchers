@@ -2102,6 +2102,45 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_conditional_access_policies` 0.3.0: the all-users MFA figures
+  count only policies that apply to every sign-in.**
+  `enforced_mfa_for_all_users_and_apps`,
+  `enforced_phishing_resistant_mfa_for_all_users_and_apps`,
+  `mfa_required_for_admin_portals`, `mfa_required_for_azure_management_api` and
+  `phishing_resistant_mfa_role_template_ids` used to count a policy that
+  covered all users and apps, even one limited to risky sign-ins, or one that
+  accepted a compliant device instead of MFA. They now skip a policy with any
+  risk, client app type, platform, location, device filter, authentication flow
+  or application filter condition, and a policy where another grant control
+  can stand in for MFA. The all-users figures also skip a policy that excludes
+  any app; the admin-portal and management-API figures skip it only when the
+  excluded app is that resource. The phishing-resistant all-users figure also
+  skips a policy that excludes a role. Counts that were 1 can now be 0, and
+  the two booleans can now be false.
+- **`azure_entra_conditional_access_policies` 0.3.0: guest and external-user
+  exclusions are counted.** The `excludeGuestsOrExternalUsers` exclusion now
+  counts in `enforced_policies_with_exclusions` and
+  `distinct_excluded_principals`, which undercounted a policy whose only
+  exclusion was guests. Each policy's `users` records the guest types and the
+  tenant scope kind (`all` or `enumerated`, never tenant ids) for both
+  `include_guests_or_external_users` and `exclude_guests_or_external_users`;
+  `enforced_policies_excluding_guests_or_external_users` and
+  `excluded_guest_or_external_user_types` are new summary fields.
+
+- **`azure_entra_app_registrations` 0.2.1: a failed applications read nulls
+  every summary count.** When the Graph applications read was denied, failed or
+  stopped part-way, the counts (credentials, expired, expiring, without expiry,
+  the rotation percentage and the rest) read 0 or a short number. They are now
+  null, as `credentials_issued_beyond_approved_lifetime` and
+  `credentials_without_lifetime` already were; `approved_lifetime_days` and
+  `rotation_threshold_days` are settings and stay. `partial_failure` and the
+  exit code are unchanged.
+
+- **`azure_ai_services_configuration` 0.2.1 names its search service counts.**
+  When the search service list is not read, the counts that become null are the
+  ones in an explicit `SEARCH_KEYS` set, not those whose key happens to contain
+  `search_service`, and a test checks every summary key falls in exactly one
+  group. Output is unchanged.
 - **The TUI's Paramify tab fits a 160x50 terminal.** Below 242 columns the
   scripts-sync panel was squeezed to its border, its buttons drawn over the log,
   and a missing-token preflight error ran off the evidence panel behind a
@@ -2117,6 +2156,13 @@ schemas and the `paramify` CLI — not the internal code.
   failure to skipped without dropping quiet-mode passes or changing the total.
   Clarify that `metadata.skip_checks` records CLI skips; discovered Checkov
   configuration must also be retained to review effective exclusions.
+
+- **`azure_key_vault_key_rotation` 0.6.0: Key Vault's default rotation policy no longer counts as a
+  configured one.** A key never given a rotation policy answers a default policy (a Notify
+  action only, no id or creation time), not a 404, and `keys_with_rotation_policy` counted it,
+  so "has a rotation policy" passed with nothing set. It now counts only a policy with an id or
+  a creation time. Each key record has a new `rotation_policy_configured`; `keys_with_rotation_enabled`
+  is unchanged.
 
 - **`azure_key_vault_key_rotation` 0.5.0: unlisted vaults no longer read as zero expired certificates.**
   `expired_certificates` and `certificates_expiring_within_30_days` are null when any
@@ -2401,6 +2447,12 @@ schemas and the `paramify` CLI — not the internal code.
   `authentication_flow_transfer_methods`. When the policies couldn't be read,
   the Graph client included, `authentication_strengths` is null rather than an
   empty list.
+
+- Evidence envelope wrapping rejects the nonstandard JSON constants `NaN`,
+  `Infinity` and `-Infinity`, and no longer writes non-finite numbers from
+  metadata or numeric overflow into a new envelope. Invalid files are logged
+  and preserved unchanged, using the existing per-file skip behavior.
+
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
   report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`
