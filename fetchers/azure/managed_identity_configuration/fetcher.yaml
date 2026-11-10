@@ -1,5 +1,5 @@
 name: azure_managed_identity_configuration
-version: 0.2.1
+version: 0.3.0
 description: >-
   Lists every managed identity with what it is attached to, which outside systems can sign in as it, and what its Azure roles and Microsoft Graph permissions let it do.
 category: azure
@@ -97,9 +97,9 @@ evidence_set:
     Summary fields:
 
     What managed identities exist?
-    - total_identities — Number of managed identities in scope, user-assigned and system-assigned
-    - total_user_assigned_identities — Number of user-assigned identities in scope (standalone identities that resources can share)
-    - total_system_assigned_identities — Number of system-assigned identities in scope (one tied to a single resource and deleted with it)
+    - total_identities — Number of managed identities in scope, user-assigned and system-assigned; null when the user-assigned identity list or the resource list could not be read, as is every count below built from both lists
+    - total_user_assigned_identities — Number of user-assigned identities in scope (standalone identities that resources can share); null when the user-assigned identity list could not be read, as is every count built from only that list
+    - total_system_assigned_identities — Number of system-assigned identities in scope (one tied to a single resource and deleted with it); null when the resource list could not be read, as is every count built from only that list
     - system_assigned_identities_by_resource_type — Number of system-assigned identities for each Azure resource type that holds one, with one key per type present (for example microsoft.web/sites)
     - provider_registration_status — Whether Microsoft.ManagedIdentity is registered on the subscription: registered, not_registered or unknown
 
@@ -112,22 +112,22 @@ evidence_set:
     - in_scope_system_assigned_identities — Number of system-assigned identities in scope; null if the resource list could not be read
 
     Is every user-assigned identity attached to something?
-    - user_assigned_identities_no_resource_attached — Number of user-assigned identities that no resource in this subscription names, not counting any whose attachments could not be read; a resource in another subscription, a deployment script or a federated workload may still use one, and sign-in activity is not read
-    - unattached_identities_with_roles — Number of user-assigned identities that no resource in this subscription names, have no federated credential and hold at least one role assignment (standing access with no visible owner)
-    - federated_only_identities_with_roles — Number of user-assigned identities that no resource in this subscription names, have a federated credential and hold at least one role assignment (an outside workload uses them, so they are never attached to a resource by design)
+    - user_assigned_identities_no_resource_attached — Number of user-assigned identities that no resource in this subscription names, null when any identity's attachments could not be read; a resource in another subscription, a deployment script or a federated workload may still use one, and sign-in activity is not read
+    - unattached_identities_with_roles — Number of user-assigned identities that no resource in this subscription names, have no federated credential and hold at least one role assignment (standing access with no visible owner); null when any identity's role assignments, attachments or federated credentials could not be read, since that identity may belong in this count or the next
+    - federated_only_identities_with_roles — Number of user-assigned identities that no resource in this subscription names, have a federated credential and hold at least one role assignment (an outside workload uses them, so they are never attached to a resource by design); null in the same cases as the count above
 
     Which outside systems can sign in as an identity?
-    - user_assigned_identities_with_federated_credentials — Number of user-assigned identities with at least one federated credential (trust that lets an outside system sign in as the identity without a secret)
-    - total_federated_credentials — Number of federated credentials across all user-assigned identities in scope
-    - federated_credentials_by_issuer_kind — Number of federated credentials for each kind of outside system that issues the token, with only the kinds present listed:
+    - user_assigned_identities_with_federated_credentials — Number of user-assigned identities with at least one federated credential (trust that lets an outside system sign in as the identity without a secret); null when the user-assigned identity list, or any identity's federated credentials, could not be read
+    - total_federated_credentials — Number of federated credentials across all user-assigned identities in scope; null when the user-assigned identity list, or any identity's federated credentials, could not be read
+    - federated_credentials_by_issuer_kind — Number of federated credentials for each kind of outside system that issues the token, with only the kinds present listed; null when the user-assigned identity list, or any identity's federated credentials, could not be read:
       - github_actions (GitHub Actions workflows)
       - azure_devops (Azure DevOps pipelines)
       - aks_workload_identity (pods in an AKS cluster)
       - google (Google Cloud)
       - aws (Amazon Web Services)
       - other (any other issuer)
-    - federated_credentials_broad_subject — Number of federated credentials with a broad subject: any GitHub pull request can sign in, a claims-matching expression is set, or the subject contains a "*"
-    - federated_credentials_nonstandard_audience — Number of federated credentials with no audience, or an audience other than api://AzureADTokenExchange (or its government and China cloud variants)
+    - federated_credentials_broad_subject — Number of federated credentials with a broad subject: any GitHub pull request can sign in, a claims-matching expression is set, or the subject contains a "*"; null when the user-assigned identity list, or any identity's federated credentials, could not be read
+    - federated_credentials_nonstandard_audience — Number of federated credentials with no audience, or an audience other than api://AzureADTokenExchange (or its government and China cloud variants); null when the user-assigned identity list, or any identity's federated credentials, could not be read
 
     What can each identity do in Azure?
     - identities_with_broad_role — Number of identities holding a role named Owner, Contributor, User Access Administrator or Role Based Access Control Administrator anywhere visible from this subscription; an assignment's condition, which may narrow it, is recorded but not applied
@@ -141,7 +141,7 @@ evidence_set:
     - role_assignments_unresolved_role — Number of role assignments to managed identities whose role definition isn't visible at the subscription scope, so what the role allows is unknown and the capability counts above leave it out
 
     What can each identity do in Microsoft Graph?
-    - graph_access — Whether Microsoft Graph could be read: read; not_authorized (the credential can't read service principals, so every identity's Graph permissions are unknown); failed (the Graph client couldn't connect, or the Azure clients couldn't be created, with the same effect); or not_read (there were no identities to look up)
+    - graph_access — Whether Microsoft Graph could be read: null when the user-assigned identity list or the resource list could not be read and nothing was looked up; read; not_authorized (the credential can't read service principals, so every identity's Graph permissions are unknown); failed (the Graph client couldn't connect, or the Azure clients couldn't be created, with the same effect); or not_read (there were no identities to look up)
     - identities_with_graph_roles — Number of identities with at least one app role assignment, on Microsoft Graph or any other API, a default-access assignment included
     - identities_with_privileged_graph_roles — Number of identities granted a privileged Microsoft Graph application permission, the same judgement azure_entra_service_principals applies, made only for Graph's own permissions and ignoring case: any with ReadWrite or FullControl in the name, Mail.Send, tenant-wide reads of mail, files, sites, chats, calendars, contacts and notes (such as Mail.Read or Files.Read.All), and any that lets the holder grant itself more access, take over users' sign-in or change the tenant's security controls (such as User.ManageIdentities.All); other APIs' permissions are not judged and default access is not privileged
     - identities_graph_roles_unknown — Number of identities whose Graph application permissions could not be read, or that hold one whose name or API could not be resolved
