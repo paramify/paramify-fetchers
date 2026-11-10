@@ -269,7 +269,7 @@ def summarize(
     healthy = sum(1 for c in credentials if c["healthy"])
     unknown_lifetime = sum(1 for c in credentials if c["lifetime_days"] is None)
     unknown_verdict = any(c["issued_beyond_approved_lifetime"] is None for c in credentials)
-    return {
+    summary = {
         "total_app_registrations": len(apps),
         "apps_with_credentials": sum(1 for a in apps if a["has_credentials"]),
         "apps_without_credentials": sum(1 for a in apps if not a["has_credentials"]),
@@ -287,8 +287,7 @@ def summarize(
         "credentials_expiring_soon": sum(1 for c in credentials if c["expiring_soon"]),
         "credentials_without_expiry": sum(1 for c in credentials if not c["has_expiry"]),
         "healthy_credentials": healthy,
-        # Null after a failed or partial applications read, and the count while any credential's
-        # verdict is unknown: it could be short.
+        # Also null while any credential's verdict is unknown: the count could be short.
         "credentials_without_lifetime": unknown_lifetime if read_complete else None,
         "credentials_issued_beyond_approved_lifetime": sum(
             1 for c in credentials if c["issued_beyond_approved_lifetime"]
@@ -308,6 +307,11 @@ def summarize(
         ),
         "apps_with_all_credentials_healthy": sum(1 for a in apps if a["all_credentials_healthy"]),
     }
+    if not read_complete:
+        # A denied, failed or part-way read is unknown, never 0; only the settings stay.
+        settings = ("approved_lifetime_days", "rotation_threshold_days")
+        summary = {k: v if k in settings else None for k, v in summary.items()}
+    return summary
 
 
 # --- collection (lazy msgraph imports) ---
