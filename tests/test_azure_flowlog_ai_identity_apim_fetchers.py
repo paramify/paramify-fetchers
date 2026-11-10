@@ -800,7 +800,9 @@ def _read_summary(monkeypatch, watchers, list_logs):
 def test_unread_watcher_list_gives_null_flow_log_counts(monkeypatch):
     summary, collector = _read_summary(monkeypatch, _raise(RuntimeError("(403) AuthorizationFailed")), lambda rg, n: [])
     assert not collector.ok
-    for key in flow.FLOW_LOG_KEYS + ("enabled_flow_logs_retained_under_90_days", "total_network_watchers"):
+    for key in flow.FLOW_LOG_KEYS + ("enabled_flow_logs_retained_under_90_days", "total_network_watchers",
+                                     "regions_with_virtual_networks_without_network_watcher",
+                                     "regions_without_network_watcher_count"):
         assert summary[key] is None, key
 
 

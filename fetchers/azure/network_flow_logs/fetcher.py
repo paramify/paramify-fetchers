@@ -242,6 +242,7 @@ def summarize(watchers, flow_logs, vnet_records, logs_read: bool = True) -> dict
     None, and `logs_read` False, when the watcher list or any watcher's flow-log list was not read: every figure built
     from the flow logs is then null."""
     watcher_count = None if watchers is None else len(watchers)
+    watchers_unread = watchers is None
     watchers = watchers or []
     vnets = vnet_records or []
     enabled = [f for f in flow_logs if f["enabled"]]
@@ -256,7 +257,7 @@ def summarize(watchers, flow_logs, vnet_records, logs_read: bool = True) -> dict
     summary = {
         "total_network_watchers": watcher_count,
         "regions_with_virtual_networks": sorted({v["location"] for v in vnets}),
-        # Populated only when the watcher list was read; a failed read never reads as "missing".
+        # Null when the watcher list was not read; a failed read never reads as "missing".
         "regions_with_virtual_networks_without_network_watcher": missing_watcher,
         "regions_without_network_watcher_count": len(missing_watcher),
         "total_flow_logs": len(flow_logs),
@@ -316,6 +317,9 @@ def summarize(watchers, flow_logs, vnet_records, logs_read: bool = True) -> dict
         summary[f"enabled_flow_logs_retained_under_{days}_days"] = count(
             enabled, lambda f, days=days: f["retention_days"] is not None and f["retention_days"] < days
         )
+    if watchers_unread and vnet_records is not None:
+        summary["regions_with_virtual_networks_without_network_watcher"] = None
+        summary["regions_without_network_watcher_count"] = None
     if not logs_read:
         for key in (*FLOW_LOG_KEYS, *(f"enabled_flow_logs_retained_under_{d}_days" for d in RETENTION_THRESHOLDS)):
             summary[key] = None

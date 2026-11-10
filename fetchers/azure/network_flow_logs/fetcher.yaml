@@ -1,5 +1,5 @@
 name: azure_network_flow_logs
-version: 0.2.2
+version: 0.3.0
 description: >-
   Shows which virtual networks and subnets have their traffic logged by flow logs, where the logs are kept and for how long, and whether Traffic Analytics is on.
 category: azure
@@ -105,8 +105,8 @@ evidence_set:
     - provider_registration_status — Whether the Microsoft.Network provider is registered on the subscription: registered, not_registered or unknown
     - total_network_watchers — Number of in-scope Network Watchers; null when the watcher list could not be read
     - regions_with_virtual_networks — List of regions with at least one in-scope virtual network; null when the virtual network list could not be read
-    - regions_with_virtual_networks_without_network_watcher — List of regions with in-scope virtual networks and no Network Watcher; empty when the watcher list could not be read, since an unread list never reads as missing; null when the virtual network list could not be read
-    - regions_without_network_watcher_count — Number of regions in regions_with_virtual_networks_without_network_watcher; null when the virtual network list could not be read
+    - regions_with_virtual_networks_without_network_watcher — List of regions with in-scope virtual networks and no Network Watcher; null when the Network Watcher list or the virtual network list could not be read, since an unread list never reads as missing
+    - regions_without_network_watcher_count — Number of regions in regions_with_virtual_networks_without_network_watcher; null when the Network Watcher list or the virtual network list could not be read
 
     Which flow logs exist?
     - total_flow_logs — Number of in-scope flow logs; null when the Network Watcher list or any watcher's flow-log list could not be read

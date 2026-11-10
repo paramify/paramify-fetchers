@@ -2102,15 +2102,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
-- **`azure_network_flow_logs` 0.2.2: flow log counts are null when a flow-log
+- **`azure_network_flow_logs` 0.3.0: flow log counts are null when a flow-log
   list was not read.** Before, a failed Network Watcher list read as 0 flow
   logs and 0 watchers, and when one watcher's flow-log list failed the counts
   covered only the watchers that were read. Now the Network Watcher list failing,
   or any watcher's flow-log list failing, makes every flow-log count (totals,
   target types, retention, Traffic Analytics, unattached and unknown targets),
   `in_scope_flow_logs`, `excluded_flow_logs` and
-  `resource_exclusion_patterns_unmatched` null, and `total_network_watchers`
-  null when the watcher list failed. With every list read the output is the same.
+  `resource_exclusion_patterns_unmatched` null. When the watcher list failed,
+  `total_network_watchers`, `regions_with_virtual_networks_without_network_watcher`
+  and `regions_without_network_watcher_count` are null too (before: 0, [] and 0). With every list read the output is the same.
 
 - **Azure resource exclusions: `resource_exclusion_patterns_unmatched` is null
   when a resource list was not read.** Before, a list that failed (or had no
