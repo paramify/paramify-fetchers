@@ -1,25 +1,7 @@
 name: azure_log_storage_immutability
 version: 0.2.1
-description: >
-  Whether archived logs in Azure Storage can be altered or deleted. In every
-  storage account in the subscription, finds the blob containers Azure Monitor
-  writes logs to: insights-logs-* (diagnostic settings), insights-activity-logs,
-  insights-metrics-*, and am-* (Log Analytics data export). For each it reports
-  the time-based immutability policy (state Locked or Unlocked, retention days,
-  protected append writes), legal hold, and version-level immutability. Each
-  account also reports its blob soft-delete window and versioning. Per
-  subscription: containers that are locked, unlocked only, on legal hold, or
-  unprotected, and the shortest retention.
-  Storage accounts and log containers the resource_exclusions patterns take out
-  are listed under excluded instead, each with the pattern that matched, and
-  every count covers only what stays in scope (storage_accounts_scanned counts
-  in-scope accounts). The summary echoes resource_exclusion_patterns, lists
-  resource_exclusion_patterns_unmatched (patterns that matched no storage
-  account or log container, such as a mistyped name, or null when the storage account list could not be read), and counts
-  excluded_storage_accounts, excluded_containers, in_scope_storage_accounts and
-  in_scope_containers (in-scope log containers; 0 accounts when none was found
-  or the patterns took out every one, which a check can catch by requiring more
-  than 0; all four are null when the account list couldn't be read).
+description: >-
+  Shows whether the storage containers holding Azure Monitor logs are protected from change or deletion by a locked retention policy or a legal hold.
 category: azure
 
 supports_targets: true
@@ -80,12 +62,37 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-LOG-STORAGE-IMMUTABILITY
   name: Azure Log Storage Immutability
-  instructions: >
-    Script: azure/log_storage_immutability/fetcher.py. ARM REST, Microsoft.Storage api-version 2023-05-01:
-    storageAccounts, each account's blobServices/default/containers and
-    blobServices/default. Log containers are found by the names Azure Monitor
-    creates (insights-logs-, insights-activity-logs, insights-metrics-, am-).
-    A container without its own policy inherits the account's default
-    version-level policy. protected means a legal hold or a Locked policy; an
-    Unlocked policy can still be deleted. Lifecycle-management rules are not
-    read. Role: Reader.
+  instructions: |
+    Script: azure/log_storage_immutability/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - GET /subscriptions — picks a subscription when none is set
+    - GET Microsoft.Storage/storageAccounts — every storage account in the subscription
+    - GET <account>/blobServices/default/containers (per account, except FileStorage accounts) — Azure Monitor log containers (names starting insights-logs-, insights-activity-logs, insights-metrics- or am-) and their immutability policies and legal holds
+    - GET <account>/blobServices/default (per account with log containers) — blob soft delete and versioning
+
+    Output: azure_log_storage_immutability_<subscription>.json — each storage account holding logs with its soft-delete window, versioning and default immutability policy, and each log container's policy state, retention, legal hold and version-level immutability, plus the resources left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no storage account or log container, such as a mistyped name; null when the storage account list could not be read
+    - excluded_storage_accounts — Number of storage accounts left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and its containers and blob service are not read; null when the storage account list could not be read
+    - excluded_containers — Number of log containers left out of scope because a pattern matched their resource group, id (an id: pattern naming the container takes just that container out of an in-scope account) or their account's region; each is listed under excluded with the pattern; null when the storage account list could not be read
+    - in_scope_storage_accounts — Number of storage accounts read and in scope; 0 means none was found or the patterns took out every account, which a check can catch by requiring more than 0; null when the storage account list could not be read
+    - in_scope_containers — Number of in-scope Azure Monitor log containers found; null when the storage account list could not be read
+
+    Which log storage was checked?
+    - storage_accounts_scanned — Number of in-scope storage accounts checked
+    - accounts_with_log_containers — Number of in-scope storage accounts with at least one in-scope Azure Monitor log container
+    - log_containers — Number of in-scope Azure Monitor log containers found
+
+    Can stored logs be changed or deleted?
+    - locked_policy — Number of log containers with a locked time-based retention policy, their own or the account's default, which nobody can shorten or remove
+    - unlocked_policy_only — Number of log containers with an unlocked retention policy and no legal hold, which an admin can still shorten or remove
+    - legal_hold — Number of log containers under a legal hold
+    - unprotected — Number of log containers with neither a locked retention policy nor a legal hold, a container with only an unlocked policy included
+    - min_retention_days — Shortest retention period, in days, among log containers that have a retention policy, locked or not; null when none has one

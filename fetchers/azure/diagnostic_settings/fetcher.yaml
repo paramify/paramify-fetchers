@@ -1,15 +1,7 @@
 name: azure_diagnostic_settings
 version: 0.1.0
-description: >
-  The subscription-scope diagnostic settings that export the Azure Activity Log — the
-  Azure analogue of AWS CloudTrail configuration. For each setting: which log
-  categories and category groups are enabled (Administrative, Security, ServiceHealth,
-  Alert, Recommendation, Policy, Autoscale, ResourceHealth), the legacy per-setting
-  retention policy, and where the records land (storage account, Log Analytics
-  workspace, event hub or partner solution). Summarized as which categories any
-  setting covers, which of the four required for control-plane audit are missing, and
-  whether the Activity Log is exported at all — without a setting it is kept for 90
-  days and then discarded.
+description: >-
+  Shows whether the subscription's Activity Log is exported by a diagnostic setting, where it goes, and whether the Administrative, Security, Alert and Policy categories are captured.
 category: azure
 
 supports_targets: true
@@ -49,6 +41,46 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-DIAG-SETTINGS
   name: Azure Activity Log Diagnostic Settings
-  instructions: >
-    Script: azure/diagnostic_settings/fetcher.py. Azure SDK calls (azure-mgmt-monitor<7 MonitorManagementClient):
-    diagnostic_settings.list(resource_uri="subscriptions/<id>/"), at subscription scope.
+  instructions: |
+    Script: azure/diagnostic_settings/fetcher.py
+
+    Access: Reader or Monitoring Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.Insights — tells "not registered" from "no settings"
+    - diagnostic_settings.list() on the subscription — the Activity Log's diagnostic settings, with their categories, category groups, retention and destinations
+
+    Output: azure_diagnostic_settings_<subscription>.json — each subscription-level diagnostic setting with the Activity Log categories and category groups it turns on, its legacy retention setting, and where it sends the records.
+
+    Summary fields:
+
+    What was checked?
+    - total_diagnostic_settings — Number of diagnostic settings on the subscription itself, which export the Activity Log; resource-level settings are not read here
+    - provider_registration_status — Whether the Azure Monitor provider (Microsoft.Insights) is registered on the subscription: registered, not_registered or unknown
+
+    Is the Activity Log exported, and where to?
+    - activity_log_exported — True if the subscription has at least one diagnostic setting, whatever categories it turns on; false if it has none, so the Activity Log is kept 90 days and then discarded
+    - settings_with_storage_account — Number of settings that send the Activity Log to a storage account
+    - settings_with_log_analytics_workspace — Number of settings that send the Activity Log to a Log Analytics workspace
+    - settings_with_event_hub — Number of settings that send the Activity Log to an event hub
+    - settings_with_partner_solution — Number of settings that send the Activity Log to a partner solution
+
+    Which Activity Log categories are captured?
+    - log_category_coverage — For each of the eight Activity Log categories, true if at least one setting captures it, by name or through the allLogs group; false if none does. Other category groups aren't expanded:
+      - Administrative (create, update, delete and action operations on resources)
+      - Security (Defender for Cloud alerts)
+      - ServiceHealth (Azure service incidents)
+      - Alert (Azure Monitor alerts firing)
+      - Recommendation (Azure Advisor recommendations)
+      - Policy (Azure Policy evaluations and effects)
+      - Autoscale (autoscale engine events)
+      - ResourceHealth (changes in a resource's health)
+    - required_log_categories — List of the four categories the fetcher requires for control-plane audit: Administrative, Security, Alert and Policy (CIS Azure 5.1.2)
+    - covered_required_log_categories — Number of the four required categories that at least one setting captures; different settings can capture different categories
+    - required_log_category_percentage — Percentage of the required categories captured = covered_required_log_categories / 4 × 100 (a whole number: 0, 25, 50, 75 or 100); the denominator is always 4, never 0
+    - all_required_log_categories_covered — True if all four required categories are captured, by one setting or spread across several; false if any is missing
+    - settings_capturing_required_categories — Number of settings that on their own capture all four required categories, by name or through allLogs (the stricter, one-setting reading)
+
+    Is the retired per-setting retention still set?
+    - settings_with_legacy_retention — Number of settings with the legacy per-setting retention policy switched on for at least one category; Azure has retired it in favour of the destination's own retention
