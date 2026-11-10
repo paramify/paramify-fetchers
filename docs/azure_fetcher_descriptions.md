@@ -18,6 +18,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Identity and access | [azure_entra_privileged_roles](#azure_entra_privileged_roles) | `EVD-AZURE-ENTRA-PRIV-ROLES` |
 | Identity and access | [azure_entra_risky_users](#azure_entra_risky_users) | `EVD-AZURE-ENTRA-RISKY-USERS` |
 | Identity and access | [azure_entra_service_principals](#azure_entra_service_principals) | `EVD-AZURE-ENTRA-SERVICE-PRINCIPALS` |
+| Identity and access | [azure_entra_sign_in_logs](#azure_entra_sign_in_logs) | `EVD-AZURE-ENTRA-SIGN-IN-LOGS` |
 | Identity and access | [azure_entra_sign_ins](#azure_entra_sign_ins) | `EVD-AZURE-ENTRA-SIGN-INS` |
 | Identity and access | [azure_managed_identity_configuration](#azure_managed_identity_configuration) | `EVD-AZURE-MANAGED-IDENTITY-CONFIG` |
 | Identity and access | [azure_pim_activations](#azure_pim_activations) | `EVD-AZURE-PIM-ACTIVATIONS` |
@@ -844,6 +845,93 @@ Summary fields:
 - `privileged_application_permissions_held` — List of the privileged Microsoft Graph application permissions held by service principals other than Microsoft's own apps; permissions that couldn't be named aren't included (see `unnamed_graph_application_permissions`); null if application permissions couldn't be read
 - `service_principals_with_privileged_delegated_grants` — Number of service principals, other than Microsoft's own apps, with a delegated grant that includes a privileged Microsoft Graph permission: one on the list in `privileged_delegated_graph_permissions_checked`, which leaves out the tenant-wide data permissions because, delegated, they reach only what the signed-in user can already open; null if delegated grants couldn't be read
 - `privileged_delegated_permissions_granted` — List of the privileged Microsoft Graph permissions in delegated grants to service principals other than Microsoft's own apps; null if delegated grants couldn't be read
+
+
+### azure_entra_sign_in_logs
+Short Description: Shows from the workspace's Entra sign-in logs whether successful sign-ins required MFA and phishing-resistant methods, what changed in authentication and Conditional Access policies, and counts of non-interactive and service-principal sign-ins.
+
+Script: fetchers/azure/entra_sign_in_logs/fetcher.py
+
+Access: Reader on the subscription, which includes querying its workspaces' logs; or, to read only these four tables, a custom role on the workspace with Microsoft.OperationalInsights/workspaces/read, workspaces/tables/read (whether each table exists, and its retention) and Microsoft.SecurityInsights/onboardingStates/read (whether Sentinel is on), plus workspaces/query/read granted on its SigninLogs, AuditLogs, AADNonInteractiveUserSignInLogs and AADServicePrincipalSignInLogs tables, and on its IdentityInfo table when groups is set; without the first three the run fails. No Microsoft Graph permission is used. Without query access the run fails as not_authorized.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET Microsoft.OperationalInsights/workspaces` and `GET Microsoft.SecurityInsights/onboardingStates` (per workspace) — the workspaces and whether Sentinel is on each
+- `GET workspaces/{workspace}/tables/SigninLogs` and `tables/AuditLogs` (per workspace) — whether Entra exports each table there, and its retention
+- With groups set: `GET workspaces/{workspace}/tables/IdentityInfo` and two KQL queries on `IdentityInfo` over the last 21 days (per workspace holding a user sign-in table) — whether Sentinel UEBA syncs identities there, the newest record and its age, and counts of the identities it holds and of the current members of each listed group; no member is named in the answer. Each user sign-in query below then starts by resolving the same members from IdentityInfo, so their names are returned only for those who signed in
+- KQL on `SigninLogs` within the lookback (per workspace, six queries) — interactive sign-ins with their result, authentication requirement, succeeded methods, requirement sources, Conditional Access status and risk, summarized and per user
+- KQL on `AuditLogs` within the lookback (per workspace, two queries) — changes to the authentication methods, MFA, security defaults and Conditional Access policies, and every other Policy-category change
+- `GET workspaces/{workspace}/tables/AADNonInteractiveUserSignInLogs` and `tables/AADServicePrincipalSignInLogs` (per workspace) — whether Entra exports each table there
+- KQL on `AADNonInteractiveUserSignInLogs` within the lookback (per workspace, two queries) — counts of non-interactive user sign-ins by result, user, app, risk and Conditional Access status; no per-event rows
+- KQL on `AADServicePrincipalSignInLogs` within the lookback (per workspace, two queries) — counts of service-principal sign-ins by result, and one capped row per service principal with its id, name, app id, counts and last sign-in; no IP addresses or resources
+
+Output: `azure_entra_sign_in_logs_<subscription>.json` — per workspace, the sign-in totals and breakdowns, each user's counts, the successful single-factor sign-ins, and the policy change events; with groups set, also how many identities IdentityInfo holds, how current it is, and the member count of each listed group.
+
+Summary fields:
+
+**What was read?**
+- `workspaces_collected` — Number of Log Analytics workspaces read in the subscription
+- `lookback_days` — Number of days of logs summarized (`lookback_days` setting, default 30)
+- `scope_users` — List of the user principal names the user sign-in evidence is limited to, added to the members of `scope_groups` when both are set; with `scope_groups` also empty, every user is read
+- `scope_groups` — List of the Entra group names whose current members the user sign-in evidence is limited to (groups setting); empty means no group scope
+- `group_scope_resolved` — True if every workspace holding a user sign-in table resolved the groups' members from its IdentityInfo table; false if one had no IdentityInfo table, no record in the last 21 days, only records older than identity_max_age_days, a refused query, or no member of any listed group, and then every user sign-in field below is null; null if no group is set or no workspace holds a user sign-in table
+- `scope_group_members` — Number of identities that are members of at least one listed group in their newest IdentityInfo record, summed across the workspaces holding a user sign-in table; null unless `group_scope_resolved` is true
+- `scope_groups_without_members` — List of the listed groups with no member in IdentityInfo: empty, misspelt, or holding only identities Sentinel does not sync; null unless `group_scope_resolved` is true
+- `identity_info_latest_record` — Time of the newest IdentityInfo record, the oldest such time when several workspaces resolved the scope; shows how current the group members are; null unless `group_scope_resolved` is true
+- `identity_info_age_hours` — Hours between the newest IdentityInfo record and the query, the greatest when several workspaces resolved the scope; a record stamped in the future reads 0; null unless `group_scope_resolved` is true
+- `scope_app_ids` — List of the application ids the user sign-in evidence (interactive and non-interactive) is limited to; empty means every app
+- `scope_service_principal_app_ids` — List of the service-principal application ids the service-principal sign-in evidence is limited to; empty means every service principal
+- `workspaces_with_sign_in_logs` — Number of workspaces holding the SigninLogs table; the sign-in counts below are summed across them, so name one with the workspaces target field when Entra exports to several
+- `sign_in_logs_workspaces` — List of the names of the workspaces holding the SigninLogs table
+- `sign_in_logs_read` — True if every such workspace's sign-in queries succeeded; false if there is none, a query failed, a workspace's table lookup failed, or the group scope did not resolve, and then every sign-in field below is null
+- `latest_sign_in` — Time of the newest sign-in in the logs, which shows whether Entra logs are still arriving
+
+**Did successful sign-ins require MFA?**
+- `sign_ins` — Number of interactive sign-ins in the lookback; non-interactive and service principal sign-ins are counted under their own fields below
+- `sign_ins_succeeded` — Number of sign-ins with ResultType 0
+- `sign_ins_failed` — Number of sign-ins with any other ResultType
+- `succeeded_multi_factor` — Number of successful sign-ins whose authentication requirement was multiFactorAuthentication
+- `succeeded_single_factor` — Number of successful sign-ins whose authentication requirement was singleFactorAuthentication, not counting Windows device logons or sign-ins that used a phishing-resistant method on their own
+- `succeeded_single_factor_phishing_resistant` — Number of successful sign-ins with no MFA requirement that used a phishing-resistant method on its own, such as a passkey, which is not a password alone
+- `succeeded_device_logons` — Number of successful logons to Windows devices (the Windows Sign In app), counted apart from sign-ins to apps
+- `multi_factor_percentage` — Percentage of successful sign-ins that required MFA = `succeeded_multi_factor` / `sign_ins_succeeded` × 100 (a whole number, 0–100); 0 when `sign_ins_succeeded` is 0
+- `all_successful_sign_ins_multi_factor` — True if `succeeded_single_factor` is 0; false if it is above 0; null if the logs were not read or no sign-in succeeded
+- `users_signed_in` — Number of users with at least one sign-in, counted by Entra object id, so sign-ins Entra logged with no user name or with an id in its place count under their user rather than as extra users; an attempt for an account that does not exist is counted by the name typed
+- `users_with_single_factor_success` — Number of users with at least one successful single-factor sign-in
+- `succeeded_by_requirement_provider` — Number of successful sign-ins for each source of the authentication requirement, as Entra names it (multiConditionalAccess, securityDefaults, perUserMfa, identityProtection and others); a sign-in with more than one source counts under each
+
+**Were phishing-resistant methods used?**
+- `succeeded_phishing_resistant` — Number of successful sign-ins in which a succeeded method was FIDO2, a passkey, Windows Hello for Business or a platform credential, or a certificate when MFA was required with no weaker or reused method beside it; "Previously satisfied" and "Satisfied by token" steps are not methods
+- `phishing_resistant_percentage` — Percentage of successful sign-ins that used a phishing-resistant method = `succeeded_phishing_resistant` / `sign_ins_succeeded` × 100 (a whole number, 0–100); 0 when `sign_ins_succeeded` is 0
+- `succeeded_by_method` — Number of successful sign-ins for each succeeded authentication method name, reused steps left out; a sign-in with more than one method counts under each
+
+**Did Conditional Access apply, and were risky sign-ins let through?**
+- `succeeded_by_conditional_access_status` — Number of successful sign-ins for each Conditional Access status (success, failure, notApplied)
+- `succeeded_risky` — Number of successful sign-ins rated medium or high risk during sign-in; needs Entra ID P2, without which every sign-in reads hidden
+
+**Were the authentication policies changed?**
+- `workspaces_with_audit_logs` — Number of workspaces holding the AuditLogs table
+- `audit_logs_read` — True if every such workspace's audit queries succeeded; false if there is none, a query failed, or a table lookup failed, and then `policy_changes` and `policy_changes_by_operation` are null
+- `policy_changes` — Number of changes in the lookback to the authentication methods, authentication strength, MFA service, per-user MFA, security defaults and Conditional Access policies, plus every other change Entra files under the Policy category, counted without a cap
+- `policy_changes_by_operation` — Number of policy changes in the lookback for each operation name, so a change this fetcher does not list by name still shows
+
+**Were there non-interactive user sign-ins (token refreshes and background sign-ins, no per-event rows copied)?**
+- `workspaces_with_non_interactive_sign_in_logs` — Number of workspaces holding the AADNonInteractiveUserSignInLogs table
+- `non_interactive_sign_in_logs_read` — True if every such workspace's queries succeeded; false if there is none, a query failed, a table lookup failed, or the group scope did not resolve, and then the non_interactive_* fields are null
+- `non_interactive_sign_ins` — Number of non-interactive user sign-ins in the lookback, within the user, group and app scope
+- `non_interactive_succeeded` — Number of non-interactive user sign-ins with ResultType 0
+- `non_interactive_failed` — Number of non-interactive user sign-ins with any other ResultType
+- `non_interactive_users_signed_in` — Number of users with at least one successful non-interactive sign-in, counted by Entra object id as `users_signed_in` is
+- `non_interactive_succeeded_risky` — Number of successful non-interactive user sign-ins rated medium or high risk during sign-in; needs Entra ID P2
+
+**Which service principals signed in (counts per principal, no IPs or resources copied)?**
+- `workspaces_with_service_principal_sign_in_logs` — Number of workspaces holding the AADServicePrincipalSignInLogs table
+- `service_principal_sign_in_logs_read` — True if every such workspace's queries succeeded; false if there is none, a query failed, or a table lookup failed, and then the service_principal_* fields are null
+- `service_principal_sign_ins` — Number of service-principal sign-ins in the lookback, limited by the service_principal_app_ids scope only (the user, group and app_ids scopes never apply)
+- `service_principal_succeeded` — Number of service-principal sign-ins with ResultType 0
+- `service_principal_failed` — Number of service-principal sign-ins with any other ResultType
+- `service_principal_principals_signed_in` — Number of distinct service principals with at least one successful sign-in
+- `service_principal_principals_with_failures` — Number of distinct service principals with at least one failed sign-in
 
 
 ### azure_entra_sign_ins
