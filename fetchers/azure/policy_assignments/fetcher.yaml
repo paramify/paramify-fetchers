@@ -78,7 +78,7 @@ evidence_set:
     - policy_definitions.list_built_in() (once, when an initiative is assigned) — the effect of each built-in member policy; on failure the members are read one at a time
     - GET Microsoft.Authorization/policyExemptions (a preview API version, the only kind Azure offers) — every exemption on the subscription, inherited from management groups, or on its resource groups and resources, Defender for Cloud recommendation exemptions included, expired ones too; a failure fails the run
 
-    Output: azure_policy_assignments_<subscription>.json — each policy assignment with its scope, excluded scopes, parameters, enforcement mode and policy definition, the effect of each policy it applies and whether it actually enforces, and each policy exemption with what it exempts, its category, reason and expiry; exemptions the resource_exclusions patterns take out are listed under excluded instead.
+    Output: azure_policy_assignments_<subscription>.json — each policy assignment with its scope, excluded scopes, parameters, enforcement mode and policy definition, the effect of each policy it applies and whether it actually enforces, and each policy exemption with what it exempts (each named member flagged in_initiative), the scope it was made at, its category, description, metadata, who created and last changed it, and its expiry; an effect value the fetcher doesn't recognise reads unresolved with that value in its reason; exemptions the resource_exclusions patterns take out are listed under excluded instead.
 
     Summary fields:
 
@@ -116,7 +116,7 @@ evidence_set:
     - actually_enforcing_percentage — Percentage of assignments that actually enforce = actually_enforcing_assignments / total_policy_assignments × 100 (a whole number, 0–100); 0 when total_policy_assignments is 0. Assignments whose effects could not be resolved count in the total but not as enforcing, so they lower it
     - audit_effect_only_assignments — Number of assignments whose policies only report (audit, auditAction, auditIfNotExists or manual), or whose enforcing effects are held back by enforcement mode DoNotEnforce
     - disabled_effect_assignments — Number of assignments whose every policy has the disabled effect
-    - unresolved_effect_assignments — Number of assignments where no policy's effect could be resolved (the definition could not be read, the effect is an expression, or its value isn't a known effect)
+    - unresolved_effect_assignments — Number of assignments in the unresolved effect class: no policy's effect could be resolved (the definition could not be read, the effect is an expression, or its value isn't a known effect), or only the disabled effect resolved while other policies didn't
     - assignments_by_effect_class — Number of assignments in each effect class:
       - enforcing (actually enforces)
       - audit_only (only reports, or held back by DoNotEnforce)
@@ -153,12 +153,12 @@ evidence_set:
     - mitigated_exemptions — Number of in-scope exemptions in category Mitigated (the policy's intent is met another way), matched without regard to case
     - whole_assignment_exemptions — Number of in-scope exemptions that exempt every policy of an assignment rather than named members of an initiative
     - defender_benchmark_exemptions — Number of in-scope exemptions on Defender for Cloud's own assignment (SecurityCenterBuiltIn), which is how Defender recommendation exemptions are stored
-    - active_exemptions_lifting_enforcement — Number of unexpired in-scope exemptions that lift enforcement: they exempt a policy with an enforcing effect (deny, modify, deployIfNotExists and the others listed above) on an assignment with enforcement mode Default; null when the assignments were not read or an exemption's assignment can't be checked
-    - exemptions_lifting_enforcement_unknown — Number of in-scope exemptions where that can't be told; each one's lifts_enforcement_unknown_reason says why: the exempted assignment isn't listed, the assignments or the initiative's members could not be read, an exempted policy isn't in the initiative's current definition, or an exempted policy's effect could not be resolved
+    - active_exemptions_lifting_enforcement — Number of unexpired in-scope exemptions that lift enforcement: they exempt a policy with an enforcing effect (deny, modify, deployIfNotExists and the others listed above) on an assignment with enforcement mode Default; null when the exemptions were not read, or when the assignment list failed and there is at least one in-scope exemption (0 when there are none)
+    - exemptions_lifting_enforcement_unknown — Number of in-scope exemptions where that can't be told; each one's lifts_enforcement_unknown_reason says why: assignment_not_listed (the exempted assignment isn't listed), assignments_unread (the assignments could not be read), initiative_members_unread (the initiative's members could not be read), member_not_in_initiative (an exempted policy isn't in the initiative's current definition) or effect_unresolved (an exempted policy's effect could not be resolved)
     - exemptions_naming_members_not_in_initiative — Number of in-scope exemptions naming at least one initiative member that the initiative's current definition doesn't have: a policy since removed from the initiative, or one in an older version the assignment still uses
-    - assignments_with_exemptions — Number of listed assignments with at least one in-scope exemption; null when the assignment list failed
-    - exemptions_of_unlisted_assignments — Number of in-scope exemptions whose assignment isn't among the assignments listed for the subscription, usually an assignment since deleted, whose exemptions Azure leaves in place; null when the assignment list failed
-    - unlisted_assignments_with_exemptions — Number of distinct assignments that in-scope exemptions point at but that aren't among the listed assignments; null when the assignment list failed
+    - assignments_with_exemptions — Number of listed assignments with at least one in-scope exemption; null when the exemptions were not read, or when the assignment list failed and there is at least one in-scope exemption (0 when there are none)
+    - exemptions_of_unlisted_assignments — Number of in-scope exemptions whose assignment isn't among the assignments listed for the subscription, usually an assignment since deleted, whose exemptions Azure leaves in place; null when the exemptions were not read, or when the assignment list failed and there is at least one in-scope exemption (0 when there are none)
+    - unlisted_assignments_with_exemptions — Number of distinct assignments that in-scope exemptions point at but that aren't among the listed assignments; null when the exemptions were not read, or when the assignment list failed and there is at least one in-scope exemption (0 when there are none)
 
     Where were the exemptions made?
     - exemptions_by_scope_kind — Number of in-scope exemptions made at each kind of scope:

@@ -85,19 +85,19 @@ evidence_set:
     - GET /policies/identitySecurityDefaultsEnforcementPolicy — whether security defaults are on
     - GET /groupSettings and GET /groupSettingTemplates/{Password Rule Settings id} — the tenant's password protection settings, and Microsoft's defaults for any it never set
     - GET /subscribedSkus — the tenant's licences, to tell Free, P1 and P2 apart
-    - GET /organization/{id}/certificateBasedAuthConfiguration — the certificate authorities trusted for certificate sign-in in the classic store, with each one's revocation list; expiry is read from the certificate
+    - GET /organization/{id}/certificateBasedAuthConfiguration — the certificate authorities trusted for certificate sign-in in the classic store, with each one's revocation list; subject and expiry are read from the certificate, which isn't copied into the evidence
     - GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations and GET …/{id}/certificateAuthorities (per configuration) — the certificate authorities in the PKI-based trust store, the newer place Entra keeps them
     - GET /groups/{id}/transitiveMembers/microsoft.graph.user with authorizationInfo (per group an enabled method includes or excludes, only when X.509 is enabled) — which users each method reaches, with their sign-in names and the count and types of their certificate user ids
     - GET /users with authorizationInfo (only when X.509 targets all users or a user directly) — the same for every user
 
-    Output: azure_entra_authentication_policy_<tenant>.json — each sign-in method in the authentication methods policy with its state, who it applies to, its settings and whether it's weak or phishing-resistant, the trusted certificate authorities, up to 100 of the users certificate sign-in targets that fail a check, plus the registration campaign, security defaults, password protection settings and the tenant's licences; Windows Hello for Business is set through device management and isn't covered.
+    Output: azure_entra_authentication_policy_<tenant>.json — each sign-in method in the authentication methods policy with its state, who it applies to, its settings and whether it's weak or phishing-resistant, the trusted certificate authorities (the combined list null unless both stores were read, each store's own list null when that store wasn't), up to 100 of the users certificate sign-in targets that fail a check, plus the registration campaign, security defaults, password protection settings and the tenant's licences; Windows Hello for Business is set through device management and isn't covered.
 
     Summary fields:
 
     What was checked?
     - authentication_methods_policy_readable — True if the authentication methods policy was read; false if not, and every method field reads null
     - total_methods — Number of sign-in methods in the policy, enabled or not; null if the policy couldn't be read
-    - enabled_methods — List of the methods whose state is enabled (for example fido2, microsoftAuthenticator, sms); null if the policy couldn't be read
+    - enabled_methods — List of the methods whose state is enabled (as Graph spells them, for example Fido2, MicrosoftAuthenticator, Sms); null if the policy couldn't be read
     - enabled_method_count — Number of enabled methods; null if the policy couldn't be read
 
     Does the tenant still allow weak methods?
@@ -119,13 +119,13 @@ evidence_set:
     - certificate_authorities_expiry_unknown — Number of trusted certificate authorities whose expiry date couldn't be read from the certificate or the service; null unless both stores were read
     - certificate_authorities_without_crl — Number of trusted certificate authorities with no certificate revocation list (CRL) address in at least one store, so a revoked user certificate signed by them isn't rejected; null unless both stores were read
     - classic_store_certificate_authorities — Number of certificate authorities in the classic store; null if it couldn't be read
-    - classic_store_status — Whether the classic trust store was read:
+    - classic_store_status — Whether the classic trust store was read (null if Microsoft Graph couldn't be reached at all):
       - read (its certificate authorities are counted)
       - not_authorized (the optional Organization.Read.All isn't granted; the run still succeeds)
       - failed (the read failed, and the run exits non-zero)
     - classic_store_missing_permission — Whether the classic trust store read was refused for a missing grant: Organization.Read.All when it was; null when the store was read or failed for another reason
     - pki_store_certificate_authorities — Number of certificate authorities in the PKI-based trust store; null if it couldn't be read
-    - pki_store_status — Whether the PKI-based trust store was read:
+    - pki_store_status — Whether the PKI-based trust store was read (null if Microsoft Graph couldn't be reached at all):
       - read (its certificate authorities are counted)
       - not_authorized (the optional PublicKeyInfrastructure.Read.All isn't granted; the run still succeeds)
       - not_available (this cloud doesn't offer the store; the run still succeeds)

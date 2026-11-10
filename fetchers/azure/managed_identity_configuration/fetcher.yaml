@@ -89,7 +89,7 @@ evidence_set:
     - role_definitions.list() at the subscription scope — each role's name and the permissions it grants, from which its capabilities are worked out rather than read off its name
     - role_assignments.list_for_subscription() — every role assignment visible from this subscription, matched to identities by principal id; assignments an identity holds in other subscriptions are not read
     - GET {identity}/federatedIdentityCredentials (per user-assigned identity) — outside systems trusted to sign in as the identity, with any claims-matching expression; read on the newer API version and retried on the older one when ARM rejects it as invalid, unknown or unregistered
-    - GET /servicePrincipals/{id}/appRoleAssignments (Microsoft Graph, per identity) — Graph application permissions granted to the identity; a 401 or 403 reads graph_access not_authorized, and any other error fails the run
+    - GET /servicePrincipals/{id}/appRoleAssignments (Microsoft Graph, per identity) — Graph application permissions granted to the identity; a 401 or 403 reads graph_access not_authorized, a 404 reads as no permissions, and any other error leaves that identity's permissions unknown and fails the run
     - GET /servicePrincipals/{id} (Microsoft Graph, per API the permissions belong to) — the permission names; no secret or token is read
 
     Output: azure_managed_identity_configuration_<subscription>.json — each user-assigned identity with the resources it is attached to and its federated credentials, each resource's system-assigned identity, and every identity's role assignments and Graph permissions; identities the resource_exclusions patterns take out are listed under excluded instead.
@@ -132,7 +132,7 @@ evidence_set:
     What can each identity do in Azure?
     - identities_with_broad_role — Number of identities holding a role named Owner, Contributor, User Access Administrator or Role Based Access Control Administrator anywhere visible from this subscription; an assignment's condition, which may narrow it, is recorded but not applied
     - identities_with_subscription_or_higher_role — Number of identities with a role assigned at subscription, management group or root scope
-    - identities_full_control — Number of identities holding a role with "*" among its actions, whatever its notActions subtract, so it allows every management action
+    - identities_full_control — Number of identities holding a role with "*" among its actions, counted whatever its notActions subtract, so Contributor counts too
     - identities_can_grant_access — Number of identities holding a role that allows Microsoft.Authorization/roleAssignments/write after its notActions, so the identity can grant access to others
     - identities_can_read_keys — Number of identities holding a role that allows an operation returning a data-plane credential (storage, AI services, AI Search, Cosmos DB, Redis, Event Hubs and Service Bus keys, Foundry connection secrets, App Service settings or API Management subscription keys)
     - identities_full_data_access — Number of identities holding a role with a data action of "*" or ending in "/*", giving full access to a service's data
@@ -142,6 +142,6 @@ evidence_set:
 
     What can each identity do in Microsoft Graph?
     - graph_access — Whether Microsoft Graph could be read: read; not_authorized (the credential can't read service principals, so every identity's Graph permissions are unknown); failed (the Graph client couldn't connect, or the Azure clients couldn't be created, with the same effect); or not_read (there were no identities to look up)
-    - identities_with_graph_roles — Number of identities granted at least one Graph application permission
-    - identities_with_privileged_graph_roles — Number of identities granted a privileged Microsoft Graph application permission, judged only for Graph's own permissions and ignoring case: any with ReadWrite or FullControl in the name, Mail.Send, tenant-wide reads of mail, files, sites, chats, calendars, contacts and notes (such as Mail.Read or Files.Read.All), and any that lets the holder grant itself more access, take over users' sign-in or change the tenant's security controls (such as User.ManageIdentities.All); other APIs' permissions are not judged and default access is not privileged
+    - identities_with_graph_roles — Number of identities with at least one app role assignment, on Microsoft Graph or any other API, a default-access assignment included
+    - identities_with_privileged_graph_roles — Number of identities granted a privileged Microsoft Graph application permission, the same judgement azure_entra_service_principals applies, made only for Graph's own permissions and ignoring case: any with ReadWrite or FullControl in the name, Mail.Send, tenant-wide reads of mail, files, sites, chats, calendars, contacts and notes (such as Mail.Read or Files.Read.All), and any that lets the holder grant itself more access, take over users' sign-in or change the tenant's security controls (such as User.ManageIdentities.All); other APIs' permissions are not judged and default access is not privileged
     - identities_graph_roles_unknown — Number of identities whose Graph application permissions could not be read, or that hold one whose name or API could not be resolved

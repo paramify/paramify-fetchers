@@ -78,14 +78,14 @@ evidence_set:
   instructions: |
     Script: azure/residual_resources/fetcher.py
 
-    Access: Reader on the subscription, plus Microsoft Graph Directory.Read.All (application permission, admin-consented) when it runs as a service principal or managed identity; a signed-in user needs nothing extra. Without it the deleted-principal check fails and so does the run. Only role assignments made at the subscription or below are reviewed; those inherited from a management group or the tenant root, and Azure Lighthouse delegations, are not.
+    Access: Reader on the subscription, plus Microsoft Graph Directory.Read.All (application permission, admin-consented) when it runs as a service principal or managed identity; a signed-in member user needs nothing extra. Without it the deleted-principal check fails and so does the run. Only role assignments made at the subscription or below are reviewed; those inherited from a management group or the tenant root, and Azure Lighthouse delegations, are not.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
     - Resource Graph Resources | where type =~ '<type>' queries, one per orphan kind (paged to the end; a result shorter than Resource Graph counted, or reported truncated, fails the run) — unattached disks, NICs, NSGs, public IPs and NAT gateways, disconnected private endpoints, unlinked private DNS zones and empty App Service plans
     - Resource Graph ResourceContainers and Resources queries — empty resource groups, as two paged queries (every resource group, and the resource count per group) because a summarize joined into a query is not paged and could drop groups unnoticed
     - Resource Graph Resources | where type =~ 'microsoft.web/sites/slots' — stale deployment slots
-    - Resource Graph Resources | where type =~ 'microsoft.managedidentity/userassignedidentities', plus a query for what references each identity — unused identities
+    - Resource Graph Resources | where type =~ 'microsoft.managedidentity/userassignedidentities', plus a query for every resource naming each identity in its identity block or anywhere in its properties (Bot Service, Database Watcher and storage encryption name it in properties) — unused identities
     - ARM GET <identity id>/federatedIdentityCredentials (per in-scope identity with no attachment and no role) — federated credentials, which Resource Graph doesn't index
     - Resource Graph authorizationresources query and role_definitions.list() — role assignments and role names
     - Resource Graph ResourceContainers subscription query and Microsoft Graph GET /organization — confirms Graph is signed in to the subscription's tenant; in any other tenant every principal would read as deleted, so a mismatch fails the run
@@ -97,7 +97,7 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no orphaned resource or role assignment, such as a mistyped name, or null when any Resource Graph query could not be read
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no orphaned resource, role assignment, deployment slot or user-assigned managed identity (in use or not), such as a mistyped name, or null when there is no subscription or credential or any Resource Graph query other than the subscription's tenant lookup could not be read
     - excluded_orphaned_resources — Number of orphaned resources left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them. A matching user-assigned managed identity that no resource attaches and no role assignment names counts here without its federated credentials being read
     - excluded_role_assignments — Number of role assignments left out of scope because a pattern matched the resource group or id of the scope they were made at (role assignments carry no region, so location: patterns never match them); assignments made at the subscription itself stay, and each excluded one is listed under excluded with the pattern
     - in_scope_orphaned_resources — Number of orphaned resources read and in scope
@@ -131,4 +131,4 @@ evidence_set:
     How many identities and slots were checked, and when is a slot stale?
     - identities_checked — Number of user-assigned managed identities read that no resource_exclusions pattern matches
     - slots_checked — Number of deployment slots read that no resource_exclusions pattern matches
-    - stale_slot_days — Days without changes after which a deployment slot counts as stale (default 90); a slot that is not running also counts as stale
+    - stale_slot_days — Days without changes after which a deployment slot counts as stale (default 90); a slot that is not running also counts as stale; null when nothing was collected (no subscription or credential, or the Resource Graph client couldn't be created)

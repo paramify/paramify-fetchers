@@ -56,7 +56,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_privileged_roles/fetcher.py
 
-    Access: Microsoft Graph application permission RoleManagement.Read.Directory (Directory.Read.All also covers it). Optional: Organization.Read.All; without it, the tenant's name and domain read null.
+    Access: Microsoft Graph application permission RoleManagement.Read.Directory (Directory.Read.All also covers it). Optional: Organization.Read.All; without it, the tenant's name and domain read null, and a target must name its tenant_id or the run fails.
 
     Commands Executed:
     - GET /organization — the tenant's name and domain
