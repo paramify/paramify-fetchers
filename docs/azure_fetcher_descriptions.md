@@ -3239,7 +3239,7 @@ Summary fields:
 
 **Does the gateway accept only strong TLS?**
 - `services_with_legacy_tls_or_ssl_enabled` — Number of services where TLS 1.0, TLS 1.1 or SSL 3.0 is on for clients or backends (set on, or unset on a service created on or before 1 April 2018, where Azure defaults it on)
-- `services_with_weak_ciphers_enabled` — Number of services with at least one weak cipher suite on (a CBC-mode suite, one without forward secrecy, or 3DES); Azure leaves the CBC and RSA key-exchange suites on until they are set to off
+- `services_with_weak_ciphers_enabled` — Number of services with at least one weak cipher suite on (a CBC-mode suite, one without forward secrecy, or 3DES); Azure leaves the CBC and RSA key-exchange suites on until they are set to off, and 3DES (TripleDes168) on when unset only for a service created on or before 1 April 2018
 - `services_minimum_api_version_enforced` — Number of services that block management API versions older than 2019-12-01, which can read secrets back
 
 **Is the developer portal open to sign-ups?**
@@ -3254,7 +3254,7 @@ Summary fields:
 **Do APIs stop callers without a key or token?**
 - `total_apis` — Number of APIs across all services (0 proves nothing about protection: there is nothing to protect yet)
 - `apis_accepting_http` — Number of APIs that accept plain HTTP or unencrypted WebSocket (ws) calls
-- `apis_without_access_control` — Number of APIs without access control: a call without a subscription key isn't stopped, because the API doesn't require a key, has no OAuth 2.0 or OpenID Connect server, and no validate-jwt or validate-azure-ad-token policy applies at global or API level, in an open product (one needing no subscription) containing the API, or on every operation; a keyed product's policy never runs for a keyless call, so only open products count
+- `apis_without_access_control` — Number of APIs without access control: a call without a subscription key isn't stopped, because the API doesn't require a key and no validate-jwt or validate-azure-ad-token policy applies at global or API level, in an open product (one needing no subscription) containing the API, or on every operation; a keyed product's policy never runs for a keyless call, so only open products count
 - `apis_access_control_unknown` — Number of APIs where access control is unknown: nothing found protects them, but a policy that could (global, API, operation, or an open or unread product) couldn't be read
 - `total_products` — Number of products across all services
 - `published_products_without_subscription` — Number of published products that need no subscription, so anyone can call their APIs without a key
@@ -5111,7 +5111,7 @@ Summary fields:
 - `environments_audit_logs_unknown` — Number of environments whose app log destination is azure-monitor and whose diagnostic settings couldn't be read
 
 **Are Container Apps open to the internet without sign-in?**
-- `container_apps_internet_facing` — Number of internet-facing Container Apps: ingress is external and the app's environment isn't internal-only (an environment missing from the subscription's list counts as not internal-only)
+- `container_apps_internet_facing` — Number of internet-facing Container Apps: ingress is external and the app's environment's network exposure is public: not internal-only and public network access not Disabled (an environment missing from the subscription's list counts as public)
 - `container_apps_allow_insecure` — Number of Container Apps whose ingress also accepts plain HTTP
 - `container_apps_without_ip_restrictions` — Number of internet-facing Container Apps with no client IP restriction rules on their ingress
 - `container_apps_internet_facing_without_auth` — Number of internet-facing Container Apps where sign-in isn't required, so the container itself must authenticate callers. Sign-in is required (auth_required) when Easy Auth is on and redirects or rejects callers who aren't signed in (RedirectToLoginPage, Return401 or Return403); it isn't when Easy Auth is off or set to AllowAnonymous, which lets every caller through

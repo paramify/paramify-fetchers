@@ -4,8 +4,9 @@ type: AUTOMATED
 role: configuration
 statement: >
   Every API on every API Management service stops a caller without a subscription key or token (it
-  requires a key, has an OAuth 2.0 or OpenID Connect server, or a validate-jwt or
-  validate-azure-ad-token policy applies), and no API's access control is unknown. Does not assert
+  requires a key, or a validate-jwt or validate-azure-ad-token policy applies to every operation),
+  and no API's access control is unknown. An OAuth 2.0 or OpenID Connect server on an API only
+  configures the developer-portal test console, so it does not count. Does not assert
   network restriction of the gateway; zero APIs passes vacuously (nothing to protect yet). API
   Management is a policy enforcement point, so an API it lets through without a key or token is an
   exception to its policy. Supports KSI-CNA-RNT; it shows access control, not network limits (see

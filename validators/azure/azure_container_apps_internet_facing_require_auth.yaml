@@ -3,8 +3,9 @@ name: Azure Container Apps Internet Facing Require Sign In
 type: AUTOMATED
 role: configuration
 statement: >
-  No internet-facing Container App (external ingress in a non-internal environment) lets callers
-  through without sign-in: each has Easy Auth on and set to redirect or reject unauthenticated
+  No internet-facing Container App (external ingress in an environment whose network exposure is
+  public: not internal-only and public network access not Disabled; an environment that could not
+  be read counts as public) lets callers through without sign-in: each has Easy Auth on and set to redirect or reject unauthenticated
   callers, and no app's authentication state is unknown. Passes with zero Container Apps. Does not
   assert IP restrictions, nor authentication implemented inside the container itself, and does not
   cover Container Instances. Supports KSI-CNA-RNT.
