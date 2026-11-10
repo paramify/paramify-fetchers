@@ -1,38 +1,7 @@
 name: azure_resource_inventory
 version: 0.4.1
-description: >
-  An automatically generated inventory of every resource in the subscription, read
-  from Azure Resource Graph's `Resources` table rather than service by service: each
-  resource's id, name, type, location, resource group, tags, SKU and kind where the
-  resource type has them, and its provisioning state. Each resource also carries its
-  Defender for Cloud coverage (assessments that came back Healthy or Unhealthy,
-  unhealthy assessments and unhealthy High/Critical assessments, from
-  `SecurityResources`; NotApplicable assessments did not happen and are counted
-  apart, never as coverage) and its Azure Policy coverage (policy states and
-  non-compliant states, from `PolicyResources`); results on a child resource, such
-  as a subnet, count for the inventoried parent. The summary
-  gives the total count and the counts by resource type and by location, how many
-  resources carry no tags, and for Defender and for Policy the resources not covered.
-  A resource counts as not covered only when its type is covered on some other
-  resource in the subscription; types the service covers on no resource (types it
-  has no recommendations or assigned policies for, or a service not in use) are
-  listed apart with their counts, and a service that covers nothing, or an empty
-  inventory (what Resource Graph returns to a caller without Reader), never reads
-  as complete. The unhealthy, High/Critical and non-compliant counts cover inventoried
-  resources and their children only: assessments and policy states about the
-  subscription itself, a resource group, or anything else not in the inventory (a
-  deleted resource, a type Resource Graph keeps outside `Resources`) are counted
-  apart, with their own unhealthy, unhealthy High/Critical and non-compliant totals,
-  and broken down by the type of what they target (never its name) under
-  results.coverage_queries. Assessments of AWS, GCP or on-premises machines (a
-  `resourceDetails` source other than Azure) always count there, by source, even
-  when their id sits under an inventoried resource such as a multicloud connector.
-  Every query is paged to the end — a result Resource Graph reports as
-  truncated, or a page count that disagrees with its own total, is a collection
-  failure rather than a short list, and a failed coverage query leaves that
-  service's counts null rather than every resource uncovered. Resource Graph indexes
-  ARM resources only: resource groups and subscriptions live in its separate
-  `ResourceContainers` table and are not counted here. Needs Reader.
+description: >-
+  Lists every resource in the subscription with its details, and how many Defender for Cloud assessments and Azure Policy evaluations cover it and how many fail.
 category: azure
 
 supports_targets: true
@@ -97,39 +66,79 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-RESOURCE-INVENTORY
   name: Azure Resource Inventory
-  instructions: >
-    Script: azure/resource_inventory/fetcher.py. Azure SDK calls (azure-mgmt-resourcegraph ResourceGraphClient),
-    each resources(QueryRequest(subscriptions=[<subscription_id>], query=...,
-    options=QueryRequestOptions(top=1000, skip_token=<previous page's $skipToken>,
-    result_format="objectArray"))) repeated until no $skipToken is returned:
-    "Resources | project id, name, type, location, resourceGroup, tags, sku, kind,
-    provisioningState = tostring(properties.provisioningState) | order by id asc";
-    "SecurityResources | where type =~ 'microsoft.security/assessments' | project id,
-    resourceDetails = properties.resourceDetails, status =
-    tostring(properties.status.code), severity = tostring(properties.metadata.severity)
-    | order by id asc"; and "PolicyResources | where type =~
-    'microsoft.policyinsights/policystates' | project id, resourceId =
-    tostring(properties.resourceId), complianceState =
-    tostring(properties.complianceState) | order by id asc". The three are joined by
-    resource id in the fetcher. Reader is sufficient — Resource Graph returns only
-    the resources the caller can read. Every policy state, Exempt and Unknown
-    included, counts toward policy_evaluations, so toward
-    resources_evaluated_by_policy and policy_evaluated_percentage; only NonCompliant
-    counts toward policy_non_compliant. Each query stops at 1,000 pages (1,000,000
-    rows), a guard in the fetcher rather than a documented Resource Graph limit. A
-    query past it is a collection failure, never a truncated result: the run exits
-    1 with the error in metadata.api_failures. A failed SecurityResources or
-    PolicyResources query leaves that service's counts null; a failed Resources
-    query leaves the inventory empty, so its totals read 0 and both services'
-    counts are null. PolicyResources, one state per resource, assignment and
-    policy, is the query a large subscription can push past the guard. A query that
-    long will usually hit the runner's default 600-second timeout first (exit 124,
-    no evidence file). KSI-CNA-EIS and KSI-SVC-EIS are supporting evidence:
-    Defender's coverage and unhealthy findings, not the enforcement or remediation
-    itself. Resources the resource_exclusions patterns take out are listed under
-    results.excluded instead, each with the pattern that matched; the summary gives
-    resource_exclusion_patterns (the configured patterns, empty when none are set),
-    resource_exclusion_patterns_unmatched (patterns that matched no resource, such
-    as a mistyped name, or null when the inventory couldn't be read), excluded_resources (how many the patterns took out; no
-    other count includes them) and in_scope_resources (how many stayed; 0 means
-    none was read or the patterns took out every resource).
+  instructions: |
+    Script: azure/resource_inventory/fetcher.py
+
+    Access: Reader on the subscription; Resource Graph returns only the resources the caller can read, so an empty inventory can mean no Reader.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - Resource Graph Resources (1,000 rows a page, paged to the end; a query past 1,000 pages fails the run, which usually hits the runner's 600-second timeout first, exit 124 with no evidence file) — every resource with its type, location, resource group, tags, SKU, kind and provisioning state
+    - Resource Graph SecurityResources | where type =~ 'microsoft.security/assessments' — every Defender for Cloud assessment, its status and severity; a failed or truncated query leaves the Defender counts null
+    - Resource Graph PolicyResources | where type =~ 'microsoft.policyinsights/policystates' — every Azure Policy state and its compliance, one per resource, assignment and policy; a failed or truncated query leaves the Policy counts null, and a failed Resources query leaves the inventory empty and both services' counts null
+
+    Output: azure_resource_inventory_<subscription>.json — each resource with its details, how many Defender assessments and Policy evaluations cover it, and how many of them fail.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource, such as a mistyped name, or null when the inventory could not be read
+    - excluded_resources — Number of resources left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
+    - in_scope_resources — Number of resources read and in scope; 0 means none was read or the patterns took out every resource, which a check can catch by requiring more than 0
+
+    What resources exist?
+    - total_resources — Number of in-scope resources (resource groups and the subscription itself are not counted)
+    - resource_type_count — Number of different resource types
+    - resources_by_type — Number of resources of each type
+    - location_count — Number of different locations (regions, plus global)
+    - resources_by_location — Number of resources in each location
+    - resource_group_count — Number of resource groups that hold at least one resource
+
+    Are resources tagged?
+    - untagged_resources — Number of resources with no tags at all
+    - tagged_resources — Number of resources with at least one tag
+
+    Was coverage read completely?
+    - defender_coverage_collected — True if every page of Defender assessments was read; false if the query failed, came back truncated or short, or never ran because the Resources query failed, and then every Defender field below is null
+    - policy_coverage_collected — True if every page of Policy states was read; false if the query failed, came back truncated or short, or never ran because the Resources query failed, and then every Policy field below is null
+    - defender_assessments_total — Number of in-scope Defender for Cloud assessments that came back Healthy or Unhealthy (an assessment that ran); NotApplicable and other statuses are counted apart
+    - defender_not_applicable_total — Number of in-scope Defender assessments with status NotApplicable (the check didn't run on the resource, for example because a policy turned it off); these never count as coverage
+    - defender_unknown_status_total — Number of in-scope Defender assessments with a missing or unexpected status (not Healthy, Unhealthy or NotApplicable); these never count as coverage. With defender_assessments_total and defender_not_applicable_total this makes every assessment read
+    - defender_assessments_outside_inventory — Number of Healthy or Unhealthy Defender assessments about something that is not an inventoried resource or a child of one (the subscription itself, a resource that no longer exists, or an AWS, GCP or on-premises machine, even when its id sits under an inventoried connector)
+    - policy_evaluations_total — Number of in-scope Azure Policy states, one for each resource, policy assignment and policy, of any compliance state (Exempt and Unknown included; only NonCompliant counts as non-compliant)
+    - policy_evaluations_outside_inventory — Number of Policy states about something that is not an inventoried resource or a child of one (a resource group, the subscription, or a resource that no longer exists)
+
+    Does Defender for Cloud assess every resource it can?
+    - resources_assessed_by_defender — Number of resources with at least one Healthy or Unhealthy Defender assessment, on the resource or on a child of it (a subnet counts for its virtual network); NotApplicable assessments and assessments of AWS, GCP or on-premises machines don't count
+    - defender_assessable_resources — Number of assessable resources: resources of a type that Defender assessed on at least one resource in the subscription
+    - defender_assessed_percentage — Percentage of assessable resources that Defender assessed = resources_assessed_by_defender / defender_assessable_resources × 100 (a whole number, 0–100); 0 when defender_assessable_resources is 0, which also happens when Defender assessed nothing; null if defender_coverage_collected is false
+    - resources_without_defender_assessment — List of the ids of the assessable resources with no Defender assessment
+    - resources_without_defender_assessment_count — Number of assessable resources with no Defender assessment
+    - types_without_defender_assessment — Number of resources of each type that Defender assessed on no resource in the subscription. These are not counted as missing: Defender has no recommendations for many types (action groups, managed identities, DNS zones), and a type can also land here when no plan or policy covers it
+    - all_assessable_resources_assessed_by_defender — True if every assessable resource has a Defender assessment; false if any doesn't, or if Defender assessed no resource at all, an empty inventory included; null if the query failed
+
+    Do Defender assessments find serious problems?
+    - resources_with_unhealthy_high_severity — Number of resources with at least one unhealthy Defender assessment of High or Critical severity
+    - unhealthy_high_severity_assessments — Number of unhealthy Defender assessments of High or Critical severity on inventoried resources and their children; assessments about the subscription or anything else not inventoried are not counted here
+    - unhealthy_assessments_without_severity — Number of unhealthy Defender assessments on inventoried resources that carry no severity, so they can't be counted as High or not
+    - defender_unhealthy_outside_inventory — Number of unhealthy Defender assessments about something not inventoried (the subscription itself, a resource that no longer exists, or an AWS, GCP or on-premises machine), of any severity. Together with the unhealthy assessments on inventoried resources this makes every in-scope unhealthy assessment
+    - defender_unhealthy_high_severity_outside_inventory — Number of unhealthy Defender assessments of High or Critical severity about something not inventoried. With unhealthy_high_severity_assessments this makes every in-scope unhealthy High or Critical assessment
+    - defender_unhealthy_without_severity_outside_inventory — Number of unhealthy Defender assessments with no severity about something not inventoried
+
+    Does Azure Policy evaluate every resource it can?
+    - resources_evaluated_by_policy — Number of resources with at least one Policy state of any compliance, on the resource or on a child of it
+    - policy_evaluable_resources — Number of evaluable resources: resources of a type that Policy evaluated on at least one resource in the subscription
+    - policy_evaluated_percentage — Percentage of evaluable resources that Policy evaluated = resources_evaluated_by_policy / policy_evaluable_resources × 100 (a whole number, 0–100); 0 when policy_evaluable_resources is 0, which also happens when Policy evaluated nothing; null if policy_coverage_collected is false
+    - resources_without_policy_evaluation — List of the ids of the evaluable resources with no Policy state
+    - resources_without_policy_evaluation_count — Number of evaluable resources with no Policy state
+    - types_without_policy_evaluation — Number of resources of each type that Policy evaluated on no resource in the subscription, which means no assigned policy applies to that type. These are not counted as missing
+    - all_evaluable_resources_evaluated_by_policy — True if every evaluable resource has a Policy state; false if any doesn't, or if Policy evaluated no resource at all, an empty inventory included; null if the query failed
+
+    Is anything non-compliant?
+    - resources_with_non_compliant_policy — Number of resources with at least one non-compliant Policy state
+    - non_compliant_policy_evaluations — Number of non-compliant Policy states on inventoried resources and their children; states about the subscription, a resource group or anything else not inventoried are not counted here
+    - policy_non_compliant_outside_inventory — Number of non-compliant Policy states about something not inventoried (the subscription, a resource group, or a resource that no longer exists). non_compliant_policy_evaluations plus this is every in-scope non-compliant state
+
+    What does nothing cover?
+    - resources_covered_by_neither_by_type — Number of resources of each type that have neither a Defender assessment nor a Policy state. It counts every such resource, so it holds both the missing resources listed above and the types neither service covers on any resource; null if either query failed
