@@ -47,6 +47,49 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_sign_in_logs`** (`EVD-AZURE-ENTRA-SIGN-IN-LOGS`) — Entra ID
+  sign-in and policy-change evidence read from the Log Analytics (Sentinel)
+  workspace the tenant exports its Entra logs to, with no Microsoft Graph
+  permission. Over a lookback (`ENTRA_LOG_LOOKBACK_DAYS`, 30 by default):
+  - **Interactive sign-ins (`SigninLogs`):** results, MFA and phishing-resistant
+    counts and percentages, the authentication methods and requirement sources,
+    Conditional Access status and risky sign-ins, plus two capped lists: each
+    user's counts, and the successful single-factor sign-ins.
+  - **Non-interactive user sign-ins (`AADNonInteractiveUserSignInLogs`):** counts
+    only, by result, user, app, risk and Conditional Access status.
+  - **Service-principal sign-ins (`AADServicePrincipalSignInLogs`):** counts, and
+    one capped row per principal with its id, name, app id, counts and last
+    sign-in.
+  - **Policy changes (`AuditLogs`):** changes to the authentication methods, MFA,
+    security defaults and Conditional Access policies and every other
+    Policy-category change, counted by operation, with a capped list of events.
+    Never scoped.
+  - No IP addresses, locations or device details are copied.
+  - **Scope.** `users` (`ENTRA_LOG_USERS`) and `app_ids` (`ENTRA_LOG_APP_IDS`)
+    narrow the user sign-ins. `service_principal_app_ids`
+    (`ENTRA_LOG_SERVICE_PRINCIPAL_APP_IDS`) narrows the service-principal
+    sign-ins; it is kept apart because there the app id names the principal.
+    `groups` (`ENTRA_LOG_GROUPS`) limits the user sign-ins to the current members
+    of Entra groups, worked out inside each query from the workspace's
+    `IdentityInfo` table (Sentinel UEBA), so no member list is kept. Only each
+    identity's newest record in the last 21 days counts. With `users` also set,
+    the listed users are added to the members. Evidence gains `group_scope`, with
+    counts only.
+  - **Fails closed.** With `groups` set, when `IdentityInfo` is missing, keeps
+    under 14 days, has no record, is older than `identity_max_age_days`
+    (`ENTRA_LOG_IDENTITY_MAX_AGE_DAYS`, default 14, 1 to 21), cannot be queried,
+    or holds no member of any listed group (and `users` is empty), no user
+    sign-in query is sent, every user sign-in figure is null and the run fails.
+    A scope value that could break the query fails as `bad_config` before any
+    query, and is not written to the message.
+  - **Users are counted by Entra object id**, and by user principal name only
+    where the log has no usable id, so one person is not read as several.
+  - **Limits.** `IdentityInfo` records group names, not ids, so two groups with
+    the same name are both in scope; membership is as of the run; whether a
+    nested group's members count depends on how Sentinel records them.
+  - Needs read on the workspace's logs (Reader, or a custom role with
+    `workspaces/query/read` on the four tables, plus `IdentityInfo` when `groups`
+    is set). Maps to KSI-IAM-APM, KSI-SVC-SIN, KSI-IAM-SNU and KSI-MLA-LET.
 - **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
   Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
   - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from
