@@ -2111,10 +2111,12 @@ schemas and the `paramify` CLI — not the internal code.
   covered all users and apps, even one limited to risky sign-ins, or one that
   accepted a compliant device instead of MFA. They now skip a policy with any
   risk, client app type, platform, location, device filter, authentication flow
-  or application filter condition, or an excluded app, and a policy where
-  another grant control can stand in for MFA. The phishing-resistant all-users
-  figure also skips a policy that excludes a role. Counts that were 1 can
-  now be 0, and the two booleans can now be false.
+  or application filter condition, and a policy where another grant control
+  can stand in for MFA. The all-users figures also skip a policy that excludes
+  any app; the admin-portal and management-API figures skip it only when the
+  excluded app is that resource. The phishing-resistant all-users figure also
+  skips a policy that excludes a role. Counts that were 1 can now be 0, and
+  the two booleans can now be false.
 - **`azure_entra_conditional_access_policies` 0.3.0: guest and external-user
   exclusions are counted.** The `excludeGuestsOrExternalUsers` exclusion now
   counts in `enforced_policies_with_exclusions` and

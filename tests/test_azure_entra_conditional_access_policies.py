@@ -400,7 +400,6 @@ NARROWING = {
     "authentication_flows": {"authenticationFlows": {"transferMethods": "deviceCodeFlow"}},
     "application_filter": {"applications": {"includeApplications": ["All"], "applicationFilter": {
         "mode": "exclude", "rule": 'CustomSecurityAttribute.Tier -eq "Legacy"'}}},
-    "excluded_apps": {"applications": {"includeApplications": ["All"], "excludeApplications": ["app-1"]}},
 }
 
 
@@ -410,6 +409,23 @@ def test_each_narrowing_condition_disqualifies_the_figures(monkeypatch, name):
     assert f["enforced_mfa_for_all_users_and_apps"] == 0
     assert f["enforced_phishing_resistant_mfa_for_all_users_and_apps"] == 0
     assert f["mfa_required_for_admin_portals"] is False and f["mfa_required_for_azure_management_api"] is False
+
+
+def test_an_unrelated_excluded_app_narrows_only_the_all_apps_figures(monkeypatch):
+    excl = {"applications": {"includeApplications": ["All"], "excludeApplications": ["app-1"]}}
+    f = _figures(monkeypatch, _mfa_policy(**excl), _strong_policy(**excl))
+    assert f["enforced_mfa_for_all_users_and_apps"] == 0
+    assert f["enforced_phishing_resistant_mfa_for_all_users_and_apps"] == 0
+    assert f["mfa_required_for_admin_portals"] is True and f["mfa_required_for_azure_management_api"] is True
+
+
+@pytest.mark.parametrize("figure, resource", [
+    ("mfa_required_for_admin_portals", "MicrosoftAdminPortals"),
+    ("mfa_required_for_azure_management_api", "797f4846-ba00-4fd7-ba43-dac1f8f63013"),
+])
+def test_excluding_the_resource_itself_clears_its_figure(monkeypatch, figure, resource):
+    f = _figures(monkeypatch, _mfa_policy(applications={"includeApplications": ["All"], "excludeApplications": [resource]}))
+    assert f[figure] is False
 
 
 def test_unrestricted_conditions_do_not_disqualify(monkeypatch):

@@ -352,11 +352,16 @@ def _client_app_types(policy: dict) -> set:
 
 
 def _unnarrowed(policy: dict, resource: str | None = None) -> bool:
-    """Enforced, on every cloud app (or `resource`), with no excluded app and no condition besides client app types."""
+    """Enforced, on every cloud app (or `resource`), with no condition besides client app types.
+
+    With no `resource`, any excluded app disqualifies; with one, only excluding that resource does.
+    """
     c = policy["conditions"]
     included = policy["target_resources"]["include"]
+    excluded = policy["target_resources"]["exclude"]
     covered = ALL_APPLICATIONS in included or (resource is not None and resource in included)
-    return (policy["is_enforced"] and covered and not policy["target_resources"]["exclude"]
+    narrowed_by_exclusion = (resource in excluded) if resource is not None else bool(excluded)
+    return (policy["is_enforced"] and covered and not narrowed_by_exclusion
             and not policy["target_resources"]["application_filter"]
             and not c["sign_in_risk_levels"] and not c["user_risk_levels"]
             and not c["service_principal_risk_levels"] and not c["insider_risk_levels"]
