@@ -163,11 +163,13 @@ def summarize(gateways: list[dict], connections: list[dict], local_gateways: lis
     tunnels = [c for c in connections if c["is_ipsec_tunnel"]]
     ikev2 = sum(1 for c in tunnels if c["ikev2"] is True)
     ikev1 = sum(1 for c in tunnels if c["ikev2"] is False)
+    vpn = [g for g in gateways if str(g.get("gateway_type") or "").lower() == "vpn"]
     return {
         "total_gateways": len(gateways),
-        "vpn_gateways": sum(1 for g in gateways if str(g.get("gateway_type") or "").lower() == "vpn"),
-        "active_active_gateways": sum(1 for g in gateways if g["active_active"]),
-        "p2s_enabled_gateways": sum(1 for g in gateways if g["p2s_enabled"]),
+        "vpn_gateways": len(vpn),
+        # Vpn-type gateways only: an ExpressRoute gateway has neither mode.
+        "active_active_gateways": sum(1 for g in vpn if g["active_active"]),
+        "p2s_enabled_gateways": sum(1 for g in vpn if g["p2s_enabled"]),
         "total_connections": len(connections),
         "ipsec_connections": len(tunnels),
         "ikev2_connections": ikev2,

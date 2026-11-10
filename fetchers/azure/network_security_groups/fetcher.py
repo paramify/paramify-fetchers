@@ -49,6 +49,9 @@ logger = logging.getLogger("azure_network_security_groups")
 # protocol", kept as literals so the summary math matches what Prowler would flag.
 INTERNET_SOURCE_PREFIXES = ("Internet", "*", "0.0.0.0/0")
 ANY_TCP_PROTOCOLS = ("TCP", "Tcp", "*")
+# A rule's source that covers every address a workload sends from, and a port range that covers every port.
+ANY_SOURCE_PREFIXES = ("*", "0.0.0.0/0", "Internet", "VirtualNetwork")
+ALL_PORTS = ("*", "0-65535")
 
 # The admin ports the summary counts Internet exposure for.
 ADMIN_PORTS = {"ssh": 22, "rdp": 3389}
@@ -315,9 +318,13 @@ def _is_catch_all_internet_outbound(rule: dict) -> bool:
     return (
         rule.get("direction") == "Outbound"
         and rule.get("protocol") == "*"
-        and "*" in _ports(rule)
+        and any(str(p).strip() in ALL_PORTS for p in _ports(rule))
         and any(d in INTERNET_DESTINATION_PREFIXES for d in _destinations(rule))
     )
+
+
+def _source_covers_everything(rule: dict) -> bool:
+    return any(s in ANY_SOURCE_PREFIXES for s in _sources(rule))
 
 
 def unrestricted_internet_outbound(group: dict) -> bool:
@@ -327,7 +334,8 @@ def unrestricted_internet_outbound(group: dict) -> bool:
     the first catch-all rule toward the Internet. With no custom override that is the
     default AllowInternetOutBound (65001), so an NSG nobody touched reads True. A
     narrower Deny (one port) does not count as an override: other egress still flows.
-    The source prefix is not considered. A rule with no priority sorts last.
+    Nor does a Deny limited to some sources: egress from the rest still flows, so the
+    walk goes on. Ports 0-65535 count as "*". A rule with no priority sorts last.
     """
     rules = sorted(
         (*group["security_rules"], *group.get("default_security_rules", [])),
@@ -335,7 +343,10 @@ def unrestricted_internet_outbound(group: dict) -> bool:
     )
     for rule in rules:
         if _is_catch_all_internet_outbound(rule):
-            return rule["access"] == "Allow"
+            if rule["access"] == "Allow":
+                return True
+            if _source_covers_everything(rule):
+                return False
     return False
 
 

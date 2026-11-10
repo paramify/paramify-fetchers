@@ -1,5 +1,5 @@
 name: azure_network_security_groups
-version: 0.5.1
+version: 0.5.2
 description: >-
   Shows which security group rules expose admin ports or allow Internet egress, which subnets and network interfaces sit behind a group, and whether subnets are separated from each other.
 category: azure
@@ -111,8 +111,8 @@ evidence_set:
     - outbound_allow_rules — Number of custom outbound rules whose access is Allow
     - outbound_deny_rules — Number of custom outbound rules whose access is Deny
     - internet_destined_allow_rules — Number of custom outbound Allow rules whose destination includes Internet, * or 0.0.0.0/0
-    - unrestricted_internet_outbound_groups — Number of groups that allow all-port Internet egress: the first catch-all rule toward the Internet (outbound, protocol * and port * written as *, destination Internet, * or 0.0.0.0/0, whatever its source), custom and default rules in priority order, is an Allow, which an untouched group's default AllowInternetOutBound is; a Deny on fewer ports or protocols, or on 0-65535 written as a range, does not count as an override
-    - restricted_internet_outbound_groups — Number of groups that are not in unrestricted_internet_outbound_groups: a catch-all Deny toward the Internet comes first, even one limited to a narrow source, or no catch-all rule toward it is found
+    - unrestricted_internet_outbound_groups — Number of groups that allow all-port Internet egress: the first catch-all rule toward the Internet (outbound, protocol *, port * or 0-65535, destination Internet, * or 0.0.0.0/0), custom and default rules in priority order, is an Allow, which an untouched group's default AllowInternetOutBound is; a Deny on fewer ports or protocols, or one limited to some sources (its source is not *, 0.0.0.0/0, Internet or VirtualNetwork), does not count as an override, and the walk goes on to the next rule
+    - restricted_internet_outbound_groups — Number of groups that are not in unrestricted_internet_outbound_groups: a catch-all Deny toward the Internet whose source covers everything (*, 0.0.0.0/0, Internet or VirtualNetwork) comes first, or no catch-all rule toward it is found
 
     Which virtual networks and subnets sit behind a group?
     - total_virtual_networks — Number of in-scope virtual networks
