@@ -1,0 +1,125 @@
+validator: qualys_hosts_auth_scanned_within_window
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"excluded_ip_ranges": [], "hosts": [{"host_id": "1001", "ip": "10.0.0.1", "days_since_vm_scan": 3.0}], "ipv4_ranges_without_host_record": [], "ipv6_ranges_without_host_record": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "summary": {"excluded_ipv4_addresses": 0, "excluded_ipv6_ranges": 0, "hosts_auth_date_unreadable": 0, "hosts_auth_scan_older_than_window": 0, "hosts_auth_scanned_within_window": 10, "hosts_by_tracking_method": {"cloud_agent": 10, "cloud_instance": 0, "dns": 0, "ip": 0, "netbios": 0, "not_returned": 0, "other": 0}, "hosts_never_auth_scanned": 0, "hosts_not_scanned_within_window": 0, "hosts_scan_date_unreadable": 0, "hosts_scanned_within_window": 10, "hosts_without_vm_scan_date": 0, "max_days_since_vm_scan": 7.0, "scan_window_days": 31, "scope_all": true, "subscription_ipv4_addresses": 16, "subscription_ipv4_addresses_without_host_record": 6, "subscription_ipv6_ranges": 0, "subscription_ipv6_ranges_without_host_record": 0, "total_hosts": 10, "visible_asset_groups": 3}}}'
+
+  - name: compliant_pretty
+    expect: PASS
+    artifact: |
+      {
+        "schema_version": "1.0",
+        "metadata": {
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "excluded_ip_ranges": [],
+          "hosts": [
+            {
+              "host_id": "1001",
+              "ip": "10.0.0.1",
+              "days_since_vm_scan": 3.0
+            }
+          ],
+          "ipv4_ranges_without_host_record": [],
+          "ipv6_ranges_without_host_record": [],
+          "metadata": {
+            "api_url": "https://qualysapi.qualys.example.com",
+            "partial_failure": false,
+            "api_failures": [],
+            "api_user_scope": {
+              "asset_group_titles": [
+                "All"
+              ],
+              "scope_all": true,
+              "visible_asset_groups": 3
+            },
+            "population": {
+              "collected": 10,
+              "pages": 1,
+              "complete": true
+            }
+          },
+          "summary": {
+            "excluded_ipv4_addresses": 0,
+            "excluded_ipv6_ranges": 0,
+            "hosts_auth_date_unreadable": 0,
+            "hosts_auth_scan_older_than_window": 0,
+            "hosts_auth_scanned_within_window": 10,
+            "hosts_by_tracking_method": {
+              "cloud_agent": 10,
+              "cloud_instance": 0,
+              "dns": 0,
+              "ip": 0,
+              "netbios": 0,
+              "not_returned": 0,
+              "other": 0
+            },
+            "hosts_never_auth_scanned": 0,
+            "hosts_not_scanned_within_window": 0,
+            "hosts_scan_date_unreadable": 0,
+            "hosts_scanned_within_window": 10,
+            "hosts_without_vm_scan_date": 0,
+            "max_days_since_vm_scan": 7.0,
+            "scan_window_days": 31,
+            "scope_all": true,
+            "subscription_ipv4_addresses": 16,
+            "subscription_ipv4_addresses_without_host_record": 6,
+            "subscription_ipv6_ranges": 0,
+            "subscription_ipv6_ranges_without_host_record": 0,
+            "total_hosts": 10,
+            "visible_asset_groups": 3
+          }
+        }
+      }
+
+  - name: scan_window_days_wrong
+    expect: FAIL
+    note: 'Only scan_window_days is wrong: 60 where the row wants EQUALS 31.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"excluded_ip_ranges": [], "hosts": [{"host_id": "1001", "ip": "10.0.0.1", "days_since_vm_scan": 3.0}], "ipv4_ranges_without_host_record": [], "ipv6_ranges_without_host_record": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "summary": {"excluded_ipv4_addresses": 0, "excluded_ipv6_ranges": 0, "hosts_auth_date_unreadable": 0, "hosts_auth_scan_older_than_window": 0, "hosts_auth_scanned_within_window": 10, "hosts_by_tracking_method": {"cloud_agent": 10, "cloud_instance": 0, "dns": 0, "ip": 0, "netbios": 0, "not_returned": 0, "other": 0}, "hosts_never_auth_scanned": 0, "hosts_not_scanned_within_window": 0, "hosts_scan_date_unreadable": 0, "hosts_scanned_within_window": 10, "hosts_without_vm_scan_date": 0, "max_days_since_vm_scan": 7.0, "scan_window_days": 60, "scope_all": true, "subscription_ipv4_addresses": 16, "subscription_ipv4_addresses_without_host_record": 6, "subscription_ipv6_ranges": 0, "subscription_ipv6_ranges_without_host_record": 0, "total_hosts": 10, "visible_asset_groups": 3}}}'
+
+  - name: total_hosts_wrong
+    expect: FAIL
+    note: 'Only total_hosts is wrong: 0 where the row wants NOT_EQUALS 0.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"excluded_ip_ranges": [], "hosts": [{"host_id": "1001", "ip": "10.0.0.1", "days_since_vm_scan": 3.0}], "ipv4_ranges_without_host_record": [], "ipv6_ranges_without_host_record": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "summary": {"excluded_ipv4_addresses": 0, "excluded_ipv6_ranges": 0, "hosts_auth_date_unreadable": 0, "hosts_auth_scan_older_than_window": 0, "hosts_auth_scanned_within_window": 10, "hosts_by_tracking_method": {"cloud_agent": 10, "cloud_instance": 0, "dns": 0, "ip": 0, "netbios": 0, "not_returned": 0, "other": 0}, "hosts_never_auth_scanned": 0, "hosts_not_scanned_within_window": 0, "hosts_scan_date_unreadable": 0, "hosts_scanned_within_window": 10, "hosts_without_vm_scan_date": 0, "max_days_since_vm_scan": 7.0, "scan_window_days": 31, "scope_all": true, "subscription_ipv4_addresses": 16, "subscription_ipv4_addresses_without_host_record": 6, "subscription_ipv6_ranges": 0, "subscription_ipv6_ranges_without_host_record": 0, "total_hosts": 0, "visible_asset_groups": 3}}}'
+
+  - name: hosts_auth_scan_older_than_window_wrong
+    expect: FAIL
+    note: 'Only hosts_auth_scan_older_than_window is wrong: 1 where the row wants EQUALS 0.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"excluded_ip_ranges": [], "hosts": [{"host_id": "1001", "ip": "10.0.0.1", "days_since_vm_scan": 3.0}], "ipv4_ranges_without_host_record": [], "ipv6_ranges_without_host_record": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "summary": {"excluded_ipv4_addresses": 0, "excluded_ipv6_ranges": 0, "hosts_auth_date_unreadable": 0, "hosts_auth_scan_older_than_window": 1, "hosts_auth_scanned_within_window": 10, "hosts_by_tracking_method": {"cloud_agent": 10, "cloud_instance": 0, "dns": 0, "ip": 0, "netbios": 0, "not_returned": 0, "other": 0}, "hosts_never_auth_scanned": 0, "hosts_not_scanned_within_window": 0, "hosts_scan_date_unreadable": 0, "hosts_scanned_within_window": 10, "hosts_without_vm_scan_date": 0, "max_days_since_vm_scan": 7.0, "scan_window_days": 31, "scope_all": true, "subscription_ipv4_addresses": 16, "subscription_ipv4_addresses_without_host_record": 6, "subscription_ipv6_ranges": 0, "subscription_ipv6_ranges_without_host_record": 0, "total_hosts": 10, "visible_asset_groups": 3}}}'
+
+  - name: hosts_auth_scan_older_than_window_null
+    expect: FAIL
+    note: 'Only hosts_auth_scan_older_than_window is null, so it could not be counted.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"excluded_ip_ranges": [], "hosts": [{"host_id": "1001", "ip": "10.0.0.1", "days_since_vm_scan": 3.0}], "ipv4_ranges_without_host_record": [], "ipv6_ranges_without_host_record": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "summary": {"excluded_ipv4_addresses": 0, "excluded_ipv6_ranges": 0, "hosts_auth_date_unreadable": 0, "hosts_auth_scan_older_than_window": null, "hosts_auth_scanned_within_window": 10, "hosts_by_tracking_method": {"cloud_agent": 10, "cloud_instance": 0, "dns": 0, "ip": 0, "netbios": 0, "not_returned": 0, "other": 0}, "hosts_never_auth_scanned": 0, "hosts_not_scanned_within_window": 0, "hosts_scan_date_unreadable": 0, "hosts_scanned_within_window": 10, "hosts_without_vm_scan_date": 0, "max_days_since_vm_scan": 7.0, "scan_window_days": 31, "scope_all": true, "subscription_ipv4_addresses": 16, "subscription_ipv4_addresses_without_host_record": 6, "subscription_ipv6_ranges": 0, "subscription_ipv6_ranges_without_host_record": 0, "total_hosts": 10, "visible_asset_groups": 3}}}'
+
+  - name: hosts_never_auth_scanned_wrong
+    expect: FAIL
+    note: 'Only hosts_never_auth_scanned is wrong: 1 where the row wants EQUALS 0.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"excluded_ip_ranges": [], "hosts": [{"host_id": "1001", "ip": "10.0.0.1", "days_since_vm_scan": 3.0}], "ipv4_ranges_without_host_record": [], "ipv6_ranges_without_host_record": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "summary": {"excluded_ipv4_addresses": 0, "excluded_ipv6_ranges": 0, "hosts_auth_date_unreadable": 0, "hosts_auth_scan_older_than_window": 0, "hosts_auth_scanned_within_window": 10, "hosts_by_tracking_method": {"cloud_agent": 10, "cloud_instance": 0, "dns": 0, "ip": 0, "netbios": 0, "not_returned": 0, "other": 0}, "hosts_never_auth_scanned": 1, "hosts_not_scanned_within_window": 0, "hosts_scan_date_unreadable": 0, "hosts_scanned_within_window": 10, "hosts_without_vm_scan_date": 0, "max_days_since_vm_scan": 7.0, "scan_window_days": 31, "scope_all": true, "subscription_ipv4_addresses": 16, "subscription_ipv4_addresses_without_host_record": 6, "subscription_ipv6_ranges": 0, "subscription_ipv6_ranges_without_host_record": 0, "total_hosts": 10, "visible_asset_groups": 3}}}'
+
+  - name: hosts_never_auth_scanned_null
+    expect: FAIL
+    note: 'Only hosts_never_auth_scanned is null, so it could not be counted.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"excluded_ip_ranges": [], "hosts": [{"host_id": "1001", "ip": "10.0.0.1", "days_since_vm_scan": 3.0}], "ipv4_ranges_without_host_record": [], "ipv6_ranges_without_host_record": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "summary": {"excluded_ipv4_addresses": 0, "excluded_ipv6_ranges": 0, "hosts_auth_date_unreadable": 0, "hosts_auth_scan_older_than_window": 0, "hosts_auth_scanned_within_window": 10, "hosts_by_tracking_method": {"cloud_agent": 10, "cloud_instance": 0, "dns": 0, "ip": 0, "netbios": 0, "not_returned": 0, "other": 0}, "hosts_never_auth_scanned": null, "hosts_not_scanned_within_window": 0, "hosts_scan_date_unreadable": 0, "hosts_scanned_within_window": 10, "hosts_without_vm_scan_date": 0, "max_days_since_vm_scan": 7.0, "scan_window_days": 31, "scope_all": true, "subscription_ipv4_addresses": 16, "subscription_ipv4_addresses_without_host_record": 6, "subscription_ipv6_ranges": 0, "subscription_ipv6_ranges_without_host_record": 0, "total_hosts": 10, "visible_asset_groups": 3}}}'
+
+  - name: hosts_auth_date_unreadable_wrong
+    expect: FAIL
+    note: 'Only hosts_auth_date_unreadable is wrong: 1 where the row wants EQUALS 0.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"excluded_ip_ranges": [], "hosts": [{"host_id": "1001", "ip": "10.0.0.1", "days_since_vm_scan": 3.0}], "ipv4_ranges_without_host_record": [], "ipv6_ranges_without_host_record": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "summary": {"excluded_ipv4_addresses": 0, "excluded_ipv6_ranges": 0, "hosts_auth_date_unreadable": 1, "hosts_auth_scan_older_than_window": 0, "hosts_auth_scanned_within_window": 10, "hosts_by_tracking_method": {"cloud_agent": 10, "cloud_instance": 0, "dns": 0, "ip": 0, "netbios": 0, "not_returned": 0, "other": 0}, "hosts_never_auth_scanned": 0, "hosts_not_scanned_within_window": 0, "hosts_scan_date_unreadable": 0, "hosts_scanned_within_window": 10, "hosts_without_vm_scan_date": 0, "max_days_since_vm_scan": 7.0, "scan_window_days": 31, "scope_all": true, "subscription_ipv4_addresses": 16, "subscription_ipv4_addresses_without_host_record": 6, "subscription_ipv6_ranges": 0, "subscription_ipv6_ranges_without_host_record": 0, "total_hosts": 10, "visible_asset_groups": 3}}}'
+
+  - name: hosts_auth_date_unreadable_null
+    expect: FAIL
+    note: 'Only hosts_auth_date_unreadable is null, so it could not be counted.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"excluded_ip_ranges": [], "hosts": [{"host_id": "1001", "ip": "10.0.0.1", "days_since_vm_scan": 3.0}], "ipv4_ranges_without_host_record": [], "ipv6_ranges_without_host_record": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "summary": {"excluded_ipv4_addresses": 0, "excluded_ipv6_ranges": 0, "hosts_auth_date_unreadable": null, "hosts_auth_scan_older_than_window": 0, "hosts_auth_scanned_within_window": 10, "hosts_by_tracking_method": {"cloud_agent": 10, "cloud_instance": 0, "dns": 0, "ip": 0, "netbios": 0, "not_returned": 0, "other": 0}, "hosts_never_auth_scanned": 0, "hosts_not_scanned_within_window": 0, "hosts_scan_date_unreadable": 0, "hosts_scanned_within_window": 10, "hosts_without_vm_scan_date": 0, "max_days_since_vm_scan": 7.0, "scan_window_days": 31, "scope_all": true, "subscription_ipv4_addresses": 16, "subscription_ipv4_addresses_without_host_record": 6, "subscription_ipv6_ranges": 0, "subscription_ipv6_ranges_without_host_record": 0, "total_hosts": 10, "visible_asset_groups": 3}}}'
+
+  - name: hosts_auth_date_unreadable_renamed
+    expect: FAIL
+    note: 'The key is renamed upstream; the presence row must fail, not read it as compliant.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"excluded_ip_ranges": [], "hosts": [{"host_id": "1001", "ip": "10.0.0.1", "days_since_vm_scan": 3.0}], "ipv4_ranges_without_host_record": [], "ipv6_ranges_without_host_record": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "summary": {"excluded_ipv4_addresses": 0, "excluded_ipv6_ranges": 0, "hosts_auth_scan_older_than_window": 0, "hosts_auth_scanned_within_window": 10, "hosts_by_tracking_method": {"cloud_agent": 10, "cloud_instance": 0, "dns": 0, "ip": 0, "netbios": 0, "not_returned": 0, "other": 0}, "hosts_never_auth_scanned": 0, "hosts_not_scanned_within_window": 0, "hosts_scan_date_unreadable": 0, "hosts_scanned_within_window": 10, "hosts_without_vm_scan_date": 0, "max_days_since_vm_scan": 7.0, "scan_window_days": 31, "scope_all": true, "subscription_ipv4_addresses": 16, "subscription_ipv4_addresses_without_host_record": 6, "subscription_ipv6_ranges": 0, "subscription_ipv6_ranges_without_host_record": 0, "total_hosts": 10, "visible_asset_groups": 3, "hosts_auth_date_unreadable_v2": 0}}}'
+
+  - name: failed_run_no_summary
+    expect: FAIL
+    note: 'A failed run writes a null summary.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 1, "status": "failed"}, "payload": {"excluded_ip_ranges": [], "hosts": [{"host_id": "1001", "ip": "10.0.0.1", "days_since_vm_scan": 3.0}], "ipv4_ranges_without_host_record": [], "ipv6_ranges_without_host_record": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "summary": null}}'

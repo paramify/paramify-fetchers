@@ -1,0 +1,36 @@
+key: qualys_scan_schedules_run_within_window
+name: Qualys Scan Schedules Run Within 31 Days
+type: AUTOMATED
+role: configuration
+statement: >
+  The scan window is the fetcher's default 31 days; at least one active recurring VM scan schedule runs
+  within it; no active recurring schedule has a longer gap between runs, and none has an unreadable
+  interval; and at least one scheduled scan launched in the window finished. Supports KSI-CNA-EIS. It
+  does not check which assets the schedules target, whether they authenticate (a separate validator),
+  or one-off schedules. It assumes a schedule's ACTIVE value of 1 to 3 means it runs.
+
+# Every capture reads the summary, which the fetcher writes last; other copies of these keys sit before it.
+regex: '"summary":\s*\{(?=[\s\S]*?"scan_window_days":\s*(?<scan_window_days>\d+))(?=[\s\S]*?"active_schedules_within_window":\s*(?<active_schedules_within_window>\d+))(?=[\s\S]*?"active_schedules_over_window":\s*(?<active_schedules_over_window>\d+|null))(?=[\s\S]*?"active_schedules_interval_unread":\s*(?<active_schedules_interval_unread>\d+|null))(?=[\s\S]*?"scheduled_scans_finished_in_window":\s*(?<scheduled_scans_finished_in_window>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 31; MATCH_GROUP[2] NOT_EQUALS 0; MATCH_GROUP[3] EQUALS 0; MATCH_GROUP[4] EQUALS 0; MATCH_GROUP[5] NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # scan_window_days
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "31" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # active_schedules_within_window
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # active_schedules_over_window
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }   # active_schedules_interval_unread
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 5 }   # scheduled_scans_finished_in_window
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-QUALYS-SCAN-SCHEDULES

@@ -1,0 +1,30 @@
+key: qualys_scan_schedules_authenticated
+name: Qualys Active Scan Schedules Use Authentication
+type: AUTOMATED
+role: configuration
+statement: >
+  At least one active VM scan schedule uses an option profile that enables authentication, no active
+  schedule's option profile enables none, and no active schedule's option profile is missing or
+  unreadable. Supports KSI-CNA-EIS. It does not check that the credentials work on each host (the host
+  coverage evidence shows authenticated scan dates) or how often the schedules run. It assumes an
+  option profile lists the authentication types it enables, not those available.
+
+# Every capture reads the summary, which the fetcher writes last; other copies of these keys sit before it.
+regex: '"summary":\s*\{(?=[\s\S]*?"active_schedules_with_authentication":\s*(?<active_schedules_with_authentication>\d+))(?=[\s\S]*?"active_schedules_without_authentication":\s*(?<active_schedules_without_authentication>\d+|null))(?=[\s\S]*?"active_schedules_authentication_unread":\s*(?<active_schedules_authentication_unread>\d+|null))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # active_schedules_with_authentication
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # active_schedules_without_authentication
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # active_schedules_authentication_unread
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-QUALYS-SCAN-SCHEDULES

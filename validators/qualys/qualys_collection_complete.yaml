@@ -1,0 +1,31 @@
+key: qualys_collection_complete
+name: Qualys Collection Complete Across All Assets
+type: AUTOMATED
+role: completeness
+statement: >
+  The Qualys fetcher run finished with exit code 0, and the API user it ran as sees the built-in All
+  asset group, so the evidence covers every asset rather than only some asset groups. Supports
+  KSI-CNA-EIS, KSI-SVC-EIS and KSI-SCR-MON for Qualys VMDR. It does not check any scan, schedule or
+  vulnerability result. It assumes, from the Qualys API guide, that a user who sees the All group sees
+  every asset; under tag-based user scoping that may not hold, and this check can then fail or pass
+  without proving full scope.
+
+# exit_code is the envelope's; scope_all is read from the payload's api_user_scope, written before the summary.
+regex: '^\s*\{(?=[\s\S]*?"exit_code":\s*(?<exit_code>-?\d+))(?=[\s\S]*?"scope_all":\s*(?<scope_all>true|false|null))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS true
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # exit_code
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # scope_all
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-QUALYS-SCAN-COVERAGE
+  - EVD-QUALYS-SCAN-SCHEDULES
+  - EVD-QUALYS-VULNERABILITY-FINDINGS
+  - EVD-QUALYS-VULNERABILITY-REMEDIATION

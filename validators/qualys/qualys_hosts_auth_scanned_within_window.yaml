@@ -1,0 +1,36 @@
+key: qualys_hosts_auth_scanned_within_window
+name: Qualys Hosts Authenticated-Scanned Within 31 Days
+type: AUTOMATED
+role: configuration
+statement: >
+  The scan window is the fetcher's default 31 days; Qualys tracks at least one host; and every host's
+  last authenticated scan is within the window: none is older, none was never scanned with
+  authentication, and none has an unreadable date. Supports KSI-CNA-EIS. It does not check that the
+  authentication succeeded on every check, or hosts Qualys does not track. It assumes Qualys records a
+  Cloud Agent scan as the host's authenticated scan date.
+
+# Every capture reads the summary, which the fetcher writes last; other copies of these keys sit before it.
+regex: '"summary":\s*\{(?=[\s\S]*?"scan_window_days":\s*(?<scan_window_days>\d+))(?=[\s\S]*?"total_hosts":\s*(?<total_hosts>\d+))(?=[\s\S]*?"hosts_auth_scan_older_than_window":\s*(?<hosts_auth_scan_older_than_window>\d+|null))(?=[\s\S]*?"hosts_never_auth_scanned":\s*(?<hosts_never_auth_scanned>\d+|null))(?=[\s\S]*?"hosts_auth_date_unreadable":\s*(?<hosts_auth_date_unreadable>\d+|null))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 31; MATCH_GROUP[2] NOT_EQUALS 0; MATCH_GROUP[3] EQUALS 0; MATCH_GROUP[4] EQUALS 0; MATCH_GROUP[5] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # scan_window_days
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "31" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_hosts
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # hosts_auth_scan_older_than_window
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }   # hosts_never_auth_scanned
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 5 }   # hosts_auth_date_unreadable
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-QUALYS-SCAN-COVERAGE

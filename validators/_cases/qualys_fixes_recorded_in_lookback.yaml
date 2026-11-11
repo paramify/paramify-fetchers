@@ -1,0 +1,103 @@
+validator: qualys_fixes_recorded_in_lookback
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"fixed": [{"qid": "100002", "severity": 4, "age_days": 12.0, "remediation_days": 30, "within_timeframe": true}], "fixed_date_unread": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "reopened": [], "summary": {"fixed_after_reopening": 0, "fixed_after_timeframe": 0, "fixed_after_timeframe_by_severity": {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0, "not_returned": 0}, "fixed_by_severity": {"1": 0, "2": 0, "3": 2, "4": 2, "5": 0, "not_returned": 0}, "fixed_date_unread": 0, "fixed_detections": 4, "fixed_timeframe_unread": 0, "fixed_within_timeframe": 4, "lookback_days": 90, "max_days_to_fix": 40.0, "median_days_to_fix": 15.0, "remediation_days": {"5": 30, "4": 30, "3": 90, "2": 180, "1": 180}, "reopened_in_lookback": 0, "scope_all": true, "visible_asset_groups": 3}}}'
+
+  - name: compliant_pretty
+    expect: PASS
+    artifact: |
+      {
+        "schema_version": "1.0",
+        "metadata": {
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "fixed": [
+            {
+              "qid": "100002",
+              "severity": 4,
+              "age_days": 12.0,
+              "remediation_days": 30,
+              "within_timeframe": true
+            }
+          ],
+          "fixed_date_unread": [],
+          "metadata": {
+            "api_url": "https://qualysapi.qualys.example.com",
+            "partial_failure": false,
+            "api_failures": [],
+            "api_user_scope": {
+              "asset_group_titles": [
+                "All"
+              ],
+              "scope_all": true,
+              "visible_asset_groups": 3
+            },
+            "population": {
+              "collected": 10,
+              "pages": 1,
+              "complete": true
+            }
+          },
+          "reopened": [],
+          "summary": {
+            "fixed_after_reopening": 0,
+            "fixed_after_timeframe": 0,
+            "fixed_after_timeframe_by_severity": {
+              "1": 0,
+              "2": 0,
+              "3": 0,
+              "4": 0,
+              "5": 0,
+              "not_returned": 0
+            },
+            "fixed_by_severity": {
+              "1": 0,
+              "2": 0,
+              "3": 2,
+              "4": 2,
+              "5": 0,
+              "not_returned": 0
+            },
+            "fixed_date_unread": 0,
+            "fixed_detections": 4,
+            "fixed_timeframe_unread": 0,
+            "fixed_within_timeframe": 4,
+            "lookback_days": 90,
+            "max_days_to_fix": 40.0,
+            "median_days_to_fix": 15.0,
+            "remediation_days": {
+              "5": 30,
+              "4": 30,
+              "3": 90,
+              "2": 180,
+              "1": 180
+            },
+            "reopened_in_lookback": 0,
+            "scope_all": true,
+            "visible_asset_groups": 3
+          }
+        }
+      }
+
+  - name: lookback_days_wrong
+    expect: FAIL
+    note: 'Only lookback_days is wrong: 30 where the row wants EQUALS 90.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"fixed": [{"qid": "100002", "severity": 4, "age_days": 12.0, "remediation_days": 30, "within_timeframe": true}], "fixed_date_unread": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "reopened": [], "summary": {"fixed_after_reopening": 0, "fixed_after_timeframe": 0, "fixed_after_timeframe_by_severity": {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0, "not_returned": 0}, "fixed_by_severity": {"1": 0, "2": 0, "3": 2, "4": 2, "5": 0, "not_returned": 0}, "fixed_date_unread": 0, "fixed_detections": 4, "fixed_timeframe_unread": 0, "fixed_within_timeframe": 4, "lookback_days": 30, "max_days_to_fix": 40.0, "median_days_to_fix": 15.0, "remediation_days": {"5": 30, "4": 30, "3": 90, "2": 180, "1": 180}, "reopened_in_lookback": 0, "scope_all": true, "visible_asset_groups": 3}}}'
+
+  - name: fixed_detections_wrong
+    expect: FAIL
+    note: 'Only fixed_detections is wrong: 0 where the row wants NOT_EQUALS 0.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"fixed": [{"qid": "100002", "severity": 4, "age_days": 12.0, "remediation_days": 30, "within_timeframe": true}], "fixed_date_unread": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "reopened": [], "summary": {"fixed_after_reopening": 0, "fixed_after_timeframe": 0, "fixed_after_timeframe_by_severity": {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0, "not_returned": 0}, "fixed_by_severity": {"1": 0, "2": 0, "3": 2, "4": 2, "5": 0, "not_returned": 0}, "fixed_date_unread": 0, "fixed_detections": 0, "fixed_timeframe_unread": 0, "fixed_within_timeframe": 4, "lookback_days": 90, "max_days_to_fix": 40.0, "median_days_to_fix": 15.0, "remediation_days": {"5": 30, "4": 30, "3": 90, "2": 180, "1": 180}, "reopened_in_lookback": 0, "scope_all": true, "visible_asset_groups": 3}}}'
+
+  - name: fixed_detections_renamed
+    expect: FAIL
+    note: 'The key is renamed upstream; the presence row must fail, not read it as compliant.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"fixed": [{"qid": "100002", "severity": 4, "age_days": 12.0, "remediation_days": 30, "within_timeframe": true}], "fixed_date_unread": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "reopened": [], "summary": {"fixed_after_reopening": 0, "fixed_after_timeframe": 0, "fixed_after_timeframe_by_severity": {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0, "not_returned": 0}, "fixed_by_severity": {"1": 0, "2": 0, "3": 2, "4": 2, "5": 0, "not_returned": 0}, "fixed_date_unread": 0, "fixed_timeframe_unread": 0, "fixed_within_timeframe": 4, "lookback_days": 90, "max_days_to_fix": 40.0, "median_days_to_fix": 15.0, "remediation_days": {"5": 30, "4": 30, "3": 90, "2": 180, "1": 180}, "reopened_in_lookback": 0, "scope_all": true, "visible_asset_groups": 3, "fixed_detections_v2": 4}}}'
+
+  - name: failed_run_no_summary
+    expect: FAIL
+    note: 'A failed run writes a null summary.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 1, "status": "failed"}, "payload": {"fixed": [{"qid": "100002", "severity": 4, "age_days": 12.0, "remediation_days": 30, "within_timeframe": true}], "fixed_date_unread": [], "metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "reopened": [], "summary": null}}'

@@ -1,0 +1,145 @@
+validator: qualys_scan_schedules_run_within_window
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "option_profiles": [{"title": "Authenticated Scan", "authentication_types": ["Unix", "Windows"]}], "scans": [{"type": "Scheduled", "state": "Finished"}], "schedules": [{"schedule_id": "1", "active": true, "interval_days": 7}], "summary": {"active_schedules": 2, "active_schedules_authentication_unread": 0, "active_schedules_by_recurrence": {"daily": 0, "monthly": 1, "not_returned": 0, "once": 0, "weekly": 1}, "active_schedules_interval_unread": 0, "active_schedules_over_window": 0, "active_schedules_with_authentication": 2, "active_schedules_within_window": 2, "active_schedules_without_authentication": 0, "inactive_schedules": 1, "option_profiles": 2, "option_profiles_with_authentication": 1, "scan_window_days": 31, "scans_by_state": {"canceled": 0, "error": 0, "finished": 5, "loading": 0, "not_returned": 0, "other": 0, "paused": 0, "queued": 0, "running": 0}, "scans_by_type": {"api": 0, "not_returned": 0, "on_demand": 0, "other": 0, "scheduled": 5}, "scans_in_window": 5, "scheduled_scans_finished_in_window": 5, "scope_all": true, "total_schedules": 3, "visible_asset_groups": 3}}}'
+
+  - name: compliant_pretty
+    expect: PASS
+    artifact: |
+      {
+        "schema_version": "1.0",
+        "metadata": {
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "api_url": "https://qualysapi.qualys.example.com",
+            "partial_failure": false,
+            "api_failures": [],
+            "api_user_scope": {
+              "asset_group_titles": [
+                "All"
+              ],
+              "scope_all": true,
+              "visible_asset_groups": 3
+            },
+            "population": {
+              "collected": 10,
+              "pages": 1,
+              "complete": true
+            }
+          },
+          "option_profiles": [
+            {
+              "title": "Authenticated Scan",
+              "authentication_types": [
+                "Unix",
+                "Windows"
+              ]
+            }
+          ],
+          "scans": [
+            {
+              "type": "Scheduled",
+              "state": "Finished"
+            }
+          ],
+          "schedules": [
+            {
+              "schedule_id": "1",
+              "active": true,
+              "interval_days": 7
+            }
+          ],
+          "summary": {
+            "active_schedules": 2,
+            "active_schedules_authentication_unread": 0,
+            "active_schedules_by_recurrence": {
+              "daily": 0,
+              "monthly": 1,
+              "not_returned": 0,
+              "once": 0,
+              "weekly": 1
+            },
+            "active_schedules_interval_unread": 0,
+            "active_schedules_over_window": 0,
+            "active_schedules_with_authentication": 2,
+            "active_schedules_within_window": 2,
+            "active_schedules_without_authentication": 0,
+            "inactive_schedules": 1,
+            "option_profiles": 2,
+            "option_profiles_with_authentication": 1,
+            "scan_window_days": 31,
+            "scans_by_state": {
+              "canceled": 0,
+              "error": 0,
+              "finished": 5,
+              "loading": 0,
+              "not_returned": 0,
+              "other": 0,
+              "paused": 0,
+              "queued": 0,
+              "running": 0
+            },
+            "scans_by_type": {
+              "api": 0,
+              "not_returned": 0,
+              "on_demand": 0,
+              "other": 0,
+              "scheduled": 5
+            },
+            "scans_in_window": 5,
+            "scheduled_scans_finished_in_window": 5,
+            "scope_all": true,
+            "total_schedules": 3,
+            "visible_asset_groups": 3
+          }
+        }
+      }
+
+  - name: scan_window_days_wrong
+    expect: FAIL
+    note: 'Only scan_window_days is wrong: 60 where the row wants EQUALS 31.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "option_profiles": [{"title": "Authenticated Scan", "authentication_types": ["Unix", "Windows"]}], "scans": [{"type": "Scheduled", "state": "Finished"}], "schedules": [{"schedule_id": "1", "active": true, "interval_days": 7}], "summary": {"active_schedules": 2, "active_schedules_authentication_unread": 0, "active_schedules_by_recurrence": {"daily": 0, "monthly": 1, "not_returned": 0, "once": 0, "weekly": 1}, "active_schedules_interval_unread": 0, "active_schedules_over_window": 0, "active_schedules_with_authentication": 2, "active_schedules_within_window": 2, "active_schedules_without_authentication": 0, "inactive_schedules": 1, "option_profiles": 2, "option_profiles_with_authentication": 1, "scan_window_days": 60, "scans_by_state": {"canceled": 0, "error": 0, "finished": 5, "loading": 0, "not_returned": 0, "other": 0, "paused": 0, "queued": 0, "running": 0}, "scans_by_type": {"api": 0, "not_returned": 0, "on_demand": 0, "other": 0, "scheduled": 5}, "scans_in_window": 5, "scheduled_scans_finished_in_window": 5, "scope_all": true, "total_schedules": 3, "visible_asset_groups": 3}}}'
+
+  - name: active_schedules_within_window_wrong
+    expect: FAIL
+    note: 'Only active_schedules_within_window is wrong: 0 where the row wants NOT_EQUALS 0.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "option_profiles": [{"title": "Authenticated Scan", "authentication_types": ["Unix", "Windows"]}], "scans": [{"type": "Scheduled", "state": "Finished"}], "schedules": [{"schedule_id": "1", "active": true, "interval_days": 7}], "summary": {"active_schedules": 2, "active_schedules_authentication_unread": 0, "active_schedules_by_recurrence": {"daily": 0, "monthly": 1, "not_returned": 0, "once": 0, "weekly": 1}, "active_schedules_interval_unread": 0, "active_schedules_over_window": 0, "active_schedules_with_authentication": 2, "active_schedules_within_window": 0, "active_schedules_without_authentication": 0, "inactive_schedules": 1, "option_profiles": 2, "option_profiles_with_authentication": 1, "scan_window_days": 31, "scans_by_state": {"canceled": 0, "error": 0, "finished": 5, "loading": 0, "not_returned": 0, "other": 0, "paused": 0, "queued": 0, "running": 0}, "scans_by_type": {"api": 0, "not_returned": 0, "on_demand": 0, "other": 0, "scheduled": 5}, "scans_in_window": 5, "scheduled_scans_finished_in_window": 5, "scope_all": true, "total_schedules": 3, "visible_asset_groups": 3}}}'
+
+  - name: active_schedules_over_window_wrong
+    expect: FAIL
+    note: 'Only active_schedules_over_window is wrong: 1 where the row wants EQUALS 0.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "option_profiles": [{"title": "Authenticated Scan", "authentication_types": ["Unix", "Windows"]}], "scans": [{"type": "Scheduled", "state": "Finished"}], "schedules": [{"schedule_id": "1", "active": true, "interval_days": 7}], "summary": {"active_schedules": 2, "active_schedules_authentication_unread": 0, "active_schedules_by_recurrence": {"daily": 0, "monthly": 1, "not_returned": 0, "once": 0, "weekly": 1}, "active_schedules_interval_unread": 0, "active_schedules_over_window": 1, "active_schedules_with_authentication": 2, "active_schedules_within_window": 2, "active_schedules_without_authentication": 0, "inactive_schedules": 1, "option_profiles": 2, "option_profiles_with_authentication": 1, "scan_window_days": 31, "scans_by_state": {"canceled": 0, "error": 0, "finished": 5, "loading": 0, "not_returned": 0, "other": 0, "paused": 0, "queued": 0, "running": 0}, "scans_by_type": {"api": 0, "not_returned": 0, "on_demand": 0, "other": 0, "scheduled": 5}, "scans_in_window": 5, "scheduled_scans_finished_in_window": 5, "scope_all": true, "total_schedules": 3, "visible_asset_groups": 3}}}'
+
+  - name: active_schedules_over_window_null
+    expect: FAIL
+    note: 'Only active_schedules_over_window is null, so it could not be counted.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "option_profiles": [{"title": "Authenticated Scan", "authentication_types": ["Unix", "Windows"]}], "scans": [{"type": "Scheduled", "state": "Finished"}], "schedules": [{"schedule_id": "1", "active": true, "interval_days": 7}], "summary": {"active_schedules": 2, "active_schedules_authentication_unread": 0, "active_schedules_by_recurrence": {"daily": 0, "monthly": 1, "not_returned": 0, "once": 0, "weekly": 1}, "active_schedules_interval_unread": 0, "active_schedules_over_window": null, "active_schedules_with_authentication": 2, "active_schedules_within_window": 2, "active_schedules_without_authentication": 0, "inactive_schedules": 1, "option_profiles": 2, "option_profiles_with_authentication": 1, "scan_window_days": 31, "scans_by_state": {"canceled": 0, "error": 0, "finished": 5, "loading": 0, "not_returned": 0, "other": 0, "paused": 0, "queued": 0, "running": 0}, "scans_by_type": {"api": 0, "not_returned": 0, "on_demand": 0, "other": 0, "scheduled": 5}, "scans_in_window": 5, "scheduled_scans_finished_in_window": 5, "scope_all": true, "total_schedules": 3, "visible_asset_groups": 3}}}'
+
+  - name: active_schedules_interval_unread_wrong
+    expect: FAIL
+    note: 'Only active_schedules_interval_unread is wrong: 1 where the row wants EQUALS 0.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "option_profiles": [{"title": "Authenticated Scan", "authentication_types": ["Unix", "Windows"]}], "scans": [{"type": "Scheduled", "state": "Finished"}], "schedules": [{"schedule_id": "1", "active": true, "interval_days": 7}], "summary": {"active_schedules": 2, "active_schedules_authentication_unread": 0, "active_schedules_by_recurrence": {"daily": 0, "monthly": 1, "not_returned": 0, "once": 0, "weekly": 1}, "active_schedules_interval_unread": 1, "active_schedules_over_window": 0, "active_schedules_with_authentication": 2, "active_schedules_within_window": 2, "active_schedules_without_authentication": 0, "inactive_schedules": 1, "option_profiles": 2, "option_profiles_with_authentication": 1, "scan_window_days": 31, "scans_by_state": {"canceled": 0, "error": 0, "finished": 5, "loading": 0, "not_returned": 0, "other": 0, "paused": 0, "queued": 0, "running": 0}, "scans_by_type": {"api": 0, "not_returned": 0, "on_demand": 0, "other": 0, "scheduled": 5}, "scans_in_window": 5, "scheduled_scans_finished_in_window": 5, "scope_all": true, "total_schedules": 3, "visible_asset_groups": 3}}}'
+
+  - name: active_schedules_interval_unread_null
+    expect: FAIL
+    note: 'Only active_schedules_interval_unread is null, so it could not be counted.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "option_profiles": [{"title": "Authenticated Scan", "authentication_types": ["Unix", "Windows"]}], "scans": [{"type": "Scheduled", "state": "Finished"}], "schedules": [{"schedule_id": "1", "active": true, "interval_days": 7}], "summary": {"active_schedules": 2, "active_schedules_authentication_unread": 0, "active_schedules_by_recurrence": {"daily": 0, "monthly": 1, "not_returned": 0, "once": 0, "weekly": 1}, "active_schedules_interval_unread": null, "active_schedules_over_window": 0, "active_schedules_with_authentication": 2, "active_schedules_within_window": 2, "active_schedules_without_authentication": 0, "inactive_schedules": 1, "option_profiles": 2, "option_profiles_with_authentication": 1, "scan_window_days": 31, "scans_by_state": {"canceled": 0, "error": 0, "finished": 5, "loading": 0, "not_returned": 0, "other": 0, "paused": 0, "queued": 0, "running": 0}, "scans_by_type": {"api": 0, "not_returned": 0, "on_demand": 0, "other": 0, "scheduled": 5}, "scans_in_window": 5, "scheduled_scans_finished_in_window": 5, "scope_all": true, "total_schedules": 3, "visible_asset_groups": 3}}}'
+
+  - name: scheduled_scans_finished_in_window_wrong
+    expect: FAIL
+    note: 'Only scheduled_scans_finished_in_window is wrong: 0 where the row wants NOT_EQUALS 0.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "option_profiles": [{"title": "Authenticated Scan", "authentication_types": ["Unix", "Windows"]}], "scans": [{"type": "Scheduled", "state": "Finished"}], "schedules": [{"schedule_id": "1", "active": true, "interval_days": 7}], "summary": {"active_schedules": 2, "active_schedules_authentication_unread": 0, "active_schedules_by_recurrence": {"daily": 0, "monthly": 1, "not_returned": 0, "once": 0, "weekly": 1}, "active_schedules_interval_unread": 0, "active_schedules_over_window": 0, "active_schedules_with_authentication": 2, "active_schedules_within_window": 2, "active_schedules_without_authentication": 0, "inactive_schedules": 1, "option_profiles": 2, "option_profiles_with_authentication": 1, "scan_window_days": 31, "scans_by_state": {"canceled": 0, "error": 0, "finished": 5, "loading": 0, "not_returned": 0, "other": 0, "paused": 0, "queued": 0, "running": 0}, "scans_by_type": {"api": 0, "not_returned": 0, "on_demand": 0, "other": 0, "scheduled": 5}, "scans_in_window": 5, "scheduled_scans_finished_in_window": 0, "scope_all": true, "total_schedules": 3, "visible_asset_groups": 3}}}'
+
+  - name: scheduled_scans_finished_in_window_renamed
+    expect: FAIL
+    note: 'The key is renamed upstream; the presence row must fail, not read it as compliant.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "option_profiles": [{"title": "Authenticated Scan", "authentication_types": ["Unix", "Windows"]}], "scans": [{"type": "Scheduled", "state": "Finished"}], "schedules": [{"schedule_id": "1", "active": true, "interval_days": 7}], "summary": {"active_schedules": 2, "active_schedules_authentication_unread": 0, "active_schedules_by_recurrence": {"daily": 0, "monthly": 1, "not_returned": 0, "once": 0, "weekly": 1}, "active_schedules_interval_unread": 0, "active_schedules_over_window": 0, "active_schedules_with_authentication": 2, "active_schedules_within_window": 2, "active_schedules_without_authentication": 0, "inactive_schedules": 1, "option_profiles": 2, "option_profiles_with_authentication": 1, "scan_window_days": 31, "scans_by_state": {"canceled": 0, "error": 0, "finished": 5, "loading": 0, "not_returned": 0, "other": 0, "paused": 0, "queued": 0, "running": 0}, "scans_by_type": {"api": 0, "not_returned": 0, "on_demand": 0, "other": 0, "scheduled": 5}, "scans_in_window": 5, "scope_all": true, "total_schedules": 3, "visible_asset_groups": 3, "scheduled_scans_finished_in_window_v2": 5}}}'
+
+  - name: failed_run_no_summary
+    expect: FAIL
+    note: 'A failed run writes a null summary.'
+    artifact: '{"schema_version": "1.0", "metadata": {"exit_code": 1, "status": "failed"}, "payload": {"metadata": {"api_url": "https://qualysapi.qualys.example.com", "partial_failure": false, "api_failures": [], "api_user_scope": {"asset_group_titles": ["All"], "scope_all": true, "visible_asset_groups": 3}, "population": {"collected": 10, "pages": 1, "complete": true}}, "option_profiles": [{"title": "Authenticated Scan", "authentication_types": ["Unix", "Windows"]}], "scans": [{"type": "Scheduled", "state": "Finished"}], "schedules": [{"schedule_id": "1", "active": true, "interval_days": 7}], "summary": null}}'
