@@ -1,7 +1,9 @@
 # Writing an issue-report fetcher
 
-An issue-report fetcher hands Paramify a report your scanner already produced,
-such as a Nessus export or a Wiz CSV, byte for byte. The assessment's pipeline in
+An issue-report fetcher hands Paramify a scan report: usually one your scanner
+already produced, such as a Nessus export or a Wiz CSV, byte for byte, or a CSV
+the fetcher builds from the scanner's API (see [API-built reports](#api-built-reports)).
+The assessment's pipeline in
 Paramify parses it into issues
 ([how intake works](https://support.paramify.com/hc/en-us/articles/41294208918291-Manage-Vulnerability-and-Configuration-Scans)).
 This guide builds one from the template, runs it against two scans, and reads what
@@ -101,17 +103,29 @@ paramify describe tenable_vuln_scan
 
 ## 3. Stream the tool's bytes
 
-**The file on disk must be the tool's own bytes.** Swap the template's request
-for the tool's export call, poll until the export is ready, then stream it to disk.
-Never parse and rewrite it: no `json.dump`, no `csv.writer`.
+**When the tool has an export, the file on disk is the tool's own bytes.** Swap
+the template's request for the tool's export call, poll until the export is
+ready, then stream it to disk. Don't parse and rewrite a native export: existing
+intake presets expect its exact format.
 
-API-derived adapters are explicit exceptions: for example,
+### API-built reports
+
+When a tool has no practical export (for example, Amazon Inspector's export
+needs an S3 bucket and KMS key the customer would have to set up first), the
+fetcher may build the report itself from the tool's read APIs, as
 [`aws_inspector_ecr_report`](../fetchers/aws/inspector_ecr_report/README.md)
-converts Inspector API findings to a documented CSV without an S3 export.
-Such an adapter needs its own intake mapping, stable record/resource identities,
-complete pagination and tests that failed collection cannot become an empty scan.
-It must not claim to be a native export or silently change an existing preset's
-format. The uploader still sends the adapter's final bytes unchanged.
+does. An API-built report must:
+
+- document its columns in the fetcher's README, since the assessment needs an
+  intake preset that matches them;
+- give every row a stable identity for deduplication, and keep the affected
+  resource distinct (the same CVE on two images is two rows);
+- read every page and refuse to write a report when collection is incomplete,
+  so a failed run can never look like an empty scan;
+- never claim to be the tool's native export, or reuse an existing preset's
+  format with different meaning.
+
+The uploader sends the fetcher's final bytes unchanged either way.
 
 ```python
 # target_suffix(), from the template: read your target's env var
