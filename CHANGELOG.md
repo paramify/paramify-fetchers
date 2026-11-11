@@ -1521,6 +1521,34 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`aws_ecr_image_scanning` 0.3.0:** retrieve newest-image scan results regardless
+  of `scan_on_push`, including enhanced continuous and completed manual scans.
+  Resolve repository scan frequency through AWS, select the newest image across
+  pages, and retain every severity and scan timestamps. Missing/incomplete scans
+  have `severity_counts: null`, rather than fabricated zero counts; collection
+  errors no longer imply BASIC scanning.
+  - **Required upgrade step:** grant `ecr:BatchGetRepositoryScanningConfiguration`
+    to the collection role. The AWS managed `AmazonEC2ContainerRegistryReadOnly`
+    policy does not include this new action.
+  - **Output changes:** `latest_image_scan.severity_counts` can be null when
+    counts are unavailable. Its keys now include `low`, `informational` and
+    `untriaged`; `latest_image_scan` adds `scan_completed_at` and
+    `vulnerability_source_updated_at`. Repositories add `scan_frequency`,
+    `applied_scan_filters` and `scan_collection_status`. Validators must distinguish
+    unknown counts from zero findings. Concurrent image deletion produces
+    `scan_collection_status: image_deleted`, `scan_status: IMAGE_NOT_FOUND` and
+    null counts without failing the run.
+  - Repository configurations are joined once across all batches. Batch failures
+    include AWS error details and preserve any successful repository configurations.
+  - **Enhanced scanning counts:** severities are counted from every finding,
+    reading all pages. AWS's `findingSeverityCounts` covers only the returned page
+    for enhanced scans (a one-finding page reported 1 medium for an image with 456
+    critical and 3,589 high). BASIC scans keep AWS's total. The runtime timeout is
+    now 3600s, since an image with ~10k findings takes about 90s.
+  - **Enhanced scanning permissions:** `ecr:DescribeImageScanFindings` also needs
+    `inspector2:ListCoverage` and `inspector2:ListFindings` when the registry uses
+    enhanced scanning; without them AWS denies the ECR call.
+
 - **The uploader guide explains the collection frequency of an evidence set.**
   A new section in [`docs/uploader_guide.md`](docs/uploader_guide.md#set-the-collection-frequency)
   gives the default (`THREE_DAY`), the values, and how to set `frequency` in
