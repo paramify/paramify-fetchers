@@ -1,0 +1,47 @@
+name: aws_route53_resolver_dns_security
+version: 0.1.0
+description: Lists each VPC with its Route 53 Resolver DNSSEC validation status, DNS Firewall rule group associations (with rule actions and domain lists), and query logging, plus any DNSSEC configs left pointing at VPCs that no longer exist.
+category: aws
+
+supports_targets: true
+
+runtime:
+  type: bash
+  entry: fetcher.sh
+
+output:
+  type: json
+  path: aws_route53_resolver_dns_security.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: AWS region to collect from.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS named profile (credentials resolved from ~/.aws / SSO).
+secrets: []
+
+ksis:
+  - KSI-SVC-VCM
+  - KSI-CNA-RNT
+  - KSI-MLA-LET
+
+evidence_set:
+  reference_id: EVD-R53-RESOLVER-DNS-SECURITY
+  name: Route 53 Resolver DNS Security
+  instructions: >-
+    Script: aws/route53_resolver_dns_security/fetcher.sh. Commands executed: aws ec2 describe-vpcs,
+    aws route53resolver list-resolver-dnssec-configs, aws route53resolver list-firewall-rule-group-associations,
+    aws route53resolver list-firewall-rules (per associated rule group), aws route53resolver list-firewall-domain-lists,
+    aws route53resolver list-resolver-query-log-config-associations.
+    One record per VPC: DnssecValidation is ENABLED, DISABLED, or NOT_CONFIGURED (no Resolver DNSSEC config exists
+    for the VPC). DnsFirewall.Associated is true when at least one rule group association is COMPLETE; each rule
+    group lists its rules' Action (BLOCK, ALERT, ALLOW) and domain list name, so a validator can require a BLOCK rule
+    on an AWS-managed threat list. QueryLogging.Enabled is true when a query log config association is ACTIVE.
+    OrphanedDnssecConfigs lists Resolver DNSSEC configs whose ResourceId matches no VPC in the region.
