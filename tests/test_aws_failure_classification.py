@@ -226,7 +226,7 @@ def test_every_aws_fetcher_reports_through_the_shared_reporter():
     exits 1 on any recorded failure, so anything after it would only run on the
     success path, which is a trap rather than a feature.
     """
-    assert len(_fetchers()) == 80
+    assert len(_fetchers()) == 81
     offenders = []
     for p in _fetchers():
         code = [ln.strip() for ln in p.read_text().splitlines()
