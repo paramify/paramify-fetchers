@@ -105,6 +105,14 @@ paramify describe tenable_vuln_scan
 for the tool's export call, poll until the export is ready, then stream it to disk.
 Never parse and rewrite it: no `json.dump`, no `csv.writer`.
 
+API-derived adapters are explicit exceptions: for example,
+[`aws_inspector_ecr_report`](../fetchers/aws/inspector_ecr_report/README.md)
+converts Inspector API findings to a documented CSV without an S3 export.
+Such an adapter needs its own intake mapping, stable record/resource identities,
+complete pagination and tests that failed collection cannot become an empty scan.
+It must not claim to be a native export or silently change an existing preset's
+format. The uploader still sends the adapter's final bytes unchanged.
+
 ```python
 # target_suffix(), from the template: read your target's env var
 value = os.environ.get("TENABLE_SCAN_ID", "").strip()
