@@ -47,6 +47,22 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Inspector ECR findings and Paramify issue intake:** `aws_inspector_ecr_findings`
+  collects active findings, package details, image inventory and coverage;
+  `aws_inspector_ecr_report` converts those APIs to a documented CSV for the existing
+  Paramify intake uploader, without S3/KMS exports. Both support account/region
+  targets and optional repository/tag filters, retain all severities, and fail on
+  incomplete pagination. Issue reports also refuse missing scan coverage and
+  require an explicit opt-in for zero findings. Includes synthetic regression tests
+  and an example manifest with manual cycle closure.
+  Evidence retains validated partial results with `metadata.partial_failure`, an
+  `api_failures` ledger, `collection_complete: false` and null summary totals,
+  while still exiting nonzero. Issue reports remain all-or-nothing. Staging files
+  stay outside the output directory, including after a process kill; the output
+  directory and its parent must be writable and share a filesystem. CSV text
+  starting with formula markers receives a leading apostrophe; JSON evidence
+  keeps the original values. Contributed by Lucid.
+
 - **`azure_entra_sign_in_logs`** (`EVD-AZURE-ENTRA-SIGN-IN-LOGS`) — Entra ID
   sign-in and policy-change evidence read from the Log Analytics (Sentinel)
   workspace the tenant exports its Entra logs to, with no Microsoft Graph
