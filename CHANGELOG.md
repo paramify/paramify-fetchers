@@ -47,6 +47,65 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Inspector ECR findings and Paramify issue intake:** `aws_inspector_ecr_findings`
+  collects active findings, package details, image inventory and coverage;
+  `aws_inspector_ecr_report` converts those APIs to a documented CSV for the existing
+  Paramify intake uploader, without S3/KMS exports. Both support account/region
+  targets and optional repository/tag filters, retain all severities, and fail on
+  incomplete pagination. Issue reports also refuse missing scan coverage and
+  require an explicit opt-in for zero findings. Includes synthetic regression tests
+  and an example manifest with manual cycle closure.
+  Evidence retains validated partial results with `metadata.partial_failure`, an
+  `api_failures` ledger, `collection_complete: false` and null summary totals,
+  while still exiting nonzero. Issue reports remain all-or-nothing. Staging files
+  stay outside the output directory, including after a process kill; the output
+  directory and its parent must be writable and share a filesystem. CSV text
+  starting with formula markers receives a leading apostrophe; JSON evidence
+  keeps the original values. Contributed by Lucid.
+
+- **`azure_entra_sign_in_logs`** (`EVD-AZURE-ENTRA-SIGN-IN-LOGS`) — Entra ID
+  sign-in and policy-change evidence read from the Log Analytics (Sentinel)
+  workspace the tenant exports its Entra logs to, with no Microsoft Graph
+  permission. Over a lookback (`ENTRA_LOG_LOOKBACK_DAYS`, 30 by default):
+  - **Interactive sign-ins (`SigninLogs`):** results, MFA and phishing-resistant
+    counts and percentages, the authentication methods and requirement sources,
+    Conditional Access status and risky sign-ins, plus two capped lists: each
+    user's counts, and the successful single-factor sign-ins.
+  - **Non-interactive user sign-ins (`AADNonInteractiveUserSignInLogs`):** counts
+    only, by result, user, app, risk and Conditional Access status.
+  - **Service-principal sign-ins (`AADServicePrincipalSignInLogs`):** counts, and
+    one capped row per principal with its id, name, app id, counts and last
+    sign-in.
+  - **Policy changes (`AuditLogs`):** changes to the authentication methods, MFA,
+    security defaults and Conditional Access policies and every other
+    Policy-category change, counted by operation, with a capped list of events.
+    Never scoped.
+  - No IP addresses, locations or device details are copied.
+  - **Scope.** `users` (`ENTRA_LOG_USERS`) and `app_ids` (`ENTRA_LOG_APP_IDS`)
+    narrow the user sign-ins. `service_principal_app_ids`
+    (`ENTRA_LOG_SERVICE_PRINCIPAL_APP_IDS`) narrows the service-principal
+    sign-ins; it is kept apart because there the app id names the principal.
+    `groups` (`ENTRA_LOG_GROUPS`) limits the user sign-ins to the current members
+    of Entra groups, worked out inside each query from the workspace's
+    `IdentityInfo` table (Sentinel UEBA), so no member list is kept. Only each
+    identity's newest record in the last 21 days counts. With `users` also set,
+    the listed users are added to the members. Evidence gains `group_scope`, with
+    counts only.
+  - **Fails closed.** With `groups` set, when `IdentityInfo` is missing, keeps
+    under 14 days, has no record, is older than `identity_max_age_days`
+    (`ENTRA_LOG_IDENTITY_MAX_AGE_DAYS`, default 14, 1 to 21), cannot be queried,
+    or holds no member of any listed group (and `users` is empty), no user
+    sign-in query is sent, every user sign-in figure is null and the run fails.
+    A scope value that could break the query fails as `bad_config` before any
+    query, and is not written to the message.
+  - **Users are counted by Entra object id**, and by user principal name only
+    where the log has no usable id, so one person is not read as several.
+  - **Limits.** `IdentityInfo` records group names, not ids, so two groups with
+    the same name are both in scope; membership is as of the run; whether a
+    nested group's members count depends on how Sentinel records them.
+  - Needs read on the workspace's logs (Reader, or a custom role with
+    `workspaces/query/read` on the four tables, plus `IdentityInfo` when `groups`
+    is set). Maps to KSI-IAM-APM, KSI-SVC-SIN, KSI-IAM-SNU and KSI-MLA-LET.
 - **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
   Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
   - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from
@@ -2102,6 +2161,45 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_conditional_access_policies` 0.3.0: the all-users MFA figures
+  count only policies that apply to every sign-in.**
+  `enforced_mfa_for_all_users_and_apps`,
+  `enforced_phishing_resistant_mfa_for_all_users_and_apps`,
+  `mfa_required_for_admin_portals`, `mfa_required_for_azure_management_api` and
+  `phishing_resistant_mfa_role_template_ids` used to count a policy that
+  covered all users and apps, even one limited to risky sign-ins, or one that
+  accepted a compliant device instead of MFA. They now skip a policy with any
+  risk, client app type, platform, location, device filter, authentication flow
+  or application filter condition, and a policy where another grant control
+  can stand in for MFA. The all-users figures also skip a policy that excludes
+  any app; the admin-portal and management-API figures skip it only when the
+  excluded app is that resource. The phishing-resistant all-users figure also
+  skips a policy that excludes a role. Counts that were 1 can now be 0, and
+  the two booleans can now be false.
+- **`azure_entra_conditional_access_policies` 0.3.0: guest and external-user
+  exclusions are counted.** The `excludeGuestsOrExternalUsers` exclusion now
+  counts in `enforced_policies_with_exclusions` and
+  `distinct_excluded_principals`, which undercounted a policy whose only
+  exclusion was guests. Each policy's `users` records the guest types and the
+  tenant scope kind (`all` or `enumerated`, never tenant ids) for both
+  `include_guests_or_external_users` and `exclude_guests_or_external_users`;
+  `enforced_policies_excluding_guests_or_external_users` and
+  `excluded_guest_or_external_user_types` are new summary fields.
+
+- **`azure_entra_app_registrations` 0.2.1: a failed applications read nulls
+  every summary count.** When the Graph applications read was denied, failed or
+  stopped part-way, the counts (credentials, expired, expiring, without expiry,
+  the rotation percentage and the rest) read 0 or a short number. They are now
+  null, as `credentials_issued_beyond_approved_lifetime` and
+  `credentials_without_lifetime` already were; `approved_lifetime_days` and
+  `rotation_threshold_days` are settings and stay. `partial_failure` and the
+  exit code are unchanged.
+
+- **`azure_ai_services_configuration` 0.2.1 names its search service counts.**
+  When the search service list is not read, the counts that become null are the
+  ones in an explicit `SEARCH_KEYS` set, not those whose key happens to contain
+  `search_service`, and a test checks every summary key falls in exactly one
+  group. Output is unchanged.
 - **Azure resource exclusions: `resource_exclusion_patterns_unmatched` is null
   when a resource list was not read.** Before, a list that failed (or had no
   credential or subscription) left every configured pattern in the field and
@@ -2111,7 +2209,7 @@ schemas and the `paramify` CLI — not the internal code.
   `ResourceExclusions` gains `mark_unread()`, and `summary()` does the same when
   any in-scope count is null. Each fetcher's description says so. Output
   changes only on an unread list; with every list read it is the same. Versions:
-  `azure_activity_log_alerts` 0.3.1, `azure_ai_hub_configuration` 0.2.1, `azure_ai_services_configuration` 0.2.1, `azure_aks_cluster_configuration` 0.3.1, `azure_alert_rules` 0.3.1, `azure_api_management_configuration` 0.2.1, `azure_app_gateway_backend_tls` 0.2.1, `azure_app_gateway_tls_listeners` 0.2.1, `azure_app_gateway_waf` 0.2.1, `azure_app_service_backups` 0.3.2, `azure_app_service_configuration` 0.5.1, `azure_app_service_deployments` 0.3.1, `azure_app_service_plans` 0.3.1, `azure_backup_recovery_status` 0.4.1, `azure_backup_vault_protection` 0.1.1, `azure_bastion_configuration` 0.1.1, `azure_change_provenance` 0.3.1, `azure_container_registry_configuration` 0.2.1, `azure_container_workloads_configuration` 0.2.1, `azure_cosmosdb_configuration` 0.2.1, `azure_data_services_configuration` 0.2.1, `azure_databricks_workspace_configuration` 0.2.1, `azure_ddos_protection` 0.2.1, `azure_defender_assessments` 0.4.1, `azure_defender_vulnerability_findings` 0.1.1, `azure_disk_encryption_status` 0.2.1, `azure_dns_configuration` 0.6.1, `azure_firewall_configuration` 0.1.1, `azure_front_door_origins` 0.8.1, `azure_front_door_tls` 0.6.1, `azure_front_door_waf_coverage` 0.6.1, `azure_front_door_waf_policies` 0.2.1, `azure_function_app_configuration` 0.2.1, `azure_key_vault_configuration` 0.4.1, `azure_key_vault_key_rotation` 0.5.1, `azure_log_analytics_deletion_rights` 0.2.1, `azure_log_analytics_query_audit` 0.2.1, `azure_log_analytics_workspaces` 0.3.1, `azure_log_storage_immutability` 0.2.1, `azure_managed_identity_configuration` 0.2.1, `azure_managed_redis_configuration` 0.2.1, `azure_monitor_fired_alerts` 0.2.2, `azure_mysql_configuration` 0.2.1, `azure_network_flow_logs` 0.2.1, `azure_network_security_groups` 0.5.1, `azure_policy_assignments` 0.4.1, `azure_policy_compliance` 0.5.1, `azure_postgresql_configuration` 0.2.1, `azure_private_dns_zone_configuration` 0.4.1, `azure_private_endpoint_configuration` 0.3.1, `azure_rbac_custom_roles` 0.2.2, `azure_rbac_role_assignments` 0.4.3, `azure_redis_cache_configuration` 0.2.1, `azure_residual_resources` 0.3.1, `azure_resource_diagnostic_settings` 0.4.1, `azure_resource_inventory` 0.4.1, `azure_resource_locks` 0.1.1, `azure_sentinel_analytics_rules` 0.3.2, `azure_sentinel_automation_rules` 0.2.1, `azure_sentinel_data_sources` 0.4.1, `azure_sentinel_incidents` 0.3.1, `azure_service_availability` 0.1.1, `azure_service_health_advisories` 0.1.1, `azure_service_log_records` 0.2.1, `azure_sql_encryption_status` 0.2.1, `azure_sql_managed_instance_backups` 0.4.1, `azure_sql_managed_instance_configuration` 0.4.1, `azure_sql_managed_instance_encryption` 0.3.1, `azure_sql_server_configuration` 0.2.1, `azure_storage_encryption_status` 0.4.1, `azure_virtual_wan_configuration` 0.2.1, `azure_vm_hardening_status` 0.3.1, `azure_vnet_egress_routing` 0.3.1, `azure_vpn_gateway_configuration` 0.2.1, `azure_zone_redundancy` 0.1.1.
+  `azure_activity_log_alerts` 0.3.1, `azure_ai_hub_configuration` 0.2.1, `azure_ai_services_configuration` 0.2.2, `azure_aks_cluster_configuration` 0.3.1, `azure_alert_rules` 0.3.1, `azure_api_management_configuration` 0.2.1, `azure_app_gateway_backend_tls` 0.2.1, `azure_app_gateway_tls_listeners` 0.2.1, `azure_app_gateway_waf` 0.2.1, `azure_app_service_backups` 0.3.2, `azure_app_service_configuration` 0.5.1, `azure_app_service_deployments` 0.3.1, `azure_app_service_plans` 0.3.1, `azure_backup_recovery_status` 0.4.1, `azure_backup_vault_protection` 0.1.1, `azure_bastion_configuration` 0.1.1, `azure_change_provenance` 0.3.1, `azure_container_registry_configuration` 0.2.1, `azure_container_workloads_configuration` 0.2.1, `azure_cosmosdb_configuration` 0.2.1, `azure_data_services_configuration` 0.2.1, `azure_databricks_workspace_configuration` 0.2.1, `azure_ddos_protection` 0.2.1, `azure_defender_assessments` 0.4.1, `azure_defender_vulnerability_findings` 0.1.1, `azure_disk_encryption_status` 0.2.1, `azure_dns_configuration` 0.6.1, `azure_firewall_configuration` 0.1.1, `azure_front_door_origins` 0.8.1, `azure_front_door_tls` 0.6.1, `azure_front_door_waf_coverage` 0.6.1, `azure_front_door_waf_policies` 0.2.1, `azure_function_app_configuration` 0.2.1, `azure_key_vault_configuration` 0.4.1, `azure_key_vault_key_rotation` 0.6.1, `azure_log_analytics_deletion_rights` 0.2.1, `azure_log_analytics_query_audit` 0.2.1, `azure_log_analytics_workspaces` 0.3.1, `azure_log_storage_immutability` 0.2.1, `azure_managed_identity_configuration` 0.2.1, `azure_managed_redis_configuration` 0.2.1, `azure_monitor_fired_alerts` 0.2.2, `azure_mysql_configuration` 0.2.1, `azure_network_flow_logs` 0.2.1, `azure_network_security_groups` 0.5.1, `azure_policy_assignments` 0.4.1, `azure_policy_compliance` 0.5.1, `azure_postgresql_configuration` 0.2.1, `azure_private_dns_zone_configuration` 0.4.1, `azure_private_endpoint_configuration` 0.3.1, `azure_rbac_custom_roles` 0.2.2, `azure_rbac_role_assignments` 0.4.3, `azure_redis_cache_configuration` 0.2.1, `azure_residual_resources` 0.3.1, `azure_resource_diagnostic_settings` 0.4.1, `azure_resource_inventory` 0.4.1, `azure_resource_locks` 0.1.1, `azure_sentinel_analytics_rules` 0.3.2, `azure_sentinel_automation_rules` 0.2.1, `azure_sentinel_data_sources` 0.4.1, `azure_sentinel_incidents` 0.3.1, `azure_service_availability` 0.1.1, `azure_service_health_advisories` 0.1.1, `azure_service_log_records` 0.2.1, `azure_sql_encryption_status` 0.2.1, `azure_sql_managed_instance_backups` 0.4.1, `azure_sql_managed_instance_configuration` 0.4.1, `azure_sql_managed_instance_encryption` 0.3.1, `azure_sql_server_configuration` 0.2.1, `azure_storage_encryption_status` 0.4.1, `azure_virtual_wan_configuration` 0.2.1, `azure_vm_hardening_status` 0.3.1, `azure_vnet_egress_routing` 0.3.1, `azure_vpn_gateway_configuration` 0.2.1, `azure_zone_redundancy` 0.1.1.
   Two fetchers also null counts that read 0 on an unread list:
   `azure_key_vault_configuration` `in_scope_key_vaults` and `excluded_key_vaults`,
   and `azure_storage_encryption_status` `in_scope_storage_accounts` and
@@ -2131,6 +2229,13 @@ schemas and the `paramify` CLI — not the internal code.
   failure to skipped without dropping quiet-mode passes or changing the total.
   Clarify that `metadata.skip_checks` records CLI skips; discovered Checkov
   configuration must also be retained to review effective exclusions.
+
+- **`azure_key_vault_key_rotation` 0.6.0: Key Vault's default rotation policy no longer counts as a
+  configured one.** A key never given a rotation policy answers a default policy (a Notify
+  action only, no id or creation time), not a 404, and `keys_with_rotation_policy` counted it,
+  so "has a rotation policy" passed with nothing set. It now counts only a policy with an id or
+  a creation time. Each key record has a new `rotation_policy_configured`; `keys_with_rotation_enabled`
+  is unchanged.
 
 - **`azure_key_vault_key_rotation` 0.5.0: unlisted vaults no longer read as zero expired certificates.**
   `expired_certificates` and `certificates_expiring_within_30_days` are null when any
@@ -2415,6 +2520,12 @@ schemas and the `paramify` CLI — not the internal code.
   `authentication_flow_transfer_methods`. When the policies couldn't be read,
   the Graph client included, `authentication_strengths` is null rather than an
   empty list.
+
+- Evidence envelope wrapping rejects the nonstandard JSON constants `NaN`,
+  `Infinity` and `-Infinity`, and no longer writes non-finite numbers from
+  metadata or numeric overflow into a new envelope. Invalid files are logged
+  and preserved unchanged, using the existing per-file skip behavior.
+
 - **`azure_entra_mfa_status` 0.3.0: users the registration report omits are
   unknown in the all-users coverage.** The authentication-methods registration
   report has no row for disabled accounts, so `mfa_coverage_percentage_all_users`
