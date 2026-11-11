@@ -5,12 +5,13 @@ role: configuration
 statement: >
   The remediation timeframes are the fetcher's defaults, assumed until the organization confirms its
   own: severity 5 and 4 within 30 days, 3 within 90, 2 and 1 within 180. No open detection that is not
-  ignored or disabled is older than its severity's timeframe, and none has an unreadable age. Supports
+  ignored or disabled is older than its severity's timeframe, and none has an unreadable age. A
+  detection's age counts from its last reopening, if any, otherwise from first found. Supports
   KSI-SVC-EIS and KSI-SCR-MON. It does not count ignored or disabled detections, so suppressing a
   detection in Qualys keeps it out of this check, and it does not check scan coverage (the scan
   coverage evidence does).
 
-# Every capture reads the summary, which the fetcher writes last; other copies of these keys sit before it.
+# Every capture reads the summary, which sorts last in the payload (the fetcher dumps with sorted keys); other copies of these keys sort before it.
 regex: '"summary":\s*\{(?=[\s\S]*?"remediation_days":\s*\{[^}]*?"5":\s*(?<remediation_days_5>\d+))(?=[\s\S]*?"remediation_days":\s*\{[^}]*?"4":\s*(?<remediation_days_4>\d+))(?=[\s\S]*?"remediation_days":\s*\{[^}]*?"3":\s*(?<remediation_days_3>\d+))(?=[\s\S]*?"remediation_days":\s*\{[^}]*?"2":\s*(?<remediation_days_2>\d+))(?=[\s\S]*?"remediation_days":\s*\{[^}]*?"1":\s*(?<remediation_days_1>\d+))(?=[\s\S]*?"past_due_detections":\s*(?<past_due_detections>\d+|null))(?=[\s\S]*?"open_age_unread":\s*(?<open_age_unread>\d+|null))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 30; MATCH_GROUP[2] EQUALS 30; MATCH_GROUP[3] EQUALS 90; MATCH_GROUP[4] EQUALS 180; MATCH_GROUP[5] EQUALS 180; MATCH_GROUP[6] EQUALS 0; MATCH_GROUP[7] EQUALS 0
 validation_rules:

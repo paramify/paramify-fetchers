@@ -3,14 +3,15 @@ name: Qualys Vulnerability Fixes Within Remediation Timeframe
 type: AUTOMATED
 role: configuration
 statement: >
-  The lookback is the fetcher's default 90 days, and the remediation timeframes are the fetcher's
-  defaults, assumed until the organization confirms its own: severity 5 and 4 within 30 days, 3 within
-  90, 2 and 1 within 180. No detection Qualys marked fixed in the lookback took longer than its
-  severity's timeframe, none has an unreadable time to fix, and none has an unreadable fixed date.
+  The lookback is the fetcher's default 90 days, an assumed setting, and the remediation timeframes are
+  the fetcher's defaults, assumed until the organization confirms its own: severity 5 and 4 within 30
+  days, 3 within 90, 2 and 1 within 180. No detection Qualys marked fixed in the lookback took longer
+  than its severity's timeframe, none has an unreadable time to fix, and none has an unreadable fixed
+  date. Days to fix count from the detection's last reopening, if any, otherwise from first found.
   Supports KSI-SVC-EIS. It does not check that anything was fixed (a separate validator), detections
   still open (the findings evidence does), or detections that reopened.
 
-# Every capture reads the summary, which the fetcher writes last; other copies of these keys sit before it.
+# Every capture reads the summary, which sorts last in the payload (the fetcher dumps with sorted keys); other copies of these keys sort before it.
 regex: '"summary":\s*\{(?=[\s\S]*?"lookback_days":\s*(?<lookback_days>\d+))(?=[\s\S]*?"remediation_days":\s*\{[^}]*?"5":\s*(?<remediation_days_5>\d+))(?=[\s\S]*?"remediation_days":\s*\{[^}]*?"4":\s*(?<remediation_days_4>\d+))(?=[\s\S]*?"remediation_days":\s*\{[^}]*?"3":\s*(?<remediation_days_3>\d+))(?=[\s\S]*?"remediation_days":\s*\{[^}]*?"2":\s*(?<remediation_days_2>\d+))(?=[\s\S]*?"remediation_days":\s*\{[^}]*?"1":\s*(?<remediation_days_1>\d+))(?=[\s\S]*?"fixed_after_timeframe":\s*(?<fixed_after_timeframe>\d+|null))(?=[\s\S]*?"fixed_timeframe_unread":\s*(?<fixed_timeframe_unread>\d+|null))(?=[\s\S]*?"fixed_date_unread":\s*(?<fixed_date_unread>\d+|null))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 90; MATCH_GROUP[2] EQUALS 30; MATCH_GROUP[3] EQUALS 30; MATCH_GROUP[4] EQUALS 90; MATCH_GROUP[5] EQUALS 180; MATCH_GROUP[6] EQUALS 180; MATCH_GROUP[7] EQUALS 0; MATCH_GROUP[8] EQUALS 0; MATCH_GROUP[9] EQUALS 0
 validation_rules:

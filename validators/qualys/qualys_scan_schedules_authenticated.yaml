@@ -9,7 +9,7 @@ statement: >
   coverage evidence shows authenticated scan dates) or how often the schedules run. It assumes an
   option profile lists the authentication types it enables, not those available.
 
-# Every capture reads the summary, which the fetcher writes last; other copies of these keys sit before it.
+# Every capture reads the summary, which sorts last in the payload (the fetcher dumps with sorted keys); other copies of these keys sort before it.
 regex: '"summary":\s*\{(?=[\s\S]*?"active_schedules_with_authentication":\s*(?<active_schedules_with_authentication>\d+))(?=[\s\S]*?"active_schedules_without_authentication":\s*(?<active_schedules_without_authentication>\d+|null))(?=[\s\S]*?"active_schedules_authentication_unread":\s*(?<active_schedules_authentication_unread>\d+|null))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0
 validation_rules:

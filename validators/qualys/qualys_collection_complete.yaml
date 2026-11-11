@@ -10,7 +10,8 @@ statement: >
   every asset; under tag-based user scoping that may not hold, and this check can then fail or pass
   without proving full scope.
 
-# exit_code is the envelope's; scope_all is read from the payload's api_user_scope, written before the summary.
+# Its own file, not common/collection_succeeded: sync links a validator to its sets only when it creates it, and this one also checks scope.
+# exit_code is the envelope's; scope_all is read from the payload's api_user_scope, which sorts before the summary.
 regex: '^\s*\{(?=[\s\S]*?"exit_code":\s*(?<exit_code>-?\d+))(?=[\s\S]*?"scope_all":\s*(?<scope_all>true|false|null))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS true
 validation_rules:

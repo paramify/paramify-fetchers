@@ -3,12 +3,13 @@ name: Qualys Hosts Vulnerability-Scanned Within 31 Days
 type: AUTOMATED
 role: configuration
 statement: >
-  The scan window is the fetcher's default 31 days, so a monthly scan fits; Qualys tracks at least one
-  host; no host's last vulnerability scan is older than the window or missing; and no host's scan date
-  is unreadable. Supports KSI-CNA-EIS and KSI-SVC-EIS. It does not check authenticated scanning (a
-  separate validator), subscription IPs with no host record, or assets Qualys does not track at all.
+  The scan window is the fetcher's default 31 days, so a monthly scan fits, assumed until the
+  organization confirms its scan frequency; Qualys tracks at least one host; no host's last
+  vulnerability scan is older than the window or missing; and no host's scan date is unreadable.
+  Supports KSI-CNA-EIS and KSI-SVC-EIS. It does not check authenticated scanning (a separate
+  validator), subscription IPs with no host record, or assets Qualys does not track at all.
 
-# Every capture reads the summary, which the fetcher writes last; other copies of these keys sit before it.
+# Every capture reads the summary, which sorts last in the payload (the fetcher dumps with sorted keys); other copies of these keys sort before it.
 regex: '"summary":\s*\{(?=[\s\S]*?"scan_window_days":\s*(?<scan_window_days>\d+))(?=[\s\S]*?"total_hosts":\s*(?<total_hosts>\d+))(?=[\s\S]*?"hosts_not_scanned_within_window":\s*(?<hosts_not_scanned_within_window>\d+|null))(?=[\s\S]*?"hosts_scan_date_unreadable":\s*(?<hosts_scan_date_unreadable>\d+|null))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 31; MATCH_GROUP[2] NOT_EQUALS 0; MATCH_GROUP[3] EQUALS 0; MATCH_GROUP[4] EQUALS 0
 validation_rules:

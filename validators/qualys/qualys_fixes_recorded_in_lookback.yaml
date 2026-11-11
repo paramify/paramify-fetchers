@@ -3,12 +3,12 @@ name: Qualys Vulnerability Fixes Recorded in 90 Days
 type: AUTOMATED
 role: configuration
 statement: >
-  The lookback is the fetcher's default 90 days, and Qualys marked at least one detection fixed within
-  it and still fixed, so remediation is being made. Supports KSI-SVC-EIS. It does not check that the
-  fixes were on time (a separate validator) or how many detections are still open. An estate with
-  nothing to fix in the lookback fails this check.
+  The lookback is the fetcher's default 90 days, an assumed setting, and Qualys marked at least one
+  detection fixed within it and still fixed, so remediation is being made. Supports KSI-SVC-EIS. It
+  does not check that the fixes were on time (a separate validator) or how many detections are still
+  open. An estate with nothing to fix in the lookback fails this check.
 
-# Every capture reads the summary, which the fetcher writes last; other copies of these keys sit before it.
+# Every capture reads the summary, which sorts last in the payload (the fetcher dumps with sorted keys); other copies of these keys sort before it.
 regex: '"summary":\s*\{(?=[\s\S]*?"lookback_days":\s*(?<lookback_days>\d+))(?=[\s\S]*?"fixed_detections":\s*(?<fixed_detections>\d+))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 90; MATCH_GROUP[2] NOT_EQUALS 0
 validation_rules:
