@@ -51,10 +51,11 @@ schemas and the `paramify` CLI — not the internal code.
   covers the stack and owner pickers (online, typed, a listing error, escape),
   the entry editor's Paramify settings, and the upload plan in the confirm,
   made by the real planner against the in-process Paramify fake: a new batch on
-  a channel's request, an evidence-level batch, direct delivery, batches off,
-  the owner choosing a channel, the refusal without one, the settings-changed
-  note, an upload, its no-op, a held entry resuming its batch and a dropped
-  file. New snapshots show the stack picker, the owner picker and the upload
+  a channel's request, an evidence-level batch, direct delivery, batches off
+  (the workspace flag, or an API with no batch routes), an API that refuses a
+  batch's approval, the owner choosing a channel, the refusal without one, the
+  settings-changed note, an upload, its no-op, a held entry resuming its batch
+  and a dropped file. New snapshots show the stack picker, the owner picker and the upload
   plan; a second end-to-end flow picks a stack and an owner, runs, and confirms
   the plan. The smoke job's goldens add `manifest set-stack`, `set-owner` and
   the dry-run note for settings changed after the run.
