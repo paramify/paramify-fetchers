@@ -47,6 +47,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **TUI regression tests for batches, channels and stacks.** The `tui` job now
+  covers the stack and owner pickers (online, typed, a listing error, escape),
+  the entry editor's Paramify settings, and the upload plan in the confirm,
+  made by the real planner against the in-process Paramify fake: a new batch on
+  a channel's request, an evidence-level batch, direct delivery, batches off,
+  the owner choosing a channel, the refusal without one, the settings-changed
+  note, an upload, its no-op, a held entry resuming its batch and a dropped
+  file. New snapshots show the stack picker, the owner picker and the upload
+  plan; a second end-to-end flow picks a stack and an owner, runs, and confirms
+  the plan. The smoke job's goldens add `manifest set-stack`, `set-owner` and
+  the dry-run note for settings changed after the run.
 - **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
   one record per VPC in the region with its Route 53 Resolver DNSSEC validation
   status (`NOT_CONFIGURED` when the VPC has no DNSSEC config), its DNS Firewall
