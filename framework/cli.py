@@ -652,7 +652,7 @@ def _upload_stage(
     raise typer.Exit(0 if summary["ok"] else 1)
 
 
-_PLAN_KWARGS = frozenset({"stack", "custom_tags", "with_validators", "only_file", "manifest_path"})
+_PLAN_KWARGS = frozenset({"stack", "owner", "custom_tags", "with_validators", "only_file", "manifest_path"})
 _TOKEN_REJECTED = "Paramify rejected the API token (HTTP 401); check {env}"
 
 
@@ -1299,7 +1299,7 @@ def samples_backfill(
 @app.command("validate")
 def validate_cmd(
     manifest: str = typer.Argument(..., help="Path to manifest yaml"),
-    online: bool = typer.Option(False, "--online", help="Also check each stack in the manifest against the workspace (needs an API token)"),
+    online: bool = typer.Option(False, "--online", help="Also check each stack and owner in the manifest against the workspace (needs an API token)"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Validate a manifest against the schema + discovered fetchers."""
@@ -1329,6 +1329,11 @@ def validate_cmd(
         except Exception as e:  # noqa: BLE001
             errors.append(f"--online: {_upload_error_text(e)}")
     notes = api.validate_notes(m, root, **discovered)
+    if online and api.manifest_owners(m):
+        try:
+            notes += api.owner_notes(m, api.list_channel_owners(root))
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"--online: {_upload_error_text(e)}")
     if json_out:
         typer.echo(json.dumps({"ok": not errors, "errors": errors, "notes": notes}, indent=2))
         raise typer.Exit(0 if not errors else 1)
@@ -1427,6 +1432,7 @@ def upload_cmd(
     no_tags: bool = typer.Option(False, "--no-tags", help="Skip the default custom tags for this run (PARAMIFY_CUSTOM_TAGS=off does the same from the environment)"),
     plan: bool = typer.Option(False, "--plan", help="Read the workspace and print the plan; apply nothing"),
     stack: Optional[str] = typer.Option(None, "--stack", help="Paramify stack (id or name) for every entry in this upload, over the one the manifest recorded"),
+    owner: Optional[str] = typer.Option(None, "--owner", help="Paramify username whose channel to use when a stack has one channel per owner, over the one the manifest recorded"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
     """Upload one evidence run to Paramify.
@@ -1447,7 +1453,7 @@ def upload_cmd(
         upload_fn=api.upload_run,
         noun="file",
         log_name="upload_log.json",
-        upload_kwargs={"custom_tags": not no_tags, "stack": stack, "with_validators": with_validators},
+        upload_kwargs={"custom_tags": not no_tags, "stack": stack, "owner": owner, "with_validators": with_validators},
         kind="evidence",
         manifest=file,
         plan_fn=api.plan_upload,
@@ -2047,6 +2053,46 @@ def manifest_set_stack(
     if note and not json_out:
         _err(f"Note: {note}")
     _save_and_report(m, path, root, json_out, extra={"stack": stack_id, "stack_name": stack_name})
+
+
+@manifest_app.command("set-owner")
+def manifest_set_owner(
+    manifest: str = typer.Argument(..., help="Path to manifest yaml"),
+    owner: str = typer.Argument(..., help="Paramify username; an empty string removes it"),
+    fetcher: Optional[str] = typer.Option(None, "--fetcher", help="Set it for this fetcher entry only (a fetcher name or an entry key such as aws_iam_mfa#1)"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Record whose channel uploads use when a stack has one channel per owner.
+
+    Paramify makes a channel for each owner on each stack. The owner is read
+    only where an evidence set has several channels on the upload's stack; a
+    set with one channel there uses it, whoever owns it. With an API token,
+    OWNER is checked against the owners of the workspace's channels (case does
+    not matter, and the workspace's spelling is stored).
+    """
+    root = api.find_repo_root()
+    path = _resolve_manifest_arg(root, manifest, json_out)
+    m = _read_for_edit(path, json_out)
+    value, note = owner.strip() or None, None
+    if value and api.upload_readiness(root)["token_present"]:
+        try:
+            owners = api.list_channel_owners(root)
+        except Exception as e:  # noqa: BLE001
+            _fail(path, _upload_error_text(e), json_out)
+        match = next((o["owner"] for o in owners if o["owner"].casefold() == value.casefold()), None)
+        if match is None:
+            names = ", ".join(o["owner"] for o in owners) or "none"
+            _fail(path, f"no channel in this workspace is owned by {value!r} (owners: {names})", json_out)
+        value = match
+    elif value:
+        note = f"no API token, so {value!r} was stored as given and not checked against the workspace"
+    try:
+        api.set_owner(m, value, use=fetcher)
+    except ValueError as e:
+        _fail(path, str(e), json_out)
+    if note and not json_out:
+        _err(f"Note: {note}")
+    _save_and_report(m, path, root, json_out, extra={"owner": value})
 
 
 @manifest_app.command("show")
