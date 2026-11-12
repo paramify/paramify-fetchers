@@ -119,6 +119,27 @@ def test_skip_reasons_match_uploader(tmp_path):
     assert {f.original_file_name: f.skip_reason for f in e2.files}["failed.json"] is None
 
 
+def test_a_file_a_later_entry_overwrote_is_not_sent(tmp_path):
+    # The file holds the later invocation's data, whatever its envelope says, so
+    # it goes under that entry and is never sent. The run already failed it.
+    later = dict(inv("x#1", []), exit_code=1, overwritten=["a.json"])
+    build(tmp_path, {"a.json": env(), "b.json": env()}, [inv("x", ["a.json", "b.json"]), later])
+    by = {e.entry_key: e for e in desired_from_run(tmp_path, {})}
+    [f] = by["x#1"].files
+    assert f.original_file_name == "a.json"
+    assert (f.skip_kind, f.skip_reason) == ("error", "overwritten later in this run (entry x#1); not sent")
+    assert [(g.original_file_name, g.skip_reason) for g in by["x"].files] == [("b.json", None)]
+
+
+def test_a_file_a_later_target_overwrote_is_not_sent(tmp_path):
+    first = dict(inv("x", ["out.json"]), target={"region": "a"})
+    second = dict(inv("x", []), target={"region": "b"}, exit_code=1, overwritten=["out.json"])
+    build(tmp_path, {"out.json": env(target={"region": "a"})}, [first, second])
+    [e] = desired_from_run(tmp_path, {})
+    [f] = e.files
+    assert (f.skip_kind, f.skip_reason) == ("error", "overwritten later in this run (entry x); not sent")
+
+
 def test_note_has_entry_token_and_no_effective_date(tmp_path):
     build(tmp_path, {"a.json": env(target={"id": "7"})}, [inv("x#1", ["a.json"])])
     [e] = desired_from_run(tmp_path, {})

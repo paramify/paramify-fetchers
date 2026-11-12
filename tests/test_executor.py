@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from framework import api
+from framework.envelope import is_enveloped
 from framework.contract import (
     ConfigField,
     Fetcher,
@@ -1133,6 +1134,7 @@ def test_a_second_entry_that_overwrites_the_first_entrys_file_fails(tmp_path):
     assert (first["entry_key"], first["exit_code"], first["outputs"]) == ("demo_hello", 0, ["demo_hello.json"])
     assert second["entry_key"] == "demo_hello#1"
     assert second["exit_code"] != 0 and second["outputs"] == []
+    assert second["overwritten"] == ["demo_hello.json"] and "overwritten" not in first
     assert _CLOBBER_MESSAGE in second["stderr_tail"]
     results = [e for e in events if e["event"] == "fetcher_result"]
     assert "error" not in results[0]
@@ -1176,6 +1178,32 @@ def test_a_fan_out_that_writes_the_same_name_for_each_target_fails_the_second(tm
     assert second.error == ("overwrote out.json, which an earlier entry or target wrote in this run. "
                             "Give each entry its own target, or remove the duplicate entry.")
     assert second.error_code == "output_overwritten"
+    assert (first.overwritten, second.overwritten) == ([], ["out.json"])
+
+
+def test_a_file_a_later_target_overwrote_is_left_unwrapped(tmp_path):
+    # Wrapping runs after every target of an entry. Target a's result still names
+    # out.json, which now holds target b's data: wrapping it would label b's data
+    # as a's, with a's status. Left raw, the upload refuses it.
+    fetcher = _target_fetcher(tmp_path, "'out.json'")
+    out = tmp_path / "out"
+    results = run_entry(fetcher, _two_regions(), out)
+
+    api._wrap_results(results, fetcher, "RID", out)
+
+    assert not is_enveloped(json.loads((out / "out.json").read_text()))
+
+
+def test_files_of_a_clean_fan_out_are_wrapped(tmp_path):
+    fetcher = _target_fetcher(tmp_path, "'out_' + os.environ['REGION'] + '.json'")
+    out = tmp_path / "out"
+    results = run_entry(fetcher, _two_regions(), out)
+
+    api._wrap_results(results, fetcher, "RID", out)
+
+    for region in ("a", "b"):
+        doc = json.loads((out / f"out_{region}.json").read_text())
+        assert is_enveloped(doc) and doc["metadata"]["target"] == {"region": region}
 
 
 def test_two_fetchers_with_different_file_names_in_one_run_dir_pass(tmp_path):

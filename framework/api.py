@@ -1367,8 +1367,23 @@ def _invocation_record(r) -> dict:
         record["stderr_tail"] = r.stderr[-_STDERR_TAIL_CHARS:]
     if r.inputs is not None:
         record["inputs"] = r.inputs
+    if r.overwritten:
+        record["overwritten"] = r.overwritten
     record["entry_key"] = r.entry_key
     return record
+
+
+def _wrap_results(results, fetcher, run_id: str, run_dir: Path) -> None:
+    """Envelope the outputs of one entry's invocations, all targets at once.
+
+    Every target of an entry runs before any is wrapped. So when a later target
+    wrote over an earlier target's file, the earlier result still names it, and
+    wrapping it would label the later target's data with the earlier target and
+    status. Such a file is left raw; the later invocation already failed for it.
+    """
+    skip = frozenset(name for r in results for name in r.overwritten)
+    for r in results:
+        wrap_outputs(r, fetcher, run_id, run_dir, skip=skip)
 
 
 def _manifest_id(path, root: Path) -> str:
@@ -1575,13 +1590,14 @@ def run(
             continue
 
         collected.setdefault(entry.use, []).extend(_input_record(r) for r in results)
-        for r in results:
-            if fetcher.is_comparator:
+        if fetcher.is_comparator:
+            for r in results:
                 r.inputs = _metadata_inputs(fetcher, run_id, collected)
-            # Exactly one of these applies: an issue report is never enveloped
-            # (wrap_outputs returns early on kind), and only an issue report gets
-            # a sidecar record.
-            wrap_outputs(r, fetcher, run_id, run_dir)
+        # Exactly one of these applies: an issue report is never enveloped
+        # (wrap_outputs returns early on kind), and only an issue report gets
+        # a sidecar record.
+        _wrap_results(results, fetcher, run_id, run_dir)
+        for r in results:
             if fetcher.is_issue_report:
                 record_issue_reports(r, fetcher, run_id, run_dir, assessment)
             if r.exit_code != 0:

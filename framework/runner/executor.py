@@ -124,8 +124,9 @@ def _file_ids(directory: Path) -> Dict[str, _FileId]:
     return ids
 
 
-def _clobbered(before: Dict[str, _FileId], directory: Path) -> Optional[str]:
-    """Why the invocation failed, if it overwrote or deleted a file that existed before it ran.
+def _clobbered(before: Dict[str, _FileId], directory: Path) -> Tuple[List[str], Optional[str]]:
+    """The names the invocation overwrote, and why it failed if it overwrote or
+    deleted a file that existed before it ran.
 
     Outputs are found by the names that are new after an invocation, and the run
     directory is new for each run. So a file that was there before the invocation
@@ -138,14 +139,14 @@ def _clobbered(before: Dict[str, _FileId], directory: Path) -> Optional[str]:
     overwritten = sorted(n for n, fid in before.items() if n in after and after[n] != fid)
     deleted = sorted(n for n in before if n not in after)
     if not overwritten and not deleted:
-        return None
+        return [], None
     parts = []
     if overwritten:
         parts.append("overwrote " + ", ".join(overwritten))
     if deleted:
         parts.append("deleted " + ", ".join(deleted))
-    return (f"{' and '.join(parts)}, which an earlier entry or target wrote in this run. "
-            "Give each entry its own target, or remove the duplicate entry.")
+    return overwritten, (f"{' and '.join(parts)}, which an earlier entry or target wrote in this run. "
+                         "Give each entry its own target, or remove the duplicate entry.")
 
 
 def _redact(text: str, secret_values) -> str:
@@ -758,7 +759,8 @@ def _invoke(
     # A file the invocation wrote over is not one of its outputs (its name was
     # there before), so it would be lost without a word. Fail the invocation the
     # way a timeout does: a non-zero exit, a reason, and the runner's own code.
-    clobber = _clobbered(before_ids, output_dir)
+    overwritten, clobber = _clobbered(before_ids, output_dir)
+    overwritten = [f"{rel}/{name}" if rel else name for name in overwritten]
     if clobber:
         if exit_code == 0:
             exit_code = 1
@@ -781,6 +783,7 @@ def _invoke(
         error_code=error_code,
         entry_key=entry_key,
         config_patterns=patterns_meta,
+        overwritten=overwritten,
     )
 
 

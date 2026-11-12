@@ -219,6 +219,10 @@ def desired_from_run(
     settings: Dict = raw_settings if isinstance(raw_settings, dict) else {}
 
     file_entry: Dict[str, str] = {}
+    # A file that an invocation wrote over holds the last such invocation's data,
+    # whatever an earlier record or its envelope says. The run failed that
+    # invocation, so the file goes under its entry and is never sent.
+    overwrote: Dict[str, str] = {}
     order: list[str] = []
     for rec in run_meta.get("invocations") or []:
         key = rec.get("entry_key")
@@ -228,6 +232,8 @@ def desired_from_run(
             order.append(key)
         for out in rec.get("outputs") or []:
             file_entry.setdefault(Path(out).name, key)
+        for out in rec.get("overwritten") or []:
+            overwrote[Path(out).name] = key
 
     paths = sorted(p for p in run_dir.glob("*.json") if is_evidence_file(p) and p.name not in RESERVED_RUN_FILES)
     if only_file:
@@ -237,14 +243,17 @@ def desired_from_run(
     for path in paths:
         envelope: Any = None
         problem: Optional[str] = None
-        try:
-            envelope = _read_json(path)
-            if not is_enveloped(envelope):
-                problem = "not envelope-wrapped"
-        except (OSError, ValueError) as e:
-            problem = f"cannot read as JSON ({e})"
+        if path.name in overwrote:
+            problem = f"overwritten later in this run (entry {overwrote[path.name]}); not sent"
+        else:
+            try:
+                envelope = _read_json(path)
+                if not is_enveloped(envelope):
+                    problem = "not envelope-wrapped"
+            except (OSError, ValueError) as e:
+                problem = f"cannot read as JSON ({e})"
         metadata = envelope["metadata"] if problem is None else {}
-        key = file_entry.get(path.name) or metadata.get("fetcher_name") or path.stem
+        key = overwrote.get(path.name) or file_entry.get(path.name) or metadata.get("fetcher_name") or path.stem
         groups.setdefault(key, []).append((path, metadata, problem, envelope))
 
     keys = [k for k in order if k in groups] + [k for k in groups if k not in order]

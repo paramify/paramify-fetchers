@@ -339,3 +339,7 @@ class InvocationResult:
     entry_key: Optional[str] = None
     # The pattern lists the fetcher received, per field, for `metadata.config_patterns`; None when it got none.
     config_patterns: Optional[Dict[str, List[Dict[str, Any]]]] = None
+    # Files that existed before this invocation and that it wrote over, in the
+    # `outputs` path convention. They now hold this invocation's data, whatever
+    # an earlier invocation's record says, so they are never wrapped or uploaded.
+    overwritten: List[str] = field(default_factory=list)

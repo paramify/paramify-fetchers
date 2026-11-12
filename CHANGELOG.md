@@ -2239,8 +2239,13 @@ schemas and the `paramify` CLI — not the internal code.
 - **A fetcher that writes over an earlier file in the same run fails.** Before,
   the second of two entries of one fetcher, or a fan-out that used one file name
   for each target, replaced the earlier evidence and passed. That invocation now
-  fails with `error_code: output_overwritten` and names the file. `paramify
-  validate` gives a note for two entries of a fetcher that takes no targets.
+  fails with `error_code: output_overwritten` and names the file. Its record in
+  `_run_metadata.json` lists the file under `overwritten`. The runner does not
+  wrap that file in an envelope, and `paramify upload` does not send it: the plan
+  shows it as an error, "overwritten later in this run". Before, a fan-out could
+  upload the second target's data labelled as the first target's evidence.
+  `paramify validate` gives a note for two entries of a fetcher that takes no
+  targets.
 - **The refusal for two channels on one stack names the owners.** Paramify makes
   one channel for each owner, so the old fix, to keep one channel, was not
   possible. The message now gives each channel's owner, and the fix says to
