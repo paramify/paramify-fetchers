@@ -1371,9 +1371,14 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
 
     errors += [f"platforms.{cat}.config: {problem} (for {', '.join(uses)})" for (cat, problem), uses in shared.items()]
     # Validators on a pipeline set mean the batch never approves, so the pipeline never runs.
-    scoped = select_validators(discover_validators(root).values(),
-                               manifest_reference_ids(manifest, fetchers, include_pipeline=True))
-    errors += pipeline_conflicts(scoped, fetchers)
+    # Only manifests with a pipeline entry pay for loading the registry.
+    if any(e.use in fetchers and fetchers[e.use].is_pipeline for e in parsed.entries):
+        try:
+            scoped = select_validators(discover_validators(root).values(),
+                                       manifest_reference_ids(manifest, fetchers, include_pipeline=True))
+            errors += pipeline_conflicts(scoped, fetchers)
+        except ValueError as e:
+            errors.append(f"validator registry: {e}")
     return errors
 
 

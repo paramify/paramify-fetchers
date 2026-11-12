@@ -128,17 +128,17 @@ def test_manifest_scope_leaves_out_pipeline_sets():
         manifest_using("x_inventory"), fetchers, include_pipeline=True)
 
 
-def test_validate_refuses_direct_delivery_on_a_pipeline_entry(tmp_path):
+def test_validate_refuses_direct_delivery_on_a_pipeline_entry():
     errs = api.validate(manifest_with(use="github_repository_inventory", paramify={"delivery": "direct"}), REPO_ROOT)
     assert any("never goes direct" in e for e in errs)
 
 
-def test_validate_refuses_no_request_direct_on_a_pipeline_entry(tmp_path):
+def test_validate_refuses_no_request_direct_on_a_pipeline_entry():
     errs = api.validate(manifest_with(use="github_repository_inventory", paramify={"no_request": "direct"}), REPO_ROOT)
     assert any("never goes direct" in e for e in errs)
 
 
-def test_validate_notes_manual_approval_on_a_pipeline_entry(tmp_path):
+def test_validate_notes_manual_approval_on_a_pipeline_entry():
     notes = api.validate_notes(
         manifest_with(use="github_repository_inventory", paramify={"approval": "MANUAL"}), REPO_ROOT)
     assert any("MANUAL" in n and "waits" in n for n in notes)
@@ -159,3 +159,19 @@ def test_collect_validators_drops_pipeline_sets_from_explicit_reference_ids(monk
     monkeypatch.setattr("framework.config_loader.discover_fetchers",
                         lambda root: {"x_inventory": fake_inventory_fetcher("EVD-X-INVENTORY")})
     assert syncer.collect_validators(REPO_ROOT, reference_ids=["EVD-X-INVENTORY"]) == []
+
+
+def _raise_registry(root):
+    raise ValueError("duplicate key")
+
+
+def test_validate_does_not_load_the_registry_without_a_pipeline_entry(monkeypatch):
+    monkeypatch.setattr("framework.validators.discover_validators", _raise_registry)
+    errs = api.validate(manifest_with(use="cornerstone_incident_response_training", paramify={}), REPO_ROOT)
+    assert not any("validator registry" in e for e in errs)
+
+
+def test_validate_reports_a_broken_registry_as_an_error(monkeypatch):
+    monkeypatch.setattr("framework.validators.discover_validators", _raise_registry)
+    errs = api.validate(manifest_with(use="github_repository_inventory", paramify={}), REPO_ROOT)
+    assert len([e for e in errs if "validator registry" in e]) == 1
