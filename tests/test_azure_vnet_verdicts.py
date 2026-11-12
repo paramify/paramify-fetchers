@@ -690,3 +690,42 @@ def test_segmented_is_never_claimed_when_a_packet_gets_through(seed):
         for dst, src_name, flows in simulate(rng, partial=True):
             if src_name in dst["segmented_from_subnets"]:
                 assert not any(flows), (seed, dst["name"], src_name)
+
+
+# --- unrestricted_internet_outbound: only a deny that covers every source overrides the default allow ---
+
+def _out_rule(priority, access, source="*", ports="*", protocol="*", dest="Internet", **extra):
+    return {"direction": "Outbound", "priority": priority, "access": access, "protocol": protocol,
+            "source_address_prefix": source, "source_address_prefixes": [],
+            "destination_address_prefix": dest, "destination_address_prefixes": [],
+            "destination_port_range": ports, "destination_port_ranges": [], **extra}
+
+
+_DEFAULT_ALLOW = _out_rule(65001, "Allow")
+
+
+def _out_group(*rules):
+    return {"security_rules": list(rules), "default_security_rules": [_DEFAULT_ALLOW]}
+
+
+@pytest.mark.parametrize("source", ["*", "0.0.0.0/0", "VirtualNetwork"])
+def test_catch_all_deny_with_a_covering_source_restricts_egress(source):
+    assert nsg.unrestricted_internet_outbound(_out_group(_out_rule(100, "Deny", source=source))) is False
+
+
+@pytest.mark.parametrize("source", ["10.0.1.0/24", "10.0.0.0/8", "AzureLoadBalancer", "Internet"])
+def test_source_limited_deny_leaves_egress_unrestricted(source):
+    assert nsg.unrestricted_internet_outbound(_out_group(_out_rule(100, "Deny", source=source))) is True
+
+
+def test_deny_with_a_covering_source_among_several_restricts_egress():
+    rule = _out_rule(100, "Deny", source=None, source_address_prefixes=["10.0.1.0/24", "*"])
+    assert nsg.unrestricted_internet_outbound(_out_group(rule)) is False
+
+
+def test_full_port_range_counts_as_every_port():
+    assert nsg.unrestricted_internet_outbound(_out_group(_out_rule(100, "Deny", ports="0-65535"))) is False
+
+
+def test_group_with_no_catch_all_rule_reads_restricted():
+    assert nsg.unrestricted_internet_outbound({"security_rules": [], "default_security_rules": []}) is False

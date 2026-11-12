@@ -807,3 +807,13 @@ def test_vpn_a_refused_resource_group_list_leaves_unmatched_patterns_null(operat
     code, evidence, _ = _run_vpn(monkeypatch, tmp_path, "id:*/virtualNetworkGateways/gw-out")
     assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     assert "matched nothing" not in caplog.text
+
+
+def test_active_active_and_p2s_count_only_vpn_gateways():
+    def gw(kind, active_active, p2s):
+        return {"gateway_type": kind, "active_active": active_active, "p2s_enabled": p2s}
+
+    gateways = [gw("Vpn", True, True), gw("Vpn", False, False), gw("ExpressRoute", True, True)]
+    summary = vpn.summarize(gateways, [], [])
+    assert (summary["total_gateways"], summary["vpn_gateways"]) == (3, 2)
+    assert (summary["active_active_gateways"], summary["p2s_enabled_gateways"]) == (1, 1)

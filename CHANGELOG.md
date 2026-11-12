@@ -2304,6 +2304,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_network_security_groups` 0.6.0: only a catch-all Internet Deny that
+  covers every source restricts Internet egress.** Before, any catch-all Deny
+  toward the Internet counted, whatever its source, so a Deny limited to one
+  subnet's addresses marked the group restricted. Now the Deny must have a
+  source of `*`, `0.0.0.0/0` or `VirtualNetwork`; a source-limited
+  Deny is skipped and the walk goes on to the next rule. A port range of
+  `0-65535` now counts as `*`. A group with no catch-all rule at all still reads
+  restricted. Affects `unrestricted_internet_outbound_groups` and
+  `restricted_internet_outbound_groups`.
+- **`azure_vpn_gateway_configuration` 0.3.0: `active_active_gateways` and
+  `p2s_enabled_gateways` count only Vpn-type gateways.** Before, an ExpressRoute
+  gateway could be counted too, so the figures could exceed `vpn_gateways`.
+
 - **`azure_app_gateway_waf` `total_waf_policies` is null when the WAF policy
   list could not be read.** Before, a failed
   `web_application_firewall_policies.list_all` left only the policies a gateway
