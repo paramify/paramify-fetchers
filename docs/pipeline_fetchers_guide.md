@@ -93,7 +93,7 @@ Inventory`. The uploader cannot see the pipeline itself, so check Inventory.
 ## 4. Set up and test
 
 1. Copy the template and fill in the block, the records and the README.
-2. Add the fetcher to a manifest and run it ([steps 1 to 3 of the inventory
+2. Add the fetcher to a manifest and run it ([steps 1 and 2 of the inventory
    guide](inventory_fetchers_guide.md#1-run-it)).
 3. Run `paramify preset <fetcher>` for the settings to enter in Paramify
    ([details](cli_guide.md#paramify-preset-fetcher)):

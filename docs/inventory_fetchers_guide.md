@@ -42,32 +42,10 @@ paramify evidence evidence/run-<timestamp>/acme_asset_inventory.json
 ```
 </details>
 
-## 3. Upload it
+## 3. Set up the pipeline (once)
 
-![paramify upload sending acme_asset_inventory.json to the EVD-ACME-INVENTORY evidence set](img/inventory_fetchers/03-upload.png)
-
-<details><summary>Copy the command</summary>
-
-```bash
-paramify upload
-```
-</details>
-
-**A run that missed anything is never sent**, as here after a rate limit:
-
-![paramify upload --dry-run after a failed run: incomplete inventory not sent, skipped_failed=1](img/inventory_fetchers/04-incomplete.png)
-
-<details><summary>Copy the command</summary>
-
-```bash
-paramify upload --dry-run
-```
-</details>
-
-## 4. Set up the pipeline (once)
-
-Do these in order. An inventory pipeline runs only on a file in an approved
-batch, so the set must be ready before you upload.
+Do this before your first upload. An inventory pipeline runs only on a file in
+an approved batch, so the set must be ready first.
 
 1. Run `paramify preset` for the fetcher. It prints what to enter: the sample
    file, the data path, the unique ID and the `asset_type` values of your last
@@ -87,9 +65,32 @@ batch, so the set must be ready before you upload.
    set's **Pipelines** tab, click **Manage Selection**.
 4. Leave the set's approval automatic, and add no validators. Validators fail on
    a file this large, and a failing one stops the batch from approving.
-5. Run `paramify upload`. The uploader makes the batch, and the pipeline runs
-   when the batch approves. The result says `APPROVED: pipeline runs now`.
-6. Then open **Monitoring → Inventory**.
+
+## 4. Upload it
+
+![paramify upload sending acme_asset_inventory.json to the EVD-ACME-INVENTORY evidence set](img/inventory_fetchers/03-upload.png)
+
+<details><summary>Copy the command</summary>
+
+```bash
+paramify upload
+```
+</details>
+
+The uploader makes the batch, and the pipeline runs when the batch approves.
+The result says `APPROVED: pipeline runs now`. Then open **Monitoring →
+Inventory**.
+
+**A run that missed anything is never sent**, as here after a rate limit:
+
+![paramify upload --dry-run after a failed run: incomplete inventory not sent, skipped_failed=1](img/inventory_fetchers/04-incomplete.png)
+
+<details><summary>Copy the command</summary>
+
+```bash
+paramify upload --dry-run
+```
+</details>
 
 For the rules behind this, see the [pipeline fetchers guide](pipeline_fetchers_guide.md#3-what-the-uploader-does-for-you).
 
@@ -101,9 +102,9 @@ For the rules behind this, see the [pipeline fetchers guide](pipeline_fetchers_g
 |---|---|
 | `the payload breaks the inventory contract` | A record lacks an ID or an `asset_type`, or two share an ID (see `problems`). |
 | `it holds no records` | Check the credential's scope and any filters. |
-| The pipeline finds no records | Your uploader config sets `artifact_payload: payload`. Use data path `data`. |
+| The pipeline finds no records | Data path must be `payload.data`; the uploader always sends the envelope for a pipeline file. |
 | A list field can't be mapped | Map its scalar copy, such as `primary_ip_address`. |
-| `a pipeline file never goes direct` | Remove `delivery: direct` or `no_request: direct` from the manifest entry. |
+| `a pipeline file never goes direct` | Remove `delivery: direct` or `no_request: direct` from the manifest entry. A run made before pipeline entries ignored a `direct` in `run.paramify` can carry one too: set `no_request: evidence` on the entry, or remove `direct` from `run.paramify`, then run again. |
 | `approves MANUAL` | Set the evidence set to approve automatically. Otherwise each batch waits for a person. |
 | `has N validator(s) … its batches will never approve` | Remove the validators from the evidence set in Paramify. |
 | Uploaded, but Inventory is empty | Check that the set has the pipeline attached and that the batch is `APPROVED`. A `SUBMITTED` batch has not run. |
