@@ -2337,6 +2337,15 @@ schemas and the `paramify` CLI — not the internal code.
   refusal now says to set `no_request: evidence` on the entry or remove
   `direct` from `run.paramify`, then run again.
 
+- **`paramify preset` (and `P` in the TUI) finds the sample of a per-target
+  inventory.** It looked for `sophos_endpoint_inventory.json`, but the shipped
+  inventory fetchers write one file per tenant or org
+  (`sophos_endpoint_inventory_<tenant>.json`), so it never found one. It now takes
+  the fetcher's files from the run's invocations (else `<stem>*.json` files whose
+  envelope names the fetcher), skips ghost runs as `paramify runs` does, uses the
+  first file as the sample and sums `asset_type` counts across the files. An
+  unreadable file says `could not read <path>`; `--json` gains `problem`.
+
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the

@@ -44,6 +44,7 @@ from framework import samples as _samples
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
     ConfigField,
+    Fetcher,
     ManifestEntry,
     PlatformConfig,
     Secret,
@@ -2594,27 +2595,61 @@ def latest_run(
     return runs[0] if runs else None
 
 
-def newest_run_with(output_dir: Path, filename: str) -> Optional[Path]:
-    """The newest run-* directory under output_dir that holds `filename`, or None.
-
-    Orders runs the way list_runs does (name, newest first).
-    """
-    base = Path(output_dir).expanduser()
-    if not base.is_absolute():
-        base = Path.cwd() / base
-    if not base.is_dir():
+def _read_envelope(path: Path) -> Optional[dict]:
+    """The JSON object in `path`, or None when it cannot be read as one."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
         return None
-    for d in sorted(base.resolve().glob("run-*"), reverse=True):
-        if d.is_dir() and (d / filename).is_file():
-            return d
-    return None
+    return data if isinstance(data, dict) else None
+
+
+def newest_pipeline_files(output_dir, fetcher: Fetcher) -> List[Tuple[Path, Optional[dict]]]:
+    """The fetcher's files in the newest run under output_dir that has any, with each one's
+    JSON (None: unreadable), sorted by name. [] when no run has one.
+
+    Runs come from list_runs: newest first, ghost runs skipped. A run's invocations
+    name the fetcher's outputs (`<stem>_<target>.json` for a per-target fetcher). A
+    run without them is searched for `<output_path stem>*.json` files whose envelope
+    names the fetcher; an unreadable one is kept, so the sheet can say so.
+    """
+    stem = Path(fetcher.output_path).stem
+    for run in list_runs(output_dir):
+        files = run.get("files") or []
+        recorded = sorted(Path(f["path"]) for f in files if f.get("fetcher") == fetcher.name)
+        found = [(p, _read_envelope(p)) for p in recorded if p.is_file()]
+        if not recorded:
+            for f in sorted(files, key=lambda f: f["name"]):
+                p = Path(f["path"])
+                if f.get("fetcher") is not None or p.suffix != ".json" or not p.name.startswith(stem):
+                    continue
+                env = _read_envelope(p)
+                if env is None or (env.get("metadata") or {}).get("fetcher_name") == fetcher.name:
+                    found.append((p, env))
+        if found:
+            return found
+    return []
+
+
+def _merged_asset_types(envelopes: List[dict]) -> Dict[str, int]:
+    """Each envelope's metadata.inventory.by_asset_type, summed: largest count first, then by name."""
+    total: Dict[str, int] = {}
+    for env in envelopes:
+        counts = ((env.get("metadata") or {}).get("inventory") or {}).get("by_asset_type")
+        if isinstance(counts, dict):
+            for k, v in counts.items():
+                if isinstance(v, int):
+                    total[k] = total.get(k, 0) + v
+    return dict(sorted(total.items(), key=lambda kv: (-kv[1], kv[0])))
 
 
 def preset_sheet(root: Path, name: str, output_dir: Optional[Path] = None) -> Dict[str, Any]:
     """The settings to enter when building the Paramify preset for a pipeline fetcher.
 
-    Reads the fetcher's `pipeline:` block and its newest run under output_dir
-    (default <root>/evidence). Raises KeyError for an unknown fetcher and
+    Reads the fetcher's `pipeline:` block and its files in the newest run that
+    has any under output_dir (default <root>/evidence). With several target files
+    the sample is the first by name and `asset_types` sums them. `problem` names
+    a file that could not be read. Raises KeyError for an unknown fetcher and
     ValueError for one with no `pipeline:` block.
     """
     fetchers = discover_fetchers(root)
@@ -2626,23 +2661,19 @@ def preset_sheet(root: Path, name: str, output_dir: Optional[Path] = None) -> Di
     pipe = f.pipeline
     inventory = pipe.type == "inventory"
     out = Path(output_dir) if output_dir is not None else Path(root) / "evidence"
-    sample = None
+    found = newest_pipeline_files(out, f)
+    sample = str(found[0][0]) if found else None
+    unreadable = [p for p, env in found if env is None]
+    problem = f"could not read {unreadable[0]}" if unreadable else None
     asset_types = None
-    run = newest_run_with(out, f.output_path)
-    if run is not None:
-        sample = str(run / f.output_path)
-        if inventory:
-            try:
-                env = json.loads((run / f.output_path).read_text())
-                counts = ((env.get("metadata") or {}).get("inventory") or {}).get("by_asset_type")
-                asset_types = dict(counts) if isinstance(counts, dict) else None
-            except (OSError, ValueError, AttributeError):
-                asset_types = None
+    if inventory and found and not unreadable:
+        asset_types = _merged_asset_types([env for _p, env in found if env is not None])
     return {
         "fetcher": name,
         "type": pipe.type,
         "evidence_set": f.evidence_set.reference_id if f.evidence_set else None,
         "sample": sample,
+        "problem": problem,
         "data_path": "payload.data" if inventory else None,
         "unique_id": "unique_asset_identifier" if inventory else None,
         "id_scheme": pipe.id_scheme,
@@ -2663,7 +2694,9 @@ def render_preset_sheet(sheet: Dict[str, Any]) -> str:
     if inventory:
         rows.append(("Data path", sheet["data_path"]))
         rows.append(("Unique ID", f"{sheet['unique_id']}   (scheme: {sheet['id_scheme']})"))
-        if sheet["asset_types"] is None:
+        if sheet.get("problem"):
+            rows.append(("Parent component", f"derive from asset_type. {sheet['problem']}"))
+        elif sheet["asset_types"] is None:
             rows.append(("Parent component", "derive from asset_type. The asset_type values need a run (run the fetcher first)"))
         elif not sheet["asset_types"]:
             rows.append(("Parent component", "derive from asset_type. The last run had no assets"))
