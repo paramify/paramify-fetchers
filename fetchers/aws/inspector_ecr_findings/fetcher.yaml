@@ -1,0 +1,42 @@
+name: aws_inspector_ecr_findings
+version: 0.1.0
+description: Collects active Inspector ECR findings, package remediation details, image inventory and scan coverage for one account and region, with optional repository and tag filters.
+category: aws
+supports_targets: true
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 3600
+output:
+  type: json
+  path: aws_inspector_ecr_findings.json
+  aggregation: per_target
+secrets: []
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: AWS region; defaults to the AWS CLI credential/configuration chain.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS profile; omit for the ambient role or credentials.
+config_schema:
+  repositories:
+    type: string
+    default: '[]'
+    env: AWS_INSPECTOR_REPOSITORIES
+    description: JSON array of up to ten exact repository names. Empty selects all repositories in the account and region.
+  image_tags:
+    type: string
+    default: '[]'
+    env: AWS_INSPECTOR_IMAGE_TAGS
+    description: JSON array of up to ten image tags, matched with OR. Empty includes untagged images too. Tags do not prove deployment.
+ksis:
+  - KSI-SCR-MON
+evidence_set:
+  reference_id: EVD-INSPECTOR-ECR-FINDINGS
+  name: Inspector ECR Vulnerability Findings and Coverage
+  instructions: 'Script: aws/inspector_ecr_findings/fetcher.py. Read-only AWS APIs: STS GetCallerIdentity; ECR DescribeRepositories and DescribeImages; Inspector2 BatchGetAccountStatus, ListCoverage and ListFindings. Includes all active finding severities in the declared scope.'

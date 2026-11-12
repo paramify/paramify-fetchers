@@ -93,6 +93,60 @@ COMPARATOR_INPUTS_ENV = "COMPARATOR_INPUTS"
 # Bound on the reported reason. Truncates the tail, not the head — the useful
 # part of an error message is the front (stderr is the opposite; see envelope.py).
 _STATUS_ERROR_MAX_CHARS = 4000
+# error_code the runner sets when an invocation overwrote or deleted a file an
+# earlier invocation in the same run wrote (see _clobbered).
+OUTPUT_OVERWRITTEN_CODE = "output_overwritten"
+
+
+class _FileId(NamedTuple):
+    """What tells one write of a file from another: a rewrite changes at least one."""
+    ino: int
+    size: int
+    mtime_ns: int
+
+
+def _file_ids(directory: Path) -> Dict[str, _FileId]:
+    """Each regular file in `directory` by name, with its identity.
+
+    Directories are left out: their mtime changes whenever a file is added
+    inside them, which is not an overwrite.
+    """
+    if not directory.exists():
+        return {}
+    ids = {}
+    for p in directory.iterdir():
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        if p.is_file():
+            ids[p.name] = _FileId(st.st_ino, st.st_size, st.st_mtime_ns)
+    return ids
+
+
+def _clobbered(before: Dict[str, _FileId], directory: Path) -> Tuple[List[str], Optional[str]]:
+    """The names the invocation overwrote, and why it failed if it overwrote or
+    deleted a file that existed before it ran.
+
+    Outputs are found by the names that are new after an invocation, and the run
+    directory is new for each run. So a file that was there before the invocation
+    came from an earlier entry or target in this run. Fetchers pick fixed file
+    names, so two entries of one fetcher, or a fan-out that names its file the
+    same for each target, write over that file. The earlier evidence is then lost,
+    and nothing else says so.
+    """
+    after = _file_ids(directory)
+    overwritten = sorted(n for n, fid in before.items() if n in after and after[n] != fid)
+    deleted = sorted(n for n in before if n not in after)
+    if not overwritten and not deleted:
+        return [], None
+    parts = []
+    if overwritten:
+        parts.append("overwrote " + ", ".join(overwritten))
+    if deleted:
+        parts.append("deleted " + ", ".join(deleted))
+    return overwritten, (f"{' and '.join(parts)}, which an earlier entry or target wrote in this run. "
+                         "Give each entry its own target, or remove the duplicate entry.")
 
 
 def _redact(text: str, secret_values) -> str:
@@ -597,6 +651,7 @@ def _invoke(
     secret_values=None,
     run_dir: Optional[Path] = None,
     inputs_index: Optional[dict] = None,
+    entry_key: Optional[str] = None,
     patterns_meta: Optional[Dict[str, List[dict]]] = None,
 ) -> InvocationResult:
     """Run one fetcher invocation.
@@ -623,6 +678,7 @@ def _invoke(
     start = time.monotonic()
 
     before = {p.name for p in output_dir.iterdir()} if output_dir.exists() else set()
+    before_ids = _file_ids(output_dir)
 
     timeout = fetcher.runtime_timeout or _DEFAULT_TIMEOUT_SEC
 
@@ -700,6 +756,18 @@ def _invoke(
     rel = output_dir.relative_to(run_dir) if output_dir != run_dir else None
     outputs = sorted(f"{rel}/{name}" if rel else name for name in (after - before))
 
+    # A file the invocation wrote over is not one of its outputs (its name was
+    # there before), so it would be lost without a word. Fail the invocation the
+    # way a timeout does: a non-zero exit, a reason, and the runner's own code.
+    overwritten, clobber = _clobbered(before_ids, output_dir)
+    overwritten = [f"{rel}/{name}" if rel else name for name in overwritten]
+    if clobber:
+        if exit_code == 0:
+            exit_code = 1
+        error = f"{error}; {clobber}" if error else clobber
+        error_code = error_code or OUTPUT_OVERWRITTEN_CODE
+        stderr += f"\nrunner: {clobber}"
+
     return InvocationResult(
         fetcher_name=fetcher.name,
         fetcher_version=fetcher.version,
@@ -713,7 +781,9 @@ def _invoke(
         outputs=outputs,
         error=error,
         error_code=error_code,
+        entry_key=entry_key,
         config_patterns=patterns_meta,
+        overwritten=overwritten,
     )
 
 
@@ -765,6 +835,7 @@ def run_entry(
     on_note: Optional[Callable[[str], None]] = None,
     inputs_index: Optional[dict] = None,
     secret_vars: FrozenSet[str] = frozenset(),
+    entry_key: Optional[str] = None,
 ) -> List[InvocationResult]:
     """Run one manifest entry: single invocation, or one per target for fanout.
 
@@ -781,6 +852,8 @@ def run_entry(
 
     `secret_vars` are the secret variables of the whole catalog and manifest
     (secret_env_vars), which no config reference may read.
+
+    `entry_key` is stamped on every InvocationResult, whatever the number of targets.
 
     A comparator gets `inputs_index` as $COMPARATOR_INPUTS. Callers pick the
     category blocks with contract.platform_for, which gives a comparator none: no
@@ -801,7 +874,7 @@ def run_entry(
                          secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir,
-                        inputs_index, patterns_meta)]
+                        inputs_index, entry_key=entry_key, patterns_meta=patterns_meta)]
 
     if not entry.targets:
         # No targets[] given. If every target field is optional, run once with the
@@ -818,7 +891,7 @@ def run_entry(
                          secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir,
-                        patterns_meta=patterns_meta)]
+                        entry_key=entry_key, patterns_meta=patterns_meta)]
 
     results = []
     for target in entry.targets:
@@ -831,7 +904,7 @@ def run_entry(
             _emit_notes(notes, on_note)
             _emit_shadowed(shadowed, on_note)
             results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir,
-                                   patterns_meta=patterns_meta))
+                                   entry_key=entry_key, patterns_meta=patterns_meta))
         except (RuntimeError, SecretResolutionError) as e:
             now = _utc_now()
             # The fetcher never ran, so it had no chance to report anything. The
@@ -851,5 +924,6 @@ def run_entry(
                 outputs=[],
                 error=reason,
                 error_code="runner_setup_failed",
+                entry_key=entry_key,
             ))
     return results
