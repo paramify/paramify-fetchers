@@ -41,8 +41,10 @@ URL = "https://api.example.test"
 class Harness:
     """One run directory, one fake workspace, and the two providers wired as the CLI will wire them."""
 
-    def __init__(self, fake: Any, run_dir: Path, capability: Any = None, budget: float = 3) -> None:
+    def __init__(self, fake: Any, run_dir: Path, capability: Any = None, budget: float = 3,
+                 upload_cfg: Any = None) -> None:
         self.fake = fake
+        self.upload_cfg = upload_cfg or {}
         self.run_dir = run_dir
         self.events: List[Dict[str, Any]] = []
         self.sent: List[Any] = []  # the multipart parts of each upload
@@ -61,7 +63,7 @@ class Harness:
         self.providers = [EvidenceSetsProvider(False, {}, {}, today=lambda: fake.today), self.delivery]
 
     def plan(self):
-        return engine.plan(self.providers, SyncContext(self.run_dir, {}), Reader(self.res))
+        return engine.plan(self.providers, SyncContext(self.run_dir, self.upload_cfg), Reader(self.res))
 
     def apply(self, plan):
         return {o.action_id: o for o in engine.apply(plan, self.providers, self.res)}
@@ -811,3 +813,54 @@ def test_direct_noop_applies_as_noop_with_no_batch(tmp_path):
     Harness(fake, two_files(tmp_path), capability=BATCHES_OFF).run()
     again = Harness(fake, tmp_path, capability=BATCHES_OFF).run()["delivery/x"]
     assert again.status == "noop" and again.result["mode"] == "direct" and again.result["batch_id"] is None
+
+
+# ---- pipeline entries ---------------------------------------------------------
+
+INVENTORY = {"type": "inventory", "id_scheme": "x-id"}
+
+
+def inventory_run(tmp_path: Path, paramify=None) -> Path:
+    body = env(fetcher="x", pipeline=INVENTORY, inventory={"complete": True})
+    return build(tmp_path, {"inv.json": body}, [inv("x", ["inv.json"])], paramify or {"x": {"use": "x"}})
+
+
+def test_pipeline_file_is_sent_and_scanned_as_the_envelope(tmp_path, monkeypatch):  # Review Focus 2
+    from framework.sync.providers import delivery as delivery_mod
+    scanned: List[bytes] = []
+    real_scan = delivery_mod.waf.scan
+    monkeypatch.setattr(delivery_mod.waf, "scan", lambda content, *a: (scanned.append(content), real_scan(content, *a))[1])
+    fake = FakeParamify()
+    h = Harness(fake, inventory_run(tmp_path), upload_cfg={"artifact_payload": "payload"})
+    out = h.run()
+    assert out["delivery/x"].status == "applied", out["delivery/x"].message
+    sent = [p["file"][1] for p in h.sent if p["file"][0] == "inv.json"]
+    assert len(sent) == 1 and set(json.loads(sent[0])) == {"schema_version", "metadata", "payload"}
+    assert scanned and all(set(json.loads(c)) == {"schema_version", "metadata", "payload"} for c in scanned)
+
+
+def test_ordinary_file_is_still_sent_as_the_payload_when_asked(tmp_path):
+    fake = FakeParamify()
+    h = Harness(fake, two_files(tmp_path), upload_cfg={"artifact_payload": "payload"})
+    h.run()
+    assert json.loads(h.sent[0]["file"][1]) == {"k": 1}
+
+
+def test_approved_pipeline_batch_says_the_pipeline_runs(tmp_path):
+    fake = FakeParamify()
+    outcome = Harness(fake, inventory_run(tmp_path)).run()["delivery/x"]
+    assert outcome.status == "applied", outcome.message
+    assert "APPROVED: pipeline runs now; check Monitoring → Inventory" in outcome.message
+    assert outcome.result["pipeline"] == {"type": "inventory", "approved": True}
+
+
+def test_submitted_pipeline_batch_is_not_success(tmp_path):
+    fake = FakeParamify()
+    outcome = Harness(fake, inventory_run(tmp_path, {"x": {"use": "x", "approval": "MANUAL"}})).run()["delivery/x"]
+    assert "SUBMITTED: waiting for approval; the pipeline has not run" in outcome.message
+    assert outcome.result["pipeline"]["approved"] is False
+
+
+def test_ordinary_entry_result_has_no_pipeline_key(tmp_path):
+    outcome = Harness(FakeParamify(), two_files(tmp_path)).run()["delivery/x"]
+    assert "pipeline" not in outcome.result

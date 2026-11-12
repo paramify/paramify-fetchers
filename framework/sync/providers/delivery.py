@@ -156,14 +156,18 @@ class _Delivered:
     held: List[str] = field(default_factory=list)
     validators_failed: List[str] = field(default_factory=list)
     mode: Optional[str] = "batch"  # or "direct" (no batch, no submit), or None (never routed)
+    pipeline_type: Optional[str] = None  # set for a pipeline entry
 
     def result(self, state: str) -> Dict[str, Any]:
-        return {
+        out = {
             "state": state, "batch_id": self.batch_id, "batch_reference": self.batch_reference,
             "status": self.status, "uploaded": list(self.uploaded), "already_present": list(self.already_present),
             "dropped": [dict(d) for d in self.dropped], "validators_failed": list(self.validators_failed),
             "mode": self.mode,
         }
+        if self.pipeline_type:
+            out["pipeline"] = {"type": self.pipeline_type, "approved": self.status == "APPROVED"}
+        return out
 
     @property
     def name(self) -> str:
@@ -243,7 +247,7 @@ def _run_batches(e: EntryDesired, obs: EntryObserved) -> List[str]:
 
 def _file_json(f: DeliveryFile) -> Dict[str, Any]:
     return {"path": str(f.path), "original_file_name": f.original_file_name, "title": f.title, "note": f.note,
-            "effective_date": f.effective_date}
+            "effective_date": f.effective_date, "pipeline": f.pipeline}
 
 
 def _utc_now() -> str:
@@ -299,21 +303,31 @@ class DeliveryProvider:
         self.entries = {e.entry_key: e for e in entries}
         return entries
 
-    def _content(self, path: Path) -> bytes:
-        """The bytes an upload of `path` sends, in this run's payload mode. Raises OSError."""
+    def _mode_for(self, pipeline: bool) -> str:
+        """A pipeline file is always the envelope: Paramify's pipeline reads `payload.data` from it."""
+        return "envelope" if pipeline else self._payload_mode
+
+    def _read(self, path: Path, pipeline: bool) -> bytes:
+        # An ordinary file goes through `_content(path)` alone, as before.
+        return self._content(path, "envelope") if pipeline else self._content(path)
+
+    def _content(self, path: Path, mode: Optional[str] = None) -> bytes:
+        """The bytes an upload of `path` sends, in `mode` (default: this run's payload mode). Raises OSError."""
+        mode = mode or self._payload_mode
         raw = path.read_bytes()
         try:
             envelope = json.loads(raw)
         except ValueError:
             return raw
-        return artifact_content(envelope, self._payload_mode) if is_enveloped(envelope) else raw
+        return artifact_content(envelope, mode) if is_enveloped(envelope) else raw
 
     def _scan(self, f: DeliveryFile) -> List[str]:
         """WAF signatures in what the upload of `f` would send: the bytes, the note and the title."""
-        key = (str(f.path), self._payload_mode)
+        mode = self._mode_for(f.pipeline)
+        key = (str(f.path), mode)
         if key not in self._waf_hits:
             try:
-                content = self._content(f.path)
+                content = self._read(f.path, f.pipeline)
             except OSError:
                 content = b""  # gone since desired(); apply reports it
             self._waf_hits[key] = waf.scan(content, f.note, f.title)
@@ -427,6 +441,7 @@ class DeliveryProvider:
             "entry_key": e.entry_key, "reference_id": e.reference_id, "evidence_id": None, "target": None, "artifact_request_id": None,
             "planned_current": False, "resume_batch_id": None,
             "files": [_file_json(f) for f in files], "dropped": dropped, "skipped": skipped,
+            "pipeline": e.pipeline,
         }
 
         def action(verb: Any, summary: str, **kw: Any) -> Action:
@@ -461,7 +476,7 @@ class DeliveryProvider:
             if direct == BATCHES_OFF:
                 warnings.append(PIPELINE_BATCHES_OFF)
             manual = (obs.evidence.approval if obs.evidence is not None else e.approval) == "MANUAL"
-            if manual:
+            if manual and direct != BATCHES_OFF:  # no batches: nothing to approve
                 warnings.append(PIPELINE_MANUAL.format(ref=e.reference_id, type=e.pipeline.get("type")))
         route = _route(e, obs, today, direct)
         # A direct entry counts the files sent before batches as on the set (below). A
@@ -651,7 +666,7 @@ class DeliveryProvider:
     def _started(self, p: Dict[str, Any], mode: str = "batch") -> _Delivered:
         # Files that are errors (unreadable, not evidence) show in the entry state
         # as drops, so a delivered entry that left some behind says so.
-        return _Delivered(mode=mode, dropped=[
+        return _Delivered(mode=mode, pipeline_type=(p.get("pipeline") or {}).get("type"), dropped=[
             {"name": d["original_file_name"], "reason": d["reason"]}
             for d in [*(p.get("dropped") or []),
                       *(s for s in p.get("skipped") or [] if s.get("kind") == "error")]])
@@ -728,9 +743,15 @@ class DeliveryProvider:
             run.status = None  # the submit took effect; what it led to is unknown
             parts.append("submitted; status could not be read back")
         elif run.status == "SUBMITTED":
-            parts.append(f"{run.name} SUBMITTED: held because validators failed: {', '.join(run.validators_failed)}"
-                         if run.validators_failed else
-                         f"{run.name} SUBMITTED: waiting for review (approval {run.approval or 'unknown'})")
+            if run.validators_failed:
+                parts.append(f"{run.name} SUBMITTED: held because validators failed: {', '.join(run.validators_failed)}")
+            elif run.pipeline_type:
+                parts.append(f"{run.name} SUBMITTED: waiting for approval; the pipeline has not run")
+            else:
+                parts.append(f"{run.name} SUBMITTED: waiting for review (approval {run.approval or 'unknown'})")
+        elif run.status == "APPROVED" and run.pipeline_type:
+            where = "Monitoring → Inventory" if run.pipeline_type == "inventory" else "Monitoring → Issues"
+            parts.append(f"{run.name} APPROVED: pipeline runs now; check {where}")
         else:
             parts.append(f"{run.name} {run.status}")
         if run.dropped:
@@ -781,7 +802,7 @@ class DeliveryProvider:
         for n, f in enumerate(to_send, 1):
             name = f["original_file_name"]
             try:
-                content = self._content(Path(f["path"]))
+                content = self._read(Path(f["path"]), bool(f.get("pipeline")))
             except OSError as exc:
                 run.dropped.append({"name": name, "reason": f"cannot read {name}: {exc.strerror or exc}"})
                 # An unreadable file is an error, as it is at plan time; the rest still goes in.

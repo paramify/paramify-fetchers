@@ -971,6 +971,12 @@ def test_manual_set_warns(tmp_path):
     assert a.verb == "deliver" and any("approves MANUAL" in w for w in a.warnings)
 
 
+def test_manual_set_does_not_warn_when_batches_are_off(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel(approval="MANUAL")), BATCHES_OFF)
+    assert a.payload["target"] == DIRECT
+    assert not any("approves MANUAL" in w for w in a.warnings)
+
+
 def test_manual_approval_on_a_new_set_warns(tmp_path):
     a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence", approval="MANUAL"), observed(None))
     assert any("approves MANUAL" in w for w in a.warnings)

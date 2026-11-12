@@ -55,6 +55,17 @@ schemas and the `paramify` CLI — not the internal code.
   `paramify describe` shows it. `github_repository_inventory` and
   `sophos_endpoint_inventory` 0.2.0 declare it.
 
+- **Pipeline files upload as the full envelope, and the result says whether the
+  pipeline ran.** `paramify upload` sends an inventory (or any pipeline) file as
+  the whole envelope even when `artifact_payload: payload` is set, because
+  Paramify's inventory pipeline reads `payload.data`; the WAF scan reads the same
+  bytes. When the batch is approved on submit, the entry says `APPROVED: pipeline
+  runs now` and where to look (Monitoring → Inventory); when it waits for a
+  person it says `SUBMITTED: waiting for approval; the pipeline has not run`. The
+  entry result in `--json` gains `pipeline: {type, approved}`. A set that
+  approves MANUAL no longer draws the "waits for someone to approve" warning when
+  the workspace has no batches, since there is no batch to approve.
+
 - **Evidence uploads go out as batches.** `paramify upload` now sends the files
   of each fetcher entry as one batch. Paramify submits and approves a batch as
   one unit. The batch goes through the channel of the evidence set, on the

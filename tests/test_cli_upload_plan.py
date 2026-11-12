@@ -99,6 +99,18 @@ def test_plan_json_carries_the_plan(fake, tmp_path):  # noqa: F811
     assert out["ok"] is True and [a["id"] for a in out["plan"]["actions"]][-1] == "delivery/x"
 
 
+def test_plan_json_on_an_inventory_run_says_the_pipeline_runs(fake, tmp_path):  # noqa: F811
+    from tests.test_sync_desired import build, env, inv
+    run = tmp_path / "run-inv"
+    run.mkdir()
+    body = env(fetcher="x", pipeline={"type": "inventory", "id_scheme": "x-id"}, inventory={"complete": True})
+    build(run, {"inv.json": body}, [inv("x", ["inv.json"])], {"x": {"use": "x"}})
+    res = cli("upload", str(run), "--plan", "--json")
+    assert res.exit_code == 0, res.output
+    action = next(a for a in json.loads(res.output)["plan"]["actions"] if a["id"] == "delivery/x")
+    assert action["summary"].endswith("approves on submit → pipeline runs")
+
+
 def test_plan_that_cannot_be_made_exits_1(no_env, tmp_path):  # noqa: F811
     res = cli("upload", str(two_files(tmp_path)), "--plan", "--json")
     assert res.exit_code == 1
