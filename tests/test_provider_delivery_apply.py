@@ -398,7 +398,7 @@ def test_submitted_with_passing_validators_lists_failing_validators(tmp_path):
 def test_manual_approval_reports_submitted_waiting_for_review(tmp_path):
     fake = FakeParamify()
     with_request(fake, approval="MANUAL")
-    h = Harness(fake, two_files(tmp_path))
+    h = Harness(fake, two_files(tmp_path, {"x": {"use": "x", "approval": "MANUAL"}}))
     d = h.run()["delivery/x"]
     assert d.result["status"] == "SUBMITTED" and d.result["validators_failed"] == []
     assert "waiting for review" in d.message and "MANUAL" in d.message
@@ -661,10 +661,31 @@ def test_lagging_read_after_approve_on_submission_reports_approved(tmp_path):
     assert "waiting for review" not in d.message and d.message.endswith("APPROVED")
 
 
+class SlowApproveFake(FakeParamify):
+    """Stage, 2026-11-12: the submit and the read just after it both say SUBMITTED
+    for a batch approved on submission; it reads APPROVED a few seconds later."""
+
+    def _submit(self, batch):
+        out = super()._submit(batch)
+        if batch["whenToApprove"] == "SUBMISSION" and out.status_code == 200:
+            batch["status"] = "SUBMITTED"
+            return type(out)(200, dict(batch))
+        return out
+
+
+def test_approve_on_submission_not_yet_approved_does_not_say_review(tmp_path):
+    fake = SlowApproveFake()
+    with_request(fake, approval="MANUAL")
+    d = Harness(fake, two_files(tmp_path)).run()["delivery/x"]
+    assert d.result["status"] == "SUBMITTED"
+    assert "waiting for review" not in d.message
+    assert "approved on submission; not approved yet when read back" in d.message
+
+
 def test_validator_gated_batch_trusts_the_read_over_the_submit(tmp_path):
     fake = LaggingFake()
     with_request(fake, approval=SWPV)
-    h = Harness(fake, two_files(tmp_path))
+    h = Harness(fake, two_files(tmp_path, {"x": {"use": "x", "approval": SWPV}}))
     d = h.run()["delivery/x"]
     assert d.result["status"] == "SUBMITTED"
 

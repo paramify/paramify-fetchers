@@ -1,4 +1,4 @@
-"""TUI: the Stack setting, the entry editor's Paramify group, and the plan in the upload confirm.
+"""TUI: the Stack and Owner settings, the entry editor's Paramify group, and the plan in the upload confirm.
 
 The Paramify API is faked at the framework.api boundary (no socket is opened); the
 app, its modals and its workers run for real.
@@ -149,10 +149,64 @@ def test_stack_without_a_token_takes_typed_text(tmp_path, no_token, run_tui):
     assert paramify["stack"] == "typed-stack" and "stack_name" not in paramify
 
 
+OWNERS = [{"owner": "alice", "sets": 3}, {"owner": "bob", "sets": 1}]
+
+
+def test_owner_picker_stores_the_owner_and_can_remove_it(tmp_path, monkeypatch, run_tui):
+    path, _ = _manifest(tmp_path)
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "tok")
+    monkeypatch.setattr(api, "list_channel_owners", lambda *a, **k: OWNERS)
+
+    async def pick(app, pilot, choice):
+        await pilot.press("2")
+        await pilot.pause()
+        app.screen.query_one("#manifest-owner", Button).press()
+        await _settle(app, pilot)
+        assert isinstance(app.screen, PickerModal)
+        options = [label for _, label in app.screen._options]
+        app.screen.dismiss(choice(app.screen._options))
+        await _settle(app, pilot)
+        return options
+
+    async def first(app, pilot):
+        options = await pick(app, pilot, lambda opts: "bob")
+        assert options == ["alice  (3 evidence sets)", "bob  (1 evidence set)"]
+        assert str(app.screen.query_one("#manifest-owner", Button).label) == "bob"
+
+    run_tui(first, path)
+    assert _run_block(path)["paramify"] == {"owner": "bob"}
+
+    async def second(app, pilot):
+        options = await pick(app, pilot, lambda opts: opts[-1][0])
+        assert options[-1] == "(no owner)"
+
+    run_tui(second, path)
+    assert _run_block(path).get("paramify") in (None, {})
+
+
+def test_owner_without_a_token_takes_typed_text(tmp_path, no_token, run_tui):
+    path, _ = _manifest(tmp_path)
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        app.screen.query_one("#manifest-owner", Button).press()
+        await _settle(app, pilot)
+        assert isinstance(app.screen, FormModal)
+        app.screen.query(Input).first().value = " alice "
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await _settle(app, pilot)
+
+    run_tui(body, path)
+    assert _run_block(path)["paramify"] == {"owner": "alice"}
+
+
 def test_entry_editor_writes_and_clears_paramify_overrides(tmp_path, run_tui):
     path, name = _manifest(tmp_path)
 
-    async def edit(app, pilot, approval, no_request, stack, delivery=BLANK):
+    async def edit(app, pilot, approval, no_request, stack, delivery=BLANK, owner=""):
         await pilot.press("2")
         await pilot.pause()
         await pilot.press("e")
@@ -160,6 +214,7 @@ def test_entry_editor_writes_and_clears_paramify_overrides(tmp_path, run_tui):
         assert isinstance(app.screen, FormModal)
         rows = {r.spec["key"]: r for r in app.screen.query("FieldRow") if r.group == "paramify"}
         rows["stack"].query_one(Input).value = stack
+        rows["owner"].query_one(Input).value = owner
         rows["approval"].query_one(Select).value = approval
         rows["no_request"].query_one(Select).value = no_request
         rows["delivery"].query_one(Select).value = delivery
@@ -168,12 +223,12 @@ def test_entry_editor_writes_and_clears_paramify_overrides(tmp_path, run_tui):
         await _settle(app, pilot)
 
     async def first(app, pilot):
-        await edit(app, pilot, "MANUAL", "evidence", "stk-9", "direct")
+        await edit(app, pilot, "MANUAL", "evidence", "stk-9", "direct", owner="bob")
 
     run_tui(first, path)
     entry = _run_block(path)["fetchers"][0]
-    assert entry["paramify"] == {"stack": "stk-9", "approval": "MANUAL", "no_request": "evidence",
-                                 "delivery": "direct"}
+    assert entry["paramify"] == {"stack": "stk-9", "owner": "bob", "approval": "MANUAL",
+                                 "no_request": "evidence", "delivery": "direct"}
 
     async def second(app, pilot):
         await edit(app, pilot, BLANK, BLANK, "")

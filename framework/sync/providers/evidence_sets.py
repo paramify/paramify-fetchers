@@ -88,7 +88,8 @@ class EvidenceSetsProvider:
     # -- plan ------------------------------------------------------------- #
     def desired(self, ctx: SyncContext) -> list:
         entries = desired_from_run(
-            ctx.run_dir, ctx.upload_cfg, stack_override=ctx.stack_override, only_file=ctx.only_file
+            ctx.run_dir, ctx.upload_cfg, stack_override=ctx.stack_override, only_file=ctx.only_file,
+            owner_override=ctx.owner_override,
         ) if ctx.run_dir is not None else []
         deliverable = [e for e in entries if any(f.skip_reason is None for f in e.files)]
         return list(group_by_reference(deliverable))
@@ -143,7 +144,7 @@ class EvidenceSetsProvider:
                 # Only an approval the manifest sets is drift; the default would note every older set.
                 for wanted in dict.fromkeys(d.explicit.values()):
                     if seen.approval != wanted:
-                        warnings.append(f"approval is {seen.approval} here; new sets get {wanted}")
+                        warnings.append(f"approval is {seen.approval} here; this upload's batches get {wanted}")
                 if seen.name != d.name:
                     warnings.append(f"name in Paramify is '{seen.name}'; the fetcher calls it '{d.name}'")
                 actions.append(Action(
