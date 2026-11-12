@@ -1484,7 +1484,7 @@ def run(
     Pass manifest_path so the run metadata records which manifest produced the
     run — that attribution powers each manifest's last_run in list_manifests().
 
-    Returns a summary dict: one record per invocation, plus `skipped`, `errors`
+    Returns a summary dict: one record per invocation, plus `skipped`, `setup_errors`
     (setup failed before any invocation) and `notes`, each naming its entry.
     Raises ValueError if the manifest is schema-invalid.
     """
@@ -1666,7 +1666,7 @@ def run(
         "completed_at": completed_at,
         "invocations": metadata["invocations"],
         "skipped": skipped,
-        "errors": setup_errors,
+        "setup_errors": setup_errors,
         "notes": notes,
         # Issue reports go to a different endpoint, so a run that collected any is
         # not finished after `paramify upload`. Counted here so every front-end can

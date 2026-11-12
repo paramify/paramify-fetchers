@@ -87,7 +87,7 @@ def test_the_summary_names_skipped_errored_and_noted_entries(staged):
     assert summary["ok"] is False
     assert summary["skipped"] == [
         {"entry_key": "testcat_ghost", "fetcher": "testcat_ghost", "reason": "not discovered"}]
-    [error] = summary["errors"]
+    [error] = summary["setup_errors"]
     assert (error["entry_key"], error["fetcher"]) == (f["needs"], f["needs"])
     assert "url" in error["error"]
     [note] = summary["notes"]
@@ -112,7 +112,7 @@ def test_the_summary_lists_are_empty_on_a_clean_run(staged):
     root, m, f = staged
     m["run"]["fetchers"] = [{"use": f["ok"]}]
     summary = api.run(m, root)
-    assert (summary["skipped"], summary["errors"], summary["notes"]) == ([], [], [])
+    assert (summary["skipped"], summary["setup_errors"], summary["notes"]) == ([], [], [])
 
 
 def test_print_run_dir_puts_only_the_run_dir_on_stdout(staged):

@@ -275,7 +275,7 @@ entries that need attention. Each item has `entry_key` and `fetcher`:
 
 - `skipped`: the entry did not run. `reason` tells why, for example
   `not discovered`.
-- `errors`: the setup failed before the fetcher started. `error` tells why.
+- `setup_errors`: the setup failed before the fetcher started. `error` tells why.
 - `notes`: the run changed something for the entry, for example it dropped an
   optional secret. `note` tells what.
 
