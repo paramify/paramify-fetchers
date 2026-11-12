@@ -12,6 +12,9 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- `paramify preset <fetcher>` prints the settings to enter when building a pipeline's Paramify preset: sample file, data
+  path, unique ID and scheme, the `asset_type` values of the newest run, and the other fetchers that share the ID
+  scheme. `--json`, `-f` and `--output-dir` pick the output.
 - `paramify validate` refuses `delivery: direct` and `no_request: direct` on a pipeline fetcher entry, and notes
   `approval: MANUAL` on one (the pipeline waits for someone to approve each batch). It also refuses a registry
   validator that targets a pipeline evidence set, since a failing validator means the batch never approves.

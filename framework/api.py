@@ -2588,6 +2588,91 @@ def latest_run(
     return runs[0] if runs else None
 
 
+def newest_run_with(output_dir: Path, filename: str) -> Optional[Path]:
+    """The newest run-* directory under output_dir that holds `filename`, or None.
+
+    Orders runs the way list_runs does (name, newest first).
+    """
+    base = Path(output_dir).expanduser()
+    if not base.is_absolute():
+        base = Path.cwd() / base
+    if not base.is_dir():
+        return None
+    for d in sorted(base.resolve().glob("run-*"), reverse=True):
+        if d.is_dir() and (d / filename).is_file():
+            return d
+    return None
+
+
+def preset_sheet(root: Path, name: str, output_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """The settings to enter when building the Paramify preset for a pipeline fetcher.
+
+    Reads the fetcher's `pipeline:` block and its newest run under output_dir
+    (default <root>/evidence). Raises KeyError for an unknown fetcher and
+    ValueError for one with no `pipeline:` block.
+    """
+    fetchers = discover_fetchers(root)
+    if name not in fetchers:
+        raise KeyError(name)
+    f = fetchers[name]
+    if not f.is_pipeline:
+        raise ValueError(f"{name} is not a pipeline fetcher")
+    pipe = f.pipeline
+    inventory = pipe.type == "inventory"
+    out = Path(output_dir) if output_dir is not None else Path(root) / "evidence"
+    sample = None
+    asset_types = None
+    run = newest_run_with(out, f.output_path)
+    if run is not None:
+        sample = str(run / f.output_path)
+        if inventory:
+            try:
+                env = json.loads((run / f.output_path).read_text())
+                counts = ((env.get("metadata") or {}).get("inventory") or {}).get("by_asset_type")
+                asset_types = dict(counts) if isinstance(counts, dict) else None
+            except (OSError, ValueError, AttributeError):
+                asset_types = None
+    return {
+        "fetcher": name,
+        "type": pipe.type,
+        "evidence_set": f.evidence_set.reference_id if f.evidence_set else None,
+        "sample": sample,
+        "data_path": "payload.data" if inventory else None,
+        "unique_id": "unique_asset_identifier" if inventory else None,
+        "id_scheme": pipe.id_scheme,
+        "asset_id_field": pipe.asset_id_field,
+        "asset_types": asset_types,
+        "linked": sorted(
+            n for n, o in fetchers.items()
+            if n != name and o.is_pipeline and o.pipeline.id_scheme == pipe.id_scheme
+        ),
+    }
+
+
+def render_preset_sheet(sheet: Dict[str, Any]) -> str:
+    """The text of the preset sheet (spec section 5); the CLI and the TUI both show it."""
+    ref = sheet["evidence_set"] or sheet["fetcher"]
+    inventory = sheet["data_path"] is not None
+    rows = [("Sample file", sheet["sample"] or "none yet: run the fetcher first")]
+    if inventory:
+        rows.append(("Data path", sheet["data_path"]))
+        rows.append(("Unique ID", f"{sheet['unique_id']}   (scheme: {sheet['id_scheme']})"))
+        if sheet["asset_types"] is None:
+            rows.append(("Parent component", "derive from asset_type. The asset_type values need a run (run the fetcher first)"))
+        elif not sheet["asset_types"]:
+            rows.append(("Parent component", "derive from asset_type. The last run had no assets"))
+        else:
+            counts = " · ".join(f"{k} {v}" for k, v in sheet["asset_types"].items())
+            rows.append(("Parent component", f"derive from asset_type. Values in the last run:\n{' ' * 22}{counts}"))
+    else:
+        rows.append(("Asset ID field", f"{sheet['asset_id_field']}   (scheme: {sheet['id_scheme']})"))
+    rows.append(("Evidence set", "approval must be automatic; attach no validators"))
+    linked = ", ".join(sheet["linked"]) if sheet["linked"] else f"none in the catalog use {sheet['id_scheme']}"
+    rows.append(("Linked fetchers", linked))
+    head = f"{sheet['type'].capitalize()} pipeline for {ref}  (attach it to this set, not a new one)"
+    return "\n".join([head] + [f"  {k:<17} {v}" for k, v in rows])
+
+
 def read_evidence(path) -> dict:
     """Read one evidence JSON file, normalized. Splits the standard envelope
     (schema_version/metadata/payload); a raw (un-enveloped) file comes back with
