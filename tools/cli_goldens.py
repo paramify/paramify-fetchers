@@ -111,13 +111,17 @@ def _outputs() -> dict:
             raise SystemExit(f"`paramify run` did not make the run directory it announced:\n"
                              f"{outputs['run'][0]}")
         run = str(run_dir.relative_to(REPO_ROOT))
-        # set-stack and set-owner edit a copy kept in the run dir, so it goes with it.
+        for name, args in (
+            ("validate", ["validate", "examples/demo.yaml"]),
+            ("upload_dry_run", ["upload", "--dry-run", run]),
+        ):
+            outputs[name] = _capture(args, _paramify(args))
+        # set-stack and set-owner edit a copy kept in the run dir, so it goes with it. It is
+        # copied after the plain dry run, so that golden never sees an extra file in the run.
         copy = run_dir / "demo.yaml"
         shutil.copy(REPO_ROOT / "examples" / "demo.yaml", copy)
         edited = str(copy.relative_to(REPO_ROOT))
         for name, args in (
-            ("validate", ["validate", "examples/demo.yaml"]),
-            ("upload_dry_run", ["upload", "--dry-run", run]),
             ("set_stack", ["manifest", "set-stack", edited, "Prod"]),
             ("set_owner", ["manifest", "set-owner", edited, "alice"]),
             # The run was made before both: the plan notes each, with its fix.
