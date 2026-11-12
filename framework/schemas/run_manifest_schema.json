@@ -127,6 +127,11 @@
         "stack_name": {
           "type": "string"
         },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Paramify username whose channel the upload uses when the stack has one channel per owner."
+        },
         "approval": {
           "enum": [
             "MANUAL",
