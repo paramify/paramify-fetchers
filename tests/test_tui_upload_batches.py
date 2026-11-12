@@ -7,7 +7,6 @@ opened (no_network), and the fake records every call.
 
 from __future__ import annotations
 
-import functools
 import json
 import threading
 from datetime import date, timedelta
@@ -28,7 +27,6 @@ from framework.tui.modals import ConfirmModal, PickerModal  # noqa: E402
 from framework.tui.screens.manifest import ManifestPage  # noqa: E402
 from framework.tui.screens.upload import UploadPage  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 URL = "https://api.example.test"  # conftest.FAKE_PARAMIFY_URL
 RUN_ID = "2026-09-01T00-00-00Z"
 
@@ -48,10 +46,8 @@ def _current_request(fake, ev, channel_index: int = 0):
     return fake.add_request(ev.id, ev.channels[channel_index].id, today - timedelta(days=5), today + timedelta(days=5))
 
 
-@functools.cache
-def _fetcher() -> str:
-    catalog = api.catalog(REPO_ROOT)
-    return next(f["name"] for c in catalog["categories"] for f in c["fetchers"])
+# The demo fetcher: a real one would change what these tests exercise when it changes.
+FETCHER = "demo_hello"
 
 
 def _envelope(name: str, ref: str) -> dict:
@@ -65,7 +61,7 @@ def _workspace(tmp_path: Path, entries: list, run_paramify: dict | None = None) 
     """A manifest listing one fetcher once per entry, and a run of it recorded with the same settings.
 
     `entries` is [(the entry's own paramify block, {file name: evidence set})]."""
-    name = _fetcher()
+    name = FETCHER
     out = tmp_path / "evidence"
     run = out / f"run-{RUN_ID}"
     run.mkdir(parents=True)
@@ -117,7 +113,7 @@ async def _answer(app, pilot, key: str) -> None:
 def _delivery(lines: list) -> list:
     """The delivery section of a plan: its action, warning and fix lines, then the totals."""
     start = lines.index("delivery") + 1
-    end = next(i for i, line in enumerate(lines) if " · " in line)
+    end = next(i for i in range(start, len(lines)) if " · " in lines[i])
     return lines[start:end + 1]
 
 
@@ -152,7 +148,7 @@ def test_an_entry_goes_in_a_new_batch_on_its_channels_current_request(tmp_path, 
 
     lines = run_tui(body, path)
     assert _delivery(lines) == [
-        f"  deliver {_fetcher()}: deliver 2 files to AR-1 (stack Prod, channel CH-1): new batch (approved on submit)",
+        f"  deliver {FETCHER}: deliver 2 files to AR-1 (stack Prod, channel CH-1): new batch (approved on submit)",
         "1 deliver · 0 noop · 0 refuse · 1 tag",
     ]
     assert not [line for line in lines if line.startswith("!")]
@@ -169,13 +165,17 @@ def test_each_entry_gets_its_own_batch_or_route(tmp_path, paramify, run_tui):
     w = paramify.add_evidence("EVD-W", channels=[st.id])
     _current_request(paramify, w)
     paramify.add_evidence("EVD-V", channels=[st.id])  # no request either
-    name = _fetcher()
+    paramify.add_evidence("EVD-U", channels=[st.id])  # no request either
+    paramify.add_evidence("EVD-T")
+    name = FETCHER
     path = _workspace(tmp_path, [
         ({}, {"x_east.json": "EVD-X", "x_west.json": "EVD-X", "x_gov.json": "EVD-X"}),
         ({"approval": "MANUAL"}, {"y.json": "EVD-Y"}),
         ({}, {"z.json": "EVD-Z"}),
         ({"delivery": "direct"}, {"w.json": "EVD-W"}),
         ({"no_request": "evidence"}, {"v.json": "EVD-V"}),
+        ({"no_request": "refuse"}, {"u.json": "EVD-U"}),
+        ({"approval": "SUBMISSION_WITH_PASSING_VALIDATORS"}, {"t.json": "EVD-T"}),
     ], {"stack": st.id})
 
     async def body(app, pilot):
@@ -189,7 +189,11 @@ def test_each_entry_gets_its_own_batch_or_route(tmp_path, paramify, run_tui):
         f"  deliver {name}#3: deliver 1 file to EVD-W direct (channel CH-3): delivery: direct",
         f"  deliver {name}#4: deliver 1 file to EVD-V (evidence level): new batch (approved on submit)",
         "    ! evidence-level batch: does not count toward the solution capability",
-        "5 deliver · 0 noop · 0 refuse · 5 tag",
+        f"  refuse {name}#5: no current or past artifact request on channel CH-5 of EVD-U",
+        "    → fix: create an artifact request on CH-5 in the app, or remove no_request: refuse from this entry "
+        "to send it direct",
+        f"  deliver {name}#6: deliver 1 file to EVD-T (evidence level): new batch (approved when its validators pass)",
+        "6 deliver · 0 noop · 1 refuse · 6 tag",
     ]
 
 
@@ -201,15 +205,18 @@ def _two_owners(fake):
     return st
 
 
-def test_the_owner_picks_the_channel_where_a_stack_has_one_per_owner(tmp_path, paramify, run_tui):
+@pytest.mark.parametrize("where", ["manifest", "entry"])
+def test_the_owner_picks_the_channel_where_a_stack_has_one_per_owner(tmp_path, paramify, run_tui, where):
     st = _two_owners(paramify)
-    path = _workspace(tmp_path, [({}, {"a.json": "EVD-X"})], {"stack": st.id, "owner": "bob"})
+    settings = {"stack": st.id, "owner": "bob"}
+    own, run_level = (settings, {}) if where == "entry" else ({}, settings)
+    path = _workspace(tmp_path, [(own, {"a.json": "EVD-X"})], run_level)
 
     async def body(app, pilot):
         return await _confirm(app, pilot)
 
     assert _delivery(run_tui(body, path)) == [
-        f"  deliver {_fetcher()}: deliver 1 file to AR-2 (stack Prod, channel CH-2): new batch (approved on submit)",
+        f"  deliver {FETCHER}: deliver 1 file to AR-2 (stack Prod, channel CH-2): new batch (approved on submit)",
         "1 deliver · 0 noop · 0 refuse · 1 tag",
     ]
 
@@ -222,7 +229,7 @@ def test_without_an_owner_the_entry_is_refused_with_the_owners_and_the_fix(tmp_p
         return await _confirm(app, pilot)
 
     assert _delivery(run_tui(body, path)) == [
-        f"  refuse {_fetcher()}: EVD-X has 2 channels on stack Prod, one per owner: CH-1 (alice), CH-2 (bob)",
+        f"  refuse {FETCHER}: EVD-X has 2 channels on stack Prod, one per owner: CH-1 (alice), CH-2 (bob)",
         "    → fix: set an owner to choose one (paramify manifest set-owner, or paramify upload --owner); "
         "owners: alice, bob",
         "0 deliver · 0 noop · 1 refuse",
@@ -235,11 +242,12 @@ def test_a_stack_and_owner_picked_after_the_run_are_noted_and_route_nothing_yet(
     _two_owners(paramify)
     paramify.add_stack("Staging")
     path = _workspace(tmp_path, [({}, {"a.json": "EVD-X"})])
-    name = _fetcher()
+    name = FETCHER
 
     async def pick(app, pilot, button: str, typed: str) -> list:
         app.screen.query_one(ManifestPage).query_one(button, Button).press()
         await _until(pilot, lambda: isinstance(app.screen, PickerModal), f"the {button} picker")
+        await _until(pilot, lambda: getattr(app.focused, "id", None) == "picker-filter", "the picker's filter")
         options = [label for _, label in app.screen._options]
         await pilot.press(*typed, "enter")
         await _until(pilot, lambda: not isinstance(app.screen, PickerModal), f"the {button} picker to close")
@@ -248,45 +256,95 @@ def test_a_stack_and_owner_picked_after_the_run_are_noted_and_route_nothing_yet(
     async def body(app, pilot):
         await pilot.press("2")
         await pilot.pause()
-        stacks = await pick(app, pilot, "#manifest-stack", "Prod")
+        stacks = await pick(app, pilot, "#manifest-stack", "Staging")
         owners = await pick(app, pilot, "#manifest-owner", "bob")
         page = app.screen.query_one(ManifestPage)
         labels = (str(page.query_one("#manifest-stack", Button).label),
                   str(page.query_one("#manifest-owner", Button).label))
-        return stacks, owners, labels, await _confirm(app, pilot)
+        lines = await _confirm(app, pilot)
+        planned_writes = _writes(paramify)
+        await _answer(app, pilot, "y")
+        await _uploaded(app, pilot)
+        return stacks, owners, labels, lines, planned_writes
 
-    stacks, owners, labels, lines = run_tui(body, path)
+    stacks, owners, labels, lines, planned_writes = run_tui(body, path)
     assert stacks == ["Prod  (st-1)", "Staging  (st-2)"]
     assert owners == ["alice  (1 evidence set)", "bob  (1 evidence set)"]
-    assert labels == ("Prod", "bob")
-    assert yaml.safe_load(path.read_text())["run"]["paramify"] == {"stack": "st-1", "stack_name": "Prod", "owner": "bob"}
-    assert lines[:2] == [
-        f"! the manifest now sets stack Prod for {name}; this run was made with none. "
-        "Run the manifest again, or upload with --stack st-1.",
-        f"! the manifest now sets owner bob for {name}; this run was made with none. "
+    assert labels == ("Staging", "bob")
+    assert yaml.safe_load(path.read_text())["run"]["paramify"] == {
+        "stack": "st-2", "stack_name": "Staging", "owner": "bob"}
+    notes = [
+        f"the manifest now sets stack Staging for {name}; this run was made with none. "
+        "Run the manifest again, or upload with --stack st-2.",
+        f"the manifest now sets owner bob for {name}; this run was made with none. "
         "Run the manifest again, or upload with --owner bob.",
     ]
+    assert lines[:2] == [f"! {n}" for n in notes]
     # The run had no stack, so the upload still cannot choose a channel.
     assert _delivery(lines)[0] == f"  refuse {name}: EVD-X has 2 channels and no stack is configured"
-    assert _writes(paramify) == []
+    assert planned_writes == []
+    # The upload after yes compares the run with the open manifest too.
+    log = json.loads((tmp_path / "evidence" / f"run-{RUN_ID}" / "upload_log.json").read_text())
+    assert log["plan"]["notes"] == notes
 
 
-def test_with_batches_off_the_plan_says_so_first_and_sends_direct(tmp_path, paramify, run_tui):
+@pytest.mark.parametrize("switch, reason", [
+    ("batches_flag_off", "Artifact requests are not enabled for this workspace."),  # 403
+    ("without_batches", "the API has no batch routes"),  # 404: an API from before batches
+])
+def test_with_batches_off_the_plan_says_so_first_and_sends_direct(tmp_path, paramify, run_tui, switch, reason):
     st = paramify.add_stack("Prod")
-    paramify.add_evidence("EVD-X", channels=[st.id])
-    paramify.batches_flag_off()
-    path = _workspace(tmp_path, [({}, {"a.json": "EVD-X"})], {"stack": st.id})
+    ev = paramify.add_evidence("EVD-X", channels=[st.id])
+    getattr(paramify, switch)()
+    path = _workspace(tmp_path, [({}, {"a.json": "EVD-X", "b.json": "EVD-X"})], {"stack": st.id})
 
     async def body(app, pilot):
-        return await _confirm(app, pilot)
+        lines = await _confirm(app, pilot)
+        await _answer(app, pilot, "y")
+        page = await _uploaded(app, pilot)
+        return lines, _log(page), _banner(page)
 
-    lines = run_tui(body, path)
-    assert lines[0] == ("! batches are off for this workspace (Artifact requests are not enabled for this "
-                        "workspace.); every entry is sent direct, as before batches")
+    lines, log, banner = run_tui(body, path)
+    assert lines[0] == (f"! batches are off for this workspace ({reason}); "
+                        "every entry is sent direct, as before batches")
     assert _delivery(lines) == [
-        f"  deliver {_fetcher()}: deliver 1 file to EVD-X direct (channel CH-1): batches are off for this workspace",
+        f"  deliver {FETCHER}: deliver 2 files to EVD-X direct (channel CH-1): batches are off for this workspace",
         "1 deliver · 0 noop · 0 refuse · 1 tag",
     ]
+    assert "[OK] a.json uploaded set=EVD-X channel=CH-1" in log
+    assert banner.startswith("evidence upload complete — uploaded=2 duplicates=0 errors=0")
+    assert paramify.batches == []
+    uploads = [c[1] for c in _writes(paramify) if c[1].endswith("/artifacts/upload")]
+    assert uploads == [f"/evidence/{ev.id}/artifacts/upload"] * 2
+    entry = json.loads((tmp_path / "evidence" / f"run-{RUN_ID}" / "upload_log.json").read_text())["entries"][FETCHER]
+    assert (entry["mode"], entry["batch_id"], entry["channel"]) == ("direct", None, "CH-1")
+
+
+def test_an_api_that_refuses_the_batch_approval_still_uploads_and_says_why(tmp_path, paramify, run_tui):
+    # Prod refused `whenToApprove` on POST /batches for a time: the batch is made
+    # without it and takes the set's mode (MANUAL here), with a note.
+    st = paramify.add_stack("Prod")
+    ev = paramify.add_evidence("EVD-X", channels=[st.id], approval="MANUAL")
+    _current_request(paramify, ev)
+    paramify.batch_settings = False
+    path = _workspace(tmp_path, [({}, {"a.json": "EVD-X", "b.json": "EVD-X"})], {"stack": st.id})
+
+    async def body(app, pilot):
+        plan = await _confirm(app, pilot)
+        await _answer(app, pilot, "y")
+        page = await _uploaded(app, pilot)
+        return plan, _banner(page)
+
+    plan, banner = run_tui(body, path)
+    assert _delivery(plan)[0].endswith(": new batch (approved on submit)")  # the plan cannot know
+    assert banner.startswith("evidence upload complete — uploaded=2 duplicates=0 errors=0")
+    assert [b.get("whenToApprove") for b in paramify.batch_bodies] == ["SUBMISSION", None]
+    [batch] = paramify.batches
+    assert batch["status"] == "SUBMITTED"
+    entry = json.loads((tmp_path / "evidence" / f"run-{RUN_ID}" / "upload_log.json").read_text())["entries"][FETCHER]
+    assert entry["status"] == "SUBMITTED"
+    assert "this workspace's API cannot set a batch's approval, so BCH-1 uses the evidence set's (MANUAL)" \
+        in entry["message"]
 
 
 def test_yes_uploads_one_batch_and_the_next_plan_finds_it_delivered(tmp_path, paramify, run_tui):
@@ -294,7 +352,7 @@ def test_yes_uploads_one_batch_and_the_next_plan_finds_it_delivered(tmp_path, pa
     ev = paramify.add_evidence("EVD-X", channels=[st.id], approval="MANUAL")
     ar = _current_request(paramify, ev)
     path = _workspace(tmp_path, [({}, {"a.json": "EVD-X", "b.json": "EVD-X"})], {"stack": st.id})
-    name = _fetcher()
+    name = FETCHER
 
     async def body(app, pilot):
         await _confirm(app, pilot)
@@ -304,7 +362,7 @@ def test_yes_uploads_one_batch_and_the_next_plan_finds_it_delivered(tmp_path, pa
         return shown, await _confirm(app, pilot)
 
     (log, banner), again = run_tui(body, path)
-    [batch] = paramify._batches
+    [batch] = paramify.batches
     assert (batch["artifactRequestId"], batch["status"], batch["artifactCount"]) == (ar.id, "APPROVED", 2)
     assert paramify.batch_bodies[0]["whenToApprove"] == "SUBMISSION"  # whatever the set says
     assert "[OK] a.json uploaded set=EVD-X channel=CH-1" in log
@@ -319,7 +377,7 @@ def test_an_entry_held_by_a_failed_file_resumes_its_open_batch(tmp_path, paramif
     st = paramify.add_stack("Prod")
     ev = paramify.add_evidence("EVD-X", channels=[st.id])
     _current_request(paramify, ev)
-    paramify.fail_upload("b.json", 503)
+    paramify.fail_upload("b.json", 503, "upstream unavailable", envelope=True)
     path = _workspace(tmp_path, [({}, {"a.json": "EVD-X", "b.json": "EVD-X"})], {"stack": st.id})
 
     async def body(app, pilot):
@@ -327,7 +385,7 @@ def test_an_entry_held_by_a_failed_file_resumes_its_open_batch(tmp_path, paramif
         await _answer(app, pilot, "y")
         page = await _uploaded(app, pilot)
         first = _log(page), _banner(page)
-        paramify._fail_all.clear()  # the outage is over
+        paramify.clear_failures()  # the outage is over
         plan = await _confirm(app, pilot)
         await _answer(app, pilot, "y")
         page = await _uploaded(app, pilot)
@@ -335,14 +393,15 @@ def test_an_entry_held_by_a_failed_file_resumes_its_open_batch(tmp_path, paramif
 
     (log, banner), plan, second = run_tui(body, path)
     assert ("[FAIL] b.json error set=EVD-X channel=CH-1 "
-            "POST /batches/bt-1/artifacts/upload failed after retrying (HTTP 503: )") in log
+            "POST /batches/bt-1/artifacts/upload failed after retrying (HTTP 503: ") in log
+    assert '"error": {"message": "upstream unavailable", "path": "/batches/bt-1/artifacts/upload"}' in log
     assert banner.startswith("evidence upload complete — uploaded=1 duplicates=0 errors=1")
     assert _delivery(plan) == [
-        f"  deliver {_fetcher()}: deliver 1 file to AR-1 (stack Prod, channel CH-1): resume BCH-1 (1 missing)",
+        f"  deliver {FETCHER}: deliver 1 file to AR-1 (stack Prod, channel CH-1): resume BCH-1 (1 missing)",
         "1 deliver · 0 noop · 0 refuse · 1 tag",
     ]
     assert second.startswith("evidence upload complete — uploaded=1 duplicates=1 errors=0")
-    [batch] = paramify._batches
+    [batch] = paramify.batches
     assert (batch["status"], batch["artifactCount"]) == ("APPROVED", 2)
 
 
@@ -350,7 +409,7 @@ def test_a_file_the_api_refuses_is_dropped_and_counted_in_the_banner(tmp_path, p
     st = paramify.add_stack("Prod")
     ev = paramify.add_evidence("EVD-X", channels=[st.id])
     _current_request(paramify, ev)
-    paramify.fail_upload("b.json", 422, "bad file")
+    paramify.fail_upload("b.json", 422, "bad file", envelope=True)
     path = _workspace(tmp_path, [({}, {"a.json": "EVD-X", "b.json": "EVD-X"})], {"stack": st.id})
 
     async def body(app, pilot):
@@ -361,7 +420,8 @@ def test_a_file_the_api_refuses_is_dropped_and_counted_in_the_banner(tmp_path, p
 
     log, banner = run_tui(body, path)
     assert ("[FAIL] b.json dropped set=EVD-X channel=CH-1 "
-            "POST /batches/bt-1/artifacts/upload failed (HTTP 422: bad file)") in log
+            "POST /batches/bt-1/artifacts/upload failed (HTTP 422: ") in log
+    assert '"error": {"message": "bad file", "path": "/batches/bt-1/artifacts/upload"}' in log
     assert banner.startswith("evidence upload complete — uploaded=1 duplicates=0 errors=0 dropped=1")
 
 
@@ -385,7 +445,7 @@ def test_no_on_the_confirm_sends_nothing(tmp_path, paramify, run_tui):
 def test_yes_on_a_plan_that_failed_sends_nothing(tmp_path, paramify, run_tui, monkeypatch):
     st = paramify.add_stack("Prod")
     paramify.add_evidence("EVD-X", channels=[st.id])
-    paramify.fail_route("GET", "/evidence", 401, "token expired")
+    paramify.fail_route("GET", "/evidence", 401, "token expired", envelope=True)
     path = _workspace(tmp_path, [({}, {"a.json": "EVD-X"})], {"stack": st.id})
     started = []
     real_upload = api.upload_run
@@ -393,12 +453,13 @@ def test_yes_on_a_plan_that_failed_sends_nothing(tmp_path, paramify, run_tui, mo
 
     async def body(app, pilot):
         lines = await _confirm(app, pilot)
-        paramify._fail_routes.clear()  # an upload started now would get through
+        paramify.clear_failures()  # an upload started now would get through
         await _answer(app, pilot, "y")
         return lines, isinstance(app.screen, ConfirmModal)
 
     lines, still_open = run_tui(body, path)
-    assert lines == ["Cannot plan the upload: GET /evidence failed (HTTP 401: token expired)"]
+    assert lines == ['Cannot plan the upload: GET /evidence failed (HTTP 401: {"requestId": "r-1", '
+                     '"statusMessage": "Unauthorized", "error": {"message": "token expired", "path": "/evidence"}})']
     assert not still_open
     assert started == [] and _writes(paramify) == []
 

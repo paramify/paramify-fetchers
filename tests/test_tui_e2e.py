@@ -176,6 +176,8 @@ async def _pick(pilot, button: str, typed: str) -> list:
     app = pilot.app
     await pilot.click(button)
     await _until(pilot, lambda: isinstance(app.screen, PickerModal), f"the {button} picker")
+    # Keys typed before the filter has focus go nowhere.
+    await _until(pilot, lambda: getattr(app.focused, "id", None) == "picker-filter", "the picker's filter")
     options = [label for _, label in app.screen._options]
     await pilot.press(*typed, "enter")
     await _until(pilot, lambda: not isinstance(app.screen, PickerModal), f"the {button} picker to close")
