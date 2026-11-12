@@ -55,7 +55,7 @@ every subcommand accepts --json, emitting {"ok", "path", "errors"}):
 
 Validate / run / launch:
   paramify validate <manifest> [--json]
-  paramify run <manifest> [--json]
+  paramify run <manifest> [--json | --print-run-dir]
   paramify upload [run-dir] [-f MANIFEST] [--output-dir DIR] [--config PATH] [--dry-run] [--json]
   paramify issues upload [run-dir] [-f MANIFEST] [--output-dir DIR] [--config PATH] [--dry-run] [--no-wait] [--json]
   paramify issues jobs [--assessment ID] [--retry JOB | --cancel JOB] [--json]
@@ -311,19 +311,25 @@ def _target_field_type(root: Path, fetcher_name: str, key: str) -> str:
     return "string"
 
 
-def _human_run_printer():
-    """Return an on_event callback that reproduces the original CLI run output."""
+def _human_run_printer(err: bool = False):
+    """Return an on_event callback that reproduces the original CLI run output.
+
+    With `err`, every line goes to stderr, so stdout stays free for a script.
+    """
+    def out(msg: str) -> None:
+        typer.echo(msg, err=err)
+
     def on_event(ev: dict) -> None:
         kind = ev["event"]
         if kind == "run_start":
-            typer.echo(f"Run {style.head(ev['run_id'])} → {style.path(ev['run_dir'])}\n")
+            out(f"Run {style.head(ev['run_id'])} → {style.path(ev['run_dir'])}\n")
         elif kind == "fetcher_skip":
             _err(f"  {style.mark('SKIP')}  {style.name(ev['fetcher'])} {style.dim('(' + ev['reason'] + ')')}")
         elif kind == "fetcher_start":
             targets = style.dim(f"  ({ev['targets']} targets)") if ev["fanout"] else ""
             if ev.get("depends_on"):
                 targets = style.dim(f"  (reads {', '.join(ev['depends_on'])})")
-            typer.echo(f"  {style.dim('RUN')}   {style.name(ev['fetcher'])}{targets}")
+            out(f"  {style.dim('RUN')}   {style.name(ev['fetcher'])}{targets}")
         elif kind == "fetcher_note":
             _err(f"        {style.mark('NOTE')}  {style.dim(ev['note'])}")
         elif kind == "fetcher_error":
@@ -332,7 +338,7 @@ def _human_run_printer():
             m = "OK" if ev["exit_code"] == 0 else "FAIL"
             detail = f"exit={ev['exit_code']} duration={ev['duration_sec']}s"
             target = f"  target={ev['target']}" if ev["target"] else ""
-            typer.echo(
+            out(
                 f"        [{style.mark(m)}] {style.dim(detail)}{style.env(target)}"
             )
             # Why it failed, as the TUI shows it: the fetcher's reported reason,
@@ -340,11 +346,11 @@ def _human_run_printer():
             if ev["exit_code"] != 0 and ev.get("error"):
                 _err(f"        {style.dim(ev['error'])}")
         elif kind == "run_complete":
-            typer.echo(f"\n_run_metadata.json → {style.path(ev['metadata_path'])}")
+            out(f"\n_run_metadata.json → {style.path(ev['metadata_path'])}")
             # `paramify upload` cannot see these, so a run that collected reports
             # and stops at the evidence stage leaves them unsent with no warning.
             if ev.get("issue_reports"):
-                typer.echo(
+                out(
                     f"{ev['issue_reports']} issue report(s) collected — send them "
                     f"with {style.head('paramify issues upload')} "
                     f"{style.dim('(paramify upload handles evidence only)')}"
@@ -1344,8 +1350,15 @@ def validate_cmd(
 def run_cmd(
     manifest: str = typer.Argument(..., help="Path to manifest yaml"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
+    print_run_dir: bool = typer.Option(
+        False, "--print-run-dir",
+        help="For scripts: print the progress to stderr and only the run directory to stdout",
+    ),
 ):
     """Run a manifest; streams per-fetcher results (or a JSON summary with --json)."""
+    if json_out and print_run_dir:
+        raise typer.BadParameter("--json and --print-run-dir each set what stdout holds; use one",
+                                 param_hint="--print-run-dir")
     root = api.find_repo_root()
     try:
         mpath = api.resolve_manifest_path(root, manifest)
@@ -1372,13 +1385,14 @@ def run_cmd(
         if not readiness["token_present"]:
             typer.echo(
                 f"Note: no Paramify API token set, so `paramify upload` will need one "
-                f"({api.UPLOAD_TOKEN_ENV}). Collecting anyway.\n"
+                f"({api.UPLOAD_TOKEN_ENV}). Collecting anyway.\n",
+                err=print_run_dir,
             )
 
     try:
         summary = api.run(
             m, root,
-            on_event=None if json_out else _human_run_printer(),
+            on_event=None if json_out else _human_run_printer(err=print_run_dir),
             manifest_path=mpath,
         )
     except (ValueError, RuntimeError) as e:
@@ -1389,6 +1403,8 @@ def run_cmd(
         raise typer.Exit(1)
     if json_out:
         typer.echo(json.dumps(summary, indent=2, default=str))
+    elif print_run_dir:
+        typer.echo(summary["run_dir"])
     raise typer.Exit(0 if summary["ok"] else 1)
 
 

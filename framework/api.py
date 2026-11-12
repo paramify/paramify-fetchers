@@ -1367,6 +1367,13 @@ def _invocation_record(r) -> dict:
     }
     if r.exit_code != 0 and r.stderr:
         record["stderr_tail"] = r.stderr[-_STDERR_TAIL_CHARS:]
+    if r.exit_code != 0:
+        # Why it failed, with the precedence the fetcher_result event uses.
+        reason = r.error or _last_line(r.stderr)
+        if reason:
+            record["error"] = reason
+        if r.error_code:
+            record["error_code"] = r.error_code
     if r.inputs is not None:
         record["inputs"] = r.inputs
     if r.overwritten:
@@ -1471,13 +1478,15 @@ def run(
 ) -> dict:
     """Execute a manifest. Wraps each output in the evidence envelope and writes
     _run_metadata.json (unchanged from the original CLI run). Fires on_event for
-    run_start / fetcher_start / fetcher_skip / log_line / fetcher_result /
-    fetcher_error / run_complete so a UI can stream live progress.
+    run_start / fetcher_start / fetcher_skip / fetcher_note / log_line /
+    fetcher_result / fetcher_error / run_complete so a UI can stream live progress.
 
     Pass manifest_path so the run metadata records which manifest produced the
     run — that attribution powers each manifest's last_run in list_manifests().
 
-    Returns a summary dict. Raises ValueError if the manifest is schema-invalid.
+    Returns a summary dict: one record per invocation, plus `skipped`, `errors`
+    (setup failed before any invocation) and `notes`, each naming its entry.
+    Raises ValueError if the manifest is schema-invalid.
     """
     from framework.runner.executor import (  # lazy: avoid import cycle
         merged_config,
@@ -1519,13 +1528,20 @@ def run(
     })
 
     all_results = []
+    # Entries that end with no invocation, and notes that must not be silent.
+    # The summary carries them, so a caller that reads no events still sees them.
+    skipped: List[dict] = []
+    setup_errors: List[dict] = []
+    notes: List[dict] = []
     overall_ok = True
     started_at = _iso_now()
 
     for entry in entries:
+        key = keys[id(entry)]
         reason = "not discovered" if entry.use not in fetchers else problems.get(entry.use)
         if reason:
             emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": reason})
+            skipped.append({"entry_key": key, "fetcher": entry.use, "reason": reason})
             overall_ok = False
             continue
         fetcher = fetchers[entry.use]
@@ -1551,8 +1567,9 @@ def run(
 
         # Its own event, not a log_line: consumers drop log_line by default, and
         # a dropped credential has to reach the operator.
-        def on_note(note: str, _use=entry.use) -> None:
+        def on_note(note: str, _use=entry.use, _key=key) -> None:
             emit({"event": "fetcher_note", "fetcher": _use, "note": note})
+            notes.append({"entry_key": _key, "fetcher": _use, "note": note})
 
         # Which assessment an issue report is destined for, and whether its cycle
         # closes after the run, are resolved from the manifest but injected into
@@ -1579,10 +1596,11 @@ def run(
                 on_note=on_note,
                 inputs_index=inputs_index,
                 secret_vars=secret_vars,
-                entry_key=keys[id(entry)],
+                entry_key=key,
             )
         except (RuntimeError, ValueError) as e:
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
+            setup_errors.append({"entry_key": key, "fetcher": entry.use, "error": str(e)})
             overall_ok = False
             collected.setdefault(entry.use, []).append(_setup_failure_record(str(e)))
             if fetcher.is_issue_report:
@@ -1647,6 +1665,9 @@ def run(
         "started_at": started_at,
         "completed_at": completed_at,
         "invocations": metadata["invocations"],
+        "skipped": skipped,
+        "errors": setup_errors,
+        "notes": notes,
         # Issue reports go to a different endpoint, so a run that collected any is
         # not finished after `paramify upload`. Counted here so every front-end can
         # say so without re-reading the run dir.

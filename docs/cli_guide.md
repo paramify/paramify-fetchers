@@ -260,6 +260,25 @@ The runner does not chain the two stages. That is the customer's job, and
 `deploy/run-and-upload.sh <manifest> [stack]` is a sample script for it. It
 uploads the run it just collected.
 
+A script that chains the stages needs the run directory. Two flags of
+`paramify run` give it:
+
+| Flag | Stdout | Stderr |
+|---|---|---|
+| `--print-run-dir` | The run directory, on one line. | The usual progress output: each result, the reason for each failure, and each skipped entry, setup error and note. |
+| `--json` | The run summary. | Nothing. |
+
+The run summary has `run_dir`, `ok` and one record for each invocation in
+`invocations`. A failed invocation has `error`: the reason the fetcher gave, or
+else its last stderr line. It can also have `error_code`. Three lists name the
+entries that need attention. Each item has `entry_key` and `fetcher`:
+
+- `skipped`: the entry did not run. `reason` tells why, for example
+  `not discovered`.
+- `errors`: the setup failed before the fetcher started. `error` tells why.
+- `notes`: the run changed something for the entry, for example it dropped an
+  optional secret. `note` tells what.
+
 ## Scan results, not evidence
 
 Some tools already calculate the findings, so you do not need to make a claim
