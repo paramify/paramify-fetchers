@@ -2720,9 +2720,9 @@ def preset_sheet(root: Path, name: str, output_dir: Optional[Path] = None) -> Di
     if name not in fetchers:
         raise KeyError(name)
     f = fetchers[name]
-    if not f.is_pipeline:
-        raise ValueError(f"{name} is not a pipeline fetcher")
     pipe = f.pipeline
+    if pipe is None:
+        raise ValueError(f"{name} is not a pipeline fetcher")
     inventory = pipe.type == "inventory"
     out = Path(output_dir) if output_dir is not None else Path(root) / "evidence"
     found = newest_pipeline_files(out, f)
@@ -2745,7 +2745,7 @@ def preset_sheet(root: Path, name: str, output_dir: Optional[Path] = None) -> Di
         "asset_types": asset_types,
         "linked": sorted(
             n for n, o in fetchers.items()
-            if n != name and o.is_pipeline and o.pipeline.id_scheme == pipe.id_scheme
+            if n != name and o.pipeline is not None and o.pipeline.id_scheme == pipe.id_scheme
         ),
     }
 

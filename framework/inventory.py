@@ -87,7 +87,7 @@ def check(payload: Any, exit_code: int) -> Dict[str, Any]:
         if exit_code == 0:
             reasons.append("the payload breaks the inventory contract")
     else:
-        counts = Counter(r["asset_type"] for r in data)
+        counts = Counter(r["asset_type"] for r in data or [])
         block["by_asset_type"] = dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
         if not included:
             reasons.append("the fetcher withheld its records (records_included: false)")

@@ -164,7 +164,7 @@ class _Delivered:
     pipeline_type: Optional[str] = None  # set for a pipeline entry
 
     def result(self, state: str) -> Dict[str, Any]:
-        out = {
+        out: Dict[str, Any] = {
             "state": state, "batch_id": self.batch_id, "batch_reference": self.batch_reference,
             "status": self.status, "uploaded": list(self.uploaded), "already_present": list(self.already_present),
             "dropped": [dict(d) for d in self.dropped], "validators_failed": list(self.validators_failed),
