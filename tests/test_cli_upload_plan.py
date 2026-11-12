@@ -69,6 +69,19 @@ def test_plan_says_first_that_batches_are_off(fake, tmp_path):  # noqa: F811
     assert not (run / "upload_log.json").exists()
 
 
+def test_plan_with_a_403_on_the_batches_probe_falls_back_to_direct(fake, tmp_path):  # noqa: F811
+    # Any 403 on GET /batches (not only "not enabled") turns batches off for
+    # this run; it must not stop the upload before planning.
+    fake.fail_route("GET", "/batches", 403,
+                    json.dumps({"requestId": "r-9", "error": {"message": "Insufficient scope", "path": "/batches"}}))
+    run = two_files(tmp_path)
+    res = cli("upload", str(run), "--plan")
+    assert res.exit_code == 0, res.output
+    assert ("! batches are off for this workspace (Insufficient scope); "
+            "every entry is sent direct, as before batches") in res.output
+    assert "  deliver x: deliver 2 files to EVD-X direct (no channel)" in res.output
+
+
 def test_plan_with_a_refusal_is_still_a_preview_and_exits_0(fake, tmp_path):  # noqa: F811
     st1, st2 = fake.add_stack("Prod"), fake.add_stack("Gov")
     fake.add_evidence("EVD-X", channels=[st1.id, st2.id])

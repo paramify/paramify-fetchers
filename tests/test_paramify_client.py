@@ -222,8 +222,15 @@ def test_delivery_capability_flag_off_without_a_json_body_keeps_the_whole_messag
     assert cap.reason == "GET /batches failed (HTTP 403: Batches NOT ENABLED)"
 
 
-def test_delivery_capability_other_403_raises():
-    c, _, _ = make([FakeResponse(403, text='{"error":{"message":"Insufficient scope"}}')])
+def test_delivery_capability_any_other_403_turns_batches_off_with_the_servers_message():
+    # A token that may upload artifacts but not list batches must not stop the
+    # whole upload: delivery falls back to direct and the plan note says why.
+    c, _, _ = make([FakeResponse(403, text='{"requestId":"r-3","error":{"message":"Insufficient scope"}}')])
+    assert delivery_capability(c) == Capability(False, "Insufficient scope")
+
+
+def test_delivery_capability_401_still_raises():
+    c, _, _ = make([FakeResponse(401, text='{"error":{"message":"Unauthorized"}}')])
     with pytest.raises(ApiError) as ei:
         delivery_capability(c)
     assert ei.value.kind is ErrorKind.FATAL

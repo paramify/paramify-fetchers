@@ -227,7 +227,7 @@ The upload sends an entry direct in these cases:
 
 | Case | Plan reason |
 |---|---|
-| The workspace does not have batches. The API answers 403 `Artifact requests are not enabled for this workspace.`, or 404. | `batches are off for this workspace` |
+| The workspace does not have batches, or the token cannot read them. `GET /batches` answers 404, or 403 for any reason (for example `Artifact requests are not enabled for this workspace.`). A 401 still stops the upload. | `batches are off for this workspace` |
 | The channel has no artifact request, and `no_request` is `direct`. | `<channel> has no artifact request` |
 | The entry sets `delivery: direct`. | `delivery: direct` |
 

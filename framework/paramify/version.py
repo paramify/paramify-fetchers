@@ -19,9 +19,13 @@ class Capability:
 
 
 def delivery_capability(client: Client) -> Capability:
-    """Can this workspace take batches? Any error other than "no routes" or "flag off" is raised.
+    """Can this workspace take batches? Any error other than a 404 or a 403 is raised.
 
-    Flag off is a 403 with the known text, or any 403 that says "not enabled".
+    A 404 means the API has no batch routes. Any 403 turns batches off with the
+    server's message as the reason: the flag is off ("not enabled"), or the
+    token may not list batches. Either way every entry is sent direct, and a
+    token that cannot upload at all fails on its own uploads, not here. A 401
+    is still raised (FATAL): no call in the run can succeed.
     """
     try:
         client.get("/batches", {"pageSize": 1})
@@ -30,7 +34,7 @@ def delivery_capability(client: Client) -> Capability:
             return Capability(False, NO_ROUTES)
         if exc.status == 403 and FLAG_OFF in exc.message:
             return Capability(False, FLAG_OFF)
-        if exc.status == 403 and "not enabled" in exc.message.lower():
+        if exc.status == 403:
             return Capability(False, _server_message(exc.message))
         raise
     return Capability(True, None)
