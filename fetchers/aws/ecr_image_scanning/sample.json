@@ -1,45 +1,79 @@
 {
   "sample_schema_version": "1.0",
   "fetcher_name": "aws_ecr_image_scanning",
-  "fetcher_version": "0.2.0",
-  "source": "live",
-  "captured_on": "2026-09-28",
+  "fetcher_version": "0.3.0",
+  "source": "synthetic",
+  "captured_on": "2026-11-06",
   "reviewed": false,
   "collections": [
     {
       "path": "results.repositories[]",
-      "records": 2,
+      "records": 1,
       "fields": {
-        "name": 2,
-        "arn": 2,
-        "registry_id": 2,
-        "scan_on_push": 2,
-        "immutability": 2,
-        "latest_image_scan": 0
+        "name": 1,
+        "arn": 1,
+        "registry_id": 1,
+        "scan_on_push": 1,
+        "immutability": 1,
+        "latest_image_scan": 1,
+        "scan_frequency": 1,
+        "applied_scan_filters": 1,
+        "scan_collection_status": 1
       }
     }
   ],
   "payload": {
     "metadata": {
       "profile": "example-profile",
-      "region": "us-east-2",
-      "datetime": "2026-09-28T17:11:51Z",
-      "account_id": "111111111111",
-      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+      "region": "us-gov-west-1",
+      "datetime": "2026-11-06T00:00:00Z",
+      "account_id": "111122223333",
+      "arn": "arn:aws-us-gov:iam::111122223333:role/example"
     },
     "results": {
       "registry_scanning": {
-        "scan_type": "BASIC",
-        "rules": []
+        "scan_type": "ENHANCED",
+        "rules": [
+          {
+            "scan_frequency": "CONTINUOUS_SCAN",
+            "scan_filters": [
+              {
+                "filter": "*",
+                "filterType": "WILDCARD"
+              }
+            ]
+          }
+        ]
       },
       "repositories": [
         {
-          "name": "pft-unscanned",
-          "arn": "arn:aws:ecr:us-east-2:111111111111:repository/pft-unscanned",
-          "registry_id": "111111111111",
+          "name": "example-continuous",
+          "arn": "arn:aws-us-gov:ecr:us-gov-west-1:111122223333:repository/example-continuous",
+          "registry_id": "111122223333",
           "scan_on_push": false,
           "immutability": "MUTABLE",
-          "latest_image_scan": null
+          "latest_image_scan": {
+            "image_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "scan_status": "ACTIVE",
+            "severity_counts": {
+              "critical": 0,
+              "high": 4,
+              "medium": 17,
+              "low": 2,
+              "informational": 0,
+              "untriaged": 1
+            },
+            "scan_completed_at": "2026-11-06T00:00:00Z",
+            "vulnerability_source_updated_at": "2026-11-06T00:00:00Z"
+          },
+          "scan_frequency": "CONTINUOUS_SCAN",
+          "applied_scan_filters": [
+            {
+              "filter": "*",
+              "filterType": "WILDCARD"
+            }
+          ],
+          "scan_collection_status": "collected"
         }
       ]
     }

@@ -142,15 +142,17 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
 
             # Upload dry-run: the TUI has no switch, so fake a token and force dry_run=True.
             monkeypatch.setenv(UPLOAD_TOKEN_ENV, "unused")
-            real_upload = api.upload_run
+            real_upload, real_plan = api.upload_run, api.plan_upload
+            # The confirm plans online when a token resolves; this one is fake, so plan offline.
+            monkeypatch.setattr(api, "plan_upload", lambda *a, **kw: real_plan(*a, **{**kw, "online": False}))
             monkeypatch.setattr(api, "upload_run", lambda *a, **kw: real_upload(*a, **{**kw, "dry_run": True}))
             await pilot.press("ctrl+r")
             assert not upload.query_one("#upload-submit", Button).disabled
             await pilot.press("ctrl+u")
             assert isinstance(app.screen, ConfirmModal)
-            assert _text(app.screen.query_one("#modal-title")) == (
-                "Upload 1 evidence file(s) to https://app.paramify.com/api/v0?"
-            )
+            confirm = _text(app.screen.query_one("#modal-title"))
+            assert "1 deliver" in confirm  # the plan's totals line
+            assert confirm.endswith("Upload 1 evidence file(s) to https://app.paramify.com/api/v0?")
             await pilot.press("y")
             await _until(pilot, lambda: "upload complete" in _text(upload_banner), "the upload dry-run")
             assert "(dry-run)" in _log(log)
