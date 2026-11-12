@@ -309,6 +309,18 @@ def test_services_unread_account_list_leaves_search_counts(monkeypatch, tmp_path
     assert summary["resource_exclusion_patterns_unmatched"] is None
 
 
+def test_services_every_summary_key_is_in_exactly_one_group():
+    search = services_fetcher.SEARCH_KEYS
+    keys = set(services_fetcher.summarize([], []))
+    keys |= set(services_fetcher.ResourceExclusions().summary([], services_fetcher.KINDS, {"accounts": 0, "search_services": 0}))
+    assert search <= keys
+    assert {k for k in keys if "search" in k} == search
+    assert all(v is None for k, v in services_fetcher.null_unread(dict.fromkeys(keys, 0), True, False).items() if k in search)
+    assert not any(v is None for k, v in services_fetcher.null_unread(dict.fromkeys(keys, 0), True, False).items() if k not in search)
+    assert all(v is None for k, v in services_fetcher.null_unread(dict.fromkeys(keys, 0), False, True).items() if k not in search)
+    assert not any(v is None for k, v in services_fetcher.null_unread(dict.fromkeys(keys, 0), False, True).items() if k in search)
+
+
 def test_hub_no_credential_makes_every_count_null(monkeypatch, tmp_path):
     code, evidence, *_ = run_hub(monkeypatch, tmp_path, "rg:rg-out", cred=False)
     summary = evidence["summary"]

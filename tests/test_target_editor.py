@@ -226,3 +226,84 @@ def test_the_entry_editor_says_where_targets_are_edited(tmp_path, run_tui):
     # short enough to survive the card width — a clipped subtitle takes the
     # pointer with it, which is the half that matters here
     assert len(subtitle) <= 66
+
+
+# --------------------------------------------------------------------------- #
+# Two entries that use the same fetcher: each action acts on the selected one
+# --------------------------------------------------------------------------- #
+
+def test_api_target_and_remove_helpers_take_an_entry_key():
+    m = api.init_manifest()
+    m["run"]["fetchers"] = [{"use": "f", "targets": [{"id": "a"}]}, {"use": "f", "targets": [{"id": "b"}]}]
+    api.set_target(m, "f", 0, {"id": "b2"}, entry_key="f#1")
+    api.add_target(m, "f", {"id": "c"}, entry_key="f#1")
+    api.remove_target(m, "f", 0, entry_key="f#1")
+    assert m["run"]["fetchers"] == [{"use": "f", "targets": [{"id": "a"}]}, {"use": "f", "targets": [{"id": "c"}]}]
+    api.remove_entry(m, "f", entry_key="f#1")
+    assert m["run"]["fetchers"] == [{"use": "f", "targets": [{"id": "a"}]}]
+    api.remove_entry(m, "f")  # no key: every entry of the fetcher, as before
+    assert m["run"]["fetchers"] == []
+
+
+def _duplicate_fanout_manifest(tmp_path: Path):
+    path, name, fields = _fanout_manifest(tmp_path)
+    import yaml
+
+    m = yaml.safe_load(path.read_text())
+    m["run"]["fetchers"].append({"use": name, "targets": [{fields[0]: "other-entry"}]})
+    path.write_text(yaml.safe_dump(m))
+    return path, name, fields
+
+
+async def _select_second_entry(app, pilot):
+    await pilot.press("2")
+    await pilot.pause()
+    await pilot.press("down")
+    await pilot.pause()
+
+
+def test_t_on_the_second_of_two_entries_edits_only_its_targets(tmp_path, run_tui):
+    import yaml
+
+    manifest, name, fields = _duplicate_fanout_manifest(tmp_path)
+
+    async def body(app, pilot):
+        await _select_second_entry(app, pilot)
+        await pilot.press("t")
+        await pilot.pause()
+        assert isinstance(app.screen, TargetsModal)
+        table = app.screen.query_one("#targets-table", DataTable)
+        rows = [list(table.get_row_at(i)) for i in range(table.row_count)]
+        assert len(rows) == 1 and "other-entry" in rows[0]
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, FormModal)
+        for r in app.screen.query("FieldRow"):
+            if r.spec["key"] == fields[0]:
+                r.query_one("Input").value = "other-edited"
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+    run_tui(body, manifest)
+    first, second = yaml.safe_load(manifest.read_text())["run"]["fetchers"]
+    assert [t[fields[0]] for t in first["targets"]] == ["first-value", "second-value"]
+    assert [t[fields[0]] for t in second["targets"]] == ["other-edited"]
+
+
+def test_x_on_the_second_of_two_entries_removes_only_it(tmp_path, run_tui):
+    import yaml
+
+    manifest, name, fields = _duplicate_fanout_manifest(tmp_path)
+
+    async def body(app, pilot):
+        await _select_second_entry(app, pilot)
+        await pilot.press("x")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmModal)
+        await pilot.press("y")
+        await pilot.pause()
+
+    run_tui(body, manifest)
+    [left] = yaml.safe_load(manifest.read_text())["run"]["fetchers"]
+    assert [t[fields[0]] for t in left["targets"]] == ["first-value", "second-value"]

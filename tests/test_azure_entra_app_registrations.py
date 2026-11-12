@@ -122,11 +122,25 @@ def test_end_before_start_is_unknown():
     assert c["lifetime_days"] is None and c["issued_beyond_approved_lifetime"] is None
 
 
-def test_failed_or_partial_read_makes_both_new_counts_null():
-    s = apps.summarize([], read_complete=False)
-    assert s["credentials_issued_beyond_approved_lifetime"] is None and s["credentials_without_lifetime"] is None
+SETTINGS = {"approved_lifetime_days", "rotation_threshold_days"}
+
+
+def _only_settings_known(summary):
+    assert {k for k, v in summary.items() if v is not None} == SETTINGS
+    assert len(summary) - len(SETTINGS) == 18  # every count and figure, so a new field gets a decision
+
+
+def test_failed_or_partial_read_makes_every_count_null():
+    _only_settings_known(apps.summarize([], read_complete=False))
     partial = apps.summarize([_app(_cred("2026-01-01T00:00:00Z", "2030-01-01T00:00:00Z"))], read_complete=False)
-    assert partial["credentials_issued_beyond_approved_lifetime"] is None and partial["credentials_without_lifetime"] is None
+    _only_settings_known(partial)
+    assert partial["approved_lifetime_days"] == 365 and partial["rotation_threshold_days"] == 30
+
+
+def test_complete_read_has_no_null_counts():
+    s = apps.summarize([], read_complete=True)
+    assert s["total_app_registrations"] == 0 and s["total_credentials"] == 0 and s["healthy_credentials"] == 0
+    assert s["credential_rotation_compliance_percentage"] == 0
 
 
 def _run(monkeypatch, tmp_path, graph_get, applications=None):
@@ -170,18 +184,27 @@ def _application(secret_start, secret_end):
               password_credentials=[cred], key_credentials=[])
 
 
-def test_main_denied_read_leaves_both_counts_null(monkeypatch, tmp_path):
+def test_main_denied_read_nulls_every_count(monkeypatch, tmp_path):
     async def denied(request_configuration=None):
         raise Exception("Insufficient privileges (status 403)")
 
     code, evidence = _run(monkeypatch, tmp_path, denied)
     summary = (evidence.get("payload") or evidence)["summary"]
     assert code == 1
-    assert summary["credentials_issued_beyond_approved_lifetime"] is None
-    assert summary["credentials_without_lifetime"] is None
+    _only_settings_known(summary)
+    assert evidence["metadata"]["partial_failure"] is True
 
 
-def test_main_page_failing_midway_leaves_both_counts_null(monkeypatch, tmp_path):
+def test_main_failed_read_nulls_every_count(monkeypatch, tmp_path):
+    async def failed(request_configuration=None):
+        raise Exception("Service unavailable (status 503)")
+
+    code, evidence = _run(monkeypatch, tmp_path, failed)
+    assert code == 1
+    _only_settings_known((evidence.get("payload") or evidence)["summary"])
+
+
+def test_main_page_failing_midway_nulls_every_count(monkeypatch, tmp_path):
     from types import SimpleNamespace as ns
     first = ns(value=[_application("2026-01-01T00:00:00Z", "2030-01-01T00:00:00Z")], odata_next_link="https://next")
 
@@ -198,9 +221,9 @@ def test_main_page_failing_midway_leaves_both_counts_null(monkeypatch, tmp_path)
     code, evidence = _run(monkeypatch, tmp_path, None, applications=Builder())
     summary = (evidence.get("payload") or evidence)["summary"]
     assert code == 1
-    assert summary["total_credentials"] == 1
-    assert summary["credentials_issued_beyond_approved_lifetime"] is None
-    assert summary["credentials_without_lifetime"] is None
+    # The first page was read, but a short count would read as the real one.
+    assert summary["total_credentials"] is None
+    _only_settings_known(summary)
 
 
 def test_main_complete_read_counts(monkeypatch, tmp_path, assert_summary_documented):

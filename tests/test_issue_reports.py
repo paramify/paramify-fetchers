@@ -245,18 +245,13 @@ def test_fanout_records_one_report_per_target(tmp_path):
         assert rec["title"] == f"Test Scan - {scanner}"
 
 
-def test_a_fixed_filename_collapses_a_fanout_run(tmp_path):
+def test_a_fixed_filename_fails_the_second_target_of_a_fanout_run(tmp_path):
     """The hazard the per-target filename convention exists to avoid.
 
-    With one fixed name, target 2 overwrites target 1 on disk, and because the
-    filename already existed the runner sees no new file and records nothing for
-    target 2. What survives is a single record carrying target 1's identity and
-    target 2's bytes — including a sha256 taken after the overwrite, so the field
-    that could have caught it agrees with the wrong story. Nothing raises.
-
-    This pins today's behavior so the cost is visible. A runner-side guard on
-    "issue-report invocation produced no new file" would change these assertions,
-    which is the point.
+    With one fixed name, target 2 overwrites target 1 on disk. Because the
+    filename already existed, target 2 has no new file, and target 1's record
+    would carry target 2's bytes. The runner sees the overwrite and fails target
+    2, so the run is not reported as a success and no cycle closes on it.
     """
     write_fanout_issue_report_fetcher(tmp_path, per_target_filename=False)
     manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [{
@@ -266,16 +261,19 @@ def test_a_fixed_filename_collapses_a_fanout_run(tmp_path):
     }]}}
     summary = api.run(manifest, tmp_path)
 
-    assert summary["ok"], "the run reports success — that is the problem"
+    assert summary["ok"] is False
     run_dir = Path(summary["run_dir"])
     body = (run_dir / ISSUE_REPORTS_DIR / "scan.csv").read_text()
     assert "west" in body and "east" not in body, "target 1's report was overwritten"
-    assert summary["invocations"][1]["outputs"] == [], "target 2 looks like it made nothing"
+    second = summary["invocations"][1]
+    assert second["outputs"] == [] and second["exit_code"] == 1
+    assert "overwrote scan.csv, which an earlier entry or target wrote in this run." in second["stderr_tail"]
 
-    records = read_index(run_dir)["reports"]
-    assert len(records) == 1
-    assert records[0]["target"] == {"scanner_id": "east"}, "labelled with the lost target"
-    assert records[0]["sha256"] == hashlib.sha256(body.encode()).hexdigest()
+    index = read_index(run_dir)
+    assert [r["target"] for r in index["reports"]] == [{"scanner_id": "east"}]
+    assert [(i["target"], i["status"]) for i in index["invocations"]] == [
+        ({"scanner_id": "east"}, "success"), ({"scanner_id": "west"}, "failed")]
+    assert index["invocations"][1]["error"].startswith("overwrote scan.csv")
 
 
 def test_run_summary_counts_collected_reports(tmp_path):

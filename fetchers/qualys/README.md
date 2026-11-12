@@ -16,7 +16,8 @@ Install the parser with `pip install -e '.[qualys]'` (it adds `defusedxml`).
 
 ## The API user
 
-The fetchers only list. Create one user for them in Qualys:
+The fetchers only list. Create one user for them in Qualys. An API-only user
+(GUI access off, API access on) is the recommended service account:
 
 1. **A local user, not SSO.** Qualys API password authentication does not work for
    SSO users.
@@ -28,8 +29,18 @@ The fetchers only list. Create one user for them in Qualys:
    asset groups. If the subscription uses tag-based user scoping, give it every tag
    instead. The evidence reports `scope_all`, which is true when the built-in All
    group is among the groups the user sees.
-5. **Log in to the Qualys UI once** with the new user. Until the subscription's
-   registration is complete, the API answers code 2003.
+5. **Activate the user once.** Until registration is complete, the API fails (code
+   2003 on the fetchers' calls). A user with GUI access logs in to the Qualys UI
+   once and completes the First Login form. A user with API access only has no UI
+   login, so it completes first login with the `acceptEULA.php` API function,
+   sent to the platform URL with the user's login credentials. See
+   [Qualys: user registration](https://docs.qualys.com/en/vm/qweb-all-api/mergedProjects/qapi-user/users/user_registration.htm)
+   for the call.
+
+Qualys support can turn on **Password Never Expires** for API-only accounts on a
+subscription, so the fetchers do not stop when the password expires. A Manager
+point of contact then sets it per user under the Security tab. See
+[Qualys: password never expires](https://docs.qualys.com/en/vmdr/latest/setup/win_security.htm).
 
 ## Environment variables
 

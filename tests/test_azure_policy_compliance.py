@@ -720,6 +720,24 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit(monke
 
 
 @needs_sdk
+def test_later_task_whose_deployments_fail_goes_to_the_callers_unread_list():
+    def at_subscription(name):
+        if name == "t2":
+            raise RuntimeError("403 Forbidden")
+        return [NS(remediated_resource_id=VM, deployment_id=None, status="Succeeded", resource_location=None,
+                   error=None, created_on=None, last_updated_on=None)]
+
+    client = fake_client(policy_states={"list_query_results_for_subscription": lambda *a, **k: []},
+                         remediations={"list_deployments_at_subscription": at_subscription})
+    tasks = [{"id": f"{SUB}/providers/Microsoft.PolicyInsights/remediations/{name}", "name": name,
+              "policy_assignment_id": ASSIGN} for name in ("t1", "t2")]
+    unread: list = []
+    rows, _, _ = fx.collect_remediation_deployments(client, "s1", tasks, 10, fx.Collector(logging.getLogger("t")),
+                                                    unread=unread)
+    assert len(rows) == 1 and unread == [tasks[1]["id"]]
+
+
+@needs_sdk
 def test_collect_remediation_deployments_at_management_group_and_resource():
     listed = []
 
