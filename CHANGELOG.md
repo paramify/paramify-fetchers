@@ -1643,6 +1643,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The TUI shows the catalog and the manifest on one Fetchers page.** The
+  Catalog and Manifest tabs are now one tab, so the TUI has four tabs:
+  Fetchers, Run, Evidence and Paramify (keys `1` to `4`). The catalog is at
+  the top and the manifest is below it. One detail pane at the right shows
+  the item in the list that has focus. Press `a`, or enter, on a catalog
+  fetcher to add it to the manifest, and focus stays in the catalog. Each
+  fetcher that is in the manifest has a check mark. `a` on a fetcher that is
+  already in the manifest moves the manifest cursor to it. Tab moves between
+  the catalog, the manifest and the detail pane. The footer shows the keys of
+  the list that has focus. The add-fetchers picker is removed.
 - **Each batch the upload creates is approved on submission by default.** The
   upload now sends the entry's `approval` (default `SUBMISSION`) when it creates
   a batch. Before, a batch took the evidence set's mode, so a set made `MANUAL`

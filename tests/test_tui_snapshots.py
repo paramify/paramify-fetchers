@@ -84,26 +84,33 @@ def test_workspace_switch_manifest_picker(shot):
     assert shot("m")
 
 
-def test_catalog_fetcher_contract(shot):
+def test_fetchers_catalog_detail(shot):
     assert shot("slash", tuple("demo_hello"), "down", "down", "down", "escape")
 
 
-def test_manifest(shot):
-    assert shot("2")
+def test_fetchers_manifest_entry(shot):
+    assert shot("1", "tab")
 
 
-def test_manifest_add_fetchers_picker(shot, demo_workspace):
+def test_fetchers_empty_manifest(shot, demo_workspace):
     root = demo_workspace.root
     api.dump_manifest(api.init_manifest(), root / "manifests" / "empty.yaml", root)
-    assert shot("2", "a", tuple("demo_hello"), "enter", manifest="manifests/empty.yaml")
+    assert shot("1", manifest="manifests/empty.yaml")
+
+
+def test_fetchers_add_from_catalog(shot, demo_workspace):
+    root = demo_workspace.root
+    api.dump_manifest(api.init_manifest(), root / "manifests" / "empty.yaml", root)
+    assert shot("slash", tuple("demo_hello"), "down", "down", "down", "escape", "a",
+                manifest="manifests/empty.yaml")
 
 
 def test_manifest_remove_confirm(shot):
-    assert shot("2", "x")
+    assert shot("1", "tab", "x")
 
 
 def test_manifest_preview(shot):
-    assert shot("2", "p")
+    assert shot("1", "tab", "p")
 
 
 def test_run_complete(shot, demo_workspace, monkeypatch):
@@ -112,20 +119,20 @@ def test_run_complete(shot, demo_workspace, monkeypatch):
             on_event(event)
 
     monkeypatch.setattr(api, "run", replay)
-    assert shot("3", "ctrl+r")
+    assert shot("2", "ctrl+r")
 
 
 def test_evidence(shot):
-    assert shot("4")
+    assert shot("3")
 
 
 def test_evidence_file_preview(shot):
-    assert shot("4", "enter", "enter")
+    assert shot("3", "enter", "enter")
 
 
 def test_paramify(shot):
-    assert shot("5")
+    assert shot("4")
 
 
 def test_paramify_scripts_preview(shot):
-    assert shot("5", "p")
+    assert shot("4", "p")

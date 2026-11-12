@@ -55,7 +55,8 @@ paramify assessments select wiz_vulnerability_findings -f manifests/pipelines.ya
 </details>
 
 It adds the last three keys below. **Set them before you run**: a run records
-its assessment when it collects. In the TUI, press `A` on the **Manifest** tab
+its assessment when it collects. In the TUI, press `A` on the entry in the
+manifest list of the **Fetchers** tab
 ([recording](demo/pipeline-setup.gif)).
 
 ```yaml
