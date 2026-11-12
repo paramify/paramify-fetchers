@@ -45,7 +45,7 @@ class CatalogTree(Tree):
 class CatalogPanel(FilterListNav, Horizontal):
     """Fetcher catalog: a tree, and (with detail=True) the contract beside it."""
 
-    HINTS = [("↑↓/jk", "navigate"), ("/", "filter"), ("tab", "pane")]
+    HINTS = [("↑↓/jk", "navigate"), ("a/enter", "add"), ("/", "filter")]
 
     BINDINGS = [
         Binding("tab", "next_pane", "pane", show=False),

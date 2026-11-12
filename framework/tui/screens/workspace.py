@@ -97,14 +97,30 @@ class WorkspaceScreen(Screen):
         tab = (tabs.active or "").removeprefix("tab-")
         name = self.app.manifest_path.name if self.app.manifest_path else "?"
         self.query_one(AppHeader).set_crumb(f"{name}  ›  {tab}")
-        page_hints: list = []
-        pane = tabs.active_pane
-        if pane is not None:
-            for child in pane.walk_children():
-                if getattr(child, "HINTS", None):
-                    page_hints = list(child.HINTS)
-                    break
-        self.query_one(HintFooter).set_hints(page_hints + self.WORKSPACE_HINTS)
+        self.query_one(HintFooter).set_hints(self._hints(tabs.active_pane) + self.WORKSPACE_HINTS)
+
+    def _hints(self, pane) -> list:
+        """The keys that work where focus is: the HINTS of the nearest widget
+        around the focused one that has them, then the page's own.
+
+        A page can hold more than one list (the Fetchers page holds the catalog
+        and the manifest), so the page's first HINTS would advertise keys that
+        do nothing in the other list.
+        """
+        if pane is None:
+            return []
+        page = next((c for c in pane.walk_children() if getattr(c, "HINTS", None)), None)
+        focused = self.focused
+        near = None
+        if focused is not None and focused in pane.walk_children():
+            near = next((w for w in focused.ancestors_with_self if getattr(w, "HINTS", None)), None)
+        hints = list(near.HINTS) if near is not None else []
+        if page is not None and page is not near:
+            hints += list(page.HINTS)
+        return hints
+
+    def on_descendant_focus(self, event) -> None:
+        self._update_chrome()
 
     def _go_to_tab(self, tab_id: str) -> None:
         tabs = self.query_one(TabbedContent)

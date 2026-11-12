@@ -271,3 +271,23 @@ def test_panels_are_hosted_without_their_own_detail(tmp_path, run_tui):
         )
 
     assert run_tui(body, _manifest_with(tmp_path)) == (0, 0, 1, 1)
+
+
+def _footer(app) -> str:
+    return _text(app.screen.query_one("#app-footer", Static).content)
+
+
+def test_footer_hints_follow_focus(tmp_path, run_tui):
+    async def body(app, pilot):
+        await pilot.press("1")
+        await pilot.pause()
+        in_catalog = _footer(app)
+        await pilot.press("tab")
+        await pilot.pause()
+        return in_catalog, _footer(app)
+
+    in_catalog, in_manifest = run_tui(body, _manifest_with(tmp_path, "demo_hello"))
+    assert "add" in in_catalog and "filter" in in_catalog
+    assert "targets" not in in_catalog, "the catalog's footer lists the manifest's keys"
+    assert "targets" in in_manifest and "validate" in in_manifest
+    assert "1-4" in in_catalog and "1-4" in in_manifest  # the workspace keys stay
