@@ -72,10 +72,6 @@ def record(asset: dict) -> dict:
     asset's own stable ID (an ARN, a resource ID), never a display name. Keep
     every record's keys the same, with None for a missing value, so a pipeline
     mapping built from one sample holds for every run.
-
-    `source` is also required: the asset exactly as the API returned it. Pass
-    the dict you were given, before any reshaping, and never a selection of its
-    fields, so nothing the source system sent is lost.
     """
     asset_id = asset.get("id")
     if not asset_id:
@@ -84,7 +80,6 @@ def record(asset: dict) -> dict:
         "unique_asset_identifier": asset_id,
         "name": asset.get("name"),
         "asset_type": asset.get("type"),
-        "source": asset,
         # ... the fields an inventory pipeline should map
     }
 

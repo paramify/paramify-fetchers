@@ -12,11 +12,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Breaking
 
-- **Inventory records must carry a `source` object.** Each item of
-  `payload.data` now requires `source`: the asset exactly as the source API
-  returned it, with no field dropped. Existing inventory fetchers must add
-  `source` to each item. If they do not, the inventory is incomplete, and
-  `paramify upload` does not send it. The inventory template shows how.
 - **Datadog evidence: some fields are removed, renamed, or now mean something
   else.** Re-check any validator or query that reads these fields:
   - `datadog_siem_signals` 0.2.0: `status` is now the signal's triage state

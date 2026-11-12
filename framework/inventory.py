@@ -34,13 +34,6 @@ def _validator() -> Draft202012Validator:
 
 
 def _where(error) -> str:
-    # `source` problems get fixed wording, because every fetcher author meets them.
-    parts = list(error.absolute_path)
-    if len(parts) == 2 and parts[0] == "data" and isinstance(parts[1], int):
-        if error.validator == "required" and "'source'" in error.message:
-            return f"data[{parts[1]}]: missing source"
-    if len(parts) == 3 and parts[0] == "data" and parts[2] == "source" and error.validator == "type":
-        return f"data[{parts[1]}]: source must be an object"
     path = "payload" + "".join(f"[{p}]" if isinstance(p, int) else f".{p}" for p in error.absolute_path)
     return f"{path}: {error.message}"
 

@@ -2,8 +2,7 @@
 # fetchers/<category>/<short_name>/ and fill in the placeholders.
 #
 # An INVENTORY is evidence with a record contract: one record per asset under
-# the payload's `data`, each with a `unique_asset_identifier` and a `source` (the asset
-# exactly as the API returned it). It goes to an
+# the payload's `data`, each with a `unique_asset_identifier`. It goes to an
 # evidence set like any evidence, and an inventory pipeline attached to that set
 # in Paramify turns each record into an Inventory item. See
 # docs/inventory_fetchers_guide.md.

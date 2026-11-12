@@ -14,8 +14,7 @@ fetcher. To write a fetcher, start with
 
 Inventory and issue-report fetchers add clauses of their own: an
 [inventory fetcher](inventory_fetchers_guide.md) writes no records when
-collection was incomplete, and gives each record a `source` object: the
-asset exactly as the source API returned it, with no field dropped. An
+collection was incomplete, and an
 [issue-report fetcher](issue_report_fetchers_guide.md) writes the source tool's
 file unmodified.
 
