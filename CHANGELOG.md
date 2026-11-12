@@ -2320,6 +2320,14 @@ schemas and the `paramify` CLI — not the internal code.
   attached (its batches never approve). `--plan` warns when the set approves
   MANUAL or the workspace has no batches.
 
+- **Re-uploading an inventory that went direct before now runs the pipeline.**
+  When the workspace has batches, files of the run that an earlier upload sent
+  direct (with no batch) are sent again in a batch, with a plan warning, instead
+  of being reported as already delivered while Paramify built nothing. With
+  batches off nothing changes. A pipeline run already in a submitted or approved
+  batch is a no-op even if the set has since gained a validator, and a no-op
+  result carries `pipeline: {type, approved}` too.
+
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the

@@ -12,7 +12,10 @@ For each entry, in this order (the first refusal ends the entry):
    this run refuses the entry: a re-upload never resends what a person
    rejected. A file of this run that the pre-batch uploader already sent (an
    artifact with no batch) is left out; when every file was, the entry is a
-   no-op;
+   no-op. A pipeline entry sends such a file again in its batch, with a
+   warning: a direct upload built nothing. A pipeline entry on a set with
+   validators is refused, unless this run's batch is already submitted or
+   approved (then it is a no-op);
 4. WAF: a file the production WAF would block is dropped at plan time.
 
 An entry is sent direct (the route before batches: no batch, no submit) when
@@ -85,6 +88,7 @@ PIPELINE_BATCHES_OFF = "this workspace has no batches, so the pipeline file goes
 PIPELINE_MANUAL = "{ref} approves MANUAL; the {type} pipeline waits for someone to approve the batch"
 PIPELINE_VALIDATORS = "{ref} has {n} validator(s) ({names}); its batches will never approve"
 PIPELINE_RUNS = " · approves on submit → pipeline runs"
+PIPELINE_RESEND = "{n} file(s) of this run went direct before; sending them again in a batch so the pipeline runs"
 WAF_BLOCKED = "blocked by the production WAF"
 PIPELINE_DIRECT_SENT = "sent direct: this workspace has no batches; the pipeline runs the pre-batch way"
 BATCHES_OFF = "batches are off for this workspace"
@@ -246,6 +250,12 @@ def _run_batches(e: EntryDesired, obs: EntryObserved) -> List[str]:
     known = {b.id: b for b in obs.batches}
     return [known[i].reference_id if i in known and known[i].reference_id else i
             for i in ids if not (i in known and known[i].status in DONE)]
+
+
+def _delivered_run(e: EntryDesired, obs: EntryObserved) -> bool:
+    """This run's batch of the entry is submitted or approved: the run is delivered."""
+    mine = attribute(obs.batches, obs.artifacts, e).mine
+    return mine is not None and mine.status in DONE
 
 
 def _file_json(f: DeliveryFile) -> Dict[str, Any]:
@@ -468,7 +478,8 @@ class DeliveryProvider:
                 changes={"stack": UNKNOWN, "channel": UNKNOWN, "target": UNKNOWN},
             )
 
-        if e.pipeline and obs.evidence is not None and obs.evidence.validators:
+        if e.pipeline and obs.evidence is not None and obs.evidence.validators and not _delivered_run(e, obs):
+            # A run already in a submitted or approved batch is a no-op below, validators or not.
             v = obs.evidence.validators
             return action("refuse", PIPELINE_VALIDATORS.format(ref=e.reference_id, n=len(v), names=", ".join(v)),
                           fix=f"remove the validators from {e.reference_id} in the app")
@@ -485,9 +496,13 @@ class DeliveryProvider:
         route = _route(e, obs, today, direct)
         # A direct entry counts the files sent before batches as on the set (below). A
         # batch entry leaves them out first, so the no-op comes ahead of a refusal.
+        # A pipeline entry sends them again in its batch: a direct upload built nothing.
         goes_direct = direct is not None or (not isinstance(route, Refusal) and route.direct_reason is not None)
         earlier = [f.original_file_name for f in files if f.original_file_name in obs.before_batches]
-        if earlier and not goes_direct:
+        resend: List[str] = []
+        if earlier and not goes_direct and e.pipeline:
+            resend = earlier
+        elif earlier and not goes_direct:
             payload["before_batches"] = earlier
             if len(earlier) == len(files):
                 return action("noop", f"{BEFORE_BATCHES} ({_count(len(files), 'file')})", warnings=warnings)
@@ -591,6 +606,9 @@ class DeliveryProvider:
             if missing:
                 summary += f"; not in it: {', '.join(f.original_file_name for f in missing)}"
             return action("noop", summary, changes=changes, warnings=warnings)
+        resent = [f for f in missing if f.original_file_name in resend]
+        if resent:
+            warnings.append(PIPELINE_RESEND.format(n=len(resent)))
         if mine is None:
             tail = "new batch"
         else:
@@ -649,7 +667,8 @@ class DeliveryProvider:
 
     def _noop(self, action_id: str, p: Dict[str, Any], message: str) -> Outcome:
         done = _Delivered(p.get("batch_id"), p.get("batch_reference"), p.get("status"),
-                          already_present=list(p.get("before_batches") or []), mode=delivery_mode(p.get("target")))
+                          already_present=list(p.get("before_batches") or []), mode=delivery_mode(p.get("target")),
+                          pipeline_type=(p.get("pipeline") or {}).get("type"))
         if p.get("target") == DIRECT:
             # A direct no-op plans no files: each sendable file is on the set already.
             done.already_present = self._wanted(p)

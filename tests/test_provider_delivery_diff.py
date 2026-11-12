@@ -1001,3 +1001,71 @@ def test_deliver_summary_says_the_pipeline_runs(tmp_path):
 def test_ordinary_evidence_with_no_request_still_goes_direct(tmp_path):
     a = plan_one(entry(tmp_path, no_request="direct"), observed(ev_with_channel(), requests=(), current=()))
     assert a.payload["target"] == DIRECT
+
+
+# -- pipeline entries: files of this run that went direct before batches ---- #
+RESEND = "{n} file(s) of this run went direct before; sending them again in a batch so the pipeline runs"
+
+
+def test_pipeline_entry_resends_files_sent_direct_before_batches(tmp_path):
+    on_set = [artifact("a.json", bid=None), artifact("b.json", bid=None)]
+    obs = observed(ev_with_channel(), requests=(), current=(), found=on_set)
+    obs.before_batches = ["a.json", "b.json"]  # as observe reads them: no batch
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), obs)
+    assert a.verb == "deliver" and a.payload["target"] == "EVIDENCE"
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json", "b.json"]
+    assert "before_batches" not in a.payload
+    assert RESEND.format(n=2) in a.warnings
+    assert a.summary.startswith("deliver 2 files to EVD-12 (evidence level): new batch")
+
+
+def test_pipeline_entry_resends_only_the_files_its_open_batch_lacks(tmp_path):
+    # a.json went direct before; b.json is already in this run's open batch.
+    found = [artifact("a.json", bid=None), artifact("b.json", bid="bt-12")]
+    obs = observed(ev_with_channel(), requests=(), current=(), found=found,
+                   batches=[batch(ar=None)], artifacts={"bt-12": [found[1]]})
+    obs.before_batches = ["a.json"]
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), obs)
+    assert a.verb == "deliver" and a.payload["resume_batch_id"] == "bt-12"
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json"]
+    assert RESEND.format(n=1) in a.warnings
+
+
+def test_pipeline_entry_with_batches_off_still_counts_files_sent_direct(tmp_path):
+    on_set = [artifact("a.json", bid=None), artifact("b.json", bid=None)]
+    obs = observed(ev_with_channel(), found=on_set)
+    obs.before_batches = ["a.json", "b.json"]
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), obs, BATCHES_OFF)
+    assert a.verb == "noop" and a.payload["target"] == DIRECT and a.summary == "already delivered (2 files)"
+    assert not any("sending them again" in w for w in a.warnings)
+
+
+def test_ordinary_entry_still_skips_files_sent_before_batches(tmp_path):
+    found = [artifact("a.json", bid=None)]
+    obs = observed(evidence(CH_P), found=found)
+    obs.before_batches = ["a.json"]
+    a = plan_one(entry(tmp_path), obs)
+    assert a.verb == "deliver" and a.payload["before_batches"] == ["a.json"]
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["b.json"]
+    assert not any("sending them again" in w for w in a.warnings)
+    obs.before_batches = ["a.json", "b.json"]
+    obs.found = [artifact("a.json", bid=None), artifact("b.json", bid=None)]
+    a = plan_one(entry(tmp_path), obs)
+    assert a.verb == "noop" and a.summary == "already delivered before batches (2 files)"
+
+
+def test_already_delivered_pipeline_run_with_a_new_validator_is_noop(tmp_path):
+    done = batch(status="APPROVED", ar=None)
+    arts = [artifact("a.json", bid="bt-12"), artifact("b.json", bid="bt-12")]
+    obs = observed(ev_with_channel(validators=("VAL-1",)), requests=(), current=(), found=arts,
+                   batches=[done], artifacts={"bt-12": arts})
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), obs)
+    assert a.verb == "noop" and a.summary == "already delivered in BCH-12"
+
+
+def test_open_pipeline_batch_on_a_set_with_a_new_validator_still_refuses(tmp_path):
+    arts = [artifact("a.json", bid="bt-12")]
+    obs = observed(ev_with_channel(validators=("VAL-1",)), requests=(), current=(), found=arts,
+                   batches=[batch(ar=None)], artifacts={"bt-12": arts})
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), obs)
+    assert a.verb == "refuse" and "VAL-1" in a.summary

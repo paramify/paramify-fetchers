@@ -874,3 +874,43 @@ def test_direct_pipeline_entry_reports_approved_null(tmp_path):
     assert outcome.result["mode"] == "direct"
     assert outcome.result["pipeline"] == {"type": "inventory", "approved": None}
     assert "sent direct: this workspace has no batches; the pipeline runs the pre-batch way" in outcome.message
+
+
+def test_pipeline_entry_resends_files_sent_direct_before_batches(tmp_path):
+    # The first upload went direct (batches off); with batches on, the re-upload sends it again in a batch.
+    fake = FakeParamify()
+    fake.batches_flag_off()
+    run_dir = inventory_run(tmp_path)
+    first = Harness(fake, run_dir, capability=Capability(False, FLAG_OFF)).run()["delivery/x"]
+    assert first.status == "applied" and first.result["mode"] == "direct"
+    fake.batches_flag_off(False)
+    h = Harness(fake, run_dir)
+    plan = h.plan()
+    [action] = [a for a in plan.actions if a.provider == "delivery"]
+    assert action.verb == "deliver"
+    assert ("1 file(s) of this run went direct before; sending them again in a batch so the pipeline runs"
+            in action.warnings)
+    outcome = h.apply(plan)["delivery/x"]
+    assert outcome.status == "applied", outcome.message
+    assert outcome.result["uploaded"] == ["inv.json"] and outcome.result["mode"] == "batch"
+    assert outcome.result["pipeline"] == {"type": "inventory", "approved": True}
+
+
+def test_pipeline_noop_result_carries_the_pipeline(tmp_path):
+    fake = FakeParamify()
+    run_dir = inventory_run(tmp_path)
+    Harness(fake, run_dir).run()
+    again = Harness(fake, run_dir).run()["delivery/x"]
+    assert again.status == "noop", again.message
+    assert again.result["pipeline"] == {"type": "inventory", "approved": True}
+
+
+def test_already_delivered_pipeline_run_with_a_new_validator_is_noop(tmp_path):
+    fake = FakeParamify()
+    run_dir = inventory_run(tmp_path)
+    Harness(fake, run_dir).run()
+    fake._evidence[0]["validators"] = [{"validatorEvidencePairId": "vp-0", "id": "vl-0", "name": "VAL-1",
+                                        "type": "REGEX"}]
+    again = Harness(fake, run_dir).run()["delivery/x"]
+    assert again.status == "noop", again.message
+    assert again.result["pipeline"] == {"type": "inventory", "approved": True}
