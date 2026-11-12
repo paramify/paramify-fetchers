@@ -264,6 +264,44 @@ def test_manifest_table_shows_the_assessment_and_close_policy(tmp_path, run_tui)
     assert "after each complete run" in detail
 
 
+def test_each_row_of_a_fetcher_listed_twice_shows_its_own_entry(tmp_path, run_tui):
+    # Writes go to the selected entry (`x#1`); the row cells, the issue count and
+    # the detail pane must read that same entry, not the first or the last one.
+    root = _stage_root(tmp_path)
+    manifest = api.init_manifest()
+    api.set_output_dir(manifest, str(root / "evidence"))
+    api.add_entry(manifest, SCAN)
+    manifest["run"]["fetchers"].append({"use": SCAN})
+    for key, values in ((SCAN, {ASSESSMENT_ID_FIELD: "11111111-1111-1111-1111-111111111111",
+                                ASSESSMENT_NAME_FIELD: "Acme Vulns", CLOSE_CYCLE_FIELD: "after_run"}),
+                        (f"{SCAN}#1", {ASSESSMENT_ID_FIELD: "22222222-2222-2222-2222-222222222222",
+                                       ASSESSMENT_NAME_FIELD: "Beta Vulns"})):
+        for field, value in values.items():
+            api.set_fetcher_config(manifest, SCAN, field, value, entry_key=key)
+    path = root / "kinds-test.yaml"
+    api.dump_manifest(manifest, path, root)
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        dt = app.screen.query_one("#manifest-entries", DataTable)
+        dt.focus()
+        dt.move_cursor(row=1)
+        await pilot.pause()
+        page = app.screen.query_one(ManifestPage)
+        detail = _plain(app.screen.query_one("#manifest-detail", Static).content)
+        return _rows(app), page._selected_entry_key(), detail
+
+    rows, selected, detail = run_tui(body, path, root)
+    first, second = rows[SCAN], rows[f"{SCAN}#1"]
+    assert (first["sends to"], first["config"], first["status"].strip()) == ("Acme Vulns · after_run", "3/3", "✓")
+    assert second["sends to"].startswith("Beta Vulns") and second["config"] == "2/3"
+    assert second["status"].strip() == "⚠ 1"
+    assert selected == f"{SCAN}#1"
+    assert "Beta Vulns" in detail and "Acme Vulns" not in detail
+    assert "after each complete run" not in detail
+
+
 def test_a_on_evidence_explains_where_evidence_goes(tmp_path, run_tui):
     root = _stage_root(tmp_path)
 

@@ -225,6 +225,7 @@ def test_instructions_open_with_the_entry_path() -> None:
 # --------------------------------------------------------------------------- #
 
 TEXT_FORMAT_FETCHERS = (
+    "aws/route53_resolver_dns_security",
     "azure/alert_rules",
     "azure/api_management_configuration",
     "azure/app_gateway_backend_tls",

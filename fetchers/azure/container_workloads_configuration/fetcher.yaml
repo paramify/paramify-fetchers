@@ -84,7 +84,7 @@ evidence_set:
     - container_groups.list() — Container Instances groups with their IP address, registry credentials, volumes and containers
     - diagnostic_settings.list() (per environment and container group) — whether logs are exported
 
-    Output: azure_container_workloads_configuration_<subscription>.json — each environment, app, job and container group with its exposure, authentication, secret handling, images and log export, plus the resources left out and why; no secret value is read, and secrets are recorded by name only.
+    Output: azure_container_workloads_configuration_<subscription>.json — each environment, app, job and container group with its exposure, authentication, secret handling, images and log export, plus the resources left out and why; no secret value is read, and secrets are recorded by name only. Lists that could not be read are null and set metadata.partial_failure.
 
     Summary fields:
 

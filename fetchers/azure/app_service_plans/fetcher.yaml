@@ -84,7 +84,7 @@ evidence_set:
     - excluded_app_service_plans — Number of plans left out of scope because a pattern matched their resource group, region or id and no in-scope site runs on them; each is listed under excluded with the pattern, and no other count includes it. A matched plan that an in-scope site runs on stays in scope and in every plan count, is not listed under excluded, and its pattern counts as matched
     - excluded_sites — Number of web apps and function apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern
     - in_scope_app_service_plans — Number of plans read and in scope, matched plans that an in-scope site runs on included; 0 means none was read or the patterns took out every plan
-    - in_scope_sites — Number of web apps and function apps read and in scope
+    - in_scope_sites — Number of web apps and function apps read and in scope; 0 when none was read or the patterns took out every site
 
     What was checked?
     - total_app_service_plans — Number of in-scope plans
