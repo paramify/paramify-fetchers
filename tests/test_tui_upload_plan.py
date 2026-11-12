@@ -454,3 +454,158 @@ def test_entry_editor_opens_on_unknown_hand_edited_values(tmp_path, run_tui):
         assert isinstance(app.screen, FormModal)
 
     run_tui(body, path)
+
+
+def _notes(app) -> list:
+    return [(str(n.message), n.severity) for n in app._notifications]
+
+
+@pytest.mark.parametrize("button, lister, message", [
+    ("#manifest-stack", "list_stacks", "Could not list stacks: HTTP 401: token expired"),
+    ("#manifest-owner", "list_channel_owners", "Could not list channel owners: HTTP 401: token expired"),
+])
+def test_a_listing_error_is_shown_and_changes_nothing(tmp_path, monkeypatch, run_tui, button, lister, message):
+    path, _ = _manifest(tmp_path)
+    before = path.read_text()
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "tok")
+
+    def refused(*a, **k):
+        raise ValueError("HTTP 401: token expired")
+
+    monkeypatch.setattr(api, lister, refused)
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        app.screen.query_one(button, Button).press()
+        await _settle(app, pilot)
+        return type(app.screen).__name__, _notes(app), str(app.screen.query_one(button, Button).label)
+
+    screen, notes, label = run_tui(body, path)
+    assert screen == "WorkspaceScreen" and label == "—"
+    assert (message, "error") in notes
+    assert path.read_text() == before
+
+
+@pytest.mark.parametrize("button, lister, options", [
+    ("#manifest-stack", "list_stacks", STACKS),
+    ("#manifest-owner", "list_channel_owners", OWNERS),
+])
+def test_escape_on_a_picker_changes_nothing(tmp_path, monkeypatch, run_tui, button, lister, options):
+    path, _ = _manifest(tmp_path)
+    before = path.read_text()
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "tok")
+    monkeypatch.setattr(api, lister, lambda *a, **k: options)
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        app.screen.query_one(button, Button).press()
+        await _settle(app, pilot)
+        assert isinstance(app.screen, PickerModal)
+        await pilot.press("escape")
+        await _settle(app, pilot)
+        return type(app.screen).__name__, _notes(app)
+
+    assert run_tui(body, path) == ("WorkspaceScreen", [])
+    assert path.read_text() == before
+
+
+def test_the_stack_button_names_what_is_stored(tmp_path, monkeypatch, run_tui):
+    # Picked: the name. Typed later: the typed value, and the old name is gone.
+    path, _ = _manifest(tmp_path)
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "tok")
+    monkeypatch.setattr(api, "list_stacks", lambda *a, **k: STACKS)
+
+    async def picked(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        app.screen.query_one("#manifest-stack", Button).press()
+        await _settle(app, pilot)
+        await pilot.press(*"Beta", "enter")
+        await _settle(app, pilot)
+        return str(app.screen.query_one("#manifest-stack", Button).label), _notes(app)
+
+    label, notes = run_tui(picked, path)
+    assert label == "Beta" and ("Stack updated.", "information") in notes
+
+    monkeypatch.delenv("PARAMIFY_UPLOAD_API_TOKEN")
+
+    async def typed(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        app.screen.query_one("#manifest-stack", Button).press()
+        await _settle(app, pilot)
+        assert isinstance(app.screen, FormModal)
+        assert app.screen.query(Input).first().value == "stk-2"  # the stored id, not the name
+        app.screen.query(Input).first().value = "stk-9"
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await _settle(app, pilot)
+        return str(app.screen.query_one("#manifest-stack", Button).label)
+
+    assert run_tui(typed, path) == "stk-9"
+    assert _run_block(path)["paramify"] == {"stack": "stk-9"}
+
+
+def test_a_blank_typed_owner_removes_it(tmp_path, no_token, run_tui):
+    path, _ = _manifest(tmp_path)
+    m = yaml.safe_load(path.read_text())
+    api.set_owner(m, "alice")
+    api.dump_manifest(m, path, REPO_ROOT)
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        assert str(app.screen.query_one("#manifest-owner", Button).label) == "alice"
+        app.screen.query_one("#manifest-owner", Button).press()
+        await _settle(app, pilot)
+        field = app.screen.query(Input).first()
+        assert field.value == "alice"
+        field.value = "  "
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await _settle(app, pilot)
+        return str(app.screen.query_one("#manifest-owner", Button).label), _notes(app)
+
+    label, notes = run_tui(body, path)
+    assert label == "—" and ("Owner removed.", "information") in notes
+    assert _run_block(path).get("paramify") in (None, {})
+
+
+def test_entry_editor_shows_the_entry_settings_and_drops_a_name_only_with_its_stack(tmp_path, run_tui):
+    path, _ = _manifest(tmp_path)
+    m = yaml.safe_load(path.read_text())
+    settings = {"stack": "stk-1", "stack_name": "Alpha", "owner": "bob", "approval": "MANUAL",
+                "no_request": "refuse", "delivery": "direct"}
+    m["run"]["fetchers"][0]["paramify"] = dict(settings)
+    path.write_text(yaml.safe_dump(m))
+
+    async def edit(app, pilot, stack=None):
+        await pilot.press("2")
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        rows = {r.spec["key"]: r for r in app.screen.query("FieldRow") if r.group == "paramify"}
+        shown = {k: (r.query_one(Input).value if r.spec["kind"] == "text" else r.query_one(Select).value)
+                 for k, r in rows.items()}
+        options = {k: [v for _, v in r.spec["options"]] for k, r in rows.items() if r.spec["kind"] == "select"}
+        if stack is not None:
+            rows["stack"].query_one(Input).value = stack
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await _settle(app, pilot)
+        return shown, options
+
+    shown, options = run_tui(edit, path)
+    assert shown == {k: v for k, v in settings.items() if k != "stack_name"}
+    assert options == {"approval": ["MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION"],
+                       "no_request": ["direct", "evidence", "refuse"], "delivery": ["auto", "direct"]}
+    assert _run_block(path)["fetchers"][0]["paramify"] == settings  # saved unchanged, name kept
+
+    run_tui(lambda app, pilot: edit(app, pilot, stack="stk-2"), path)
+    assert _run_block(path)["fetchers"][0]["paramify"] == {
+        **{k: v for k, v in settings.items() if k != "stack_name"}, "stack": "stk-2"}
