@@ -111,9 +111,10 @@ class FakeParamify:
         return row
 
     def add_evidence(self, ref: str, *, channels: Any = (), approval: str = "SUBMISSION",
-                     owners: Any = ()) -> EvidenceSet:
-        """`owners` gives each channel's owner username, in the order of `channels`; a channel past its end has none."""
-        row = self._make_evidence(ref, channels, approval, owners=owners)
+                     owners: Any = (), name: Optional[str] = None) -> EvidenceSet:
+        """`owners` gives each channel's owner username, in the order of `channels`; a channel past its end has none.
+        `name` defaults to `ref`."""
+        row = self._make_evidence(ref, channels, approval, name, owners=owners)
         return EvidenceSet(
             id=row["id"], reference_id=ref, name=row["name"], approval=approval,
             channels=tuple(Channel(c["id"], c["referenceId"], c["stackId"], (c["owner"] or {}).get("username"))

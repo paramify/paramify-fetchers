@@ -34,6 +34,7 @@ import json
 import os
 import shutil
 import socket
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict
@@ -490,3 +491,34 @@ def no_network(monkeypatch, tmp_path):
     if log.exists():
         attempts += log.read_text().splitlines()
     assert not attempts, f"network attempts (the app may have swallowed the error): {attempts}"
+
+
+FAKE_PARAMIFY_URL = "https://api.example.test"
+
+
+@functools.cache
+def _paramify_fake():
+    spec = importlib.util.spec_from_file_location("paramify_fake", Path(__file__).with_name("paramify_fake.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("paramify_fake", module)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def fake_paramify(monkeypatch):
+    """tests/paramify_fake.py as the workspace every Paramify call reaches (stacks, owners,
+    plan, upload), with a fake upload token. Request it after demo_workspace, which clears the token."""
+    from datetime import date
+
+    from framework.paramify.client import Client
+    from framework.paramify_auth import BASE_URL_ENV, UPLOAD_TOKEN_ENV
+    from framework.sync import upload as upload_mod
+
+    fake = _paramify_fake().FakeParamify()
+    fake.set_today(date.today())
+    monkeypatch.setenv(UPLOAD_TOKEN_ENV, "fake-token")
+    monkeypatch.setenv(BASE_URL_ENV, FAKE_PARAMIFY_URL)
+    monkeypatch.setattr(upload_mod, "Client", functools.partial(
+        Client, session=fake.session, sleep=lambda _s: None, retry_budget_s=3))
+    return fake
