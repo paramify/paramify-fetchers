@@ -47,6 +47,61 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Evidence uploads go out as batches.** `paramify upload` now sends the files
+  of each fetcher entry as one batch. Paramify submits and approves a batch as
+  one unit. The batch goes through the channel of the evidence set, on the
+  current artifact request. A set with no channel gets the batch on the set. A
+  set with several channels no longer fails: the upload uses the channel on the
+  stack of the entry. It refuses one entry, and gives the fix, when no stack is
+  set, the stack is unknown, or no channel is on that stack. `no_request:
+  evidence` sends the batch to the set instead. A temporary failure holds the
+  batch open, and the same upload resumes it. A file that fails for good is
+  dropped and named, and the rest goes in. Uploading the same run again changes
+  nothing, also for a run that the earlier uploader sent before batches. A file
+  that the submitted batch of the run does not hold is named as dropped, not as
+  already sent. When Paramify rejected the batch of the run, the upload refuses
+  the entry: collect again to send new evidence. When
+  the API refuses a write (400, 405, 415, 422) for one set or batch, only that
+  entry fails. Only a 401 or 403 stops the upload. A 403 on the check for
+  batches does not: the upload then sends every entry direct, and the plan gives
+  the server's reason. A refused tag is a warning.
+  Batches need Paramify API 0.14.0 or later. An entry that cannot use a batch
+  is sent direct, the way the uploader sent it before batches. This covers a
+  workspace without batches, a channel with no artifact request, and
+  `delivery: direct`.
+- **`delivery: auto | direct`** in the `paramify` block of the manifest, on the
+  run or on one entry. `direct` sends the entry the way the uploader sent it
+  before batches. `auto` is the default.
+- **`no_request: direct`, now the default.** When a channel has no artifact
+  request, the upload sends the entry direct and warns. `evidence` and `refuse`
+  still work.
+- **Direct delivery in the upload result.** Each entry has a `mode` (`batch`,
+  `direct`, or null for an entry the upload did not route). The summary has
+  `batches`, which says whether the workspace has batches and why not. In a dry
+  run, `batches` is null. It is also null when the check for batches failed.
+- **`paramify upload --plan`** reads the workspace and changes nothing. It
+  prints the plan. For each entry it shows the set, stack, channel and artifact
+  request, and whether the batch is new, resumed or done. It also shows dropped
+  files and open batches from earlier runs. `--dry-run` stays offline and needs
+  no token.
+- **`paramify upload --stack`, `paramify stacks`, `paramify manifest set-stack`,
+  and the `run.paramify` manifest keys.** `run.paramify` and the `paramify`
+  block of each entry hold `stack`, `stack_name`, `approval` and `no_request`.
+  `paramify run` records them for each entry in `_run_metadata.json`, and the
+  upload reads them from there. `paramify stacks` lists the stacks in the
+  workspace. `manifest set-stack MANIFEST STACK [--fetcher NAME]` stores a
+  stack. `paramify validate --online` checks stack ids.
+- **`plan` event.** `upload_run` emits `plan` after planning, beside
+  `upload_start`, `upload_file` and `upload_complete`.
+- **`paramify run --print-run-dir`** writes only the run directory to stdout,
+  and the normal progress output to stderr. Scripts use it to upload the run
+  they just collected. It cannot be used with `--json`.
+- **More in the `paramify run --json` summary.** It adds `skipped` (entries that
+  did not run, with the reason), `setup_errors` (entries whose setup failed
+  before the fetcher started) and `notes`. Each item names the entry and the
+  fetcher. The record of a failed invocation adds `error` and, when the fetcher
+  gave one, `error_code`. The same record goes in `_run_metadata.json`.
+
 - **Inspector ECR findings and Paramify issue intake:** `aws_inspector_ecr_findings`
   collects active findings, package details, image inventory and coverage;
   `aws_inspector_ecr_report` converts those APIs to a documented CSV for the existing
@@ -1521,6 +1576,35 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **Upload result shape.** The `--json` summary and `upload_log.json` keep
+  `uploaded`, `skipped_duplicate`, `skipped_failed`, `errors` and `ok` for one
+  release. So do the `upload_start`, `upload_file` and `upload_complete` events.
+  `results` no longer holds `evidence_id`, `artifact_id` or `channel_id` for each
+  file. The summary and the log add `dropped`, `plan`, `entries` and
+  `outcomes`. Each entry has a state, batch, stack, channel and artifact
+  request, and its state is `planned` for a dry run. With `--with-validators`
+  they add `validators`. A dry run with `--with-validators` names the sync it
+  would do and syncs nothing. `dropped` counts the files that the upload
+  dropped. `errors` does not count them, so `ok` is true only when `errors` is
+  0. A dropped file has the outcome `dropped` in `results` and does not change
+  the exit code. A file that is unreadable, not an envelope, or has no complete
+  evidence set still counts in `errors` and makes `ok` false, as before. The
+  other files of the entry still go in.
+- **`approval` in the manifest sets the approval mode of a new evidence set.**
+  The default stays `SUBMISSION`: Paramify approves each batch when the upload
+  submits it. Set `SUBMISSION_WITH_PASSING_VALIDATORS` to hold a batch until its
+  validators pass, or `MANUAL`. The upload never changes an existing set.
+- **Run ids gain a 4-hex suffix** (`run-2026-11-01T02-00-00Z-a1b2`). Two runs
+  that start together no longer share a directory. Readers accept both forms.
+- **`--with-validators` now runs before delivery.** A new set has its validators
+  before its first batch goes in. If the validator sync fails, the upload sends
+  no batch for any entry of the run, and the run exits 1.
+- **`deploy/run-and-upload.sh` uploads the run it just collected.** It reads the
+  run directory from `paramify run --print-run-dir` and no longer takes the
+  newest run on disk. An optional second argument names the stack. The log
+  still shows the full output of the run: each fetcher, skipped entries, setup
+  errors, notes and the reason for each failure. `./run_and_upload.sh` does the
+  same.
 - **`aws_ecr_image_scanning` 0.3.0:** retrieve newest-image scan results regardless
   of `scan_on_push`, including enhanced continuous and completed manual scans.
   Resolve repository scan frequency through AWS, select the newest image across
@@ -1548,7 +1632,6 @@ schemas and the `paramify` CLI — not the internal code.
   - **Enhanced scanning permissions:** `ecr:DescribeImageScanFindings` also needs
     `inspector2:ListCoverage` and `inspector2:ListFindings` when the registry uses
     enhanced scanning; without them AWS denies the ECR call.
-
 - **The uploader guide explains the collection frequency of an evidence set.**
   A new section in [`docs/uploader_guide.md`](docs/uploader_guide.md#set-the-collection-frequency)
   gives the default (`THREE_DAY`), the values, and how to set `frequency` in
@@ -2189,6 +2272,33 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`paramify doctor` and the note before `paramify run` find an upload token
+  in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
+  Before, only `paramify stacks` and `paramify upload` read `.env`, and the
+  others said that no token was set.
+- **The TUI manifest screen shows each entry of a fetcher that the manifest
+  lists twice.** Each row, its counts and the detail pane show that entry's own
+  config. `paramify manifest validate` names the second and later entries of a
+  fetcher by entry key (`aws_x#1: ...`).
+- **A fetcher that writes over an earlier file in the same run fails.** Before,
+  the second of two entries of one fetcher, or a fan-out that used one file name
+  for each target, replaced the earlier evidence and passed. That invocation now
+  fails with `error_code: output_overwritten` and names the file. Its record in
+  `_run_metadata.json` lists the file under `overwritten`. The runner does not
+  wrap that file in an envelope, and `paramify upload` does not send it: the plan
+  shows it as an error, "overwritten later in this run". Before, a fan-out could
+  upload the second target's data labelled as the first target's evidence.
+  `paramify validate` gives a note for two entries of a fetcher that takes no
+  targets.
+- **The refusal for two channels on one stack names the owners.** Paramify makes
+  one channel for each owner, so the old fix, to keep one channel, was not
+  possible. The message now gives each channel's owner, and the fix says to
+  upload the evidence in the app.
+- **The upload plan says when the Paramify settings in the manifest changed
+  after the run.** The upload uses the settings that the run recorded. When the
+  manifest now sets a different stack, approval, no_request or delivery for an
+  entry, the plan gives a note with the fix. The upload still uses the settings
+  of the run.
 - **`azure_entra_conditional_access_policies` 0.3.0: the all-users MFA figures
   count only policies that apply to every sign-in.**
   `enforced_mfa_for_all_users_and_apps`,
@@ -2769,6 +2879,13 @@ schemas and the `paramify` CLI — not the internal code.
   provides.
   Other existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
   evidenceable.
+
+### Deprecated
+
+- **`uploaders/paramify_evidence/uploader.py`.** It still works and keeps its
+  flags. It now hands the run to the same engine as `paramify upload`, prints a
+  deprecation notice, and writes the notice under `deprecations` in
+  `upload_log.json`. Use `paramify upload`.
 
 ## [0.6.0-beta] - 2026-10-23
 
