@@ -864,3 +864,13 @@ def test_submitted_pipeline_batch_is_not_success(tmp_path):
 def test_ordinary_entry_result_has_no_pipeline_key(tmp_path):
     outcome = Harness(FakeParamify(), two_files(tmp_path)).run()["delivery/x"]
     assert "pipeline" not in outcome.result
+
+
+def test_direct_pipeline_entry_reports_approved_null(tmp_path):
+    fake = FakeParamify()
+    fake.batches_flag_off()
+    outcome = Harness(fake, inventory_run(tmp_path), capability=Capability(False, FLAG_OFF)).run()["delivery/x"]
+    assert outcome.status == "applied", outcome.message
+    assert outcome.result["mode"] == "direct"
+    assert outcome.result["pipeline"] == {"type": "inventory", "approved": None}
+    assert "sent direct: this workspace has no batches; the pipeline runs the pre-batch way" in outcome.message

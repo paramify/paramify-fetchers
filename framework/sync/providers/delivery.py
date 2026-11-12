@@ -86,6 +86,7 @@ PIPELINE_MANUAL = "{ref} approves MANUAL; the {type} pipeline waits for someone 
 PIPELINE_VALIDATORS = "{ref} has {n} validator(s) ({names}); its batches will never approve"
 PIPELINE_RUNS = " · approves on submit → pipeline runs"
 WAF_BLOCKED = "blocked by the production WAF"
+PIPELINE_DIRECT_SENT = "sent direct: this workspace has no batches; the pipeline runs the pre-batch way"
 BATCHES_OFF = "batches are off for this workspace"
 DELIVERY_DIRECT = "delivery: direct"
 DIRECT = "DIRECT"  # the payload target of an entry sent direct
@@ -166,7 +167,9 @@ class _Delivered:
             "mode": self.mode,
         }
         if self.pipeline_type:
-            out["pipeline"] = {"type": self.pipeline_type, "approved": self.status == "APPROVED"}
+            # Direct: no batch, so "approved" does not apply (None, not False).
+            out["pipeline"] = {"type": self.pipeline_type,
+                               "approved": None if self.mode == "direct" else self.status == "APPROVED"}
         return out
 
     @property
@@ -308,8 +311,9 @@ class DeliveryProvider:
         return "envelope" if pipeline else self._payload_mode
 
     def _read(self, path: Path, pipeline: bool) -> bytes:
-        # An ordinary file goes through `_content(path)` alone, as before.
-        return self._content(path, "envelope") if pipeline else self._content(path)
+        mode = self._mode_for(pipeline)
+        # The payload mode is `_content`'s default, so only an override is passed.
+        return self._content(path) if mode == self._payload_mode else self._content(path, mode)
 
     def _content(self, path: Path, mode: Optional[str] = None) -> bytes:
         """The bytes an upload of `path` sends, in `mode` (default: this run's payload mode). Raises OSError."""
@@ -783,6 +787,8 @@ class DeliveryProvider:
             return Outcome(action_id, "failed", run.result("failed"), ALL_DROPPED)
         parts = [note] if note else []
         parts.append(f"{_count(len(run.uploaded), 'file')} sent direct")
+        if run.pipeline_type:
+            parts.append(PIPELINE_DIRECT_SENT)
         if run.dropped:
             parts.append(f"dropped {', '.join(d['name'] for d in run.dropped)}")
         return Outcome(action_id, "applied", run.result("delivered_with_drops" if run.dropped else "delivered"),
