@@ -8,7 +8,9 @@ For each entry, in this order (the first refusal ends the entry):
    set, through one artifacts query by file name, so a second upload of a run
    skips or resumes it, even after the cycle rolled over, and never makes
    another. A file that a submitted or approved batch of this run does not
-   have is reported dropped, never as already delivered. A file of this run that the pre-batch uploader already sent (an
+   have is reported dropped, never as already delivered. A rejected batch of
+   this run refuses the entry: a re-upload never resends what a person
+   rejected. A file of this run that the pre-batch uploader already sent (an
    artifact with no batch) is left out; when every file was, the entry is a
    no-op;
 4. WAF: a file the production WAF would block is dropped at plan time.
@@ -59,6 +61,7 @@ from framework.sync.providers.delivery_routing import (
     delivered_before_batches,
     delivered_files,
     own_batch_ids,
+    rejected,
     resolve_channel,
     resolve_request,
     stack_drift,
@@ -509,6 +512,9 @@ class DeliveryProvider:
 
         if mine is not None:
             changes["batch"] = {"id": mine.id, "reference_id": mine.reference_id, "status": mine.status}
+            refusal = rejected(mine)
+            if refusal is not None:
+                return action("refuse", refusal.message, fix=refusal.fix, changes=changes, warnings=warnings)
         have = {a.original_file_name for a in obs.artifacts.get(mine.id) or []} if mine is not None else set()
         missing = [f for f in files if f.original_file_name not in have]
         if mine is not None and mine.status in DONE:

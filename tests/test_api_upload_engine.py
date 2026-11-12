@@ -175,6 +175,18 @@ def test_a_file_the_submitted_batch_dropped_is_not_counted_as_a_duplicate(fake, 
     assert len(fake._batches) == 1 and len(submits(fake)) == 1
 
 
+def test_a_rejected_batch_of_the_run_refuses_the_reupload(fake, root, tmp_path):
+    run = two_files(tmp_path)
+    api.upload_run(run, root)
+    fake._batches[0]["status"] = "REJECTED"  # a reviewer rejected it in the app
+    fake.calls.clear()
+    out = api.upload_run(run, root)
+    entry = out["entries"]["x"]
+    assert entry["state"] == "refused" and out["ok"] is False and out["errors"] == 1
+    assert entry["message"] == "BCH-1 was rejected in Paramify; collect again to send new evidence"
+    assert all(c[0] == "GET" for c in fake.calls)
+
+
 def test_retry_resumes_and_submits_once(fake, root, tmp_path):
     run = two_files(tmp_path)
     fake.fail_upload("a.json", 502)

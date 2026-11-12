@@ -401,6 +401,7 @@ results, see [verify validators](suggest_validator_guide.md#5-verify-in-paramify
 | `no current or past artifact request on channel …` | This appears only with `no_request: refuse`. Create an artifact request on the channel in the app, or remove `no_request: refuse` from this entry to send it direct. |
 | `batches are off for this workspace (…); every entry is sent direct, as before batches` | This is a note, not an error. The workspace has no batches, so the upload sends every entry direct. |
 | An entry shows `held` | A temporary failure stopped the batch. Run the same upload again. |
+| `… was rejected in Paramify; collect again to send new evidence` | A person rejected this run's batch in the app. The upload does not send the same evidence again. Collect again: the new run makes a new batch. |
 | A file shows `blocked by the production WAF` | The evidence holds a string the WAF rejects (`../`, `/bin/sh`, `<script`). The upload sent the rest. Remove the string and collect again. |
 | Validators attach to `EVD-…`, not your remapped set | Validator sync uses the registry's reference IDs. Attach them on the set's **Validators** tab → **Manage Selection**. |
 | `No fetchers in the manifest …` from `scripts sync` | It found none in `manifest.yaml` at the repo root. Name your manifest, or pass `--all`. |

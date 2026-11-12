@@ -22,6 +22,7 @@ from framework.paramify.resources import (
 from framework.sync.providers.desired import EntryDesired
 
 DONE = ("SUBMITTED", "APPROVED")
+REJECTED = "REJECTED"
 
 
 @dataclass(frozen=True)
@@ -218,9 +219,23 @@ def attribute(batches: List[Batch], artifacts: Dict[str, List[Artifact]], entry:
             mine.append(b)
         elif runs and b.status == "OPEN":
             earlier.append((b, runs[0]))
-    # A finished batch wins over an open one, so a stray duplicate never gets resumed.
-    mine.sort(key=lambda b: 0 if b.status in DONE else 1)
+    # A finished batch wins over an open one, so a stray duplicate never gets resumed;
+    # so does a rejected one, so what a person rejected is never sent again.
+    mine.sort(key=lambda b: 0 if b.status in DONE else 1 if b.status == REJECTED else 2)
     return Attribution(mine[0] if mine else None, earlier)
+
+
+def rejected(batch: Batch) -> Optional[Refusal]:
+    """This run's batch, when a person rejected it in Paramify: the entry ends there.
+
+    A re-upload of the run would resend the same evidence; a new run makes a new batch.
+    """
+    if batch.status != REJECTED:
+        return None
+    return Refusal(
+        f"this run's batch {batch.reference_id} was rejected",
+        f"{batch.reference_id} was rejected in Paramify; collect again to send new evidence",
+    )
 
 
 def stack_drift(entry: EntryDesired, stacks: List[Stack]) -> Optional[str]:

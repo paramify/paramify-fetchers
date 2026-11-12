@@ -401,10 +401,20 @@ def test_batches_open_with_all_files_submits_only(tmp_path):
     assert a.summary == "deliver 0 files to AR-41 (channel CHN-1): resume BCH-12 (submit only)"
 
 
-def test_batches_rejected_resumes(tmp_path):
+def test_batches_rejected_refuses(tmp_path):
+    # A person rejected this run's evidence: a re-upload never resends it.
     a = _with_batch(tmp_path, "REJECTED")
-    assert a.verb == "deliver" and a.payload["resume_batch_id"] == "bt-12"
-    assert [f["original_file_name"] for f in a.payload["files"]] == ["b.json"]
+    assert a.verb == "refuse" and a.summary == "this run's batch BCH-12 was rejected"
+    assert a.fix == "BCH-12 was rejected in Paramify; collect again to send new evidence"
+    assert a.payload["resume_batch_id"] is None
+    assert a.changes["batch"] == {"id": "bt-12", "reference_id": "BCH-12", "status": "REJECTED"}
+
+
+def test_attribute_prefers_a_rejected_batch_over_an_open_one_of_the_same_run(tmp_path):
+    e = entry(tmp_path)
+    rejected, stray = batch(status="REJECTED"), batch("bt-13", "BCH-13", "OPEN")
+    arts = {"bt-12": [artifact("a.json")], "bt-13": [artifact("a.json", bid="bt-13")]}
+    assert attribute([stray, rejected], arts, e).mine is rejected
 
 
 def test_batches_empty_known_only_from_upload_state(tmp_path):
@@ -661,10 +671,16 @@ def test_rollover_this_runs_batch_open_on_old_request_resumes_there(tmp_path):
 
 
 def test_rollover_resume_on_unobserved_request_says_earlier(tmp_path):
-    batches, arts = _old_request_batch("REJECTED", ar="ar-gone")
+    batches, arts = _old_request_batch("OPEN", ar="ar-gone")
     a = plan_one(entry(tmp_path), observed(evidence(CH_P), requests=[AR_NOW], batches=batches, artifacts=arts))
     assert a.verb == "deliver" and a.payload["artifact_request_id"] == "ar-gone"
     assert a.warnings == ["resuming BCH-12 on an earlier artifact request"]
+
+
+def test_rollover_rejected_batch_on_old_request_refuses(tmp_path):
+    batches, arts = _old_request_batch("REJECTED", ar="ar-gone")
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), requests=[AR_NOW], batches=batches, artifacts=arts))
+    assert a.verb == "refuse" and a.fix == "BCH-12 was rejected in Paramify; collect again to send new evidence"
 
 
 def test_rollover_resume_on_evidence_level_batch(tmp_path):
