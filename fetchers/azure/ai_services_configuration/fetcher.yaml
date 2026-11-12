@@ -1,5 +1,5 @@
 name: azure_ai_services_configuration
-version: 0.2.1
+version: 0.2.2
 description: >
   Inventories Azure AI services accounts (Microsoft.CognitiveServices/accounts — Azure AI Foundry,
   Azure OpenAI, Language, Speech, Document Intelligence and the other kinds) and Azure AI Search
