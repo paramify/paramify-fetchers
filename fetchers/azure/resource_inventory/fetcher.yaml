@@ -130,6 +130,6 @@ evidence_set:
     results.excluded instead, each with the pattern that matched; the summary gives
     resource_exclusion_patterns (the configured patterns, empty when none are set),
     resource_exclusion_patterns_unmatched (patterns that matched no resource, such
-    as a mistyped name, or null when the inventory couldn't be read), excluded_resources (how many the patterns took out; no
+    as a mistyped name, or null when the inventory, the Defender assessments or the Policy states couldn't be read), excluded_resources (how many the patterns took out; no
     other count includes them) and in_scope_resources (how many stayed; 0 means
     none was read or the patterns took out every resource).

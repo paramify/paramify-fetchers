@@ -50,6 +50,28 @@ def repo_root() -> Path:
     return REPO_ROOT
 
 
+@pytest.fixture(autouse=True)
+def _no_upload_yaml_from_the_working_tree(monkeypatch):
+    """Tests never read the user's own `<repo>/upload.yaml`.
+
+    It is the uploader config the TUI and CLI read by default, it is not
+    tracked, and a developer often has one (CI never does). A test that plans an
+    upload with the real repo root as its root would read it and route to the
+    developer's evidence sets. For that root only, act as if there is none; a
+    test that passes its own tmp root still gets the real lookup.
+    """
+    from framework import api
+
+    real = api.default_upload_config
+
+    def default_upload_config(root):
+        if Path(root).resolve() == REPO_ROOT:
+            return None
+        return real(root)
+
+    monkeypatch.setattr(api, "default_upload_config", default_upload_config)
+
+
 # --------------------------------------------------------------------------- #
 # --fail-on-skip: the tui job's guard against a missing textual passing as skips.
 # --------------------------------------------------------------------------- #

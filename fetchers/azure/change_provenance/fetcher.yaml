@@ -131,8 +131,8 @@ evidence_set:
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
-    - Resource Graph query on resourcechanges — every resource create, update and delete in the lookback window, with caller, client, correlation id and changed properties
-    - Resource Graph query on resourcecontainerchanges — the same for resource groups and the subscription itself
+    - Resource Graph query on resourcechanges — every resource create, update and delete in the lookback window, with caller, client, correlation id and changed properties; the run fails if Resource Graph returns fewer rows than it counted or reports the result truncated
+    - Resource Graph query on resourcecontainerchanges — the same for resource groups and the subscription itself, with the same rule on fewer rows or a truncated result
     - deployments.list_at_subscription_scope() — subscription deployment history
     - resource_groups.list() — the resource groups, to read each one's deployments
     - deployments.list_by_resource_group() (per resource group) — each group's deployment history, to match changes to deployments

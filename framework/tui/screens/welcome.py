@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import colorsys
 import math
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -288,6 +289,7 @@ class WelcomeScreen(Screen):
     @staticmethod
     def _relative(ts: str) -> str:
         """Humanize a last-run stamp (run_id format or plain date); raw on mismatch."""
+        ts = re.sub(r"(?<=Z)-[0-9a-f]{4}$", "", ts)  # run ids carry a 4-hex suffix
         for fmt in ("%Y-%m-%dT%H-%M-%SZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"):
             try:
                 then = datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc)

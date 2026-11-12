@@ -620,7 +620,8 @@ def test_effective_config_gives_a_comparator_only_its_own_fields(tmp_path):
     assert [(f["name"], f["value"], f["source"]) for f in fields] == [("environments", "production", "entry")]
 
 
-def test_doctor_leaves_out_a_comparators_category(tmp_path):
+def test_doctor_leaves_out_a_comparators_category(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")  # doctor loads `.env`; never the developer's own
     src = input_fetcher(tmp_path, "src")
     (tmp_path / "fetchers" / "_categories").mkdir(parents=True)
     (tmp_path / "fetchers" / "_categories" / "cmpcat.yaml").write_text("requires:\n  tools:\n    - cmpcat-cli\n")

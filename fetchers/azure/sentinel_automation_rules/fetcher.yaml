@@ -98,4 +98,4 @@ evidence_set:
     Is incident response automated?
     - active_rules_total — Number of active automation rules across the workspaces read; active means enabled and not past its expiration time
     - workspaces_with_no_active_rules — Number of workspaces read with no active automation rule; a workspace whose rules couldn't be read is not counted
-    - playbooks_run — Number of distinct playbooks (Logic Apps) that active automation rules run
+    - playbooks_run — Number of distinct playbooks (Logic Apps) that active automation rules run; playbook internals (the Logic Apps themselves) are not read, so this does not show what a playbook does
