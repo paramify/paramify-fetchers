@@ -21,10 +21,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from rich.text import Text
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Container, Vertical
-from textual import work
 from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import Static
