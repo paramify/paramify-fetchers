@@ -84,6 +84,15 @@ schemas and the `paramify` CLI — not the internal code.
   request, and whether the batch is new, resumed or done. It also shows dropped
   files and open batches from earlier runs. `--dry-run` stays offline and needs
   no token.
+- **Choose the channel by owner: `run.paramify.owner`, `paramify manifest
+  set-owner`, `paramify upload --owner`, and an owner setting in the TUI.**
+  Paramify makes one channel for each owner on each stack. Before, the upload
+  refused a set with two owners' channels on one stack. Now it uses the
+  channel of the owner the manifest sets. The owner is read only in that case:
+  a set with one channel on the stack uses it, whoever owns it. An entry can
+  set its own owner. The plan gives a note when the manifest's owner differs
+  from the run's. `paramify validate --online` gives a note for an owner who
+  has no channel in the workspace.
 - **`paramify upload --stack`, `paramify stacks`, `paramify manifest set-stack`,
   and the `run.paramify` manifest keys.** `run.paramify` and the `paramify`
   block of each entry hold `stack`, `stack_name`, `approval` and `no_request`.
@@ -1575,6 +1584,16 @@ schemas and the `paramify` CLI — not the internal code.
   can't be looked up.
 
 ### Changed
+
+- **Each batch the upload creates is approved on submission by default.** The
+  upload now sends the entry's `approval` (default `SUBMISSION`) when it creates
+  a batch. Before, a batch took the evidence set's mode, so a set made `MANUAL`
+  in the app held each batch for review. Set `approval: MANUAL` or
+  `SUBMISSION_WITH_PASSING_VALIDATORS` on an entry to keep review or validator
+  gating. The plan says how each new batch is approved. A workspace whose API
+  cannot set a batch's mode gets the batch without it, with a warning. A batch
+  that is approved on submission but still reads `SUBMITTED` no longer reports
+  `waiting for review`.
 
 - **Upload result shape.** The `--json` summary and `upload_log.json` keep
   `uploaded`, `skipped_duplicate`, `skipped_failed`, `errors` and `ok` for one
