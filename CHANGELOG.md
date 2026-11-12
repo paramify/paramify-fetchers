@@ -47,6 +47,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Optional selected-subscription reads for mixed Entra evidence.**
+  `azure_entra_emergency_accounts` 0.2.0 and
+  `azure_entra_dormant_identities` 0.3.0 accept `target_subscription_only`
+  (default false). With an explicit subscription and `AZURE_TENANT_ID`, ARM
+  requests stay in that subscription and both source tenant reads must agree
+  before further directory reads. Shared Graph clients check continuation origins
+  and refuse redirects; scoped ARM REST/SDK requests validate before token/send.
+  Graph remains tenant-wide. Missing reads, licensing limits and unsupported APIs
+  remain recorded failures or unknown values. No source access is changed.
+
 - **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
   one record per VPC in the region with its Route 53 Resolver DNSSEC validation
   status (`NOT_CONFIGURED` when the VPC has no DNSSEC config), its DNS Firewall
