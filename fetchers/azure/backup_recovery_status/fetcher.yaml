@@ -131,7 +131,7 @@ evidence_set:
     - retention_threshold_days — Number of days a policy must keep backups to count as adequate (30); always set, even when the vault list could not be read
     - policies_meeting_retention_threshold — Number of backup policies whose longest retention across daily, weekly, monthly and yearly schedules, and any per-database sub-policies (SAP HANA, SQL in a VM), is at least retention_threshold_days; a month counts as 30 days and a year as 365; null when the vault list could not be read
     - policies_without_readable_retention — Number of backup policies whose retention could not be read at all; null when the vault list could not be read
-    - protected_items_meeting_retention_threshold — Number of protected items whose policy meets the retention threshold; an item with no policy is not counted; null when the vault list could not be read
+    - protected_items_meeting_retention_threshold — Number of protected items whose policy meets the retention threshold; an item with no policy, or whose policy could not be read, is not counted; null when the vault list could not be read
     - retention_threshold_percentage — Percentage of protected items whose policy meets the retention threshold = protected_items_meeting_retention_threshold / total_protected_items × 100 (a whole number, rounded down; reads 0 when total_protected_items is 0); null when the vault list could not be read
 
     Were restores run, and how did they go?

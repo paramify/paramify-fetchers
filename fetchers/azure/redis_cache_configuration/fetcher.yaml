@@ -94,7 +94,7 @@ evidence_set:
     - in_scope_redis_caches — Number of caches read and in scope; null when the cache list could not be read; 0 means there are none or the patterns took out every cache, which a check can catch by requiring more than 0
 
     Which caches exist?
-    - total_caches — Number of in-scope caches; every cache count below is out of this total
+    - total_caches — Number of in-scope caches; every cache count below is out of this total; reads 0, not null, when the cache list could not be read, so read it together with in_scope_redis_caches
     - provider_registration_status — Whether the Redis provider (Microsoft.Cache) is registered on the subscription: registered, not_registered or unknown
     - caches_by_sku — Number of caches for each SKU name Azure reports (such as Basic, Standard or Premium), or unknown when it reports none
     - caches_by_redis_version — Number of caches for each Redis version Azure reports, or unknown when it reports none

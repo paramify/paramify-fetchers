@@ -84,7 +84,7 @@ evidence_set:
     - in_scope_disks — Number of disks read and in scope; null when the disk list could not be read; 0 means there are none or the patterns took out every disk, which a check can catch by requiring more than 0
 
     Which disks exist?
-    - total_disks — Number of in-scope managed disks, attached or not
+    - total_disks — Number of in-scope managed disks, attached or not; reads 0, not null, when the disk list could not be read, so read it together with in_scope_disks
     - attached_total_disks — Number of disks attached to a virtual machine (the disk names an owner or a shared-disk owner list)
     - unattached_total_disks — Number of disks attached to no virtual machine; they still hold the data of the machine they were detached from
     - provider_registration_status — Whether the Compute provider (Microsoft.Compute) is registered on the subscription: registered, not_registered or unknown

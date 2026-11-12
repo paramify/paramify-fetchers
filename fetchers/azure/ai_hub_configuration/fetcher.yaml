@@ -154,7 +154,7 @@ evidence_set:
     - workspaces_computes_unknown — Number of workspaces whose compute couldn't be read
 
     Do connections to other services keep stored secrets?
-    - total_connections — Number of connection listings across all workspaces, including each project's repeat of a connection it inherits from its hub
+    - total_connections — Number of connection listings across all workspaces whose connections could be read, including each project's repeat of a connection it inherits from its hub
     - connections_using_stored_secrets — Number of connection listings whose auth type keeps a credential in the connection (API key, custom keys, personal access token, username and password, access key, SAS, account key, service principal or OAuth2), as opposed to Entra ID or managed identity types
     - connections_unauthenticated — Number of connection listings with auth type None (no authentication to the target service)
     - connections_auth_type_unrecognized — Number of connection listings whose auth type the fetcher doesn't recognise, so whether they keep a secret is unknown

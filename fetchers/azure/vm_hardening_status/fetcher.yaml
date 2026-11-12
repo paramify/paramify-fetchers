@@ -93,11 +93,11 @@ evidence_set:
     - in_scope_scale_sets — Number of scale sets read and in scope; null when the scale set list could not be read; 0 means there are none or the patterns took out every scale set
 
     Which machines and scale sets exist?
-    - total_virtual_machines — Number of in-scope virtual machines; every virtual machine count below is out of this total
+    - total_virtual_machines — Number of in-scope virtual machines; every virtual machine count below is out of this total; reads 0, not null, when the virtual machine list could not be read, so read it together with in_scope_virtual_machines
     - linux_vms — Number of virtual machines with a Linux configuration
     - vms_in_scale_sets — Number of virtual machines that are members of a scale set
-    - total_scale_sets — Number of in-scope scale sets
-    - total_scale_set_instances — Number of instances across the in-scope scale sets
+    - total_scale_sets — Number of in-scope scale sets; reads 0, not null, when the scale set list could not be read, so read it together with in_scope_scale_sets
+    - total_scale_set_instances — Number of instances across the in-scope scale sets; 0 when the scale set list could not be read
     - empty_scale_sets — Number of scale sets with no instances, including those whose instance list could not be read
     - provider_registration_status — Whether the Compute provider (Microsoft.Compute) is registered on the subscription: registered, not_registered or unknown
 
@@ -121,7 +121,7 @@ evidence_set:
 
     Which guest extensions and load balancers are in use?
     - vms_with_extensions — Number of virtual machines with at least one guest extension installed; a machine whose extension list could not be read is not counted
-    - total_extensions — Number of guest extensions installed across the in-scope virtual machines
+    - total_extensions — Number of guest extensions installed across the in-scope virtual machines; a virtual machine whose extension list couldn't be read adds 0
     - scale_sets_with_load_balancer — Number of scale sets with at least one load balancer backend pool
 
     Are operating system patches applied automatically?

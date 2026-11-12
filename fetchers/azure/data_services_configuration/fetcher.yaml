@@ -79,7 +79,7 @@ evidence_set:
     - providers.get() for Microsoft.DocumentDB, Microsoft.Kusto and Microsoft.EventHub — tells "not registered" from "none there", for each provider
     - mongo_clusters.list() — MongoDB vCore clusters with their public access, authentication, high availability, encryption and private endpoint settings
     - firewall_rules.list_by_mongo_cluster() (per cluster) — the IP ranges each cluster's firewall admits
-    - clusters.list() — Data Explorer clusters with their network, encryption, tenant trust and callout policy settings
+    - clusters.list() — Data Explorer clusters with their network, encryption, tenant trust and callout policy settings; callout policies are read from the cluster itself, since the listCalloutPolicies action needs more than Reader
     - cluster_principal_assignments.list() (per cluster) — who holds which role on the cluster
     - databases.list_by_cluster() and database_principal_assignments.list() (per cluster and database) — databases, their retention and who holds which role on each
     - namespaces.list() — Event Hubs namespaces with their TLS, local authentication, redundancy and encryption settings
@@ -135,7 +135,7 @@ evidence_set:
     - data_explorer_clusters_vnet_injected — Number of Data Explorer clusters deployed into a virtual network (a VNet configuration whose state isn't Disabled)
     - data_explorer_clusters_outbound_restricted — Number of Data Explorer clusters with outbound network access restricted (restrictOutboundNetworkAccess Enabled)
     - data_explorer_callout_policies_allowed — Number of callout policies, across all in-scope Data Explorer clusters, that allow queries to call out to an external service (SQL, web APIs, storage); an empty list means none is set
-    - data_explorer_clusters_callout_policies_unknown — Number of Data Explorer clusters whose callout policies couldn't be read
+    - data_explorer_clusters_callout_policies_unknown — Number of Data Explorer clusters whose callout policies couldn't be read; always 0, since the policies come with the cluster list and a cluster returned without them reads as having none
 
     Is Data Explorer data protected?
     - data_explorer_clusters_disk_encryption_enabled — Number of Data Explorer clusters with disk encryption turned on

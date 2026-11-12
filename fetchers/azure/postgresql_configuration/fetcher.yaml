@@ -92,7 +92,7 @@ evidence_set:
     - in_scope_postgresql_servers — Number of servers read and in scope; null if the server list couldn't be read, and 0 means there are none or the patterns took out every server, which a check can catch by requiring more than 0
 
     What was checked?
-    - total_postgresql_servers — Number of in-scope Azure Database for PostgreSQL flexible servers; every count below is out of this total
+    - total_postgresql_servers — Number of in-scope Azure Database for PostgreSQL flexible servers; every count below is out of this total; reads 0, not null, when the server list could not be read, so read it together with in_scope_postgresql_servers
     - provider_registration_status — Whether the PostgreSQL provider (Microsoft.DBforPostgreSQL) is registered on the subscription: registered, not_registered or unknown
 
     Are connections encrypted?
@@ -102,7 +102,7 @@ evidence_set:
     Can people sign in with Entra ID?
     - entra_id_authentication_servers — Number of servers with Microsoft Entra ID authentication enabled
     - entra_id_authentication_configured_servers — Number of servers with Entra ID authentication enabled and at least one Entra administrator assigned
-    - total_entra_id_admins — Number of Entra ID administrators (users, groups or apps) across in-scope servers; a server with Entra ID authentication off reports none
+    - total_entra_id_admins — Number of Entra ID administrators (users, groups or apps) across in-scope servers; a server with Entra ID authentication off reports none; a server whose administrator list couldn't be read adds 0
 
     Is server activity logged?
     - log_checkpoints_servers — Number of servers with log_checkpoints ON, which writes each checkpoint to the server log
@@ -115,7 +115,7 @@ evidence_set:
     - public_network_access_disabled_servers — Number of servers with public network access Disabled, so they're reached only through a virtual network or private endpoint
     - servers_allowing_all_azure_services — Number of servers with the 0.0.0.0–0.0.0.0 firewall rule ("allow public access from any Azure service"), which admits compute in any Azure customer's subscription, not only the organization's own
     - servers_allowing_entire_internet — Number of servers with a firewall rule for every IPv4 address (exactly 0.0.0.0–255.255.255.255; split or overlapping rules that add up to it aren't detected)
-    - total_firewall_rules — Number of firewall rules across in-scope servers
+    - total_firewall_rules — Number of firewall rules across in-scope servers; a server whose firewall rules couldn't be read adds 0
 
     Will the server survive a zone or region loss?
     - geo_redundant_backup_servers — Number of servers whose backups are geo-redundant (stored in a second region too)

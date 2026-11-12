@@ -88,7 +88,7 @@ evidence_set:
     - in_scope_redis_clusters — Number of clusters read and in scope; null when the cluster list could not be read; 0 means there are none or the patterns took out every cluster, which a check can catch by requiring more than 0
 
     Which clusters and databases exist?
-    - total_clusters — Number of in-scope clusters; every cluster count below is out of this total
+    - total_clusters — Number of in-scope clusters; every cluster count below is out of this total; reads 0, not null, when the cluster list could not be read, so read it together with in_scope_redis_clusters
     - total_databases — Number of databases read across the in-scope clusters; clusters whose database list could not be read add none
     - provider_registration_status — Whether the Redis provider (Microsoft.Cache) is registered on the subscription: registered, not_registered or unknown
     - databases_unread_clusters — Number of clusters whose database list could not be read, so both per-cluster verdicts are null: tls_only (minimum TLS 1.2 or higher, at least one database, and every database Encrypted) and entra_only (at least one database, and every database with access-key authentication Disabled)
