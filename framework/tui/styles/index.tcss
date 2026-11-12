@@ -344,6 +344,14 @@ ModalScreen {
     padding-bottom: 1;
 }
 
+/* Why a picker's list is short: no token, an API error. */
+#picker-notice {
+    color: $warning;
+    border-left: tall $warning;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
 #modal-body {
     height: auto;
     max-height: 24;
@@ -414,6 +422,12 @@ ModalScreen {
 #picker-list {
     height: 16;
     margin-top: 1;
+}
+
+/* A notice's single fallback choice: no filter above it, no empty list below it. */
+#picker-list.fallback {
+    height: auto;
+    margin-top: 0;
 }
 
 /* Multi-select add-fetcher modal: checkbox list (left) + live picked list

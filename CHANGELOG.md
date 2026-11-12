@@ -59,7 +59,14 @@ schemas and the `paramify` CLI — not the internal code.
   `KSI-SVC-VCM`, `KSI-CNA-RNT` and `KSI-MLA-LET`. `aws_discovery_beta` now
   lists DNS Firewall rule group associations (`dns_firewall_association`) per
   region, so discovery covers the `route53resolver` service this fetcher reads.
-
+- **The TUI asks for the stack when it makes a new manifest.** After the name,
+  `n` on the welcome screen shows the stacks of the workspace. Pick one, or
+  skip and set it later on the manifest screen. The TUI writes the manifest
+  only after this step, with `run.paramify.stack` and `stack_name` when you
+  pick a stack. Without an API token, or when the stack list fails, the step
+  still shows. It tells why there is no list and offers to make the manifest
+  without a stack. The form refuses a name that is already in use before the
+  stack step, and keeps the typed name.
 - **Evidence uploads go out as batches.** `paramify upload` now sends the files
   of each fetcher entry as one batch. Paramify submits and approves a batch as
   one unit. The batch goes through the channel of the evidence set, on the
