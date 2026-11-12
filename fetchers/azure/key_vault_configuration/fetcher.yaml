@@ -93,7 +93,7 @@ evidence_set:
     - rbac_authorization_vaults — Number of vaults that use Azure RBAC role assignments for access to keys, secrets and certificates (the role assignments aren't in this evidence)
     - access_policy_vaults — Number of vaults that use the older vault access policies instead of Azure RBAC
     - rbac_authorization_percentage — Percentage of vaults that use Azure RBAC = rbac_authorization_vaults / total_key_vaults × 100 (a whole number, rounded down; reads 0 when total_key_vaults is 0)
-    - total_access_policies — Number of access policy entries across all vaults, each giving a user, group or app permissions on a vault's keys, secrets, certificates or storage accounts
+    - total_access_policies — Number of access policy entries across all vaults, each giving a user, group or app permissions on a vault's keys, secrets, certificates or storage accounts; 0 when the key vault list could not be read
 
     Can a deleted vault or secret be recovered?
     - soft_delete_vaults — Number of vaults with soft delete on, so deleted vaults, keys and secrets are kept for the retention period and can be restored; a vault that doesn't report the setting counts as off

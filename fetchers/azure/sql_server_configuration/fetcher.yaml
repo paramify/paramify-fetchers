@@ -94,7 +94,7 @@ evidence_set:
     - in_scope_sql_servers — Number of SQL servers read and in scope; null if the server list couldn't be read, and 0 means there are none or the patterns took out every server, which a check can catch by requiring more than 0
 
     What was checked?
-    - total_sql_servers — Number of in-scope Azure SQL logical servers (SQL Managed Instances aren't included); every count below is out of this total
+    - total_sql_servers — Number of in-scope Azure SQL logical servers (SQL Managed Instances aren't included); every count below is out of this total; reads 0, not null, when the server list could not be read, so read it together with in_scope_sql_servers
     - provider_registration_status — Whether the SQL provider (Microsoft.Sql) is registered on the subscription: registered, not_registered or unknown
 
     Is the server closed to the public internet?

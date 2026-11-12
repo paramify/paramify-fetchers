@@ -10,7 +10,7 @@ adds the envelope, not the fetcher. See docs/envelope_guide.md.
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, NoReturn
 
 from framework import inventory
 from framework.contract import Fetcher, InvocationResult
@@ -23,6 +23,10 @@ _ERROR_TAIL_CHARS = 4000
 # not just the boolean.
 ENVELOPE_KEYS = {"schema_version", "metadata", "payload"}
 _ENVELOPE_KEYS = ENVELOPE_KEYS  # back-compat for in-module use
+
+
+def _invalid_json_constant(value: str) -> NoReturn:
+    raise ValueError(f"Invalid JSON constant: {value}")
 
 
 def is_enveloped(obj) -> bool:
@@ -70,12 +74,17 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
 
 
 def wrap_outputs(
-    result: InvocationResult, fetcher: Fetcher, run_id: str, run_dir: Path
+    result: InvocationResult, fetcher: Fetcher, run_id: str, run_dir: Path,
+    skip: frozenset = frozenset(),
 ) -> None:
     """Wrap each JSON output file from one invocation in an envelope, in place.
 
     Non-JSON files and already-enveloped files are left untouched. A failure to
     wrap a single file is logged and skipped — it never aborts the run.
+
+    Names in `skip` are left raw: a later invocation of the run wrote over them,
+    so they hold that invocation's data, not this one's (see
+    `InvocationResult.overwritten`).
 
     An issue-report fetcher is skipped entirely. Its output is the source tool's
     own file, which Paramify's file intake preset parses directly, so wrapping it
@@ -92,12 +101,12 @@ def wrap_outputs(
 
     meta = build_metadata(result, fetcher, run_id)
     for name in result.outputs:
-        if not name.endswith(".json"):
+        if not name.endswith(".json") or name in skip:
             continue
         path = run_dir / name
         try:
-            raw = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError) as e:
+            raw = json.loads(path.read_text(), parse_constant=_invalid_json_constant)
+        except (OSError, ValueError) as e:
             logger.warning("envelope: skipping %s (cannot read as JSON: %s)", name, e)
             continue
         if is_enveloped(raw):
@@ -121,4 +130,9 @@ def wrap_outputs(
         # cannot serialize. Without this the run aborts mid-manifest on a
         # TypeError that run_cmd does not catch, leaving the collected file
         # unenveloped and no _run_metadata.json at all.
-        path.write_text(json.dumps(envelope, indent=2, default=str))
+        try:
+            serialized = json.dumps(envelope, indent=2, default=str, allow_nan=False)
+        except ValueError as e:
+            logger.warning("envelope: skipping %s (cannot serialize as JSON: %s)", name, e)
+            continue
+        path.write_text(serialized)

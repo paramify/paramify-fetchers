@@ -88,8 +88,8 @@ evidence_set:
     - in_scope_clusters — Number of clusters read and in scope; 0 means there are none or the patterns took out every cluster; null when the cluster list could not be read
 
     Which clusters and node pools were checked?
-    - total_clusters — Number of in-scope AKS clusters, including clusters still provisioning or in a failed state; every count below about clusters is out of this total
-    - total_agent_pools — Number of node pools (agent pools) across the in-scope clusters
+    - total_clusters — Number of in-scope AKS clusters, including clusters still provisioning or in a failed state; every count below about clusters is out of this total; reads 0, not null, when the cluster list could not be read, so read it together with in_scope_clusters
+    - total_agent_pools — Number of node pools (agent pools) across the in-scope clusters; 0 when the cluster list could not be read
     - kubernetes_versions — List of the distinct Kubernetes versions the clusters are set to run (the requested version, which an upgrade in progress may not have reached yet), sorted
     - provider_registration_status — Whether the AKS provider (Microsoft.ContainerService) is registered on the subscription: registered, not_registered or unknown
 

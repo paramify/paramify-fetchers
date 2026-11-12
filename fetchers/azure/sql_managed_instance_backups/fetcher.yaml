@@ -111,7 +111,7 @@ evidence_set:
     - in_scope_failovers — Number of failovers read and in scope; null when the failover history wasn't read in full
 
     What was checked?
-    - total_managed_instances — Number of in-scope SQL Managed Instances
+    - total_managed_instances — Number of in-scope SQL Managed Instances; reads 0, not null, when the instance list could not be read (the run then fails)
     - total_user_databases — Number of user databases on in-scope instances (system databases left out); null if any instance's database list couldn't be read
     - instances_stopped — Number of instances whose state is Stopped; Azure takes no backups while an instance is stopped, so read retention together with this
     - provider_registration_status — Whether the SQL provider (Microsoft.Sql) is registered on the subscription: registered, not_registered or unknown
