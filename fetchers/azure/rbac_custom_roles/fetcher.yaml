@@ -83,8 +83,8 @@ evidence_set:
 
     What was checked?
     - total_role_definitions — Number of role definitions listed for the subscription, built-in, custom and excluded; 0 when the list could not be read
-    - builtin_role_definitions — Number of built-in role definitions; above 0 shows the list was read even when there are no custom roles
-    - custom_role_definitions — Number of custom role definitions in scope; every count and percentage below covers only these
+    - builtin_role_definitions — Number of built-in role definitions; above 0 shows the list was read even when there are no custom roles; 0 when the list could not be read
+    - custom_role_definitions — Number of custom role definitions in scope; every count and percentage below covers only these, so when the role list could not be read this and every custom_roles_*, owner_equivalent_*, contributor_equivalent_* and least_privilege_* field below reads 0, and custom_roles_with_escalation_names is empty
     - provider_registration_status — Whether Microsoft.Authorization is registered on the subscription: registered, not_registered or unknown
 
     Which custom roles are left out of scope?

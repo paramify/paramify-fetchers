@@ -2291,6 +2291,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_authentication_policy` no longer shows Microsoft's password
+  defaults when the tenant's settings could not be read.** Before, a failed
+  `/groupSettings` read fell back to the template, so `password_settings_source`
+  read `template_defaults` and the banned-password and lockout fields showed
+  the defaults, though the tenant may have saved other values. The source and
+  those fields are now null, and the failed read still fails the run. Version
+  0.3.1.
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the
