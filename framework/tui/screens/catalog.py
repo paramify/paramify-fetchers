@@ -14,7 +14,6 @@ for the page that hosts it to show in a shared pane.
 from __future__ import annotations
 
 from rich.console import RenderableType
-from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -138,7 +137,14 @@ class CatalogPanel(FilterListNav, Horizontal):
 
     def _show(self, data) -> None:
         self._data = data
-        self.post_message(ShowDetail(self.current_detail()))
+        self._emit_detail()
+
+    def _emit_detail(self) -> None:
+        # A panel with its own pane writes it at once; otherwise the host shows it.
+        if self._has_detail:
+            self.query_one("#catalog-detail", Static).update(self.current_detail())
+        else:
+            self.post_message(ShowDetail(self.current_detail()))
 
     def current_detail(self) -> RenderableType:
         """What the detail pane shows for the highlighted node."""
@@ -148,13 +154,6 @@ class CatalogPanel(FilterListNav, Horizontal):
         if isinstance(data, tuple):
             return render.kind_detail(*data)
         return render.empty_detail()
-
-    @on(ShowDetail)
-    def _own_detail(self, event: ShowDetail) -> None:
-        # Only a panel with its own pane keeps the message; otherwise the host shows it.
-        if self._has_detail:
-            event.stop()
-            self.query_one("#catalog-detail", Static).update(event.renderable)
 
     def focus_search(self) -> None:
         self.query_one("#catalog-search", Input).focus()

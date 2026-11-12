@@ -141,7 +141,7 @@ CatalogPanel { height: 1fr; padding: 1 1 0 1; }
 #catalog-detail-scroll { width: 1fr; margin-left: 1; }
 
 /* Manifest editor */
-ManifestPage {
+ManifestPanel {
     height: 1fr;
 }
 
@@ -174,6 +174,7 @@ ManifestPage {
 }
 
 #manifest-entries-panel { width: 55%; }
+ManifestPanel.no-detail #manifest-entries-panel { width: 1fr; }
 #manifest-entries { height: 1fr; }
 
 #manifest-detail-scroll {

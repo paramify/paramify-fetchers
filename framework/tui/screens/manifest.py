@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 import yaml
+from rich.console import RenderableType
 from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
@@ -23,6 +24,7 @@ from framework.contract import ManifestEntry
 from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
 from framework.runner.manifest_loader import entry_keys
 from framework.tui import kinds, palette, render
+from framework.tui.components.detail import ShowDetail
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.components.table import DataTable
@@ -59,7 +61,14 @@ def _target_summary(target: dict) -> str:
 # The owner picker's "remove the owner" choice; no username can be empty.
 _NO_OWNER = "\0none"
 
-class ManifestPage(ButtonRowNav, Vertical):
+class ManifestPanel(ButtonRowNav, Vertical):
+    """The manifest editor: settings row, entries table, and (with detail=True)
+    the selected entry's detail beside the table.
+
+    With detail=False the detail pane is left out and ShowDetail bubbles to the
+    page that hosts the panel, which shows it in a shared pane.
+    """
+
     HINTS = [
         ("a", "add"), ("e", "entry"), ("x", "remove"), ("t", "targets"),
         ("A", "assessment"), ("s", "save"), ("v", "validate"), ("p", "preview"),
@@ -77,6 +86,12 @@ class ManifestPage(ButtonRowNav, Vertical):
         *BUTTON_ROW_BINDINGS,
     ]
 
+    def __init__(self, *, detail: bool = True, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._has_detail = detail
+        if not detail:
+            self.add_class("no-detail")
+
     def compose(self) -> ComposeResult:
         with Horizontal(id="manifest-top"):
             yield Static("output dir:", classes="inline-label")
@@ -93,8 +108,9 @@ class ManifestPage(ButtonRowNav, Vertical):
             with Vertical(id="manifest-entries-panel", classes="panel"):
                 yield DataTable(id="manifest-entries")
                 yield Static("", id="manifest-empty-hint", classes="empty-hint")
-            with VerticalScroll(id="manifest-detail-scroll", classes="panel"):
-                yield Static(render.empty_detail("No fetcher selected."), id="manifest-detail")
+            if self._has_detail:
+                with VerticalScroll(id="manifest-detail-scroll", classes="panel"):
+                    yield Static(render.empty_detail("No fetcher selected."), id="manifest-detail")
         yield Static(id="manifest-issues")
 
     def on_mount(self) -> None:
@@ -105,7 +121,8 @@ class ManifestPage(ButtonRowNav, Vertical):
         # {entry key: merged config view}, rebuilt with the table (api.effective_config)
         self._config_view: Dict[str, List[dict]] = {}
         self.query_one("#manifest-entries-panel", Vertical).border_title = "fetchers"
-        self.query_one("#manifest-detail-scroll", VerticalScroll).border_title = "detail"
+        if self._has_detail:
+            self.query_one("#manifest-detail-scroll", VerticalScroll).border_title = "detail"
         dt = self.query_one("#manifest-entries", DataTable)
         dt.cursor_type = "row"
         dt.zebra_stripes = True
@@ -249,11 +266,17 @@ class ManifestPage(ButtonRowNav, Vertical):
         self.query_one("#manifest-entries-panel", Vertical).set_class(bool(hint), "empty")
 
     def _refresh_detail(self) -> None:
-        detail = self.query_one("#manifest-detail", Static)
+        # A panel with its own pane writes it at once; otherwise the host shows it.
+        if self._has_detail:
+            self.query_one("#manifest-detail", Static).update(self.current_detail())
+        else:
+            self.post_message(ShowDetail(self.current_detail()))
+
+    def current_detail(self) -> RenderableType:
+        """What the detail pane shows for the selected entry."""
         use = self._selected
         if not use or self._manifest is None:
-            detail.update(render.empty_detail("No fetcher selected — press 'a' to add one."))
-            return
+            return render.empty_detail("No fetcher selected — press 'a' to add one.")
         # The selected entry (`x#1`), not the first that uses this fetcher.
         key = self._selected_entry_key()
         entry = self._keyed_entry(key)
@@ -261,7 +284,7 @@ class ManifestPage(ButtonRowNav, Vertical):
         # Bucket against the full entry list so index-prefixed (entry[i]) errors
         # attribute correctly, then take this entry's slice.
         errs = self._bucket_errors(self._errors, self._entries()).get(key, [])
-        detail.update(render.entry_detail(d, entry, errs, self._config_view.get(key)))
+        return render.entry_detail(d, entry, errs, self._config_view.get(key))
 
     def _set_issues(self, errors: List[str]) -> None:
         issues = self.query_one("#manifest-issues", Static)

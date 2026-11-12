@@ -110,3 +110,46 @@ def test_catalog_panel_with_detail_renders_its_own():
     shown, reached_app = _host(CatalogPanel(detail=True), body)
     assert "demo_hello" in shown
     assert reached_app == 0, "a panel with its own detail pane let ShowDetail bubble"
+
+
+# --------------------------------------------------------------------------- #
+# ManifestPanel: needs the real app (it reads app.manifest and app.root_path)
+# --------------------------------------------------------------------------- #
+
+def _manifest_with(tmp_path: Path, *names: str) -> Path:
+    m = api.init_manifest()
+    api.set_output_dir(m, str(tmp_path / "evidence"))
+    for name in names:
+        api.add_entry(m, name)
+    path = tmp_path / "panels.yaml"
+    api.dump_manifest(m, path, REPO_ROOT)
+    return path
+
+
+def test_manifest_panel_posts_show_detail(tmp_path, monkeypatch, run_tui):
+    from framework.tui.screens.manifest import ManifestPanel
+    from framework.tui.screens.workspace import WorkspaceScreen
+
+    seen: list = []
+    monkeypatch.setattr(WorkspaceScreen, "on_show_detail", lambda self, e: seen.append(e), raising=False)
+
+    async def body(app, pilot):
+        probe = ManifestPanel(detail=False, id="probe")
+        await app.screen.mount(probe)
+        await pilot.pause()
+        probe.rebuild()
+        await pilot.pause()
+        return len(probe.query("#manifest-detail-scroll")), [_text(e.renderable) for e in seen]
+
+    panes, texts = run_tui(body, _manifest_with(tmp_path, "demo_hello"))
+    assert panes == 0
+    assert texts and "demo_hello" in texts[-1]
+
+
+def test_manifest_panel_with_detail_is_unchanged(tmp_path, run_tui):
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        return _text(app.screen.query_one("#manifest-detail", Static).content)
+
+    assert "demo_hello" in run_tui(body, _manifest_with(tmp_path, "demo_hello"))
