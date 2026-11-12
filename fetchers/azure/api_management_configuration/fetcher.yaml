@@ -87,7 +87,7 @@ evidence_set:
     - logger.list_by_service() (per service) — where the service sends request logs
     - diagnostic_settings.list() (per service) — whether gateway logs are exported
 
-    Output: azure_api_management_configuration_<subscription>.json — each service with its network exposure, TLS and cipher settings, certificates, developer portal, policy elements, APIs, products, subscriptions, backends, named values and logging, plus the services left out and why; policy text, named-value values, subscription keys and backend credentials are never recorded.
+    Output: azure_api_management_configuration_<subscription>.json — each service with its network exposure, TLS and cipher settings, certificates, developer portal, policy elements, APIs, products, subscriptions, backends, named values and logging, plus the services left out and why; policy text, named-value values, subscription keys and backend credentials are never recorded. Lists that could not be read are null and set metadata.partial_failure.
 
     Summary fields:
 

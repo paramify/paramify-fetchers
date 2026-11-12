@@ -1,5 +1,5 @@
 name: azure_app_gateway_waf
-version: 0.2.1
+version: 0.2.2
 description: >-
   Shows which web application firewall policy protects each Application Gateway web listener, whether it blocks attacks in Prevention mode, and how each WAF policy is configured.
 category: azure
@@ -79,7 +79,7 @@ evidence_set:
     - providers.get("Microsoft.Network") — tells "networking not in use" from "no gateways"
     - application_gateways.list_all() — every gateway with its listeners, path rules, WAF policy associations and legacy WAF configuration
     - Resource Graph count of microsoft.network/applicationgateways — confirms the gateway list is complete; a mismatch is counted again after 30 seconds, and the run fails if it persists
-    - web_application_firewall_policies.list_all() — every WAF policy in the subscription
+    - web_application_firewall_policies.list_all() — every WAF policy in the subscription; when it fails, total_waf_policies is null and the other policy counts cover only the policies gateways reference
     - web_application_firewall_policies.get() (per referenced policy list_all did not return) — policies held in another subscription; a refusal (401, 403) or a missing policy (404) is recorded as unreadable, and any other error fails the run
 
     Output: azure_app_gateway_waf_<subscription>.json — each web listener with the WAF that applies, its state, mode and enforcement, plus each WAF policy's mode, rule overrides, exclusions, custom and rate-limit rules, and the resources left out and why.
@@ -110,7 +110,7 @@ evidence_set:
     - public_listeners_not_enforcing — Number of web listeners on a public frontend IP whose WAF is not confirmed enforcing: it is not Enabled in Prevention mode, or it could not be read
 
     How are the WAF policies configured?
-    - total_waf_policies — Number of WAF policies in the policy list, including policies a gateway references that are held in another subscription
+    - total_waf_policies — Number of WAF policies in the policy list, including policies a gateway references that are held in another subscription; null if the policy list could not be read
     - unresolved_waf_policies — Number of referenced WAF policies that could not be read, for any reason
     - unreadable_waf_policies — Number of referenced WAF policies that could not be read because access was refused (401, 403) or the policy no longer exists (404); a listener that uses one has an unknown enforcement
     - policies_prevention — Number of WAF policies Enabled in Prevention mode

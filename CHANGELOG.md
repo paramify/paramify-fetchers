@@ -2291,6 +2291,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_app_gateway_waf` `total_waf_policies` is null when the WAF policy
+  list could not be read.** Before, a failed
+  `web_application_firewall_policies.list_all` left only the policies a gateway
+  references, read one by one, so the total looked like a small number of
+  policies. The failed list still fails the run. Version 0.2.2.
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the

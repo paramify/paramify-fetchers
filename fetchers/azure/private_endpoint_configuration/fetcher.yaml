@@ -71,7 +71,7 @@ evidence_set:
   instructions: |
     Script: azure/private_endpoint_configuration/fetcher.py
 
-    Access: Reader on the subscription. Optional: Reader on the other subscriptions the endpoints connect to; without it, targets there read not_visible and their public access reads unknown.
+    Access: Reader on the subscription. Optional: Reader on the other subscriptions the endpoints connect to; without it, targets there read not_visible, and their public access state (target_public_network_access_state) reads not_visible too.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set

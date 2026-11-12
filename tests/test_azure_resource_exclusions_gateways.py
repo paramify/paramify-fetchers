@@ -224,6 +224,23 @@ def test_waf_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_
     }
 
 
+def test_waf_total_policies_is_null_when_the_policy_list_fails(monkeypatch, tmp_path):
+    gateways, _ = _waf_scenario(monkeypatch)
+
+    def failed_list(subscription_id, cred, collector):
+        collector.record("network.web_application_firewall_policies.list_all", RuntimeError("request timed out"))
+
+    monkeypatch.setattr(waf, "collect_policies", failed_list)
+    pol_out = _policy("pol-out", NET_OUT, "Enabled", "Prevention")
+    monkeypatch.setattr(waf, "fetch_policy", lambda pid, cred, collector: (
+        (pol_out, None) if pid.endswith("/pol-out") else (None, waf.unresolved_policy(pid))))
+    code, evidence = _run_gateway_fetcher(waf, monkeypatch, tmp_path, None, "azure_app_gateway_waf", gateways)
+    summary = evidence["summary"]
+    assert code == 1 and summary["total_waf_policies"] is None
+    # The referenced policies are still read one by one and judged.
+    assert (summary["policies_prevention"], summary["unresolved_waf_policies"]) == (1, 1)
+
+
 def test_waf_excluded_policy_leaves_the_list_but_an_in_scope_listener_keeps_its_verdict(monkeypatch, tmp_path):
     gateways, fetched = _waf_scenario(monkeypatch)
     code, evidence = _run_gateway_fetcher(waf, monkeypatch, tmp_path, "rg:rg-out, location:nowhere", "azure_app_gateway_waf", gateways)

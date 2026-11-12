@@ -115,7 +115,7 @@ evidence_set:
     - policies_with_allow_all_custom_rule — Number of WAF policies with an enabled custom match rule that allows every request (every condition matches any request, or any address through 0.0.0.0/0 or ::/0); custom rules run before managed rules, so it lets every request past them
 
     How much of the managed rule set is switched off, and is it current?
-    - total_disabled_managed_rules — Number of managed rules switched off one by one through a rule override, across all policies and rule sets; rules in a group switched off as a whole are not included
+    - total_disabled_managed_rules — Number of managed rules switched off one by one through a rule override (an override with no state counts as off), across all policies and rule sets; rules in a group switched off as a whole are not included
     - total_disabled_managed_rule_groups — Number of managed rule groups switched off as a whole (a group override that lists no rules), across all policies and rule sets
     - policies_with_fully_disabled_rule_groups — Number of WAF policies whose Default Rule Set has a rule group that blocks by default with no rule enabled now
     - associated_policies_with_fully_disabled_rule_groups — Number of associated WAF policies whose Default Rule Set has a rule group that blocks by default with no rule enabled now
