@@ -35,7 +35,7 @@ Wire the scanner settings it lists ([Wiz manifest settings](wiz_pipeline_guide.m
 or [let your AI agent](../README.md#drive-it-with-an-ai-agent) do it with
 `wire-manifest`. Step 2 covers the assessment lines.
 [In the TUI](https://support.paramify.com/hc/en-us/articles/55867428958355-Setup-Fetchers),
-that's `n`, then `a` on the **Manifest** tab.
+that's `n`, then `a` on each fetcher in the catalog of the **Fetchers** tab.
 
 ## 2. Point it at an assessment
 

@@ -1650,9 +1650,12 @@ schemas and the `paramify` CLI — not the internal code.
   the item in the list that has focus. Press `a`, or enter, on a catalog
   fetcher to add it to the manifest, and focus stays in the catalog. Each
   fetcher that is in the manifest has a check mark. `a` on a fetcher that is
-  already in the manifest moves the manifest cursor to it. Tab moves between
-  the catalog, the manifest and the detail pane. The footer shows the keys of
-  the list that has focus. The add-fetchers picker is removed.
+  already in the manifest moves the manifest cursor to it, and `a` on the
+  manifest list moves to the catalog filter. Enter in the filter moves to the
+  first fetcher it shows. Tab moves from the catalog to the manifest list,
+  the output dir, the stack, owner and Save row, and the detail pane. Escape
+  stays in the list you were in. The footer shows the keys of the list that
+  has focus. The add-fetchers picker is removed.
 - **Each batch the upload creates is approved on submission by default.** The
   upload now sends the entry's `approval` (default `SUBMISSION`) when it creates
   a batch. Before, a batch took the evidence set's mode, so a set made `MANUAL`

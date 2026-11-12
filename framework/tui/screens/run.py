@@ -137,7 +137,7 @@ class RunPage(Vertical):
         self._set_banner(Text("running…", style=palette.WARN))
         self._refresh_summary()
         # Snapshot the manifest: the worker runs on another thread and the
-        # Manifest tab can mutate the shared dict on the UI thread mid-run.
+        # Fetchers tab can mutate the shared dict on the UI thread mid-run.
         self._run_worker(deepcopy(self.app.manifest), self.app.root_path, self.app.manifest_path)
 
     @work(thread=True, exclusive=True)

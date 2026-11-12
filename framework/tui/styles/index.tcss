@@ -142,16 +142,19 @@ CatalogPanel { height: 1fr; padding: 1 1 0 1; }
 
 /* ---- Fetchers: the catalog over the manifest, one detail pane at the right ---- */
 FetchersPage { height: 1fr; padding: 1 1 0 1; }
-#fetchers-left { width: 60%; height: 1fr; }
+#fetchers-left { width: 45%; min-width: 78; height: 1fr; }  /* 78: the manifest table fits without sideways scroll */
 #catalog-panel { height: 1fr; min-height: 8; padding: 0; }
 #catalog-panel #catalog-left { width: 1fr; }
 /* Its height is set from the row count (FetchersPage._fit_manifest). */
 #manifest-panel { height: 16; }
 #manifest-panel #manifest-top { padding: 1 0 0 0; }
 #manifest-panel #manifest-body { padding: 0; }
-/* Half the width of the Manifest tab it came from: buttons fit their labels so
-   the output dir keeps room to show a path. */
-#manifest-panel #manifest-top Button { width: auto; min-width: 7; }
+/* Narrower than a page of its own: the buttons sit on their own row and fit
+   their labels, so the output dir keeps room to show a path. */
+#manifest-settings { height: auto; padding: 0; align: left middle; }
+#manifest-settings .inline-label { width: auto; padding: 0 1 0 0; }
+#manifest-settings .after-button { margin-left: 2; }
+#manifest-settings Button { width: auto; min-width: 7; margin-left: 1; }
 #manifest-panel #manifest-output-dir { min-width: 16; }
 #fetchers-detail-scroll { width: 1fr; margin-left: 1; }
 

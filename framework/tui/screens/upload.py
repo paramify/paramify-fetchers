@@ -113,7 +113,7 @@ class UploadPage(ButtonRowNav, Vertical):
         # Shifted on purpose: a close auto-closes every open issue the cycle
         # never saw, and cannot be undone.
         Binding("C", "close_cycle", "Close cycle"),
-        # p mirrors the Manifest tab's preview key (this page has no Input to eat
+        # p mirrors the manifest list's preview key (this page has no Input to eat
         # it); ctrl+p stays as an alias, which needs App.ENABLE_COMMAND_PALETTE
         # off — Textual's palette claims ctrl+p as a priority binding.
         Binding("p,ctrl+p", "preview_scripts", "Preview"),

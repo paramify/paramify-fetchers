@@ -141,12 +141,14 @@ def test_a_on_a_fetcher_in_the_manifest_jumps_to_it(tmp_path, run_tui):
         await _find(app, pilot, "demo_hello")
         await pilot.press("a")
         await _settle(app, pilot)
-        return notices, _cursor_key(app)
+        return notices, _cursor_key(app), _detail(app)
 
-    notices, cursor = run_tui(body, path)
+    notices, cursor, detail = run_tui(body, path)
     assert path.read_text() == before, "adding a fetcher already in the manifest wrote the file"
     assert any("demo_hello is already in the manifest" in n for n in notices), notices
     assert cursor == "demo_hello"
+    # select() moved the manifest cursor; the catalog the user is in keeps the pane.
+    assert "✓ in manifest" in detail, "the manifest's cursor move replaced the catalog detail"
 
 
 def test_detail_follows_the_focused_list(tmp_path, run_tui):
@@ -169,19 +171,36 @@ def test_detail_follows_the_focused_list(tmp_path, run_tui):
     assert "✓ in manifest" not in manifest_view and "demo_hello" in manifest_view
 
 
-def test_tab_cycles_three_areas(tmp_path, run_tui):
+def test_tab_reaches_every_part_of_the_page(tmp_path, run_tui):
     async def body(app, pilot):
         await pilot.press("1")
         await pilot.pause()
         seen = [_focus_id(app)]
-        for _ in range(3):
+        for _ in range(5):
             await pilot.press("tab")
             await pilot.pause()
             seen.append(_focus_id(app))
         return seen
 
     assert run_tui(body, _manifest_with(tmp_path, "demo_hello")) == [
-        "catalog-tree", "manifest-entries", "fetchers-detail-scroll", "catalog-tree",
+        "catalog-tree", "manifest-entries", "manifest-output-dir", "manifest-stack",
+        "fetchers-detail-scroll", "catalog-tree",
+    ]
+
+
+def test_arrows_walk_the_stack_owner_save_row(tmp_path, run_tui):
+    async def body(app, pilot):
+        app.screen.query_one("#manifest-stack").focus()
+        await pilot.pause()
+        seen = [_focus_id(app)]
+        for key in ("right", "right", "right"):
+            await pilot.press(key)
+            await pilot.pause()
+            seen.append(_focus_id(app))
+        return seen
+
+    assert run_tui(body, _manifest_with(tmp_path, "demo_hello")) == [
+        "manifest-stack", "manifest-owner", "btn-save", "manifest-stack",
     ]
 
 
@@ -258,7 +277,7 @@ def test_narrow_terminal_keeps_both_lists(tmp_path):
     tree_h, stack_h, table_h = asyncio.run(main())
     assert tree_h >= 5, f"the catalog is squeezed to {tree_h} rows"
     assert stack_h > 0, "the manifest settings row is off the page"
-    assert table_h >= 2, f"the manifest table is squeezed to {table_h} rows"
+    assert table_h >= 5, f"the manifest table is squeezed to {table_h} rows"
 
 
 def test_panels_are_hosted_without_their_own_detail(tmp_path, run_tui):
@@ -291,3 +310,130 @@ def test_footer_hints_follow_focus(tmp_path, run_tui):
     assert "targets" not in in_catalog, "the catalog's footer lists the manifest's keys"
     assert "targets" in in_manifest and "validate" in in_manifest
     assert "1-4" in in_catalog and "1-4" in in_manifest  # the workspace keys stay
+
+
+def _sizes(path: Path, size: tuple) -> dict:
+    async def main():
+        app = FetcherApp(manifest_path=str(path), root_override=str(REPO_ROOT))
+        async with app.run_test(size=size) as pilot:
+            await _settle(app, pilot)
+            q = app.screen.query_one
+            column = q("#fetchers-left")
+            return {
+                "column_w": column.region.width, "column_h": column.region.height,
+                "column_right": column.region.right,
+                "detail_w": q("#fetchers-detail-scroll").region.width,
+                "panel_h": q("#manifest-panel").region.height,
+                "table_h": q("#manifest-entries", DataTable).region.height,
+                "tree_h": q("#catalog-tree", Tree).region.height,
+                "buttons_right": max(q(f"#{b}").region.right for b in ("manifest-stack", "manifest-owner", "btn-save")),
+                "dir_w": q("#manifest-output-dir").region.width,
+            }
+
+    return asyncio.run(main())
+
+
+def test_the_lists_column_is_narrower_than_the_detail(tmp_path):
+    s = _sizes(_manifest_with(tmp_path, "demo_hello"), (180, 50))
+    assert s["column_w"] < s["detail_w"], s
+
+
+def test_the_settings_rows_fit_the_column(tmp_path):
+    for size in ((120, 35), (180, 50)):
+        s = _sizes(_manifest_with(tmp_path, "demo_hello", file=f"fit{size[0]}.yaml"), size)
+        assert s["buttons_right"] <= s["column_right"], (size, s)
+        assert s["dir_w"] >= 16, (size, s)
+
+
+def test_a_short_manifest_still_gets_ten_rows(tmp_path):
+    s = _sizes(_manifest_with(tmp_path, "demo_hello"), (180, 50))
+    assert s["table_h"] >= 11, s  # ten rows and the header
+
+
+def test_a_long_manifest_takes_at_most_sixty_percent(tmp_path):
+    names = [f["name"] for c in api.catalog(REPO_ROOT)["categories"] for f in c["fetchers"]
+             if f["name"].startswith("aws_")][:30]
+    s = _sizes(_manifest_with(tmp_path, *names), (180, 50))
+    assert s["column_h"] * 0.55 <= s["panel_h"] <= s["column_h"] * 0.6 + 1, s
+    assert s["tree_h"] >= 5, s
+
+
+def _fetcher_with_wired_secret() -> str:
+    for c in api.catalog(REPO_ROOT)["categories"]:
+        for f in c["fetchers"]:
+            if any(not s.get("per_target") and s.get("env") for s in f.get("secrets", [])):
+                return f["name"]
+    raise AssertionError("no fetcher has an entry-level secret with a default env var")
+
+
+def test_the_add_notice_says_how_to_reach_the_entry(tmp_path, run_tui):
+    name = _fetcher_with_wired_secret()
+
+    async def body(app, pilot):
+        notices: list = []
+        real = app.notify
+        app.notify = lambda m, *a, **k: (notices.append(str(m)), real(m, *a, **k))[1]
+        await _find(app, pilot, name)
+        await pilot.press("a")
+        await _settle(app, pilot)
+        return notices
+
+    notices = run_tui(body, _manifest_with(tmp_path))
+    wired = [n for n in notices if "secrets wired" in n]
+    assert wired, notices
+    assert "tab, then e" in wired[-1], "the notice names a key that does nothing in the catalog"
+
+
+def test_enter_in_the_filter_goes_to_the_first_match(tmp_path, run_tui):
+    path = _manifest_with(tmp_path)
+
+    async def body(app, pilot):
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("slash", *"demo_hello", "enter")
+        await pilot.pause()
+        tree = app.screen.query_one("#catalog-tree", Tree)
+        landed = _focus_id(app), tree.cursor_node.data["name"]
+        await pilot.press("enter")  # and enter again adds it
+        await _settle(app, pilot)
+        return landed
+
+    assert run_tui(body, path) == ("catalog-tree", "demo_hello")
+    assert _uses(path) == {"demo_hello"}
+
+
+def test_tab_from_the_filter_goes_to_the_tree(tmp_path, run_tui):
+    async def body(app, pilot):
+        await pilot.press("1")
+        await pilot.pause()
+        app.screen.query_one("#catalog-search", Input).focus()
+        await pilot.pause()
+        await pilot.press("tab")
+        await pilot.pause()
+        return _focus_id(app)
+
+    assert run_tui(body, _manifest_with(tmp_path, "demo_hello")) == "catalog-tree"
+
+
+def test_escape_stays_in_the_list_you_were_in(tmp_path, run_tui):
+    async def body(app, pilot):
+        await pilot.press("1")
+        await pilot.pause()
+        app.screen.query_one("#manifest-output-dir", Input).focus()
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        from_field = _focus_id(app)
+        await pilot.press("escape")
+        await pilot.pause()
+        return from_field, _focus_id(app)
+
+    assert run_tui(body, _manifest_with(tmp_path, "demo_hello")) == ("manifest-entries", "manifest-entries")
+
+
+def test_the_scan_report_help_names_the_fetchers_tab():
+    from framework.tui import kinds, render
+
+    text = _text(render.kind_detail(kinds.SCAN_REPORT, 1))
+    assert "Manifest tab" not in text
+    assert "Fetchers tab" in text

@@ -138,7 +138,8 @@ def test_escape_returns_focus_to_the_pane_default(tmp_path, run_tui):
         await pilot.pause()
         return _focus_id(app)
 
-    assert run_tui(body, manifest) == "catalog-tree"
+    # The output dir belongs to the manifest; escape stays in that list.
+    assert run_tui(body, manifest) == "manifest-entries"
 
 
 # --------------------------------------------------------------------------- #

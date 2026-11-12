@@ -343,10 +343,12 @@ def test_add_fetchers_keeps_the_entry_when_autosave_fails(tmp_path, monkeypatch,
         _panel(app).add_fetchers(["demo_hello"])
         await pilot.pause()
         uses = {e["use"] for e in app.manifest["run"]["fetchers"]}
-        return uses, _panel(app).in_manifest(), notices
+        leaf = _leaf(app.screen.query_one("#catalog-tree", Tree), "demo_hello")
+        return uses, _panel(app).in_manifest(), notices, str(leaf.label) if leaf else ""
 
-    uses, marked, notices = run_tui(body, path)
+    uses, marked, notices, label = run_tui(body, path)
     assert uses == {"demo_hello"} and marked == {"demo_hello"}
+    assert label.rstrip().endswith("✓"), "the catalog does not mark a fetcher whose save failed"
     assert any(sev == "error" and "not saved" in text for text, sev in notices), notices
     assert _uses(path) == set(), "the file changed although the save failed"
 

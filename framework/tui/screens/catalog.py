@@ -115,6 +115,21 @@ class CatalogPanel(FilterListNav, Horizontal):
 
     # -- events ----------------------------------------------------------- #
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Enter in the filter: into the tree, on the first fetcher it shows."""
+        if event.input.id != "catalog-search":
+            return
+        event.stop()
+        tree = self.query_one("#catalog-tree", Tree)
+        node = tree.cursor_node
+        if node is None or not isinstance(node.data, dict):
+            node = _first_leaf(tree.root)
+        tree.focus()
+        if node is not None:
+            for parent in node.ancestors if hasattr(node, "ancestors") else _ancestors(node):
+                parent.expand()
+            self.call_after_refresh(tree.move_cursor, node)
+
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "catalog-search":
             self._filter = event.value
@@ -176,8 +191,8 @@ class CatalogPanel(FilterListNav, Horizontal):
         """What the detail pane shows for the highlighted node."""
         data = self._data
         if isinstance(data, dict):
-            # Only the shared pane says whether the fetcher is in the manifest:
-            # the Catalog tab has no add, so it keeps its contract as it was.
+            # Only the shared pane (the Fetchers page) says whether the fetcher is
+            # in the manifest; a panel with its own pane has no add.
             marked = None if self._has_detail else data.get("name") in self._marked
             return render.fetcher_detail(data, in_manifest=marked)
         if isinstance(data, tuple):
@@ -217,6 +232,25 @@ class CatalogPanel(FilterListNav, Horizontal):
 
     def focus_default(self) -> None:
         self.query_one("#catalog-tree").focus()
+
+
+def _first_leaf(node):
+    """The first fetcher in the tree, in display order."""
+    for child in node.children:
+        if isinstance(child.data, dict):
+            return child
+        found = _first_leaf(child)
+        if found is not None:
+            return found
+    return None
+
+
+def _ancestors(node) -> list:
+    out = []
+    while node.parent is not None:
+        node = node.parent
+        out.append(node)
+    return out
 
 
 def _matches(fetcher: dict, flt: str) -> bool:

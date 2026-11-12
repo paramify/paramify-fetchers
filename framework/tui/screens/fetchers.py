@@ -45,8 +45,9 @@ class FetchersPage(Horizontal):
     _active: Optional[Widget] = None
 
     # The manifest list fits its entries: at least MIN_ROWS table rows, at most
-    # half the left column. The catalog takes the rest.
-    MIN_ROWS = 5
+    # MAX_SHARE of the left column. The catalog takes the rest.
+    MIN_ROWS = 10
+    MAX_SHARE = 0.6
 
     def compose(self) -> ComposeResult:
         with Vertical(id="fetchers-left"):
@@ -133,7 +134,7 @@ class FetchersPage(Horizontal):
             return
         overhead = panel.outer_size.height - slot.outer_size.height
         rows = max(self.MIN_ROWS, table.row_count) + 1  # + the header row
-        height = min(overhead + rows, column.size.height // 2)
+        height = min(overhead + rows, int(column.size.height * self.MAX_SHARE))
         if panel.styles.height is None or panel.styles.height.cells != height:
             panel.styles.height = height
 
@@ -147,20 +148,28 @@ class FetchersPage(Horizontal):
     # -- focus ------------------------------------------------------------- #
 
     def action_next_area(self) -> None:
-        """Tab: catalog tree -> manifest table -> detail pane -> catalog tree."""
+        """Tab: catalog tree -> manifest table -> output dir -> stack/owner/Save
+        row -> detail pane -> catalog tree. Left/right walk the button row.
+
+        The table comes before the settings above it: entries are edited often
+        and the settings are set once, and "tab, then e" must reach an entry.
+        """
         table = self.query_one("#manifest-entries", DataTable)
         areas = [
             self.query_one("#catalog-tree"),
             # An empty manifest hides its table; its hint is the stop instead.
             table if table.display else self.query_one("#manifest-empty-hint"),
+            self.query_one("#manifest-output-dir"),
+            self.query_one("#manifest-stack"),
             self.query_one("#fetchers-detail-scroll", VerticalScroll),
         ]
         focused = self.app.focused
-        here = next(
-            (i for i, area in enumerate(areas) if focused is not None and area in focused.ancestors_with_self),
-            # The filter box and the settings row belong to the list they sit in.
-            0 if self._panel_of(focused) is self._catalog else 1 if self._panel_of(focused) is self._manifest else -1,
-        )
+        here = -1  # the catalog filter, and anything unknown, sit before the tree
+        if focused is not None:
+            chain = list(focused.ancestors_with_self)
+            here = next((i for i, area in enumerate(areas) if area in chain), -1)
+            if here == -1 and any(w.id == "manifest-settings" for w in chain):
+                here = 3  # owner and Save share the stack button's stop
         for step in range(1, len(areas) + 1):
             target = areas[(here + step) % len(areas)]
             if target.display and target.focusable:  # an empty manifest hides its table
@@ -168,7 +177,8 @@ class FetchersPage(Horizontal):
                 return
 
     def focus_default(self) -> None:
-        self._catalog.focus_default()
+        """Escape and tab switches land in the list the user was last in."""
+        (self._active if isinstance(self._active, ManifestPanel) else self._catalog).focus_default()
 
     def focus_search(self) -> None:
         self._catalog.focus_search()

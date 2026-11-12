@@ -90,7 +90,7 @@ _KIND_ABOUT = {
         "Hands over findings a scanner already computed — a Nessus export, a Wiz "
         "CSV, a STIG report — as the tool's own file, never rewritten.",
         "Sent to an assessment's pipeline, which turns it into issues. Each one "
-        "needs an assessment, chosen per manifest with A on the Manifest tab; "
+        "needs an assessment, chosen per manifest with A on its entry on the Fetchers tab; "
         "send with i on the Paramify tab. Usually kept in a manifest of its own.",
     ),
 }

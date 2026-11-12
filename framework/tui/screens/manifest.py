@@ -97,11 +97,13 @@ class ManifestPanel(ButtonRowNav, Vertical):
             # select_on_focus off: Textual selects the whole value on focus, so
             # the first keystroke replaced the existing path wholesale.
             yield Input(placeholder="./evidence", id="manifest-output-dir", select_on_focus=False)
-            yield Static("stack:", classes="inline-label")
-            yield Button("—", id="manifest-stack")
-            yield Static("owner:", classes="inline-label after-button")
-            yield Button("—", id="manifest-owner")
-            yield Button("Save", id="btn-save")
+            if self._has_detail:
+                yield from self._settings_buttons()
+        if not self._has_detail:
+            # Half a page wide, one row cannot hold a path and three buttons:
+            # stack, owner and Save get a row of their own (left/right walk it).
+            with Horizontal(id="manifest-settings"):
+                yield from self._settings_buttons()
         with Horizontal(id="manifest-body"):
             with Vertical(id="manifest-entries-panel", classes="panel"):
                 yield DataTable(id="manifest-entries")
@@ -110,6 +112,13 @@ class ManifestPanel(ButtonRowNav, Vertical):
                 with VerticalScroll(id="manifest-detail-scroll", classes="panel"):
                     yield Static(render.empty_detail("No fetcher selected."), id="manifest-detail")
         yield Static(id="manifest-issues")
+
+    def _settings_buttons(self) -> ComposeResult:
+        yield Static("stack:", classes="inline-label")
+        yield Button("—", id="manifest-stack")
+        yield Static("owner:", classes="inline-label after-button")
+        yield Button("—", id="manifest-owner")
+        yield Button("Save", id="btn-save")
 
     def on_mount(self) -> None:
         self._selected: Optional[str] = None  # the fetcher (use) of the selected row
@@ -618,7 +627,9 @@ class ManifestPanel(ButtonRowNav, Vertical):
             if asked and inputs:
                 message += f" + {inputs} input{'s' if inputs != 1 else ''}"
             if wired:
-                message += " — secrets wired to default env vars (e to change)."
+                # On the Fetchers page focus stays in the catalog, where e does nothing.
+                how = "e to change" if self._has_detail else "tab, then e to change"
+                message += f" — secrets wired to default env vars ({how})."
             self.notify(message)
         return added
 
@@ -1057,4 +1068,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
     # -- focus ------------------------------------------------------------ #
 
     def focus_default(self) -> None:
-        self.query_one("#manifest-entries", DataTable).focus()
+        table = self.query_one("#manifest-entries", DataTable)
+        hint = self.query_one("#manifest-empty-hint", Static)
+        # An empty manifest hides its table; on the Fetchers page its hint takes focus instead.
+        (hint if not table.display and hint.can_focus else table).focus()
