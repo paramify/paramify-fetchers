@@ -220,6 +220,8 @@ def test_firewall_rule_classification():
         ("Enabled", [_rule("0.0.0.0", "255.255.255.255")], "allow_all"),
         ("Enabled", [_rule("10.0.0.1", "10.0.0.9")], "restricted"),
         ("Enabled", [], "no_rules"),
+        ("Disabled", None, "disabled"),  # disabled settles it without the rules
+        ("Enabled", None, None),
         # Judged on width, not the exact 0.0.0.0-255.255.255.255 pair:
         ("Enabled", [_rule("0.0.0.0", "127.255.255.255"), _rule("128.0.0.0", "255.255.255.255")], "allow_all"),
         ("Enabled", [_rule("1.0.0.0", "255.255.255.255")], "broad"),  # near-total
@@ -571,6 +573,46 @@ def test_collect_mongo_firewall_width(monkeypatch):
     assert records[0]["public_access"] == "allow_all"  # two halves cover every address
     assert records[0]["firewall_allowed_address_percentage"] == 100.0
     assert records[0]["audit_logs_exported"] is True  # category matched case-insensitively
+
+
+def test_collect_mongo_disabled_public_access_survives_unreadable_firewall_rules(monkeypatch):
+    def _clusters(pna):
+        return {"id": f"{RG}/providers/Microsoft.DocumentDB/mongoClusters/{pna}", "name": pna, "resource_group": "ai",
+                "public_network_access": pna}
+
+    def _refuse(rg, name):
+        raise RuntimeError("403")
+
+    mongo = _Client(mongo_clusters=_Group(list=lambda: [_clusters("Disabled"), _clusters("Enabled")]),
+                    firewall_rules=_Group(list_by_mongo_cluster=_refuse))
+    _fake_module(monkeypatch, "azure.mgmt.mongocluster", MongoClusterMgmtClient=lambda **k: mongo)
+    _fake_module(monkeypatch, "azure.mgmt.kusto", KustoManagementClient=lambda **k: _Client())
+    _fake_module(monkeypatch, "azure.mgmt.eventhub", EventHubManagementClient=lambda **k: _Client())
+    monkeypatch.setattr(ds, "project_mongo_cluster", lambda m: dict(m))
+    monkeypatch.setattr(ds, "monitor_client", lambda sub, cred: "monitor")
+    monkeypatch.setattr(ds, "list_diagnostic_settings", lambda monitor, rid: [])
+    records, _, _ = ds.collect(SUB.split("/")[-1], object(), _collector())
+    assert [(r["name"], r["public_access"]) for r in records] == [("Disabled", "disabled"), ("Enabled", None)]
+    assert records[0]["firewall_rules"] is None
+
+
+def test_summarize_gives_null_for_every_count_of_an_unread_service():
+    read = ds.summarize([], [], [])
+    assert read["total_mongo_clusters"] == 0 and read["total_event_hubs"] == 0
+    for unread, prefixes in (
+        ("mongo", ("total_mongo_clusters", "mongo_clusters_")),
+        ("kusto", ("total_data_explorer_clusters", "data_explorer_")),
+        ("eventhub", ("total_event_hub", "event_hub")),
+    ):
+        lists = {"mongo": [], "kusto": [], "eventhub": []}
+        lists[unread] = None
+        summary = ds.summarize(lists["mongo"], lists["kusto"], lists["eventhub"])
+        assert set(summary) == set(read)
+        for key, value in summary.items():
+            if key.startswith(prefixes):
+                assert value is None, key
+            else:
+                assert value == read[key], key
 
 
 # --------------------------------------------------------------------------- #
