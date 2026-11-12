@@ -177,9 +177,10 @@ Each record under `payload.data`:
 
 ### Migration
 
-`github_repository_inventory`, `sophos_endpoint_inventory`, and
-`_template_inventory` gain the block and `asset_type`, with a minor version bump
-for each fetcher. The six scan fetchers and `_template_issue_report` change in
+`github_repository_inventory` (`id_scheme: github-repository-url`) and
+`sophos_endpoint_inventory` (`id_scheme: sophos-endpoint-id`) already write
+`asset_type`. They gain the block, with a minor version bump each.
+`_template_inventory` gains the block and `asset_type`. The six scan fetchers and `_template_issue_report` change in
 Phase 2.
 
 ## 4. Delivery to an evidence set
@@ -223,9 +224,9 @@ is created. The pipeline runs only when the batch is `APPROVED`.
 - **Registry:** `paramify validate` and the registry tests refuse a validator
   whose `evidence_sets` names the evidence set of a pipeline fetcher. The
   validator sync skips pipeline sets.
-- **Workspace:** `--plan` reads `GET /validators` for each pipeline set. A
-  validator attached in the app refuses the entry, with the fix: "remove it in
-  the app; its batches will never approve".
+- **Workspace:** `--plan` reads the `validators` list of the evidence set, which
+  the routing read already returns. A validator attached in the app refuses the
+  entry, with the fix: "remove it in the app; its batches will never approve".
 
 ### What the uploader cannot see
 
@@ -249,11 +250,12 @@ Inventory pipeline for EVD-SOPHOS-INVENTORY  (attach it to this set, not a new o
   Parent component  derive from asset_type. Values in the last run:
                       endpoint 412 · server 37
   Evidence set      approval must be automatic; attach no validators
-  Linked scans      none in your manifests use sophos-endpoint-id
+  Linked fetchers   none in the catalog use sophos-endpoint-id
 ```
 
-For a scan fetcher (Phase 2) it prints the inventory mapping column
-(`asset_id_field`) and the inventory fetchers with the same scheme. With no run
+"Linked fetchers" are the catalog's other pipeline fetchers with the same
+`id_scheme`. For a scan fetcher (Phase 2) the sheet also prints the inventory
+mapping column (`asset_id_field`). With no run
 yet, it prints the settings and says that the sample and `asset_type` values
 need a run. Later, `--apply` will create the preset through the API.
 
@@ -282,12 +284,12 @@ inventory verdict.
 ### TUI
 
 - **Manifest tab:** the "sends to" column reads `EVD-… · pipeline`. On a
-  pipeline entry the settings form shows `delivery` and `no_request` locked,
-  with the note "pipeline files always go in a batch". `approval: MANUAL` shows
+  pipeline entry the settings form does not offer `delivery` or `no_request`,
+  and says "pipeline files always go in a batch". `approval: MANUAL` shows
   the warning inline.
 - **Detail pane:** the pipeline type, the ID scheme, and the linked fetchers.
-- **`p`** on an inventory or scan entry opens the same sheet as
-  `paramify preset`.
+- **`P`** on an inventory or scan entry opens the same sheet as
+  `paramify preset` (`p` is already Preview).
 - **Paramify tab:** the plan rows and results above. "Waiting for approval" is
   amber, not green.
 
