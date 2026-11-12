@@ -57,6 +57,7 @@ paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
 paramify evidence <file>       # read one evidence file, or an issue-report sidecar
 paramify upload   [run-dir]    # push a run's evidence to Paramify (default: latest run)
+paramify stacks                # list the workspace's stacks (name, id)
 paramify issues   <sub>        # send a run's issue reports into assessment pipelines; list/close their jobs
 paramify programs <sub>        # list workspace programs; turn them into targets
 paramify assessments <sub>     # list workspace assessments; point issue reports at one
@@ -216,18 +217,67 @@ paramify upload                     # upload the latest run (get-or-create evide
 ```
 
 `paramify upload` takes an optional run directory. The default is the latest
-run under `--output-dir`. It supports `--dry-run`, `--config` and `--json`. You
-can also call the same uploader directly as
-`python -m uploaders.paramify_evidence <run-dir>`.
+run under `--output-dir`. It sends one batch for each fetcher entry in the run.
+The batch goes through the channel of the evidence set when the set has one.
+When a batch cannot be used, the upload sends the entry
+[direct](uploader_guide.md#when-a-batch-cannot-be-used), the way it did before
+batches.
 
-The uploader is idempotent within a run. It talks to Paramify REST v0 over HTTPS
-only, and it reads `PARAMIFY_UPLOAD_API_TOKEN` (and the optional
-`PARAMIFY_API_BASE_URL`).
+| Flag | Effect |
+|---|---|
+| `--dry-run` | Lists what would upload. Makes no API calls and needs no token. Routing shows as unknown. |
+| `--plan` | Reads the workspace (no changes) and prints the full plan. Applies nothing. |
+| `--stack STACK` | Sends every entry to this stack (an id or a name). It replaces the stack the run recorded. |
+| `--with-validators` | Syncs validators for the evidence sets of the run before the batches go out. If the sync fails, the upload sends no batch. With `--dry-run`, it only names the sync it would do. |
+| `--no-tags` | Skips the default custom tags for this upload. |
+| `--config`, `-f`, `-o` | Choose the uploader config, the manifest, and the output directory. |
+| `--json` | Prints the summary: the legacy counts, plus `dropped`, `plan`, `entries`, `outcomes`, `batches` and, with `--with-validators`, `validators`. |
+
+Set the stack in the manifest under `run.paramify` (`stack`, `stack_name`,
+`approval`, `delivery`, `no_request`). An entry can set the same keys in its own `paramify`
+block. List the stacks in the workspace with `paramify stacks`. Write one into a
+manifest with `paramify manifest set-stack MANIFEST STACK [--fetcher NAME]`.
+With a token, the command looks up the stack and stores its id and name. Check
+the stack ids against the workspace with `paramify validate --online`.
+
+Uploading the same run again changes nothing. The upload finds the batch it made
+for that run. A new run makes a new batch. If a temporary failure holds a batch
+open, run the same upload again to resume it. A new evidence set gets the
+approval mode `SUBMISSION` unless `approval` says otherwise: Paramify approves
+each batch when the upload submits it. The upload never changes an existing set. The routing rules and each
+refusal are in [`uploader_guide.md`](uploader_guide.md#how-a-run-is-delivered).
+
+The upload talks to Paramify REST v0 over HTTPS only, and it reads
+`PARAMIFY_UPLOAD_API_TOKEN` (and the optional `PARAMIFY_API_BASE_URL`).
 [`uploaders/paramify_evidence/README.md`](../uploaders/paramify_evidence/README.md)
 shows how to create a Paramify API key with the necessary permissions.
 
+`uploaders/paramify_evidence/uploader.py` still works for old schedules, but it
+is deprecated. It hands the run to the same upload and prints a notice. Use
+`paramify upload`.
+
 The runner does not chain the two stages. That is the customer's job, and
-`run_and_upload.sh` at the repo root is a sample script for it.
+`deploy/run-and-upload.sh <manifest> [stack]` is a sample script for it. It
+uploads the run it just collected.
+
+A script that chains the stages needs the run directory. Two flags of
+`paramify run` give it:
+
+| Flag | Stdout | Stderr |
+|---|---|---|
+| `--print-run-dir` | The run directory, on one line. | The usual progress output: each result, the reason for each failure, and each skipped entry, setup error and note. |
+| `--json` | The run summary. | Nothing. |
+
+The run summary has `run_dir`, `ok` and one record for each invocation in
+`invocations`. A failed invocation has `error`: the reason the fetcher gave, or
+else its last stderr line. It can also have `error_code`. Three lists name the
+entries that need attention. Each item has `entry_key` and `fetcher`:
+
+- `skipped`: the entry did not run. `reason` tells why, for example
+  `not discovered`.
+- `setup_errors`: the setup failed before the fetcher started. `error` tells why.
+- `notes`: the run changed something for the entry, for example it dropped an
+  optional secret. `note` tells what.
 
 ## Scan results, not evidence
 

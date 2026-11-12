@@ -28,6 +28,7 @@ from textual.message import Message
 from textual.widgets import Button, Checkbox, RichLog, Static, TabbedContent
 
 from framework import api
+from framework.sync.render import render_plan
 from framework.tui import palette
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.components.table import DataTable
@@ -156,7 +157,9 @@ class UploadPage(ButtonRowNav, Vertical):
     def on_mount(self) -> None:
         self._uploading = False
         self._syncing = False
+        self._busy_planning = False
         self._run_dir: str | None = None
+        self._run_manifest = None  # see _rebuild_evidence
         self._issues_run_dir: str | None = None
         self._preflight: dict | None = None
         self._issues_preflight: dict | None = None
@@ -230,7 +233,7 @@ class UploadPage(ButtonRowNav, Vertical):
 
     @property
     def _busy(self) -> bool:
-        return self._uploading or self._syncing
+        return self._uploading or self._syncing or self._busy_planning
 
     # -- data ------------------------------------------------------------- #
 
@@ -255,13 +258,17 @@ class UploadPage(ButtonRowNav, Vertical):
         evidence panel does not offer another manifest's evidence; runs from
         before run attribution existed are the fallback.
         """
+        return self._latest_scoped(kind)[0]
+
+    def _latest_scoped(self, kind: str) -> tuple[dict | None, bool]:
+        """_latest, and whether the run came from the active manifest's own runs."""
         out = self._output_dir()
         path = getattr(self.app, "manifest_path", None)
         if path is not None:
             root = self.app.root_path
             if api.latest_run(out, manifest_path=path, root=root) is not None:
-                return api.latest_run(out, kind=kind, manifest_path=path, root=root)
-        return api.latest_run(out, kind=kind)
+                return api.latest_run(out, kind=kind, manifest_path=path, root=root), True
+        return api.latest_run(out, kind=kind), False
 
     def rebuild(self) -> None:
         """Refresh readiness for both panels (cheap; no network). The scripts
@@ -276,6 +283,7 @@ class UploadPage(ButtonRowNav, Vertical):
         """Evidence-upload readiness (run-scoped). Sets self._run_dir/_preflight
         and the upload button."""
         self._run_dir = None
+        self._run_manifest = None
         self._preflight = None
         table = self.query_one("#evidence-summary", DataTable)
         table.clear()
@@ -286,7 +294,7 @@ class UploadPage(ButtonRowNav, Vertical):
         out = self._output_dir()
         table.add_row("output dir", out)
         try:
-            latest = self._latest("evidence")
+            latest, scoped = self._latest_scoped("evidence")
         except Exception as exc:
             self._notes("evidence", [("status", f"cannot list runs: {exc}", palette.FAIL)])
             return
@@ -297,6 +305,11 @@ class UploadPage(ButtonRowNav, Vertical):
             return
 
         self._run_dir = latest["dir"]
+        # The manifest the plan compares the run's Paramify settings with: the
+        # open one when the run is its own, or records none. A run another
+        # manifest made gets None, and the upload reads that manifest from the run.
+        if scoped or latest.get("manifest") is None:
+            self._run_manifest = getattr(self.app, "manifest_path", None)
         table.add_row("selected run", latest["run_id"])
         table.add_row("result", self._result_text(latest))
 
@@ -467,27 +480,45 @@ class UploadPage(ButtonRowNav, Vertical):
             self.notify("No upload-ready run selected.")
             return
 
-        def go(ok: bool) -> None:
-            if ok:
-                self._start_upload(self._run_dir)
-
-        self.app.push_screen(
-            ConfirmModal(
-                f"Upload {self._preflight['file_count']} evidence file(s) to {self._preflight['base_url']}?"
-            ),
-            go,
+        # Plan first, so the confirm shows what the upload will do. upload_run
+        # plans again under its own lock; this one only informs the question.
+        self._busy_planning = True
+        self._plan_worker(
+            self._run_dir, self.app.root_path, bool(self._preflight.get("token_present")),
+            f"Upload {self._preflight['file_count']} evidence file(s) to {self._preflight['base_url']}?",
+            self._run_manifest,
         )
+
+    @work(thread=True, exclusive=True, group="plan")
+    def _plan_worker(self, run_dir: str, root, online: bool, question: str, manifest_path=None) -> None:
+        try:
+            lines = render_plan(api.plan_upload(run_dir, root, online=online, manifest_path=manifest_path))
+            error = False
+        except Exception as exc:
+            lines, error = [f"Cannot plan the upload: {exc}"], True
+        self.app.call_from_thread(self._confirm_upload, run_dir, "\n".join(lines), question, error)
+
+    def _confirm_upload(self, run_dir: str, body: str, question: str, error: bool) -> None:
+        def go(ok: bool) -> None:
+            if ok and not error:
+                self._start_upload(run_dir)
+
+        try:
+            self.app.push_screen(ConfirmModal(body if error else f"{body}\n\n{question}"), go)
+        finally:
+            self._busy_planning = False
 
     def _start_upload(self, run_dir: str) -> None:
         self._uploading = True
         self._upload_kind = "evidence"
         self._begin_log(Text("uploading to Paramify...", style=palette.WARN))
-        self._upload_worker(run_dir, self.app.root_path)
+        self._upload_worker(run_dir, self.app.root_path, self._run_manifest)
 
     @work(thread=True, exclusive=True)
-    def _upload_worker(self, run_dir: str, root) -> None:
+    def _upload_worker(self, run_dir: str, root, manifest_path=None) -> None:
         try:
-            api.upload_run(run_dir, root, on_event=lambda ev: self.post_message(UploadEvent(ev)))
+            api.upload_run(run_dir, root, on_event=lambda ev: self.post_message(UploadEvent(ev)),
+                           manifest_path=manifest_path)
         except Exception as exc:
             self.post_message(UploadEvent({"event": "_upload_failed", "error": str(exc)}))
 
@@ -639,6 +670,13 @@ class UploadPage(ButtonRowNav, Vertical):
             mode = " (dry-run)" if ev.get("dry_run") else ""
             self._set_banner(Text(f"uploading {ev.get('files', 0)} {noun}(s) to {ev.get('base_url', '')}{mode}", style=palette.WARN))
             log.write(Text(f"upload {ev.get('files', 0)} {noun}(s) from {ev.get('run_dir', '')}{mode}", style="bold"))
+        elif etype == "delivery_file":
+            n = ev.get("n")
+            progress = f"{n}/{ev.get('of')} " if n is not None else ""
+            outcome = ev.get("outcome")
+            style = palette.OK if outcome == "uploaded" else palette.WARN
+            reason = f"  {ev['reason']}" if ev.get("reason") else ""
+            log.write(Text(f"  {progress}{ev.get('file', '?')} {outcome}{reason}", style=style))
         elif etype == "upload_file":
             outcome = ev.get("outcome")
             if outcome == "uploaded":
@@ -712,6 +750,7 @@ class UploadPage(ButtonRowNav, Vertical):
             f"uploaded={ev.get('uploaded', 0)} "
             f"duplicates={ev.get('skipped_duplicate', 0)} "
             f"errors={ev.get('errors', 0)}"
+            + (f" dropped={ev['dropped']}" if ev.get("dropped") else "")
             + (f" jobs_failed={ev['jobs_failed']}" if ev.get("jobs_failed") else ""),
             style=style,
         )
