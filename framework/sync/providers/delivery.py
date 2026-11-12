@@ -260,6 +260,36 @@ def _batch_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
     return {**meta, "effectiveDate": day.isoformat()}
 
 
+# How a new batch is approved, as the plan says it (the entry's `approval`).
+_APPROVAL_TEXT = {
+    "SUBMISSION": "approved on submit",
+    "SUBMISSION_WITH_PASSING_VALIDATORS": "approved when its validators pass",
+    "MANUAL": "reviewed in the app",
+}
+
+
+def _create_batch(resources: Any, ar_id: Optional[str], ev_id: str,
+                  when_to_approve: Optional[str]) -> Tuple[Batch, Optional[str]]:
+    """Create the batch with its approval; returns it and a note when the approval could not be set.
+
+    Each new batch gets the entry's `approval` (default SUBMISSION), not the
+    evidence set's. An API from before POST /batches took `whenToApprove`
+    refuses the key with a 400; the batch is then made without it, and copies
+    the set's setting, as it did before.
+    """
+    target = {"artifact_request_id": ar_id} if ar_id else {"evidence_id": ev_id}
+    if not when_to_approve:
+        return resources.create_batch(**target), None
+    try:
+        return resources.create_batch(**target, when_to_approve=when_to_approve), None
+    except ApiError as exc:
+        if exc.status != 400 or "Unrecognized key" not in exc.message or "whenToApprove" not in exc.message:
+            raise
+    made = resources.create_batch(**target)
+    return made, (f"this workspace's API cannot set a batch's approval, so {made.reference_id} "
+                  f"uses the evidence set's ({made.when_to_approve or 'unknown'}), not {when_to_approve}")
+
+
 # ---- provider -------------------------------------------------------------- #
 
 class DeliveryProvider:
@@ -288,7 +318,8 @@ class DeliveryProvider:
             raise ValueError(f"artifact_payload must be 'envelope' or 'payload', got {mode!r}")
         self._payload_mode = mode
         entries = desired_from_run(
-            ctx.run_dir, ctx.upload_cfg, stack_override=ctx.stack_override, only_file=ctx.only_file
+            ctx.run_dir, ctx.upload_cfg, stack_override=ctx.stack_override, only_file=ctx.only_file,
+            owner_override=ctx.owner_override,
         ) if ctx.run_dir is not None else []
         self.entries = {e.entry_key: e for e in entries}
         return entries
@@ -553,7 +584,8 @@ class DeliveryProvider:
                 summary += f"; not in it: {', '.join(f.original_file_name for f in missing)}"
             return action("noop", summary, changes=changes, warnings=warnings)
         if mine is None:
-            tail = "new batch"
+            payload["when_to_approve"] = e.approval
+            tail = f"new batch ({_APPROVAL_TEXT.get(e.approval, f'approval {e.approval}')})"
         else:
             payload.update(resume_batch_id=mine.id, files=[_file_json(f) for f in missing])
             tail = f"resume {mine.reference_id} ({len(missing)} missing)" if missing \
@@ -652,8 +684,9 @@ class DeliveryProvider:
                 run.batch_id = p["resume_batch_id"]
                 present = {a.original_file_name for a in resources.artifacts(ev_id, batch_id=run.batch_id)}
             else:
-                made = (resources.create_batch(artifact_request_id=ar_id) if ar_id
-                        else resources.create_batch(evidence_id=ev_id))
+                made, settings_note = _create_batch(resources, ar_id, ev_id, p.get("when_to_approve"))
+                if settings_note:
+                    note = f"{note}; {settings_note}" if note else settings_note
                 run.batch_id, run.batch_reference, run.status = made.id, made.reference_id, made.status
                 if self._run_state is not None:
                     self._run_state.record_batch(p["entry_key"], made.id)
@@ -704,10 +737,13 @@ class DeliveryProvider:
         if not read:
             run.status = None  # the submit took effect; what it led to is unknown
             parts.append("submitted; status could not be read back")
+        elif run.status == "SUBMITTED" and run.validators_failed:
+            parts.append(f"{run.name} SUBMITTED: held because validators failed: {', '.join(run.validators_failed)}")
+        elif run.status == "SUBMITTED" and run.approval == "SUBMISSION":
+            # Paramify approves such a batch a moment after the submit answers; no one reviews it.
+            parts.append(f"{run.name} SUBMITTED: approved on submission; not approved yet when read back")
         elif run.status == "SUBMITTED":
-            parts.append(f"{run.name} SUBMITTED: held because validators failed: {', '.join(run.validators_failed)}"
-                         if run.validators_failed else
-                         f"{run.name} SUBMITTED: waiting for review (approval {run.approval or 'unknown'})")
+            parts.append(f"{run.name} SUBMITTED: waiting for review (approval {run.approval or 'unknown'})")
         else:
             parts.append(f"{run.name} {run.status}")
         if run.dropped:

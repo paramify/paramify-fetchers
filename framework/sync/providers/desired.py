@@ -6,6 +6,7 @@ except `DeliveryFile.path`, which stays a `Path` so apply can read the file.
 from __future__ import annotations
 
 import json
+import shlex
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -60,6 +61,8 @@ class EntryDesired:
     collected_on: Optional[date] = None  # the day the run started (UTC), from _run_metadata.json
     approval_explicit: bool = False  # `approval` came from the manifest, not the default
     delivery: str = DEFAULT_DELIVERY
+    # A Paramify username. It only breaks a tie between channels on the entry's stack.
+    owner: Optional[str] = None
 
 
 def is_enveloped(obj: Any) -> bool:
@@ -153,7 +156,8 @@ def _skip_reason(metadata: Dict, es: Optional[Dict], skip_failed: bool) -> Optio
 
 
 # The settings a run records per entry that a later manifest edit can change, and
-# what each one is when the manifest leaves it unset. The stack has no default.
+# what each one is when the manifest leaves it unset. The stack and the owner have
+# no default, and each has its own note (below), since each has its own flag.
 _SETTING_DEFAULTS = (
     ("approval", DEFAULT_APPROVAL),
     ("no_request", DEFAULT_NO_REQUEST),
@@ -170,6 +174,7 @@ def settings_notes(
     manifest_settings: Dict[str, Dict],
     *,
     stack_override: Optional[str] = None,
+    owner_override: Optional[str] = None,
 ) -> list[str]:
     """One plan note per setting the manifest now sets differently from the run.
 
@@ -177,7 +182,8 @@ def settings_notes(
     entry key of the current manifest to its resolved settings and its `use`.
     Only keys in both are compared, and only when both name the same fetcher.
     The run's settings still win: these notes only say that they differ.
-    The stack is not compared when `--stack` was given, since that wins over both.
+    The stack is not compared when `--stack` was given, since that wins over both;
+    the owner likewise with `--owner`.
     """
     notes: list[str] = []
     for key, run_cfg in run_settings.items():
@@ -196,6 +202,14 @@ def settings_notes(
                 f"the manifest now sets stack {_stack_label(now)} for {key}; this run was made with "
                 f"{_stack_label(run_cfg)}. {fix}"
             )
+        if not owner_override and (run_cfg.get("owner") or None) != (now.get("owner") or None):
+            # Usernames can hold spaces, so the flag is quoted for the shell.
+            fix = (f"Run the manifest again, or upload with --owner {shlex.quote(now['owner'])}." if now.get("owner")
+                   else "Run the manifest again to use it.")
+            notes.append(
+                f"the manifest now sets owner {now.get('owner') or 'none'} for {key}; this run was made with "
+                f"{run_cfg.get('owner') or 'none'}. {fix}"
+            )
         for field, default in _SETTING_DEFAULTS:
             then, later = run_cfg.get(field) or default, now.get(field) or default
             if then != later:
@@ -212,6 +226,7 @@ def desired_from_run(
     *,
     stack_override: Optional[str] = None,
     only_file: Optional[str] = None,
+    owner_override: Optional[str] = None,
 ) -> list[EntryDesired]:
     run_dir = Path(run_dir)
     overrides = upload_cfg.get("overrides") or {}
@@ -305,5 +320,6 @@ def desired_from_run(
             recorded_batch_id=state.batch_for(key),
             collected_on=_started_on(run_meta),
             approval_explicit=bool(cfg.get("approval")),
+            owner=owner_override or cfg.get("owner") or None,
         ))
     return result
