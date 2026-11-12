@@ -86,6 +86,7 @@ from framework.secret_resolver import (
 )
 from framework.sync import upload as _sync_upload
 from framework.sync.model import Plan
+from framework.sync.providers.delivery_routing import PIPELINE_DIRECT
 
 _missing_token_error = missing_token_error
 
@@ -1192,6 +1193,11 @@ def validate_notes(manifest: dict, root: Path, fetchers=None, platforms=None) ->
     if not UNKNOWN_CONFIG_KEYS_ARE_ERRORS:
         notes += unknown_config_keys(parsed, fetchers, platforms)
     notes += _duplicate_entry_notes(parsed, fetchers)
+    for entry, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries)):
+        f = fetchers.get(entry.use)
+        if f is not None and f.is_pipeline and manifest_loader.resolved_paramify(parsed, entry).get("approval") == "MANUAL":
+            notes.append(f"{key}: approval MANUAL on a pipeline fetcher; "
+                         f"the pipeline waits for someone to approve each batch")
     return notes
 
 
@@ -1241,6 +1247,13 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
         errors += unknown_config_keys(parsed, fetchers, platforms)
     # A bad category-wide pattern list is one mistake, reported once with the entries it reaches.
     shared: Dict[Tuple[Optional[str], str], List[str]] = {}
+
+    from framework.validators import (
+        discover_validators,
+        manifest_reference_ids,
+        pipeline_conflicts,
+        select_validators,
+    )
 
     # Each message names its entry by key (`x`, `x#1`), so a front-end can tell
     # which of two entries of one fetcher it is about.
@@ -1350,7 +1363,17 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                 if secret.name not in entry.secrets:
                     errors.append(f"{key}: missing secret '{secret.name}'")
 
+        # A pipeline file never goes direct (the upload engine refuses it too; this catches it before a run).
+        if fetcher.is_pipeline:
+            paramify = manifest_loader.resolved_paramify(parsed, entry)
+            errors += [f"{key}: {setting}: direct is not allowed on a pipeline fetcher; {PIPELINE_DIRECT}"
+                       for setting in ("delivery", "no_request") if paramify.get(setting) == "direct"]
+
     errors += [f"platforms.{cat}.config: {problem} (for {', '.join(uses)})" for (cat, problem), uses in shared.items()]
+    # Validators on a pipeline set mean the batch never approves, so the pipeline never runs.
+    scoped = select_validators(discover_validators(root).values(),
+                               manifest_reference_ids(manifest, fetchers, include_pipeline=True))
+    errors += pipeline_conflicts(scoped, fetchers)
     return errors
 
 

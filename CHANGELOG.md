@@ -10,6 +10,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Added
+
+- `paramify validate` refuses `delivery: direct` and `no_request: direct` on a pipeline fetcher entry, and notes
+  `approval: MANUAL` on one (the pipeline waits for someone to approve each batch). It also refuses a registry
+  validator that targets a pipeline evidence set, since a failing validator means the batch never approves.
+  Validator sync leaves pipeline sets out of an explicit `reference_ids` list.
+
 ### Breaking
 
 - **Datadog evidence: some fields are removed, renamed, or now mean something
