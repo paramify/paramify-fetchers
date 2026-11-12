@@ -29,7 +29,8 @@ _spec.loader.exec_module(uploader)
 
 
 def _records(n: int) -> list:
-    return [{"unique_asset_identifier": f"arn:aws:ec2:us-east-2:1:instance/i-{i}", "name": f"vm{i}"}
+    return [{"unique_asset_identifier": f"arn:aws:ec2:us-east-2:1:instance/i-{i}", "name": f"vm{i}",
+             "asset_type": "server"}
             for i in range(n)]
 
 
@@ -84,7 +85,8 @@ def test_schema_refuses_an_issue_report_block_on_an_inventory():
 
 def test_a_clean_run_is_complete():
     block = inventory.check(_payload(), 0)
-    assert block == {"records": 2, "records_included": True, "complete": True}
+    assert block == {"records": 2, "records_included": True, "by_asset_type": {"server": 2},
+                     "complete": True}
 
 
 def test_a_failed_run_is_never_complete_even_with_records():
@@ -122,8 +124,31 @@ def test_contract_breaks_are_named(payload, needle):
     assert any(needle in p for p in block["problems"]), block["problems"]
 
 
+def test_a_record_without_asset_type_breaks_the_contract():
+    p = {"records_included": True, "data": [{"unique_asset_identifier": "a"}]}
+    assert any("asset_type" in s for s in inventory.payload_problems(p))
+
+
+def test_a_null_asset_type_breaks_the_contract():
+    p = {"records_included": True, "data": [{"unique_asset_identifier": "a", "asset_type": None}]}
+    assert any("asset_type" in s for s in inventory.payload_problems(p))
+
+
+def test_the_verdict_counts_records_by_asset_type():
+    data = [{"unique_asset_identifier": str(i), "asset_type": t}
+            for i, t in enumerate(["server", "endpoint", "endpoint"])]
+    block = inventory.check({"records_included": True, "data": data}, 0)
+    assert block["by_asset_type"] == {"endpoint": 2, "server": 1}
+    assert list(block["by_asset_type"]) == ["endpoint", "server"]
+
+
+def test_a_broken_payload_has_no_asset_type_counts():
+    block = inventory.check({"records_included": True, "data": [{"unique_asset_identifier": "a"}]}, 0)
+    assert "by_asset_type" not in block
+
+
 def test_a_systematic_break_is_summarised_not_listed_per_record():
-    block = inventory.check(_payload(records=[{"name": str(i)} for i in range(500)]), 0)
+    block = inventory.check(_payload(records=[{"unique_asset_identifier": str(i)} for i in range(500)]), 0)
     assert len(block["problems"]) == 6
     assert block["problems"][-1] == "... and 495 more"
 
