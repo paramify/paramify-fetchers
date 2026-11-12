@@ -258,6 +258,11 @@ run:
         no_request: refuse  # refuse this entry instead
 ```
 
+A [pipeline fetcher](pipeline_fetchers_guide.md)'s entry ignores a `direct` it
+inherits from `run.paramify`: it uses `delivery: auto` and `no_request:
+evidence`, and `paramify validate` notes it. Set on the entry itself, `direct`
+is a validate error.
+
 | `no_request` | Result when the channel has no artifact request |
 |---|---|
 | `direct` (default) | Sends the entry direct, with a warning. |
@@ -413,7 +418,8 @@ results, see [verify validators](suggest_validator_guide.md#5-verify-in-paramify
 fetcher](pipeline_fetchers_guide.md), such as an inventory, never goes direct
 while the workspace has batches: a direct upload is stored and builds nothing.
 With no artifact request it goes in an evidence-level batch on the set. A
-manifest entry with `delivery: direct` or `no_request: direct` is refused. When
+manifest entry with `delivery: direct` or `no_request: direct` on the entry itself
+is refused; the same setting inherited from `run.paramify` is ignored. When
 the workspace has no batches, the file is sent direct with the note `sent direct:
 this workspace has no batches; the pipeline runs the pre-batch way`, and `--json`
 shows `pipeline.approved: null`.

@@ -1195,9 +1195,13 @@ def validate_notes(manifest: dict, root: Path, fetchers=None, platforms=None) ->
     notes += _duplicate_entry_notes(parsed, fetchers)
     for entry, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries)):
         f = fetchers.get(entry.use)
-        if f is not None and f.is_pipeline and manifest_loader.resolved_paramify(parsed, entry).get("approval") == "MANUAL":
+        if f is None or not f.is_pipeline:
+            continue
+        if manifest_loader.resolved_paramify(parsed, entry, pipeline=True).get("approval") == "MANUAL":
             notes.append(f"{key}: approval MANUAL on a pipeline fetcher; "
                          f"the pipeline waits for someone to approve each batch")
+        notes += [f"{key}: ignores run.paramify {setting}: direct; pipeline files always go in a batch"
+                  for setting in manifest_loader.ignored_run_direct(parsed, entry)]
     return notes
 
 
@@ -1364,8 +1368,9 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                     errors.append(f"{key}: missing secret '{secret.name}'")
 
         # A pipeline file never goes direct (the upload engine refuses it too; this catches it before a run).
+        # A `direct` inherited from run.paramify is ignored (validate_notes says so); the entry's own is an error.
         if fetcher.is_pipeline:
-            paramify = manifest_loader.resolved_paramify(parsed, entry)
+            paramify = manifest_loader.resolved_paramify(parsed, entry, pipeline=True)
             errors += [f"{key}: {setting}: direct is not allowed on a pipeline fetcher; {PIPELINE_DIRECT}"
                        for setting in ("delivery", "no_request") if paramify.get(setting) == "direct"]
 
@@ -1686,7 +1691,8 @@ def run(
         "completed_at": completed_at,
         "invocations": [_invocation_record(r) for r in all_results],
         "paramify": {
-            keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(parsed, e)}
+            keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(
+                parsed, e, pipeline=e.use in fetchers and fetchers[e.use].is_pipeline)}
             for e in entries
         },
     }

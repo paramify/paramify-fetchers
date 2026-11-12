@@ -68,7 +68,10 @@ When `paramify upload` finds a file from a pipeline fetcher, it:
 - **Sends it in a batch.** Paramify's inventory pipeline runs only on a file in
   an approved batch. A direct upload is stored and builds nothing. With no
   artifact request on the channel, the upload makes an evidence-level batch on
-  the set.
+  the set. A `delivery: direct` or `no_request: direct` inherited from
+  `run.paramify` is ignored, and `paramify validate` notes it; on the entry
+  itself it is an error. If an earlier upload sent the run's files direct, the
+  next upload sends them again in a batch, so the pipeline runs.
 - **Sends the whole envelope**, even when your uploader config sets
   `artifact_payload: payload`. The pipeline reads `payload.data`.
 - **Needs the set to approve automatically.** The batch approves on submit, so
@@ -134,6 +137,7 @@ in the same change.
 |---|---|
 | `kind: inventory` fails validation | Add the `pipeline:` block with `type: inventory` and an `id_scheme`. |
 | `direct is not allowed on a pipeline fetcher` | Remove `delivery: direct` or `no_request: direct` from the entry. A pipeline file never goes direct. |
+| `a pipeline file never goes direct` on upload, with no `direct` on the entry | The run was made before pipeline entries ignored a `direct` in `run.paramify`. Set `no_request: evidence` on the entry, or remove `direct` from `run.paramify`, then run again. |
 | `has N validator(s) … its batches will never approve` | Remove the validators from the evidence set in Paramify. |
 | `approves MANUAL` | Set the evidence set to approve automatically, or approve each batch yourself. |
 | `SUBMITTED: waiting for approval` | The batch needs a person to approve it. The pipeline has not run. |

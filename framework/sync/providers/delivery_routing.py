@@ -19,6 +19,7 @@ from framework.paramify.resources import (
     EvidenceSet,
     Stack,
 )
+from framework.runner.manifest_loader import PIPELINE_DEFAULTS
 from framework.sync.providers.desired import EntryDesired
 
 DONE = ("SUBMITTED", "APPROVED")
@@ -123,10 +124,19 @@ def resolve_channel(entry: EntryDesired, evidence: Optional[EvidenceSet], stacks
 
 
 def pipeline_refusal(entry: EntryDesired) -> Optional[Refusal]:
-    """A pipeline entry the manifest sends direct: a direct upload builds nothing."""
-    if entry.pipeline and (entry.delivery == "direct" or entry.no_request == "direct"):
-        return Refusal(PIPELINE_DIRECT, "remove delivery: direct and no_request: direct from this entry")
-    return None
+    """A pipeline entry the run recorded as direct: a direct upload builds nothing.
+
+    A run made since pipeline entries ignore an inherited run.paramify `direct`
+    records the pipeline default instead, so this is the entry's own setting, or
+    an inherited one recorded by an older run: the fix covers both.
+    """
+    if not entry.pipeline:
+        return None
+    direct = [k for k, v in (("delivery", entry.delivery), ("no_request", entry.no_request)) if v == "direct"]
+    if not direct:
+        return None
+    settings = " and ".join(f"{k}: {PIPELINE_DEFAULTS[k]}" for k in direct)
+    return Refusal(PIPELINE_DIRECT, f"set {settings} on this entry, or remove direct from run.paramify, then run again")
 
 
 def resolve_request(

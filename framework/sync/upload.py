@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from dotenv import load_dotenv
 
 from framework import yaml_io
+from framework.config_loader import discover_fetchers
 from framework.custom_tags import Tagger, category_display_names, resolve_tag_policy
 from framework.paramify.client import Client, base_url_error
 from framework.paramify.resources import Reader, Resources
@@ -117,7 +118,15 @@ def manifest_notes(run_dir: Path, root: Path, manifest_path: Optional[Path],
         meta = json.loads((run_dir / "_run_metadata.json").read_text())
         run_settings = meta.get("paramify")
         parsed = manifest_loader.parse_manifest(yaml_io.load_path(path))
-        now = {key: {"use": e.use, **manifest_loader.resolved_paramify(parsed, e)}
+        # A pipeline entry ignores a run-level `direct`, as the run that recorded it did.
+        # Only then do the fetchers matter, so only then are they read.
+        pipeline_uses: set = set()
+        if any(manifest_loader.ignored_run_direct(parsed, e) for e in parsed.entries):
+            try:
+                pipeline_uses = {name for name, f in discover_fetchers(root).items() if f.is_pipeline}
+            except Exception:  # noqa: BLE001 — unknown fetchers: compare as ordinary entries
+                pipeline_uses = set()
+        now = {key: {"use": e.use, **manifest_loader.resolved_paramify(parsed, e, pipeline=e.use in pipeline_uses)}
                for e, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries))}
     except Exception:  # noqa: BLE001 — advice only; a bad manifest is reported where it is used
         return []

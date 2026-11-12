@@ -2328,6 +2328,15 @@ schemas and the `paramify` CLI — not the internal code.
   batch is a no-op even if the set has since gained a validator, and a no-op
   result carries `pipeline: {type, approved}` too.
 
+- **A run-level `delivery: direct` or `no_request: direct` no longer refuses
+  every inventory.** A pipeline entry ignores a `direct` it inherits from
+  `run.paramify` and uses `delivery: auto` and `no_request: evidence`;
+  `paramify validate` notes it, `paramify run` records those settings, and the
+  upload plan compares against them. `direct` on the entry itself is still a
+  validate error. A run recorded before this fix still refuses at upload; the
+  refusal now says to set `no_request: evidence` on the entry or remove
+  `direct` from `run.paramify`, then run again.
+
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the

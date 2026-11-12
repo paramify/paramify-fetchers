@@ -175,3 +175,40 @@ def test_validate_reports_a_broken_registry_as_an_error(monkeypatch):
     monkeypatch.setattr("framework.validators.discover_validators", _raise_registry)
     errs = api.validate(manifest_with(use="github_repository_inventory", paramify={}), REPO_ROOT)
     assert len([e for e in errs if "validator registry" in e]) == 1
+
+
+# --- a run-level direct is ignored by a pipeline entry (decision-log #1895) ---
+
+
+def with_run_paramify(manifest: dict, paramify: dict) -> dict:
+    manifest["run"]["paramify"] = paramify
+    return manifest
+
+
+def test_validate_ignores_a_run_level_no_request_direct_on_a_pipeline_entry():
+    m = with_run_paramify(manifest_with(use="github_repository_inventory", paramify={}),
+                          {"delivery": "auto", "no_request": "direct"})
+    assert not any("never goes direct" in e for e in api.validate(m, REPO_ROOT))
+    notes = api.validate_notes(m, REPO_ROOT)
+    assert ("github_repository_inventory: ignores run.paramify no_request: direct; "
+            "pipeline files always go in a batch") in notes
+
+
+def test_validate_ignores_a_run_level_delivery_direct_on_a_pipeline_entry():
+    m = with_run_paramify(manifest_with(use="github_repository_inventory", paramify={}), {"delivery": "direct"})
+    assert not any("never goes direct" in e for e in api.validate(m, REPO_ROOT))
+    assert any("ignores run.paramify delivery: direct" in n for n in api.validate_notes(m, REPO_ROOT))
+
+
+def test_validate_still_refuses_the_entrys_own_direct_under_a_run_level_one():
+    m = with_run_paramify(manifest_with(use="github_repository_inventory", paramify={"no_request": "direct"}),
+                          {"no_request": "direct"})
+    assert any("never goes direct" in e for e in api.validate(m, REPO_ROOT))
+    assert not any("ignores run.paramify" in n for n in api.validate_notes(m, REPO_ROOT))
+
+
+def test_ordinary_entry_under_a_run_level_direct_has_no_error_and_no_note():
+    m = with_run_paramify(manifest_with(use="cornerstone_incident_response_training", paramify={}),
+                          {"delivery": "direct", "no_request": "direct"})
+    assert not any("direct" in e for e in api.validate(m, REPO_ROOT))
+    assert not any("ignores run.paramify" in n for n in api.validate_notes(m, REPO_ROOT))

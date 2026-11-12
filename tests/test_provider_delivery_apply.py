@@ -914,3 +914,23 @@ def test_already_delivered_pipeline_run_with_a_new_validator_is_noop(tmp_path):
     again = Harness(fake, run_dir).run()["delivery/x"]
     assert again.status == "noop", again.message
     assert again.result["pipeline"] == {"type": "inventory", "approved": True}
+
+
+def test_pipeline_entry_recorded_with_the_pipeline_defaults_goes_in_a_batch(tmp_path):
+    # A run recorded under run.paramify no_request: direct holds the pipeline default for the inventory entry.
+    fake = FakeParamify()
+    with_request(fake)
+    fake._requests.clear()  # a channel with no artifact request: where no_request: direct would send it direct
+    h = Harness(fake, inventory_run(tmp_path, {"x": {"use": "x", "delivery": "auto", "no_request": "evidence"}}))
+    plan = h.plan()
+    [action] = [a for a in plan.actions if a.provider == "delivery"]
+    assert action.verb == "deliver" and action.payload["target"] == "EVIDENCE"
+
+
+def test_pipeline_entry_recorded_with_an_inherited_direct_says_how_to_fix_it(tmp_path):
+    fake = FakeParamify()
+    h = Harness(fake, inventory_run(tmp_path, {"x": {"use": "x", "no_request": "direct"}}))
+    [action] = [a for a in h.plan().actions if a.provider == "delivery"]
+    assert action.verb == "refuse"
+    assert action.fix == ("set no_request: evidence on this entry, or remove direct from run.paramify, "
+                          "then run again")
