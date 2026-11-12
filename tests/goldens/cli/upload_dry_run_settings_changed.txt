@@ -1,0 +1,19 @@
+$ paramify upload --dry-run -f evidence/run-<run-id>/demo.yaml evidence/run-<run-id>
+exit 0
+--- stdout
+Uploading to production: https://app.paramify.com/api/v0
+Upload 1 file(s) from <repo>/evidence/run-<run-id> → https://app.paramify.com/api/v0 (dry-run)
+
+! the manifest now sets stack Prod for demo_hello; this run was made with none. Run the manifest again, or upload with --stack Prod.
+! the manifest now sets owner alice for demo_hello; this run was made with none. Run the manifest again, or upload with --owner alice.
+evidence_sets
+  noop EVD-DEMO-HELLO: evidence set EVD-DEMO-HELLO: state unknown (offline)
+delivery
+  deliver demo_hello: deliver 1 file to EVD-DEMO-HELLO (routing unknown offline)
+1 deliver · 0 noop · 0 refuse
+
+        [DRY] demo_hello.json  set=EVD-DEMO-HELLO  tags=Automated by Paramify Fetchers,Demo
+
+Done: uploaded=0 skipped_duplicate=0 skipped_failed=0 errors=0
+tags: applied=0 failed=0  provenance='Automated by Paramify Fetchers'
+--- stderr

@@ -1,0 +1,6 @@
+$ paramify manifest set-owner evidence/run-<run-id>/demo.yaml alice
+exit 0
+--- stdout
+Wrote <repo>/evidence/run-<run-id>/demo.yaml
+--- stderr
+Note: no API token, so 'alice' was stored as given and not checked against the workspace
