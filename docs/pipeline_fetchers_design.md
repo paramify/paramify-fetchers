@@ -1,6 +1,6 @@
 # Pipeline fetchers — Design
 
-**Status:** Phase 1 is built. Four live checks are still pending ([§8](#8-live-checks)).
+**Status:** Phase 1 is built. Five live checks are still pending ([§8](#8-live-checks)).
 The design was agreed in conversation on 2026-11-12.
 **Date:** 2026-11-12
 
@@ -141,7 +141,7 @@ pipeline:
 | `type` | yes | The Paramify pipeline that reads the file. For a scan report it replaces `issue_report.assessment_type`. |
 | `id_scheme` | yes | The format of the asset ID, such as `aws-arn`, `azure-resource-id`, `wiz-resource-id`, or `hostname`. The known schemes are listed in `docs/pipeline_fetchers_guide.md`. A new scheme must be added to that list; `test_every_id_scheme_is_in_the_guide` enforces it. |
 | `asset_id_field` | scan reports only | The column of the vendor file that holds the asset ID. This is the column to choose as "inventory mapping" in the vulnerability preset. |
-| `preset` | reserved | Refused by the schema with "not supported yet". It will name a preset once the API can create one. |
+| `preset` | reserved | Refused by the schema. It will name a preset once the API can create one. |
 
 Fields that are the same for every inventory are not declared: the data path is
 always `payload.data`, and the unique ID is always `unique_asset_identifier`.
@@ -199,10 +199,12 @@ failure, and the upload says so.**
 | The channel has a current or past request | Batch on the request | Batch on the request |
 | The channel has no request | Direct (`no_request: direct`) | **Ad hoc batch on the set** (`POST /batches`, `type: EVIDENCE`) |
 | `no_request: refuse` in the manifest | Refuse | Refuse |
-| `no_request: direct` in the manifest | Direct | **`paramify validate` error** |
-| `delivery: direct` in the manifest | Direct | **`paramify validate` error** |
+| `no_request: direct` in the manifest | Direct | On the entry: **`paramify validate` error**. Inherited from `run.paramify`: ignored, with a note |
+| `delivery: direct` in the manifest | Direct | On the entry: **`paramify validate` error**. Inherited from `run.paramify`: ignored, with a note |
 | The workspace has no batches | Direct | **Direct, with the note** "sent direct: this workspace has no batches; the pipeline runs the pre-batch way". If live check 2 fails, this becomes a refusal. |
 | `artifact_payload: payload` in the uploader config | Bare payload | **The envelope, always** ([§1](#the-envelope-and-field-mapping)) |
+| Files of this run an earlier upload sent direct (the workspace has batches now) | Count as delivered | **Sent again in a batch**, with a warning: the direct upload built nothing |
+| This run's batch is submitted or approved, and the set has since gained a validator | No-op | No-op (not the validators refusal) |
 
 Channel and stack routing, idempotency, resume, WAF checks, and the incomplete-
 inventory skip are unchanged.
@@ -373,6 +375,7 @@ hoc batches.
 | 2 | A direct upload in a workspace with no batches builds Inventory. | That row of the routing table becomes a refusal. |
 | 3 | The mapper reads a nested field inside a record (`tags.env`). | Flat fields become a rule, checked when the output is enveloped. |
 | 4 | A `MANUAL` set: the batch stays `SUBMITTED` and builds nothing until approved, and `--plan` warns. | Fix the warning. |
+| 5 | A set with a validator attached in the app shows as a refusal in `--plan` (proves the routing read carries `validators`). | Read the set's validators another way before routing. |
 
 ## 9. Tests
 
@@ -392,7 +395,7 @@ hoc batches.
 
 | Phase | Contents | Behaviour change |
 |---|---|---|
-| 1 | The contract, routing, validate rules, `paramify preset`, TUI, the two inventory fetchers and the template, the rewritten inventory guide, a new `docs/pipeline_fetchers_guide.md` (how to write a pipeline fetcher, and the ID scheme list), and live checks 1 to 4 | Inventory entries only. Other evidence is unchanged. |
+| 1 | The contract, routing, validate rules, `paramify preset`, TUI, the two inventory fetchers and the template, the rewritten inventory guide, a new `docs/pipeline_fetchers_guide.md` (how to write a pipeline fetcher, and the ID scheme list), and live checks 1 to 5 | Inventory entries only. Other evidence is unchanged. |
 | 2 | The block on the six scan fetchers and the template, `assessments:` fan-out, the multi-select picker, and the inventory-link note | Scan entries. The single-assessment form keeps working. |
 | 3 | The issues uploader on the sync engine | None for users. Start it when the app moves scans to evidence sets. |
 
