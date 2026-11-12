@@ -1234,18 +1234,20 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     # A bad category-wide pattern list is one mistake, reported once with the entries it reaches.
     shared: Dict[Tuple[Optional[str], str], List[str]] = {}
 
-    for i, entry in enumerate(parsed.entries):
+    # Each message names its entry by key (`x`, `x#1`), so a front-end can tell
+    # which of two entries of one fetcher it is about.
+    for i, (entry, key) in enumerate(zip(parsed.entries, manifest_loader.entry_keys(parsed.entries))):
         if entry.use not in fetchers:
             errors.append(f"entry[{i}] uses unknown fetcher: {entry.use}")
             continue
         fetcher = fetchers[entry.use]
 
         if entry.use in problems:
-            errors.append(f"{entry.use}: {problems[entry.use]}")
+            errors.append(f"{key}: {problems[entry.use]}")
         else:
             # Same run only: an input the manifest doesn't run is reported missing.
             errors.extend(
-                f"{entry.use}: reads {dep}, which is not in the manifest (fix: paramify manifest add {dep})"
+                f"{key}: reads {dep}, which is not in the manifest (fix: paramify manifest add {dep})"
                 for dep in fetcher.depends_on if dep not in in_manifest
             )
 
@@ -1255,11 +1257,11 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             # target field is actually required.
             if any(f.required for f in fetcher.target_schema.values()):
                 errors.append(
-                    f"{entry.use}: supports_targets but no targets[] in manifest "
+                    f"{key}: supports_targets but no targets[] in manifest "
                     f"(a required target field has no value)"
                 )
         if not fetcher.supports_targets and entry.targets:
-            errors.append(f"{entry.use}: does not support targets but manifest has targets[]")
+            errors.append(f"{key}: does not support targets but manifest has targets[]")
 
         spec = platform_for(fetcher, platforms)
         platform_cfg = platform_for(fetcher, parsed.platforms)
@@ -1273,7 +1275,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             in_platform = platform_cfg and name in platform_cfg.config
             in_entry = name in entry.config
             if not (in_platform or in_entry):
-                errors.append(f"{entry.use}: required config '{name}' not set ({config_hint(fetcher, name)})")
+                errors.append(f"{key}: required config '{name}' not set ({config_hint(fetcher, name)})")
 
         # The references the runner would refuse, so a hand edit fails here rather than at run time.
         merged = merged_config(fetcher, spec, platform_cfg, entry, secret_vars)
@@ -1282,9 +1284,9 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             if merged.sources.get(name) == "platform" and fdef is not None and fdef.type == patterns.TYPE:
                 shared.setdefault((platform_category(fetcher), problem), []).append(entry.use)
             else:
-                errors.append(f"{entry.use}: {problem}")
+                errors.append(f"{key}: {problem}")
         for j, t in enumerate(entry.targets):
-            errors += [f"{entry.use} target[{j}]: {k} is {v!r}, but target fields aren't resolved, so ${{env:}} "
+            errors += [f"{key} target[{j}]: {k} is {v!r}, but target fields aren't resolved, so ${{env:}} "
                        f"references don't work there" for k, v in t.values.items() if is_env_ref_attempt(v) or is_partial_env_ref(v)]
 
         # An issue report with no assessment collects fine but can never be
@@ -1298,11 +1300,11 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             first_unset = {name: var for name, var in reversed(merged.unset)}
             unset = {name for name in (ASSESSMENT_ID_FIELD, CLOSE_CYCLE_FIELD)
                      if values.get(name) is None and name in first_unset}
-            errors += [f"{entry.use}: {name} reads ${{env:{first_unset[name]}}}, a reference unset in this environment"
+            errors += [f"{key}: {name} reads ${{env:{first_unset[name]}}}, a reference unset in this environment"
                        for name in sorted(unset)]
             if not values.get(ASSESSMENT_ID_FIELD) and ASSESSMENT_ID_FIELD not in unset:
                 errors.append(
-                    f"{entry.use}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
+                    f"{key}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
                     f"sent to Paramify (fix: paramify assessments select {entry.use})"
                 )
             # Same reasoning as assessment_id: not a required field (collecting
@@ -1311,14 +1313,14 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             if close_cycle is None:
                 if CLOSE_CYCLE_FIELD not in unset:
                     errors.append(
-                        f"{entry.use}: no {CLOSE_CYCLE_FIELD} set — say whether the "
+                        f"{key}: no {CLOSE_CYCLE_FIELD} set — say whether the "
                         f"assessment's cycle closes after each run "
                         f"({' or '.join(CLOSE_CYCLE_VALUES)}; fix: paramify assessments "
                         f"select {entry.use} --close-cycle after_run|never)"
                     )
             elif close_cycle not in CLOSE_CYCLE_VALUES:
                 errors.append(
-                    f"{entry.use}: {CLOSE_CYCLE_FIELD} is {close_cycle!r}; expected "
+                    f"{key}: {CLOSE_CYCLE_FIELD} is {close_cycle!r}; expected "
                     f"{' or '.join(CLOSE_CYCLE_VALUES)}"
                 )
 
@@ -1334,11 +1336,11 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                 for j, t in enumerate(entry.targets):
                     if secret.name not in t.secrets:
                         errors.append(
-                            f"{entry.use} target[{j}] missing per_target secret '{secret.name}'"
+                            f"{key} target[{j}] missing per_target secret '{secret.name}'"
                         )
             else:
                 if secret.name not in entry.secrets:
-                    errors.append(f"{entry.use}: missing secret '{secret.name}'")
+                    errors.append(f"{key}: missing secret '{secret.name}'")
 
     errors += [f"platforms.{cat}.config: {problem} (for {', '.join(uses)})" for (cat, problem), uses in shared.items()]
     return errors
@@ -3471,7 +3473,11 @@ def effective_config(
 
         platform defaults <- platform values <- per-fetcher values
 
-    Returns {use: [descriptor + {"value", "source"}]}, where source is "entry",
+    `uses` holds entry keys (manifest_loader.entry_keys): a fetcher name is its
+    first entry's key, and `x#1` is the second entry that uses `x`. A key no entry
+    has is read as a fetcher name with no entry of its own.
+
+    Returns {key: [descriptor + {"value", "source"}]}, where source is "entry",
     "platforms.<category>", "default", or None when nothing supplies it. When the
     value as written is a ${env:} reference, "reference" holds it and
     "reference_state" says "set", "unset" (value and source are then the next
@@ -3496,19 +3502,20 @@ def effective_config(
     specs = platforms if platforms is not None else discover_platforms(root)
     run = _run(m)
     parsed = manifest_loader.parse_manifest({"run": {**run, "fetchers": run.get("fetchers") or []}})
-    entries = {e.use: e for e in parsed.entries}
+    # By entry key, so two entries of one fetcher each get their own view.
+    entries = dict(zip(manifest_loader.entry_keys(parsed.entries), parsed.entries))
     # The whole manifest's secrets, so a config reference reading one shows as invalid, as at run time.
     secret_vars = secret_env_vars(discovered.values(), specs.values(), parsed.entries)
 
     out: Dict[str, List[dict]] = {}
-    for use in uses:
-        f = discovered.get(use)
+    for key in uses:
+        entry = entries.get(key) or ManifestEntry(use=key)
+        f = discovered.get(entry.use)
         if f is None:
-            out[use] = []
+            out[key] = []
             continue
         spec = platform_for(f, specs)
         platform_cfg = platform_for(f, parsed.platforms) or PlatformConfig()
-        entry = entries.get(use) or ManifestEntry(use=use)
         platform_values, entry_values = platform_cfg.config, entry.config
         merged = merged_config(f, spec, platform_cfg, entry, secret_vars)
         labels = {"entry": "entry", "platform": f"platforms.{f.category}", "default": "default"}
@@ -3532,7 +3539,7 @@ def effective_config(
                 d["reference_state"] = ("invalid" if name in merged.errors
                                         else "set" if merged.sources.get(name) == top_source else "unset")
             fields.append(d)
-        out[use] = fields
+        out[key] = fields
     return out
 
 def shared_config_state(

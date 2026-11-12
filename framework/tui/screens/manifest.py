@@ -98,7 +98,7 @@ class ManifestPage(ButtonRowNav, Vertical):
         self._selected_key: Optional[str] = None  # its entry key: x, x#1
         self._key_use: Dict[str, str] = {}
         self._errors: List[str] = []
-        # {use: merged config view}, rebuilt with the table (api.effective_config)
+        # {entry key: merged config view}, rebuilt with the table (api.effective_config)
         self._config_view: Dict[str, List[dict]] = {}
         self.query_one("#manifest-entries-panel", Vertical).border_title = "fetchers"
         self.query_one("#manifest-detail-scroll", VerticalScroll).border_title = "detail"
@@ -177,20 +177,18 @@ class ManifestPage(ButtonRowNav, Vertical):
             self._errors = api.validate(self._manifest, self.app.root_path, **discovered)
         except Exception as exc:  # never let a validation crash kill the UI
             self._errors = [f"validation error: {exc}"]
-        by_use = self._bucket_errors(self._errors, entries)
+        # One row per entry, keyed by entry key (`x`, `x#1`): two entries of one
+        # fetcher used to share a key, which the table refuses. Everything a row
+        # shows is read by that key too, so each row shows its own entry.
+        keys = entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries])
+        by_key = self._bucket_errors(self._errors, entries)
         try:
-            self._config_view = api.effective_config(
-                self._manifest, [e.get("use", "") for e in entries],
-                self.app.root_path, **discovered,
-            )
+            self._config_view = api.effective_config(self._manifest, keys, self.app.root_path, **discovered)
         except Exception:  # never let a config-merge failure kill the UI
             self._config_view = {}
 
         dt.clear()
         row_keys: List[str] = []
-        # One row per entry, keyed by entry key (`x`, `x#1`): two entries of one
-        # fetcher used to share a key, which the table refuses.
-        keys = entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries])
         self._key_use = {}
         for e, ekey in zip(entries, keys):
             use = e.get("use", "?")
@@ -198,9 +196,9 @@ class ManifestPage(ButtonRowNav, Vertical):
             d = descriptors.get(use)
             fanout = bool(d and d.get("supports_targets"))
             sset, stot = self._secret_counts(d, e)
-            cset, ctot = self._config_counts(self._config_view.get(use))
+            cset, ctot = self._config_counts(self._config_view.get(ekey))
             ntargets = len(e.get("targets") or [])
-            errs = by_use.get(use, [])
+            errs = by_key.get(ekey, [])
             status = palette.pill("✓", "ok") if not errs else palette.pill(f"⚠ {len(errs)}", "warn")
             dt.add_row(
                 use,
@@ -209,7 +207,7 @@ class ManifestPage(ButtonRowNav, Vertical):
                 f"{cset}/{ctot}",
                 str(ntargets) if fanout else "—",
                 status,
-                render.destination_cell(d, self._config_view.get(use)) if d else "—",
+                render.destination_cell(d, self._config_view.get(ekey)) if d else "—",
                 key=ekey,
             )
             row_keys.append(ekey)
@@ -251,12 +249,14 @@ class ManifestPage(ButtonRowNav, Vertical):
         if not use or self._manifest is None:
             detail.update(render.empty_detail("No fetcher selected — press 'a' to add one."))
             return
-        entry = self._entry(use)
+        # The selected entry (`x#1`), not the first that uses this fetcher.
+        key = self._selected_entry_key()
+        entry = self._keyed_entry(key)
         d = self._descriptors().get(use)
         # Bucket against the full entry list so index-prefixed (entry[i]) errors
         # attribute correctly, then take this entry's slice.
-        errs = self._bucket_errors(self._errors, self._entries()).get(use, [])
-        detail.update(render.entry_detail(d, entry, errs, self._config_view.get(use)))
+        errs = self._bucket_errors(self._errors, self._entries()).get(key, [])
+        detail.update(render.entry_detail(d, entry, errs, self._config_view.get(key)))
 
     def _set_issues(self, errors: List[str]) -> None:
         issues = self.query_one("#manifest-issues", Static)
@@ -292,11 +292,12 @@ class ManifestPage(ButtonRowNav, Vertical):
 
     @staticmethod
     def _bucket_errors(errors: List[str], entries: List[dict]) -> Dict[str, List[str]]:
-        # api.validate() uses two prefix conventions: "<use>: ..." / "<use> ..."
-        # for known entries, and "entry[<i>] uses unknown fetcher: <use>" for
-        # undiscovered ones. Attribute both so an unknown-fetcher row never shows
-        # a misleading ✓.
-        uses = [e.get("use") for e in entries]
+        """{entry key: its errors}. api.validate() uses two prefix conventions:
+        "<entry key>: ..." / "<entry key> ..." for known entries, and
+        "entry[<i>] uses unknown fetcher: <use>" for undiscovered ones. Attribute
+        both so an unknown-fetcher row never shows a misleading ✓, and so an
+        error about `x#1` shows on that row only."""
+        keys = entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries])
         out: Dict[str, List[str]] = {}
         for msg in errors or []:
             target = None
@@ -305,13 +306,10 @@ class ManifestPage(ButtonRowNav, Vertical):
                     idx = int(msg[6 : msg.index("]")])
                 except ValueError:
                     idx = -1
-                if 0 <= idx < len(uses):
-                    target = uses[idx]
+                if 0 <= idx < len(keys):
+                    target = keys[idx]
             if target is None:
-                for u in uses:
-                    if u and (msg.startswith(f"{u}:") or msg.startswith(f"{u} ")):
-                        target = u
-                        break
+                target = next((k for k in keys if msg.startswith(f"{k}:") or msg.startswith(f"{k} ")), None)
             if target:
                 out.setdefault(target, []).append(msg)
         return out

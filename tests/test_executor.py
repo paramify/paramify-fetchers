@@ -344,6 +344,24 @@ def test_effective_config_skips_an_unset_reference_like_the_runner(tmp_path, mon
     assert (field["value"], field["source"]) == ("qa.*", "platforms.testcat")
 
 
+def test_effective_config_keys_two_entries_of_one_fetcher_apart(tmp_path):
+    fetcher = make_fetcher(tmp_path, config_schema={"hosts": cfg("hosts", "HOSTS")})
+    m = {"run": {"fetchers": [{"use": "t_fetcher", "config": {"hosts": "first"}},
+                              {"use": "t_fetcher", "config": {"hosts": "second"}}]}}
+    view = api.effective_config(m, ["t_fetcher", "t_fetcher#1"], tmp_path, {"t_fetcher": fetcher}, {})
+    # The plain name is the first entry's key, the entry a write by fetcher name reaches.
+    assert [(k, [f["value"] for f in v]) for k, v in view.items()] == [
+        ("t_fetcher", ["first"]), ("t_fetcher#1", ["second"])]
+
+
+def test_validate_names_the_entry_an_error_is_about(tmp_path):
+    fetcher = make_fetcher(tmp_path, config_schema={"hosts": cfg("hosts", "HOSTS", required=True)})
+    m = {"run": {"fetchers": [{"use": "t_fetcher", "config": {"hosts": "h"}}, {"use": "t_fetcher"}]}}
+    errors = api.validate(m, REPO_ROOT, {"t_fetcher": fetcher}, {})
+    assert [e for e in errors if "'hosts'" in e] == [
+        f"t_fetcher#1: required config 'hosts' not set ({api.config_hint(fetcher, 'hosts')})"]
+
+
 LEAK_PROBE = "leak-probe-aaaaaaaa"
 
 
