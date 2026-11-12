@@ -47,6 +47,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`pipeline:` block in `fetcher.yaml`.** A fetcher whose output feeds a Paramify
+  pipeline declares `pipeline: {type, id_scheme}` (`asset_id_field` for a
+  scan-report pipeline). `kind: inventory` now requires it with `type: inventory`;
+  `kind: issue_report` may declare `vulnerability` or `configuration`; evidence and
+  discovery fetchers refuse it. The envelope records it as `metadata.pipeline` and
+  `paramify describe` shows it. `github_repository_inventory` and
+  `sophos_endpoint_inventory` 0.2.0 declare it.
+
 - **Evidence uploads go out as batches.** `paramify upload` now sends the files
   of each fetcher entry as one batch. Paramify submits and approves a batch as
   one unit. The batch goes through the channel of the evidence set, on the

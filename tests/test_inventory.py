@@ -50,6 +50,7 @@ def _doc(**overrides) -> dict:
         "output": {"type": "json", "path": "x.json"},
         "secrets": [],
         "evidence_set": {"reference_id": "EVD-X-INVENTORY", "name": "X"},
+        "pipeline": {"type": "inventory", "id_scheme": "x-id"},
     }
     doc.update(overrides)
     return {k: v for k, v in doc.items() if v is not None}
@@ -150,6 +151,7 @@ def _stage(root: Path, payload: dict, exit_code: int = 0, kind: str = "inventory
         "output:\n  type: json\n  path: t_inventory.json\n"
         "secrets: []\n"
         "evidence_set:\n  reference_id: EVD-T-INVENTORY\n  name: T Inventory\n"
+        + ("pipeline:\n  type: inventory\n  id_scheme: t-id\n" if kind == "inventory" else "")
     )
     (fdir / "fetcher.py").write_text(
         "import json, os\nfrom pathlib import Path\n"

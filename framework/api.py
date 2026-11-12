@@ -50,6 +50,7 @@ from framework.contract import (
     TargetField,
     config_hint,
     effective_secrets,
+    pipeline_dict,
     platform_category,
     platform_for,
 )
@@ -182,6 +183,8 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
             "title": f.issue_report.title,
             "format": f.output_type,
         }
+    if f.pipeline is not None:
+        d["pipeline"] = pipeline_dict(f.pipeline)
     if f.is_comparator:
         d["depends_on"] = list(f.depends_on)
     return d
