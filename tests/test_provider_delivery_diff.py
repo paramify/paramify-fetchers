@@ -26,7 +26,7 @@ from framework.paramify.resources import (
 from framework.paramify.version import FLAG_OFF, Capability
 from framework.sync.model import UNKNOWN, Plan, Ref, SyncContext
 from framework.sync.providers import waf
-from framework.sync.providers.delivery import DeliveryProvider, EntryObserved
+from framework.sync.providers.delivery import DIRECT, DeliveryProvider, EntryObserved
 from framework.sync.providers.delivery_routing import (
     DirectRoute,
     Refusal,
@@ -66,6 +66,10 @@ def evidence(*channels: Channel) -> EvidenceSet:
     return EvidenceSet("ev-1", "EVD-12", "Set 12", "SUBMISSION", tuple(channels))
 
 
+def ev_with_channel(approval="SUBMISSION", validators=()) -> EvidenceSet:
+    return EvidenceSet("ev-1", "EVD-12", "Set 12", approval, (CH_P,), tuple(validators))
+
+
 def note(use="aws_x", run_id="R1", entry: Optional[str] = None) -> str:
     parts = [f"fetcher={use}", "version=0.1.0", f"run_id={run_id}", "status=success"]
     if entry:
@@ -73,20 +77,23 @@ def note(use="aws_x", run_id="R1", entry: Optional[str] = None) -> str:
     return "; ".join(parts)
 
 
-def write_file(tmp_path: Path, name: str, payload=None, skip: Optional[str] = None, key="aws_x") -> DeliveryFile:
+def write_file(tmp_path: Path, name: str, payload=None, skip: Optional[str] = None, key="aws_x",
+               skip_reason: Optional[str] = None) -> DeliveryFile:
     body = {"schema_version": "1.0", "metadata": {"fetcher_name": "aws_x"}, "payload": payload or {"k": 1}}
     path = tmp_path / name
     path.write_text(json.dumps(body))
-    return DeliveryFile(path, name, f"Set 12 - {name}", note(entry=key), "evidence", skip)
+    return DeliveryFile(path, name, f"Set 12 - {name}", note(entry=key), "evidence", skip or skip_reason)
 
 
 def entry(tmp_path, key="aws_x", use="aws_x", *, files=("a.json", "b.json"), stack=None, stack_name=None,
-          no_request="refuse", recorded=None, run_id="R1", ref="EVD-12", delivery="auto") -> EntryDesired:
+          no_request="refuse", recorded=None, run_id="R1", ref="EVD-12", delivery="auto", pipeline=None,
+          approval="SUBMISSION_WITH_PASSING_VALIDATORS") -> EntryDesired:
     built = tuple(f if isinstance(f, DeliveryFile) else write_file(tmp_path, f, key=key) for f in files)
     return EntryDesired(
         entry_key=key, use=use, run_id=run_id, reference_id=ref, evidence_set={"reference_id": ref, "name": "Set 12"},
-        category="aws", approval="SUBMISSION_WITH_PASSING_VALIDATORS", stack=stack, stack_name=stack_name,
+        category="aws", approval=approval, stack=stack, stack_name=stack_name,
         no_request=no_request, files=built, recorded_batch_id=recorded, delivery=delivery,
+        pipeline=pipeline,
     )
 
 
@@ -933,3 +940,58 @@ def test_direct_entry_without_a_batch_of_this_run_has_no_open_batch_warning(tmp_
     other_run = artifact("a.json", bid="bt-9", note_text=note(run_id="R0", entry="aws_x"))
     a = plan_one(entry(tmp_path), observed(evidence(CH_P), found=[other_run]), BATCHES_OFF)
     assert a.verb == "deliver" and a.warnings == []
+
+
+# -- pipeline entries ------------------------------------------------------ #
+INV = {"type": "inventory", "id_scheme": "x-id"}
+
+
+def test_pipeline_entry_with_no_request_goes_in_an_evidence_batch(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel(), requests=(), current=()))
+    assert a.verb == "deliver" and a.payload["target"] == "EVIDENCE"
+
+
+def test_pipeline_entry_refuses_delivery_direct(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, delivery="direct"), observed(ev_with_channel()))
+    assert a.verb == "refuse" and "never goes direct" in a.summary
+
+
+def test_pipeline_entry_refuses_no_request_direct(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="direct"), observed(ev_with_channel(), requests=(), current=()))
+    assert a.verb == "refuse"
+
+
+def test_pipeline_entry_goes_direct_with_a_note_when_batches_are_off(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel()), BATCHES_OFF)
+    assert a.payload["target"] == DIRECT and any("no batches" in w for w in a.warnings)
+
+
+def test_manual_set_warns(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel(approval="MANUAL")))
+    assert a.verb == "deliver" and any("approves MANUAL" in w for w in a.warnings)
+
+
+def test_manual_approval_on_a_new_set_warns(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence", approval="MANUAL"), observed(None))
+    assert any("approves MANUAL" in w for w in a.warnings)
+
+
+def test_set_with_validators_refuses(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel(validators=("VAL-1",))))
+    assert a.verb == "refuse" and "VAL-1" in a.summary and "never approve" in a.summary
+
+
+def test_incomplete_inventory_on_a_set_with_validators_is_noop(tmp_path):
+    skipped = write_file(tmp_path, "a.json", key="aws_x", skip_reason="incomplete inventory not sent: x")
+    a = plan_one(entry(tmp_path, pipeline=INV, files=(skipped,)), observed(ev_with_channel(validators=("VAL-1",))))
+    assert a.verb == "noop"
+
+
+def test_deliver_summary_says_the_pipeline_runs(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel()))
+    assert a.summary.endswith("approves on submit → pipeline runs")
+
+
+def test_ordinary_evidence_with_no_request_still_goes_direct(tmp_path):
+    a = plan_one(entry(tmp_path, no_request="direct"), observed(ev_with_channel(), requests=(), current=()))
+    assert a.payload["target"] == DIRECT

@@ -55,12 +55,14 @@ from framework.sync.model import UNKNOWN, Action, Outcome, Ref, SyncContext
 from framework.sync.providers import waf
 from framework.sync.providers.delivery_routing import (
     DONE,
+    PIPELINE_DIRECT,  # noqa: F401  (defined beside pipeline_refusal; re-exported here with the other copy)
     DirectRoute,
     Refusal,
     attribute,
     delivered_before_batches,
     delivered_files,
     own_batch_ids,
+    pipeline_refusal,
     rejected,
     resolve_channel,
     resolve_request,
@@ -79,6 +81,10 @@ from framework.sync.state import RunState
 EVIDENCE_LEVEL_WARNING = "evidence-level batch: does not count toward the solution capability"
 ALL_DROPPED = "every file was dropped"
 BEFORE_BATCHES = "already delivered before batches"
+PIPELINE_BATCHES_OFF = "this workspace has no batches, so the pipeline file goes direct, the pre-batch way"
+PIPELINE_MANUAL = "{ref} approves MANUAL; the {type} pipeline waits for someone to approve the batch"
+PIPELINE_VALIDATORS = "{ref} has {n} validator(s) ({names}); its batches will never approve"
+PIPELINE_RUNS = " · approves on submit → pipeline runs"
 WAF_BLOCKED = "blocked by the production WAF"
 BATCHES_OFF = "batches are off for this workspace"
 DELIVERY_DIRECT = "delivery: direct"
@@ -338,7 +344,7 @@ class DeliveryProvider:
         """Why this entry is sent direct before any request routing, or None."""
         if self._capability is not None and not self._capability.batches:
             return BATCHES_OFF
-        if entry.delivery == "direct":
+        if entry.delivery == "direct" and not entry.pipeline:  # a pipeline entry is refused instead
             return DELIVERY_DIRECT
         return None
 
@@ -433,6 +439,9 @@ class DeliveryProvider:
                     "remove the strings the production WAF blocks (named in each dropped file) "
                     "from the evidence and collect again"))
             return action("noop", f"nothing to send: {_count(len(skipped), 'file')} skipped")
+        refusal = pipeline_refusal(e)
+        if refusal is not None:
+            return action("refuse", refusal.message, fix=refusal.fix)
         if obs is UNKNOWN:
             payload.update(evidence_id=UNKNOWN, target=UNKNOWN)
             return action(
@@ -440,9 +449,20 @@ class DeliveryProvider:
                 changes={"stack": UNKNOWN, "channel": UNKNOWN, "target": UNKNOWN},
             )
 
+        if e.pipeline and obs.evidence is not None and obs.evidence.validators:
+            v = obs.evidence.validators
+            return action("refuse", PIPELINE_VALIDATORS.format(ref=e.reference_id, n=len(v), names=", ".join(v)),
+                          fix=f"remove the validators from {e.reference_id} in the app")
         warnings = [w for w in (stack_drift(e, obs.stacks),) if w]
         sendable = len(files)
         direct = self._direct_reason(e)
+        manual = False
+        if e.pipeline:
+            if direct == BATCHES_OFF:
+                warnings.append(PIPELINE_BATCHES_OFF)
+            manual = (obs.evidence.approval if obs.evidence is not None else e.approval) == "MANUAL"
+            if manual:
+                warnings.append(PIPELINE_MANUAL.format(ref=e.reference_id, type=e.pipeline.get("type")))
         route = _route(e, obs, today, direct)
         # A direct entry counts the files sent before batches as on the set (below). A
         # batch entry leaves them out first, so the no-op comes ahead of a refusal.
@@ -559,7 +579,10 @@ class DeliveryProvider:
             tail = f"resume {mine.reference_id} ({len(missing)} missing)" if missing \
                 else f"resume {mine.reference_id} (submit only)"
         n = _count(len(payload["files"]), "file")
-        return action("deliver", f"deliver {n} to {where}: {tail}", changes=changes, warnings=warnings)
+        summary = f"deliver {n} to {where}: {tail}"
+        if e.pipeline and not manual:
+            summary += PIPELINE_RUNS
+        return action("deliver", summary, changes=changes, warnings=warnings)
 
     # -- apply ------------------------------------------------------------ #
     def apply(self, action: Action, resources: Any, resolve: Callable[[Any], Any]) -> Outcome:

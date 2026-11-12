@@ -22,6 +22,7 @@ from framework.paramify.resources import (
 from framework.sync.providers.desired import EntryDesired
 
 DONE = ("SUBMITTED", "APPROVED")
+PIPELINE_DIRECT = "a pipeline file never goes direct: a direct upload is stored but builds nothing"
 REJECTED = "REJECTED"
 
 
@@ -119,6 +120,13 @@ def resolve_channel(entry: EntryDesired, evidence: Optional[EvidenceSet], stacks
             "Upload it in the app and choose the channel there.",
         )
     return on_stack[0]
+
+
+def pipeline_refusal(entry: EntryDesired) -> Optional[Refusal]:
+    """A pipeline entry the manifest sends direct: a direct upload builds nothing."""
+    if entry.pipeline and (entry.delivery == "direct" or entry.no_request == "direct"):
+        return Refusal(PIPELINE_DIRECT, "remove delivery: direct and no_request: direct from this entry")
+    return None
 
 
 def resolve_request(

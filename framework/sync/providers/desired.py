@@ -16,6 +16,7 @@ from framework.sync.state import RunState
 
 DEFAULT_APPROVAL = "SUBMISSION"
 DEFAULT_NO_REQUEST = "direct"
+DEFAULT_PIPELINE_NO_REQUEST = "evidence"  # a pipeline file never goes direct
 DEFAULT_DELIVERY = "auto"
 
 _ENVELOPE_KEYS = {"schema_version", "metadata", "payload"}
@@ -41,6 +42,7 @@ class DeliveryFile:
     skip_kind: Literal["skipped", "error"] = "skipped"
     # The envelope's collected_at, sent as the artifact's effectiveDate; None: the upload time is sent.
     effective_date: Optional[str] = None
+    pipeline: bool = False  # the envelope names a Paramify pipeline (metadata.pipeline, or an older inventory)
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,15 @@ class EntryDesired:
     collected_on: Optional[date] = None  # the day the run started (UTC), from _run_metadata.json
     approval_explicit: bool = False  # `approval` came from the manifest, not the default
     delivery: str = DEFAULT_DELIVERY
+    pipeline: Optional[Dict[str, Any]] = None  # the chosen envelope's pipeline block, if any
+
+
+def pipeline_of(metadata: Dict) -> Optional[Dict[str, Any]]:
+    """The envelope's pipeline block; a run from before it existed has only `inventory`."""
+    block = metadata.get("pipeline")
+    if isinstance(block, dict):
+        return block
+    return {"type": "inventory"} if isinstance(metadata.get("inventory"), dict) else None
 
 
 def is_enveloped(obj: Any) -> bool:
@@ -285,10 +296,12 @@ def desired_from_run(
                 skip_reason=reason,
                 skip_kind="error" if problem or reason == ERROR_SKIP else "skipped",
                 effective_date=metadata.get("collected_at") or None,
+                pipeline=bool(pipeline_of(metadata)),
             ))
         md = chosen if chosen is not None else (first_md or {})
         es_final = (chosen_es if chosen is not None else first_es) or {}
         cfg = settings.get(key) or {}
+        pipeline = pipeline_of(md)
         result.append(EntryDesired(
             entry_key=key,
             use=cfg.get("use") or md.get("fetcher_name") or key,
@@ -299,11 +312,12 @@ def desired_from_run(
             approval=cfg.get("approval") or DEFAULT_APPROVAL,
             stack=stack_override if stack_override else cfg.get("stack"),
             stack_name=None if stack_override else cfg.get("stack_name"),
-            no_request=cfg.get("no_request") or DEFAULT_NO_REQUEST,
+            no_request=cfg.get("no_request") or (DEFAULT_PIPELINE_NO_REQUEST if pipeline else DEFAULT_NO_REQUEST),
             delivery=cfg.get("delivery") or DEFAULT_DELIVERY,
             files=tuple(files),
             recorded_batch_id=state.batch_for(key),
             collected_on=_started_on(run_meta),
             approval_explicit=bool(cfg.get("approval")),
+            pipeline=pipeline,
         ))
     return result

@@ -2286,6 +2286,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`paramify upload` no longer sends an inventory direct when its channel has
+  no artifact request.** A Paramify inventory pipeline runs only on a file in an
+  approved batch, so a direct upload was stored and built nothing. The file now
+  goes in an evidence-level batch. `delivery: direct` or `no_request: direct` on
+  an inventory entry is refused, and so is an evidence set with validators
+  attached (its batches never approve). `--plan` warns when the set approves
+  MANUAL or the workspace has no batches.
+
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the
