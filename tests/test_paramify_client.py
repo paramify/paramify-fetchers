@@ -1,8 +1,10 @@
 """Tests for framework.paramify: error classification, retries, version check."""
 import json
+from http.client import RemoteDisconnected
 
 import pytest
 import requests
+from urllib3.exceptions import ClosedPoolError, MaxRetryError, NewConnectionError, ProtocolError
 
 from framework.paramify import ApiError, Client, ErrorKind
 from framework.paramify.client import base_url_error, classify
@@ -270,10 +272,50 @@ def test_post_503_then_200_retries_once():
     assert len(s.calls) == 2 and sleeps == [1]
 
 
-def test_post_connection_error_retries():
-    c, _, sleeps = make([requests.ConnectionError("x"), FakeResponse(200, {"ok": 1})])
+def _never_connected():
+    """What requests raises when it could not open a connection: the POST was never sent."""
+    reason = NewConnectionError(None, "Failed to establish a new connection: refused")
+    return requests.ConnectionError(MaxRetryError(None, "/batches", reason=reason))
+
+
+def _dropped_mid_response():
+    """What requests raises when the connection drops after the request went out."""
+    cause = RemoteDisconnected("Remote end closed connection without response")
+    return requests.ConnectionError(ProtocolError("Connection aborted.", cause))
+
+
+@pytest.mark.parametrize("exc", [
+    _never_connected(),
+    requests.ConnectionError(ClosedPoolError(None, "Pool is closed.")),
+    requests.ConnectTimeout("connect timed out"),
+], ids=["new-connection", "closed-pool", "connect-timeout"])
+def test_post_retries_a_connection_that_was_never_made(exc):
+    c, s, sleeps = make([exc, FakeResponse(200, {"ok": 1})])
     assert c.post_json("/batches", {}) == {"ok": 1}
-    assert sleeps == [1]
+    assert len(s.calls) == 2 and sleeps == [1]
+
+
+@pytest.mark.parametrize("send", [
+    lambda c: c.post_json("/batches", {}),
+    lambda c: c.post_json("/batches/b/submit", {}),
+    lambda c: c.post_file("/batches/b/artifacts/upload", "f", b"x", {}),
+], ids=["create", "submit", "upload"])
+def test_post_dropped_mid_response_is_not_retried(send):
+    # The server may have committed the write before the connection dropped, so
+    # a retry could duplicate an artifact or batch, or 409 on an already-submitted
+    # batch. It must be sent exactly once and come back TEMPORARY.
+    c, s, sleeps = make([_dropped_mid_response(), FakeResponse(200, {"ok": 1})])
+    with pytest.raises(ApiError) as ei:
+        send(c)
+    assert ei.value.kind is ErrorKind.TEMPORARY
+    assert "may have taken effect" in str(ei.value)
+    assert len(s.calls) == 1 and sleeps == []
+
+
+def test_get_dropped_mid_response_still_retries():
+    c, s, sleeps = make([_dropped_mid_response(), FakeResponse(200, {"ok": 1})])
+    assert c.get("/x") == {"ok": 1}
+    assert len(s.calls) == 2
 
 
 def test_get_502_then_200_succeeds():

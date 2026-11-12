@@ -12,8 +12,26 @@ from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlparse
 
 import requests
+from urllib3.exceptions import ClosedPoolError, ConnectTimeoutError, MaxRetryError
 
 _BACKOFF_CAP_S = 30.0
+
+
+def _never_connected(exc: requests.ConnectionError) -> bool:
+    """Whether the request could not have reached the server.
+
+    requests raises ConnectionError both when it could not connect and when the
+    connection dropped after the request went out (a urllib3 ProtocolError such as
+    RemoteDisconnected or a reset). Only the first is safe to repeat for a write.
+    A failed connect arrives as a MaxRetryError whose reason is a connect-time
+    error (NewConnectionError and NameResolutionError subclass ConnectTimeoutError).
+    """
+    if isinstance(exc, requests.ConnectTimeout):
+        return True
+    cause = exc.args[0] if exc.args else None
+    if isinstance(cause, ClosedPoolError):
+        return True
+    return isinstance(cause, MaxRetryError) and isinstance(cause.reason, ConnectTimeoutError)
 
 
 class ErrorKind(str, Enum):
@@ -149,7 +167,8 @@ class Client:
         attempt = 0
         # A POST may already be committed server-side when it times out or
         # answers 500/502/504; retrying would duplicate the create or upload.
-        # Only a refusal (429/503) or a failed connection is safe to repeat.
+        # Only a refusal (429/503) or a connection that was never made is safe to
+        # repeat. A connection that dropped after the request went out is not.
         safe_to_retry = method == "GET"
         while True:
             status: Optional[int] = None
@@ -166,6 +185,7 @@ class Client:
                 )
             except requests.ConnectionError as exc:
                 reason = f"{type(exc).__name__}: {exc}"
+                retryable = safe_to_retry or _never_connected(exc)
             except requests.RequestException as exc:
                 reason = f"{type(exc).__name__}: {exc}"
                 retryable = safe_to_retry and isinstance(exc, requests.Timeout)
