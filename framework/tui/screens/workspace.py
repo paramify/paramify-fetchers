@@ -1,7 +1,8 @@
-"""WorkspaceScreen — the five-tab fetcher workspace.
+"""WorkspaceScreen — the four-tab fetcher workspace.
 
-Hosts the shared chrome (AppHeader + HintFooter) and the Catalog / Manifest /
-Run / Evidence / Paramify tabs. The App pushes this once a manifest is chosen
+Hosts the shared chrome (AppHeader + HintFooter) and the Fetchers / Run /
+Evidence / Paramify tabs. Fetchers holds the catalog and the manifest on one
+page. The App pushes this once a manifest is chosen
 (from the welcome front door, or directly via --manifest). The active manifest can be
 swapped in place with the quick-picker (`m`), which reloads the pages.
 """
@@ -16,13 +17,14 @@ from textual.widgets import TabbedContent, TabPane
 from framework.tui.components.chrome import AppHeader, HintFooter
 from framework.tui.screens.catalog import CatalogPanel
 from framework.tui.screens.evidence import EvidencePage
+from framework.tui.screens.fetchers import FetchersPage
 from framework.tui.screens.manifest import ManifestPanel
 from framework.tui.screens.run import RunPage
 from framework.tui.screens.upload import UploadPage
 
 
 class WorkspaceScreen(Screen):
-    TAB_IDS = ["tab-catalog", "tab-manifest", "tab-run", "tab-evidence", "tab-upload"]
+    TAB_IDS = ["tab-fetchers", "tab-run", "tab-evidence", "tab-upload"]
 
     # A one-shot callable that overrides the default focus for the next pane
     # activation (used by the search shortcut to land on the filter box instead
@@ -34,14 +36,13 @@ class WorkspaceScreen(Screen):
     # esc is listed because it is the only way out of a focused text field back
     # to the shortcut keys: an Input consumes every printable key, so while one
     # holds focus none of the hints above it are live.
-    WORKSPACE_HINTS = [("1-5", "tabs"), ("m", "manifest"), ("esc", "leave field"), ("q", "quit")]
+    WORKSPACE_HINTS = [("1-4", "tabs"), ("m", "manifest"), ("esc", "leave field"), ("q", "quit")]
 
     BINDINGS = [
-        Binding("1", "go_tab(0)", "Catalog"),
-        Binding("2", "go_tab(1)", "Manifest"),
-        Binding("3", "go_tab(2)", "Run"),
-        Binding("4", "go_tab(3)", "Evidence"),
-        Binding("5", "go_tab(4)", "Paramify"),
+        Binding("1", "go_tab(0)", "Fetchers"),
+        Binding("2", "go_tab(1)", "Run"),
+        Binding("3", "go_tab(2)", "Evidence"),
+        Binding("4", "go_tab(3)", "Paramify"),
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "unfocus", "Unfocus", show=False),
         Binding("m", "switch_manifest", "Manifest…"),
@@ -51,11 +52,9 @@ class WorkspaceScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield AppHeader()
-        with TabbedContent(initial="tab-catalog"):
-            with TabPane("Catalog", id="tab-catalog"):
-                yield CatalogPanel(id="catalog-page")
-            with TabPane("Manifest", id="tab-manifest"):
-                yield ManifestPanel(id="manifest-page")
+        with TabbedContent(initial="tab-fetchers"):
+            with TabPane("Fetchers", id="tab-fetchers"):
+                yield FetchersPage(id="fetchers-page")
             with TabPane("Run", id="tab-run"):
                 yield RunPage(id="run-page")
             with TabPane("Evidence", id="tab-evidence"):
@@ -156,12 +155,12 @@ class WorkspaceScreen(Screen):
     def action_focus_search(self) -> None:
         self._focus_override = lambda: self.query_one(CatalogPanel).focus_search()
         tabs = self.query_one(TabbedContent)
-        if tabs.active == "tab-catalog":
+        if tabs.active == "tab-fetchers":
             # No TabActivated fires when already here; run the override directly.
             self.call_after_refresh(self._focus_active_pane)
         else:
             self.set_focus(None)
-            tabs.active = "tab-catalog"  # TabActivated → _focus_active_pane consumes the override
+            tabs.active = "tab-fetchers"  # TabActivated → _focus_active_pane consumes the override
 
     def action_switch_manifest(self) -> None:
         self.app.open_manifest_picker()

@@ -16,9 +16,9 @@ from textual.widgets import Button, DataTable, RichLog  # noqa: E402
 from framework import api  # noqa: E402
 from framework.paramify_auth import UPLOAD_TOKEN_ENV  # noqa: E402
 from framework.tui.app import FetcherApp  # noqa: E402
-from framework.tui.modals import ConfirmModal, MultiPickerModal, PreviewModal  # noqa: E402
+from framework.tui.modals import ConfirmModal, PreviewModal  # noqa: E402
 from framework.tui.screens.evidence import EvidencePage  # noqa: E402
-from framework.tui.screens.manifest import ManifestPanel  # noqa: E402
+from framework.tui.screens.fetchers import FetchersPage  # noqa: E402
 from framework.tui.screens.run import RunPage  # noqa: E402
 from framework.tui.screens.upload import UploadPage  # noqa: E402
 from framework.tui.screens.welcome import WelcomeScreen  # noqa: E402
@@ -83,22 +83,27 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             await pilot.pause()
             assert isinstance(app.screen, WorkspaceScreen)
 
-            # Manifest: add demo_hello through the picker; the edit is saved.
-            page = await _tab(pilot, "2", ManifestPanel)
-            assert "manifest is empty" in _text(page.query_one("#manifest-empty-hint"))
-            await pilot.press("a")
-            assert isinstance(app.screen, MultiPickerModal)
-            await pilot.press(*"demo_hello", "enter")
-            assert "demo_hello" in _text(app.screen.query_one("#multi-pick-chosen"))
-            await pilot.press("ctrl+s")
+            # Fetchers: find demo_hello in the catalog and add it with a; the edit is saved.
+            page = await _tab(pilot, "1", FetchersPage)
+            assert "press a on a fetcher to add it" in _text(page.query_one("#manifest-empty-hint"))
+            await pilot.press("slash", *"demo_hello", "escape")
             await pilot.pause()
+            tree = page.query_one("#catalog-tree")
+            for _ in range(12):  # past the kind and platform headings to the fetcher
+                if tree.cursor_node is not None and isinstance(tree.cursor_node.data, dict):
+                    break
+                await pilot.press("down")
+                await pilot.pause()
+            await pilot.press("a")
+            await pilot.pause()
+            assert str(tree.cursor_node.label).rstrip().endswith("✓")
             assert [row[0] for row in _rows(page.query_one("#manifest-entries", DataTable))] == ["demo_hello"]
             assert _text(page.query_one("#manifest-issues")) == "✓ manifest is runnable"
             shipped = yaml.safe_load((REPO_ROOT / "examples" / "demo.yaml").read_text())
             assert yaml.safe_load(manifest.read_text())["run"] == shipped["run"]
 
             # Run: execute it for real.
-            run = await _tab(pilot, "3", RunPage)
+            run = await _tab(pilot, "2", RunPage)
             await pilot.press("ctrl+r")
             banner = run.query_one("#run-banner")
             await _until(pilot, lambda: "run complete" in _text(banner), "the run")
@@ -109,7 +114,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             [run_dir] = (root / "evidence").glob("run-*")
 
             # Evidence: the run and its file, then the enveloped evidence itself.
-            evidence = await _tab(pilot, "4", EvidencePage)
+            evidence = await _tab(pilot, "3", EvidencePage)
             [listed_run] = _rows(evidence.query_one("#evidence-runs", DataTable))
             assert listed_run[0] == run_dir.name.removeprefix("run-")
             assert listed_run[2:] == ["1", "0"]
@@ -123,7 +128,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             await pilot.press("escape")
 
             # Paramify: with no token the upload is refused before anything is sent.
-            upload = await _tab(pilot, "5", UploadPage)
+            upload = await _tab(pilot, "4", UploadPage)
             ready = dict(row[:2] for row in _rows(upload.query_one("#evidence-summary", DataTable)))
             assert ready["selected run"] == listed_run[0]
             assert ready["result"] == "1/1 ok"

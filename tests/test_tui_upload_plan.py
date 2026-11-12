@@ -72,7 +72,9 @@ def test_stack_row_shows_the_stack_name(tmp_path, run_tui):
     api.dump_manifest(m, path, REPO_ROOT)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         assert "Alpha" in str(app.screen.query_one("#manifest-stack", Button).label)
 
@@ -86,7 +88,9 @@ def test_stack_picker_stores_id_and_name(tmp_path, monkeypatch, run_tui):
     monkeypatch.setattr(api, "list_stacks", lambda *a, **k: STACKS)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         app.screen.query_one("#manifest-stack", Button).press()
         await _settle(app, pilot)
@@ -117,7 +121,9 @@ def test_stack_picker_finds_a_token_that_is_only_in_dotenv(tmp_path, no_token, m
     monkeypatch.setattr(api, "list_stacks", lambda *a, **k: STACKS)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         app.screen.query_one("#manifest-stack", Button).press()
         await _settle(app, pilot)
@@ -134,7 +140,9 @@ def test_stack_without_a_token_takes_typed_text(tmp_path, no_token, run_tui):
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         app.screen.query_one("#manifest-stack", Button).press()
         await _settle(app, pilot)
@@ -159,7 +167,9 @@ def test_owner_picker_stores_the_owner_and_can_remove_it(tmp_path, monkeypatch, 
     monkeypatch.setattr(api, "list_channel_owners", lambda *a, **k: OWNERS)
 
     async def pick(app, pilot, choice):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         app.screen.query_one("#manifest-owner", Button).press()
         await _settle(app, pilot)
@@ -189,7 +199,9 @@ def test_owner_without_a_token_takes_typed_text(tmp_path, no_token, run_tui):
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         app.screen.query_one("#manifest-owner", Button).press()
         await _settle(app, pilot)
@@ -207,7 +219,9 @@ def test_entry_editor_writes_and_clears_paramify_overrides(tmp_path, run_tui):
     path, name = _manifest(tmp_path)
 
     async def edit(app, pilot, approval, no_request, stack, delivery=BLANK, owner=""):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
@@ -250,7 +264,7 @@ def _open_confirm(tmp_path, run_tui, check, monkeypatch):
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
         page = app.screen.query_one(UploadPage)
         page.query_one("#upload-submit", Button).disabled = False
@@ -358,7 +372,7 @@ def test_log_shows_brackets_in_file_names_and_reasons(tmp_path, run_tui):
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
         page = app.screen.query_one(UploadPage)
         page._begin_log(Text("uploading"))
@@ -379,7 +393,7 @@ def test_log_panel_renders_delivery_file_progress(tmp_path, run_tui):
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
         page = app.screen.query_one(UploadPage)
         page._begin_log(Text("uploading"))
@@ -417,7 +431,9 @@ def test_entry_editor_edits_the_selected_duplicate_entry(tmp_path, run_tui):
     path, name, cfg_key = _two_entry_manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("down")
         await pilot.pause()
@@ -447,7 +463,9 @@ def test_entry_editor_opens_on_unknown_hand_edited_values(tmp_path, run_tui):
     path.write_text(yaml.safe_dump(m))
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()

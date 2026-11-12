@@ -128,6 +128,12 @@ class CatalogPanel(FilterListNav, Horizontal):
 
     # -- actions ---------------------------------------------------------- #
 
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        # Without its own detail pane, tab belongs to the page that hosts the panel.
+        if action == "next_pane" and not self._has_detail:
+            return False
+        return True
+
     def action_next_pane(self) -> None:
         tree = self.query_one("#catalog-tree", Tree)
         if not self._has_detail:
@@ -164,7 +170,7 @@ class CatalogPanel(FilterListNav, Horizontal):
         if self._has_detail:
             self.query_one("#catalog-detail", Static).update(self.current_detail())
         else:
-            self.post_message(ShowDetail(self.current_detail()))
+            self.post_message(ShowDetail(self.current_detail(), self))
 
     def current_detail(self) -> RenderableType:
         """What the detail pane shows for the highlighted node."""

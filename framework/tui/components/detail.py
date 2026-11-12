@@ -7,6 +7,8 @@ the page's pane lets it bubble to the page.
 
 from __future__ import annotations
 
+from typing import Any
+
 from rich.console import RenderableType
 from textual.message import Message
 
@@ -14,8 +16,9 @@ from textual.message import Message
 class ShowDetail(Message):
     """What the detail pane should show for the panel's highlighted row."""
 
-    def __init__(self, renderable: RenderableType) -> None:
+    def __init__(self, renderable: RenderableType, source: Any = None) -> None:
         self.renderable = renderable
+        self.source = source  # the panel that posted it, so a host can tell its lists apart
         super().__init__()
 
 

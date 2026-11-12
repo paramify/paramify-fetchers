@@ -31,7 +31,6 @@ from framework.tui.components.table import DataTable
 from framework.tui.modals import (
     ConfirmModal,
     FormModal,
-    MultiPickerModal,
     PickerModal,
     PreviewModal,
     TargetsModal,
@@ -102,7 +101,6 @@ class ManifestPanel(ButtonRowNav, Vertical):
             yield Button("—", id="manifest-stack")
             yield Static("owner:", classes="inline-label after-button")
             yield Button("—", id="manifest-owner")
-            yield Button("Add fetcher", variant="primary", id="btn-add")
             yield Button("Save", id="btn-save")
         with Horizontal(id="manifest-body"):
             with Vertical(id="manifest-entries-panel", classes="panel"):
@@ -123,6 +121,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
         self.query_one("#manifest-entries-panel", Vertical).border_title = "fetchers"
         if self._has_detail:
             self.query_one("#manifest-detail-scroll", VerticalScroll).border_title = "detail"
+        else:
+            # On the Fetchers page an empty manifest hides its table; the hint takes
+            # its place as the focus stop, so the manifest's keys stay in reach.
+            self.query_one("#manifest-empty-hint", Static).can_focus = True
         dt = self.query_one("#manifest-entries", DataTable)
         dt.cursor_type = "row"
         dt.zebra_stripes = True
@@ -259,6 +261,9 @@ class ManifestPanel(ButtonRowNav, Vertical):
 
         self._refresh_detail()
         self._set_issues(self._errors)
+        if not self._has_detail:
+            # Under the catalog, whose list is titled "fetchers", this one is the manifest.
+            self.query_one("#manifest-entries-panel", Vertical).border_title = f"manifest ({len(entries)})"
         self.post_message(ManifestChanged(self.in_manifest()))
 
     def _set_empty(self, hint: Optional[str]) -> None:
@@ -273,7 +278,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
         if self._has_detail:
             self.query_one("#manifest-detail", Static).update(self.current_detail())
         else:
-            self.post_message(ShowDetail(self.current_detail()))
+            self.post_message(ShowDetail(self.current_detail(), self))
 
     def current_detail(self) -> RenderableType:
         """What the detail pane shows for the selected entry."""
@@ -567,10 +572,6 @@ class ManifestPanel(ButtonRowNav, Vertical):
             done,
         )
 
-    @on(Button.Pressed, "#btn-add")
-    def _on_btn_add(self) -> None:
-        self.action_add_fetcher()
-
     @on(Button.Pressed, "#btn-save")
     def _on_btn_save(self) -> None:
         self.action_save()
@@ -578,41 +579,8 @@ class ManifestPanel(ButtonRowNav, Vertical):
     # -- actions ---------------------------------------------------------- #
 
     def action_add_fetcher(self) -> None:
-        if not self._has_detail:
-            # On the Fetchers page the catalog above is where fetchers are added.
-            self.post_message(FocusCatalog())
-            return
-        m = self._manifest
-        if m is None:
-            return
-        existing = {e.get("use") for e in self._entries()}
-        cat = getattr(self.app, "catalog_data", None)
-        # Grouped like the catalog, kind first: a platform that ships both kinds
-        # (wiz) would otherwise list its evidence and its scan reports as one.
-        # Every fetcher is passed (not just addable ones): the picker shows the
-        # already-added ones greyed out so a fully-added category — e.g. datadog
-        # once all 13 are in — still appears instead of vanishing.
-        sections = [
-            (kinds.heading(kind), [(c, [f["name"] for f in fs]) for c, fs in groups])
-            for kind, groups in kinds.sections(cat)
-        ]
-        if not sections:
-            self.notify("No fetchers discovered.")
-            return
-
-        def done(names: Optional[List[str]]) -> None:
-            if names:
-                self.add_fetchers(names)
-
-        self.app.push_screen(
-            MultiPickerModal(
-                "Add fetchers",
-                sections,
-                subtitle="enter/space opens a platform or toggles a fetcher · ✓ = already in manifest · type to filter",
-                disabled=existing,
-            ),
-            done,
-        )
+        # Fetchers are added from the catalog above, on the same page.
+        self.post_message(FocusCatalog())
 
     def add_fetchers(self, names: List[str]) -> List[str]:
         """Add fetchers to the manifest and return the names added.

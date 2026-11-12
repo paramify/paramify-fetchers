@@ -35,8 +35,8 @@ def _problems(pane) -> list:
     return problems
 
 
-@pytest.mark.parametrize("keys", [("1",), ("2",), ("3",), ("4",), ("5",), ("5", "p")],
-                         ids=["catalog", "manifest", "run", "evidence", "paramify", "paramify-preview"])
+@pytest.mark.parametrize("keys", [("1",), ("2",), ("3",), ("4",), ("4", "p")],
+                         ids=["fetchers", "run", "evidence", "paramify", "paramify-preview"])
 def test_page_fits_160x50(keys, demo_workspace, no_network):
     async def drive() -> list:
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))

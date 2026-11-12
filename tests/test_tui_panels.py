@@ -249,11 +249,14 @@ def test_manifest_panel_posts_show_detail(tmp_path, monkeypatch, run_tui):
     assert texts and "demo_hello" in texts[-1]
 
 
-def test_manifest_panel_with_detail_is_unchanged(tmp_path, run_tui):
+def test_manifest_panel_with_detail_writes_its_own_pane(tmp_path, run_tui):
+    from framework.tui.screens.manifest import ManifestPanel
+
     async def body(app, pilot):
-        await pilot.press("2")
+        probe = ManifestPanel(detail=True, id="probe")
+        await app.screen.mount(probe)
         await pilot.pause()
-        return _text(app.screen.query_one("#manifest-detail", Static).content)
+        return _text(probe.query_one("#manifest-detail", Static).content)
 
     assert "demo_hello" in run_tui(body, _manifest_with(tmp_path, "demo_hello"))
 
@@ -297,7 +300,9 @@ def test_add_fetchers_writes_and_selects_the_new_row(tmp_path, run_tui):
     path = _manifest_with(tmp_path, "demo_hello")
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         assert _cursor_key(app) == "demo_hello"
         added = _panel(app).add_fetchers(["demo_policy_check"])
@@ -347,10 +352,10 @@ def test_add_fetchers_keeps_the_entry_when_autosave_fails(tmp_path, monkeypatch,
 
 
 def test_rebuild_posts_manifest_changed(tmp_path, monkeypatch, run_tui):
-    from framework.tui.screens.workspace import WorkspaceScreen
+    from framework.tui.screens.fetchers import FetchersPage
 
     seen: list = []
-    monkeypatch.setattr(WorkspaceScreen, "on_manifest_changed", lambda self, e: seen.append(e.names), raising=False)
+    monkeypatch.setattr(FetchersPage, "on_manifest_changed", lambda self, e: seen.append(e.names))
 
     async def body(app, pilot):
         _panel(app).rebuild()

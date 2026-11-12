@@ -69,7 +69,9 @@ def _edit(tmp_path: Path, own=None, text=None, save=True, use=USE, field="resour
         app = FetcherApp(manifest_path=str(path), root_override=str(REPO_ROOT))
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
-            await pilot.press("2")
+            await pilot.press("1")
+            await pilot.pause()
+            await pilot.press("tab")  # from the catalog to the manifest list
             await pilot.pause()
             await pilot.press("e")
             await pilot.pause()

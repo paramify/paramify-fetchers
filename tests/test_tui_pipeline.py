@@ -67,7 +67,7 @@ def test_j_lists_pipeline_jobs(tmp_path, monkeypatch, run_tui):
     monkeypatch.setattr(api, "issues_jobs", lambda root, **kw: jobs)
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
         await pilot.press("j")
         await _settle(app, pilot)
@@ -90,7 +90,7 @@ def test_a_failed_job_offers_retry_and_cancel_behind_a_confirm(tmp_path, monkeyp
     )
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
         await pilot.press("j")
         await _settle(app, pilot)
@@ -122,7 +122,7 @@ def test_shift_c_closes_a_manifest_assessment_after_a_warning(tmp_path, monkeypa
         app.manifest["run"]["fetchers"][0]["config"] = {
             "assessment_id": "A-1", "assessment_name": "Monthly Scan",
         }
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
         await pilot.press("C")
         await pilot.pause()
@@ -141,7 +141,7 @@ def test_shift_c_closes_a_manifest_assessment_after_a_warning(tmp_path, monkeypa
 
 def test_shift_c_with_no_assessment_says_so(tmp_path, run_tui):
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
         await pilot.press("C")
         await pilot.pause()
@@ -171,7 +171,7 @@ def test_each_panel_picks_the_newest_run_of_its_own_kind(tmp_path, run_tui):
     evidence = evidence_run(out, "2026-09-02T00-00-00Z")
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
         page = app.screen.query_one(UploadPage)
         assert page._run_dir == str(evidence)
@@ -222,7 +222,7 @@ def test_paramify_tab_keys_work_on_a_pipeline_only_manifest(tmp_path, monkeypatc
     monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "t")
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
         page = app.screen.query_one(UploadPage)
         assert app.focused is not None and app.focused in page.walk_children()
@@ -240,7 +240,9 @@ def test_a_on_an_empty_manifest_says_what_to_do(tmp_path, run_tui):
     api.dump_manifest(manifest, path, REPO_ROOT)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("A")
         await pilot.pause()
@@ -282,7 +284,7 @@ def test_focus_returns_to_the_paramify_page_after_a_send(tmp_path, monkeypatch, 
     monkeypatch.setattr(UploadPage, "_rebuild_scripts", no_scripts)
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
         page = app.screen.query_one(UploadPage)
         await pilot.press("i")
@@ -304,7 +306,7 @@ def test_focus_returns_to_the_paramify_page_after_a_send(tmp_path, monkeypatch, 
 def test_finishing_a_send_does_not_pull_focus_off_another_tab(tmp_path, run_tui):
     async def body(app, pilot):
         page = app.screen.query_one(UploadPage)
-        await pilot.press("1")                     # the user is on Catalog
+        await pilot.press("1")                     # the user is on Fetchers
         await pilot.pause()
         before = app.focused
         page._finalize_upload({"ok": True, "uploaded": 1})
