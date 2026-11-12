@@ -419,6 +419,32 @@ def test_stack_override_reaches_delivery(fake, root, tmp_path):
     assert out["entries"]["x"]["channel"] == "CH-2"
 
 
+# ---- batch approval -------------------------------------------------------------
+
+def test_a_batch_is_approved_on_submission_by_default_whatever_the_set_says(fake, root, tmp_path):
+    fake.add_evidence("EVD-X", approval="MANUAL")
+    out = api.upload_run(two_files(tmp_path), root)
+    assert [b.get("whenToApprove") for b in fake.batch_bodies] == ["SUBMISSION"]
+    assert out["entries"]["x"]["status"] == "APPROVED"
+
+
+def test_the_manifest_approval_sets_the_batch(fake, root, tmp_path):
+    fake.add_evidence("EVD-X", approval="SUBMISSION")
+    out = api.upload_run(two_files(tmp_path, {"x": {"use": "x", "approval": "MANUAL"}}), root)
+    assert [b.get("whenToApprove") for b in fake.batch_bodies] == ["MANUAL"]
+    assert out["entries"]["x"]["status"] == "SUBMITTED"
+
+
+def test_an_api_without_batch_settings_gets_the_old_request_and_a_warning(fake, root, tmp_path):
+    fake.batch_settings = False
+    fake.add_evidence("EVD-X", approval="MANUAL")
+    out = api.upload_run(two_files(tmp_path), root)
+    assert [b.get("whenToApprove") for b in fake.batch_bodies] == ["SUBMISSION", None]
+    entry = out["entries"]["x"]
+    assert entry["state"] == "delivered" and entry["status"] == "SUBMITTED"
+    assert "cannot set a batch's approval" in out["entries"]["x"]["message"]
+
+
 def fanout_run(tmp_path: Path, paramify=None) -> Path:
     """A run of one entry that fanned out over three targets, as the runner writes it:
     one invocation per target, each with its own file and the entry's key."""
@@ -439,7 +465,7 @@ def test_fanout_entry_is_one_batch_on_the_request_with_a_file_per_target(fake, r
 
     plan = api.plan_upload(run, root, online=True)
     [action] = [a for a in plan.actions if a.verb == "deliver"]
-    assert action.summary == "deliver 3 files to AR-1 (stack Prod, channel CH-1): new batch"
+    assert action.summary == "deliver 3 files to AR-1 (stack Prod, channel CH-1): new batch (approved on submit)"
 
     out = api.upload_run(run, root)
     entry = out["entries"]["x"]
@@ -908,7 +934,7 @@ def test_a_collected_demo_run_uploads_with_its_entry_key_and_paramify_block(fake
     assert entry["artifact_request"]["reference_id"] == "AR-1"
     [noop] = [a for a in out["plan"]["actions"] if a["id"] == "evidence_sets/EVD-DEMO-HELLO"]
     # The run-level approval survived the collect; the entry stack took no run-level label.
-    assert "approval is SUBMISSION here; new sets get MANUAL" in noop["warnings"]
+    assert "approval is SUBMISSION here; this upload's batches get MANUAL" in noop["warnings"]
     [delivery] = [a for a in out["plan"]["actions"] if a["id"] == "delivery/demo_hello"]
     assert not any("now named" in w for w in delivery["warnings"])
     [art] = fake._artifacts

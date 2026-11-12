@@ -56,6 +56,9 @@ def _target_summary(target: dict) -> str:
     return "  ".join(f"{k}={v}" for k, v in vals.items()) or "(empty)"
 
 
+# The owner picker's "remove the owner" choice; no username can be empty.
+_NO_OWNER = "\0none"
+
 class ManifestPage(ButtonRowNav, Vertical):
     HINTS = [
         ("a", "add"), ("e", "entry"), ("x", "remove"), ("t", "targets"),
@@ -82,6 +85,8 @@ class ManifestPage(ButtonRowNav, Vertical):
             yield Input(placeholder="./evidence", id="manifest-output-dir", select_on_focus=False)
             yield Static("stack:", classes="inline-label")
             yield Button("—", id="manifest-stack")
+            yield Static("owner:", classes="inline-label after-button")
+            yield Button("—", id="manifest-owner")
             yield Button("Add fetcher", variant="primary", id="btn-add")
             yield Button("Save", id="btn-save")
         with Horizontal(id="manifest-body"):
@@ -162,6 +167,7 @@ class ManifestPage(ButtonRowNav, Vertical):
             odi.value = out
 
         self.query_one("#manifest-stack", Button).label = self._stack_label()
+        self.query_one("#manifest-owner", Button).label = (self._run().get("paramify") or {}).get("owner") or "—"
 
         descriptors = self._descriptors()
         entries = self._entries()
@@ -468,6 +474,73 @@ class ManifestPage(ButtonRowNav, Vertical):
             done,
         )
 
+    @on(Button.Pressed, "#manifest-owner")
+    def _on_owner(self) -> None:
+        self.action_pick_owner()
+
+    def action_pick_owner(self) -> None:
+        """Choose whose channel uploads use when a stack has one channel per owner.
+
+        With a token the choice is a list of the owners of the workspace's
+        channels. Without one the username is typed and stored as given.
+        """
+        m = self._manifest
+        if m is None:
+            return
+        if api.upload_readiness(self.app.root_path)["token_present"]:
+            self._pick_owner_online(m)
+        else:
+            self._type_owner(m)
+
+    @work(thread=True, exclusive=True, group="owners")
+    def _pick_owner_online(self, m: dict) -> None:
+        try:
+            owners = api.list_channel_owners(self.app.root_path)
+        except Exception as exc:
+            self.app.call_from_thread(self.notify, f"Could not list channel owners: {exc}", severity="error")
+            return
+        self.app.call_from_thread(self._show_owner_picker, m, owners)
+
+    def _set_owner(self, m: dict, owner: Optional[str]) -> None:
+        api.set_owner(m, owner)
+        self._autosave()
+        self.notify("Owner updated." if owner else "Owner removed.")
+        self.rebuild()
+
+    def _show_owner_picker(self, m: dict, owners: List[dict]) -> None:
+        def done(choice: Optional[str]) -> None:
+            if choice is not None:
+                self._set_owner(m, None if choice == _NO_OWNER else choice)
+
+        options = [(o["owner"], f"{o['owner']}  ({o['sets']} evidence set{'s' if o['sets'] != 1 else ''})")
+                   for o in owners]
+        if (self._run().get("paramify") or {}).get("owner"):
+            options.append((_NO_OWNER, "(no owner)"))
+        self.app.push_screen(
+            PickerModal("Paramify channel owner", options,
+                        subtitle="Used only where a stack has one channel per owner."),
+            done,
+        )
+
+    def _type_owner(self, m: dict) -> None:
+        current = (self._run().get("paramify") or {}).get("owner") or ""
+        spec = {"key": "owner", "label": "owner", "kind": "text", "value": current,
+                "placeholder": "Paramify username", "required": False,
+                "help": "no API token: the value is stored as typed; blank removes it"}
+
+        def done(result: Optional[dict]) -> None:
+            if result is None:
+                return
+            value = ((result.get("owner") or {}).get("owner") or "").strip()
+            if value != current:
+                self._set_owner(m, value or None)
+
+        self.app.push_screen(
+            FormModal("Paramify channel owner", {"owner": [spec]},
+                      subtitle="Set a token to pick from the workspace's channel owners."),
+            done,
+        )
+
     @on(Button.Pressed, "#btn-add")
     def _on_btn_add(self) -> None:
         self.action_add_fetcher()
@@ -570,6 +643,9 @@ class ManifestPage(ButtonRowNav, Vertical):
         paramify_specs = [
             {"key": "stack", "label": "stack", "kind": "text", "value": pf.get("stack"),
              "placeholder": "inherit", "required": False, "help": "stack id or name; blank inherits"},
+            {"key": "owner", "label": "owner", "kind": "text", "value": pf.get("owner"),
+             "placeholder": "inherit", "required": False,
+             "help": "Paramify username; picks the channel when a stack has one per owner; blank inherits"},
             {"key": "approval", "label": "approval", "kind": "select", "value": pf.get("approval") if pf.get("approval") in APPROVALS else None,
              "options": [(v, v) for v in APPROVALS], "required": False, "help": "blank inherits"},
             {"key": "no_request", "label": "no_request", "kind": "select", "value": pf.get("no_request") if pf.get("no_request") in NO_REQUESTS else None,
@@ -618,7 +694,7 @@ class ManifestPage(ButtonRowNav, Vertical):
     def _set_entry_paramify(self, entry: dict, values: dict) -> None:
         """Write the entry's `paramify` block from the form; a blank field removes its key."""
         block = dict(entry.get("paramify") or {})
-        for key in ("stack", "approval", "no_request", "delivery"):
+        for key in ("stack", "owner", "approval", "no_request", "delivery"):
             if values.get(key):
                 block[key] = values[key]
             else:

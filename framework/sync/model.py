@@ -158,6 +158,7 @@ class SyncContext:
     upload_cfg: Dict[str, Any]
     stack_override: Optional[str] = None
     only_file: Optional[str] = None
+    owner_override: Optional[str] = None
     # Typed per-provider options, keyed by provider name.
     options: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
