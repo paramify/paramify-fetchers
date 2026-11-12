@@ -157,6 +157,21 @@ def test_noop_action_applies_as_noop_with_the_batch(tmp_path):
     assert again.result["status"] == "APPROVED"
 
 
+def test_noop_reports_a_file_the_done_batch_does_not_have_as_dropped(tmp_path):
+    fake = FakeParamify()
+    fake.fail_upload("b.json", 400, "bad file")
+    h = Harness(fake, two_files(tmp_path))
+    assert h.run()["delivery/x"].result["state"] == "delivered_with_drops"
+    fake.calls.clear()
+    again = Harness(fake, tmp_path)
+    d = again.run()["delivery/x"]
+    assert d.status == "noop" and d.result["batch_id"] == "bt-1"
+    assert d.result["dropped"] == [{"name": "b.json", "reason": "not in approved batch BCH-1"}]
+    assert "b.json" in d.message
+    assert [(e["file"], e["outcome"]) for e in again.file_events()] == [("b.json", "dropped")]
+    assert again.uploads() == [] and again.submits() == []
+
+
 # ---- resume -----------------------------------------------------------------
 
 def test_resume_uploads_only_missing_files_then_submits(tmp_path):

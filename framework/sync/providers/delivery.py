@@ -7,7 +7,8 @@ For each entry, in this order (the first refusal ends the entry):
 3. batch: this entry's batch for this run is found anywhere on the evidence
    set, through one artifacts query by file name, so a second upload of a run
    skips or resumes it, even after the cycle rolled over, and never makes
-   another. A file of this run that the pre-batch uploader already sent (an
+   another. A file that a submitted or approved batch of this run does not
+   have is reported dropped, never as already delivered. A file of this run that the pre-batch uploader already sent (an
    artifact with no batch) is left out; when every file was, the entry is a
    no-op;
 4. WAF: a file the production WAF would block is dropped at plan time.
@@ -508,14 +509,25 @@ class DeliveryProvider:
 
         if mine is not None:
             changes["batch"] = {"id": mine.id, "reference_id": mine.reference_id, "status": mine.status}
+        have = {a.original_file_name for a in obs.artifacts.get(mine.id) or []} if mine is not None else set()
+        missing = [f for f in files if f.original_file_name not in have]
         if mine is not None and mine.status in DONE:
-            payload.update(batch_id=mine.id, batch_reference=mine.reference_id, status=mine.status)
-            return action("noop", f"already delivered in {mine.reference_id}", changes=changes, warnings=warnings)
+            # A file the batch does not have was dropped when it was sent (or never
+            # planned into it): it is not delivered. Report it; a resend would be
+            # refused again, and a finished batch takes no more files.
+            reason = f"not in {mine.status.lower()} batch {mine.reference_id}"
+            payload.update(
+                batch_id=mine.id, batch_reference=mine.reference_id, status=mine.status,
+                files=[_file_json(f) for f in files if f.original_file_name in have],
+                not_in_batch=[{"original_file_name": f.original_file_name, "reason": reason} for f in missing],
+            )
+            summary = f"already delivered in {mine.reference_id}"
+            if missing:
+                summary += f"; not in it: {', '.join(f.original_file_name for f in missing)}"
+            return action("noop", summary, changes=changes, warnings=warnings)
         if mine is None:
             tail = "new batch"
         else:
-            have = {a.original_file_name for a in obs.artifacts.get(mine.id) or []}
-            missing = [f for f in files if f.original_file_name not in have]
             payload.update(resume_batch_id=mine.id, files=[_file_json(f) for f in missing])
             tail = f"resume {mine.reference_id} ({len(missing)} missing)" if missing \
                 else f"resume {mine.reference_id} (submit only)"
@@ -572,8 +584,12 @@ class DeliveryProvider:
         if p.get("target") == DIRECT:
             # A direct no-op plans no files: each sendable file is on the set already.
             done.already_present = self._wanted(p)
-            for name in done.already_present:
-                self._emit(action_id, name, "already_present", None, 0, 0)
+        # A batch no-op names the files sent before batches here: they are not in its payload files.
+        for name in done.already_present:
+            self._emit(action_id, name, "already_present", None, 0, 0)
+        for d in p.get("not_in_batch") or []:
+            done.dropped.append({"name": d["original_file_name"], "reason": d["reason"]})
+            self._emit(action_id, d["original_file_name"], "dropped", None, 0, 0, d["reason"])
         return Outcome(action_id, "noop", done.result("noop"), message)
 
     def _wanted(self, p: Dict[str, Any]) -> List[str]:

@@ -161,6 +161,20 @@ def test_second_upload_of_same_run_is_noop(fake, root, tmp_path):
     assert len(fake._batches) == 1 and len(submits(fake)) == 1
 
 
+def test_a_file_the_submitted_batch_dropped_is_not_counted_as_a_duplicate(fake, root, tmp_path):
+    run = two_files(tmp_path)
+    fake.fail_upload("b.json", 400, "bad file")
+    api.upload_run(run, root)
+    events: List[Dict[str, Any]] = []
+    out = api.upload_run(run, root, on_event=events.append)
+    assert (out["uploaded"], out["skipped_duplicate"], out["dropped"], out["errors"]) == (0, 1, 1, 0)
+    assert sorted((r["file"], r["outcome"]) for r in out["results"]) == [
+        ("a.json", "skipped_duplicate"), ("b.json", "dropped")]
+    assert sorted(file_events(events)) == [("a.json", "skipped_duplicate"), ("b.json", "dropped")]
+    assert out["entries"]["x"]["state"] == "noop" and out["ok"] is True
+    assert len(fake._batches) == 1 and len(submits(fake)) == 1
+
+
 def test_retry_resumes_and_submits_once(fake, root, tmp_path):
     run = two_files(tmp_path)
     fake.fail_upload("a.json", 502)
@@ -693,6 +707,19 @@ def test_files_delivered_before_batches_are_left_out_of_the_batch(fake, root, tm
     assert sorted(file_events(events)) == [("a.json", "skipped_duplicate"), ("b.json", "uploaded")]
     [batch] = fake._batches
     assert batch["artifactCount"] == 1
+
+
+def test_second_upload_counts_files_sent_before_batches_next_to_the_done_batch(fake, root, tmp_path):
+    ev = fake.add_evidence("EVD-X")
+    fake.add_legacy_artifact(ev.id, "a.json", LEGACY_NOTE)
+    run = two_files(tmp_path)
+    assert api.upload_run(run, root)["entries"]["x"]["state"] == "delivered"
+    events: List[Dict[str, Any]] = []
+    out = api.upload_run(run, root, on_event=events.append)
+    assert out["entries"]["x"]["state"] == "noop" and out["ok"] is True
+    assert (out["uploaded"], out["skipped_duplicate"], out["dropped"], out["errors"]) == (0, 2, 0, 0)
+    assert sorted(file_events(events)) == [("a.json", "skipped_duplicate"), ("b.json", "skipped_duplicate")]
+    assert len(out["results"]) == 2
 
 
 def test_a_legacy_artifact_of_another_entry_is_not_this_entrys(fake, root, tmp_path):

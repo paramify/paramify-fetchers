@@ -368,14 +368,24 @@ def _with_batch(tmp_path, status, names=("a.json",), **kw):
 
 
 def test_batches_this_run_submitted_is_noop(tmp_path):
-    a = _with_batch(tmp_path, "SUBMITTED")
+    a = _with_batch(tmp_path, "SUBMITTED", names=("a.json", "b.json"))
     assert a.verb == "noop" and a.summary == "already delivered in BCH-12"
-    assert a.payload["batch_id"] == "bt-12"
+    assert a.payload["batch_id"] == "bt-12" and a.payload["not_in_batch"] == []
 
 
 def test_batches_this_run_approved_is_noop(tmp_path):
-    a = _with_batch(tmp_path, "APPROVED")
+    a = _with_batch(tmp_path, "APPROVED", names=("a.json", "b.json"))
     assert a.verb == "noop" and a.summary == "already delivered in BCH-12"
+
+
+def test_batches_this_run_submitted_without_a_file_reports_it_not_in_the_batch(tmp_path):
+    # b.json was dropped on a permanent error when the batch was sent: it is not delivered.
+    a = _with_batch(tmp_path, "SUBMITTED")
+    assert a.verb == "noop"
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json"]
+    assert a.payload["not_in_batch"] == [
+        {"original_file_name": "b.json", "reason": "not in submitted batch BCH-12"}]
+    assert a.summary == "already delivered in BCH-12; not in it: b.json"
 
 
 def test_batches_open_with_some_files_resumes(tmp_path):
@@ -632,6 +642,7 @@ def _old_request_batch(status, run_id="R1", ar="ar-40"):
 
 def test_rollover_this_runs_batch_approved_on_old_request_is_noop(tmp_path):
     batches, arts = _old_request_batch("APPROVED")
+    arts["bt-12"].append(artifact("b.json"))
     a = plan_one(entry(tmp_path), observed(evidence(CH_P), requests=[AR_PAST, AR_NOW], batches=batches,
                                            artifacts=arts))
     assert a.verb == "noop" and a.summary == "already delivered in BCH-12"
