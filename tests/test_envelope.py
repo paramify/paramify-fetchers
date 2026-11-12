@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from jsonschema import Draft202012Validator
 
 from framework.contract import EvidenceSet, Fetcher, InvocationResult
@@ -171,6 +172,57 @@ def test_unreadable_json_is_skipped_without_raising(tmp_path):
     # A single unreadable file must never abort the run.
     wrap_outputs(make_result(), make_fetcher(tmp_path), "rid", tmp_path)
     assert (tmp_path / "ev.json").read_text() == "{ not valid json"   # left as-is
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+@pytest.mark.parametrize("already_enveloped", [False, True])
+def test_nonstandard_json_constant_is_not_wrapped(tmp_path, caplog, constant, already_enveloped):
+    raw = '{"value": ' + constant + '}'
+    if already_enveloped:
+        raw = '{"schema_version": "1.0", "metadata": {}, "payload": ' + raw + '}'
+    path = tmp_path / "ev.json"
+    path.write_text(raw)
+
+    wrap_outputs(make_result(), make_fetcher(tmp_path), "rid", tmp_path)
+
+    assert path.read_text() == raw
+    assert "cannot read as JSON" in caplog.text
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_target_does_not_write_invalid_json_or_stop_later_invocations(tmp_path, caplog, value):
+    path = tmp_path / "ev.json"
+    path.write_text('{"value": 1}')
+    wrap_outputs(make_result(target={"value": value}), make_fetcher(tmp_path), "rid", tmp_path)
+
+    assert path.read_text() == '{"value": 1}'
+    assert "cannot serialize as JSON" in caplog.text
+
+    # The per-file failure must not prevent a later valid invocation from wrapping.
+    valid = tmp_path / "valid.json"
+    valid.write_text('{"value": 2}')
+    wrap_outputs(make_result(outputs=["valid.json"]), make_fetcher(tmp_path), "rid", tmp_path)
+    assert json.loads(valid.read_text())["payload"] == {"value": 2}
+
+
+def test_overflowing_payload_number_is_not_written_as_infinity(tmp_path, caplog):
+    path = tmp_path / "ev.json"
+    path.write_text('{"value": 1e999}')
+    valid = tmp_path / "valid.json"
+    valid.write_text('{"value": 2}')
+    wrap_outputs(make_result(outputs=["ev.json", "valid.json"]), make_fetcher(tmp_path), "rid", tmp_path)
+
+    assert path.read_text() == '{"value": 1e999}'
+    assert "cannot serialize as JSON" in caplog.text
+    assert json.loads(valid.read_text())["payload"] == {"value": 2}
+
+
+def test_finite_values_and_constant_names_in_strings_are_preserved(tmp_path):
+    raw = {"zero": 0, "negative": -1.25, "exponent": 1e30,
+           "text": ["NaN", "Infinity", "-Infinity"], "empty": None, "enabled": False}
+    env = _wrap_one(tmp_path, raw)
+    assert env["payload"] == raw
+    _VALIDATOR.validate(env)
 
 
 def test_no_evidence_set_block_when_fetcher_declares_none(tmp_path):

@@ -14,8 +14,10 @@ paramify:
   base_url: https://app.paramify.com/api/v0   # optional; default shown
 
 # Channels need no configuration: an evidence set that has one is uploaded
-# through it, and one with none uploads unchanneled. Channels are created in the
-# Paramify app — the API only lets the uploader use what a set already has.
+# through it, and one with none gets its batch on the evidence set. A set with
+# several channels needs a stack: set it in the run manifest (run.paramify.stack,
+# `paramify manifest set-stack`) or with `paramify upload --stack`. Channels are
+# created in the Paramify app — the upload only uses what a set already has.
 
 # Per-fetcher overrides. Key = fetcher name (metadata.fetcher_name). Override
 # just reference_id to map a fetcher to a different evidence set in your program;

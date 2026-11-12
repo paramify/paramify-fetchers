@@ -56,7 +56,7 @@ def _subcommands(group: str) -> set:
 EXPECTED_TOP = {
     "list", "catalog", "describe", "ksi", "doctor", "manifests", "runs",
     "evidence", "validate", "run", "upload", "manifest", "scripts", "programs",
-    "assessments", "capabilities", "artifacts", "issues", "tui",
+    "assessments", "capabilities", "artifacts", "issues", "tui", "stacks",
 }
 EXPECTED_PROGRAMS = {"list", "target"}
 EXPECTED_ASSESSMENTS = {"list", "select"}
@@ -66,7 +66,7 @@ EXPECTED_ISSUES = {"upload"}
 EXPECTED_MANIFEST = {
     "init", "new", "add", "remove", "set-config", "set-secret",
     "add-target", "remove-target", "set-platform-config",
-    "set-passthrough", "set-output-dir", "show",
+    "set-passthrough", "set-output-dir", "set-stack", "show",
 }
 EXPECTED_SCRIPTS = {"sync"}
 
@@ -152,6 +152,12 @@ def test_issues_upload_accepts_force():
     only remaining option is deleting the log, which re-sends every file."""
     cmd = get_command(app).commands["issues"].commands["upload"]
     assert "force" in {p.name for p in cmd.params}
+
+
+@pytest.fixture(autouse=True)
+def _no_dotenv(monkeypatch):
+    """No test here reads the developer's own `.env`: doctor, `run` and set-stack load it."""
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
 
 
 def test_doctor_json_ok_without_manifest():
@@ -369,6 +375,10 @@ API_TO_CLI = {
     "validate": "validate",
     "run": "run",
     "upload_preflight": "upload",
+    "plan_upload": "upload",
+    "list_stacks": "stacks",
+    "set_stack": "manifest set-stack",
+    "upload_readiness": "manifest set-stack",  # its token check; `doctor` reports it too
     "upload_run": "upload",
     "scripts_sync_preflight": "scripts sync",
     "scripts_sync": "scripts sync",
@@ -698,6 +708,21 @@ def test_human_run_printer_emits_contract(capsys):
     assert "[FAIL] exit=1" in out and "target=t1" in out
     assert "_run_metadata.json → /tmp/run/_run_metadata.json" in out
     assert "SKIP  f3 (missing secret)" in err  # skips/errors go to stderr
+
+
+def test_human_run_printer_says_why_an_invocation_failed(capsys):
+    """A failed invocation's reason (the event's `error`) is printed under its
+    [FAIL] line, so the CLI says why, as the TUI does. A pass prints none."""
+    from framework.cli import _human_run_printer
+    cb = _human_run_printer()
+    cb({"event": "fetcher_result", "fetcher": "f1", "exit_code": 0, "duration_sec": 0.1, "target": None,
+        "error": "ignored on a pass"})
+    cb({"event": "fetcher_result", "fetcher": "f1", "exit_code": 1, "duration_sec": 0.1, "target": None,
+        "error": "overwrote demo_hello.json, which an earlier entry or target wrote in this run."})
+    cb({"event": "fetcher_result", "fetcher": "f2", "exit_code": 2, "duration_sec": 0.1, "target": None})
+    err = capsys.readouterr().err
+    assert "overwrote demo_hello.json, which an earlier entry or target wrote in this run." in err
+    assert "ignored on a pass" not in err
 
 
 # --------------------------------------------------------------------------- #
