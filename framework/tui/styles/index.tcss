@@ -127,7 +127,7 @@ TabbedContent {
 }
 
 /* ---- Catalog ---- */
-CatalogPage { height: 1fr; padding: 1 1 0 1; }
+CatalogPanel { height: 1fr; padding: 1 1 0 1; }
 
 #catalog-left { width: 42%; min-width: 32; }
 #catalog-search { margin: 1 0; }

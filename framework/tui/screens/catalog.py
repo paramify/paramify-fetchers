@@ -6,21 +6,27 @@ not the platform, decides where a fetcher's output goes (see tui/kinds.py), and
 a platform that ships both kinds would otherwise mix them in one folder. Right
 panel: the selected fetcher's contract, or what a kind is when its heading is
 highlighted. Panels are titled and their border follows focus (.panel CSS).
+
+A panel made with detail=False leaves the right panel out: it posts ShowDetail
+for the page that hosts it to show in a shared pane.
 """
 
 from __future__ import annotations
 
+from rich.console import RenderableType
+from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Input, Static, Tree
 
 from framework.tui import kinds, render
+from framework.tui.components.detail import ShowDetail
 from framework.tui.components.keys import FILTER_NAV_BINDINGS, FilterListNav
 
 
-class CatalogPage(FilterListNav, Horizontal):
-    """Two-pane fetcher catalog: tree on the left, contract detail on the right."""
+class CatalogPanel(FilterListNav, Horizontal):
+    """Fetcher catalog: a tree, and (with detail=True) the contract beside it."""
 
     HINTS = [("↑↓/jk", "navigate"), ("/", "filter"), ("tab", "pane")]
 
@@ -36,18 +42,25 @@ class CatalogPage(FilterListNav, Horizontal):
 
     _filter: str = ""
 
+    def __init__(self, *, detail: bool = True, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._has_detail = detail
+        self._data = None  # what the highlighted node carries: a fetcher, a kind heading, or None
+
     def compose(self) -> ComposeResult:
         with Vertical(id="catalog-left", classes="panel"):
             yield Input(placeholder="/ filter fetchers…", id="catalog-search")
             yield Tree("fetchers", id="catalog-tree")
-        with VerticalScroll(id="catalog-detail-scroll", classes="panel"):
-            yield Static(render.empty_detail(), id="catalog-detail")
+        if self._has_detail:
+            with VerticalScroll(id="catalog-detail-scroll", classes="panel"):
+                yield Static(render.empty_detail(), id="catalog-detail")
 
     def on_mount(self) -> None:
         self.query_one("#catalog-tree", Tree).show_root = False
-        detail = self.query_one("#catalog-detail-scroll", VerticalScroll)
-        detail.can_focus = True
-        detail.border_title = "contract"
+        if self._has_detail:
+            detail = self.query_one("#catalog-detail-scroll", VerticalScroll)
+            detail.can_focus = True
+            detail.border_title = "contract"
         self.rebuild()
 
     # -- data ------------------------------------------------------------- #
@@ -98,6 +111,9 @@ class CatalogPage(FilterListNav, Horizontal):
 
     def action_next_pane(self) -> None:
         tree = self.query_one("#catalog-tree", Tree)
+        if not self._has_detail:
+            tree.focus()
+            return
         right = self.query_one("#catalog-detail-scroll", VerticalScroll)
         on_left = tree.has_focus or self.query_one("#catalog-search", Input).has_focus
         (right if on_left else tree).focus()
@@ -111,8 +127,8 @@ class CatalogPage(FilterListNav, Horizontal):
     def _nav(self, down: bool) -> None:
         # j/k drive whatever pane is focused: scroll the detail when it holds
         # focus, otherwise move the tree cursor (matches the arrow-key routing).
-        right = self.query_one("#catalog-detail-scroll", VerticalScroll)
-        if right.has_focus:
+        right = self.query("#catalog-detail-scroll").first() if self._has_detail else None
+        if right is not None and right.has_focus:
             right.action_scroll_down() if down else right.action_scroll_up()
         else:
             tree = self.query_one("#catalog-tree", Tree)
@@ -121,13 +137,24 @@ class CatalogPage(FilterListNav, Horizontal):
     # -- helpers ---------------------------------------------------------- #
 
     def _show(self, data) -> None:
-        detail = self.query_one("#catalog-detail", Static)
+        self._data = data
+        self.post_message(ShowDetail(self.current_detail()))
+
+    def current_detail(self) -> RenderableType:
+        """What the detail pane shows for the highlighted node."""
+        data = self._data
         if isinstance(data, dict):
-            detail.update(render.fetcher_detail(data))
-        elif isinstance(data, tuple):
-            detail.update(render.kind_detail(*data))
-        else:
-            detail.update(render.empty_detail())
+            return render.fetcher_detail(data)
+        if isinstance(data, tuple):
+            return render.kind_detail(*data)
+        return render.empty_detail()
+
+    @on(ShowDetail)
+    def _own_detail(self, event: ShowDetail) -> None:
+        # Only a panel with its own pane keeps the message; otherwise the host shows it.
+        if self._has_detail:
+            event.stop()
+            self.query_one("#catalog-detail", Static).update(event.renderable)
 
     def focus_search(self) -> None:
         self.query_one("#catalog-search", Input).focus()
