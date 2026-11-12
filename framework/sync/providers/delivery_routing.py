@@ -1,6 +1,7 @@
 """The routing rules of delivery, as pure functions over observed API data.
 
-- `resolve_channel`: which channel of the evidence set, by the entry's stack.
+- `resolve_channel`: which channel of the evidence set, by the entry's stack,
+  then by its owner when the stack has several channels.
 - `resolve_request`: which artifact request on that channel.
 - `attribute`: which batch is this entry's for this run, found from the
   `run_id=` and `entry=` (or `fetcher=`) tokens in its artifacts' notes.
@@ -109,16 +110,27 @@ def resolve_channel(entry: EntryDesired, evidence: Optional[EvidenceSet], stacks
             f"{ref} has no channel on stack {stack.name}",
             f"create a channel for stack {stack.name} on {ref} in the app",
         )
-    if len(on_stack) > 1:
-        # Paramify makes one channel per owner on a stack, by design, so the
-        # user cannot remove one. Name the owners so they know which to pick.
-        names = ", ".join(f"{c.reference_id} ({c.owner})" if c.owner else c.reference_id for c in on_stack)
-        return Refusal(
-            f"{ref} has {len(on_stack)} channels on stack {stack.name}, one per owner: {names}",
-            "the upload cannot choose which owner's request this evidence fills. "
-            "Upload it in the app and choose the channel there.",
-        )
-    return on_stack[0]
+    if len(on_stack) == 1:
+        return on_stack[0]
+    # Paramify makes one channel per owner on a stack, by design, so the user
+    # cannot remove one. The owner breaks the tie, and only here: a set whose
+    # stack has one channel uses it whoever owns it.
+    owners = ", ".join(c.owner for c in on_stack if c.owner) or "none"
+    if entry.owner:
+        mine = [c for c in on_stack if c.owner and c.owner.casefold() == entry.owner.casefold()]
+        if len(mine) == 1:
+            return mine[0]
+        if not mine:
+            return Refusal(
+                f"{ref} has no channel on stack {stack.name} owned by {entry.owner}",
+                f"set the owner to one of: {owners}",
+            )
+    names = ", ".join(f"{c.reference_id} ({c.owner})" if c.owner else c.reference_id for c in on_stack)
+    return Refusal(
+        f"{ref} has {len(on_stack)} channels on stack {stack.name}, one per owner: {names}",
+        "set an owner to choose one (paramify manifest set-owner, or paramify upload --owner); "
+        f"owners: {owners}",
+    )
 
 
 def resolve_request(

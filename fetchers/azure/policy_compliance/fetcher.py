@@ -1154,9 +1154,9 @@ def collect_remediation_deployments(
                   arm_id_key(task.get("policy_definition_reference_id")))
         read = read_by_policy.setdefault(policy, set())
         current = current_by_policy.setdefault(policy, {})
-        unread = sorted({arm_id_key(d.get("remediated_resource_id")) for d in rows} - read - {""})
-        for at in range(0, len(unread), RESOURCE_FILTER_BATCH):
-            batch = unread[at:at + RESOURCE_FILTER_BATCH]
+        to_read = sorted({arm_id_key(d.get("remediated_resource_id")) for d in rows} - read - {""})
+        for at in range(0, len(to_read), RESOURCE_FILTER_BATCH):
+            batch = to_read[at:at + RESOURCE_FILTER_BATCH]
             read.update(batch)
             current.update(collector.guard(
                 f"policyinsights.policy_states.list_query_results_for_subscription (remediated {name})",

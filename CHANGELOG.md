@@ -84,6 +84,15 @@ schemas and the `paramify` CLI — not the internal code.
   request, and whether the batch is new, resumed or done. It also shows dropped
   files and open batches from earlier runs. `--dry-run` stays offline and needs
   no token.
+- **Choose the channel by owner: `run.paramify.owner`, `paramify manifest
+  set-owner`, `paramify upload --owner`, and an owner setting in the TUI.**
+  Paramify makes one channel for each owner on each stack. Before, the upload
+  refused a set with two owners' channels on one stack. Now it uses the
+  channel of the owner the manifest sets. The owner is read only in that case:
+  a set with one channel on the stack uses it, whoever owns it. An entry can
+  set its own owner. The plan gives a note when the manifest's owner differs
+  from the run's. `paramify validate --online` gives a note for an owner who
+  has no channel in the workspace.
 - **`paramify upload --stack`, `paramify stacks`, `paramify manifest set-stack`,
   and the `run.paramify` manifest keys.** `run.paramify` and the `paramify`
   block of each entry hold `stack`, `stack_name`, `approval` and `no_request`.
@@ -1576,6 +1585,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **Each batch the upload creates is approved on submission by default.** The
+  upload now sends the entry's `approval` (default `SUBMISSION`) when it creates
+  a batch. Before, a batch took the evidence set's mode, so a set made `MANUAL`
+  in the app held each batch for review. Set `approval: MANUAL` or
+  `SUBMISSION_WITH_PASSING_VALIDATORS` on an entry to keep review or validator
+  gating. The plan says how each new batch is approved. A workspace whose API
+  cannot set a batch's mode gets the batch without it, with a warning. A batch
+  that is approved on submission but still reads `SUBMITTED` no longer reports
+  `waiting for review`.
+
 - **Upload result shape.** The `--json` summary and `upload_log.json` keep
   `uploaded`, `skipped_duplicate`, `skipped_failed`, `errors` and `ok` for one
   release. So do the `upload_start`, `upload_file` and `upload_complete` events.
@@ -2352,6 +2371,12 @@ schemas and the `paramify` CLI — not the internal code.
   `azure_key_vault_configuration` `in_scope_key_vaults` and `excluded_key_vaults`,
   and `azure_storage_encryption_status` `in_scope_storage_accounts` and
   `excluded_storage_accounts`.
+  `azure_policy_compliance` now marks a task whose deployment list failed as
+  unread even after an earlier task returned rows; before, a local list took
+  over the name of the caller's list, so `deployments_complete` stayed true.
+  `azure_resource_inventory` also nulls the field when the Defender assessments
+  or Policy states query fails, since patterns are matched against those rows
+  too.
 - **The TUI's Paramify tab fits a 160x50 terminal.** Below 242 columns the
   scripts-sync panel was squeezed to its border, its buttons drawn over the log,
   and a missing-token preflight error ran off the evidence panel behind a
