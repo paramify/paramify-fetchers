@@ -25,3 +25,15 @@ class AddRequested(Message):
     def __init__(self, names: list) -> None:
         self.names = list(names)
         super().__init__()
+
+
+class ManifestChanged(Message):
+    """The manifest panel rebuilt; names are the fetchers now in the manifest."""
+
+    def __init__(self, names: set) -> None:
+        self.names = set(names)
+        super().__init__()
+
+
+class FocusCatalog(Message):
+    """`a` on the manifest list: the page should move focus to the catalog filter."""

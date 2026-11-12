@@ -256,3 +256,137 @@ def test_manifest_panel_with_detail_is_unchanged(tmp_path, run_tui):
         return _text(app.screen.query_one("#manifest-detail", Static).content)
 
     assert "demo_hello" in run_tui(body, _manifest_with(tmp_path, "demo_hello"))
+
+
+# --------------------------------------------------------------------------- #
+# ManifestPanel: the add API the Fetchers page calls
+# --------------------------------------------------------------------------- #
+
+def _cursor_key(app) -> str:
+    from framework.tui.components.table import DataTable
+
+    dt = app.screen.query_one("#manifest-entries", DataTable)
+    return dt.coordinate_to_cell_key(dt.cursor_coordinate).row_key.value
+
+
+def _uses(path: Path) -> set:
+    import yaml
+
+    return {e["use"] for e in yaml.safe_load(path.read_text())["run"]["fetchers"]}
+
+
+def _panel(app):
+    from framework.tui.screens.manifest import ManifestPanel
+
+    return app.screen.query_one(ManifestPanel)
+
+
+def _record_notices(app) -> list:
+    notices: list = []
+    real = app.notify
+
+    def notify(message, *a, **kw):
+        notices.append((str(message), kw.get("severity", "information")))
+        return real(message, *a, **kw)
+
+    app.notify = notify
+    return notices
+
+
+def test_add_fetchers_writes_and_selects_the_new_row(tmp_path, run_tui):
+    path = _manifest_with(tmp_path, "demo_hello")
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        assert _cursor_key(app) == "demo_hello"
+        added = _panel(app).add_fetchers(["demo_policy_check"])
+        await pilot.pause()
+        # The new row, not the row that was selected before the add.
+        return added, _cursor_key(app)
+
+    added, cursor = run_tui(body, path)
+    assert added == ["demo_policy_check"]
+    assert cursor == "demo_policy_check"
+    assert _uses(path) == {"demo_hello", "demo_policy_check"}
+
+
+def test_add_fetchers_brings_comparator_inputs(tmp_path, run_tui):
+    path = _manifest_with(tmp_path)
+
+    async def body(app, pilot):
+        notices = _record_notices(app)
+        added = _panel(app).add_fetchers(["demo_policy_check"])
+        await pilot.pause()
+        return added, notices
+
+    added, notices = run_tui(body, path)
+    assert set(added) == {"demo_policy_check", "demo_hello"}
+    assert _uses(path) == {"demo_policy_check", "demo_hello"}
+    assert any("Added demo_policy_check + 1 input" in text for text, _ in notices), notices
+
+
+def test_add_fetchers_keeps_the_entry_when_autosave_fails(tmp_path, monkeypatch, run_tui):
+    path = _manifest_with(tmp_path)
+
+    def refuse(*_a, **_k):
+        raise OSError("read-only file system")
+
+    async def body(app, pilot):
+        notices = _record_notices(app)
+        monkeypatch.setattr(api, "dump_manifest", refuse)
+        _panel(app).add_fetchers(["demo_hello"])
+        await pilot.pause()
+        uses = {e["use"] for e in app.manifest["run"]["fetchers"]}
+        return uses, _panel(app).in_manifest(), notices
+
+    uses, marked, notices = run_tui(body, path)
+    assert uses == {"demo_hello"} and marked == {"demo_hello"}
+    assert any(sev == "error" and "not saved" in text for text, sev in notices), notices
+    assert _uses(path) == set(), "the file changed although the save failed"
+
+
+def test_rebuild_posts_manifest_changed(tmp_path, monkeypatch, run_tui):
+    from framework.tui.screens.workspace import WorkspaceScreen
+
+    seen: list = []
+    monkeypatch.setattr(WorkspaceScreen, "on_manifest_changed", lambda self, e: seen.append(e.names), raising=False)
+
+    async def body(app, pilot):
+        _panel(app).rebuild()
+        await pilot.pause()
+        return seen
+
+    assert run_tui(body, _manifest_with(tmp_path, "demo_hello"))[-1] == {"demo_hello"}
+
+
+def test_select_moves_the_cursor_to_an_entry(tmp_path, run_tui):
+    async def body(app, pilot):
+        _panel(app).select("demo_hello")
+        await pilot.pause()
+        return _cursor_key(app)
+
+    assert run_tui(body, _manifest_with(tmp_path, "demo_policy_check", "demo_hello")) == "demo_hello"
+
+
+def test_a_on_a_shared_manifest_panel_asks_for_the_catalog(tmp_path, monkeypatch, run_tui):
+    from framework.tui.screens.manifest import ManifestPanel
+    from framework.tui.screens.workspace import WorkspaceScreen
+
+    asked: list = []
+    monkeypatch.setattr(WorkspaceScreen, "on_focus_catalog", lambda self, e: asked.append(e), raising=False)
+
+    async def body(app, pilot):
+        probe = ManifestPanel(detail=False, id="probe")
+        await app.screen.mount(probe)
+        await pilot.pause()
+        hint = _text(probe.query_one("#manifest-empty-hint", Static).content)
+        probe.query_one("#manifest-entries").focus()
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        return hint, len(asked), type(app.screen).__name__
+
+    hint, n, screen = run_tui(body, _manifest_with(tmp_path))
+    assert "press a on a fetcher to add it" in hint
+    assert n == 1 and screen == "WorkspaceScreen", "a opened the picker instead of asking for the catalog"

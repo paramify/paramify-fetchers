@@ -24,7 +24,7 @@ from framework.contract import ManifestEntry
 from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
 from framework.runner.manifest_loader import entry_keys
 from framework.tui import kinds, palette, render
-from framework.tui.components.detail import ShowDetail
+from framework.tui.components.detail import FocusCatalog, ManifestChanged, ShowDetail
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.components.table import DataTable
@@ -176,6 +176,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             dt.clear()
             self._set_empty(f"no manifest loaded — press [bold {palette.ACCENT}]m[/] to pick one")
             self._set_issues(["(no manifest loaded)"])
+            self.post_message(ManifestChanged(set()))
             return
 
         out = self._run().get("output_dir", "") or ""
@@ -234,11 +235,12 @@ class ManifestPanel(ButtonRowNav, Vertical):
             )
             row_keys.append(ekey)
 
-        self._set_empty(
-            None
-            if entries
-            else f"manifest is empty — press [bold {palette.ACCENT}]a[/] to add fetchers"
+        empty = (
+            f"manifest is empty — press [bold {palette.ACCENT}]a[/] to add fetchers"
+            if self._has_detail
+            else f"press [bold {palette.ACCENT}]a[/] on a fetcher to add it"
         )
+        self._set_empty(None if entries else empty)
 
         # preserve selection across rebuilds
         if row_keys:
@@ -257,6 +259,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
 
         self._refresh_detail()
         self._set_issues(self._errors)
+        self.post_message(ManifestChanged(self.in_manifest()))
 
     def _set_empty(self, hint: Optional[str]) -> None:
         """Show the hatched placeholder (with the given message) instead of the
@@ -575,6 +578,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
     # -- actions ---------------------------------------------------------- #
 
     def action_add_fetcher(self) -> None:
+        if not self._has_detail:
+            # On the Fetchers page the catalog above is where fetchers are added.
+            self.post_message(FocusCatalog())
+            return
         m = self._manifest
         if m is None:
             return
@@ -594,36 +601,8 @@ class ManifestPanel(ButtonRowNav, Vertical):
             return
 
         def done(names: Optional[List[str]]) -> None:
-            if not names:
-                return
-            # Auto-wire each added fetcher's entry-level secrets to their suggested
-            # env var names: the default is almost always correct, so the edit form
-            # is only needed for the edge case where a name differs. (Per-target
-            # secrets are not wired here — each target usually needs its own cred.)
-            descriptors = self._descriptors()
-            try:
-                fetchers = api.discover(self.app.root_path)["fetchers"]
-            except Exception:  # never let a discovery failure kill the UI
-                fetchers = {}
-            # A comparator brings its inputs with it.
-            added = [a for name in names for a in api.add_entry(m, name, fetchers)]
-            wired = False
-            for name in added:
-                d = descriptors.get(name)
-                if d:
-                    for s in d.get("secrets", []):
-                        if not s.get("per_target") and s.get("env"):
-                            api.set_secret(m, name, s["name"], s["env"])
-                            wired = True
-            self._selected = names[-1]
-            self._autosave()
-            self.rebuild()
-            n = len(added)
-            noun = "fetcher" if n == 1 else "fetchers"
-            if wired:
-                self.notify(f"Added {n} {noun} — secrets wired to default env vars (e to change).")
-            else:
-                self.notify(f"Added {n} {noun}.")
+            if names:
+                self.add_fetchers(names)
 
         self.app.push_screen(
             MultiPickerModal(
@@ -634,6 +613,61 @@ class ManifestPanel(ButtonRowNav, Vertical):
             ),
             done,
         )
+
+    def add_fetchers(self, names: List[str]) -> List[str]:
+        """Add fetchers to the manifest and return the names added.
+
+        A comparator brings its inputs with it. Each added fetcher's entry-level
+        secrets are wired to their suggested env var names: the default is almost
+        always correct, so the edit form is only needed where a name differs.
+        (Per-target secrets are not wired: each target usually needs its own
+        credential.) The table cursor moves to the last fetcher asked for.
+        """
+        m = self._manifest
+        if m is None or not names:
+            return []
+        descriptors = self._descriptors()
+        try:
+            fetchers = api.discover(self.app.root_path)["fetchers"]
+        except Exception:  # never let a discovery failure kill the UI
+            fetchers = {}
+        added = [a for name in names for a in api.add_entry(m, name, fetchers)]
+        wired = False
+        for name in added:
+            d = descriptors.get(name)
+            for s in (d or {}).get("secrets", []):
+                if not s.get("per_target") and s.get("env"):
+                    api.set_secret(m, name, s["name"], s["env"])
+                    wired = True
+        # Both: rebuild keeps the old row while _selected_key still names one.
+        self._selected = self._selected_key = names[-1]
+        self._autosave()
+        self.rebuild()
+        if added:
+            asked = [n for n in names if n in added]
+            inputs = len(added) - len(asked)
+            message = f"Added {', '.join(asked) or ', '.join(added)}"
+            if asked and inputs:
+                message += f" + {inputs} input{'s' if inputs != 1 else ''}"
+            if wired:
+                message += " — secrets wired to default env vars (e to change)."
+            self.notify(message)
+        return added
+
+    def in_manifest(self) -> set:
+        """The fetchers the manifest uses."""
+        return {str(e.get("use")) for e in self._entries() if e.get("use")}
+
+    def select(self, use: str) -> None:
+        """Move the table cursor to the entry for `use`."""
+        dt = self.query_one("#manifest-entries", DataTable)
+        try:
+            row = dt.get_row_index(use)
+        except Exception:
+            return
+        self._selected = self._selected_key = use
+        dt.move_cursor(row=row)
+        self._refresh_detail()
 
     def action_edit_entry(self) -> None:
         use, m = self._selected, self._manifest
