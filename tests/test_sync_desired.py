@@ -206,3 +206,11 @@ def test_ordinary_entry_has_no_pipeline(tmp_path):
     build(tmp_path, {"a.json": env()}, [inv("x", ["a.json"])])
     [e] = desired_from_run(tmp_path, {})
     assert e.pipeline is None and not e.files[0].pipeline
+
+
+def test_old_inventory_run_through_desired_from_run_is_a_pipeline_entry(tmp_path):  # Review Focus 1
+    # A run collected before the pipeline block: metadata.inventory, no metadata.pipeline.
+    build(tmp_path, {"a.json": env(inventory={"complete": True})}, [inv("x", ["a.json"])], {"x": {"use": "x"}})
+    [e] = desired_from_run(tmp_path, {})
+    assert e.pipeline == {"type": "inventory"} and e.no_request == "evidence"
+    assert e.files[0].pipeline is True and e.files[0].kind == "inventory"
