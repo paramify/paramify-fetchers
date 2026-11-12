@@ -270,7 +270,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2`, `cm-3`, `cm-5`, `cm-6`, `cm-7`, `cm-8.1`, `si-3`
 
-*9 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments), [`azure_change_provenance`](../fetchers/azure/change_provenance), [`azure_change_work_items`](../comparators/azure/change_work_items), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`github_deployment_controls`](../fetchers/github/deployment_controls), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config)
+*10 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments), [`azure_change_provenance`](../fetchers/azure/change_provenance), [`azure_change_work_items`](../comparators/azure/change_work_items), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`github_deployment_controls`](../fetchers/github/deployment_controls), [`github_workflow_runs`](../fetchers/github/workflow_runs), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config)
 
 #### ⬜ `KSI-CMT-RVP` — Reviewing Change Procedures
 
@@ -286,7 +286,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-3`, `cm-3.2`, `cm-4.2`, `si-2`
 
-*9 fetchers:* [`aws_codebuild_pipeline_config`](../fetchers/aws/codebuild_pipeline_config), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`github_actions_security`](../fetchers/github/actions_security), [`github_branch_protection`](../fetchers/github/branch_protection), [`github_deployment_controls`](../fetchers/github/deployment_controls), [`github_pull_request_checks`](../fetchers/github/pull_request_checks), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config), [`wiz_code_findings`](../fetchers/wiz/code_findings)
+*10 fetchers:* [`aws_codebuild_pipeline_config`](../fetchers/aws/codebuild_pipeline_config), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`github_actions_security`](../fetchers/github/actions_security), [`github_branch_protection`](../fetchers/github/branch_protection), [`github_deployment_controls`](../fetchers/github/deployment_controls), [`github_pull_request_checks`](../fetchers/github/pull_request_checks), [`github_workflow_runs`](../fetchers/github/workflow_runs), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config), [`wiz_code_findings`](../fetchers/wiz/code_findings)
 
 ### RPL — Recovery Planning  (2/2)
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-328 of 344 fetchers carry a mapping.
+329 of 345 fetchers carry a mapping.
 
 ### aws  (82)
 
@@ -700,7 +700,7 @@ python tools/gen_ksi_mapping.py
 | [`gcp_secret_manager_configuration`](../fetchers/gcp/secret_manager_configuration) | `KSI-SVC-ASM` |
 | [`gcp_vpc_network_configuration`](../fetchers/gcp/vpc_network_configuration) | `KSI-CNA-ULN` |
 
-### github  (15)
+### github  (16)
 
 | Fetcher | Indicators |
 |---|---|
@@ -719,6 +719,7 @@ python tools/gen_ksi_mapping.py
 | [`github_secret_scanning`](../fetchers/github/secret_scanning) | `KSI-SVC-ASM` |
 | [`github_significant_change_notifications`](../fetchers/github/significant_change_notifications) | `KSI-CMT-LMC` |
 | [`github_vulnerability_disclosure`](../fetchers/github/vulnerability_disclosure) | `KSI-PIY-RVD` |
+| [`github_workflow_runs`](../fetchers/github/workflow_runs) | `KSI-CMT-RMV`, `KSI-CMT-VTD` |
 
 ### gitlab  (4)
 
