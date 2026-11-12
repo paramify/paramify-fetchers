@@ -1,9 +1,9 @@
 """Fetchers page — the catalog and the manifest on one screen.
 
-The catalog of every discovered fetcher sits on top; the manifest's settings
-and entries sit below it, sized to fit; one detail pane on the right shows the
-contract of the highlighted catalog fetcher or the detail of the highlighted
-manifest entry, whichever list the user is in. `a` on a catalog fetcher adds it
+The catalog of every discovered fetcher and one detail pane share the top row;
+the manifest's settings and entries run across the full width below them, sized
+to fit. The detail pane shows the contract of the highlighted catalog fetcher or
+the detail of the highlighted manifest entry, whichever list the user is in. `a` on a catalog fetcher adds it
 to the manifest without leaving the catalog.
 
 The two lists are the same CatalogPanel and ManifestPanel widgets that used to
@@ -20,7 +20,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
-from textual.widgets import Static
+from textual.widgets import Button, Static
 
 from framework.tui import render
 from framework.tui.components.detail import (
@@ -34,7 +34,7 @@ from framework.tui.screens.catalog import CatalogPanel
 from framework.tui.screens.manifest import ManifestPanel
 
 
-class FetchersPage(Horizontal):
+class FetchersPage(Vertical):
     HINTS = [("tab", "area")]
 
     BINDINGS = [Binding("tab", "next_area", "area", show=False)]
@@ -45,16 +45,16 @@ class FetchersPage(Horizontal):
     _active: Optional[Widget] = None
 
     # The manifest list fits its entries: at least MIN_ROWS table rows, at most
-    # MAX_SHARE of the left column. The catalog takes the rest.
-    MIN_ROWS = 10
-    MAX_SHARE = 0.6
+    # MAX_SHARE of the page. The catalog and the detail take the rest.
+    MIN_ROWS = 12
+    MAX_SHARE = 0.65
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="fetchers-left"):
+        with Horizontal(id="fetchers-top"):
             yield CatalogPanel(detail=False, id="catalog-panel")
-            yield ManifestPanel(detail=False, id="manifest-panel")
-        with VerticalScroll(id="fetchers-detail-scroll", classes="panel"):
-            yield Static(render.empty_detail(), id="fetchers-detail")
+            with VerticalScroll(id="fetchers-detail-scroll", classes="panel"):
+                yield Static(render.empty_detail(), id="fetchers-detail")
+        yield ManifestPanel(detail=False, id="manifest-panel")
 
     def on_mount(self) -> None:
         scroll = self.query_one("#fetchers-detail-scroll", VerticalScroll)
@@ -119,7 +119,7 @@ class FetchersPage(Horizontal):
         self.call_after_refresh(self._fit_manifest)
 
     def _fit_manifest(self) -> None:
-        """Size the manifest panel to its rows, between MIN_ROWS and half the column.
+        """Size the manifest panel to its rows, between MIN_ROWS and MAX_SHARE of the page.
 
         Done here, not in CSS: a table sized to its content never scrolls, so a
         CSS max-height would cut rows off instead of letting the table scroll.
@@ -127,14 +127,13 @@ class FetchersPage(Horizontal):
         height, so that overhead is the panel's height less the table slot's.
         """
         panel = self._manifest
-        column = self.query_one("#fetchers-left", Vertical)
         table = panel.query_one("#manifest-entries", DataTable)
         slot = table if table.display else panel.query_one("#manifest-empty-hint")
-        if not column.size.height or not panel.size.height:
+        if not self.size.height or not panel.size.height:
             return
         overhead = panel.outer_size.height - slot.outer_size.height
         rows = max(self.MIN_ROWS, table.row_count) + 1  # + the header row
-        height = min(overhead + rows, int(column.size.height * self.MAX_SHARE))
+        height = min(overhead + rows, int(self.size.height * self.MAX_SHARE))
         if panel.styles.height is None or panel.styles.height.cells != height:
             panel.styles.height = height
 
@@ -168,7 +167,7 @@ class FetchersPage(Horizontal):
         if focused is not None:
             chain = list(focused.ancestors_with_self)
             here = next((i for i, area in enumerate(areas) if area in chain), -1)
-            if here == -1 and any(w.id == "manifest-settings" for w in chain):
+            if here == -1 and isinstance(focused, Button) and any(w.id == "manifest-top" for w in chain):
                 here = 3  # owner and Save share the stack button's stop
         for step in range(1, len(areas) + 1):
             target = areas[(here + step) % len(areas)]

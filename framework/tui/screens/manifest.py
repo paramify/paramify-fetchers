@@ -97,13 +97,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             # select_on_focus off: Textual selects the whole value on focus, so
             # the first keystroke replaced the existing path wholesale.
             yield Input(placeholder="./evidence", id="manifest-output-dir", select_on_focus=False)
-            if self._has_detail:
-                yield from self._settings_buttons()
-        if not self._has_detail:
-            # Half a page wide, one row cannot hold a path and three buttons:
-            # stack, owner and Save get a row of their own (left/right walk it).
-            with Horizontal(id="manifest-settings"):
-                yield from self._settings_buttons()
+            yield from self._settings_buttons()
         with Horizontal(id="manifest-body"):
             with Vertical(id="manifest-entries-panel", classes="panel"):
                 yield DataTable(id="manifest-entries")

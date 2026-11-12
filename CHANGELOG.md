@@ -1645,9 +1645,9 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **The TUI shows the catalog and the manifest on one Fetchers page.** The
   Catalog and Manifest tabs are now one tab, so the TUI has four tabs:
-  Fetchers, Run, Evidence and Paramify (keys `1` to `4`). The catalog is at
-  the top and the manifest is below it. One detail pane at the right shows
-  the item in the list that has focus. Press `a`, or enter, on a catalog
+  Fetchers, Run, Evidence and Paramify (keys `1` to `4`). The catalog and a
+  detail pane are at the top, and the manifest is across the full width below
+  them. The detail pane shows the item in the list that has focus. Press `a`, or enter, on a catalog
   fetcher to add it to the manifest, and focus stays in the catalog. Each
   fetcher that is in the manifest has a check mark. `a` on a fetcher that is
   already in the manifest moves the manifest cursor to it, and `a` on the

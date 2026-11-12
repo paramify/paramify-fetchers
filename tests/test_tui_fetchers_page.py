@@ -318,12 +318,16 @@ def _sizes(path: Path, size: tuple) -> dict:
         async with app.run_test(size=size) as pilot:
             await _settle(app, pilot)
             q = app.screen.query_one
-            column = q("#fetchers-left")
+            page = q("#fetchers-page")
+            panel = q("#manifest-panel")
             return {
-                "column_w": column.region.width, "column_h": column.region.height,
-                "column_right": column.region.right,
+                "page_w": page.region.width, "column_h": page.region.height,
+                "panel_w": panel.region.width, "panel_right": panel.region.right,
+                "panel_y": panel.region.y,
+                "catalog_w": q("#catalog-panel").region.width,
                 "detail_w": q("#fetchers-detail-scroll").region.width,
-                "panel_h": q("#manifest-panel").region.height,
+                "detail_bottom": q("#fetchers-detail-scroll").region.bottom,
+                "panel_h": panel.region.height,
                 "table_h": q("#manifest-entries", DataTable).region.height,
                 "tree_h": q("#catalog-tree", Tree).region.height,
                 "buttons_right": max(q(f"#{b}").region.right for b in ("manifest-stack", "manifest-owner", "btn-save")),
@@ -333,28 +337,30 @@ def _sizes(path: Path, size: tuple) -> dict:
     return asyncio.run(main())
 
 
-def test_the_lists_column_is_narrower_than_the_detail(tmp_path):
+def test_the_manifest_spans_the_page_under_catalog_and_detail(tmp_path):
     s = _sizes(_manifest_with(tmp_path, "demo_hello"), (180, 50))
-    assert s["column_w"] < s["detail_w"], s
+    assert s["panel_w"] >= s["page_w"] - 2, s  # the full width, less the page padding
+    assert s["detail_bottom"] <= s["panel_y"], s  # the detail sits beside the catalog, above it
+    assert s["catalog_w"] < s["detail_w"], s
 
 
-def test_the_settings_rows_fit_the_column(tmp_path):
+def test_the_settings_row_fits_the_page(tmp_path):
     for size in ((120, 35), (180, 50)):
         s = _sizes(_manifest_with(tmp_path, "demo_hello", file=f"fit{size[0]}.yaml"), size)
-        assert s["buttons_right"] <= s["column_right"], (size, s)
+        assert s["buttons_right"] <= s["panel_right"], (size, s)
         assert s["dir_w"] >= 16, (size, s)
 
 
-def test_a_short_manifest_still_gets_ten_rows(tmp_path):
+def test_a_short_manifest_still_gets_twelve_rows(tmp_path):
     s = _sizes(_manifest_with(tmp_path, "demo_hello"), (180, 50))
-    assert s["table_h"] >= 11, s  # ten rows and the header
+    assert s["table_h"] >= 13, s  # twelve rows and the header
 
 
-def test_a_long_manifest_takes_at_most_sixty_percent(tmp_path):
+def test_a_long_manifest_takes_at_most_sixty_five_percent(tmp_path):
     names = [f["name"] for c in api.catalog(REPO_ROOT)["categories"] for f in c["fetchers"]
              if f["name"].startswith("aws_")][:30]
     s = _sizes(_manifest_with(tmp_path, *names), (180, 50))
-    assert s["column_h"] * 0.55 <= s["panel_h"] <= s["column_h"] * 0.6 + 1, s
+    assert s["column_h"] * 0.6 <= s["panel_h"] <= s["column_h"] * 0.65 + 1, s
     assert s["tree_h"] >= 5, s
 
 
