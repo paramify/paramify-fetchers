@@ -62,6 +62,7 @@ esac
 
 FAKE_CHECKOV = r"""#!/bin/bash
 printf '%s\n' "$@" > "$CHECKOV_ARGV_FILE"
+env | grep -E '^(AZURE_(TENANT_ID|CLIENT_ID|CLIENT_SECRET|FEDERATED_TOKEN_FILE|AUTHORITY_HOST)|MSI_ENDPOINT|IDENTITY_ENDPOINT|IDENTITY_HEADER)=' > "$CHECKOV_ARGV_FILE.env"
 cat "$CHECKOV_FIXTURE"
 """
 
@@ -143,6 +144,19 @@ def arg_after(argv: List[str], flag: str) -> Optional[str]:
 K8S_RESULT = checkov_result("kubernetes", [check("CKV_K8S_1", "Pod.default.x", "PASSED")],
                             [check("CKV_K8S_14", "Pod.default.x", "FAILED")])
 TF_RESULT = checkov_result("terraform", [check("CKV_AWS_1", "aws_s3_bucket.x", "PASSED")], [])
+
+
+# --- the category's Azure identity passthrough ----------------------------------
+
+@pytest.mark.parametrize("fetcher,result", [("kubernetes", K8S_RESULT), ("terraform", TF_RESULT)])
+def test_checkov_never_gets_the_azure_identity(harness, tmp_path, fetcher, result):
+    # The checkov category lets these through for checkov_bicep's TFVC sign-in only.
+    harness(fetcher, result, AZURE_TENANT_ID="00000000-0000-0000-0000-000000000000",
+            AZURE_CLIENT_ID="00000000-0000-0000-0000-000000000001", AZURE_CLIENT_SECRET="fake-client-secret",
+            AZURE_FEDERATED_TOKEN_FILE="/nonexistent/token", AZURE_AUTHORITY_HOST="https://login.example.invalid",
+            MSI_ENDPOINT="http://127.0.0.1:1/msi", IDENTITY_ENDPOINT="http://127.0.0.1:1/identity",
+            IDENTITY_HEADER="fake-identity-header")
+    assert (tmp_path / "checkov.argv.env").read_text() == ""
 
 
 # --- branch actually scanned ---------------------------------------------------
@@ -283,3 +297,34 @@ def test_require_tools_without_names_checks_the_defaults(tmp_path, names):
     assert proc.returncode == 1
     missing = [line.rsplit(": ", 1)[1] for line in proc.stderr.splitlines()]
     assert missing == ["git", "checkov", "jq"]
+
+
+@pytest.mark.parametrize("fetcher", ["terraform", "kubernetes"])
+def test_quiet_summary_preserves_passed_and_skipped_counts(harness, fetcher):
+    # Real Checkov --quiet omits successful and skipped detail arrays. Those
+    # omissions must not turn actual successes/skips into a zero denominator.
+    result = checkov_result(fetcher, [], [check("CKV_X_1", "resource.x", "FAILED")])
+    result["summary"].update(passed=7, skipped=2)
+    result["results"].pop("passed_checks")
+    result["results"].pop("skipped_checks")
+    payload, _, _ = harness(fetcher, result)
+    assert payload["summary"]["passed_checks"] == 7
+    assert payload["summary"]["failed_checks"] == 1
+    assert payload["summary"]["skipped_checks"] == 2
+    assert payload["summary"]["total_checks"] == 10
+    assert payload["summary"]["aggregate_percentage"] == 70.0
+    assert payload["results"]["failed_checks"] == result["results"]["failed_checks"]
+
+
+def test_quiet_resource_filter_keeps_original_denominator(harness):
+    result = checkov_result("terraform", [], [check("CKV_X_1", "resource.x", "FAILED")])
+    result["summary"].update(passed=7, skipped=2)
+    result["results"].pop("passed_checks")
+    result["results"].pop("skipped_checks")
+    payload, _, _ = harness("terraform", result, CHECKOV_SKIP_RESOURCES="resource.x")
+    assert payload["summary"]["passed_checks"] == 7
+    assert payload["summary"]["failed_checks"] == 0
+    assert payload["summary"]["skipped_checks"] == 3
+    assert payload["summary"]["total_checks"] == 10
+    assert payload["summary"]["aggregate_percentage"] == 70.0
+    assert payload["summary"]["skipped_by_resource_filter"] == 1

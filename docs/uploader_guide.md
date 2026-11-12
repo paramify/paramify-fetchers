@@ -75,6 +75,51 @@ overrides:
 
 ![paramify upload --dry-run reporting the upload.yaml it read and sending both files to CUST-SQS-ENC-01](img/uploader/03-override.png)
 
+### Set the collection frequency
+
+The collection frequency is how often Paramify expects a new artifact on a set.
+It is not a count of your uploads. When the upload creates a set, it sets the
+frequency to `THREE_DAY` and starts the schedule on that day. To use a different
+frequency, add `frequency` to the fetcher in `upload.yaml`:
+
+```yaml
+overrides:
+  aws_sqs_encryption_status:
+    frequency: DAILY
+```
+
+The values are `DAILY`, `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`,
+`QUARTERLY`, `BIANNUAL`, `ANNUAL` and `NOT_SET`. `DAILY` is the shortest, so use
+it when you upload more than once a day.
+
+- **Only new sets get it.** The upload writes the frequency when it creates the
+  set. It never changes the frequency of a set that exists, so a change that you
+  make in the app stays.
+- **One entry for each fetcher.** No setting applies to all fetchers. To set
+  every fetcher to `DAILY`, add an `overrides` entry for each one.
+- **Check the key name.** The upload ignores an unknown key, for example
+  `frequncy`, and gives no warning.
+- **Scheduled uploads need `--config`.** `deploy/run-and-upload.sh` does not read
+  `upload.yaml` by default ([troubleshooting](#troubleshooting)).
+
+**To change sets that exist,** edit the frequency on each set in the app, or use
+the API. Each run's `upload_log.json` lists the sets that the upload used. This
+loop sets all of them to `DAILY`:
+
+```bash
+jq -r '.. | objects | select(has("evidence_id")) | .evidence_id' \
+  evidence/run-*/upload_log.json | sort -u |
+while read -r id; do
+  curl -s -X PATCH "${PARAMIFY_API_BASE_URL:-https://app.paramify.com/api/v0}/evidence/$id" \
+    -H "Authorization: Bearer $PARAMIFY_UPLOAD_API_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"frequency": "DAILY"}' -o /dev/null -w "$id %{http_code}\n"
+done
+```
+
+Each line shows a set ID and the HTTP status. `200` is a success. `403` means
+that the key does not have **Write Evidences**.
+
 ## 4. Upload
 
 Run it without `--dry-run`. Each file shows `OK`, plus `channel=` when its set

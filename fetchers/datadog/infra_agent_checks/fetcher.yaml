@@ -1,5 +1,5 @@
 name: datadog_infra_agent_checks
-version: 0.1.0
+version: 0.1.1
 description: Retrieves per-host Datadog agent check results to prove configuration evaluation is actively running and passing across the fleet.
 category: datadog
 

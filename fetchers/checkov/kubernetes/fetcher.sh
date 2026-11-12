@@ -25,6 +25,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Interim v0.x: load .env for the dev loop if present. The runner injects env directly.
 [ -f .env ] && { set -a; . .env; set +a; }
+# The category lets an Entra identity through for checkov_bicep's TFVC sign-in; this fetcher never uses it.
+unset AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_FEDERATED_TOKEN_FILE AZURE_AUTHORITY_HOST \
+      MSI_ENDPOINT IDENTITY_ENDPOINT IDENTITY_HEADER
 
 . "$SCRIPT_DIR/../_shared/clone.sh"
 # The one place a fetcher reports WHY it failed (docs/fetcher_contract_guide.md, step 6).
@@ -170,9 +173,11 @@ fi
 # The kubernetes framework emits an array (one element per check_type); take the first.
 jq 'if type=="array" then .[0] else . end' "$RAW" > "$NORM"
 
-PASSED=$(jq '(.results.passed_checks // []) | length' "$NORM")
-FAILED=$(jq '(.results.failed_checks // []) | length' "$NORM")
-SKIPPED=$(jq '(.results.skipped_checks // []) | length' "$NORM")
+# --quiet omits passed/skipped detail arrays. Checkov's summary remains
+# authoritative; the resource filter transfers failures without changing total.
+PASSED=$(jq '.summary.passed // ((.results.passed_checks // []) | length)' "$NORM")
+FAILED=$(jq 'if .summary.failed != null then .summary.failed else ((.results.failed_checks // []) | length) end' "$NORM")
+SKIPPED=$(jq 'if .summary.skipped != null then .summary.skipped else ((.results.skipped_checks // []) | length) end' "$NORM")
 TOTAL=$((PASSED + FAILED + SKIPPED))
 PCT=$(awk "BEGIN { if ($TOTAL > 0) printf \"%.2f\", ($PASSED / $TOTAL) * 100; else print 0 }")
 

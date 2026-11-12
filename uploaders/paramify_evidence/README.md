@@ -96,6 +96,12 @@ See [`examples/upload.yaml`](../../examples/upload.yaml):
 - `paramify.base_url` — default `https://app.paramify.com/api/v0`.
 - `overrides.<fetcher_name>.reference_id` (and optionally `name`/`instructions`/`frequency`) —
   map a fetcher to a different evidence set for your program.
+- `overrides.<fetcher_name>.frequency` — how often Paramify expects a new
+  artifact on the set (`DAILY`, `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`,
+  `QUARTERLY`, `BIANNUAL`, `ANNUAL`, `NOT_SET`). The default is `THREE_DAY`. The
+  uploader writes it only when it creates the set, and there is no setting for
+  all fetchers. To change sets that exist, see
+  [set the collection frequency](../../docs/uploader_guide.md#set-the-collection-frequency).
 - `skip_failed` — skip files whose run status was `failed` (default: upload anyway,
   with the status noted on the artifact).
 - `artifact_payload` — `envelope` (default, self-describing) or `payload` (bare

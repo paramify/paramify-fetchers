@@ -17,6 +17,7 @@ textual>=8,<9
 
 # Checkov category (fetchers/checkov/*) — the bash fetchers shell out to the
 # `checkov` CLI. Also requires system `git` (clone) + `jq`, which are not pip deps.
+# checkov_bicep's Entra sign-in to TFVC also uses azure-identity (pinned below).
 checkov
 
 # Azure category (fetchers/azure/*) — official azure-mgmt-* SDKs. Auth is the
@@ -75,7 +76,7 @@ cryptography>=42.0.0,<51
 # Managed databases.
 azure-mgmt-sql>=4.0.0,<5
 azure-mgmt-rdbms>=10.1.1,<11
-azure-mgmt-postgresqlflexibleservers>=2.0.0,<3
+azure-mgmt-postgresqlflexibleservers>=2.0.0,<4
 azure-mgmt-cosmosdb>=10.0.0,<11
 azure-mgmt-redisenterprise>=3.1.0,<4
 azure-mgmt-redis>=14.5.0,<15
@@ -144,3 +145,7 @@ google-cloud-api-keys
 # Oracle Cloud Infrastructure. One distribution covers every OCI service — the
 # SDK is generated from one spec and ships all clients in the single `oci` package.
 oci
+
+# Qualys category (fetchers/qualys/*) — the VM/PC API answers in XML that names an
+# external DTD; defusedxml parses it with entities and external references refused.
+defusedxml

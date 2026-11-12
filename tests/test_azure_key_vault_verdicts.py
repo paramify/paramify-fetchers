@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import enum
 import importlib.util
+import json
 import logging
 import sys
 from datetime import datetime, timezone
@@ -196,6 +197,56 @@ def test_expiry_summary_counts_only_unexpired_within_thirty_days():
     assert (summary["expired_certificates"], summary["certificates_expiring_within_30_days"]) == (1, 1)
 
 
+def listed_vault(*expires, name="kv-one"):
+    records = [kv.certificate_record({"name": f"c{i}", "expires": e}, None, False, NOW) for i, e in enumerate(expires)]
+    return {"id": VAULT_ID, "name": name, "certificates_status": "accessible", "certificates": records}
+
+
+def refused_vault(name="kv-refused"):
+    return {"id": VAULT_ID, "name": name, "certificates_status": "not_authorized", "certificates": []}
+
+
+def test_refused_vault_nulls_the_expiry_counts():
+    summary = kv.summarize_certificates([refused_vault()], [])
+    assert (summary["expired_certificates"], summary["certificates_expiring_within_30_days"]) == (None, None)
+    assert (summary["certificate_not_authorized_vaults"], summary["total_certificates"]) == (1, 0)
+
+
+def test_partial_list_nulls_counts_even_with_an_expired_certificate_in_the_listed_vault():
+    summary = kv.summarize_certificates(
+        [listed_vault("2026-10-01T00:00:00Z"), refused_vault()], [])
+    assert (summary["expired_certificates"], summary["certificates_expiring_within_30_days"]) == (None, None)
+    assert (summary["certificate_accessible_vaults"], summary["certificate_not_authorized_vaults"],
+            summary["total_certificates"]) == (1, 1, 1)
+
+
+@pytest.mark.parametrize("status", ["failed", "not_attempted"])
+def test_any_unlisted_vault_nulls_the_counts(status):
+    summary = kv.summarize_certificates([{"certificates_status": status, "certificates": []}], [])
+    assert (summary["expired_certificates"], summary["certificates_expiring_within_30_days"]) == (None, None)
+
+
+def test_certificate_without_expiry_is_counted_apart_from_both_expiry_counts():
+    summary = kv.summarize_certificates([listed_vault(None, "2026-10-01T00:00:00Z", "2027-06-01T00:00:00Z")], [])
+    assert (summary["certificates_without_expiry"], summary["expired_certificates"],
+            summary["certificates_expiring_within_30_days"], summary["total_certificates"]) == (1, 1, 0, 3)
+
+
+def test_summary_matches_the_instructions_with_a_refused_vault(monkeypatch, tmp_path, assert_summary_documented):
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setattr(kv, "resolve_subscription", lambda c: {"subscription_id": "sub", "subscription_source": "env"})
+    monkeypatch.setattr(kv, "credential", lambda: object())
+    monkeypatch.setattr(kv, "provider_registration_status", lambda *a, **k: "registered")
+    monkeypatch.setattr(kv, "collect_key_vaults", lambda *a, **k: [kv.vault_record(refused_vault())])
+    monkeypatch.setattr(kv, "collect_app_service_certificates", lambda *a, **k: [])
+    assert kv.main() == 0
+    evidence = json.loads(next(tmp_path.glob("azure_key_vault_key_rotation_*.json")).read_text())
+    summary = evidence["summary"]
+    assert_summary_documented("azure/key_vault_key_rotation", summary)
+    assert (summary["expired_certificates"], summary["certificates_expiring_within_30_days"]) == (None, None)
+    assert evidence["metadata"]["partial_failure"] is False
+
+
 def test_offset_timestamps_are_brought_to_utc():
     assert kv._utc_timestamp("2027-03-01T05:00:00+05:00") == "2027-03-01T00:00:00Z"
     assert kv._utc_timestamp(datetime(2027, 3, 1)) == "2027-03-01T00:00:00Z"
@@ -323,6 +374,49 @@ def test_app_service_certificate_list_failure_fails_the_run(monkeypatch, failing
     assert c.ok is False
     assert c.failures[0]["operation"] == (
         "web.WebSiteManagementClient (init)" if failing == "init" else "web.certificates.list")
+
+
+# --- a default rotation policy is not a configured one ---
+
+DEFAULT_POLICY = {"id": None, "expires_in": None, "created": None, "updated": None,
+                  "lifetime_actions": [{"action": "Notify", "time_after_create": None,
+                                        "time_before_expiry": "P30D"}]}
+SET_POLICY = {"id": "https://kv-one.vault.azure.net/keys/k1/rotationpolicy", "expires_in": "P1Y",
+              "created": "2026-01-01T00:00:00Z", "updated": "2026-01-01T00:00:00Z",
+              "lifetime_actions": [{"action": "Notify", "time_after_create": None,
+                                    "time_before_expiry": "P30D"}]}
+ROTATE_POLICY = {**SET_POLICY, "lifetime_actions": [
+    {"action": "Rotate", "time_after_create": None, "time_before_expiry": "P30D"}]}
+
+
+def _rotation_summary(policy):
+    keys = kv.merge_rotation_policies([kv.key_record({"name": "k1"})], {"k1": policy})
+    return keys[0], kv.summarize([{**kv.vault_record(vault()), "keys": keys}])
+
+
+def test_default_notify_only_policy_is_not_a_configured_policy():
+    key, summary = _rotation_summary(DEFAULT_POLICY)
+    assert key["rotation_policy_configured"] is False
+    assert key["rotation_policy_readable"] is True
+    assert (summary["keys_with_rotation_policy"], summary["keys_with_rotation_enabled"]) == (0, 0)
+    assert summary["keys_with_readable_rotation_policy"] == 1
+
+
+def test_a_set_notify_policy_counts_as_configured_but_does_not_rotate():
+    key, summary = _rotation_summary(SET_POLICY)
+    assert key["rotation_policy_configured"] is True
+    assert (summary["keys_with_rotation_policy"], summary["keys_with_rotation_enabled"]) == (1, 0)
+
+
+def test_a_set_rotate_policy_counts_as_configured_and_rotating():
+    key, summary = _rotation_summary(ROTATE_POLICY)
+    assert key["rotation_policy_configured"] is True and key["rotation_enabled"] is True
+    assert (summary["keys_with_rotation_policy"], summary["keys_with_rotation_enabled"]) == (1, 1)
+
+
+def test_a_policy_with_only_a_creation_time_is_configured():
+    assert kv.policy_is_configured({**DEFAULT_POLICY, "created": "2026-01-01T00:00:00Z"})
+    assert not kv.policy_is_configured(None)
 
 
 # --- the existing evidence is unchanged ---

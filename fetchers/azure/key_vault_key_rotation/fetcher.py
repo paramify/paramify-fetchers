@@ -370,6 +370,11 @@ def rotation_policy_record(policy: dict | None) -> dict | None:
     }
 
 
+def policy_is_configured(policy: dict | None) -> bool:
+    """Was this policy set by someone? Key Vault answers a never-set key with a default."""
+    return bool(policy) and (policy.get("id") is not None or policy.get("created") is not None)
+
+
 def has_rotate_action(policy: dict | None) -> bool:
     """Prowler's keyvault_key_rotation_enabled predicate, case-insensitively.
 
@@ -413,6 +418,7 @@ def key_record(
         "key_size": key.get("key_size"),
         "curve_name": key.get("curve_name"),
         "rotation_policy": policy,
+        "rotation_policy_configured": policy_is_configured(policy),
         "rotation_enabled": has_rotate_action(policy),
         "rotation_policy_source": policy_source if policy else None,
         "rotation_policy_readable": bool(policy_readable),
@@ -571,11 +577,12 @@ def merge_rotation_policies(keys: list[dict], data_plane_policies: dict) -> list
             keys.append(record)
             by_name[name] = record
         if policy is None:
-            # A 404 (or an ungranted policy read) for one key: what the management
-            # plane knows stands, and readability is not upgraded.
+            # An ungranted policy read for one key: what the management plane knows
+            # stands, and readability is not upgraded.
             continue
         normalized = rotation_policy_record(policy)
         record["rotation_policy"] = normalized
+        record["rotation_policy_configured"] = policy_is_configured(normalized)
         record["rotation_enabled"] = has_rotate_action(normalized)
         record["rotation_policy_source"] = SOURCE_DATA_PLANE
         record["rotation_policy_readable"] = True
@@ -628,6 +635,8 @@ def summarize_certificates(vaults: list[dict], app_service_certificates: list[di
     from_key_vault = [
         c for c in app_service_certificates if c["source"] == APP_SERVICE_SOURCE_KEY_VAULT
     ]
+    # A vault whose certificates weren't listed may hold an expired one: unknown, never 0.
+    all_listed = all(v.get("certificates_status") == CERTIFICATES_ACCESSIBLE for v in vaults)
     return {
         "certificate_accessible_vaults": sum(
             1 for v in vaults if v.get("certificates_status") == CERTIFICATES_ACCESSIBLE
@@ -639,8 +648,9 @@ def summarize_certificates(vaults: list[dict], app_service_certificates: list[di
         "certificates_with_readable_policy": len(readable),
         "certificates_with_auto_renew": auto_renew,
         "certificate_auto_renew_percentage": coverage_percentage(auto_renew, len(readable)),
-        "expired_certificates": sum(1 for cert in certificates if cert["expired"]),
-        "certificates_expiring_within_30_days": _expiring_soon(certificates),
+        "certificates_without_expiry": sum(1 for cert in certificates if cert["expired"] is None),
+        "expired_certificates": sum(1 for cert in certificates if cert["expired"]) if all_listed else None,
+        "certificates_expiring_within_30_days": _expiring_soon(certificates) if all_listed else None,
         "total_app_service_certificates": len(app_service_certificates),
         "app_service_certificates_by_source": source_counts(app_service_certificates),
         "expired_app_service_certificates": sum(1 for c in app_service_certificates if c["expired"]),
@@ -676,7 +686,9 @@ def summarize(vaults: list[dict]) -> dict:
         "total_keys": len(keys),
         "enabled_keys": sum(1 for key in keys if key["enabled"]),
         "keys_with_readable_rotation_policy": len(visible_keys),
-        "keys_with_rotation_policy": sum(1 for key in keys if key["rotation_policy"]),
+        "keys_with_rotation_policy": sum(
+            1 for key in keys if key["rotation_policy_configured"]
+        ),
         "keys_with_rotation_enabled": rotating,
         "rotation_enabled_percentage": coverage_percentage(rotating, len(visible_keys)),
         "keys_with_expiration": keys_with_expiration,
@@ -856,7 +868,8 @@ def collect_rotation_policies(vault: dict, cred, collector: Collector) -> None:
         except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash
             if is_data_plane_inaccessible(exc):
                 # Prowler's `_get_single_rotation_policy` returns (name, None) here.
-                # A key with no policy configured answers 404, which is the finding.
+                # A key never given a policy answers a default one, not 404; that is
+                # told apart by its null id (rotation_policy_configured).
                 logger.warning(
                     "key vault %s: no readable rotation policy for key %s — %s",
                     name,
