@@ -309,7 +309,6 @@ def main():
             ],
         }
         output.write_text(json.dumps(payload, indent=2))
-        logger.error("Inventory withheld: %s", error)
         report_failure(f"Inventory withheld: {error}", "partial_failure")
         return 1
     payload["completed_at"] = datetime.now(timezone.utc).isoformat()
