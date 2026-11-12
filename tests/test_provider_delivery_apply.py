@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import json
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -124,8 +125,22 @@ def test_upload_sends_the_planned_bytes_title_and_note(tmp_path):
     meta = json.loads(h.sent[0]["artifact"][1])
     assert name == "a.json"
     assert content == json.dumps(json.loads((tmp_path / "a.json").read_text()), indent=2).encode()
-    assert set(meta) == {"title", "note"}  # no effectiveDate, no channelId
+    assert set(meta) == {"title", "note", "effectiveDate"}  # no channelId on a batch upload
     assert meta["title"] == "Set X" and "run_id=RID" in meta["note"] and "entry=x" in meta["note"]
+    # The run's collected_at, as the pre-batch uploader sent it, so a late upload keeps the collection date.
+    assert meta["effectiveDate"] == "2026-01-01T00:00:00Z"
+    assert fake._artifacts[0]["effectiveDate"] == "2026-01-01T00:00:00Z"
+
+
+def test_upload_without_collected_at_sends_the_upload_time_as_effective_date(tmp_path):
+    fake = FakeParamify()
+    body = env(fetcher="x")
+    del body["metadata"]["collected_at"]
+    build(tmp_path, {"a.json": body}, [inv("x", ["a.json"])], {"x": {"use": "x"}})
+    h = Harness(fake, tmp_path)
+    h.run()
+    meta = json.loads(h.sent[0]["artifact"][1])
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", meta["effectiveDate"])
 
 
 def test_payload_mode_sends_only_the_payload(tmp_path):
@@ -679,7 +694,9 @@ def test_direct_apply_uploads_each_file_with_the_channel_id(tmp_path):
     r = d.result
     assert r["mode"] == "direct" and r["state"] == "delivered" and r["batch_id"] is None
     assert r["status"] is None and r["uploaded"] == ["a.json", "b.json"]
-    assert {"title", "note", "channelId"} == set(json.loads(h.sent[0]["artifact"][1]))
+    meta = json.loads(h.sent[0]["artifact"][1])
+    assert {"title", "note", "effectiveDate", "channelId"} == set(meta)
+    assert meta["effectiveDate"] == "2026-01-01T00:00:00Z"
     assert [(e["file"], e["outcome"], e["n"], e["of"]) for e in h.file_events()] == [
         ("a.json", "uploaded", 1, 2), ("b.json", "uploaded", 2, 2)]
 
@@ -691,7 +708,7 @@ def test_direct_apply_with_no_channel_sends_no_channel_id(tmp_path):
     h = Harness(fake, two_files(tmp_path), capability=BATCHES_OFF)
     d = h.run()["delivery/x"]
     assert d.result["state"] == "delivered" and d.result["mode"] == "direct"
-    assert {"title", "note"} == set(json.loads(h.sent[0]["artifact"][1]))
+    assert {"title", "note", "effectiveDate"} == set(json.loads(h.sent[0]["artifact"][1]))
 
 
 def test_direct_apply_to_a_set_made_in_this_run(tmp_path):

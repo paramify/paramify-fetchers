@@ -140,14 +140,22 @@ def test_a_file_a_later_target_overwrote_is_not_sent(tmp_path):
     assert (f.skip_kind, f.skip_reason) == ("error", "overwritten later in this run (entry x); not sent")
 
 
-def test_note_has_entry_token_and_no_effective_date(tmp_path):
+def test_note_has_entry_token_and_the_effective_date_is_collected_at(tmp_path):
     build(tmp_path, {"a.json": env(target={"id": "7"})}, [inv("x#1", ["a.json"])])
     [e] = desired_from_run(tmp_path, {})
     f = e.files[0]
     assert f.note == ('fetcher=x; version=0.1.0; run_id=RID; status=success; '
                       'target={"id":"7"}; entry=x#1')
     assert f.title == "Set X - 7"
-    assert not hasattr(f, "effectiveDate")
+    assert f.effective_date == "2026-01-01T00:00:00Z"
+
+
+def test_effective_date_is_none_without_collected_at(tmp_path):
+    body = env()
+    del body["metadata"]["collected_at"]
+    build(tmp_path, {"a.json": body}, [inv("x", ["a.json"])])
+    [e] = desired_from_run(tmp_path, {})
+    assert e.files[0].effective_date is None
 
 
 def test_recorded_batch_id_from_state(tmp_path):

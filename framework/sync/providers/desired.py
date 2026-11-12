@@ -39,6 +39,8 @@ class DeliveryFile:
     # "error": a file that could not be read or is not evidence (the old uploader
     # counted these as errors). "skipped": a decision (skip_failed, incomplete inventory).
     skip_kind: Literal["skipped", "error"] = "skipped"
+    # The envelope's collected_at, sent as the artifact's effectiveDate; None: the upload time is sent.
+    effective_date: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -282,6 +284,7 @@ def desired_from_run(
                 kind="inventory" if isinstance(inventory, dict) else "evidence",
                 skip_reason=reason,
                 skip_kind="error" if problem or reason == ERROR_SKIP else "skipped",
+                effective_date=metadata.get("collected_at") or None,
             ))
         md = chosen if chosen is not None else (first_md or {})
         es_final = (chosen_es if chosen is not None else first_es) or {}

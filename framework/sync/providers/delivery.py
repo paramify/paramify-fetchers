@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -235,8 +235,13 @@ def _run_batches(e: EntryDesired, obs: EntryObserved) -> List[str]:
             for i in ids if not (i in known and known[i].status in DONE)]
 
 
-def _file_json(f: DeliveryFile) -> Dict[str, str]:
-    return {"path": str(f.path), "original_file_name": f.original_file_name, "title": f.title, "note": f.note}
+def _file_json(f: DeliveryFile) -> Dict[str, Any]:
+    return {"path": str(f.path), "original_file_name": f.original_file_name, "title": f.title, "note": f.note,
+            "effective_date": f.effective_date}
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # ---- provider -------------------------------------------------------------- #
@@ -744,7 +749,10 @@ class DeliveryProvider:
                 continue
             reason: Optional[str] = None
             try:
-                upload(name, content, {"title": f["title"], "note": f["note"]})
+                # effectiveDate: when the evidence was collected, not when it was uploaded,
+                # as the pre-batch uploader sent it. Without a collected_at, the upload time.
+                upload(name, content, {"title": f["title"], "note": f["note"],
+                                       "effectiveDate": f.get("effective_date") or _utc_now()})
                 run.uploaded.append(name)
                 outcome = "uploaded"
             except ApiError as exc:
