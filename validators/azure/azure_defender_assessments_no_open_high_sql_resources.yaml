@@ -13,7 +13,7 @@ statement: >
   reports NotApplicable, so a treated finding does not fail this check. Supports KSI-SCR-MIT (critical
   vulnerabilities are not left without treatment) for Azure SQL. Does NOT read other resource types,
   including SQL virtual clusters, or Medium and Low findings. It doesn't measure how long a finding has
-  been open (azure_defender_assessments_no_findings_past_sla does). It doesn't cover end-of-support
+  been open. It doesn't cover end-of-support
   components or supplier risk, or prove that a baseline approval or exemption was itself approved:
   those records are the organization's. It relies on Defender raising a High recommendation for an
   instance it doesn't scan.

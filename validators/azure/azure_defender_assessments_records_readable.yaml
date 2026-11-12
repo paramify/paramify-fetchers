@@ -7,9 +7,9 @@ statement: >
   carries both a severity field and a recognised status_code (Healthy, Unhealthy or
   NotApplicable), so the assessment list was read in a shape a posture check can count.
   Also fails when Defender for Cloud was never turned on (provider not registered). Does
-  NOT prove any posture. The posture checks attached are
+  NOT prove any posture. The posture check attached is
   azure_defender_assessments_no_open_high_sql_resources (Azure SQL instances, servers and their
-  databases) and azure_defender_assessments_no_findings_past_sla (any resource, once past its SLA),
+  databases),
   so this evidence set passes on readable records even while a High finding within its SLA is open
   on a resource that is not an Azure SQL instance, server or database.
 
