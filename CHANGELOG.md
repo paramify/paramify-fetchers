@@ -2304,6 +2304,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_network_flow_logs` 0.3.0: flow log counts are null when a flow-log
+  list was not read.** Before, a failed Network Watcher list read as 0 flow
+  logs and 0 watchers, and when one watcher's flow-log list failed the counts
+  covered only the watchers that were read. Now the Network Watcher list failing,
+  or any watcher's flow-log list failing, makes every flow-log count (totals,
+  target types, retention, Traffic Analytics, unattached and unknown targets),
+  `in_scope_flow_logs`, `excluded_flow_logs` and
+  `resource_exclusion_patterns_unmatched` null. When the watcher list failed,
+  `total_network_watchers`, `regions_with_virtual_networks_without_network_watcher`
+  and `regions_without_network_watcher_count` are null too (before: 0, [] and 0). With every list read the output is the same.
+
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the
