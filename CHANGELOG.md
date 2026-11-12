@@ -2371,6 +2371,12 @@ schemas and the `paramify` CLI — not the internal code.
   `azure_key_vault_configuration` `in_scope_key_vaults` and `excluded_key_vaults`,
   and `azure_storage_encryption_status` `in_scope_storage_accounts` and
   `excluded_storage_accounts`.
+  `azure_policy_compliance` now marks a task whose deployment list failed as
+  unread even after an earlier task returned rows; before, a local list took
+  over the name of the caller's list, so `deployments_complete` stayed true.
+  `azure_resource_inventory` also nulls the field when the Defender assessments
+  or Policy states query fails, since patterns are matched against those rows
+  too.
 - **The TUI's Paramify tab fits a 160x50 terminal.** Below 242 columns the
   scripts-sync panel was squeezed to its border, its buttons drawn over the log,
   and a missing-token preflight error ran off the evidence panel behind a

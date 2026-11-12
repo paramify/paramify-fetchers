@@ -423,6 +423,8 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
 
     assessments = _read("SecurityResources", DEFENDER_QUERY)
     states = _read("PolicyResources", POLICY_QUERY)
+    if assessments is None or states is None:
+        exclusions.mark_unread()  # a pattern naming only what the failed query returns was never compared
     # Results are resolved against the whole inventory, then those about anything excluded are dropped.
     defender = None if assessments is None else tally_defender(
         drop_excluded(assessments["rows"], assessment_target, keys, locations, excluded_keys, exclusions),
