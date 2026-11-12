@@ -126,6 +126,21 @@ own `manifests/<name>.yaml` once you've built it and rebuilt the image (manifest
 are baked in — see [Where manifests come from](#where-manifests-come-from)).
 Times are **UTC** (the container clock).
 
+The scheduler log shows the full collect output of each run. It shows each
+result and the reason for each failure. It also shows each entry that did not
+run, each setup error and each note, for example a dropped credential:
+
+```text
+==> collect: manifests/nightly.yaml
+  SKIP  okta_ghost (not discovered)
+  RUN   aws_x
+        runner error: aws_x: required config 'url' has no value
+  RUN   okta_y
+        [FAIL] exit=1 duration=0.2s
+        token rejected (HTTP 401)
+WARN: collect exited 1 (a fetcher reported failures); uploading whatever was produced
+```
+
 ## Walk through it end-to-end on your laptop (Docker Desktop + a test AWS secret)
 
 A guided run: build the image, pull secrets from **AWS Secrets Manager**, run a
