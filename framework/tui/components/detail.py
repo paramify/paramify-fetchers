@@ -17,3 +17,11 @@ class ShowDetail(Message):
     def __init__(self, renderable: RenderableType) -> None:
         self.renderable = renderable
         super().__init__()
+
+
+class AddRequested(Message):
+    """The catalog asks the page to add these fetchers to the manifest."""
+
+    def __init__(self, names: list) -> None:
+        self.names = list(names)
+        super().__init__()

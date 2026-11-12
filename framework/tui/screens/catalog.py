@@ -20,8 +20,26 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Input, Static, Tree
 
 from framework.tui import kinds, render
-from framework.tui.components.detail import ShowDetail
+from framework.tui.components.detail import AddRequested, ShowDetail
 from framework.tui.components.keys import FILTER_NAV_BINDINGS, FilterListNav
+
+
+class CatalogTree(Tree):
+    """The catalog tree. Enter on a fetcher asks to add it; enter on a heading
+    opens or closes it, as before.
+
+    Enter gets its own action because textual runs select_cursor for a mouse
+    click too: overriding that would make a click add the fetcher.
+    """
+
+    BINDINGS = [Binding("enter", "enter_node", "Add", show=False)]
+
+    def action_enter_node(self) -> None:
+        node = self.cursor_node
+        if node is not None and isinstance(node.data, dict):
+            self.post_message(AddRequested([node.data["name"]]))
+        else:
+            self.action_select_cursor()
 
 
 class CatalogPanel(FilterListNav, Horizontal):
@@ -33,6 +51,7 @@ class CatalogPanel(FilterListNav, Horizontal):
         Binding("tab", "next_pane", "pane", show=False),
         Binding("j", "tree_down", "down", show=False),
         Binding("k", "tree_up", "up", show=False),
+        Binding("a", "add", "add", show=False),
         # up/down are unbound on Input, so they only reach here from the filter;
         # the tree and the detail pane both bind them and keep their own.
         *FILTER_NAV_BINDINGS,
@@ -45,11 +64,12 @@ class CatalogPanel(FilterListNav, Horizontal):
         super().__init__(**kwargs)
         self._has_detail = detail
         self._data = None  # what the highlighted node carries: a fetcher, a kind heading, or None
+        self._marked: set = set()  # fetchers in the manifest, shown with a check
 
     def compose(self) -> ComposeResult:
         with Vertical(id="catalog-left", classes="panel"):
             yield Input(placeholder="/ filter fetchers…", id="catalog-search")
-            yield Tree("fetchers", id="catalog-tree")
+            yield CatalogTree("fetchers", id="catalog-tree")
         if self._has_detail:
             with VerticalScroll(id="catalog-detail-scroll", classes="panel"):
                 yield Static(render.empty_detail(), id="catalog-detail")
@@ -87,7 +107,7 @@ class CatalogPanel(FilterListNav, Horizontal):
             for category, fetchers in groups:
                 cat_node = kind_node.add(f"{category}  ({len(fetchers)})", expand=bool(flt))
                 for fetcher in fetchers:
-                    cat_node.add_leaf(fetcher["name"], data=fetcher)
+                    cat_node.add_leaf(self._leaf_label(fetcher), data=fetcher)
             total += count
 
         tree.root.expand()
@@ -150,10 +170,41 @@ class CatalogPanel(FilterListNav, Horizontal):
         """What the detail pane shows for the highlighted node."""
         data = self._data
         if isinstance(data, dict):
-            return render.fetcher_detail(data)
+            # Only the shared pane says whether the fetcher is in the manifest:
+            # the Catalog tab has no add, so it keeps its contract as it was.
+            marked = None if self._has_detail else data.get("name") in self._marked
+            return render.fetcher_detail(data, in_manifest=marked)
         if isinstance(data, tuple):
             return render.kind_detail(*data)
         return render.empty_detail()
+
+    def _leaf_label(self, fetcher: dict) -> str:
+        name = fetcher["name"]
+        return f"{name}  ✓" if name in self._marked else name
+
+    def set_marked(self, names) -> None:
+        """Check the fetchers that are in the manifest.
+
+        Relabels the leaves in place: a rebuild would reset the cursor and the
+        open branches, and throw the user back to the top of the tree.
+        """
+        self._marked = set(names)
+        tree = self.query_one("#catalog-tree", Tree)
+
+        def walk(node) -> None:
+            for child in node.children:
+                if isinstance(child.data, dict):
+                    child.set_label(self._leaf_label(child.data))
+                walk(child)
+
+        walk(tree.root)
+        if isinstance(self._data, dict):
+            self._emit_detail()
+
+    def action_add(self) -> None:
+        node = self.query_one("#catalog-tree", Tree).cursor_node
+        if node is not None and isinstance(node.data, dict):
+            self.post_message(AddRequested([node.data["name"]]))
 
     def focus_search(self) -> None:
         self.query_one("#catalog-search", Input).focus()

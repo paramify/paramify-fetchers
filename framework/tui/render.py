@@ -192,8 +192,12 @@ def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest:
     return Group(Text("sends to", style="bold"), _kv_table(rows))
 
 
-def fetcher_detail(f: dict) -> RenderableType:
-    """Full detail view for one fetcher descriptor."""
+def fetcher_detail(f: dict, in_manifest: Optional[bool] = None) -> RenderableType:
+    """Full detail view for one fetcher descriptor.
+
+    in_manifest adds a line under the title saying whether the fetcher is in the
+    manifest, or how to add it. None leaves the line out.
+    """
     title = Text()
     title.append(f.get("name", ""), style=f"bold {palette.FG}")
     if f.get("version"):
@@ -209,9 +213,16 @@ def fetcher_detail(f: dict) -> RenderableType:
 
     description = Text(f.get("description") or "(no description)", style="italic")
 
+    status = []
+    if in_manifest is True:
+        status = [Text("✓ in manifest", style=palette.OK)]
+    elif in_manifest is False:
+        status = [Text.assemble(("a", f"bold {palette.ACCENT}"), (" add to the manifest", "dim"))]
+
     return Group(
         title,
         meta,
+        *status,
         Text(),
         description,
         Text(),
