@@ -57,9 +57,14 @@ schemas and the `paramify` CLI — not the internal code.
   evidence` sends the batch to the set instead. A temporary failure holds the
   batch open, and the same upload resumes it. A file that fails for good is
   dropped and named, and the rest goes in. Uploading the same run again changes
-  nothing, also for a run that the earlier uploader sent before batches. When
+  nothing, also for a run that the earlier uploader sent before batches. A file
+  that the submitted batch of the run does not hold is named as dropped, not as
+  already sent. When Paramify rejected the batch of the run, the upload refuses
+  the entry: collect again to send new evidence. When
   the API refuses a write (400, 405, 415, 422) for one set or batch, only that
-  entry fails. Only a 401 or 403 stops the upload. A refused tag is a warning.
+  entry fails. Only a 401 or 403 stops the upload. A 403 on the check for
+  batches does not: the upload then sends every entry direct, and the plan gives
+  the server's reason. A refused tag is a warning.
   Batches need Paramify API 0.14.0 or later. An entry that cannot use a batch
   is sent direct, the way the uploader sent it before batches. This covers a
   workspace without batches, a channel with no artifact request, and
@@ -88,6 +93,14 @@ schemas and the `paramify` CLI — not the internal code.
   stack. `paramify validate --online` checks stack ids.
 - **`plan` event.** `upload_run` emits `plan` after planning, beside
   `upload_start`, `upload_file` and `upload_complete`.
+- **`paramify run --print-run-dir`** writes only the run directory to stdout,
+  and the normal progress output to stderr. Scripts use it to upload the run
+  they just collected. It cannot be used with `--json`.
+- **More in the `paramify run --json` summary.** It adds `skipped` (entries that
+  did not run, with the reason), `setup_errors` (entries whose setup failed
+  before the fetcher started) and `notes`. Each item names the entry and the
+  fetcher. The record of a failed invocation adds `error` and, when the fetcher
+  gave one, `error_code`. The same record goes in `_run_metadata.json`.
 
 - **Inspector ECR findings and Paramify issue intake:** `aws_inspector_ecr_findings`
   collects active findings, package details, image inventory and coverage;
@@ -1587,10 +1600,11 @@ schemas and the `paramify` CLI — not the internal code.
   before its first batch goes in. If the validator sync fails, the upload sends
   no batch for any entry of the run, and the run exits 1.
 - **`deploy/run-and-upload.sh` uploads the run it just collected.** It reads the
-  run directory from `paramify run --json` and no longer takes the newest run on
-  disk. An optional second argument names the stack. It writes one line for each
-  fetcher run to stderr: the entry, the target, the exit code and the last error
-  line. `./run_and_upload.sh` does the same.
+  run directory from `paramify run --print-run-dir` and no longer takes the
+  newest run on disk. An optional second argument names the stack. The log
+  still shows the full output of the run: each fetcher, skipped entries, setup
+  errors, notes and the reason for each failure. `./run_and_upload.sh` does the
+  same.
 - **The uploader guide explains the collection frequency of an evidence set.**
   A new section in [`docs/uploader_guide.md`](docs/uploader_guide.md#set-the-collection-frequency)
   gives the default (`THREE_DAY`), the values, and how to set `frequency` in
@@ -2231,6 +2245,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`paramify doctor` and the note before `paramify run` find an upload token
+  in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
+  Before, only `paramify stacks` and `paramify upload` read `.env`, and the
+  others said that no token was set.
+- **The TUI manifest screen shows each entry of a fetcher that the manifest
+  lists twice.** Each row, its counts and the detail pane show that entry's own
+  config. `paramify manifest validate` names the second and later entries of a
+  fetcher by entry key (`aws_x#1: ...`).
 - **A fetcher that writes over an earlier file in the same run fails.** Before,
   the second of two entries of one fetcher, or a fan-out that used one file name
   for each target, replaced the earlier evidence and passed. That invocation now
