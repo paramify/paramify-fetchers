@@ -1,10 +1,11 @@
 name: github_deployment_controls
-version: 0.1.0
+version: 0.2.0
 description: >-
   Deployment controls and history: each environment's required reviewers,
   self-review prevention, wait timer, branch policy, custom protection rules
   and admin bypass, and every deployment to a production environment in the
-  window with its ref, creator, the app that made it and its latest status.
+  window with its ref, creator, the app that made it, its latest status and
+  who approved it.
 category: github
 
 supports_targets: true
@@ -87,4 +88,6 @@ evidence_set:
     prevention, wait timer, deployment branch policy and allowed refs, custom
     protection rules and admin bypass; for production environments (by name),
     the deployments in the window with ref, commit, creator, whether GitHub
-    Actions made it, and latest status.
+    Actions made it, status history, whether it passed the gate or was held
+    there, and who approved its workflow run: whether someone other than
+    the creator did, with bot and self-approvals flagged.

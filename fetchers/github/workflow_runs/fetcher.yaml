@@ -1,0 +1,90 @@
+name: github_workflow_runs
+version: 0.1.0
+description: >-
+  GitHub Actions run history: every workflow run in the window with its
+  workflow, trigger, branch, commit, who started it and its result, and the
+  artifacts each run kept (metadata only, never the contents).
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: github_workflow_runs.json
+  aggregation: per_target
+
+config_schema:
+  days_back:
+    type: integer
+    required: false
+    default: 30
+    env: GITHUB_WORKFLOW_RUNS_DAYS_BACK
+    description: Days of workflow run history to collect (1-366).
+  max_runs:
+    type: integer
+    required: false
+    default: 2000
+    env: GITHUB_MAX_WORKFLOW_RUNS
+    description: >-
+      Most workflow runs read per repository; more in the window fails the
+      run rather than cutting the history short.
+  max_artifacts:
+    type: integer
+    required: false
+    default: 2000
+    env: GITHUB_MAX_ARTIFACTS
+    description: >-
+      Most artifacts read per repository; more in the window fails the run
+      rather than cutting the list short.
+
+secrets: []
+
+ksis:
+  - KSI-CMT-VTD
+  - KSI-CMT-RMV
+
+evidence_set:
+  reference_id: EVD-GITHUB-WORKFLOW-RUNS
+  name: GitHub Workflow Runs
+  instructions: >-
+    Script: github/workflow_runs/fetcher.py. Per repository, every GitHub
+    Actions workflow run created in the window: workflow file, trigger event,
+    branch and head repository, commit, actor and triggering actor, attempt,
+    status and conclusion, and the artifacts the run uploaded (name, size, digest,
+    expiry; never the contents). Summary counts runs by outcome, failed runs
+    on the default branch, workflows whose newest default-branch run failed,
+    reruns, and artifacts.

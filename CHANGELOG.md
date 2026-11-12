@@ -47,6 +47,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`github_workflow_runs` 0.1.0 gives the GitHub Actions run history.** For
+  each repository, it records every workflow run in the window: the workflow
+  file, trigger, branch, commit, actor, attempt, status and conclusion. It
+  also records the artifacts that each run uploaded (name, size, digest and
+  expiry, never the contents). The summary counts runs by outcome and failed
+  runs on the default branch. It also lists the workflows whose newest
+  finished run on the default branch failed. A run from a fork is never on
+  the default branch, even when the fork's branch has the same name. The run
+  reads the newest runs
+  first and does not use a date filter, because a filtered list stops at
+  1,000 results with no error. It fails as truncated beyond
+  `GITHUB_MAX_WORKFLOW_RUNS` or `GITHUB_MAX_ARTIFACTS`. It needs the Actions
+  (repository) read permission.
+
 - **Inspector ECR findings and Paramify issue intake:** `aws_inspector_ecr_findings`
   collects active findings, package details, image inventory and coverage;
   `aws_inspector_ecr_report` converts those APIs to a documented CSV for the existing
@@ -1520,6 +1534,45 @@ schemas and the `paramify` CLI — not the internal code.
   can't be looked up.
 
 ### Changed
+
+- **`github_deployment_controls` 0.2.0 records who approved each production
+  deployment.** For a deployment that GitHub Actions made, the fetcher finds
+  the workflow run from the oldest deployment status and reads the run's
+  reviews of that environment. It reads the full status history to tell a
+  deployment that got past the gate from one held there. New fields per
+  deployment: `gate`, `run_id`, `approvals` (one entry per review),
+  `approvals_unknown` and `independent_approval` (a person other than the
+  creator approved it). New summary fields:
+  `production_deployments_by_gate`, `production_deployments_held_at_gate`,
+  `production_deployments_approved`, `production_deployments_without_approval`,
+  `production_deployments_approval_unknown`,
+  `production_deployments_approved_independently`,
+  `production_deployments_without_independent_approver`,
+  `production_deployments_approved_by_bot`,
+  `production_deployments_self_approved` and
+  `production_deployments_approver_ambiguous`. Approval is judged only for
+  deployments that passed the gate. If the approval is not known, the value
+  is `null`, not "not approved". This occurs when Actions did not make the
+  deployment, when the status has no run link, or when GitHub deleted the
+  run. The fetcher needs no new permission. It makes one more call for each
+  workflow run that made a production deployment.
+- **`github_actions_security` 0.2.0 records runner groups and OIDC subject
+  claims.** `organization.runner_groups` gives each group with its
+  visibility, the repositories that can use it, its runners, whether it
+  allows public repositories and whether it limits use to some workflows.
+  `organization.oidc_subject_template` gives the organization's subject
+  template. Each repository with a workflow that uses OIDC gets
+  `oidc_subject`, with the claim keys that its subject is built from. New
+  summary fields: `runner_groups`, `runner_groups_open_to_all_repositories`,
+  `runner_groups_allowing_public_repositories`,
+  `runner_groups_not_restricted_to_workflows`,
+  `organization_oidc_subject_claims`, `repositories_with_custom_oidc_subject`,
+  `repositories_on_organization_oidc_template` and
+  `repositories_oidc_subject_without_repository`. A workflow with
+  `permissions: write-all` counts as using OIDC. Runner groups use the
+  Self-hosted runners (organization) permission and follow
+  `include_self_hosted_runners`. The repository OIDC setting needs the Actions
+  (repository) read permission.
 
 - **The uploader guide explains the collection frequency of an evidence set.**
   A new section in [`docs/uploader_guide.md`](docs/uploader_guide.md#set-the-collection-frequency)
