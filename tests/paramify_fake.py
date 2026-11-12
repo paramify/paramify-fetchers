@@ -65,6 +65,9 @@ class FakeParamify:
     def __init__(self) -> None:
         self.session = _Session(self)
         self.calls: List[Tuple[str, str, Dict[str, Any]]] = []
+        self.batch_bodies: List[Dict[str, Any]] = []  # each POST /batches body, as sent
+        # False: an API from before POST /batches took the batch settings (prod, for a time).
+        self.batch_settings = True
         self.today = date(2026, 11, 1)
         self.tags: Dict[Tuple[str, str], List[str]] = {}
         self._stacks: List[Dict[str, Any]] = []
@@ -252,6 +255,19 @@ class FakeParamify:
         })
 
     def _create_batch(self, body: Dict[str, Any]) -> FakeResponse:
+        self.batch_bodies.append(dict(body))
+        allowed = {"type", "artifactRequestId", "evidenceId"}
+        if self.batch_settings:
+            allowed |= {"whenToApprove", "whenToCreateAndUpdateProcess"}
+        extra = sorted(set(body) - allowed)
+        if extra:
+            # The wording stage gives (a zod error), 2026-11-12.
+            return FakeResponse(400, text=json.dumps({
+                "statusMessage": "Bad Request",
+                "error": {"message": "The request body is invalid.", "path": "/api/v0/batches",
+                          "errorDetails": [{"path": [], "message": f'Unrecognized key: "{extra[0]}"'}]}}))
+        if body.get("whenToApprove") not in (None, "MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION"):
+            return FakeResponse(400, text="Invalid option: whenToApprove")
         request_id = None
         if body["type"] == "ARTIFACT_REQUEST":
             request = next((r for r in self._requests if r["id"] == body["artifactRequestId"]), None)
@@ -267,7 +283,8 @@ class FakeParamify:
         row = {
             "id": f"bt-{self._next('bt')}", "referenceId": f"BCH-{self._n['bt']}", "status": "OPEN",
             "evidenceId": evidence_id, "artifactRequestId": request_id, "artifactCount": 0,
-            "whenToApprove": evidence["whenToApproveArtifactRequest"], "whenToCreateAndUpdateProcess": "NEVER",
+            "whenToApprove": body.get("whenToApprove") or evidence["whenToApproveArtifactRequest"],
+            "whenToCreateAndUpdateProcess": "NEVER",
         }
         self._batches.append(row)
         return FakeResponse(201, row)

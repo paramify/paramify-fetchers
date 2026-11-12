@@ -16,7 +16,9 @@ paramify:
 # Channels need no configuration: an evidence set that has one is uploaded
 # through it, and one with none gets its batch on the evidence set. A set with
 # several channels needs a stack: set it in the run manifest (run.paramify.stack,
-# `paramify manifest set-stack`) or with `paramify upload --stack`. Channels are
+# `paramify manifest set-stack`) or with `paramify upload --stack`. A stack with
+# one channel per owner also needs an owner (run.paramify.owner,
+# `paramify manifest set-owner`, or `paramify upload --owner`). Channels are
 # created in the Paramify app — the upload only uses what a set already has.
 
 # Per-fetcher overrides. Key = fetcher name (metadata.fetcher_name). Override
