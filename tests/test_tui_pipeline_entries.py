@@ -59,8 +59,36 @@ def test_entry_form_hides_direct_settings_for_a_pipeline_entry(tmp_path, run_tui
         return {s["key"]: s for s in app.screen._groups["paramify"]}
 
     specs = run_tui(body, _manifest(tmp_path, PIPELINE))
-    assert set(specs) == {"stack", "approval"}
+    assert set(specs) == {"stack", "approval", "no_request"}
     assert specs["approval"]["help"] == "pipeline files always go in a batch; MANUAL waits for a person"
+    assert specs["no_request"]["options"] == [("evidence", "evidence"), ("refuse", "refuse")]
+    assert specs["no_request"]["help"] == "no artifact request: blank or evidence sends a batch to the set; refuse stops"
+
+
+def test_saving_the_form_keeps_a_pipeline_entrys_settings(tmp_path, run_tui):
+    import yaml
+
+    path = _manifest(tmp_path, PIPELINE)
+    manifest = yaml.safe_load(path.read_text())
+    settings = {"no_request": "refuse", "approval": "SUBMISSION", "delivery": "auto"}
+    manifest["run"]["fetchers"][0]["paramify"] = dict(settings)
+    api.dump_manifest(manifest, path, REPO_ROOT)
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, FormModal)
+        shown = {s["key"]: s["value"] for s in app.screen._groups["paramify"]}
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        return shown
+
+    shown = run_tui(body, path)
+    assert shown["no_request"] == "refuse"
+    # delivery is not on the form, so the save leaves it as it was.
+    assert yaml.safe_load(path.read_text())["run"]["fetchers"][0]["paramify"] == settings
 
 
 def test_entry_form_keeps_direct_settings_for_ordinary_evidence(tmp_path, run_tui):

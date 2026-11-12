@@ -9,7 +9,7 @@ modal -> api.* mutator -> rebuild, mirroring the Bagels write path.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 import yaml
 from rich.text import Text
@@ -38,6 +38,7 @@ from framework.tui.modals import (
 
 APPROVALS = ("MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION")
 NO_REQUESTS = ("direct", "evidence", "refuse")
+PIPELINE_NO_REQUESTS = ("evidence", "refuse")  # a pipeline file never goes direct
 DELIVERIES = ("auto", "direct")
 
 
@@ -569,21 +570,28 @@ class ManifestPage(ButtonRowNav, Vertical):
             for s in d.get("secrets", []) if not s.get("per_target")
         ]
         pf = entry.get("paramify") or {}
+        pipeline = bool(d.get("pipeline"))
+        no_requests = PIPELINE_NO_REQUESTS if pipeline else NO_REQUESTS
         paramify_specs = [
             {"key": "stack", "label": "stack", "kind": "text", "value": pf.get("stack"),
              "placeholder": "inherit", "required": False, "help": "stack id or name; blank inherits"},
             {"key": "approval", "label": "approval", "kind": "select", "value": pf.get("approval") if pf.get("approval") in APPROVALS else None,
              "options": [(v, v) for v in APPROVALS], "required": False,
              "help": ("pipeline files always go in a batch; MANUAL waits for a person"
-                      if d.get("pipeline") else "blank inherits")},
-            {"key": "no_request", "label": "no_request", "kind": "select", "value": pf.get("no_request") if pf.get("no_request") in NO_REQUESTS else None,
-             "options": [(v, v) for v in NO_REQUESTS], "required": False, "help": "blank inherits"},
+                      if pipeline else "blank inherits")},
+            {"key": "no_request", "label": "no_request", "kind": "select",
+             "value": pf.get("no_request") if pf.get("no_request") in no_requests else None,
+             "options": [(v, v) for v in no_requests], "required": False,
+             "help": ("no artifact request: blank or evidence sends a batch to the set; refuse stops"
+                      if pipeline else "blank inherits")},
             {"key": "delivery", "label": "delivery", "kind": "select", "value": pf.get("delivery") if pf.get("delivery") in DELIVERIES else None,
              "options": [(v, v) for v in DELIVERIES], "required": False, "help": "blank inherits"},
         ]
-        if d.get("pipeline"):
-            # A pipeline file always goes in a batch, so the direct-delivery knobs do not apply.
-            paramify_specs = [s for s in paramify_specs if s["key"] not in ("no_request", "delivery")]
+        if pipeline:
+            # A pipeline file always goes in a batch, so `delivery` does not apply (and
+            # no_request offers no `direct`). The save leaves a key the form hides alone.
+            paramify_specs = [s for s in paramify_specs if s["key"] != "delivery"]
+        shown = [s["key"] for s in paramify_specs]
         groups = {"config": config_specs, "secrets": secret_specs, "paramify": paramify_specs}
 
         def done(result: Optional[dict]) -> None:
@@ -596,7 +604,7 @@ class ManifestPage(ButtonRowNav, Vertical):
                     api.set_fetcher_config(m, use, k, v, entry_key=ekey)
             for name, env in (result.get("secrets") or {}).items():
                 api.set_secret(m, use, name, env, entry_key=ekey)
-            self._set_entry_paramify(entry, result.get("paramify") or {})
+            self._set_entry_paramify(entry, result.get("paramify") or {}, shown)
             self._autosave()
             self.rebuild()
             self.notify(f"Updated {use}.")
@@ -622,10 +630,13 @@ class ManifestPage(ButtonRowNav, Vertical):
         entries = self._entries()
         return list(zip(entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries]), entries))
 
-    def _set_entry_paramify(self, entry: dict, values: dict) -> None:
-        """Write the entry's `paramify` block from the form; a blank field removes its key."""
+    def _set_entry_paramify(self, entry: dict, values: dict, shown: Sequence[str]) -> None:
+        """Write the entry's `paramify` block from the form; a blank field removes its key.
+
+        Only the keys the form `shown` are touched: one it hid keeps its value.
+        """
         block = dict(entry.get("paramify") or {})
-        for key in ("stack", "approval", "no_request", "delivery"):
+        for key in shown:
             if values.get(key):
                 block[key] = values[key]
             else:
