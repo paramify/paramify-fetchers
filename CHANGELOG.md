@@ -25,6 +25,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Breaking
 
+- **`kind: inventory` requires a `pipeline:` block.** A `fetcher.yaml` with
+  `kind: inventory` and no `pipeline: {type: inventory, id_scheme: …}` fails the
+  schema, and a schema failure drops the fetcher from discovery. Migration: add
+  `pipeline: {type: inventory, id_scheme: <scheme>}` (the scheme list is in the
+  [pipeline fetchers guide](docs/pipeline_fetchers_guide.md)).
+
+- **Inventory records must carry `asset_type`.** Advanced config derives each
+  Inventory item's parent component from it, so a `kind: inventory` record
+  without a non-empty string `asset_type` now breaks the inventory contract
+  and the run is not sent. `metadata.inventory.by_asset_type` counts the
+  records per type (largest first). Migration: set a non-empty `asset_type`
+  (such as `endpoint`) on every record; `_template_inventory` already writes it.
+
 - **Datadog evidence: some fields are removed, renamed, or now mean something
   else.** Re-check any validator or query that reads these fields:
   - `datadog_siem_signals` 0.2.0: `status` is now the signal's triage state
@@ -62,9 +75,9 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`pipeline:` block in `fetcher.yaml`.** A fetcher whose output feeds a Paramify
   pipeline declares `pipeline: {type, id_scheme}` (`asset_id_field` for a
-  scan-report pipeline). `kind: inventory` now requires it with `type: inventory`;
-  `kind: issue_report` may declare `vulnerability` or `configuration`; evidence and
-  discovery fetchers refuse it. The envelope records it as `metadata.pipeline` and
+  scan-report pipeline). `kind: issue_report` may declare `vulnerability` or
+  `configuration`; evidence and discovery fetchers refuse it (for `kind:
+  inventory`, see **Breaking**). The envelope records it as `metadata.pipeline` and
   `paramify describe` shows it. `github_repository_inventory` and
   `sophos_endpoint_inventory` 0.2.0 declare it.
 
@@ -1609,12 +1622,6 @@ schemas and the `paramify` CLI — not the internal code.
   can't be looked up.
 
 ### Changed
-
-- **Inventory records must carry `asset_type`.** Advanced config derives each
-  Inventory item's parent component from it, so a `kind: inventory` record
-  without a non-empty string `asset_type` now breaks the inventory contract
-  and the run is not sent. `metadata.inventory.by_asset_type` counts the
-  records per type (largest first). `_template_inventory` already writes it.
 
 - **Upload result shape.** The `--json` summary and `upload_log.json` keep
   `uploaded`, `skipped_duplicate`, `skipped_failed`, `errors` and `ok` for one
