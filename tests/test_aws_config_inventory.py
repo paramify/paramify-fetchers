@@ -282,23 +282,79 @@ def test_cli_uses_profile_and_region_without_constructing_endpoints(
 ):
     monkeypatch.setenv("AWS_PROFILE", "inventory-reader")
     monkeypatch.setenv("AWS_REGION", estate["region"])
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "stale-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "stale-secret")
+    monkeypatch.setenv("AWS_SESSION_TOKEN", "stale-token")
     calls = []
 
     def run(command, **kwargs):
         calls.append(command)
         assert kwargs["timeout"] == 120
+        assert kwargs["shell"] is False
+        assert kwargs["env"]["AWS_PROFILE"] == "inventory-reader"
+        assert kwargs["env"]["AWS_REGION"] == estate["region"]
+        assert "AWS_ACCESS_KEY_ID" not in kwargs["env"]
+        assert "AWS_SECRET_ACCESS_KEY" not in kwargs["env"]
+        assert "AWS_SESSION_TOKEN" not in kwargs["env"]
         return SimpleNamespace(returncode=0, stdout="{}")
 
     monkeypatch.setattr(fetcher.subprocess, "run", run)
     fetcher.aws("describe-configuration-aggregators")
-    assert calls[0][-4:] == [
-        "--profile",
-        "inventory-reader",
-        "--region",
-        estate["region"],
-    ]
+    assert "--profile" not in calls[0]
+    assert "--region" not in calls[0]
     assert "--endpoint-url" not in calls[0]
     assert "--no-paginate" in calls[0]
+
+
+def test_cli_request_values_are_data_not_command_arguments(monkeypatch):
+    token = "file:///etc/passwd; $(touch /tmp/not-executed) --endpoint-url=https://example.invalid"
+    calls = []
+
+    def run(command, **kwargs):
+        path = Path(
+            command[command.index("--cli-input-json") + 1].removeprefix("file://")
+        )
+        calls.append(json.loads(path.read_text()))
+        assert token not in command
+        assert kwargs["shell"] is False
+        return SimpleNamespace(returncode=0, stdout="{}")
+
+    monkeypatch.setattr(fetcher.subprocess, "run", run)
+    fetcher.aws(
+        "select-aggregate-resource-config",
+        "--configuration-aggregator-name",
+        "inventory",
+        "--expression",
+        "SELECT arn",
+        "--next-token",
+        token,
+    )
+    assert calls == [
+        {
+            "ConfigurationAggregatorName": "inventory",
+            "Expression": "SELECT arn",
+            "NextToken": token,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "operation,args",
+    [
+        ("delete-configuration-aggregator", ()),
+        (
+            "select-aggregate-resource-config",
+            ("--endpoint-url", "https://example.invalid"),
+        ),
+        ("select-aggregate-resource-config", ("--expression",)),
+    ],
+)
+def test_cli_rejects_unknown_operations_and_flags(monkeypatch, operation, args):
+    monkeypatch.setattr(
+        fetcher.subprocess, "run", lambda *a, **k: pytest.fail("must not execute")
+    )
+    with pytest.raises(ValueError):
+        fetcher.aws(operation, *args)
 
 
 def test_cli_failure_is_not_treated_as_an_empty_page(monkeypatch):

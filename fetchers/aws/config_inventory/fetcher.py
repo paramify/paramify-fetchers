@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,26 +15,57 @@ from fetcher_status import report_failure
 
 logger = logging.getLogger("aws_config_inventory")
 OUTPUT = "aws_config_inventory.json"
+OPERATIONS = {
+    "describe-configuration-aggregators": "describe-configuration-aggregators",
+    "describe-configuration-aggregator-sources-status": "describe-configuration-aggregator-sources-status",
+    "select-aggregate-resource-config": "select-aggregate-resource-config",
+}
+PARAMETERS = {
+    "--configuration-aggregator-names": "ConfigurationAggregatorNames",
+    "--configuration-aggregator-name": "ConfigurationAggregatorName",
+    "--expression": "Expression",
+    "--next-token": "NextToken",
+}
 
 
 def aws(operation, *arguments):
-    command = [
-        "aws",
-        "configservice",
-        operation,
-        *arguments,
-        "--output",
-        "json",
-        "--no-paginate",
-        "--no-cli-pager",
-    ]
+    if operation not in OPERATIONS or len(arguments) % 2:
+        raise ValueError("Unsupported Config operation or arguments")
+    request = {}
+    for flag, value in zip(arguments[::2], arguments[1::2]):
+        if flag not in PARAMETERS or not isinstance(value, str):
+            raise ValueError("Unsupported Config request parameter")
+        request[PARAMETERS[flag]] = (
+            [value] if flag == "--configuration-aggregator-names" else value
+        )
+    environment = os.environ.copy()
     # An explicit profile must take precedence over ambient static credentials.
-    if os.environ.get("AWS_PROFILE"):
-        command += ["--profile", os.environ["AWS_PROFILE"]]
-    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
-    if region:
-        command += ["--region", region]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=120)
+    if environment.get("AWS_PROFILE"):
+        for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
+            environment.pop(name, None)
+    # Request values stay in JSON; the CLI cannot interpret them as flags or file:// inputs.
+    with tempfile.TemporaryDirectory(prefix="config-inventory-") as temporary:
+        path = Path(temporary) / "request.json"
+        path.write_text(json.dumps(request))
+        result = subprocess.run(
+            [
+                "aws",
+                "configservice",
+                OPERATIONS[operation],
+                "--cli-input-json",
+                f"file://{path}",
+                "--output",
+                "json",
+                "--no-paginate",
+                "--no-cli-pager",
+                "--no-cli-auto-prompt",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            shell=False,
+            env=environment,
+        )
     if result.returncode:
         raise ValueError(f"{operation} failed: {result.stderr.strip()[:1000]}")
     response = json.loads(result.stdout)
