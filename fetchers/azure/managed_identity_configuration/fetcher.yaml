@@ -113,7 +113,7 @@ evidence_set:
 
     Is every user-assigned identity attached to something?
     - user_assigned_identities_no_resource_attached — Number of user-assigned identities that no resource in this subscription names, null when any identity's attachments could not be read; a resource in another subscription, a deployment script or a federated workload may still use one, and sign-in activity is not read
-    - unattached_identities_with_roles — Number of user-assigned identities that no resource in this subscription names, have no federated credential and hold at least one role assignment (standing access with no visible owner); null when any identity's role assignments, attachments or federated credentials could not be read, since that identity may belong in this count or the next
+    - unattached_identities_with_roles — Number of user-assigned identities that no resource in this subscription names, have no federated credential and hold at least one role assignment (standing access with no visible owner); null when, for any user-assigned identity, a list needed to place it was not read: its role assignments; its attachments, with no resource found naming it; or its federated credentials, when it has roles and no attachment
     - federated_only_identities_with_roles — Number of user-assigned identities that no resource in this subscription names, have a federated credential and hold at least one role assignment (an outside workload uses them, so they are never attached to a resource by design); null in the same cases as the count above
 
     Which outside systems can sign in as an identity?
