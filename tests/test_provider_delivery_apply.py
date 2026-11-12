@@ -127,9 +127,21 @@ def test_upload_sends_the_planned_bytes_title_and_note(tmp_path):
     assert content == json.dumps(json.loads((tmp_path / "a.json").read_text()), indent=2).encode()
     assert set(meta) == {"title", "note", "effectiveDate"}  # no channelId on a batch upload
     assert meta["title"] == "Set X" and "run_id=RID" in meta["note"] and "entry=x" in meta["note"]
-    # The run's collected_at, as the pre-batch uploader sent it, so a late upload keeps the collection date.
-    assert meta["effectiveDate"] == "2026-01-01T00:00:00Z"
-    assert fake._artifacts[0]["effectiveDate"] == "2026-01-01T00:00:00Z"
+    # The date of the run's collected_at, so a late upload keeps the collection date.
+    # The batch route takes a date only (YYYY-MM-DD); a timestamp there is a 400.
+    assert meta["effectiveDate"] == "2026-01-01"
+    assert fake._artifacts[0]["effectiveDate"] == "2026-01-01"
+
+
+def test_batch_effective_date_is_the_utc_date_of_collected_at(tmp_path):
+    fake = FakeParamify()
+    body = env(fetcher="x")
+    body["metadata"]["collected_at"] = "2026-01-01T20:30:00-07:00"  # 2026-01-02 in UTC
+    build(tmp_path, {"a.json": body}, [inv("x", ["a.json"])], {"x": {"use": "x"}})
+    h = Harness(fake, tmp_path)
+    h.run()
+    assert json.loads(h.sent[0]["artifact"][1])["effectiveDate"] == "2026-01-02"
+    assert fake._artifacts[0]["batchId"] == "bt-1"
 
 
 def test_upload_without_collected_at_sends_the_upload_time_as_effective_date(tmp_path):
@@ -140,7 +152,7 @@ def test_upload_without_collected_at_sends_the_upload_time_as_effective_date(tmp
     h = Harness(fake, tmp_path)
     h.run()
     meta = json.loads(h.sent[0]["artifact"][1])
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", meta["effectiveDate"])
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", meta["effectiveDate"])  # today, as a date: the batch route
 
 
 def test_payload_mode_sends_only_the_payload(tmp_path):

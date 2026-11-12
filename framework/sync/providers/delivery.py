@@ -244,6 +244,22 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _batch_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """The artifact meta for the batch route, whose `effectiveDate` is a date only.
+
+    The direct route takes the whole `collected_at` timestamp, as the pre-batch
+    uploader sent it. The batch route accepts only `YYYY-MM-DD` and refuses
+    anything else with a 400, which would drop every file. So it gets the UTC
+    date of that timestamp, or today's UTC date when the timestamp is unreadable.
+    """
+    when = str(meta.get("effectiveDate") or "")
+    try:
+        day = datetime.fromisoformat(when.replace("Z", "+00:00")).astimezone(timezone.utc).date()
+    except ValueError:
+        day = datetime.now(timezone.utc).date()
+    return {**meta, "effectiveDate": day.isoformat()}
+
+
 # ---- provider -------------------------------------------------------------- #
 
 class DeliveryProvider:
@@ -650,7 +666,8 @@ class DeliveryProvider:
         # Step 3: upload what the batch does not have yet.
         present |= set(p.get("before_batches") or [])  # sent before batches existed
         error = self._send(action_id, p, run, present,
-                           lambda name, content, meta: resources.upload_to_batch(run.batch_id, name, content, meta))
+                           lambda name, content, meta: resources.upload_to_batch(
+                               run.batch_id, name, content, _batch_meta(meta)))
         if error is not None:
             return self._failed(action_id, error, run, resources, ev_id, f"batch {run.name}")
 

@@ -20,6 +20,10 @@ _EVIDENCE_POST_KEYS = frozenset({
 })
 
 _DIRECT_META_KEYS = frozenset({"title", "note", "effectiveDate", "channelId"})
+# UploadBatchArtifactSchema (API 0.14.0): no channelId, and effectiveDate is a date
+# only, `YYYY-MM-DD`. The direct route's UploadArtifactSchema takes any string.
+_BATCH_META_KEYS = frozenset({"title", "note", "effectiveDate"})
+_BATCH_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _public(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -278,6 +282,11 @@ class FakeParamify:
             status, text = self._fail_all[filename]
             return FakeResponse(status, text=text)
         meta = json.loads(files["artifact"][1])
+        extra = sorted(set(meta) - _BATCH_META_KEYS)
+        if extra:
+            return FakeResponse(400, text=f"Unrecognized keys: {', '.join(extra)}")
+        if "effectiveDate" in meta and not _BATCH_DATE.fullmatch(str(meta["effectiveDate"])):
+            return FakeResponse(400, text="effectiveDate: Invalid date, expected YYYY-MM-DD")
         row = {
             "id": f"af-{self._next('af')}", "title": meta.get("title") or filename,
             "originalFileName": filename, "pathname": f"/artifacts/{filename}", "note": meta.get("note"),
