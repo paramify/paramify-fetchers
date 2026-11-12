@@ -92,7 +92,7 @@ evidence_set:
     - GET /servicePrincipals/{id}/appRoleAssignments (Microsoft Graph, per identity) — Graph application permissions granted to the identity; a 401 or 403 reads graph_access not_authorized, a 404 reads as no permissions, and any other error leaves that identity's permissions unknown and fails the run
     - GET /servicePrincipals/{id} (Microsoft Graph, per API the permissions belong to) — the permission names; no secret or token is read
 
-    Output: azure_managed_identity_configuration_<subscription>.json — each user-assigned identity with the resources it is attached to and its federated credentials, each resource's system-assigned identity, and every identity's role assignments and Graph permissions; identities the resource_exclusions patterns take out are listed under excluded instead.
+    Output: azure_managed_identity_configuration_<subscription>.json — each user-assigned identity with the resources it is attached to and its federated credentials, each resource's system-assigned identity, and every identity's role assignments and Graph permissions; identities the resource_exclusions patterns take out are listed under excluded instead. Lists that could not be read are null and set metadata.partial_failure.
 
     Summary fields:
 

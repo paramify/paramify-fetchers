@@ -1,5 +1,5 @@
 name: azure_entra_authentication_policy
-version: 0.3.0
+version: 0.3.1
 description: >-
   Shows which sign-in methods the tenant allows, flagging weak and phishing-resistant ones, which certificate authorities certificate sign-in trusts, and whether certificate users map to certificates.
 category: azure
@@ -151,9 +151,9 @@ evidence_set:
 
     Are common passwords and password guessing blocked?
     - entra_id_tier — Whether the tenant has Entra ID P2, P1 or neither: p2, p1 or free, from the service plans of its active subscriptions (a lapsed one doesn't count); null if the licences couldn't be read
-    - password_settings_source — Whether the password protection values come from a setting the tenant saved (directory_setting) or, when it never saved one, Microsoft's defaults (template_defaults); null if neither could be read
-    - custom_banned_password_check_enabled — True if the custom banned-password check is switched on; false if it's off; null if the value couldn't be read
-    - custom_banned_password_count — Number of words on the custom banned-password list (the words aren't recorded); null if neither the tenant's setting nor Microsoft's defaults could be read
+    - password_settings_source — Whether the password protection values come from a setting the tenant saved (directory_setting) or, when it never saved one, Microsoft's defaults (template_defaults); null if the tenant's settings couldn't be read (Microsoft's defaults are not used then, since the tenant may have saved other values), or if it saved none and Microsoft's defaults couldn't be read
+    - custom_banned_password_check_enabled — True if the custom banned-password check is switched on; false if it's off; null if the value couldn't be read, as always when the tenant's settings couldn't be read
+    - custom_banned_password_count — Number of words on the custom banned-password list (the words aren't recorded); null if the tenant's settings couldn't be read, or if it saved none and Microsoft's defaults couldn't be read
     - custom_banned_password_list_enforced — True only if the custom check is on, the list has at least one word and the tenant has Entra ID P1 or P2; false if any of the three is missing; null if the check setting or the licence tier couldn't be read
-    - lockout_threshold — Number of failed sign-ins before smart lockout first locks an account; null if the value couldn't be read
-    - lockout_duration_in_seconds — Number of seconds an account stays locked after its first smart lockout (later lockouts last longer); null if the value couldn't be read
+    - lockout_threshold — Number of failed sign-ins before smart lockout first locks an account; null if the value couldn't be read, as always when the tenant's settings couldn't be read
+    - lockout_duration_in_seconds — Number of seconds an account stays locked after its first smart lockout (later lockouts last longer); null if the value couldn't be read, as always when the tenant's settings couldn't be read

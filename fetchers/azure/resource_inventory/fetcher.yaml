@@ -77,13 +77,13 @@ evidence_set:
     - Resource Graph SecurityResources | where type =~ 'microsoft.security/assessments' — every Defender for Cloud assessment, its status and severity; a failed or truncated query leaves the Defender counts null
     - Resource Graph PolicyResources | where type =~ 'microsoft.policyinsights/policystates' — every Azure Policy state and its compliance, one per resource, assignment and policy (a query past 1,000 pages fails the run; PolicyResources is the one a large subscription reaches, and it usually hits the runner's 600-second timeout first, exit 124 with no evidence file); a failed or truncated query leaves the Policy counts null, and a failed Resources query leaves the inventory empty and both services' counts null
 
-    Output: azure_resource_inventory_<subscription>.json — each resource with its details, how many Defender assessments and Policy evaluations cover it, and how many of them fail; Defender assessments and Policy states about anything outside the inventory are counted under coverage_queries by the kind of thing they target (never its name), AWS, GCP or on-premises ones by source.
+    Output: azure_resource_inventory_<subscription>.json — each resource with its details, how many Defender assessments and Policy evaluations cover it, and how many of them fail; Defender assessments and Policy states about anything outside the inventory are counted under coverage_queries by the kind of thing they target (never its name), AWS, GCP or on-premises ones by source. KSI-CNA-EIS and KSI-SVC-EIS are supporting evidence: Defender's coverage and unhealthy findings, not the enforcement or remediation itself.
 
     Summary fields:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource and no Defender assessment's or Policy state's target, such as a mistyped name, or null when the inventory could not be read
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource and no Defender assessment's or Policy state's target, such as a mistyped name, or null when the inventory, the Defender assessments or the Policy states could not be read
     - excluded_resources — Number of resources left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
     - in_scope_resources — Number of resources read and in scope; 0 means none was read or the patterns took out every resource, which a check can catch by requiring more than 0
 

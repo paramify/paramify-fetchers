@@ -57,7 +57,7 @@ evidence_set:
     Summary fields:
 
     What was checked?
-    - pim_available — True if PIM answered; false if the tenant has no PIM (no Entra ID P2 or ID Governance licence), and then every count reads 0; null if both lists failed for another reason
+    - pim_available — True if PIM refused neither list for want of a licence and at least one list was read; false if the tenant has no PIM (no Entra ID P2 or ID Governance licence), and then the counts from a list PIM refused read 0 while those from a list that failed for another reason read null; null if both lists failed for another reason
     - collected_at — Timestamp (UTC) of when the evidence was collected
     - oldest_request_created_on — Time of the oldest request Azure still holds; null if there are none or the requests were not read
     - newest_request_created_on — Time of the newest request; null if there are none or the requests were not read

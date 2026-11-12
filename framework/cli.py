@@ -55,7 +55,7 @@ every subcommand accepts --json, emitting {"ok", "path", "errors"}):
 
 Validate / run / launch:
   paramify validate <manifest> [--json]
-  paramify run <manifest> [--json]
+  paramify run <manifest> [--json | --print-run-dir]
   paramify upload [run-dir] [-f MANIFEST] [--output-dir DIR] [--config PATH] [--dry-run] [--json]
   paramify issues upload [run-dir] [-f MANIFEST] [--output-dir DIR] [--config PATH] [--dry-run] [--no-wait] [--json]
   paramify issues jobs [--assessment ID] [--retry JOB | --cancel JOB] [--json]
@@ -95,12 +95,15 @@ from framework.issue_reports import (
     CLOSE_CYCLE_VALUES,
     ISSUE_REPORTS_DIR,
 )
+from framework.paramify.client import ApiError
 from framework.runner.executor import is_credential_env_name
 from framework.secret_resolver import (
     env_var_name,
     is_env_ref_attempt,
     is_partial_env_ref,
 )
+from framework.sync.model import Outcome, Plan
+from framework.sync.render import render_outcomes, render_plan
 
 _DEFAULT_MANIFEST = "manifest.yaml"
 
@@ -308,19 +311,25 @@ def _target_field_type(root: Path, fetcher_name: str, key: str) -> str:
     return "string"
 
 
-def _human_run_printer():
-    """Return an on_event callback that reproduces the original CLI run output."""
+def _human_run_printer(err: bool = False):
+    """Return an on_event callback that reproduces the original CLI run output.
+
+    With `err`, every line goes to stderr, so stdout stays free for a script.
+    """
+    def out(msg: str) -> None:
+        typer.echo(msg, err=err)
+
     def on_event(ev: dict) -> None:
         kind = ev["event"]
         if kind == "run_start":
-            typer.echo(f"Run {style.head(ev['run_id'])} → {style.path(ev['run_dir'])}\n")
+            out(f"Run {style.head(ev['run_id'])} → {style.path(ev['run_dir'])}\n")
         elif kind == "fetcher_skip":
             _err(f"  {style.mark('SKIP')}  {style.name(ev['fetcher'])} {style.dim('(' + ev['reason'] + ')')}")
         elif kind == "fetcher_start":
             targets = style.dim(f"  ({ev['targets']} targets)") if ev["fanout"] else ""
             if ev.get("depends_on"):
                 targets = style.dim(f"  (reads {', '.join(ev['depends_on'])})")
-            typer.echo(f"  {style.dim('RUN')}   {style.name(ev['fetcher'])}{targets}")
+            out(f"  {style.dim('RUN')}   {style.name(ev['fetcher'])}{targets}")
         elif kind == "fetcher_note":
             _err(f"        {style.mark('NOTE')}  {style.dim(ev['note'])}")
         elif kind == "fetcher_error":
@@ -329,15 +338,19 @@ def _human_run_printer():
             m = "OK" if ev["exit_code"] == 0 else "FAIL"
             detail = f"exit={ev['exit_code']} duration={ev['duration_sec']}s"
             target = f"  target={ev['target']}" if ev["target"] else ""
-            typer.echo(
+            out(
                 f"        [{style.mark(m)}] {style.dim(detail)}{style.env(target)}"
             )
+            # Why it failed, as the TUI shows it: the fetcher's reported reason,
+            # else its last stderr line, else the runner's own (an overwrite).
+            if ev["exit_code"] != 0 and ev.get("error"):
+                _err(f"        {style.dim(ev['error'])}")
         elif kind == "run_complete":
-            typer.echo(f"\n_run_metadata.json → {style.path(ev['metadata_path'])}")
+            out(f"\n_run_metadata.json → {style.path(ev['metadata_path'])}")
             # `paramify upload` cannot see these, so a run that collected reports
             # and stops at the evidence stage leaves them unsent with no warning.
             if ev.get("issue_reports"):
-                typer.echo(
+                out(
                     f"{ev['issue_reports']} issue report(s) collected — send them "
                     f"with {style.head('paramify issues upload')} "
                     f"{style.dim('(paramify upload handles evidence only)')}"
@@ -421,8 +434,12 @@ def _human_upload_printer(noun: str = "file", log_name: str = "upload_log.json")
                 f"skipped_duplicate={ev['skipped_duplicate']} "
                 f"skipped_failed={ev['skipped_failed']} "
                 f"errors={ev['errors']}"
+                + (f" dropped={ev['dropped']}" if ev.get("dropped") else "")
                 + (f" jobs_failed={ev['jobs_failed']}" if "jobs_failed" in ev else "")
             )
+            planned = ev.get("validators") or {}
+            if ev.get("dry_run") and planned.get("planned"):
+                typer.echo(f"validators: {planned['planned']} (dry run: nothing synced)")
             if ev.get("halted"):
                 typer.echo(f"\nStopped early: {ev['halted']}")
             for line in _tags_done_lines(ev.get("tags")):
@@ -478,10 +495,11 @@ def _upload_stage(
     noun: str,
     log_name: str,
     upload_kwargs: Optional[dict] = None,
-    after_upload: Optional[Callable[[Path, Path, Optional[Path], bool], dict]] = None,
-    after_upload_key: str = "after_upload",
     kind: Optional[str] = None,
     manifest: Optional[str] = None,
+    plan_fn: Optional[Callable[..., Plan]] = None,
+    plan_only: bool = False,
+    pass_manifest: bool = False,
 ) -> NoReturn:
     """Resolve a run directory, preflight it, and upload — the whole flow for one
     upload stage.
@@ -490,15 +508,30 @@ def _upload_stage(
     different endpoints. Parameterizing it keeps the token prompt, the JSON error
     shape, and the exit codes identical between them, which is what a caller
     scripting either one depends on.
+
+    With `plan_only` the stage prints the plan (`plan_fn`, read-only, online) and
+    stops. Otherwise the upload prints the plan it makes, as a `plan` event, before
+    it applies, and the outcomes after it.
+
+    With `pass_manifest`, the manifest given with -f also goes to `upload_fn` and
+    `plan_fn` as `manifest_path`, so the plan can say where its Paramify settings
+    now differ from the run's.
     """
     root = api.find_repo_root()
+    manifest_path = None
     if run_dir:
         resolved_run_dir = Path(run_dir).resolve()
+        # The run is named, so the manifest only feeds the plan notes: one that
+        # is not found is left out, as before, rather than failing the upload.
+        if manifest and pass_manifest:
+            try:
+                manifest_path = api.resolve_manifest_path(root, manifest)
+            except api.ManifestNotFound:
+                manifest_path = None
     else:
         # The newest run with something of this stage's kind — not simply the
         # newest run: evidence and pipeline manifests usually share an
         # output_dir, and each command would otherwise pick up the other's run.
-        manifest_path = None
         if manifest:
             try:
                 manifest_path = api.resolve_manifest_path(root, manifest)
@@ -521,9 +554,12 @@ def _upload_stage(
             raise typer.Exit(1)
         resolved_run_dir = Path(latest["dir"]).resolve()
 
+    if pass_manifest:
+        upload_kwargs = {**(upload_kwargs or {}), "manifest_path": manifest_path}
+
     config_path = Path(config).resolve() if config else None
     try:
-        preflight = preflight_fn(resolved_run_dir, root, config_path, dry_run=dry_run)
+        preflight = preflight_fn(resolved_run_dir, root, config_path, dry_run=dry_run and not plan_only)
     except Exception as e:  # noqa: BLE001 — surface setup errors to CLI users
         if json_out:
             typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
@@ -536,7 +572,7 @@ def _upload_stage(
     # prompt there hangs the job instead of failing it.
     if not preflight["ok"] and not preflight["token_present"] and not json_out:
         if paramify_auth.prompt_for_token(preflight["base_url"]) is not None:
-            preflight = preflight_fn(resolved_run_dir, root, config_path, dry_run=dry_run)
+            preflight = preflight_fn(resolved_run_dir, root, config_path, dry_run=dry_run and not plan_only)
 
     if not preflight["ok"]:
         if json_out:
@@ -551,9 +587,47 @@ def _upload_stage(
         # assessment, say). `.get` because the evidence preflight has no such key.
         for warning in preflight.get("warnings") or []:
             _err(f"  {style.mark('WARN')}  {warning}")
-        typer.echo(f"Uploading to {preflight['base_url_label']}: {preflight['base_url']}")
+        verb = "Planning upload to" if plan_only else "Uploading to"
+        typer.echo(f"{verb} {preflight['base_url_label']}: {preflight['base_url']}")
         if preflight.get("config_path"):
             typer.echo(f"Uploader config: {preflight['config_path']}")
+
+    def _fail_stage(prefix: str, e: Exception) -> NoReturn:
+        text = _upload_error_text(e)
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [text]}, indent=2))
+        else:
+            _err(f"{prefix}: {text}")
+        raise typer.Exit(1)
+
+    if plan_fn is not None and plan_only:
+        try:
+            plan = plan_fn(
+                resolved_run_dir, root, config_path, online=True,
+                **{k: v for k, v in (upload_kwargs or {}).items() if k in _PLAN_KWARGS},
+            )
+        except Exception as e:  # noqa: BLE001
+            _fail_stage("Plan failed", e)
+        if json_out:
+            typer.echo(json.dumps({"ok": True, "plan": plan.to_json()}, indent=2, default=str))
+        else:
+            for line in render_plan(plan):
+                typer.echo(line)
+        raise typer.Exit(0)
+
+    printer = _human_upload_printer(noun, log_name)
+    validator_printer = _human_validator_printer()
+
+    def on_human_event(ev: dict) -> None:
+        # The engine's plan, printed once as it is made; validator-sync progress as before.
+        if ev.get("event") == "plan":
+            for line in render_plan(Plan.from_json(ev["plan"])):
+                typer.echo(line)
+            typer.echo("")
+        elif str(ev.get("event", "")).startswith("sync_"):
+            validator_printer(ev)
+        else:
+            printer(ev)
 
     try:
         summary = upload_fn(
@@ -561,41 +635,32 @@ def _upload_stage(
             root,
             config_path,
             dry_run=dry_run,
-            on_event=None if json_out else _human_upload_printer(noun, log_name),
+            on_event=None if json_out else on_human_event,
             **(upload_kwargs or {}),
         )
     except Exception as e:  # noqa: BLE001
-        if json_out:
-            typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
-        else:
-            _err(f"Upload failed: {e}")
-        raise typer.Exit(1)
+        _fail_stage("Upload failed", e)
 
-    # An optional second stage over the same run (validator sync, today). It runs
-    # after the artifacts are in, because it associates validators to the sets the
-    # upload just filled.
-    extra: Optional[dict] = None
-    if after_upload is not None:
-        try:
-            extra = after_upload(resolved_run_dir, root, config_path, dry_run)
-        except Exception as e:  # noqa: BLE001
-            if json_out:
-                typer.echo(json.dumps(
-                    {**summary, "ok": False, after_upload_key: {"ok": False, "error": str(e)}},
-                    indent=2, default=str,
-                ))
-            else:
-                _err(f"{after_upload_key.replace('_', ' ').capitalize()} failed: {e}")
-            raise typer.Exit(1)
-
-    # Top-level `ok` reflects BOTH stages, matching the exit code — a consumer
-    # reading `.ok` must not see true when the follow-on stage failed.
-    ok = summary["ok"] and (extra is None or extra.get("ok", True))
     if json_out:
-        out = dict(summary) if extra is None else {**summary, after_upload_key: extra}
-        out["ok"] = ok
-        typer.echo(json.dumps(out, indent=2, default=str))
-    raise typer.Exit(0 if ok else 1)
+        typer.echo(json.dumps(summary, indent=2, default=str))
+    elif summary.get("outcomes"):
+        lines = render_outcomes([Outcome(**o) for o in summary["outcomes"]])
+        if lines:
+            typer.echo("")
+            for line in lines:
+                typer.echo(line)
+    raise typer.Exit(0 if summary["ok"] else 1)
+
+
+_PLAN_KWARGS = frozenset({"stack", "owner", "custom_tags", "with_validators", "only_file", "manifest_path"})
+_TOKEN_REJECTED = "Paramify rejected the API token (HTTP 401); check {env}"
+
+
+def _upload_error_text(e: Exception) -> str:
+    """An upload or plan error as the user reads it; a 401 names the token to check."""
+    if isinstance(e, ApiError) and e.status == 401:
+        return _TOKEN_REJECTED.format(env=paramify_auth.UPLOAD_TOKEN_ENV)
+    return str(e)
 
 
 def _tags_suffix(ev: dict) -> str:
@@ -1234,6 +1299,7 @@ def samples_backfill(
 @app.command("validate")
 def validate_cmd(
     manifest: str = typer.Argument(..., help="Path to manifest yaml"),
+    online: bool = typer.Option(False, "--online", help="Also check each stack and owner in the manifest against the workspace (needs an API token)"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Validate a manifest against the schema + discovered fetchers."""
@@ -1257,7 +1323,17 @@ def validate_cmd(
         raise typer.Exit(1)
     discovered = {"fetchers": api.discover_fetchers(root), "platforms": api.discover_platforms(root)}
     errors = api.validate(m, root, **discovered)
+    if online:
+        try:
+            errors += api.stack_errors(m, api.list_stacks(root))
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"--online: {_upload_error_text(e)}")
     notes = api.validate_notes(m, root, **discovered)
+    if online and api.manifest_owners(m):
+        try:
+            notes += api.owner_notes(m, api.list_channel_owners(root))
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"--online: {_upload_error_text(e)}")
     if json_out:
         typer.echo(json.dumps({"ok": not errors, "errors": errors, "notes": notes}, indent=2))
         raise typer.Exit(0 if not errors else 1)
@@ -1279,8 +1355,15 @@ def validate_cmd(
 def run_cmd(
     manifest: str = typer.Argument(..., help="Path to manifest yaml"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
+    print_run_dir: bool = typer.Option(
+        False, "--print-run-dir",
+        help="For scripts: print the progress to stderr and only the run directory to stdout",
+    ),
 ):
     """Run a manifest; streams per-fetcher results (or a JSON summary with --json)."""
+    if json_out and print_run_dir:
+        raise typer.BadParameter("--json and --print-run-dir each set what stdout holds; use one",
+                                 param_hint="--print-run-dir")
     root = api.find_repo_root()
     try:
         mpath = api.resolve_manifest_path(root, manifest)
@@ -1307,13 +1390,14 @@ def run_cmd(
         if not readiness["token_present"]:
             typer.echo(
                 f"Note: no Paramify API token set, so `paramify upload` will need one "
-                f"({api.UPLOAD_TOKEN_ENV}). Collecting anyway.\n"
+                f"({api.UPLOAD_TOKEN_ENV}). Collecting anyway.\n",
+                err=print_run_dir,
             )
 
     try:
         summary = api.run(
             m, root,
-            on_event=None if json_out else _human_run_printer(),
+            on_event=None if json_out else _human_run_printer(err=print_run_dir),
             manifest_path=mpath,
         )
     except (ValueError, RuntimeError) as e:
@@ -1324,6 +1408,8 @@ def run_cmd(
         raise typer.Exit(1)
     if json_out:
         typer.echo(json.dumps(summary, indent=2, default=str))
+    elif print_run_dir:
+        typer.echo(summary["run_dir"])
     raise typer.Exit(0 if summary["ok"] else 1)
 
 
@@ -1337,29 +1423,26 @@ def upload_cmd(
         help="Base dir to find the run in (default: the -f manifest's output_dir, else ./evidence)",
     ),
     file: Optional[str] = typer.Option(
-        None, "-f", "--file", help="Only runs this manifest produced",
+        None, "-f", "--file",
+        help="Only runs this manifest produced; the plan notes its Paramify settings that differ from the run's",
     ),
     config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and report what would upload; no API calls"),
-    with_validators: bool = typer.Option(False, "--with-validators", help="After upload, sync validators for the sets this run produced (create-or-skip)"),
+    with_validators: bool = typer.Option(False, "--with-validators", help="Before delivery, sync validators for the sets this run produced (create-or-skip)"),
     no_tags: bool = typer.Option(False, "--no-tags", help="Skip the default custom tags for this run (PARAMIFY_CUSTOM_TAGS=off does the same from the environment)"),
+    plan: bool = typer.Option(False, "--plan", help="Read the workspace and print the plan; apply nothing"),
+    stack: Optional[str] = typer.Option(None, "--stack", help="Paramify stack (id or name) for every entry in this upload, over the one the manifest recorded"),
+    owner: Optional[str] = typer.Option(None, "--owner", help="Paramify username whose channel to use when a stack has one channel per owner, over the one the manifest recorded"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
     """Upload one evidence run to Paramify.
 
-    Evidence only. Issue reports collected by the same run go to a different
-    endpoint — see `paramify issues upload`.
+    Plans the upload, prints the plan, then applies it: one batch per manifest
+    entry. Evidence only. Issue reports collected by the same run go to a
+    different endpoint — see `paramify issues upload`.
     """
-    def _sync_after(run_path: Path, root: Path, config_path: Optional[Path], dry: bool) -> dict:
-        return api.sync_validators(
-            root,
-            reference_ids=list(api.reference_ids_from_run(run_path)),
-            config_path=config_path,
-            dry_run=dry,
-            on_event=None if json_out else _human_validator_printer(),
-            custom_tags=not no_tags,
-        )
-
+    if plan and dry_run:
+        raise typer.BadParameter("--plan reads the workspace and --dry-run makes no API calls; use one", param_hint="--plan")
     _upload_stage(
         run_dir=run_dir,
         output_dir=output_dir,
@@ -1370,12 +1453,34 @@ def upload_cmd(
         upload_fn=api.upload_run,
         noun="file",
         log_name="upload_log.json",
-        upload_kwargs={"custom_tags": not no_tags},
-        after_upload=_sync_after if with_validators else None,
-        after_upload_key="validators",
+        upload_kwargs={"custom_tags": not no_tags, "stack": stack, "owner": owner, "with_validators": with_validators},
         kind="evidence",
         manifest=file,
+        plan_fn=api.plan_upload,
+        plan_only=plan,
+        pass_manifest=True,
     )
+
+
+@app.command("stacks")
+def stacks_cmd(
+    config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """List the stacks in the Paramify workspace (name, id). Needs an API token."""
+    try:
+        stacks = api.list_stacks(config_path=Path(config).resolve() if config else None)
+    except Exception as e:  # noqa: BLE001 — setup and API errors read the same to a CLI user
+        _fail(None, _upload_error_text(e), json_out)
+    if json_out:
+        typer.echo(json.dumps({"ok": True, "stacks": stacks}, indent=2))
+        return
+    if not stacks:
+        typer.echo("No stacks in this workspace.")
+        return
+    width = max(len(s["name"]) for s in stacks)
+    for s in stacks:
+        typer.echo(f"{s['name']:<{width}}  {style.dim(s['id'])}")
 
 
 @validators_app.command("check")
@@ -1914,6 +2019,80 @@ def manifest_set_output_dir(
     m = _read_for_edit(path, json_out)
     api.set_output_dir(m, output_dir)
     _save_and_report(m, path, root, json_out)
+
+
+@manifest_app.command("set-stack")
+def manifest_set_stack(
+    manifest: str = typer.Argument(..., help="Path to manifest yaml"),
+    stack: str = typer.Argument(..., help="Stack id or name"),
+    fetcher: Optional[str] = typer.Option(None, "--fetcher", help="Set it for this fetcher entry only (a fetcher name or an entry key such as aws_iam_mfa#1)"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Record the Paramify stack that uploads go to.
+
+    With an API token, STACK is looked up in the workspace (an id first, then a
+    name) and both are stored. Without one it is stored as given and checked at
+    the next `paramify upload --plan` or `paramify validate --online`.
+    """
+    root = api.find_repo_root()
+    path = _resolve_manifest_arg(root, manifest, json_out)
+    m = _read_for_edit(path, json_out)
+    stack_id, stack_name, note = stack, None, None
+    if api.upload_readiness(root)["token_present"]:
+        try:
+            found = api.resolve_stack(api.list_stacks(root), stack)
+        except Exception as e:  # noqa: BLE001
+            _fail(path, _upload_error_text(e), json_out)
+        stack_id, stack_name = found["id"], found["name"]
+    else:
+        note = f"no API token, so {stack!r} was stored as given and not checked against the workspace"
+    try:
+        api.set_stack(m, stack_id, stack_name, use=fetcher)
+    except ValueError as e:
+        _fail(path, str(e), json_out)
+    if note and not json_out:
+        _err(f"Note: {note}")
+    _save_and_report(m, path, root, json_out, extra={"stack": stack_id, "stack_name": stack_name})
+
+
+@manifest_app.command("set-owner")
+def manifest_set_owner(
+    manifest: str = typer.Argument(..., help="Path to manifest yaml"),
+    owner: str = typer.Argument(..., help="Paramify username; an empty string removes it"),
+    fetcher: Optional[str] = typer.Option(None, "--fetcher", help="Set it for this fetcher entry only (a fetcher name or an entry key such as aws_iam_mfa#1)"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Record whose channel uploads use when a stack has one channel per owner.
+
+    Paramify makes a channel for each owner on each stack. The owner is read
+    only where an evidence set has several channels on the upload's stack; a
+    set with one channel there uses it, whoever owns it. With an API token,
+    OWNER is checked against the owners of the workspace's channels (case does
+    not matter, and the workspace's spelling is stored).
+    """
+    root = api.find_repo_root()
+    path = _resolve_manifest_arg(root, manifest, json_out)
+    m = _read_for_edit(path, json_out)
+    value, note = owner.strip() or None, None
+    if value and api.upload_readiness(root)["token_present"]:
+        try:
+            owners = api.list_channel_owners(root)
+        except Exception as e:  # noqa: BLE001
+            _fail(path, _upload_error_text(e), json_out)
+        match = next((o["owner"] for o in owners if o["owner"].casefold() == value.casefold()), None)
+        if match is None:
+            names = ", ".join(o["owner"] for o in owners) or "none"
+            _fail(path, f"no channel in this workspace is owned by {value!r} (owners: {names})", json_out)
+        value = match
+    elif value:
+        note = f"no API token, so {value!r} was stored as given and not checked against the workspace"
+    try:
+        api.set_owner(m, value, use=fetcher)
+    except ValueError as e:
+        _fail(path, str(e), json_out)
+    if note and not json_out:
+        _err(f"Note: {note}")
+    _save_and_report(m, path, root, json_out, extra={"owner": value})
 
 
 @manifest_app.command("show")

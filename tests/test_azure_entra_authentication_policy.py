@@ -170,8 +170,9 @@ def _client(calls, configs, authorities, fail=(), pki=None, pki_error=None):
         organization=organization,
         policies=ns(authentication_methods_policy=ns(get=_async(policy)),
                     identity_security_defaults_enforcement_policy=ns(get=_async(ns(is_enabled=False)))),
-        group_settings=Pages([]),
-        group_setting_templates=ns(by_group_setting_template_id=lambda tid: ns(get=_async(ns(values=[])))),
+        group_settings=Pages(DENIED if "group_settings" in fail else []),
+        group_setting_templates=ns(by_group_setting_template_id=lambda tid: ns(get=_async(ns(values=[
+            ns(name="LockoutThreshold", default_value="10")])))),
         subscribed_skus=Pages([]),
         users=Pages(DENIED if "users" in fail else USERS, calls, "users"),
         groups=ns(by_group_id=group),
@@ -478,6 +479,17 @@ def test_an_unreadable_classic_certificate_matches_its_pki_entry_by_key_identifi
     # Counted once, with the expiry its PKI entry could read.
     assert (summary["trusted_certificate_authorities"], summary["certificate_authorities_expiry_unknown"],
             summary["expired_certificate_authorities"]) == (1, 0, 0)
+
+
+def test_failed_settings_read_leaves_the_password_values_null_not_the_defaults(monkeypatch, tmp_path):
+    summary = run(monkeypatch, tmp_path, CONFIGS)[1]["summary"]
+    assert (summary["password_settings_source"], summary["lockout_threshold"]) == ("template_defaults", 10)
+    code, evidence, _ = run(monkeypatch, tmp_path, CONFIGS, fail=("group_settings",))
+    summary = evidence["summary"]
+    assert code == 1
+    assert [summary[k] for k in ("password_settings_source", "custom_banned_password_check_enabled",
+                                 "custom_banned_password_count", "custom_banned_password_list_enforced",
+                                 "lockout_threshold", "lockout_duration_in_seconds")] == [None] * 6
 
 
 def test_a_missing_cryptography_package_raises_rather_than_reading_as_an_unreadable_certificate(monkeypatch):
