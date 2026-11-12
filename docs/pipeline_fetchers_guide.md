@@ -92,7 +92,12 @@ Inventory`. The uploader cannot see the pipeline itself, so check Inventory.
 1. Copy the template and fill in the block, the records and the README.
 2. Add the fetcher to a manifest and run it ([steps 1 to 3 of the inventory
    guide](inventory_fetchers_guide.md#1-run-it)).
-3. Run `paramify preset <fetcher>` for the settings to enter in Paramify.
+3. Run `paramify preset <fetcher>` for the settings to enter in Paramify
+   ([details](cli_guide.md#paramify-preset-fetcher)):
+   - `-f manifest.yaml` reads the runs from that manifest's `run.output_dir`.
+   - `-o DIR` / `--output-dir DIR` finds the newest run in `DIR` instead.
+   - `--json` prints the same settings as data.
+   - In the TUI, press `P` on the **Manifest** tab to open the same sheet.
 4. Run `paramify validate`, then `paramify upload --plan`.
 
 <details><summary>Copy the commands</summary>
@@ -108,8 +113,9 @@ paramify upload --plan
 
 An inventory fetcher and a scan fetcher with the same `id_scheme` can be linked
 in Paramify. `paramify preset` lists the other fetchers that share a scheme. A
-scheme that is not in this list is allowed. Add it here when you write the first
-fetcher for it.
+new scheme must be added to this list. A fetcher whose scheme is missing from
+this table fails a test (`test_every_id_scheme_is_in_the_guide`), so add the row
+in the same change.
 
 | Scheme | ID format | Fetchers |
 |---|---|---|

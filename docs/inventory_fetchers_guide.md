@@ -89,6 +89,7 @@ batch, so the set must be ready before you upload.
    a file this large, and a failing one stops the batch from approving.
 5. Run `paramify upload`. The uploader makes the batch, and the pipeline runs
    when the batch approves. The result says `APPROVED: pipeline runs now`.
+6. Then open **Monitoring → Inventory**.
 
 For the rules behind this, see the [pipeline fetchers guide](pipeline_fetchers_guide.md#3-what-the-uploader-does-for-you).
 

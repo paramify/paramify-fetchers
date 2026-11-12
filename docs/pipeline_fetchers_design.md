@@ -139,7 +139,7 @@ pipeline:
 | Key | Required | Meaning |
 |---|---|---|
 | `type` | yes | The Paramify pipeline that reads the file. For a scan report it replaces `issue_report.assessment_type`. |
-| `id_scheme` | yes | The format of the asset ID, such as `aws-arn`, `azure-resource-id`, `wiz-resource-id`, or `hostname`. The known schemes are listed in `docs/pipeline_fetchers_guide.md`. A scheme not on that list is allowed. |
+| `id_scheme` | yes | The format of the asset ID, such as `aws-arn`, `azure-resource-id`, `wiz-resource-id`, or `hostname`. The known schemes are listed in `docs/pipeline_fetchers_guide.md`. A new scheme must be added to that list; `test_every_id_scheme_is_in_the_guide` enforces it. |
 | `asset_id_field` | scan reports only | The column of the vendor file that holds the asset ID. This is the column to choose as "inventory mapping" in the vulnerability preset. |
 | `preset` | reserved | Refused by the schema with "not supported yet". It will name a preset once the API can create one. |
 

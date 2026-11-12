@@ -80,3 +80,29 @@ def test_loader_parses_the_block_and_envelope_records_it(tmp_path):
 def test_every_inventory_fetcher_in_the_repo_declares_a_pipeline():
     fetchers = discover_fetchers(REPO_ROOT)
     assert all(f.is_pipeline for f in fetchers.values() if f.is_inventory)
+
+
+def test_every_id_scheme_is_in_the_guide():
+    guide = (REPO_ROOT / "docs" / "pipeline_fetchers_guide.md").read_text()
+    section = guide.split("## The ID scheme list", 1)[1].split("\n---", 1)[0]
+    listed = {
+        line.split("|")[1].strip().strip("`")
+        for line in section.splitlines()
+        if line.startswith("| `")
+    }
+    schemes = {f.pipeline.id_scheme for f in discover_fetchers(REPO_ROOT).values() if f.is_pipeline}
+    assert schemes, "no pipeline fetchers found"
+    assert schemes <= listed, f"add to the ID scheme list in docs/pipeline_fetchers_guide.md: {sorted(schemes - listed)}"
+
+
+def test_inventory_template_record_always_has_an_asset_type(monkeypatch):
+    import importlib.util
+    monkeypatch.syspath_prepend(str(REPO_ROOT / "fetchers" / "_lib"))
+    path = REPO_ROOT / "fetchers" / "_template_inventory" / "fetcher.py"
+    spec = importlib.util.spec_from_file_location("_template_inventory_fetcher", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for asset in ({"id": "a-1"}, {"id": "a-1", "type": None}, {"id": "a-1", "type": ""}):
+        rec = mod.record(asset)
+        assert isinstance(rec["asset_type"], str) and rec["asset_type"]
+    assert mod.record({"id": "a-1", "type": "host"})["asset_type"] == "host"
