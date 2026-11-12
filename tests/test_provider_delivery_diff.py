@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -86,13 +87,13 @@ def write_file(tmp_path: Path, name: str, payload=None, skip: Optional[str] = No
 
 
 def entry(tmp_path, key="aws_x", use="aws_x", *, files=("a.json", "b.json"), stack=None, stack_name=None,
-          no_request="refuse", recorded=None, run_id="R1", ref="EVD-12", delivery="auto", pipeline=None,
-          approval="SUBMISSION_WITH_PASSING_VALIDATORS") -> EntryDesired:
+          no_request="refuse", recorded=None, run_id="R1", ref="EVD-12", delivery="auto",
+          owner=None, pipeline=None, approval="SUBMISSION_WITH_PASSING_VALIDATORS") -> EntryDesired:
     built = tuple(f if isinstance(f, DeliveryFile) else write_file(tmp_path, f, key=key) for f in files)
     return EntryDesired(
         entry_key=key, use=use, run_id=run_id, reference_id=ref, evidence_set={"reference_id": ref, "name": "Set 12"},
         category="aws", approval=approval, stack=stack, stack_name=stack_name,
-        no_request=no_request, files=built, recorded_batch_id=recorded, delivery=delivery,
+        no_request=no_request, files=built, recorded_batch_id=recorded, delivery=delivery, owner=owner,
         pipeline=pipeline,
     )
 
@@ -176,7 +177,7 @@ def test_channels_none(tmp_path):
     assert a.payload["target"] == "EVIDENCE" and a.payload["evidence_id"] == "ev-1"
     assert a.payload["artifact_request_id"] is None and a.payload["resume_batch_id"] is None
     assert a.changes["channel"] is None and a.changes["stack"] is None
-    assert a.summary == "deliver 2 files to EVD-12 (evidence level): new batch"
+    assert a.summary == "deliver 2 files to EVD-12 (evidence level): new batch (approved when its validators pass)"
 
 
 def test_channels_one_no_stack_configured(tmp_path):
@@ -184,7 +185,7 @@ def test_channels_one_no_stack_configured(tmp_path):
     assert a.verb == "deliver" and a.payload["target"] == "ARTIFACT_REQUEST"
     assert a.payload["artifact_request_id"] == "ar-41" and a.payload["planned_current"] is True
     assert a.changes["channel"] == "CHN-1"
-    assert a.summary == "deliver 2 files to AR-41 (channel CHN-1): new batch"
+    assert a.summary == "deliver 2 files to AR-41 (channel CHN-1): new batch (approved when its validators pass)"
 
 
 def test_channels_one_matching_stack(tmp_path):
@@ -192,7 +193,7 @@ def test_channels_one_matching_stack(tmp_path):
         a = plan_one(entry(tmp_path, stack=configured), observed(evidence(CH_P), stacks=[PROD, GOV]))
         assert a.verb == "deliver" and a.payload["artifact_request_id"] == "ar-41"
         assert a.changes["stack"] == {"id": "st-1", "name": "Prod"}
-        assert a.summary == "deliver 2 files to AR-41 (stack Prod, channel CHN-1): new batch"
+        assert a.summary == "deliver 2 files to AR-41 (stack Prod, channel CHN-1): new batch (approved when its validators pass)"
 
 
 def test_channels_one_on_configured_stack_id_missing_from_stack_list(tmp_path):
@@ -287,8 +288,8 @@ def test_channels_one_per_owner_on_the_stack_refuse_and_name_the_owners(tmp_path
     a = plan_one(entry(tmp_path, stack="GovCloud"), observed(evidence(CH_P, a_, b_), stacks=[PROD, GOV]))
     assert a.verb == "refuse"
     assert a.summary == "EVD-12 has 2 channels on stack GovCloud, one per owner: CHN-3 (Owner A), CHN-4 (Owner B)"
-    assert a.fix == ("the upload cannot choose which owner's request this evidence fills. "
-                     "Upload it in the app and choose the channel there.")
+    assert a.fix == ("set an owner to choose one (paramify manifest set-owner, or paramify upload --owner); "
+                     "owners: Owner A, Owner B")
 
 
 def test_a_channel_with_no_owner_shows_its_reference_id_only(tmp_path):
@@ -297,6 +298,74 @@ def test_a_channel_with_no_owner_shows_its_reference_id_only(tmp_path):
     refusal = resolve_channel(entry(tmp_path, stack="GovCloud"), evidence(a_, b_), [PROD, GOV])
     assert isinstance(refusal, Refusal)
     assert refusal.message == "EVD-12 has 2 channels on stack GovCloud, one per owner: CHN-3 (Owner A), CHN-4"
+
+
+OWN_A = Channel("ch-3", "CHN-3", "st-2", owner="alice")
+OWN_B = Channel("ch-4", "CHN-4", "st-2", owner="bob")
+AR_BOB = ArtifactRequest("ar-50", "AR-50", "ch-4", "ev-1", date(2026, 10, 15), date(2026, 11, 15))
+
+
+def test_the_owner_picks_its_channel_among_several_on_the_stack(tmp_path):
+    a = plan_one(entry(tmp_path, stack="GovCloud", owner="bob"),
+                 observed(evidence(CH_P, OWN_A, OWN_B), stacks=[PROD, GOV], requests=[AR_BOB], current=["ar-50"]))
+    assert a.verb == "deliver" and a.payload["artifact_request_id"] == "ar-50"
+    assert a.changes["channel"] == "CHN-4"
+
+
+def test_a_new_batch_carries_the_entrys_approval_and_says_so(tmp_path):
+    e = entry(tmp_path)  # approval SUBMISSION_WITH_PASSING_VALIDATORS
+    a = plan_one(e, observed(evidence(CH_P), stacks=[PROD]))
+    assert a.payload["when_to_approve"] == "SUBMISSION_WITH_PASSING_VALIDATORS"
+    assert a.summary.endswith("new batch (approved when its validators pass)")
+
+
+def test_the_owner_matches_without_regard_to_case(tmp_path):
+    picked = resolve_channel(entry(tmp_path, stack="GovCloud", owner="Bob"), evidence(OWN_A, OWN_B), [PROD, GOV])
+    assert picked == OWN_B
+
+
+def test_the_owner_is_ignored_when_the_stack_has_one_channel(tmp_path):
+    # A tiebreaker only: one owner for the whole manifest must not refuse the sets
+    # whose only channel on the stack belongs to someone else.
+    assert resolve_channel(entry(tmp_path, stack="GovCloud", owner="carol"), evidence(CH_P, OWN_A), [PROD, GOV]) == OWN_A
+    assert resolve_channel(entry(tmp_path, owner="carol"), evidence(OWN_A), [PROD, GOV]) == OWN_A
+
+
+def test_the_owner_does_not_choose_between_stacks(tmp_path):
+    bob_on_prod = Channel("ch-5", "CHN-5", "st-1", owner="bob")
+    refusal = resolve_channel(entry(tmp_path, owner="bob"), evidence(OWN_A, bob_on_prod), [PROD, GOV])
+    assert isinstance(refusal, Refusal) and "no stack is configured" in refusal.message
+
+
+def test_an_owner_with_no_channel_on_the_stack_refuses_and_names_the_owners(tmp_path):
+    a = plan_one(entry(tmp_path, stack="GovCloud", owner="carol"),
+                 observed(evidence(CH_P, OWN_A, OWN_B), stacks=[PROD, GOV]))
+    assert a.verb == "refuse"
+    assert a.summary == "EVD-12 has no channel on stack GovCloud owned by carol"
+    assert a.fix == "set the owner to one of: alice, bob"
+
+
+def test_owner_from_the_manifest_reaches_routing(tmp_path):
+    fake = FakeParamify()
+    fake.add_stack("Prod")
+    gov = fake.add_stack("GovCloud")
+    ev = fake.add_evidence("EVD-X", channels=[gov.id, gov.id], owners=["alice", "bob"])
+    fake.add_request(ev.id, ev.channels[1].id, date(2026, 10, 15), date(2026, 11, 15))
+    build(tmp_path, {"a.json": env(fetcher="x")}, [inv("x", ["a.json"])],
+          {"x": {"use": "x", "stack": "GovCloud", "owner": "bob"}})
+    [a] = plan_run(fake, tmp_path)
+    assert a.verb == "deliver" and a.changes["channel"] == ev.channels[1].reference_id
+
+
+def test_owner_override_beats_the_recorded_owner(tmp_path):
+    fake = FakeParamify()
+    gov = fake.add_stack("GovCloud")
+    ev = fake.add_evidence("EVD-X", channels=[gov.id, gov.id], owners=["alice", "bob"])
+    fake.add_request(ev.id, ev.channels[0].id, date(2026, 10, 15), date(2026, 11, 15))
+    build(tmp_path, {"a.json": env(fetcher="x")}, [inv("x", ["a.json"])],
+          {"x": {"use": "x", "owner": "bob"}})
+    [a] = plan_run(fake, tmp_path, owner_override="alice")
+    assert a.verb == "deliver" and a.changes["channel"] == ev.channels[0].reference_id
 
 
 def test_stack_label_drift_warns(tmp_path):
@@ -570,7 +639,7 @@ def test_set_created_in_same_run_targets_ref(tmp_path):
     a = plan_one(entry(tmp_path, stack="Prod"), observed(None, stacks=[PROD]))
     assert a.verb == "deliver" and a.payload["target"] == "EVIDENCE"
     assert a.payload["evidence_id"] == Ref("evidence_sets/EVD-12", "id")
-    assert a.summary == "deliver 2 files to EVD-12 (new evidence set, evidence level): new batch"
+    assert a.summary == "deliver 2 files to EVD-12 (new evidence set, evidence level): new batch (approved when its validators pass)"
     # JSON-native payload: it round-trips through Plan.to_json.
     rt = Plan.from_json(json.loads(json.dumps(Plan([a]).to_json())))
     assert rt.actions[0].payload == a.payload
@@ -599,10 +668,10 @@ def test_offline_plan_has_unknown_routing(tmp_path):
 
 # ---- observe against the fake API -------------------------------------------
 
-def plan_run(fake, run_dir, stack_override=None):
+def plan_run(fake, run_dir, stack_override=None, owner_override=None):
     res = Resources(Client("t", "https://api.example.test", session=fake.session))
     p = DeliveryProvider(RunState(run_dir), today=lambda: fake.today)
-    desired = p.desired(SyncContext(run_dir, {}, stack_override=stack_override))
+    desired = p.desired(SyncContext(run_dir, {}, stack_override=stack_override, owner_override=owner_override))
     return p.diff(desired, p.observe(desired, Reader(res)))
 
 
@@ -966,13 +1035,32 @@ def test_pipeline_entry_goes_direct_with_a_note_when_batches_are_off(tmp_path):
     assert a.payload["target"] == DIRECT and any("no batches" in w for w in a.warnings)
 
 
-def test_manual_set_warns(tmp_path):
-    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel(approval="MANUAL")))
-    assert a.verb == "deliver" and any("approves MANUAL" in w for w in a.warnings)
+def test_manual_set_does_not_warn_when_the_new_batch_approves_on_submit(tmp_path):
+    # A new batch takes the entry's approval, not the set's.
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence", approval="SUBMISSION"),
+                 observed(ev_with_channel(approval="MANUAL")))
+    assert a.verb == "deliver" and not any("approves MANUAL" in w for w in a.warnings)
+    assert a.summary.endswith("→ pipeline runs")
 
 
-def test_manual_set_does_not_warn_when_batches_are_off(tmp_path):
-    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel(approval="MANUAL")), BATCHES_OFF)
+def test_manual_entry_approval_warns(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence", approval="MANUAL"), observed(ev_with_channel()))
+    assert any(w.startswith("the new batch approves MANUAL") for w in a.warnings)
+    assert not a.summary.endswith("pipeline runs")
+
+
+def test_resumed_manual_batch_warns_even_when_the_entry_approves_on_submit(tmp_path):
+    # A resumed batch keeps the approval it was created with.
+    b = replace(batch(status="OPEN"), when_to_approve="MANUAL")
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence", approval="SUBMISSION"),
+                 observed(evidence(CH_P), batches=[b], artifacts={b.id: [artifact("a.json")]}))
+    assert a.verb == "deliver" and "resume BCH-12" in a.summary
+    assert any(w.startswith("BCH-12 approves MANUAL") for w in a.warnings)
+
+
+def test_manual_entry_does_not_warn_when_batches_are_off(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence", approval="MANUAL"), observed(ev_with_channel()),
+                 BATCHES_OFF)
     assert a.payload["target"] == DIRECT
     assert not any("approves MANUAL" in w for w in a.warnings)
 
@@ -995,7 +1083,7 @@ def test_incomplete_inventory_on_a_set_with_validators_is_noop(tmp_path):
 
 def test_deliver_summary_says_the_pipeline_runs(tmp_path):
     a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel()))
-    assert a.summary.endswith("approves on submit → pipeline runs")
+    assert a.summary.endswith("(approved when its validators pass) → pipeline runs")
 
 
 def test_ordinary_evidence_with_no_request_still_goes_direct(tmp_path):

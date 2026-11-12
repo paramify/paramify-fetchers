@@ -1,4 +1,5 @@
-"""The CLI surface of the upload engine: `upload --plan`, `--stack`, `stacks`, `manifest set-stack`, `validate --online`.
+"""The CLI surface of the upload engine: `upload --plan`, `--stack`, `--owner`, `stacks`,
+`manifest set-stack`, `manifest set-owner`, `validate --online`.
 
 The facade is pointed at the in-process fake API (see test_api_upload_engine).
 Runs and manifests live under tmp_path; nothing is written into the repo.
@@ -108,7 +109,7 @@ def test_plan_json_on_an_inventory_run_says_the_pipeline_runs(fake, tmp_path):  
     res = cli("upload", str(run), "--plan", "--json")
     assert res.exit_code == 0, res.output
     action = next(a for a in json.loads(res.output)["plan"]["actions"] if a["id"] == "delivery/x")
-    assert action["summary"].endswith("approves on submit → pipeline runs")
+    assert action["summary"].endswith("new batch (approved on submit) → pipeline runs")
 
 
 def test_plan_that_cannot_be_made_exits_1(no_env, tmp_path):  # noqa: F811
@@ -186,9 +187,11 @@ def test_stack_and_validators_reach_upload_run(no_env, tmp_path, monkeypatch):  
 
     monkeypatch.setattr(api, "upload_run", fake_upload)
     monkeypatch.setattr(api, "sync_validators", lambda *a, **k: pytest.fail("synced after the upload"))
-    res = cli("upload", str(two_files(tmp_path)), "--dry-run", "--stack", "Prod", "--with-validators", "--no-tags")
+    res = cli("upload", str(two_files(tmp_path)), "--dry-run", "--stack", "Prod", "--owner", "alice",
+              "--with-validators", "--no-tags")
     assert res.exit_code == 0, res.output
     assert seen["stack"] == "Prod" and seen["with_validators"] is True and seen["custom_tags"] is False
+    assert seen["owner"] == "alice"
 
 
 def test_stack_override_is_applied(fake, tmp_path):  # noqa: F811
@@ -198,6 +201,21 @@ def test_stack_override_is_applied(fake, tmp_path):  # noqa: F811
     fake.add_request(ev.id, ev.channels[1].id, today - timedelta(days=5), today + timedelta(days=5))
     res = cli("upload", str(two_files(tmp_path)), "--stack", st2.id)
     assert res.exit_code == 0, res.output
+
+
+def test_owner_override_picks_the_owners_channel(fake, tmp_path):  # noqa: F811
+    gov = fake.add_stack("Gov")
+    ev = fake.add_evidence("EVD-X", channels=[gov.id, gov.id], owners=["alice", "bob"])
+    today = date.today()
+    fake.add_request(ev.id, ev.channels[1].id, today - timedelta(days=5), today + timedelta(days=5))
+    run = two_files(tmp_path)
+    refused = cli("upload", str(run), "--plan")
+    assert "one per owner" in refused.output and "set-owner" in refused.output, refused.output
+    res = cli("upload", str(run), "--owner", "bob", "--json")
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.output)["entries"]["x"]["channel"] == ev.channels[1].reference_id
+    again = cli("upload", str(run), "--owner", "bob", "--json")
+    assert json.loads(again.output)["entries"]["x"]["state"] == "noop"
 
 
 def test_validators_sync_once_and_before_delivery(fake, tmp_path, monkeypatch):  # noqa: F811
@@ -348,6 +366,46 @@ def test_set_stack_fetcher_matching_none_names_the_entries(fake, tmp_path):  # n
     assert read(path)["run"]["fetchers"][1]["paramify"]["stack_name"] == "Prod"
 
 
+# ---- manifest set-owner ----------------------------------------------------------
+
+def test_set_owner_stores_the_workspaces_spelling(fake, tmp_path):  # noqa: F811
+    st = fake.add_stack("Prod")
+    fake.add_evidence("EVD-X", channels=[st.id, st.id], owners=["Alice", "bob"])
+    path = manifest_file(tmp_path, a_fetcher())
+    res = cli("manifest", "set-owner", str(path), "alice")
+    assert res.exit_code == 0, res.output
+    assert read(path)["run"]["paramify"] == {"owner": "Alice"}
+
+
+def test_set_owner_for_one_fetcher_and_removing_it(fake, tmp_path):  # noqa: F811
+    st = fake.add_stack("Prod")
+    fake.add_evidence("EVD-X", channels=[st.id], owners=["bob"])
+    use = a_fetcher()
+    path = manifest_file(tmp_path, use)
+    assert cli("manifest", "set-owner", str(path), "bob", "--fetcher", use).exit_code == 0
+    m = read(path)
+    assert m["run"]["fetchers"][0]["paramify"] == {"owner": "bob"} and "paramify" not in m["run"]
+    assert cli("manifest", "set-owner", str(path), "", "--fetcher", use).exit_code == 0
+    assert read(path)["run"]["fetchers"][0]["paramify"] == {}
+
+
+def test_set_owner_unknown_is_an_error_naming_the_owners(fake, tmp_path):  # noqa: F811
+    st = fake.add_stack("Prod")
+    fake.add_evidence("EVD-X", channels=[st.id, st.id], owners=["alice", "bob"])
+    path = manifest_file(tmp_path, a_fetcher())
+    res = cli("manifest", "set-owner", str(path), "carol")
+    assert res.exit_code == 1 and "carol" in res.output and "alice, bob" in res.output
+    assert "paramify" not in read(path)["run"]
+
+
+def test_set_owner_without_a_token_stores_as_given_with_a_note(no_env, tmp_path):  # noqa: F811
+    path = manifest_file(tmp_path, a_fetcher())
+    res = cli("manifest", "set-owner", str(path), "alice")
+    assert res.exit_code == 0, res.output
+    assert read(path)["run"]["paramify"] == {"owner": "alice"}
+    assert "not checked" in res.output
+
+
 # ---- validate --online -----------------------------------------------------------
 
 def test_validate_online_flags_an_unknown_stack(fake, tmp_path):  # noqa: F811
@@ -370,6 +428,26 @@ def test_validate_online_accepts_a_stack_by_name(fake, tmp_path):  # noqa: F811
     path.write_text(yaml.safe_dump({"run": {"output_dir": "./evidence", "paramify": {"stack": "Prod"}, "fetchers": []}}))
     errors = json.loads(cli("validate", str(path), "--online", "--json").output)["errors"]
     assert not any("stack" in e for e in errors)
+
+
+def test_validate_online_notes_an_owner_with_no_channel(fake, tmp_path):  # noqa: F811
+    st = fake.add_stack("Prod")
+    fake.add_evidence("EVD-X", channels=[st.id], owners=["alice"])
+    path = tmp_path / "m.yaml"
+    path.write_text(yaml.safe_dump({"run": {"output_dir": "./evidence", "paramify": {"owner": "ALICE"},
+                                            "fetchers": [{"use": a_fetcher(), "paramify": {"owner": "carol"}}]}}))
+    out = json.loads(cli("validate", str(path), "--online", "--json").output)
+    assert not any("owner" in e for e in out["errors"])
+    owner_notes = [n for n in out["notes"] if "owned by" in n]
+    assert len(owner_notes) == 1 and "carol" in owner_notes[0] and "owners: alice" in owner_notes[0]
+
+
+def test_validate_online_lists_no_evidence_without_an_owner(fake, tmp_path):  # noqa: F811
+    fake.add_stack("Prod")
+    path = tmp_path / "m.yaml"
+    path.write_text(yaml.safe_dump({"run": {"output_dir": "./evidence", "paramify": {"stack": "Prod"}, "fetchers": []}}))
+    cli("validate", str(path), "--online", "--json")
+    assert not any(c.endswith("/evidence") for c in calls(fake))
 
 
 def test_validate_without_online_makes_no_calls(fake, tmp_path):  # noqa: F811
@@ -455,6 +533,22 @@ def test_a_stack_override_drops_only_the_stack_note(no_env, root, tmp_path):  # 
                      "Run the manifest again to use it."]
     out = api.upload_run(run, root, dry_run=True, manifest_path=m, stack="Prod")
     assert out["plan"]["notes"] == notes
+
+
+def test_an_owner_the_manifest_now_sets_gets_a_note_and_the_flag(no_env, root, tmp_path):  # noqa: F811
+    run = two_files(tmp_path, {"x": {"use": "x", "owner": "alice"}})
+    m = paramify_manifest(tmp_path / "m.yaml", {"owner": "bob"})
+    assert api.plan_upload(run, root, online=False, manifest_path=m).notes == [
+        "the manifest now sets owner bob for x; this run was made with alice. "
+        "Run the manifest again, or upload with --owner bob."]
+    assert api.plan_upload(run, root, online=False, manifest_path=m, owner="bob").notes == []
+
+
+def test_the_owner_flag_in_the_note_is_quoted_for_the_shell(no_env, root, tmp_path):  # noqa: F811
+    run = two_files(tmp_path, {"x": {"use": "x"}})
+    m = paramify_manifest(tmp_path / "m.yaml", {"owner": "Tate Mccauley Admin"})
+    [note] = api.plan_upload(run, root, online=False, manifest_path=m).notes
+    assert note.endswith("upload with --owner 'Tate Mccauley Admin'.")
 
 
 def test_the_runs_own_manifest_is_used_when_none_is_given(no_env, root, tmp_path):  # noqa: F811

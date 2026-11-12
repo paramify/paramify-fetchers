@@ -85,9 +85,9 @@ EVIDENCE_LEVEL_WARNING = "evidence-level batch: does not count toward the soluti
 ALL_DROPPED = "every file was dropped"
 BEFORE_BATCHES = "already delivered before batches"
 PIPELINE_BATCHES_OFF = "this workspace has no batches, so the pipeline file goes direct, the pre-batch way"
-PIPELINE_MANUAL = "{ref} approves MANUAL; the {type} pipeline waits for someone to approve the batch"
+PIPELINE_MANUAL = "{batch} approves MANUAL; the {type} pipeline waits for someone to approve it"
 PIPELINE_VALIDATORS = "{ref} has {n} validator(s) ({names}); its batches will never approve"
-PIPELINE_RUNS = " · approves on submit → pipeline runs"
+PIPELINE_RUNS = " → pipeline runs"
 PIPELINE_RESEND = "{n} file(s) of this run went direct before; sending them again in a batch so the pipeline runs"
 WAF_BLOCKED = "blocked by the production WAF"
 PIPELINE_DIRECT_SENT = "sent direct: this workspace has no batches; the pipeline runs the pre-batch way"
@@ -173,8 +173,20 @@ class _Delivered:
         if self.pipeline_type:
             # Direct: no batch, so "approved" does not apply (None, not False).
             out["pipeline"] = {"type": self.pipeline_type,
-                               "approved": None if self.mode == "direct" else self.status == "APPROVED"}
+                               "approved": None if self.mode == "direct" else self._approved}
         return out
+
+    @property
+    def _approved(self) -> bool:
+        """Whether the batch is approved, or will be with no one reviewing it.
+
+        A batch approved on submission can read back SUBMITTED for a moment after
+        the submit (see the read-back in apply); Paramify approves it on its own,
+        so the pipeline runs and no one needs telling to approve it.
+        """
+        if self.status == "APPROVED":
+            return True
+        return self.status == "SUBMITTED" and self.approval == "SUBMISSION" and not self.validators_failed
 
     @property
     def name(self) -> str:
@@ -283,6 +295,36 @@ def _batch_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
     return {**meta, "effectiveDate": day.isoformat()}
 
 
+# How a new batch is approved, as the plan says it (the entry's `approval`).
+_APPROVAL_TEXT = {
+    "SUBMISSION": "approved on submit",
+    "SUBMISSION_WITH_PASSING_VALIDATORS": "approved when its validators pass",
+    "MANUAL": "reviewed in the app",
+}
+
+
+def _create_batch(resources: Any, ar_id: Optional[str], ev_id: str,
+                  when_to_approve: Optional[str]) -> Tuple[Batch, Optional[str]]:
+    """Create the batch with its approval; returns it and a note when the approval could not be set.
+
+    Each new batch gets the entry's `approval` (default SUBMISSION), not the
+    evidence set's. An API from before POST /batches took `whenToApprove`
+    refuses the key with a 400; the batch is then made without it, and copies
+    the set's setting, as it did before.
+    """
+    target = {"artifact_request_id": ar_id} if ar_id else {"evidence_id": ev_id}
+    if not when_to_approve:
+        return resources.create_batch(**target), None
+    try:
+        return resources.create_batch(**target, when_to_approve=when_to_approve), None
+    except ApiError as exc:
+        if exc.status != 400 or "Unrecognized key" not in exc.message or "whenToApprove" not in exc.message:
+            raise
+    made = resources.create_batch(**target)
+    return made, (f"this workspace's API cannot set a batch's approval, so {made.reference_id} "
+                  f"uses the evidence set's ({made.when_to_approve or 'unknown'}), not {when_to_approve}")
+
+
 # ---- provider -------------------------------------------------------------- #
 
 class DeliveryProvider:
@@ -311,7 +353,8 @@ class DeliveryProvider:
             raise ValueError(f"artifact_payload must be 'envelope' or 'payload', got {mode!r}")
         self._payload_mode = mode
         entries = desired_from_run(
-            ctx.run_dir, ctx.upload_cfg, stack_override=ctx.stack_override, only_file=ctx.only_file
+            ctx.run_dir, ctx.upload_cfg, stack_override=ctx.stack_override, only_file=ctx.only_file,
+            owner_override=ctx.owner_override,
         ) if ctx.run_dir is not None else []
         self.entries = {e.entry_key: e for e in entries}
         return entries
@@ -486,13 +529,8 @@ class DeliveryProvider:
         warnings = [w for w in (stack_drift(e, obs.stacks),) if w]
         sendable = len(files)
         direct = self._direct_reason(e)
-        manual = False
-        if e.pipeline:
-            if direct == BATCHES_OFF:
-                warnings.append(PIPELINE_BATCHES_OFF)
-            manual = (obs.evidence.approval if obs.evidence is not None else e.approval) == "MANUAL"
-            if manual and direct != BATCHES_OFF:  # no batches: nothing to approve
-                warnings.append(PIPELINE_MANUAL.format(ref=e.reference_id, type=e.pipeline.get("type")))
+        if e.pipeline and direct == BATCHES_OFF:
+            warnings.append(PIPELINE_BATCHES_OFF)
         route = _route(e, obs, today, direct)
         # A direct entry counts the files sent before batches as on the set (below). A
         # batch entry leaves them out first, so the no-op comes ahead of a refusal.
@@ -610,15 +648,24 @@ class DeliveryProvider:
         if resent:
             warnings.append(PIPELINE_RESEND.format(n=len(resent)))
         if mine is None:
-            tail = "new batch"
+            payload["when_to_approve"] = e.approval
+            tail = f"new batch ({_APPROVAL_TEXT.get(e.approval, f'approval {e.approval}')})"
         else:
             payload.update(resume_batch_id=mine.id, files=[_file_json(f) for f in missing])
             tail = f"resume {mine.reference_id} ({len(missing)} missing)" if missing \
                 else f"resume {mine.reference_id} (submit only)"
         n = _count(len(payload["files"]), "file")
         summary = f"deliver {n} to {where}: {tail}"
-        if e.pipeline and not manual:
-            summary += PIPELINE_RUNS
+        if e.pipeline:
+            # A new batch takes the entry's approval; a resumed one keeps its own.
+            # The set's setting only matters on an API that cannot set a batch's
+            # approval, which apply reports when it happens.
+            approval = e.approval if mine is None else mine.when_to_approve
+            if approval == "MANUAL":
+                batch = "the new batch" if mine is None else mine.reference_id
+                warnings.append(PIPELINE_MANUAL.format(batch=batch, type=e.pipeline.get("type")))
+            else:
+                summary += PIPELINE_RUNS
         return action("deliver", summary, changes=changes, warnings=warnings)
 
     # -- apply ------------------------------------------------------------ #
@@ -713,8 +760,9 @@ class DeliveryProvider:
                 run.batch_id = p["resume_batch_id"]
                 present = {a.original_file_name for a in resources.artifacts(ev_id, batch_id=run.batch_id)}
             else:
-                made = (resources.create_batch(artifact_request_id=ar_id) if ar_id
-                        else resources.create_batch(evidence_id=ev_id))
+                made, settings_note = _create_batch(resources, ar_id, ev_id, p.get("when_to_approve"))
+                if settings_note:
+                    note = f"{note}; {settings_note}" if note else settings_note
                 run.batch_id, run.batch_reference, run.status = made.id, made.reference_id, made.status
                 if self._run_state is not None:
                     self._run_state.record_batch(p["entry_key"], made.id)
@@ -765,13 +813,16 @@ class DeliveryProvider:
         if not read:
             run.status = None  # the submit took effect; what it led to is unknown
             parts.append("submitted; status could not be read back")
+        elif run.status == "SUBMITTED" and run.validators_failed:
+            parts.append(f"{run.name} SUBMITTED: held because validators failed: {', '.join(run.validators_failed)}")
+        elif run.status == "SUBMITTED" and run.approval == "SUBMISSION":
+            # Paramify approves such a batch a moment after the submit answers; no one reviews it.
+            parts.append(f"{run.name} SUBMITTED: approved on submission; not approved yet when read back"
+                         + ("; the pipeline runs once Paramify approves it" if run.pipeline_type else ""))
+        elif run.status == "SUBMITTED" and run.pipeline_type:
+            parts.append(f"{run.name} SUBMITTED: waiting for approval; the pipeline has not run")
         elif run.status == "SUBMITTED":
-            if run.validators_failed:
-                parts.append(f"{run.name} SUBMITTED: held because validators failed: {', '.join(run.validators_failed)}")
-            elif run.pipeline_type:
-                parts.append(f"{run.name} SUBMITTED: waiting for approval; the pipeline has not run")
-            else:
-                parts.append(f"{run.name} SUBMITTED: waiting for review (approval {run.approval or 'unknown'})")
+            parts.append(f"{run.name} SUBMITTED: waiting for review (approval {run.approval or 'unknown'})")
         elif run.status == "APPROVED" and run.pipeline_type:
             where = "Monitoring → Inventory" if run.pipeline_type == "inventory" else "Monitoring → Issues"
             parts.append(f"{run.name} APPROVED: pipeline runs now; check {where}")

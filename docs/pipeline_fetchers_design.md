@@ -20,7 +20,7 @@ Paramify batches, with channels and artifact requests.
 |---|---|
 | D1 | **A `pipeline:` block in `fetcher.yaml` marks a pipeline fetcher.** The uploader reads its delivery rules from the block, not from `kind`. See [§3](#3-the-pipeline-contract). |
 | D2 | **A pipeline file on an evidence set always goes in a batch** when the workspace has batches. With no artifact request it goes in an ad hoc batch on the set. It is never sent direct. See [§4](#4-delivery-to-an-evidence-set). |
-| D3 | **The batch must approve automatically.** The uploader warns about a `MANUAL` set and reports a batch that did not approve. It never changes the customer's approval rule. |
+| D3 | **The batch must approve automatically.** Each new batch takes the entry's approval (default `SUBMISSION`, since PR #328). The uploader warns when that approval, or a resumed batch's, is `MANUAL`, and reports a batch that did not approve. It never changes the customer's approval rule. |
 | D4 | **No validators on a pipeline evidence set.** `paramify validate` refuses one in the registry, and `--plan` refuses an entry whose set has one in the workspace. |
 | D5 | **Inventory records gain a required `asset_type`.** Paramify derives each record's parent component from it. |
 | D6 | **`id_scheme` names the format of the asset ID.** An inventory fetcher and a scan fetcher with the same scheme can be linked in Paramify. |
@@ -211,15 +211,20 @@ inventory skip are unchanged.
 
 ### Approval
 
-A batch copies its approval rule (`whenToApprove`) from its evidence set when it
-is created. The pipeline runs only when the batch is `APPROVED`.
+Since PR #328, each new batch gets the entry's `approval` (default
+`SUBMISSION`) through `whenToApprove` on `POST /batches`, not the evidence
+set's rule. Only an API that cannot set a batch's approval falls back to the
+set's rule, and apply says so when it happens. A resumed batch keeps the
+approval it was created with. The pipeline runs only when the batch is
+`APPROVED`.
 
 | Case | Behaviour |
 |---|---|
-| The uploader creates the set | It gets `SUBMISSION`, the existing default. |
-| The manifest sets `approval: MANUAL` on a pipeline entry | `paramify validate` warns: Inventory waits for a person to approve. |
-| An existing set is `MANUAL` | `--plan` warns. The set is not changed. The warning is not shown when the workspace has no batches. |
-| The batch reads back `SUBMITTED`, not `APPROVED` | The result is "waiting for approval: the pipeline has not run", not success. |
+| The entry's approval is `SUBMISSION` (the default) | The new batch approves on submit, even on a `MANUAL` set. The plan line ends `→ pipeline runs`. |
+| The manifest sets `approval: MANUAL` on a pipeline entry | `paramify validate` notes it, and `--plan` warns: "the new batch approves MANUAL". Not shown when the workspace has no batches. |
+| A resumed batch of this run approves `MANUAL` | `--plan` warns, naming the batch. |
+| The batch reads back `SUBMITTED` with approval `SUBMISSION` | Paramify approves it a moment later. The result says the pipeline runs once Paramify approves it, and `approved` is true. |
+| The batch reads back `SUBMITTED` otherwise | The result is "waiting for approval: the pipeline has not run", and `approved` is false. |
 
 ### Validators
 
@@ -265,8 +270,8 @@ need a run. Later, `--apply` will create the preset through the API.
 
 ```
 delivery
-  deliver sophos_endpoint_inventory: 1 file → EVD-SOPHOS-INVENTORY, ad hoc batch (CH-12 has no request) · approves on submit → pipeline runs
-  warn    github_repository_inventory: EVD-GH-INVENTORY approves MANUAL; Inventory waits for someone to approve the batch
+  deliver sophos_endpoint_inventory: 1 file → EVD-SOPHOS-INVENTORY, new batch (approved on submit) → pipeline runs
+  warn    github_repository_inventory: the new batch approves MANUAL; the inventory pipeline waits for someone to approve it
   refuse  acme_inventory: EVD-ACME-INVENTORY has 1 validator (VAL-…); its batches will never approve. Remove it in the app.
 ```
 
@@ -374,7 +379,7 @@ hoc batches.
 | 1 | An ad hoc batch on the set (the channel has no request) builds Inventory. | Refuse when there is no request, and tell the user to create one. |
 | 2 | A direct upload in a workspace with no batches builds Inventory. | That row of the routing table becomes a refusal. |
 | 3 | The mapper reads a nested field inside a record (`tags.env`). | Flat fields become a rule, checked when the output is enveloped. |
-| 4 | A `MANUAL` set: the batch stays `SUBMITTED` and builds nothing until approved, and `--plan` warns. | Fix the warning. |
+| 4 | An entry with `approval: MANUAL`: the batch stays `SUBMITTED` and builds nothing until approved, and `--plan` warns. A `MANUAL` set with the default entry approval still builds Inventory on submit. | Fix the warning, or the approval routing. |
 | 5 | A set with a validator attached in the app shows as a refusal in `--plan` (proves the routing read carries `validators`). | Read the set's validators another way before routing. |
 
 ## 9. Tests

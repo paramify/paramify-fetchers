@@ -1899,6 +1899,7 @@ def plan_upload(
     custom_tags: bool = True,
     with_validators: bool = False,
     manifest_path: Optional[Path] = None,
+    owner: Optional[str] = None,
 ) -> Plan:
     """The upload plan for one run directory; nothing is written.
 
@@ -1906,7 +1907,9 @@ def plan_upload(
     neither, and shows routing values as unknown. Raises ValueError for setup
     errors. `framework.sync.render.render_plan` turns the plan into text.
 
-    The plan notes each Paramify setting (stack, approval, no_request,
+    `stack` and `owner` win over what the run recorded, for every entry.
+
+    The plan notes each Paramify setting (stack, owner, approval, no_request,
     delivery) that `manifest_path` now sets differently from the run. Without
     it, the run's own manifest is used; with neither, nothing is compared. The
     run's settings still apply.
@@ -1914,7 +1917,7 @@ def plan_upload(
     return _sync_upload.plan_upload(
         run_dir, root, _upload_config(root, config_path), online=online, stack=stack,
         only_file=only_file, custom_tags=custom_tags, with_validators=with_validators,
-        manifest_path=manifest_path,
+        manifest_path=manifest_path, owner=owner,
     )
 
 
@@ -1934,6 +1937,7 @@ def upload_run(
     base_url: Optional[str] = None,
     deprecations: Sequence[str] = (),
     manifest_path: Optional[Path] = None,
+    owner: Optional[str] = None,
 ) -> dict:
     """Upload one run directory to Paramify, one batch per manifest entry.
 
@@ -1948,22 +1952,18 @@ def upload_run(
     `token` and `base_url` (both ahead of the environment) are for callers that
     already hold them; `deprecations` are notes for `upload_log.json`.
     `manifest_path` is as for plan_upload: the plan notes the settings it now
-    sets differently from the run.
+    sets differently from the run. `stack` and `owner` are as for plan_upload.
     """
     return _sync_upload.run_upload(
         run_dir, root, _upload_config(root, config_path), dry_run=dry_run, on_event=on_event,
         custom_tags=custom_tags, stack=stack, only_file=only_file, with_validators=with_validators,
         upload_cfg=upload_cfg, token=token, base_url=base_url, deprecations=deprecations,
-        manifest_path=manifest_path,
+        manifest_path=manifest_path, owner=owner,
     )
 
 
-def list_stacks(root: Optional[Path] = None, config_path: Optional[Path] = None) -> List[dict]:
-    """The workspace's stacks as `[{"id", "name"}]`, sorted by name. Needs a token.
-
-    Raises ValueError when there is no token or the base URL is invalid; an
-    API error is raised as it is.
-    """
+def _workspace(root: Optional[Path], config_path: Optional[Path]) -> Any:
+    """Resources for the configured workspace. Raises ValueError with no token or a bad base URL."""
     root = Path(root) if root is not None else find_repo_root()
     load_dotenv()
     config = _sync_upload.load_config(_upload_config(root, config_path))
@@ -1974,8 +1974,30 @@ def list_stacks(root: Optional[Path] = None, config_path: Optional[Path] = None)
     token, _ = resolve_upload_token()
     if not token:
         raise ValueError(_missing_token_error())
-    stacks = _sync_upload.Resources(_sync_upload.Client(token, base_url)).stacks()
+    return _sync_upload.Resources(_sync_upload.Client(token, base_url))
+
+
+def list_stacks(root: Optional[Path] = None, config_path: Optional[Path] = None) -> List[dict]:
+    """The workspace's stacks as `[{"id", "name"}]`, sorted by name. Needs a token.
+
+    Raises ValueError when there is no token or the base URL is invalid; an
+    API error is raised as it is.
+    """
+    stacks = _workspace(root, config_path).stacks()
     return sorted(({"id": s.id, "name": s.name} for s in stacks), key=lambda s: (s["name"], s["id"]))
+
+
+def list_channel_owners(root: Optional[Path] = None, config_path: Optional[Path] = None) -> List[dict]:
+    """The owners of the workspace's channels as `[{"owner", "sets"}]`, sorted by username.
+
+    `sets` counts the evidence sets where the owner has a channel. These are the
+    names `paramify.owner` can take. Needs a token; errors as for list_stacks.
+    """
+    found: Dict[str, Dict[str, Any]] = {}
+    for ev in _workspace(root, config_path).evidence_sets():
+        for name in {c.owner for c in ev.channels if c.owner}:
+            found.setdefault(name.casefold(), {"owner": name, "sets": 0})["sets"] += 1
+    return sorted(found.values(), key=lambda r: r["owner"].casefold())
 
 
 def _run_block(m: dict) -> dict:
@@ -2026,30 +2048,72 @@ def stack_errors(manifest: dict, stacks: Sequence[Mapping[str, Any]]) -> List[st
     return errors
 
 
+def manifest_owners(manifest: dict) -> List[Tuple[str, str]]:
+    """Each `owner` the manifest sets, as (where, username): the default, then each entry's."""
+    run = _run_block(manifest)
+    places = [("run.paramify.owner", (run.get("paramify") or {}).get("owner"))]
+    places += [(f"fetchers[{k}].paramify.owner", (e.get("paramify") or {}).get("owner"))
+               for k, e in _keyed_entries(manifest)]
+    return [(where, str(value)) for where, value in places if value]
+
+
+def owner_notes(manifest: dict, owners: Sequence[Mapping[str, Any]]) -> List[str]:
+    """One note for each `owner` in the manifest that owns no channel in the workspace.
+
+    A note, not an error: the owner is read only where a stack has several
+    channels, and there such an owner breaks no tie, so the upload refuses.
+    """
+    known = {str(o["owner"]).casefold() for o in owners}
+    names = ", ".join(str(o["owner"]) for o in owners) or "none"
+    return [f"{where}: no channel in this workspace is owned by {value!r} (owners: {names})"
+            for where, value in manifest_owners(manifest) if value.casefold() not in known]
+
+
+def _paramify_block(m: dict, use: Optional[str]) -> dict:
+    """The `paramify` block to write: the manifest's, or with `use`, one fetcher entry's.
+
+    `use` is an entry key (`aws_iam_mfa` is the first entry for that fetcher,
+    `aws_iam_mfa#1` the second) or a fetcher name; one that matches none, or
+    several, raises ValueError naming the entry keys.
+    """
+    if use is None:
+        return _run(m).setdefault("paramify", {})
+    pairs = _keyed_entries(m)
+    hits = [(k, e) for k, e in pairs if k == use] or [(k, e) for k, e in pairs if e.get("use") == use]
+    if len(hits) != 1:
+        names = ", ".join(k for k, _ in hits) if hits else ", ".join(k for k, _ in pairs) or "none"
+        what = (f"matches several entries; use {hits[0][0]} for the first, {hits[0][0]}#1 for the second"
+                if hits else "matches no entry")
+        raise ValueError(f"{use!r} {what} (entries: {names})")
+    return hits[0][1].setdefault("paramify", {})
+
+
 def set_stack(m: dict, stack: str, stack_name: Optional[str] = None, use: Optional[str] = None) -> dict:
     """Record the Paramify stack uploads go to: manifest-wide, or for one fetcher entry.
 
     Writes `run.paramify.stack` (and `stack_name` when given). With `use`, writes
-    that entry's `paramify` block instead. `use` is an entry key (`aws_iam_mfa` is
-    the first entry for that fetcher, `aws_iam_mfa#1` the second) or a fetcher
-    name; one that matches none, or several, raises ValueError naming the entry keys.
+    that entry's `paramify` block instead (see _paramify_block).
     """
-    if use is None:
-        block = _run(m).setdefault("paramify", {})
-    else:
-        pairs = _keyed_entries(m)
-        hits = [(k, e) for k, e in pairs if k == use] or [(k, e) for k, e in pairs if e.get("use") == use]
-        if len(hits) != 1:
-            names = ", ".join(k for k, _ in hits) if hits else ", ".join(k for k, _ in pairs) or "none"
-            what = (f"matches several entries; use {hits[0][0]} for the first, {hits[0][0]}#1 for the second"
-                    if hits else "matches no entry")
-            raise ValueError(f"{use!r} {what} (entries: {names})")
-        block = hits[0][1].setdefault("paramify", {})
+    block = _paramify_block(m, use)
     block["stack"] = stack
     if stack_name:
         block["stack_name"] = stack_name
     else:
         block.pop("stack_name", None)
+    return m
+
+
+def set_owner(m: dict, owner: Optional[str], use: Optional[str] = None) -> dict:
+    """Record the Paramify username whose channel uploads use when a stack has one per owner.
+
+    Writes `run.paramify.owner`, or with `use` that entry's (see _paramify_block).
+    A blank `owner` removes it, so an entry inherits the manifest's again.
+    """
+    block = _paramify_block(m, use)
+    if owner and owner.strip():
+        block["owner"] = owner.strip()
+    else:
+        block.pop("owner", None)
     return m
 
 

@@ -74,10 +74,12 @@ When `paramify upload` finds a file from a pipeline fetcher, it:
   next upload sends them again in a batch, so the pipeline runs.
 - **Sends the whole envelope**, even when your uploader config sets
   `artifact_payload: payload`. The pipeline reads `payload.data`.
-- **Needs the set to approve automatically.** The batch approves on submit, so
-  the pipeline runs. The uploader warns when a set approves `MANUAL`, and says
-  `SUBMITTED: waiting for approval; the pipeline has not run` when a batch is
-  not approved. It never changes the set's approval rule.
+- **Approves the batch on submit.** Each new batch takes the entry's
+  `approval`, which defaults to `SUBMISSION`, so the pipeline runs even when
+  the set itself approves `MANUAL`. The uploader warns when the entry (or a
+  batch it resumes) approves `MANUAL`, and says `SUBMITTED: waiting for
+  approval; the pipeline has not run` when a batch is not approved. It never
+  changes the set's approval rule.
 - **Wants no validators on the set.** Validators fail on files this large, so
   the batch would never approve. The plan refuses an entry whose set has a
   validator, and `paramify validate` refuses a registry validator that targets
@@ -139,6 +141,6 @@ in the same change.
 | `direct is not allowed on a pipeline fetcher` | Remove `delivery: direct` or `no_request: direct` from the entry. A pipeline file never goes direct. |
 | `a pipeline file never goes direct` on upload, with no `direct` on the entry | The run was made before pipeline entries ignored a `direct` in `run.paramify`. Set `no_request: evidence` on the entry, or remove `direct` from `run.paramify`, then run again. |
 | `has N validator(s) … its batches will never approve` | Remove the validators from the evidence set in Paramify. |
-| `approves MANUAL` | Set the evidence set to approve automatically, or approve each batch yourself. |
+| `approves MANUAL` | Remove `approval: MANUAL` from the entry (new batches then approve on submit), or approve each batch yourself. |
 | `SUBMITTED: waiting for approval` | The batch needs a person to approve it. The pipeline has not run. |
 | `paramify evidence` reports a problem with `asset_type` | A record has no `asset_type`, or it is empty. Set one on every record. |

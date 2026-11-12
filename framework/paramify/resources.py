@@ -150,6 +150,10 @@ class Resources:
     def stacks(self) -> List[Stack]:
         return [Stack(id=s["id"], name=s["name"]) for s in self._client.get("/stacks") or []]
 
+    def evidence_sets(self) -> List[EvidenceSet]:
+        """Every evidence set in the workspace, with its channels."""
+        return [_evidence(row) for row in self._paged("/evidence", "evidences", {})]
+
     def evidence_by_reference(self, refs: Sequence[str]) -> Dict[str, EvidenceSet]:
         found: Dict[str, EvidenceSet] = {}
         for ref in refs:
@@ -232,14 +236,19 @@ class Resources:
         return existing
 
     def create_batch(
-        self, *, artifact_request_id: Optional[str] = None, evidence_id: Optional[str] = None
+        self, *, artifact_request_id: Optional[str] = None, evidence_id: Optional[str] = None,
+        when_to_approve: Optional[str] = None,
     ) -> Batch:
+        """Create an OPEN batch. Without `when_to_approve` it copies the evidence set's setting."""
+        body: Dict[str, Any]
         if artifact_request_id:
             body = {"type": "ARTIFACT_REQUEST", "artifactRequestId": artifact_request_id}
         elif evidence_id:
             body = {"type": "EVIDENCE", "evidenceId": evidence_id}
         else:
             raise ValueError("create_batch needs an artifact_request_id or an evidence_id")
+        if when_to_approve:
+            body["whenToApprove"] = when_to_approve
         return _batch(self._client.post_json("/batches", body))
 
     def upload_to_batch(self, batch_id: str, filename: str, content: bytes, meta: Dict[str, Any]) -> Artifact:

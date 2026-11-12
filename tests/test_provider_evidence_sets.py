@@ -85,7 +85,7 @@ def test_existing_set_noop_with_drift_and_tags():
     noop, tag = plan_for(provider(), [entry(approval=DEFAULT)], {"EVD-A": seen})
     assert noop.verb == "noop"
     assert noop.warnings == [
-        f"approval is MANUAL here; new sets get {DEFAULT}",
+        f"approval is MANUAL here; this upload's batches get {DEFAULT}",
         "name in Paramify is 'Other'; the fetcher calls it 'Set A'",
     ]
     assert noop.payload["id"] == "ev-9"
@@ -102,7 +102,7 @@ def test_existing_set_with_entries_that_disagree_is_not_refused():
     seen = observed_set(approval="MANUAL")
     noop, tag = plan_for(provider(), [entry("a", approval="SUBMISSION"), entry("b")], {"EVD-A": seen})
     assert noop.verb == "noop" and tag.verb == "tag"
-    assert noop.warnings == ["approval is MANUAL here; new sets get SUBMISSION"]
+    assert noop.warnings == ["approval is MANUAL here; this upload's batches get SUBMISSION"]
 
 
 def test_existing_set_without_drift_has_no_warnings():

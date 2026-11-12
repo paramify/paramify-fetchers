@@ -99,6 +99,18 @@ def test_stack_override_wins(tmp_path):
     assert e.stack == "S9" and e.stack_name is None
 
 
+def test_owner_comes_from_the_run_settings(tmp_path):
+    build(tmp_path, {"a.json": env()}, [inv("x", ["a.json"])], {"x": {"use": "x", "owner": "alice"}})
+    [e] = desired_from_run(tmp_path, {})
+    assert e.owner == "alice"
+
+
+def test_owner_override_wins(tmp_path):
+    build(tmp_path, {"a.json": env()}, [inv("x", ["a.json"])], {"x": {"use": "x", "owner": "alice"}})
+    [e] = desired_from_run(tmp_path, {}, owner_override="bob")
+    assert e.owner == "bob"
+
+
 def test_skip_reasons_match_uploader(tmp_path):
     build(tmp_path, {
         "failed.json": env(status="failed"),

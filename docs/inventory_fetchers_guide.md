@@ -105,6 +105,6 @@ For the rules behind this, see the [pipeline fetchers guide](pipeline_fetchers_g
 | The pipeline finds no records | Data path must be `payload.data`; the uploader always sends the envelope for a pipeline file. |
 | A list field can't be mapped | Map its scalar copy, such as `primary_ip_address`. |
 | `a pipeline file never goes direct` | Remove `delivery: direct` or `no_request: direct` from the manifest entry. A run made before pipeline entries ignored a `direct` in `run.paramify` can carry one too: set `no_request: evidence` on the entry, or remove `direct` from `run.paramify`, then run again. |
-| `approves MANUAL` | Set the evidence set to approve automatically. Otherwise each batch waits for a person. |
+| `approves MANUAL` | Remove `approval: MANUAL` from the manifest entry, so new batches approve on submit. Otherwise each batch waits for a person. |
 | `has N validator(s) … its batches will never approve` | Remove the validators from the evidence set in Paramify. |
 | Uploaded, but Inventory is empty | Check that the set has the pipeline attached and that the batch is `APPROVED`. A `SUBMITTED` batch has not run. |

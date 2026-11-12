@@ -90,9 +90,25 @@ schemas and the `paramify` CLI — not the internal code.
   person it says `SUBMITTED: waiting for approval; the pipeline has not run`. The
   entry result in `--json` gains `pipeline: {type, approved}`. A file sent direct
   (the workspace has no batches) reports `approved: null`; `false` means a batch
-  is submitted and waiting for a person. A set that
-  approves MANUAL no longer draws the "waits for someone to approve" warning when
-  the workspace has no batches, since there is no batch to approve.
+  is submitted and waiting for a person. `--plan` warns when
+  the batch will approve MANUAL: the entry's `approval: MANUAL` for a new batch
+  (each new batch takes the entry's approval, so a MANUAL set alone does not
+  hold it), or a resumed batch created MANUAL. There is no warning when the
+  workspace has no batches. A batch approved on submission that has not flipped
+  to APPROVED yet when read back counts as `approved: true`.
+
+- **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
+  one record per VPC in the region with its Route 53 Resolver DNSSEC validation
+  status (`NOT_CONFIGURED` when the VPC has no DNSSEC config), its DNS Firewall
+  rule group associations with each rule's action and domain list (or DNS
+  Firewall Advanced threat protection), and its query log config associations
+  with their status and error. DNSSEC configs whose VPC no longer exists are
+  listed in `OrphanedDnssecConfigs`. Only `COMPLETE` firewall associations and
+  `ACTIVE` query log associations count as on; a field whose AWS call failed
+  reads null and the run exits 1. Supports profile/region targets. Maps to
+  `KSI-SVC-VCM`, `KSI-CNA-RNT` and `KSI-MLA-LET`. `aws_discovery_beta` now
+  lists DNS Firewall rule group associations (`dns_firewall_association`) per
+  region, so discovery covers the `route53resolver` service this fetcher reads.
 
 - **Evidence uploads go out as batches.** `paramify upload` now sends the files
   of each fetcher entry as one batch. Paramify submits and approves a batch as
@@ -131,6 +147,15 @@ schemas and the `paramify` CLI — not the internal code.
   request, and whether the batch is new, resumed or done. It also shows dropped
   files and open batches from earlier runs. `--dry-run` stays offline and needs
   no token.
+- **Choose the channel by owner: `run.paramify.owner`, `paramify manifest
+  set-owner`, `paramify upload --owner`, and an owner setting in the TUI.**
+  Paramify makes one channel for each owner on each stack. Before, the upload
+  refused a set with two owners' channels on one stack. Now it uses the
+  channel of the owner the manifest sets. The owner is read only in that case:
+  a set with one channel on the stack uses it, whoever owns it. An entry can
+  set its own owner. The plan gives a note when the manifest's owner differs
+  from the run's. `paramify validate --online` gives a note for an owner who
+  has no channel in the workspace.
 - **`paramify upload --stack`, `paramify stacks`, `paramify manifest set-stack`,
   and the `run.paramify` manifest keys.** `run.paramify` and the `paramify`
   block of each entry hold `stack`, `stack_name`, `approval` and `no_request`.
@@ -148,6 +173,19 @@ schemas and the `paramify` CLI — not the internal code.
   before the fetcher started) and `notes`. Each item names the entry and the
   fetcher. The record of a failed invocation adds `error` and, when the fetcher
   gave one, `error_code`. The same record goes in `_run_metadata.json`.
+- **`github_workflow_runs` 0.1.0 gives the GitHub Actions run history.** For
+  each repository, it records every workflow run in the window: the workflow
+  file, trigger, branch, commit, actor, attempt, status and conclusion. It
+  also records the artifacts that each run uploaded (name, size, digest and
+  expiry, never the contents). The summary counts runs by outcome and failed
+  runs on the default branch. It also lists the workflows whose newest
+  finished run on the default branch failed. A run from a fork is never on
+  the default branch, even when the fork's branch has the same name. The run
+  reads the newest runs
+  first and does not use a date filter, because a filtered list stops at
+  1,000 results with no error. It fails as truncated beyond
+  `GITHUB_MAX_WORKFLOW_RUNS` or `GITHUB_MAX_ARTIFACTS`. It needs the Actions
+  (repository) read permission.
 
 - **Inspector ECR findings and Paramify issue intake:** `aws_inspector_ecr_findings`
   collects active findings, package details, image inventory and coverage;
@@ -1623,6 +1661,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **Each batch the upload creates is approved on submission by default.** The
+  upload now sends the entry's `approval` (default `SUBMISSION`) when it creates
+  a batch. Before, a batch took the evidence set's mode, so a set made `MANUAL`
+  in the app held each batch for review. Set `approval: MANUAL` or
+  `SUBMISSION_WITH_PASSING_VALIDATORS` on an entry to keep review or validator
+  gating. The plan says how each new batch is approved. A workspace whose API
+  cannot set a batch's mode gets the batch without it, with a warning. A batch
+  that is approved on submission but still reads `SUBMITTED` no longer reports
+  `waiting for review`.
+
 - **Upload result shape.** The `--json` summary and `upload_log.json` keep
   `uploaded`, `skipped_duplicate`, `skipped_failed`, `errors` and `ok` for one
   release. So do the `upload_start`, `upload_file` and `upload_complete` events.
@@ -1679,6 +1727,45 @@ schemas and the `paramify` CLI — not the internal code.
   - **Enhanced scanning permissions:** `ecr:DescribeImageScanFindings` also needs
     `inspector2:ListCoverage` and `inspector2:ListFindings` when the registry uses
     enhanced scanning; without them AWS denies the ECR call.
+- **`github_deployment_controls` 0.2.0 records who approved each production
+  deployment.** For a deployment that GitHub Actions made, the fetcher finds
+  the workflow run from the oldest deployment status and reads the run's
+  reviews of that environment. It reads the full status history to tell a
+  deployment that got past the gate from one held there. New fields per
+  deployment: `gate`, `run_id`, `approvals` (one entry per review),
+  `approvals_unknown` and `independent_approval` (a person other than the
+  creator approved it). New summary fields:
+  `production_deployments_by_gate`, `production_deployments_held_at_gate`,
+  `production_deployments_approved`, `production_deployments_without_approval`,
+  `production_deployments_approval_unknown`,
+  `production_deployments_approved_independently`,
+  `production_deployments_without_independent_approver`,
+  `production_deployments_approved_by_bot`,
+  `production_deployments_self_approved` and
+  `production_deployments_approver_ambiguous`. Approval is judged only for
+  deployments that passed the gate. If the approval is not known, the value
+  is `null`, not "not approved". This occurs when Actions did not make the
+  deployment, when the status has no run link, or when GitHub deleted the
+  run. The fetcher needs no new permission. It makes one more call for each
+  workflow run that made a production deployment.
+- **`github_actions_security` 0.2.0 records runner groups and OIDC subject
+  claims.** `organization.runner_groups` gives each group with its
+  visibility, the repositories that can use it, its runners, whether it
+  allows public repositories and whether it limits use to some workflows.
+  `organization.oidc_subject_template` gives the organization's subject
+  template. Each repository with a workflow that uses OIDC gets
+  `oidc_subject`, with the claim keys that its subject is built from. New
+  summary fields: `runner_groups`, `runner_groups_open_to_all_repositories`,
+  `runner_groups_allowing_public_repositories`,
+  `runner_groups_not_restricted_to_workflows`,
+  `organization_oidc_subject_claims`, `repositories_with_custom_oidc_subject`,
+  `repositories_on_organization_oidc_template` and
+  `repositories_oidc_subject_without_repository`. A workflow with
+  `permissions: write-all` counts as using OIDC. Runner groups use the
+  Self-hosted runners (organization) permission and follow
+  `include_self_hosted_runners`. The repository OIDC setting needs the Actions
+  (repository) read permission.
+
 - **The uploader guide explains the collection frequency of an evidence set.**
   A new section in [`docs/uploader_guide.md`](docs/uploader_guide.md#set-the-collection-frequency)
   gives the default (`THREE_DAY`), the values, and how to set `frequency` in

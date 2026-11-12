@@ -229,23 +229,32 @@ batches.
 | `--dry-run` | Lists what would upload. Makes no API calls and needs no token. Routing shows as unknown. |
 | `--plan` | Reads the workspace (no changes) and prints the full plan. Applies nothing. |
 | `--stack STACK` | Sends every entry to this stack (an id or a name). It replaces the stack the run recorded. |
+| `--owner USERNAME` | Where a stack has one channel per owner, uses this owner's channel. It replaces the owner the run recorded. |
 | `--with-validators` | Syncs validators for the evidence sets of the run before the batches go out. If the sync fails, the upload sends no batch. With `--dry-run`, it only names the sync it would do. |
 | `--no-tags` | Skips the default custom tags for this upload. |
 | `--config`, `-f`, `-o` | Choose the uploader config, the manifest, and the output directory. |
 | `--json` | Prints the summary: the legacy counts, plus `dropped`, `plan`, `entries`, `outcomes`, `batches` and, with `--with-validators`, `validators`. |
 
 Set the stack in the manifest under `run.paramify` (`stack`, `stack_name`,
-`approval`, `delivery`, `no_request`). An entry can set the same keys in its own `paramify`
+`owner`, `approval`, `delivery`, `no_request`). An entry can set the same keys in its own `paramify`
 block. List the stacks in the workspace with `paramify stacks`. Write one into a
 manifest with `paramify manifest set-stack MANIFEST STACK [--fetcher NAME]`.
 With a token, the command looks up the stack and stores its id and name. Check
 the stack ids against the workspace with `paramify validate --online`.
 
+When an evidence set has two channels on the stack, one for each owner, the
+upload needs an owner. Write one with
+`paramify manifest set-owner MANIFEST USERNAME [--fetcher NAME]`. An empty
+USERNAME removes it. The owner is read only where it breaks such a tie. See
+[Owner](uploader_guide.md#owner). `paramify validate --online` gives a note for
+an owner who has no channel in the workspace.
+
 Uploading the same run again changes nothing. The upload finds the batch it made
 for that run. A new run makes a new batch. If a temporary failure holds a batch
-open, run the same upload again to resume it. A new evidence set gets the
-approval mode `SUBMISSION` unless `approval` says otherwise: Paramify approves
-each batch when the upload submits it. The upload never changes an existing set. The routing rules and each
+open, run the same upload again to resume it. Each new batch, and each new
+evidence set, gets the approval mode `SUBMISSION` unless `approval` says
+otherwise: Paramify approves the batch when the upload submits it, whatever
+mode the set has. The upload never changes an existing set. The routing rules and each
 refusal are in [`uploader_guide.md`](uploader_guide.md#how-a-run-is-delivered).
 
 The upload talks to Paramify REST v0 over HTTPS only, and it reads

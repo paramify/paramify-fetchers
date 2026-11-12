@@ -200,7 +200,8 @@ run:
 |---|---|---|
 | `stack` | stack id or name | The stack whose channel receives the batch. |
 | `stack_name` | text | A label. The plan warns when it no longer matches the workspace. |
-| `approval` | `MANUAL`, `SUBMISSION_WITH_PASSING_VALIDATORS`, `SUBMISSION` | How Paramify approves batches on a set this upload creates. |
+| `owner` | Paramify username | Whose channel receives the batch when the stack has one channel per owner. |
+| `approval` | `SUBMISSION` (default), `SUBMISSION_WITH_PASSING_VALIDATORS`, `MANUAL` | How Paramify approves each batch this upload creates, and a set it creates. |
 | `no_request` | `direct` (default), `evidence`, `refuse` | What to do when a channel has no artifact request. |
 | `delivery` | `auto` (default), `direct` | `direct` sends the entry direct, with no batch. |
 
@@ -214,6 +215,27 @@ List the stacks with `paramify stacks`. Store one in a manifest with
 `paramify manifest set-stack MANIFEST STACK`. Add `--fetcher NAME` to set it for
 one entry. To override the stack for one upload, run
 `paramify upload --stack STACK`.
+
+#### Owner
+
+Paramify makes one channel for each owner on each stack. So an evidence set can
+have two channels on the same stack, one for each owner. The stack alone cannot
+choose between them. The `owner` setting chooses the channel of that owner.
+
+The upload reads the owner only in this case. When the stack has one channel,
+the upload uses it, whoever owns it. So you can set one owner for the whole
+manifest. Sets with one channel are not changed.
+
+- When no channel on the stack has the owner, the upload refuses the entry. The
+  message lists the owners on that stack.
+- The owner does not choose a stack. A set with channels on several stacks
+  still needs a stack.
+- The match ignores case.
+
+Store an owner with `paramify manifest set-owner MANIFEST USERNAME`. Add
+`--fetcher NAME` to set it for one entry. With a token, the command checks the
+name against the owners of the workspace's channels. To override the owner for
+one upload, run `paramify upload --owner USERNAME`.
 
 ### When a batch cannot be used
 
@@ -281,11 +303,22 @@ as delivered. A new run goes in a batch.
 
 ### Approval mode
 
-A new evidence set gets the approval mode `SUBMISSION`. Paramify approves
-each batch when the upload submits it, so the evidence always goes in. Set
-`approval` to change it: `SUBMISSION_WITH_PASSING_VALIDATORS` holds a batch
-until its validators pass, and `MANUAL` holds it for a person. The upload never changes an
-existing set: it only adds tags to it.
+Each batch the upload creates gets the approval mode `SUBMISSION`. Paramify
+approves the batch when the upload submits it, and no one reviews it. This is
+so whatever mode the evidence set has. Set `approval` to change it:
+`SUBMISSION_WITH_PASSING_VALIDATORS` holds a batch until its validators pass,
+and `MANUAL` holds it for a person. A new evidence set gets the same mode. The
+upload never changes an existing set: it only adds tags to it.
+
+The plan says how each new batch is approved, for example
+`new batch (approved on submit)`. A batch that an earlier upload made keeps its
+mode. Paramify approves a batch a moment after the submit answers, so the
+upload can report `SUBMITTED: approved on submission; not approved yet when
+read back`. The batch needs nothing more.
+
+A workspace whose API cannot set a batch's mode yet refuses it. The upload then
+creates the batch without it, so the batch takes the set's mode, and the entry
+gives a warning.
 
 When you set `approval` and an existing set uses a different mode, the plan
 shows a note. When the upload must create a set, all the entries that send to
@@ -402,7 +435,8 @@ results, see [verify validators](suggest_validator_guide.md#5-verify-in-paramify
 | `No run under ./evidence that collected evidence.` | Your manifest writes elsewhere. Add `-f <manifest>`, or pass the run directory. |
 | `… has 3 channels and no stack is configured` | The upload does not guess a channel. Set the stack: `paramify manifest set-stack`, or `paramify upload --stack`. The message lists the stacks. |
 | `… has no channel on stack …` | Create a channel for that stack on the evidence set in the app, or choose another stack. |
-| `… has 2 channels on stack …, one per owner: …` | Paramify makes one channel for each owner on a stack. The upload cannot choose the owner, so it refuses this entry. Upload the evidence in the app and choose the channel there. The message gives the owner of each channel. |
+| `… has 2 channels on stack …, one per owner: …` | Paramify makes one channel for each owner on a stack, and no owner is set. Set one: `paramify manifest set-owner`, or `paramify upload --owner`. The message gives the owner of each channel. See [Owner](#owner). |
+| `… has no channel on stack … owned by …` | The owner you set has no channel on this set's stack. Set one of the owners that the message lists, or set this entry's own owner with `--fetcher`. |
 | `no current or past artifact request on channel …` | This appears only with `no_request: refuse`. Create an artifact request on the channel in the app, or remove `no_request: refuse` from this entry to send it direct. |
 | `batches are off for this workspace (…); every entry is sent direct, as before batches` | This is a note, not an error. The workspace has no batches, so the upload sends every entry direct. |
 | An entry shows `held` | A temporary failure stopped the batch. Run the same upload again. |

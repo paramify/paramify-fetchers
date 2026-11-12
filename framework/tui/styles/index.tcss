@@ -156,6 +156,10 @@ ManifestPage {
     padding: 0 1 0 0;
 }
 
+#manifest-top .after-button {
+    margin-left: 2;
+}
+
 #manifest-output-dir {
     width: 1fr;
 }

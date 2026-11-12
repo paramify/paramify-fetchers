@@ -59,7 +59,7 @@ def test_entry_form_hides_direct_settings_for_a_pipeline_entry(tmp_path, run_tui
         return {s["key"]: s for s in app.screen._groups["paramify"]}
 
     specs = run_tui(body, _manifest(tmp_path, PIPELINE))
-    assert set(specs) == {"stack", "approval", "no_request"}
+    assert set(specs) == {"stack", "owner", "approval", "no_request"}
     assert specs["approval"]["help"] == "pipeline files always go in a batch; MANUAL waits for a person"
     assert specs["no_request"]["options"] == [("evidence", "evidence"), ("refuse", "refuse")]
     assert specs["no_request"]["help"] == "no artifact request: blank or evidence sends a batch to the set; refuse stops"
@@ -100,7 +100,7 @@ def test_entry_form_keeps_direct_settings_for_ordinary_evidence(tmp_path, run_tu
         return {s["key"] for s in app.screen._groups["paramify"]}
 
     keys = run_tui(body, _manifest(tmp_path, _plain_evidence_name()))
-    assert keys == {"stack", "approval", "no_request", "delivery"}
+    assert keys == {"stack", "owner", "approval", "no_request", "delivery"}
 
 
 def test_detail_pane_names_the_pipeline(tmp_path, run_tui):

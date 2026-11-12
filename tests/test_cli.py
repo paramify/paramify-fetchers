@@ -66,7 +66,7 @@ EXPECTED_ISSUES = {"upload"}
 EXPECTED_MANIFEST = {
     "init", "new", "add", "remove", "set-config", "set-secret",
     "add-target", "remove-target", "set-platform-config",
-    "set-passthrough", "set-output-dir", "set-stack", "show",
+    "set-passthrough", "set-output-dir", "set-stack", "set-owner", "show",
 }
 EXPECTED_SCRIPTS = {"sync"}
 
@@ -378,6 +378,10 @@ API_TO_CLI = {
     "plan_upload": "upload",
     "list_stacks": "stacks",
     "set_stack": "manifest set-stack",
+    "set_owner": "manifest set-owner",
+    "list_channel_owners": "manifest set-owner",  # and `validate --online`, and the TUI's owner picker
+    "owner_notes": "validate",  # --online
+    "manifest_owners": "validate",  # --online: only a manifest that sets an owner lists the owners
     "upload_readiness": "manifest set-stack",  # its token check; `doctor` reports it too
     "upload_run": "upload",
     "scripts_sync_preflight": "scripts sync",

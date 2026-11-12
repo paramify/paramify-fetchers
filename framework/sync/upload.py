@@ -102,7 +102,7 @@ def _run_manifest(run_dir: Path, root: Path) -> Optional[Path]:
 
 
 def manifest_notes(run_dir: Path, root: Path, manifest_path: Optional[Path],
-                   stack_override: Optional[str]) -> List[str]:
+                   stack_override: Optional[str], owner_override: Optional[str] = None) -> List[str]:
     """Plan notes for the Paramify settings the manifest now sets differently from the run.
 
     `paramify run` records each entry's settings in the run, and the upload uses
@@ -132,7 +132,7 @@ def manifest_notes(run_dir: Path, root: Path, manifest_path: Optional[Path],
         return []
     if not isinstance(run_settings, dict):
         return []
-    return settings_notes(run_settings, now, stack_override=stack_override)
+    return settings_notes(run_settings, now, stack_override=stack_override, owner_override=owner_override)
 
 
 # ---- setup ------------------------------------------------------------------ #
@@ -142,7 +142,8 @@ class _Setup:
 
     def __init__(self, run_dir: Any, config_path: Optional[Path], stack: Optional[str],
                  only_file: Optional[str], *, upload_cfg: Optional[Dict[str, Any]] = None,
-                 token: Optional[str] = None, base_url: Optional[str] = None) -> None:
+                 token: Optional[str] = None, base_url: Optional[str] = None,
+                 owner: Optional[str] = None) -> None:
         load_dotenv()
         self.run_dir = Path(run_dir)
         if not self.run_dir.is_dir():
@@ -160,7 +161,8 @@ class _Setup:
                       if is_evidence_file(p) and (not only_file or p.name == only_file)]
         if not self.files:
             raise ValueError(f"no evidence files found in {self.run_dir} — nothing to upload (wrong directory?)")
-        self.ctx = SyncContext(self.run_dir, self.config, stack_override=stack, only_file=only_file)
+        self.ctx = SyncContext(self.run_dir, self.config, stack_override=stack, only_file=only_file,
+                               owner_override=owner)
         # Plan notes the caller adds (see manifest_notes).
         self.notes: List[str] = []
 
@@ -229,14 +231,15 @@ def plan_upload(
     custom_tags: bool = True,
     with_validators: bool = False,
     manifest_path: Optional[Path] = None,
+    owner: Optional[str] = None,
 ) -> Plan:
     """The plan for uploading `run_dir`. Online it reads the workspace (read-only); offline it needs no token.
 
     `manifest_path` is the manifest to compare the run's Paramify settings with
     (see manifest_notes); without it, the run's own manifest is used.
     """
-    setup = _Setup(run_dir, config_path, stack, only_file)
-    notes = manifest_notes(setup.run_dir, root, manifest_path, stack)
+    setup = _Setup(run_dir, config_path, stack, only_file, owner=owner)
+    notes = manifest_notes(setup.run_dir, root, manifest_path, stack, owner)
     reader = None
     capability: Optional[Capability] = None  # offline: no check, no note
     if online:
@@ -483,6 +486,7 @@ def run_upload(
     base_url: Optional[str] = None,
     deprecations: Sequence[str] = (),
     manifest_path: Optional[Path] = None,
+    owner: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Plan and apply the upload of one run; see the module docstring.
 
@@ -498,8 +502,8 @@ def run_upload(
     """
     emit: Event = on_event or (lambda _ev: None)
     setup = _Setup(run_dir, config_path, stack, only_file,
-                   upload_cfg=upload_cfg, token=token, base_url=base_url)
-    setup.notes = manifest_notes(setup.run_dir, root, manifest_path, stack)
+                   upload_cfg=upload_cfg, token=token, base_url=base_url, owner=owner)
+    setup.notes = manifest_notes(setup.run_dir, root, manifest_path, stack, owner)
     policy = resolve_tag_policy(setup.config, override_off=None if custom_tags else NO_TAGS)
     report = _Report(emit, dry_run, Tagger(None, "", policy=policy, display_names=category_display_names(root)))
     base = {"run_dir": str(setup.run_dir), "base_url": setup.base_url, "dry_run": dry_run,
