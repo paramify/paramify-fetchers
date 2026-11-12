@@ -154,6 +154,12 @@ def test_issues_upload_accepts_force():
     assert "force" in {p.name for p in cmd.params}
 
 
+@pytest.fixture(autouse=True)
+def _no_dotenv(monkeypatch):
+    """No test here reads the developer's own `.env`: doctor, `run` and set-stack load it."""
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+
+
 def test_doctor_json_ok_without_manifest():
     """Without a manifest, doctor is a Python-version gate; tools are advisory."""
     result = runner.invoke(app, ["doctor", "--json"])
@@ -372,6 +378,7 @@ API_TO_CLI = {
     "plan_upload": "upload",
     "list_stacks": "stacks",
     "set_stack": "manifest set-stack",
+    "upload_readiness": "manifest set-stack",  # its token check; `doctor` reports it too
     "upload_run": "upload",
     "scripts_sync_preflight": "scripts sync",
     "scripts_sync": "scripts sync",

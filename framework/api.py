@@ -626,7 +626,12 @@ def upload_readiness(root: Path, config_path: Optional[Path] = None) -> dict:
     The destination is reported as loudly as the token, because pointing at
     stage when you meant production (or the reverse) fails silently: the upload
     succeeds, into the wrong workspace.
+
+    `.env` is loaded first, as `list_stacks` and the upload do (override=False,
+    so a real export wins). Without it a token kept only in `.env` reads as
+    missing here while `paramify stacks` and `paramify upload` find it.
     """
+    load_dotenv()
     config: dict = {}
     if config_path is not None:
         try:

@@ -7,10 +7,12 @@ app, its modals and its workers run for real.
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
 import yaml
+from dotenv import dotenv_values
 
 pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
 
@@ -95,6 +97,37 @@ def test_stack_picker_stores_id_and_name(tmp_path, monkeypatch, run_tui):
     run_tui(body, path)
     paramify = _run_block(path)["paramify"]
     assert paramify["stack"] == "stk-2" and paramify["stack_name"] == "Beta"
+
+
+def test_stack_picker_finds_a_token_that_is_only_in_dotenv(tmp_path, no_token, monkeypatch, run_tui):
+    # The picker asks upload_readiness, which loads `.env` the way list_stacks
+    # does; api.load_dotenv is pointed at a tmp file (override=False semantics).
+    path, _ = _manifest(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("PARAMIFY_UPLOAD_API_TOKEN=tok\n")
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "")
+    monkeypatch.delenv("PARAMIFY_UPLOAD_API_TOKEN")  # recorded, so the loaded value is removed afterwards
+
+    def load_dotenv(*_a, **_k) -> bool:
+        values = {k: v for k, v in dotenv_values(env_file).items() if v is not None and k not in os.environ}
+        os.environ.update(values)
+        return bool(values)
+
+    monkeypatch.setattr(api, "load_dotenv", load_dotenv)
+    monkeypatch.setattr(api, "list_stacks", lambda *a, **k: STACKS)
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        app.screen.query_one("#manifest-stack", Button).press()
+        await _settle(app, pilot)
+        assert isinstance(app.screen, PickerModal)
+        app.screen.dismiss("stk-1")
+        await _settle(app, pilot)
+
+    run_tui(body, path)
+    paramify = _run_block(path)["paramify"]
+    assert paramify["stack"] == "stk-1" and paramify["stack_name"] == "Alpha"
 
 
 def test_stack_without_a_token_takes_typed_text(tmp_path, no_token, run_tui):

@@ -21,7 +21,6 @@ from textual.widgets import Button, Input, Static
 from framework import api, patterns
 from framework.contract import ManifestEntry
 from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
-from framework.paramify_auth import resolve_upload_token
 from framework.runner.manifest_loader import entry_keys
 from framework.tui import kinds, palette, render
 from framework.tui.components.forms import env_name_from_ref
@@ -415,8 +414,9 @@ class ManifestPage(ButtonRowNav, Vertical):
         m = self._manifest
         if m is None:
             return
-        token, _ = resolve_upload_token()
-        if token:
+        # upload_readiness loads `.env` first, as list_stacks does: a token kept
+        # only there must not drop the picker to typed, unchecked text.
+        if api.upload_readiness(self.app.root_path)["token_present"]:
             self._pick_stack_online(m)
         else:
             self._type_stack(m)

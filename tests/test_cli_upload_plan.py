@@ -6,12 +6,14 @@ Runs and manifests live under tmp_path; nothing is written into the repo.
 from __future__ import annotations
 
 import json
+import os
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
 import yaml
+from dotenv import dotenv_values
 from typer.testing import CliRunner
 
 from framework import api, paramify_auth
@@ -281,6 +283,37 @@ def test_set_stack_without_a_token_stores_as_given_with_a_note(no_env, tmp_path)
     assert res.exit_code == 0, res.output
     assert read(path)["run"]["paramify"] == {"stack": "Prod"}
     assert "not checked" in res.output
+
+
+@pytest.fixture
+def dotenv_token(fake, tmp_path, monkeypatch):  # noqa: F811
+    """The upload token only in a `.env` file under tmp_path, not in the environment.
+
+    `api.load_dotenv` (what `list_stacks` calls) is pointed at that file. It
+    loads like python-dotenv's default, override=False: a name already in the
+    environment wins. PYTHON_DOTENV_DISABLED stays set, so no other loader can
+    read the developer's own `.env`.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"{paramify_auth.UPLOAD_TOKEN_ENV}=tok\n")
+    monkeypatch.delenv(paramify_auth.UPLOAD_TOKEN_ENV)  # `fake` set it; its teardown removes it again
+
+    def load_dotenv(*_a, **_k) -> bool:
+        values = {k: v for k, v in dotenv_values(env_file).items() if v is not None and k not in os.environ}
+        os.environ.update(values)
+        return bool(values)
+
+    monkeypatch.setattr(api, "load_dotenv", load_dotenv)
+    return env_file
+
+
+def test_set_stack_with_the_token_only_in_dotenv_checks_the_name(dotenv_token, fake, tmp_path):  # noqa: F811
+    st = fake.add_stack("Prod")
+    path = manifest_file(tmp_path, a_fetcher())
+    res = cli("manifest", "set-stack", str(path), "Prod")
+    assert res.exit_code == 0, res.output
+    assert read(path)["run"]["paramify"] == {"stack": st.id, "stack_name": "Prod"}
+    assert "not checked" not in res.output
 
 
 def test_set_stack_targets_each_of_two_entries_with_the_same_fetcher(fake, tmp_path):  # noqa: F811
