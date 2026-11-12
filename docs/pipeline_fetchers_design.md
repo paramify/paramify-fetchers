@@ -1,7 +1,7 @@
 # Pipeline fetchers — Design
 
-**Status:** Proposed. The design was agreed in conversation on 2026-11-12. Four
-live checks are still open ([§8](#8-live-checks)).
+**Status:** Phase 1 is built. Four live checks are still pending ([§8](#8-live-checks)).
+The design was agreed in conversation on 2026-11-12.
 **Date:** 2026-11-12
 
 Some fetchers write evidence that a person reads. Others write data that a
@@ -139,7 +139,7 @@ pipeline:
 | Key | Required | Meaning |
 |---|---|---|
 | `type` | yes | The Paramify pipeline that reads the file. For a scan report it replaces `issue_report.assessment_type`. |
-| `id_scheme` | yes | The format of the asset ID, such as `aws-arn`, `azure-resource-id`, `wiz-resource-id`, or `hostname`. The known schemes are listed in `docs/pipeline_fetchers_guide.md`. A scheme not on that list is allowed, and `paramify validate` notes that it should be added. |
+| `id_scheme` | yes | The format of the asset ID, such as `aws-arn`, `azure-resource-id`, `wiz-resource-id`, or `hostname`. The known schemes are listed in `docs/pipeline_fetchers_guide.md`. A scheme not on that list is allowed. |
 | `asset_id_field` | scan reports only | The column of the vendor file that holds the asset ID. This is the column to choose as "inventory mapping" in the vulnerability preset. |
 | `preset` | reserved | Refused by the schema with "not supported yet". It will name a preset once the API can create one. |
 
@@ -201,7 +201,7 @@ failure, and the upload says so.**
 | `no_request: refuse` in the manifest | Refuse | Refuse |
 | `no_request: direct` in the manifest | Direct | **`paramify validate` error** |
 | `delivery: direct` in the manifest | Direct | **`paramify validate` error** |
-| The workspace has no batches | Direct | **Direct, with a note** that the pipeline runs the pre-batch way. If live check 2 fails, this becomes a refusal. |
+| The workspace has no batches | Direct | **Direct, with the note** "sent direct: this workspace has no batches; the pipeline runs the pre-batch way". If live check 2 fails, this becomes a refusal. |
 | `artifact_payload: payload` in the uploader config | Bare payload | **The envelope, always** ([§1](#the-envelope-and-field-mapping)) |
 
 Channel and stack routing, idempotency, resume, WAF checks, and the incomplete-
@@ -216,7 +216,7 @@ is created. The pipeline runs only when the batch is `APPROVED`.
 |---|---|
 | The uploader creates the set | It gets `SUBMISSION`, the existing default. |
 | The manifest sets `approval: MANUAL` on a pipeline entry | `paramify validate` warns: Inventory waits for a person to approve. |
-| An existing set is `MANUAL` | `--plan` warns. The set is not changed. |
+| An existing set is `MANUAL` | `--plan` warns. The set is not changed. The warning is not shown when the workspace has no batches. |
 | The batch reads back `SUBMITTED`, not `APPROVED` | The result is "waiting for approval: the pipeline has not run", not success. |
 
 ### Validators
@@ -274,7 +274,9 @@ Result lines for a pipeline entry:
 - `SUBMITTED: waiting for approval; the pipeline has not run`
 - `not sent: incomplete inventory (…)`, as today
 
-The `--json` result gains `pipeline: {type, approved}` for each entry, so
+The `--json` result gains `pipeline: {type, approved}` for each entry. `approved`
+is `null` for a file sent direct (the workspace has no batches), and `false`
+means a batch is `SUBMITTED` and waits for a person. This lets
 `deploy/run-and-upload.sh` and CI can alert on a file that was sent but not
 approved.
 

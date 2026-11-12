@@ -408,3 +408,12 @@ results, see [verify validators](suggest_validator_guide.md#5-verify-in-paramify
 | The run also collected scan reports | `paramify upload` sends evidence only. Send reports with the [issues uploader](../uploaders/paramify_issues/README.md). |
 
 **More detail:** [upload options](../uploaders/paramify_evidence/README.md#config---config-optional)
+
+**A pipeline file is the exception.** A file from a [pipeline
+fetcher](pipeline_fetchers_guide.md), such as an inventory, never goes direct
+while the workspace has batches: a direct upload is stored and builds nothing.
+With no artifact request it goes in an evidence-level batch on the set. A
+manifest entry with `delivery: direct` or `no_request: direct` is refused. When
+the workspace has no batches, the file is sent direct with the note `sent direct:
+this workspace has no batches; the pipeline runs the pre-batch way`, and `--json`
+shows `pipeline.approved: null`.

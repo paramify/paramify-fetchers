@@ -75,7 +75,9 @@ schemas and the `paramify` CLI — not the internal code.
   bytes. When the batch is approved on submit, the entry says `APPROVED: pipeline
   runs now` and where to look (Monitoring → Inventory); when it waits for a
   person it says `SUBMITTED: waiting for approval; the pipeline has not run`. The
-  entry result in `--json` gains `pipeline: {type, approved}`. A set that
+  entry result in `--json` gains `pipeline: {type, approved}`. A file sent direct
+  (the workspace has no batches) reports `approved: null`; `false` means a batch
+  is submitted and waiting for a person. A set that
   approves MANUAL no longer draws the "waits for someone to approve" warning when
   the workspace has no batches, since there is no batch to approve.
 
