@@ -1,0 +1,6 @@
+$ paramify manifest set-stack evidence/run-<run-id>/demo.yaml Prod
+exit 0
+--- stdout
+Wrote <repo>/evidence/run-<run-id>/demo.yaml
+--- stderr
+Note: no API token, so 'Prod' was stored as given and not checked against the workspace

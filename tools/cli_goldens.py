@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the demo's `paramify run`/`validate`/`upload --dry-run` output against tests/goldens/cli/."""
+"""Check the demo's run, validate, upload --dry-run, set-stack and set-owner output against tests/goldens/cli/."""
 
 from __future__ import annotations
 
@@ -110,9 +110,22 @@ def _outputs() -> dict:
         if run_dir is None or not run_dir.is_dir():
             raise SystemExit(f"`paramify run` did not make the run directory it announced:\n"
                              f"{outputs['run'][0]}")
+        run = str(run_dir.relative_to(REPO_ROOT))
         for name, args in (
             ("validate", ["validate", "examples/demo.yaml"]),
-            ("upload_dry_run", ["upload", "--dry-run", str(run_dir.relative_to(REPO_ROOT))]),
+            ("upload_dry_run", ["upload", "--dry-run", run]),
+        ):
+            outputs[name] = _capture(args, _paramify(args))
+        # set-stack and set-owner edit a copy kept in the run dir, so it goes with it. It is
+        # copied after the plain dry run, so that golden never sees an extra file in the run.
+        copy = run_dir / "demo.yaml"
+        shutil.copy(REPO_ROOT / "examples" / "demo.yaml", copy)
+        edited = str(copy.relative_to(REPO_ROOT))
+        for name, args in (
+            ("set_stack", ["manifest", "set-stack", edited, "Prod"]),
+            ("set_owner", ["manifest", "set-owner", edited, "alice"]),
+            # The run was made before both: the plan notes each, with its fix.
+            ("upload_dry_run_settings_changed", ["upload", "--dry-run", "-f", edited, run]),
         ):
             outputs[name] = _capture(args, _paramify(args))
     finally:

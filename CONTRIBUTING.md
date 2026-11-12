@@ -59,8 +59,9 @@ pytest tests/test_tui_snapshots.py --snapshot-update
 A mismatch writes `snapshot_report.html`, which shows the old and new screen
 side by side. In CI, download it from the job's `snapshot-report-*` artifact.
 
-The smoke job compares `paramify run`, `validate` and `upload --dry-run` on
-`examples/demo.yaml` with `tests/goldens/cli/`. After an intended output
+The smoke job compares `paramify run`, `validate`, `upload --dry-run`,
+`manifest set-stack` and `set-owner` on `examples/demo.yaml` with
+`tests/goldens/cli/`. After an intended output
 change, run `python tools/cli_goldens.py --update`.
 
 ## Adding a fetcher

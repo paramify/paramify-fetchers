@@ -185,7 +185,9 @@ jobs:
           print(f"smoke ok: described all {len(names)} discovered fetchers")
           EOF
       # The headless path a new user takes first, end to end and offline: run the
-      # credential-free demo manifest, validate it, dry-run its upload. Output is
+      # credential-free demo manifest, validate it, dry-run its upload; then
+      # set-stack and set-owner on a copy, and the dry run's note that they
+      # changed after the run. Output is
       # compared with tests/goldens/cli/ after the repo path, run ids and
       # timestamps are normalised out. Refresh: python tools/cli_goldens.py --update
       - name: paramify run / validate / upload --dry-run on the demo (goldens)
