@@ -47,6 +47,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
+  one record per VPC in the region with its Route 53 Resolver DNSSEC validation
+  status (`NOT_CONFIGURED` when the VPC has no DNSSEC config), its DNS Firewall
+  rule group associations with each rule's action and domain list (or DNS
+  Firewall Advanced threat protection), and its query log config associations
+  with their status and error. DNSSEC configs whose VPC no longer exists are
+  listed in `OrphanedDnssecConfigs`. Only `COMPLETE` firewall associations and
+  `ACTIVE` query log associations count as on; a field whose AWS call failed
+  reads null and the run exits 1. Supports profile/region targets. Maps to
+  `KSI-SVC-VCM`, `KSI-CNA-RNT` and `KSI-MLA-LET`. `aws_discovery_beta` now
+  lists DNS Firewall rule group associations (`dns_firewall_association`) per
+  region, so discovery covers the `route53resolver` service this fetcher reads.
+
 - **Evidence uploads go out as batches.** `paramify upload` now sends the files
   of each fetcher entry as one batch. Paramify submits and approves a batch as
   one unit. The batch goes through the channel of the evidence set, on the
