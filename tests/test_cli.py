@@ -392,6 +392,8 @@ API_TO_CLI = {
     "set_assessment": "assessments select",
     "set_close_cycle": "assessments select",  # --close-cycle
     "issues_jobs": "issues jobs",
+    "preset_sheet": "preset",
+    "render_preset_sheet": "preset",
     "issues_job_action": "issues jobs",  # --retry / --cancel
     "issues_close": "issues close",
     "latest_run": "upload",  # and `issues upload`: the run picked with no run-dir

@@ -501,8 +501,11 @@ class PreviewModal(ModalScreen[None]):
 
     BINDINGS = [Binding("escape,q,p", "close", "Close")]
 
-    def __init__(self, text: str, title: str = "manifest preview") -> None:
+    def __init__(self, text: str, title: str = "manifest preview", close_keys: str = "escape,q,p") -> None:
         super().__init__()
+        if close_keys != "escape,q,p":
+            self._bindings = self._bindings.copy()
+            self._bindings.bind(close_keys, "close", "Close")
         self._text = text
         self._title = title
 

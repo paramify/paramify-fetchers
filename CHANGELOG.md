@@ -12,6 +12,9 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- TUI: a pipeline fetcher's "sends to" cell ends in `· pipeline`, its detail pane names the pipeline type and ID
+  scheme, and its entry form drops `no_request` and `delivery`. `P` on the Manifest tab opens the preset sheet. The
+  upload log flags a pipeline batch that is submitted but not yet approved.
 - `paramify preset <fetcher>` prints the settings to enter when building a pipeline's Paramify preset: sample file, data
   path, unique ID and scheme, the `asset_type` values of the newest run, and the other fetchers that share the ID
   scheme. `--json`, `-f` and `--output-dir` pick the output.

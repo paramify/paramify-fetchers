@@ -8,6 +8,7 @@ modal -> api.* mutator -> rebuild, mirroring the Bagels write path.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import yaml
@@ -59,7 +60,7 @@ def _target_summary(target: dict) -> str:
 class ManifestPage(ButtonRowNav, Vertical):
     HINTS = [
         ("a", "add"), ("e", "entry"), ("x", "remove"), ("t", "targets"),
-        ("A", "assessment"), ("s", "save"), ("v", "validate"), ("p", "preview"),
+        ("A", "assessment"), ("P", "preset"), ("s", "save"), ("v", "validate"), ("p", "preview"),
     ]
 
     BINDINGS = [
@@ -68,6 +69,7 @@ class ManifestPage(ButtonRowNav, Vertical):
         Binding("x", "remove_entry", "Remove"),
         Binding("t", "edit_targets", "Targets"),
         Binding("A", "pick_assessment", "Assessment"),
+        Binding("P", "preset_sheet", "Preset"),
         Binding("s", "save", "Save"),
         Binding("v", "validate", "Validate"),
         Binding("p", "preview", "Preview"),
@@ -571,12 +573,17 @@ class ManifestPage(ButtonRowNav, Vertical):
             {"key": "stack", "label": "stack", "kind": "text", "value": pf.get("stack"),
              "placeholder": "inherit", "required": False, "help": "stack id or name; blank inherits"},
             {"key": "approval", "label": "approval", "kind": "select", "value": pf.get("approval") if pf.get("approval") in APPROVALS else None,
-             "options": [(v, v) for v in APPROVALS], "required": False, "help": "blank inherits"},
+             "options": [(v, v) for v in APPROVALS], "required": False,
+             "help": ("pipeline files always go in a batch; MANUAL waits for a person"
+                      if d.get("pipeline") else "blank inherits")},
             {"key": "no_request", "label": "no_request", "kind": "select", "value": pf.get("no_request") if pf.get("no_request") in NO_REQUESTS else None,
              "options": [(v, v) for v in NO_REQUESTS], "required": False, "help": "blank inherits"},
             {"key": "delivery", "label": "delivery", "kind": "select", "value": pf.get("delivery") if pf.get("delivery") in DELIVERIES else None,
              "options": [(v, v) for v in DELIVERIES], "required": False, "help": "blank inherits"},
         ]
+        if d.get("pipeline"):
+            # A pipeline file always goes in a batch, so the direct-delivery knobs do not apply.
+            paramify_specs = [s for s in paramify_specs if s["key"] not in ("no_request", "delivery")]
         groups = {"config": config_specs, "secrets": secret_specs, "paramify": paramify_specs}
 
         def done(result: Optional[dict]) -> None:
@@ -952,6 +959,23 @@ class ManifestPage(ButtonRowNav, Vertical):
             return
         text = yaml.safe_dump(self._manifest, sort_keys=False, default_flow_style=False)
         self.app.push_screen(PreviewModal(text, title=str(self.app.manifest_path)))
+
+    def action_preset_sheet(self) -> None:
+        use = self._selected
+        if not use or self._manifest is None:
+            return
+        if not (self._descriptors().get(use) or {}).get("pipeline"):
+            self.notify(f"{use} is not a pipeline fetcher")
+            return
+        run = self._manifest.get("run") or {}
+        out = run.get("output_dir")
+        try:
+            sheet = api.preset_sheet(self.app.root_path, use, Path(out) if out else None)
+        except (KeyError, ValueError) as exc:
+            self.notify(str(exc), severity="warning")
+            return
+        self.app.push_screen(PreviewModal(api.render_preset_sheet(sheet), title=f"preset: {use}",
+                                          close_keys="escape,q,P"))
 
     # -- focus ------------------------------------------------------------ #
 

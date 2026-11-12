@@ -35,6 +35,25 @@ from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal, PickerModal
 
 
+def pipeline_wait_lines(entries: dict) -> list:
+    """One amber line per pipeline entry whose batch is submitted but not approved.
+
+    Only `approved is False` counts: None means the file went direct (a workspace
+    without batches), which is not a warning.
+    """
+    lines = []
+    for key, entry in entries.items():
+        pipe = (entry or {}).get("pipeline") or {}
+        if pipe.get("approved") is False:
+            batch = entry.get("batch_reference") or entry.get("batch_id")
+            where = f" ({batch})" if batch else ""
+            lines.append(Text(
+                f"  [WAIT] {key}: waiting for approval{where}; the {pipe.get('type')} pipeline runs once someone approves the batch",
+                style=palette.WARN,
+            ))
+    return lines
+
+
 class UploadEvent(Message):
     """Carries one api.upload_run() event dict from the worker thread."""
 
@@ -730,6 +749,8 @@ class UploadPage(ButtonRowNav, Vertical):
                 f"  {ev.get('reason', '')}", style=palette.WARN,
             ))
         elif etype == "upload_complete":
+            for line in pipeline_wait_lines(ev.get("entries") or {}):
+                log.write(line)
             self._finalize_upload(ev)
         elif etype == "_upload_failed":
             self._uploading = False
