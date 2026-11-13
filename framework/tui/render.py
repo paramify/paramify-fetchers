@@ -77,12 +77,12 @@ _KIND_ABOUT = {
         "Asserts a configuration state — MFA is enforced, buckets are encrypted — "
         "as a JSON payload the fetcher builds.",
         "Wrapped in the standard envelope and uploaded to the evidence set the "
-        "fetcher names. Upload with ctrl+u on the Paramify tab.",
+        "fetcher names. Upload with u on the Paramify tab.",
     ),
     kinds.INVENTORY: (
         "Lists every asset of a kind — cloud resources, hosts, devices — one "
         "record each, for Paramify's Inventory.",
-        "Uploaded to its evidence set with ctrl+u like evidence; an inventory "
+        "Uploaded to its evidence set with u like evidence; an inventory "
         "pipeline attached to that set builds the Inventory items. Only a run "
         "that collected every asset is sent.",
     ),
@@ -188,7 +188,7 @@ def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest:
                 "none declared — the upload skips it unless the uploader config names one",
                 style=palette.WARN,
             )))
-        rows.append(("send", Text("ctrl+u on the Paramify tab, enveloped JSON", style="dim")))
+        rows.append(("send", Text("u on the Paramify tab, enveloped JSON", style="dim")))
     return Group(Text("sends to", style="bold"), _kv_table(rows))
 
 
