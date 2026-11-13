@@ -2381,6 +2381,30 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_policy_compliance` 0.6.0: unread reads give null counts, and an
+  unread remediation task can no longer read as complete.**
+  - `deployments_complete` could read true on a run that missed a task's
+    deployment list: a later task's read replaced the record of unread tasks.
+    A task whose deployments could not be listed now keeps it false.
+  - A remediation task at a scope the fetcher doesn't recognise now fails the
+    run, where before it was skipped with only a log line.
+  - When the compliance summary could not be read, `non_compliant_resources`,
+    `non_compliant_policies`, `compliant_resources`, `resources_evaluated`,
+    `resource_compliance_percentage`, `assignments_evaluated`,
+    `non_compliant_assignments` and `compliant_assignments` read null, not 0.
+    When the remediation task list could not be read, `remediation_tasks`,
+    `remediation_tasks_by_provisioning_state` and the two deployment totals
+    read null, not 0. `listed_non_compliant_states` and
+    `listed_distinct_non_compliant_resources` read null when the non-compliant
+    states query failed. With the provider not registered they still read 0.
+  - With a `resource_exclusions` pattern set and the summary unread,
+    `non_compliant_assignments` and `compliant_assignments` read null, not 0.
+  - When the task list or any task's deployment list was not read,
+    `remediation_deployments_listed`, `remediation_deployments_by_status` and
+    the `remediated_resources_*` counts (and
+    `succeeded_remediations_now_non_compliant`) read null, not counts over the
+    partial list.
+
 - **`azure_entra_authentication_policy` no longer shows Microsoft's password
   defaults when the tenant's settings could not be read.** Before, a failed
   `/groupSettings` read fell back to the template, so `password_settings_source`

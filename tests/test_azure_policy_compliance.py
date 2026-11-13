@@ -880,3 +880,138 @@ def test_summary_fields_match_the_instructions(monkeypatch, tmp_path, assert_sum
     assert fx.main() == 0
     summary = json.loads((tmp_path / "azure_policy_compliance_s1.json").read_text())["summary"]
     assert_summary_documented("azure/policy_compliance", summary)
+
+
+def _deployment(rid):
+    return NS(remediated_resource_id=rid, deployment_id=None, status="Succeeded", resource_location=None,
+              error=None, created_on=None, last_updated_on=None)
+
+
+def _task(name, scope=SUB, ref="r1"):
+    return {"id": f"{scope}/providers/Microsoft.PolicyInsights/remediations/{name}", "name": name,
+            "policy_assignment_id": ASSIGN, "policy_definition_reference_id": ref, "total_deployments": 1}
+
+
+@needs_sdk
+def test_a_task_whose_deployments_could_not_be_listed_stays_unread_after_later_tasks_are_read():
+    def at_subscription(name):
+        if name == "t2":
+            raise RuntimeError("throttled")
+        return [_deployment(VM)]
+
+    client = fake_client(
+        policy_states={"list_query_results_for_subscription": lambda *a, **k: []},
+        remediations={"list_deployments_at_subscription": at_subscription},
+    )
+    unread: list = []
+    collector = fx.Collector(logging.getLogger("t"))
+    rows, _, _ = fx.collect_remediation_deployments(
+        client, "s1", [_task("t1"), _task("t2")], 10, collector, unread=unread)
+    assert len(rows) == 1
+    assert unread == [_task("t2")["id"]]
+    assert not collector.ok
+
+
+@needs_sdk
+def test_unrecognised_remediation_scope_fails_the_run():
+    client = fake_client(policy_states={}, remediations={})
+    odd = {**_task("t1"), "id": "/providers/Odd/remediations/t1"}
+    unread: list = []
+    collector = fx.Collector(logging.getLogger("t"))
+    fx.collect_remediation_deployments(client, "s1", [odd], 10, collector, unread=unread)
+    assert unread == [odd["id"]]
+    assert not collector.ok
+
+
+def _run_main(monkeypatch, tmp_path, collected, registration="registered"):
+    monkeypatch.setattr(fx, "load_dotenv", lambda: None)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setattr(fx, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
+    monkeypatch.setattr(fx, "credential", lambda: object())
+    monkeypatch.setattr(fx, "provider_registration_status", lambda *a: registration)
+    monkeypatch.setattr(fx, "collect_compliance", lambda *a, **k: collected)
+    assert fx.main() == 0
+    return json.loads((tmp_path / "azure_policy_compliance_s1.json").read_text())["summary"]
+
+
+SERVICE_COUNTS = ("non_compliant_resources", "non_compliant_policies", "compliant_resources", "resources_evaluated",
+                  "resource_compliance_percentage", "assignments_evaluated", "non_compliant_assignments",
+                  "compliant_assignments")
+TASK_COUNTS = ("remediation_tasks", "remediation_tasks_by_provisioning_state", "remediation_failed_deployments",
+               "remediation_successful_deployments")
+
+
+def test_counts_are_null_when_the_summary_and_task_reads_failed(monkeypatch, tmp_path):
+    summary = _run_main(monkeypatch, tmp_path, fx.empty_collection())
+    assert all(summary[k] is None for k in SERVICE_COUNTS + TASK_COUNTS)
+
+
+@needs_sdk
+def test_listed_state_counts_are_null_when_the_states_query_fails(monkeypatch, tmp_path):
+    def boom(*a, **k):
+        raise RuntimeError("throttled")
+
+    client = fake_client(policy_states={"list_query_results_for_subscription": boom})
+    monkeypatch.setattr(fx, "collect_evaluation_details", lambda *a, **k: fx.empty_collection()["details"])
+    monkeypatch.setattr(fx, "collect_recurrence", lambda *a, **k: fx.empty_collection()["recurrence"])
+    monkeypatch.setattr(fx, "collect_remediation_deployments", lambda *a, **k: ([], False, []))
+    import azure.mgmt.policyinsights as pi
+    monkeypatch.setattr(pi, "PolicyInsightsClient", lambda **k: client)
+    collector = fx.Collector(logging.getLogger("t"))
+    limits = {"non_compliant": 10, "detail_resources": 1, "recurrence_pairs": 1, "remediation_deployments": 1}
+    collected = fx.collect_compliance("s1", object(), collector, limits)
+    assert collected["states_read"] is False and not collector.ok
+    summary = _run_main(monkeypatch, tmp_path, collected)
+    assert summary["listed_non_compliant_states"] is None
+    assert summary["listed_distinct_non_compliant_resources"] is None
+
+
+DEPLOYMENT_COUNTS = ("remediation_deployments_listed", "remediation_deployments_by_status",
+                     "remediated_resources_listed", "remediated_resources_now_compliant",
+                     "remediated_resources_now_non_compliant", "succeeded_remediations_now_non_compliant",
+                     "remediated_resources_not_yet_reevaluated", "remediated_resources_compliance_unknown")
+
+
+def test_deployment_counts_are_null_when_a_deployment_list_was_not_read(monkeypatch, tmp_path):
+    summary = _run_main(monkeypatch, tmp_path, {**fx.empty_collection(), "tasks_read": True})
+    assert all(summary[k] is None for k in DEPLOYMENT_COUNTS)
+    assert summary["remediation_deployments_truncated"] is False
+
+
+def test_deployment_counts_read_zero_when_every_list_was_read(monkeypatch, tmp_path):
+    summary = _run_main(monkeypatch, tmp_path, {**fx.empty_collection(), "deployments_complete": True})
+    assert all(summary[k] in (0, {}) for k in DEPLOYMENT_COUNTS)
+    summary = _run_main(monkeypatch, tmp_path, fx.empty_collection(), registration=fx.NOT_REGISTERED)
+    assert all(summary[k] in (0, {}) for k in DEPLOYMENT_COUNTS)
+
+
+def test_assignment_counts_are_null_with_patterns_when_the_summary_was_not_read(monkeypatch, tmp_path):
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:other")
+    pair = {"resource_id": VM, "policy_assignment_id": ASSIGN, "policy_definition_id": DEF,
+            "policy_definition_reference_id": "r1", "compliance_state": "noncompliant"}
+    collected = {**fx.empty_collection(), "latest_pairs": [pair], "latest_pairs_status": fx.LATEST_READ}
+    summary = _run_main(monkeypatch, tmp_path, collected)
+    assert summary["non_compliant_assignments"] is None and summary["compliant_assignments"] is None
+
+
+def test_listed_state_counts_read_zero_when_the_list_was_read_and_empty(monkeypatch, tmp_path):
+    summary = _run_main(monkeypatch, tmp_path, {**fx.empty_collection(), "states_read": True})
+    assert summary["listed_non_compliant_states"] == 0
+    assert summary["listed_distinct_non_compliant_resources"] == 0
+
+
+def test_counts_read_zero_when_both_reads_came_back_empty(monkeypatch, tmp_path):
+    collected = {**fx.empty_collection(), "summary_read": True, "tasks_read": True}
+    summary = _run_main(monkeypatch, tmp_path, collected)
+    assert all(summary[k] == 0 for k in SERVICE_COUNTS + ("remediation_tasks", "remediation_failed_deployments"))
+    assert summary["remediation_tasks_by_provisioning_state"] == {}
+
+
+def test_each_read_nulls_only_its_own_counts(monkeypatch, tmp_path):
+    summary = _run_main(monkeypatch, tmp_path, {**fx.empty_collection(), "summary_read": True})
+    assert summary["non_compliant_resources"] == 0 and summary["remediation_tasks"] is None
+
+
+def test_unregistered_provider_still_reads_zero(monkeypatch, tmp_path):
+    summary = _run_main(monkeypatch, tmp_path, fx.empty_collection(), registration=fx.NOT_REGISTERED)
+    assert summary["non_compliant_resources"] == 0 and summary["remediation_tasks"] == 0
