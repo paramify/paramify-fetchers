@@ -109,7 +109,8 @@ def test_key_vaults_unread_diagnostic_settings_null_the_counts_built_from_them(m
     monkeypatch.setitem(sys.modules, "azure.mgmt.monitor", ns(MonitorManagementClient=lambda **_: monitor))
     found = vaults.collect_key_vaults("s1", object(), _collector())
     summary = vaults.summarize(found)
-    for key in vaults.AUDIT_COUNTS:
+    for key in ("vaults_with_diagnostic_settings", "vaults_with_audit_logging", "vaults_without_audit_logging",
+                "audit_logging_percentage"):
         assert summary[key] is None, key
     assert summary["vaults_audit_logging_unknown"] == 1
     assert summary["total_key_vaults"] == 2 and summary["rbac_authorization_vaults"] == 2
@@ -152,7 +153,9 @@ def test_storage_unread_container_list_nulls_container_counts(monkeypatch, tmp_p
     code, evidence = _run(storage, monkeypatch, tmp_path, "azure_storage_encryption_status")
     summary = evidence["summary"]
     assert code == 1
-    for key in (*storage.CONTAINER_COUNTS, "in_scope_containers", "excluded_containers"):
+    for key in ("total_containers", "containers_with_public_access_level", "anonymously_accessible_containers",
+                "containers_with_immutability_policy", "containers_with_legal_hold", "in_scope_containers",
+                "excluded_containers"):
         assert summary[key] is None, key
     assert summary["accounts_with_containers_not_collected"] == 1
     assert summary["total_storage_accounts"] == 2 and summary["in_scope_storage_accounts"] == 2
@@ -165,7 +168,7 @@ def test_storage_unread_replication_status_nulls_the_counts_built_from_it(monkey
     found = storage.collect_storage_accounts("s1", object(), _collector())
     summary = storage.summarize(found)
     assert summary["geo_redundant_accounts"] == 1
-    assert all(summary[k] is None for k in storage.REPLICATION_COUNTS)
+    assert summary["geo_replication_live_accounts"] is None and summary["geo_failover_ready_accounts"] is None
 
 
 # --- azure_sql_managed_instance_encryption / _backups ---
@@ -263,3 +266,61 @@ def test_mi_backups_unread_failover_group_list_nulls_membership_count(monkeypatc
     summary = mi_backups.summarize(found, groups, not unlisted)
     assert summary["instances_in_failover_group"] is None and summary["total_instance_failover_groups"] is None
     assert summary["instances_failover_group_unknown"] == 1
+
+
+def test_storage_unread_service_properties_null_versioning_and_soft_delete_counts(monkeypatch):
+    def blob_props(group, name):
+        if name == "sa-b":
+            raise DENIED
+        return ns()
+
+    def file_props(group, name):
+        raise RuntimeError("File is not supported for the account.")
+
+    client = _storage_client(lambda: iter([_account("sa-a"), _account("sa-b")]), lambda *a: [])
+    client.blob_services = ns(get_service_properties=blob_props)
+    client.file_services = ns(get_service_properties=file_props)
+    monkeypatch.setitem(sys.modules, "azure.mgmt.storage", ns(StorageManagementClient=lambda **_: client))
+    found = storage.collect_storage_accounts("s1", object(), _collector())
+    assert {a["name"]: a["blob_properties_status"] for a in found} == {"sa-a": "collected", "sa-b": "failed"}
+    assert {a["file_service_properties_status"] for a in found} == {"not_supported"}
+    summary = storage.summarize(found)
+    assert summary["blob_versioning_accounts"] is None and summary["container_soft_delete_accounts"] is None
+    assert summary["share_soft_delete_accounts"] == 0  # not_supported is expected, not a failure
+
+
+# --- a list that was read and is empty still counts 0 ---
+
+def test_key_vaults_read_empty_list_counts_zero(monkeypatch, tmp_path):
+    client = ns(vaults=ns(list_by_subscription=lambda: []))
+    monkeypatch.setitem(sys.modules, "azure.mgmt.keyvault", ns(KeyVaultManagementClient=lambda **_: client))
+    code, evidence = _run(vaults, monkeypatch, tmp_path, "azure_key_vault_configuration")
+    summary = evidence["summary"]
+    assert code == 0 and summary["total_key_vaults"] == 0 and summary["in_scope_key_vaults"] == 0
+    assert summary["total_access_policies"] == 0
+
+
+def test_storage_read_empty_list_counts_zero(monkeypatch, tmp_path):
+    client = _storage_client(lambda: iter([]), lambda *a: [])
+    monkeypatch.setitem(sys.modules, "azure.mgmt.storage", ns(StorageManagementClient=lambda **_: client))
+    code, evidence = _run(storage, monkeypatch, tmp_path, "azure_storage_encryption_status")
+    summary = evidence["summary"]
+    assert code == 0 and summary["total_storage_accounts"] == 0 and summary["in_scope_storage_accounts"] == 0
+    assert summary["total_containers"] == 0 and summary["in_scope_containers"] == 0
+
+
+def test_mi_encryption_read_empty_list_counts_zero(monkeypatch, tmp_path):
+    monkeypatch.setattr(mi_encryption, "sql_client", lambda *a: _mi_client(lambda: [], []))
+    code, evidence = _run(mi_encryption, monkeypatch, tmp_path, "azure_sql_managed_instance_encryption")
+    summary = evidence["summary"]
+    assert code == 0 and summary["total_managed_instances"] == 0 and summary["in_scope_managed_instances"] == 0
+    assert summary["tde_enabled_user_databases"] == 0
+
+
+def test_mi_backups_read_empty_list_counts_zero(monkeypatch, tmp_path):
+    monkeypatch.setattr(mi_backups, "sql_client", lambda *a: _mi_client(lambda: [], []))
+    monkeypatch.setattr(mi_backups, "read_failover_history", lambda *a: ([], {"days": 90, "complete": True}))
+    code, evidence = _run(mi_backups, monkeypatch, tmp_path, "azure_sql_managed_instance_backups")
+    summary = evidence["summary"]
+    assert code == 0 and summary["total_managed_instances"] == 0 and summary["in_scope_managed_instances"] == 0
+    assert summary["total_instance_failover_groups"] == 0 and summary["in_scope_instance_failover_groups"] == 0

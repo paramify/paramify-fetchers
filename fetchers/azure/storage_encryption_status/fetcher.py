@@ -429,7 +429,9 @@ def account_record(
         "allow_cross_tenant_replication": True if cross_tenant is None else bool(cross_tenant),
         # Filled in by the blob/file enrichment; None = not collected (no endpoint).
         "blob_properties": None,
+        "blob_properties_status": CONTAINERS_NOT_ATTEMPTED,
         "file_service_properties": None,
+        "file_service_properties_status": CONTAINERS_NOT_ATTEMPTED,
         # --- geo-replication (stats filled in by the get_properties enrichment) ---
         "geo_redundant": bool(GEO_REDUNDANT_SKU.search(sku)),
         "read_access_secondary": bool(READ_ACCESS_SKU.search(sku)),
@@ -492,6 +494,10 @@ CONTAINER_COUNTS = (
     "total_containers", "containers_with_public_access_level", "anonymously_accessible_containers",
     "containers_with_immutability_policy", "containers_with_legal_hold",
 )
+PROPERTY_COUNTS = {
+    "blob_properties_status": ("blob_versioning_accounts", "container_soft_delete_accounts"),
+    "file_service_properties_status": ("share_soft_delete_accounts",),
+}
 REPLICATION_COUNTS = ("geo_replication_live_accounts", "geo_failover_ready_accounts")
 
 
@@ -549,6 +555,9 @@ def _null_unread(accounts: list[dict], counts: dict) -> dict:
     """Null the counts built from a container list or replication status that failed for some account."""
     if any(a.get("containers_status") == CONTAINERS_FAILED for a in accounts):
         counts.update({k: None for k in CONTAINER_COUNTS})
+    for status, keys in PROPERTY_COUNTS.items():
+        if any(a.get(status) == CONTAINERS_FAILED for a in accounts):
+            counts.update({k: None for k in keys})
     if any((a.get("geo_replication_stats") or {}).get("stats_status") == STATS_FAILED for a in accounts):
         counts.update({k: None for k in REPLICATION_COUNTS})
     return counts
@@ -680,8 +689,9 @@ def collect_storage_accounts(
                 "storage.blob_services.get_service_properties",
                 RuntimeError(f"storage account {name!r} has no resource group in its id"),
             )
+            account["blob_properties_status"] = account["file_service_properties_status"] = CONTAINERS_FAILED
             continue
-        account["blob_properties"] = _service_properties(
+        account["blob_properties"], account["blob_properties_status"] = _service_properties(
             collector,
             "storage.blob_services.get_service_properties",
             name,
@@ -691,7 +701,7 @@ def collect_storage_accounts(
                 )
             ),
         )
-        account["file_service_properties"] = _service_properties(
+        account["file_service_properties"], account["file_service_properties_status"] = _service_properties(
             collector,
             "storage.file_services.get_service_properties",
             name,
@@ -762,15 +772,15 @@ def _service_properties(collector: Collector, operation: str, account_name: str,
     otherwise fail the whole run. Prowler skips it the same way.
     """
     try:
-        return fn()
+        return fn(), CONTAINERS_COLLECTED
     except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
         if _is_benign_unsupported(exc):
             logger.warning(
                 "%s: skipping %s — %s", operation, account_name, str(exc).strip().splitlines()[0]
             )
-            return None
+            return None, CONTAINERS_NOT_SUPPORTED
         collector.record(f"{operation} ({account_name})", exc)
-        return None
+        return None, CONTAINERS_FAILED
 
 
 def main() -> int:

@@ -2405,7 +2405,11 @@ schemas and the `paramify` CLI — not the internal code.
     container list is not read, the container counts and `in_scope_containers`
     and `excluded_containers` are null; when any geo-redundant account's
     replication status is not read, `geo_replication_live_accounts` and
-    `geo_failover_ready_accounts` are null.
+    `geo_failover_ready_accounts` are null. When any account's blob or file
+    service properties are not read, `blob_versioning_accounts`,
+    `container_soft_delete_accounts` (blob) and `share_soft_delete_accounts`
+    (file) are null; each account records `blob_properties_status` and
+    `file_service_properties_status` (collected, not_supported or failed).
   - `azure_sql_managed_instance_encryption` 0.4.0: when the instance list is
     not read, every count is null (`total_managed_instances` and
     `in_scope_managed_instances` included). The key counts are null when any

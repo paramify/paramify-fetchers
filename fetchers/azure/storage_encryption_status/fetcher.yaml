@@ -145,9 +145,9 @@ evidence_set:
     - geo_failed_over_accounts — Number of storage accounts that have failed over to their second region at least once
 
     Can deleted or changed data be recovered?
-    - blob_versioning_accounts — Number of storage accounts with blob versioning on
-    - container_soft_delete_accounts — Number of storage accounts that keep deleted blob containers for a retention period (container soft delete)
-    - share_soft_delete_accounts — Number of storage accounts that keep deleted file shares for a retention period (share soft delete)
+    - blob_versioning_accounts — Number of storage accounts with blob versioning on; null when any account's blob service properties could not be read
+    - container_soft_delete_accounts — Number of storage accounts that keep deleted blob containers for a retention period (container soft delete); null when any account's blob service properties could not be read
+    - share_soft_delete_accounts — Number of storage accounts that keep deleted file shares for a retention period (share soft delete); null when any account's file service properties could not be read
     - containers_with_immutability_policy — Number of blob containers with a time-based retention (immutability) policy; null when any account's container list could not be read
     - containers_with_legal_hold — Number of blob containers under a legal hold; null when any account's container list could not be read
 
