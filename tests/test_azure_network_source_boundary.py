@@ -39,6 +39,7 @@ def strict(monkeypatch, sub=SUB):
 def test_vnet_does_not_enumerate_other_subscriptions_when_spoke_is_unresolved(
     monkeypatch,
 ):
+    pytest.importorskip("azure.mgmt.network")
     strict(monkeypatch)
     native = load("vnet_egress_routing")
     sdk = MagicMock()
@@ -90,6 +91,7 @@ def test_waf_retains_foreign_policy_as_unknown_without_fetch(monkeypatch):
 def test_private_dns_queries_explicit_target_and_keeps_foreign_link_unknown(
     monkeypatch,
 ):
+    pytest.importorskip("azure.mgmt.privatedns")
     import test_azure_private_network_fetchers as existing
 
     strict(monkeypatch, existing.SUB)
@@ -122,6 +124,7 @@ def test_private_dns_queries_explicit_target_and_keeps_foreign_link_unknown(
 
 
 def test_private_dns_does_not_create_foreign_zone_group_client(monkeypatch):
+    pytest.importorskip("azure.mgmt.network")
     strict(monkeypatch)
     native = load("private_dns_zone_configuration")
     constructor = Mock(side_effect=AssertionError("foreign zone group client"))
