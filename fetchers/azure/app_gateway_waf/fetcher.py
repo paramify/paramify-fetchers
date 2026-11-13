@@ -249,7 +249,7 @@ def referenced_policy_ids(gateway) -> set:
     return {i for i in ids if i}
 
 
-def summarize(gateways: list[dict], listeners: list[dict], policies: list[dict]) -> dict:
+def summarize(gateways: list[dict], listeners: list[dict], policies: list[dict], policies_listed: bool = True) -> dict:
     return {
         "total_application_gateways": len(gateways),
         "waf_tier_gateways": sum(1 for g in gateways if "WAF" in str(g["sku_tier"] or "")),
@@ -263,7 +263,8 @@ def summarize(gateways: list[dict], listeners: list[dict], policies: list[dict])
         "public_listeners_not_enforcing": sum(
             1 for li in listeners if li["frontend_type"] == "public" and li["waf_enforcing"] is not True
         ),
-        "total_waf_policies": len(policies),
+        # After a failed policy list only the referenced policies were read, so the total is unknown.
+        "total_waf_policies": len(policies) if policies_listed else None,
         "unresolved_waf_policies": sum(1 for p in policies if not p["resolved"]),
         "unreadable_waf_policies": sum(1 for p in policies if p.get("read_status") in ("not_authorized", "not_found")),
         "policies_prevention": sum(1 for p in policies if p["state"] == "Enabled" and p["mode"] == "Prevention"),
@@ -318,7 +319,7 @@ def build(raw_gateways: list | None, collector: Collector, subscription_id, cred
     exclusions.warn_unmatched(logger)
     results = {"application_gateways": gateways, "listeners": listeners, "waf_policies": policy_list,
                "excluded": excluded}
-    summary = {**summarize(gateways, listeners, policy_list), **exclusions.summary(
+    summary = {**summarize(gateways, listeners, policy_list, listed_policies is not None), **exclusions.summary(
         excluded, ("application_gateway", "waf_policy"), {
             "application_gateways": len(gateways) if listed else None, "listeners": len(listeners) if listed else None,
             "waf_policies": None if listed_policies is None else len(policy_list)})}
