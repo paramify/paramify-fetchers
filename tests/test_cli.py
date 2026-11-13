@@ -1984,3 +1984,10 @@ def test_status_table_has_the_totals_line(monkeypatch, status_manifest):
     out = runner.invoke(app, ["status", status_manifest]).output
     assert "demo_policy_check" in out
     assert "scripts 1/2" in out and "uploaded 1/2" in out
+
+
+def test_status_exits_2_for_a_manifest_that_does_not_exist(monkeypatch, tmp_path):
+    """A wait-until-ready loop must stop on a typo, not spin on exit 1."""
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: pytest.fail("no manifest to read"))
+    result = runner.invoke(app, ["status", str(tmp_path / "no-such.yaml")])
+    assert result.exit_code == 2

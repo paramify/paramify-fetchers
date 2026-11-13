@@ -182,3 +182,17 @@ def test_a_set_with_no_registry_validators_can_be_ready(tmp_path, workspace):
     workspace["outcomes"]["demo_policy_check"] = "would_noop"
     row = _row(api.paramify_status(REPO_ROOT, _manifest(tmp_path, "demo_policy_check")), "demo_policy_check")
     assert row["validators"] == [] and row["ready"] is True
+
+
+def test_an_uploader_override_names_the_set(tmp_path, workspace):
+    """The scripts sync and the upload send an overridden fetcher to the set its
+    override names; the status must read that set, or the row never gets ready."""
+    workspace["sets"][0]["reference_id"] = "CUST-HELLO-01"
+    config = tmp_path / "upload.yaml"
+    config.write_text("overrides:\n  demo_hello:\n    reference_id: CUST-HELLO-01\n")
+    row = _row(api.paramify_status(REPO_ROOT, _manifest(tmp_path, "demo_hello"), config), "demo_hello")
+    assert row["evidence_set"]["reference_id"] == "CUST-HELLO-01"
+    assert row["evidence_set"]["id"] == "ev-1"
+    # The registry still names the shipped set, so its validators still apply.
+    assert [v["key"] for v in row["validators"]] == ["hello_complete", "hello_greets"]
+    assert row["ready"] is True

@@ -1532,9 +1532,9 @@ def status_cmd(
 
     Exit 0 when every fetcher is ready, 1 when some are not, 2 on a setup error.
     """
-    root = api.find_repo_root()
-    path = _resolve_manifest_arg(root, manifest, json_out)
     try:
+        root = api.find_repo_root()
+        path = api.resolve_manifest_path(root, manifest)
         status = api.paramify_status(root, path, Path(config).resolve() if config else None)
     except Exception as e:  # noqa: BLE001 — a setup error, reported as one line
         if json_out:

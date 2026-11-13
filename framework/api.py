@@ -3672,6 +3672,15 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
     config_path = _upload_config(root, config_path)
     readiness = upload_readiness(root, config_path=config_path)
     token = bool(readiness["token_present"])
+    # The uploader config can send a fetcher to another set (overrides.<name>);
+    # the scripts sync and the upload both follow it, so the status does too.
+    overrides: dict = {}
+    if config_path:
+        try:
+            loaded = yaml_io.load_path(Path(config_path))
+            overrides = (loaded.get("overrides") or {}) if isinstance(loaded, dict) else {}
+        except (OSError, yaml.YAMLError):
+            overrides = {}  # upload_readiness already reports an unreadable config
 
     rows: List[dict] = []
     seen: set = set()
@@ -3692,10 +3701,13 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
         if fetcher.evidence_set is None:
             continue  # discovery: reports what exists, never uploaded
         ref = fetcher.evidence_set.reference_id
+        found_override = overrides.get(use)
+        override: dict = found_override if isinstance(found_override, dict) else {}
         rows.append({
             "name": use,
             "kind": fetcher.kind,
-            "evidence_set": {"reference_id": ref, "name": fetcher.evidence_set.name,
+            "evidence_set": {"reference_id": override.get("reference_id") or ref,
+                             "name": override.get("name") or fetcher.evidence_set.name,
                              "id": None, "artifact_count": 0},
             "script": None,
             "validators": [
