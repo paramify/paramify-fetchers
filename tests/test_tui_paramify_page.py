@@ -674,7 +674,7 @@ def test_a_capabilities_error_shows_in_its_lens(tmp_path, monkeypatch, run_tui):
     grid_shown, error, pairs_shown = run_tui(body, _manifest(tmp_path))
     assert not grid_shown and not pairs_shown
     assert "Could not list the workspace's solution capabilities: HTTP 403." in error
-    assert "The by-fetcher lens still works." in error
+    assert "The by-fetcher view still works." in error
 
 
 def test_w_belongs_to_the_fetcher_view(tmp_path, monkeypatch, run_tui):
@@ -916,3 +916,32 @@ def test_coming_back_on_the_capability_view_focuses_it(tmp_path, monkeypatch, ru
         return page.query_one("#pf-lens").current, on_return, app.focused.id
 
     assert run_tui(body, _manifest(tmp_path)) == ("pf-by-capability", "pf-cap-grid", "pf-cap-grid")
+
+
+# ---- #345 review fixes ------------------------------------------------------- #
+
+@pytest.mark.parametrize("errors, token", [({}, False), ({"capabilities": "HTTP 403"}, True)],
+                         ids=["no-token", "read-failed"])
+def test_the_capability_view_without_a_grid_keeps_the_keys(tmp_path, monkeypatch, run_tui, errors, token):
+    """With no grid to focus, the view must not focus its filter: [ would type a
+    bracket and 1 a digit there, and escape would come back to it."""
+    _stub(monkeypatch, _cap_status(token=token, errors=errors))
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        on_view = app.focused.id, page.query_one("#pf-cap-filter").display
+        await pilot.press("escape")
+        await pilot.pause()
+        after_escape = app.focused.id
+        await pilot.press("left_square_bracket")
+        await pilot.pause()
+        back = page.query_one("#pf-lens").current
+        await pilot.press("right_square_bracket", "1")
+        await pilot.pause()
+        return on_view, after_escape, back, app.screen.query_one(TabbedContent).active
+
+    (focused, filter_shown), after_escape, back, tab = run_tui(body, _manifest(tmp_path))
+    assert focused == "pf-cap-error" and not filter_shown
+    assert after_escape == "pf-cap-error"
+    assert back == "pf-by-fetcher", "[ did not switch the view back"
+    assert tab == "tab-fetchers", "1 did not switch the tab"

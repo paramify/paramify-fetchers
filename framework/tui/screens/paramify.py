@@ -286,6 +286,9 @@ class ParamifyPage(ParamifyWriter, Vertical):
         activity.border_title = "activity"
         activity.display = False
         self.query_one("#pf-lens-tabs", Tabs).can_focus = False
+        # Without a token or a capabilities read the view shows only this text,
+        # and it takes focus, so [ ] and the tab keys still reach the page.
+        self.query_one("#pf-cap-error", Static).can_focus = True
         # The empty-manifest hint takes focus, so the page keys still work.
         self.query_one("#pf-grid-empty", Static).can_focus = True
         grid = self.query_one("#pf-grid", DataTable)
@@ -605,8 +608,9 @@ class ParamifyPage(ParamifyWriter, Vertical):
         return names[0]
 
     def action_focus_filter(self) -> None:
-        by_capability = self.query_one("#pf-lens", ContentSwitcher).current == "pf-by-capability"
-        self.query_one("#pf-cap-filter" if by_capability else "#pf-filter", Input).focus()
+        target = self.query_one("#pf-filter" if self._by_fetcher() else "#pf-cap-filter", Input)
+        if target.display:  # the capability filter hides with its grid
+            target.focus()
 
     # -- views ------------------------------------------------------------ #
 
@@ -639,29 +643,29 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self._focus_target().focus()
             return
         grid = self.query_one("#pf-cap-grid", DataTable)
-        (grid if grid.display else self.query_one("#pf-cap-filter", Input)).focus()
+        (grid if grid.display else self.query_one("#pf-cap-error", Static)).focus()
 
     def _draw_capabilities(self) -> None:
         status = self._status
         grid = self.query_one("#pf-cap-grid", DataTable)
         error = self.query_one("#pf-cap-error", Static)
-        pairs_panel = self.query_one("#pf-pairs-panel", Vertical)
         panel = self.query_one("#pf-cap-panel", Vertical)
         if status is None:
             return
         problem = (status.get("errors") or {}).get("capabilities")
         if not self._online() or problem:
-            grid.display = False
-            pairs_panel.display = False
-            error.display = True
+            # Nothing to filter or move through: the filter hides with the grid,
+            # so focus lands on the text, never in an Input that eats [ and 1.
+            refocus = self.app.focused in (grid, self.query_one("#pf-cap-filter"))
+            self._cap_view_parts(False)
             error.update(Text(CAPS_OFFLINE) if not self._online() else Text(
                 f"Could not list the workspace's solution capabilities: {problem}.\n"
-                "The by-fetcher lens still works. ctrl+r to try again.", style=palette.WARN))
+                "The by-fetcher view still works. ctrl+r to try again.", style=palette.WARN))
             panel.border_title = "capabilities"
+            if refocus:
+                error.focus()
             return
-        grid.display = True
-        pairs_panel.display = True
-        error.display = False
+        self._cap_view_parts(True)
         self._cap_pairs = self._pairs_by_capability(status)
         keep = None
         if grid.row_count:
@@ -689,6 +693,12 @@ class ParamifyPage(ParamifyWriter, Vertical):
             except Exception:  # noqa: BLE001 — filtered out
                 pass
         self._show_pairs(self._cap_cursor())
+
+    def _cap_view_parts(self, shown: bool) -> None:
+        """The capability grid, its filter and the pairs pane, or the text in their place."""
+        for part in ("#pf-cap-grid", "#pf-cap-filter", "#pf-pairs-panel"):
+            self.query_one(part).display = shown
+        self.query_one("#pf-cap-error", Static).display = not shown
 
     @staticmethod
     def _pairs_by_capability(status: dict) -> dict:
