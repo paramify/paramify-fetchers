@@ -1,16 +1,7 @@
 name: azure_sql_encryption_status
-version: 0.2.0
-description: >
-  For each Azure SQL logical server in the subscription, reports the transparent
-  data encryption (TDE) key source — the encryption protector's server_key_type
-  ("AzureKeyVault" = a customer-managed Key Vault key, "ServiceManaged" = the
-  platform key), the bound key name and URI, and whether key auto-rotation is on —
-  plus the per-database TDE state underneath it. TDE is enabled by default on Azure
-  SQL, so the evidence that varies is the key source, not "encrypted: true/false";
-  per-database state is still collected because a restored or explicitly disabled
-  database can be unencrypted under an otherwise CMK-protected server. The
-  Azure-managed `master` database is flagged and excluded from the user-database
-  counts.
+version: 0.2.1
+description: >-
+  Shows whether each Azure SQL server's transparent data encryption uses a customer-managed Key Vault key and whether every user database on it has encryption turned on.
 category: azure
 
 config_schema:
@@ -72,19 +63,44 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-SQL-ENC
   name: Azure SQL Transparent Data Encryption
-  instructions: >
-    Script: azure/sql_encryption_status/fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient):
-    servers.list(), encryption_protectors.get(), databases.list_by_server(),
-    transparent_data_encryptions.get(). Records each server's TDE key source and
-    every database's TDE state.
+  instructions: |
+    Script: azure/sql_encryption_status/fetcher.py
 
-    SQL servers the resource_exclusions patterns take out are listed under results.excluded instead,
-    each with the pattern that matched; their databases follow them (never read, in no database
-    count). The key vault a server's protector names is not a resource this fetcher reads, so
-    excluding that vault does not change the server's verdict.
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Sql") — tells "not registered" apart from "no servers"
+    - servers.list() — every logical server
+    - encryption_protectors.get() (per in-scope server) — the TDE protector's key type, key name, Key Vault URI and auto-rotation setting
+    - databases.list_by_server() (per in-scope server) — the databases on each server
+    - transparent_data_encryptions.get() (per database) — whether transparent data encryption (TDE) is on
+
+    Output: azure_sql_encryption_status_<subscription>.json — each Azure SQL logical server with the key that protects its transparent data encryption and the encryption state of every database on it; the master database is kept but marked as a system database; servers left out of scope are listed with the pattern that matched.
+
+    Summary fields:
 
     Which resources are left out of scope?
-      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every server is in scope
-      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no SQL server, such as a mistyped name
-      - excluded_sql_servers — Number of SQL servers left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their databases; null if the list couldn't be read
-      - in_scope_sql_servers — Number of SQL servers read and in scope; null if the list couldn't be read, and 0 means there are none or the patterns took out every server, which a check can catch by requiring more than 0
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every server is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no SQL server, such as a mistyped name; null if the server list couldn't be read
+    - excluded_sql_servers — Number of SQL servers left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, its databases are never read, and no other count includes it or its databases; null if the server list couldn't be read. The key vault a server's protector names isn't a resource this fetcher reads, so excluding that vault doesn't change the server's verdict
+    - in_scope_sql_servers — Number of SQL servers read and in scope; null if the server list couldn't be read, and 0 means there are none or the patterns took out every server, which a check can catch by requiring more than 0
+
+    What was checked?
+    - total_sql_servers — Number of in-scope Azure SQL logical servers (SQL Managed Instances aren't included); reads 0, not null, when the server list could not be read, so read it together with in_scope_sql_servers
+    - total_databases — Number of databases across in-scope servers, including master; a server whose database list couldn't be read adds 0
+    - total_user_databases — Number of user databases across in-scope servers: every database except master, which Azure creates and manages; a server whose database list couldn't be read adds 0
+    - provider_registration_status — Whether the SQL provider (Microsoft.Sql) is registered on the subscription: registered, not_registered or unknown
+
+    Is the encryption key customer-managed?
+    - customer_managed_key_servers — Number of servers whose TDE protector is a customer-managed Key Vault key (server key type AzureKeyVault)
+    - service_managed_key_servers — Number of servers not counted in customer_managed_key_servers: the protector is the Microsoft-managed (ServiceManaged) key, or the protector couldn't be read
+    - cmk_percentage — Percentage of servers whose TDE protector is a customer-managed key = customer_managed_key_servers / total_sql_servers × 100 (a whole number, 0–100; reads 0 when total_sql_servers is 0). Servers whose protector couldn't be read count in the total but not as customer-managed. TDE is on by default, so the key source is what varies
+    - key_auto_rotation_servers — Number of servers with key auto-rotation on, so the protector moves to the newest key version in Key Vault automatically; a server whose protector couldn't be read counts as off
+
+    Is every user database encrypted?
+    - tde_enabled_user_databases — Number of user databases with TDE Enabled
+    - tde_disabled_user_databases — Number of user databases with TDE Disabled, for example a database restored or switched off under a server with a customer-managed key
+    - tde_unknown_user_databases — Number of user databases whose TDE state couldn't be read
+    - tde_percentage — Percentage of user databases with TDE on = tde_enabled_user_databases / total_user_databases × 100 (a whole number, 0–100; reads 0 when total_user_databases is 0). Databases whose state is unknown count in the total but not as encrypted, so they lower it
+    - servers_with_a_tde_disabled_user_database — Number of servers with at least one user database whose TDE is Disabled

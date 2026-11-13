@@ -445,6 +445,8 @@ def main() -> int:
             ),
         )
 
+    if public is None or private is None:
+        resources.mark_unread()
     resources.warn_unmatched(logger)
     zone_counts = {"public_dns_zones": None if public is None else len(public),
                    "private_dns_zones": None if private is None else len(private)}

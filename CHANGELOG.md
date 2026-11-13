@@ -47,6 +47,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
+  columns (unchanged, so existing intake presets keep mapping), the CSV adds the
+  Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and
+  `Internet Reachable Reason` (Wiz's finding-level classification, closer to
+  FedRAMP's Internet-Reachable Vulnerability than the asset-level `Asset Has Wide
+  Internet Exposure`), `Asset Has Limited Internet Exposure`, the BOD 26-04 KEV
+  inputs `CISA SSVC Automatable` and `CISA SSVC Technical Impact` plus `CISA KEV
+  Due Date`, and four signals toward Likely Exploitable (`Exploitability
+  Validation Status`, `Has Initial Access Potential`, `Code Reachability`,
+  `Attack Vector`). None of the four is a Likely Exploitable verdict. Each field
+  is selected only when the tenant's schema has it (read-only introspection); a
+  missing one leaves its column blank and is logged, and if the schema cannot be
+  read the legacy query is sent unchanged. The columns are listed in
+  [the fetcher's README](fetchers/wiz/vulnerability_findings/README.md#columns).
+
 - **Optional selected-subscription reads for mixed Entra evidence.**
   `azure_entra_emergency_accounts` 0.2.0 and
   `azure_entra_dormant_identities` 0.3.0 accept `target_subscription_only`
@@ -69,7 +84,14 @@ schemas and the `paramify` CLI — not the internal code.
   `KSI-SVC-VCM`, `KSI-CNA-RNT` and `KSI-MLA-LET`. `aws_discovery_beta` now
   lists DNS Firewall rule group associations (`dns_firewall_association`) per
   region, so discovery covers the `route53resolver` service this fetcher reads.
-
+- **The TUI asks for the stack when it makes a new manifest.** After the name,
+  `n` on the welcome screen shows the stacks of the workspace. Pick one, or
+  skip and set it later on the manifest screen. The TUI writes the manifest
+  only after this step, with `run.paramify.stack` and `stack_name` when you
+  pick a stack. Without an API token, or when the stack list fails, the step
+  still shows. It tells why there is no list and offers to make the manifest
+  without a stack. The form refuses a name that is already in use before the
+  stack step, and keeps the typed name.
 - **Evidence uploads go out as batches.** `paramify upload` now sends the files
   of each fetcher entry as one batch. Paramify submits and approves a batch as
   one unit. The batch goes through the channel of the evidence set, on the
@@ -2366,6 +2388,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_authentication_policy` no longer shows Microsoft's password
+  defaults when the tenant's settings could not be read.** Before, a failed
+  `/groupSettings` read fell back to the template, so `password_settings_source`
+  read `template_defaults` and the banned-password and lockout fields showed
+  the defaults, though the tenant may have saved other values. The source and
+  those fields are now null, and the failed read still fails the run. Version
+  0.3.1.
+- **`azure_app_gateway_waf` `total_waf_policies` is null when the WAF policy
+  list could not be read.** Before, a failed
+  `web_application_firewall_policies.list_all` left only the policies a gateway
+  references, read one by one, so the total looked like a small number of
+  policies. The failed list still fails the run. Version 0.2.2.
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the
@@ -2432,6 +2466,26 @@ schemas and the `paramify` CLI — not the internal code.
   ones in an explicit `SEARCH_KEYS` set, not those whose key happens to contain
   `search_service`, and a test checks every summary key falls in exactly one
   group. Output is unchanged.
+- **Azure resource exclusions: `resource_exclusion_patterns_unmatched` is null
+  when a resource list was not read.** Before, a list that failed (or had no
+  credential or subscription) left every configured pattern in the field and
+  logged "matched nothing" for each, as if the patterns were mistyped, though
+  none was compared to a resource. The field is now null, with no warning,
+  whenever a list the fetcher needs was not read. The shared
+  `ResourceExclusions` gains `mark_unread()`, and `summary()` does the same when
+  any in-scope count is null. Each fetcher's description says so. Output
+  changes only on an unread list; with every list read it is the same. Versions:
+  `azure_activity_log_alerts` 0.3.1, `azure_ai_hub_configuration` 0.2.1, `azure_ai_services_configuration` 0.2.2, `azure_aks_cluster_configuration` 0.3.1, `azure_alert_rules` 0.3.1, `azure_api_management_configuration` 0.2.1, `azure_app_gateway_backend_tls` 0.2.1, `azure_app_gateway_tls_listeners` 0.2.1, `azure_app_gateway_waf` 0.2.1, `azure_app_service_backups` 0.3.2, `azure_app_service_configuration` 0.5.1, `azure_app_service_deployments` 0.3.1, `azure_app_service_plans` 0.3.1, `azure_backup_recovery_status` 0.4.1, `azure_backup_vault_protection` 0.1.1, `azure_bastion_configuration` 0.1.1, `azure_change_provenance` 0.3.1, `azure_container_registry_configuration` 0.2.1, `azure_container_workloads_configuration` 0.2.1, `azure_cosmosdb_configuration` 0.2.1, `azure_data_services_configuration` 0.2.1, `azure_databricks_workspace_configuration` 0.2.1, `azure_ddos_protection` 0.2.1, `azure_defender_assessments` 0.4.1, `azure_defender_vulnerability_findings` 0.1.1, `azure_disk_encryption_status` 0.2.1, `azure_dns_configuration` 0.6.1, `azure_firewall_configuration` 0.1.1, `azure_front_door_origins` 0.8.1, `azure_front_door_tls` 0.6.1, `azure_front_door_waf_coverage` 0.6.1, `azure_front_door_waf_policies` 0.2.1, `azure_function_app_configuration` 0.2.1, `azure_key_vault_configuration` 0.4.1, `azure_key_vault_key_rotation` 0.6.1, `azure_log_analytics_deletion_rights` 0.2.1, `azure_log_analytics_query_audit` 0.2.1, `azure_log_analytics_workspaces` 0.3.1, `azure_log_storage_immutability` 0.2.1, `azure_managed_identity_configuration` 0.2.1, `azure_managed_redis_configuration` 0.2.1, `azure_monitor_fired_alerts` 0.2.2, `azure_mysql_configuration` 0.2.1, `azure_network_flow_logs` 0.2.1, `azure_network_security_groups` 0.5.1, `azure_policy_assignments` 0.4.1, `azure_policy_compliance` 0.5.1, `azure_postgresql_configuration` 0.2.1, `azure_private_dns_zone_configuration` 0.4.1, `azure_private_endpoint_configuration` 0.3.1, `azure_rbac_custom_roles` 0.2.2, `azure_rbac_role_assignments` 0.4.3, `azure_redis_cache_configuration` 0.2.1, `azure_residual_resources` 0.3.1, `azure_resource_diagnostic_settings` 0.4.1, `azure_resource_inventory` 0.4.1, `azure_resource_locks` 0.1.1, `azure_sentinel_analytics_rules` 0.3.2, `azure_sentinel_automation_rules` 0.2.1, `azure_sentinel_data_sources` 0.4.1, `azure_sentinel_incidents` 0.3.1, `azure_service_availability` 0.1.1, `azure_service_health_advisories` 0.1.1, `azure_service_log_records` 0.2.1, `azure_sql_encryption_status` 0.2.1, `azure_sql_managed_instance_backups` 0.4.1, `azure_sql_managed_instance_configuration` 0.4.1, `azure_sql_managed_instance_encryption` 0.3.1, `azure_sql_server_configuration` 0.2.1, `azure_storage_encryption_status` 0.4.1, `azure_virtual_wan_configuration` 0.2.1, `azure_vm_hardening_status` 0.3.1, `azure_vnet_egress_routing` 0.3.1, `azure_vpn_gateway_configuration` 0.2.1, `azure_zone_redundancy` 0.1.1.
+  Two fetchers also null counts that read 0 on an unread list:
+  `azure_key_vault_configuration` `in_scope_key_vaults` and `excluded_key_vaults`,
+  and `azure_storage_encryption_status` `in_scope_storage_accounts` and
+  `excluded_storage_accounts`.
+  `azure_policy_compliance` now marks a task whose deployment list failed as
+  unread even after an earlier task returned rows; before, a local list took
+  over the name of the caller's list, so `deployments_complete` stayed true.
+  `azure_resource_inventory` also nulls the field when the Defender assessments
+  or Policy states query fails, since patterns are matched against those rows
+  too.
 - **The TUI's Paramify tab fits a 160x50 terminal.** Below 242 columns the
   scripts-sync panel was squeezed to its border, its buttons drawn over the log,
   and a missing-token preflight error ran off the evidence panel behind a

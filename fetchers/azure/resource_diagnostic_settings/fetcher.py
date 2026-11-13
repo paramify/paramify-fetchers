@@ -651,6 +651,8 @@ def main() -> int:
             ),
         )
 
+    if inventory["total_records"] is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     records = sorted((with_ingestion(r, workspaces, approved) for r in records), key=lambda r: (r["id"] or "").lower())
     destinations = destination_records(workspaces, records, approved)

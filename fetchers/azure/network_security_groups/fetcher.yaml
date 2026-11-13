@@ -1,18 +1,7 @@
 name: azure_network_security_groups
-version: 0.5.0
-description: >
-  Every network security group in the subscription with its inline security rules
-  (destination port range, protocol, source address prefix, access, direction) —
-  enough to show whether an admin port such as SSH (22) or RDP (3389) is reachable
-  from the Internet — plus every virtual network with its subnets' NSG association
-  and DDoS protection state, which shows whether segmentation is actually enforced
-  rather than merely defined. Each NSG also carries its default (platform) rules, so
-  the effective outbound posture is visible: an NSG whose first catch-all Internet
-  rule is the default AllowInternetOutBound permits all egress. Every network
-  interface is listed with its effective NSG coverage, on the NIC itself or
-  inherited from its subnet; a NIC with neither is unfiltered. Each workload subnet
-  says which other subnets in its VNet can reach it on every port (east-west
-  segmentation), through both subnets' NSGs.
+version: 0.5.1
+description: >-
+  Shows which security group rules expose admin ports or allow Internet egress, which subnets and network interfaces sit behind a group, and whether subnets are separated from each other.
 category: azure
 
 config_schema:
@@ -81,44 +70,71 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-NSG
   name: Azure Network Security Groups
-  instructions: >
-    Script: azure/network_security_groups/fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient):
-    network_security_groups.list_all() (security_rules and default_security_rules),
-    virtual_networks.list_all(), network_interfaces.list_all(). Reader is
-    sufficient — all GETs. East-west segmentation, per workload subnet in
-    virtual_networks[].subnets: for every other workload subnet in the same VNet
-    (GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet,
-    AzureFirewallManagementSubnet and RouteServerSubnet are left out on both ends),
-    the source subnet's NSG outbound rules and this subnet's NSG inbound rules,
-    custom and default, are each walked in priority order. An Allow decides once it
-    covers every port (protocol any or TCP; a rule's port ranges are merged, so
-    0-1023 plus 1024-65535 counts, and port 0 is not needed) and touches both
-    address ranges; a Deny
-    decides only once it covers every port and protocol and all of both ranges
-    (the VirtualNetwork tag, * and 0.0.0.0/0 cover any subnet of the VNet; CIDRs
-    are matched, adjacent ones merged). A subnet with no NSG does not filter. The
-    pair is "segmented" when either side reaches a Deny first, "open" when both
-    allow, and "undetermined" when the deciding Allow is scoped to an application
-    security group or an NSG is in another subscription. Narrower allows (one port,
-    one protocol) do not make a pair open: segmentation here means no other tier
-    reaches the subnet on every port. east_west_segmentation is "segmented" (open
-    from none), "partial" (open from some), "unsegmented" (open from all),
-    "undetermined", or "no_peer_subnets"; open_from_subnets,
-    segmented_from_subnets and undetermined_from_subnets name the other subnets.
-    Not considered: NIC-level NSGs (they can only narrow a pair this calls open),
-    traffic within one subnet, and peered VNets. Maps to KSI-CNA-RNT / KSI-CNA-MAT /
-    KSI-CNA-ULN / KSI-CNA-DFP.
+  instructions: |
+    Script: azure/network_security_groups/fetcher.py
 
-    Resources the resource_exclusions patterns take out are listed under excluded
-    instead, each with the pattern that matched; a network interface taken out with
-    its virtual network or subnet names that network or subnet in matched_id.
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "networking not in use" from "nothing there"
+    - network_security_groups.list_all() — every group with its custom and default security rules
+    - virtual_networks.list_all() — every virtual network with its subnets, their NSG association and its DDoS protection setting
+    - network_interfaces.list_all() — every network interface with its own NSG and the subnets it sits in
+
+    Output: azure_network_security_groups_<subscription>.json — each network security group with its rules, each virtual network with its subnets and east-west verdicts, each network interface with its NSG coverage, plus the resources left out and why.
+
+    Summary fields:
 
     Which resources are left out of scope?
-      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no network security group, virtual network, network interface or subnet a network interface sits in, such as a mistyped name
-      - excluded_network_security_groups — Number of network security groups left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
-      - excluded_virtual_networks — Number of virtual networks left out of scope the same way; their subnets leave with them and no subnet count includes them
-      - excluded_network_interfaces — Number of network interfaces left out of scope the same way, or because a pattern matched the virtual network their subnets sit in or one of those subnets
-      - in_scope_network_security_groups — Number of network security groups read and in scope; 0 means none was read or the patterns took out every one, which a check can catch by requiring more than 0
-      - in_scope_virtual_networks — Number of virtual networks read and in scope
-      - in_scope_network_interfaces — Number of network interfaces read and in scope
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no network security group, virtual network, network interface or subnet a network interface sits in, such as a mistyped name; null when a list could not be read
+    - excluded_network_security_groups — Number of network security groups left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it
+    - excluded_virtual_networks — Number of virtual networks left out of scope the same way; their subnets leave with them and no subnet count includes them
+    - excluded_network_interfaces — Number of network interfaces left out of scope the same way, or because a pattern matched the virtual network their subnets sit in or one of those subnets; each names that network or subnet in matched_id
+    - in_scope_network_security_groups — Number of network security groups read and in scope; 0 means none was read or the patterns took out every group
+    - in_scope_virtual_networks — Number of virtual networks read and in scope
+    - in_scope_network_interfaces — Number of network interfaces read and in scope
+
+    Which groups and rules were checked?
+    - total_network_security_groups — Number of in-scope network security groups
+    - total_security_rules — Number of custom security rules across those groups; the platform's default rules are not counted
+    - inbound_allow_rules — Number of custom inbound rules whose access is Allow
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+    Is any admin port reachable from the Internet?
+    - internet_sourced_allow_rules — Number of custom inbound Allow rules whose source is Internet, * or 0.0.0.0/0
+    - ssh_open_to_internet_groups — Number of groups with a custom inbound Allow rule over TCP or any protocol that covers port 22 from the Internet, *, or 0.0.0.0/0
+    - rdp_open_to_internet_groups — Number of groups with a custom inbound Allow rule over TCP or any protocol that covers port 3389 from the Internet, *, or 0.0.0.0/0
+
+    Is Internet egress restricted?
+    - outbound_allow_rules — Number of custom outbound rules whose access is Allow
+    - outbound_deny_rules — Number of custom outbound rules whose access is Deny
+    - internet_destined_allow_rules — Number of custom outbound Allow rules whose destination includes Internet, * or 0.0.0.0/0
+    - unrestricted_internet_outbound_groups — Number of groups that allow all-port Internet egress: the first catch-all rule toward the Internet (outbound, protocol * and port * written as *, destination Internet, * or 0.0.0.0/0, whatever its source), custom and default rules in priority order, is an Allow, which an untouched group's default AllowInternetOutBound is; a Deny on fewer ports or protocols, or on 0-65535 written as a range, does not count as an override
+    - restricted_internet_outbound_groups — Number of groups that are not in unrestricted_internet_outbound_groups: a catch-all Deny toward the Internet comes first, even one limited to a narrow source, or no catch-all rule toward it is found
+
+    Which virtual networks and subnets sit behind a group?
+    - total_virtual_networks — Number of in-scope virtual networks
+    - ddos_protected_virtual_networks — Number of in-scope virtual networks with DDoS protection turned on
+    - total_subnets — Number of subnets on in-scope virtual networks
+    - subnets_with_nsg — Number of subnets with a network security group attached
+    - subnets_without_nsg — Number of subnets with no network security group attached
+    - subnet_nsg_coverage_percentage — Percentage of subnets with a group attached = subnets_with_nsg / total_subnets × 100 (rounded down to a whole number); 0 when total_subnets is 0
+
+    Is every network interface filtered?
+    - total_network_interfaces — Number of in-scope network interfaces
+    - nics_with_nic_nsg — Number of network interfaces with a group attached to the interface itself
+    - nics_protected_by_subnet_nsg_only — Number of network interfaces with no group of their own that sit in a subnet with one; a subnet in another subscription is not read and gives no protection
+    - nics_without_any_nsg — Number of network interfaces with neither their own group nor a subnet group, so nothing filters their traffic
+    - nic_nsg_coverage_percentage — Percentage of network interfaces filtered by a group on the interface or its subnet = (total_network_interfaces - nics_without_any_nsg) / total_network_interfaces × 100 (rounded down to a whole number); 0 when total_network_interfaces is 0
+
+    Can workload subnets reach each other on every port?
+    - workload_subnets_by_east_west_segmentation — Number of workload subnets for each east-west result; GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet, AzureFirewallManagementSubnet and RouteServerSubnet are left out. Each side of a pair, the source subnet's outbound rules and the destination's inbound rules, custom and default in priority order, is decided by its first Allow over TCP or any protocol on every port that touches both subnets, or Deny on every port and protocol that covers both; the pair is open when both sides allow (a subnet with no group allows) and segmented when either denies. Network interface groups (which can only narrow a pair), traffic within one subnet and peered networks are not considered:
+      - segmented (no other workload subnet in its network reaches it on every port)
+      - partial (some other subnets reach it on every port)
+      - unsegmented (every other workload subnet reaches it on every port)
+      - undetermined (no subnet is open, but one pair cannot be decided, because the deciding Allow names an application security group or a group lives in another subscription)
+      - no_peer_subnets (it is the only workload subnet in its network)
+    - east_west_subnet_pairs — Number of source and destination subnet pairs judged, across all workload subnets
+    - open_east_west_subnet_pairs — Number of those pairs where the source reaches the destination on every port

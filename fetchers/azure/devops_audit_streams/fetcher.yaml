@@ -1,13 +1,7 @@
 name: azure_devops_audit_streams
 version: 0.1.1
-description: >
-  For one Azure DevOps organization: whether auditing is on (from the Log
-  Audit Events policy when the token can read it, else from the audit log's
-  newest change to that policy or its newest event), every audit stream with
-  its target type, status and reason, and last update, and the newest event in
-  the 90-day audit log. For an Azure Monitor Logs stream, whether the
-  workspace's AzureDevOpsAuditing table received this organization's rows in
-  the window. Stream tokens and keys are never written.
+description: >-
+  Shows whether an Azure DevOps organization records audit events, streams them out of Azure DevOps, which keeps them only 90 days, and whether streamed events arrive.
 category: azure
 
 supports_targets: true
@@ -71,14 +65,33 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-DEVOPS-AUDIT-STREAMS
   name: Azure DevOps Audit Streams
-  instructions: >
-    Script: azure/devops_audit_streams/fetcher.py. Azure DevOps REST: OrganizationPolicy
-    Policy.LogAuditEvents (a PAT gets 401; then its newest logged change, else
-    any event in the window; see auditing.source), auditservice
-    _apis/audit/streams and _apis/audit/auditlog, ignoring audit-log reads.
-    consumerInputs keep only endpoint identifiers. Azure Monitor streams: the
-    organization's own AzureDevOpsAuditing rows, expected after a newer
-    organization-level event.
-    Needs: View audit log (PAT: vso.auditlog); Manage audit streams to list
-    streams, there being no read-only permission (without it, stream fields
-    are null, not_authorized); Log Analytics Reader.
+  instructions: |
+    Script: azure/devops_audit_streams/fetcher.py
+
+    Access: A user with the View audit log and Manage audit streams permissions, signed in with a personal access token that has Read Audit Log (vso.auditlog), or with Entra ID when no token is set. Listing audit streams needs Manage audit streams, as Azure DevOps has no read-only permission for it; without it, the stream fields are null and the run is not_authorized. Only the Entra sign-in can read the Log Audit Events policy; with a token, auditing is judged from the audit log. Log Analytics Reader on each Azure Monitor Logs stream's workspace, for the ingestion check; without it, azure_monitor_streams_with_rows and azure_monitor_streams_missing_rows are null and the run fails.
+
+    Commands Executed:
+    - GET _apis/connectionData — identifies the signed-in user (token or Entra ID)
+    - GET _apis/OrganizationPolicy/Policies/Policy.LogAuditEvents — whether auditing is on (best effort; a token gets 401)
+    - GET _apis/audit/streams — every audit stream and its status
+    - GET _apis/audit/auditlog (last 90 days, paged) — the newest audit events, and the newest logged change to the Log Audit Events policy; reads of the audit log itself are ignored
+    - GET Microsoft.OperationalInsights/workspaces/{name} (per Azure Monitor Logs stream whose workspace is named by resource id) — its workspace id
+    - KQL on AzureDevOpsAuditing (per workspace) — whether this organization's events arrived in the window
+
+    Output: azure_devops_audit_streams_<organization>.json — whether auditing is on, each audit stream with its destination type, status and reason, last update and destination (endpoint identifiers only, never tokens or keys), which source the auditing answer came from, for Azure Monitor Logs streams whether this organization's events are arriving, and the newest audit log events.
+
+    Summary fields:
+
+    Is auditing on?
+    - auditing_enabled — True if auditing is on; false if it is off; null if none of the sources below shows it. Read from the Log Audit Events policy when the sign-in can (Entra ID); otherwise from the newest logged change to that policy; with no logged change, true if the audit log shows an event other than a read of the log within the audit window (default 7 days)
+    - newest_audit_event — Time of the newest audit event in the last 90 days, ignoring reads of the audit log; null if the audit log couldn't be read or holds none
+
+    Are audit events streamed somewhere that keeps them?
+    - streams — Number of audit streams; null if the streams couldn't be listed
+    - streams_delivering — Number of audit streams that are enabled or backfilling; null if the streams couldn't be listed
+    - streams_not_delivering — List of audit streams (by name, or id) that are disabled, deleted or otherwise not delivering; null if the streams couldn't be listed
+    - streams_by_target — Number of audit streams for each destination type (Azure Monitor Logs, Splunk, Azure Event Grid, or the type Azure DevOps reports for any other, unknown when it reports none); null if the streams couldn't be listed
+
+    Are the streamed events actually arriving?
+    - azure_monitor_streams_with_rows — Number of Azure Monitor Logs streams whose workspace has received this organization's audit events in the audit window; null if the streams couldn't be listed or such a stream's workspace couldn't be checked
+    - azure_monitor_streams_missing_rows — Number of delivering Azure Monitor Logs streams whose workspace has none of this organization's events in the audit window, although an organization-level event newer than the stream and more than an hour old should have arrived; null if the streams couldn't be listed or such a stream's workspace couldn't be checked

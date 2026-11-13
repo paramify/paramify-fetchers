@@ -654,11 +654,14 @@ def main() -> int:
     # Attributed against every change and deployment first, so an in-scope change keeps an origin an excluded one gave.
     in_scope, excluded = split_changes(attributed, exclusions)
     in_scope = keep_values(in_scope, value_limit)
+    tables_read = set(sources) == set(CHANGE_TABLES)
+    if not tables_read:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     existing = None if groups is None else {g.lower() for g in groups}
     counts = exclusions.summary(excluded, ("change",), {"changes": len(in_scope)})
     # Unknown, not none, when a change table wasn't read.
-    if set(sources) != set(CHANGE_TABLES):
+    if not tables_read:
         counts.update(excluded_changes=None, in_scope_changes=None,
                       **dict.fromkeys(value_summary([]), None))
     evidence = build_payload(

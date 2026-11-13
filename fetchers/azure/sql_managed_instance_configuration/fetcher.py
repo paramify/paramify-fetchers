@@ -596,8 +596,13 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
     """Instances the exclusions take out are appended to `excluded` and get none of the per-instance reads."""
     client = sql_client(subscription_id, cred, collector)
     if client is None:
+        if exclusions is not None:
+            exclusions.mark_unread()
         return [], None
+    failures = len(collector.failures)
     instances = list_instances(client, collector, project_instance)
+    if exclusions is not None and len(collector.failures) > failures:
+        exclusions.mark_unread()
     if exclusions and excluded is not None:
         instances, out = exclusions.split(instances, "managed_instance")
         excluded += sorted(out, key=lambda e: e["id"] or "")
@@ -700,6 +705,8 @@ def main() -> int:
             ),
         )
 
+    if not (subscription_id and cred is not None):
+        exclusions.mark_unread()
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
 

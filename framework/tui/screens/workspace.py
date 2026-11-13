@@ -14,9 +14,9 @@ from textual.screen import Screen
 from textual.widgets import TabbedContent, TabPane
 
 from framework.tui.components.chrome import AppHeader, HintFooter
-from framework.tui.screens.catalog import CatalogPage
+from framework.tui.screens.catalog import CatalogPanel
 from framework.tui.screens.evidence import EvidencePage
-from framework.tui.screens.manifest import ManifestPage
+from framework.tui.screens.manifest import ManifestPanel
 from framework.tui.screens.run import RunPage
 from framework.tui.screens.upload import UploadPage
 
@@ -53,9 +53,9 @@ class WorkspaceScreen(Screen):
         yield AppHeader()
         with TabbedContent(initial="tab-catalog"):
             with TabPane("Catalog", id="tab-catalog"):
-                yield CatalogPage(id="catalog-page")
+                yield CatalogPanel(id="catalog-page")
             with TabPane("Manifest", id="tab-manifest"):
-                yield ManifestPage(id="manifest-page")
+                yield ManifestPanel(id="manifest-page")
             with TabPane("Run", id="tab-run"):
                 yield RunPage(id="run-page")
             with TabPane("Evidence", id="tab-evidence"):
@@ -65,7 +65,7 @@ class WorkspaceScreen(Screen):
         yield HintFooter()
 
     def on_mount(self) -> None:
-        self.query_one(CatalogPage).rebuild()
+        self.query_one(CatalogPanel).rebuild()
         self.reload()
         # Land focus inside the opening pane so its key bindings are live from
         # the first keystroke (not only after the user clicks into it).
@@ -73,7 +73,7 @@ class WorkspaceScreen(Screen):
 
     def reload(self) -> None:
         """Refresh the manifest-dependent pages + chrome (after load / switch)."""
-        self.query_one(ManifestPage).rebuild()
+        self.query_one(ManifestPanel).rebuild()
         try:
             self.query_one(EvidencePage).rebuild_runs()
         except Exception:
@@ -151,10 +151,10 @@ class WorkspaceScreen(Screen):
 
     def action_refresh(self) -> None:
         self.app.refresh_catalog()
-        self.query_one(CatalogPage).rebuild()
+        self.query_one(CatalogPanel).rebuild()
 
     def action_focus_search(self) -> None:
-        self._focus_override = lambda: self.query_one(CatalogPage).focus_search()
+        self._focus_override = lambda: self.query_one(CatalogPanel).focus_search()
         tabs = self.query_one(TabbedContent)
         if tabs.active == "tab-catalog":
             # No TabActivated fires when already here; run the override directly.

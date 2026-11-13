@@ -411,6 +411,8 @@ def main() -> int:
     exclusions.record_invalid(collector)
     group_records, excluded_groups = exclusions.split(group_records, "action_group")
     excluded += excluded_groups + excluded_processing
+    if not all(read.values()):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     counts = exclusions.summary(excluded, KINDS, {"activity_log_alerts": len(alerts), "action_groups": len(group_records),
                                                   "processing_rules": len(processing_rules)})

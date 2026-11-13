@@ -1,15 +1,7 @@
 name: azure_vnet_egress_routing
-version: 0.3.0
-description: >
-  Where each subnet's Internet-bound traffic goes: through a firewall or network
-  virtual appliance, into a black hole, to a VPN/ExpressRoute gateway, out a NAT
-  gateway, or straight out through Azure's implicit default outbound access. Each
-  subnet carries its route table, default route, default-outbound setting and
-  service endpoints, plus which of its own and its peers' address ranges are not
-  forced through the appliance; each network interface carries its own egress path
-  and default-outbound flag; every route table shows whether any subnet uses it; and
-  every Azure Firewall shows its tier, effective threat-intelligence mode, policy and
-  how many subnets actually route through it.
+version: 0.3.1
+description: >-
+  Shows where each subnet's and network interface's Internet-bound traffic goes: through a firewall or appliance, a gateway, a NAT gateway, a black hole or Azure's default outbound access.
 category: azure
 
 supports_targets: true
@@ -88,114 +80,99 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-VNET-EGRESS
   name: Azure VNet Egress Routing
-  instructions: >
-    Script: azure/vnet_egress_routing/fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient),
-    all reads, Reader is sufficient: virtual_networks.list_all(),
-    virtual_network_peerings.list() per VNet, route_tables.list_all(),
-    network_interfaces.list_all(), azure_firewalls.list_all(),
-    firewall_policies.list_all(), virtual_hubs.list() and, per Virtual WAN hub,
-    routing_intent.list(), hub_virtual_network_connections.list() and
-    hub_route_tables.list(); plus the Microsoft.Network registration state.
-    Virtual WAN: a spoke VNet connected to a hub learns the hub's 0.0.0.0/0 when the
-    hub has an Internet routing-intent policy (or, without routing intent, a 0.0.0.0/0
-    route in the route table the connection is associated with) and the connection's
-    enableInternetSecurity ("Propagate default route") is true; that route reaches a
-    subnet only while its route table allows gateway route propagation, and a
-    user-defined 0.0.0.0/0 beats it. Such a subnet is "appliance" with
-    default_route.source "virtual_hub", next_hop_resource_id the policy's next hop, and
-    appliance_owner "azure_firewall" (or "hub_appliance" for an NVA). The default route
-    is not advertised across hubs, so only the directly connected hub counts. A spoke
-    is recognised from its own side by the peering every hub connection adds to a
-    Microsoft-managed HV_<hub>_<guid> VNet (virtual_hub_spoke, virtual_hub_name). When
-    no hub in this subscription connects it, the hub is looked for in every other
-    enabled subscription the credential can see (subscriptions.list(), then
-    virtual_hubs.list() per subscription and the same per-hub calls), so the fetcher
-    identity needs Reader on the hub's subscription as well. At most
-    VIRTUAL_HUB_SEARCH_MAX_SUBSCRIPTIONS (default 50) other subscriptions are searched,
-    in the order the subscriptions API lists them; subscriptions_over_limit counts the
-    rest. A hub found in another subscription keeps only its connections to this
-    subscription's spokes, plus its name, id, location, routing-intent policies and
-    firewall id, which that spoke's egress depends on; a hub in this subscription
-    lists all of its connections, including spokes in other subscriptions. A spoke whose hub is still
-    not found has virtual_hub_resolved false, and its subnets that the hub's default
-    route would reach read "virtual_hub_unresolved" (default_route.source the same),
-    never "default_outbound": their egress cannot be told from this side.
-    virtual_hub_search records how many spokes needed the search, the subscriptions
-    searched, how many spokes were found and any call that failed; a failure there
-    does not fail the run, because the spokes it leaves unfound already say so. Hubs
-    from another subscription appear in virtual_hubs with their subscription_id; their
-    Azure Firewall is that subscription's own evidence.
-    egress_path per subnet is derived from the subnet's route table, IPv4 only. The
-    default route is a user-defined 0.0.0.0/0 route, or routes of one next-hop kind
-    that together cover 0.0.0.0/0 (0.0.0.0/1 + 128.0.0.0/1 is the usual split), which
-    are more specific and so beat an exact 0.0.0.0/0 or a propagated default;
-    default_route.user_defined_prefixes lists the routes it is made of. A default to
-    VirtualAppliance or VirtualApplianceEcmp is "appliance", to None is "blackhole",
-    to VirtualNetworkGateway is "gateway", any other non-Internet hop is "other".
-    internet_bypass_routes lists, on a subnet with one of those four paths, every
-    route whose next hop is Internet (a CIDR or a service tag such as AzureCloud):
-    traffic to that range leaves directly, around the firewall, appliance or gateway;
-    workload_subnets_with_internet_bypass_routes counts the subnets with any. On a
-    private subnet (default_outbound_access false) with no NAT gateway or other
-    explicit outbound method, Azure documents that such routes fail rather than leave. With no such route (Azure's system route sends
-    0.0.0.0/0 to the Internet) or a route to Internet, a NAT gateway on the subnet or
-    the VNet's default public NAT gateway gives "nat_gateway"; otherwise
-    default_outbound_access decides: null or true is "default_outbound" (null
-    implicitly allows outbound, so default_outbound_access_effective reports it as
-    true), false is "none". Subnets made private by default (new virtual networks
-    created with an API version released after 2026-03-31) are not null: Microsoft
-    documents that those API versions set defaultOutboundAccess to false on the
-    subnet, while earlier API versions and tools pinned to them leave it null, which
-    keeps default outbound access. A Virtual WAN hub's default route, when it applies
-    (above), overrides all of this.
-    GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet,
-    AzureFirewallManagementSubnet and RouteServerSubnet are "platform_managed" — Azure
-    sets their routing rules. A network interface takes its subnet's path, except that
-    one with a public IP on a "default_outbound" or "none" subnet is "public_ip".
-    For a user-defined route, appliance_owner says what holds each appliance next-hop IP, looked up in the
-    subnet's VNet, its Connected peers and any Virtual WAN hub firewall:
-    "azure_firewall" (appliance_firewall_ids names it), "nic_ip_forwarding" (a NIC
-    with IP forwarding enabled), "nic_no_ip_forwarding", "mixed" (firewall and
-    forwarding NIC), or "not_in_subscription" when nothing here holds it (another
-    subscription, a load balancer frontend). Each Azure Firewall's
-    effective_threat_intel_mode is, when it has a firewall policy, the strictest
-    threatIntelMode along that policy and its base_policy chain (a child policy
-    inherits its parent's mode and can only tighten it) — the firewall's own field is
-    not used then — and its own threatIntelMode otherwise. firewall_policy_resolved
-    is false when the policy or one of its parents is in another subscription; the
-    mode is then null unless a policy that was read already says Deny. routed_workload_subnets counts the subnets whose
-    0.0.0.0/0 route resolves to that firewall. unrouted_internal_prefixes and unrouted_peered_prefixes
-    list the VNet's own and its Connected peers' address ranges that the route table
-    does not send to an appliance: Azure's system routes for those ranges are more
-    specific than 0.0.0.0/0, so that traffic skips the appliance unless a route at
-    least as specific covers it. service_endpoints are listed because their system
-    routes cannot be overridden by any route table. Limitations: this is the
-    configured routing, not the effective route table — BGP routes from a gateway
-    (bgp_route_propagation true) are not visible, and reading effective routes needs
-    Microsoft.Network/networkInterfaces/effectiveRouteTable/action, which Reader does
-    not grant. Load balancers are not collected: a NIC in the backend pool of a
-    Standard public load balancer with outbound rules (or of a basic public load
-    balancer) leaves through that load balancer, yet it and its subnet still read
-    "default_outbound" (or "none"). Maps to KSI-CNA-RNT / KSI-CNA-ULN / KSI-CNA-DFP.
+  instructions: |
+    Script: azure/vnet_egress_routing/fetcher.py
 
-    Resources the resource_exclusions patterns take out are listed under excluded
-    instead, each with the pattern that matched; a network interface taken out with
-    its subnet names that subnet in matched_id. An in-scope firewall that routes only
-    excluded subnets counts in azure_firewalls_with_no_routed_subnet, and an in-scope
-    route table attached only to excluded subnets counts in unassociated_route_tables.
+    Access: Reader on the subscription. Optional: Reader on the other subscriptions a Virtual WAN hub may sit in; without it, spokes whose hub is there read virtual_hub_unresolved. Reader does not grant effective route table reads, so the evidence is the configured routing, not the effective routes, and gateway-learned BGP routes are not visible.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set, and lists other subscriptions to search for a spoke's Virtual WAN hub (at most VIRTUAL_HUB_SEARCH_MAX_SUBSCRIPTIONS, default 50, in the order listed)
+    - providers.get("Microsoft.Network") — tells "networking not in use" from "nothing there"
+    - virtual_networks.list_all() — every virtual network with its subnets, route table links, NAT gateway, default outbound setting and service endpoints
+    - virtual_network_peerings.list() (per virtual network) — the peerings, to find peers' address ranges and hub spokes
+    - route_tables.list_all() — every route table with its routes
+    - network_interfaces.list_all() — every network interface, with IP forwarding and public IPs
+    - azure_firewalls.list_all() — every Azure Firewall with its tier, threat-intelligence mode and policy
+    - firewall_policies.list_all() — the policies, to resolve each firewall's effective threat-intelligence mode
+    - virtual_hubs.list() — every Virtual WAN hub in the subscription
+    - routing_intent.list() (per hub) — the hub's Internet routing-intent policy
+    - hub_virtual_network_connections.list() (per hub) — the spokes connected and whether they propagate the default route
+    - hub_route_tables.list() (per hub) — the hub route table's 0.0.0.0/0 route when there is no routing intent
+
+    Output: azure_vnet_egress_routing_<subscription>.json — each subnet with its egress path, default route, bypass routes and unrouted prefixes, each network interface's path, the route tables, firewalls and hubs, plus the resources left out and why.
+
+    Summary fields:
 
     Which resources are left out of scope?
-      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no virtual network, subnet, route table, network interface, Azure Firewall or Virtual WAN hub, such as a mistyped name
-      - excluded_virtual_networks — Number of virtual networks left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
-      - excluded_subnets — Number of subnets left out of scope the same way, which takes every subnet of an excluded virtual network
-      - excluded_route_tables — Number of route tables left out of scope the same way
-      - excluded_network_interfaces — Number of network interfaces left out of scope the same way, or because a pattern matched one of their subnets
-      - excluded_azure_firewalls — Number of Azure Firewalls left out of scope the same way
-      - excluded_virtual_hubs — Number of Virtual WAN hubs left out of scope the same way
-      - in_scope_virtual_networks — Number of virtual networks read and in scope; 0 means none was read or the patterns took out every one, which a check can catch by requiring more than 0
-      - in_scope_subnets — Number of subnets read and in scope, platform subnets included
-      - in_scope_route_tables — Number of route tables read and in scope
-      - in_scope_network_interfaces — Number of network interfaces read and in scope
-      - in_scope_azure_firewalls — Number of Azure Firewalls read and in scope
-      - in_scope_virtual_hubs — Number of Virtual WAN hubs read and in scope, from this subscription or found for one of its spokes
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no virtual network, subnet, route table, network interface, Azure Firewall or Virtual WAN hub, such as a mistyped name; null when a list could not be read
+    - excluded_virtual_networks — Number of virtual networks left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it
+    - excluded_subnets — Number of subnets left out of scope the same way, which takes every subnet of an excluded virtual network
+    - excluded_route_tables — Number of route tables left out of scope the same way
+    - excluded_network_interfaces — Number of network interfaces left out of scope the same way, or because a pattern matched one of their subnets; each names that subnet in matched_id
+    - excluded_azure_firewalls — Number of Azure Firewalls left out of scope the same way
+    - excluded_virtual_hubs — Number of Virtual WAN hubs left out of scope the same way
+    - in_scope_virtual_networks — Number of virtual networks read and in scope; 0 means none was read or the patterns took out every one
+    - in_scope_subnets — Number of subnets read and in scope, platform subnets included
+    - in_scope_route_tables — Number of route tables read and in scope
+    - in_scope_network_interfaces — Number of network interfaces read and in scope
+    - in_scope_azure_firewalls — Number of Azure Firewalls read and in scope
+    - in_scope_virtual_hubs — Number of Virtual WAN hubs read and in scope, from this subscription or found for one of its spokes
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+    Which subnets were checked?
+    - total_virtual_networks — Number of in-scope virtual networks
+    - total_subnets — Number of in-scope subnets
+    - workload_subnets — Number of in-scope subnets other than the platform subnets
+    - platform_subnets — Number of in-scope subnets named GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet, AzureFirewallManagementSubnet or RouteServerSubnet, whose routing Azure sets; every count below is about workload subnets unless it says otherwise
+
+    Where does each subnet's Internet traffic go?
+    - workload_subnets_by_egress_path — Number of workload subnets for each egress path, worked out from the route table for IPv4; a default route is a user-defined 0.0.0.0/0 route or routes of one next-hop kind that together cover it, such as 0.0.0.0/1 and 128.0.0.0/1; load balancers are not collected and a machine's own public IP is judged per interface below, so a subnet whose machines leave through a public load balancer or their own public IPs still reads default_outbound or none:
+      - appliance (default route to a virtual appliance, or through a Virtual WAN hub that propagates its default route)
+      - blackhole (default route to None, so Internet traffic is dropped)
+      - gateway (default route to a virtual network gateway)
+      - nat_gateway (no default route, or one to Internet, and a NAT gateway on the subnet or the network's default public NAT gateway)
+      - default_outbound (no default route and default outbound access is on or unset, so Azure's implicit public IP is the subnet's fallback)
+      - none (no default route and default outbound access is off, so the subnet itself gives no outbound path)
+      - other (default route to any other non-Internet next hop)
+      - virtual_hub_unresolved (the spoke's hub was not found, so the hub's default route cannot be ruled in or out)
+    - workload_subnets_default_outbound_effective — Number of workload subnets with default outbound access on; an unset value counts as on
+    - workload_subnets_appliance_with_default_outbound_fallback — Number of workload subnets routed to an appliance that also have default outbound access on
+    - workload_subnets_with_internet_bypass_routes — Number of workload subnets whose path is appliance, blackhole, gateway or other and that have a route with next hop Internet (a CIDR or a service tag such as AzureCloud), so that traffic skips the appliance; on a private subnet with no explicit outbound method such routes fail rather than leave
+    - workload_subnets_with_service_endpoints — Number of workload subnets with service endpoints, whose system routes no route table can override
+    - workload_subnets_with_unrouted_internal_prefixes — Number of workload subnets whose own network's address ranges the route table does not send to an appliance, which Azure's more specific system routes then send directly
+    - workload_subnets_with_unrouted_peered_prefixes — Number of workload subnets with the same gap for the address ranges of the Connected peer networks
+
+    Who owns the appliance?
+    - workload_subnets_appliance_azure_firewall — Number of workload subnets whose appliance next hop is an Azure Firewall
+    - workload_subnets_appliance_not_in_subscription — Number of workload subnets whose appliance next hop IP nothing here holds, such as another subscription or a load balancer frontend
+    - workload_subnets_via_virtual_hub — Number of workload subnets whose default route comes from a Virtual WAN hub; it applies only while the subnet's route table allows gateway route propagation and no user-defined 0.0.0.0/0 beats it
+    - total_virtual_hubs — Number of in-scope Virtual WAN hubs, including those found in other subscriptions for this subscription's spokes
+    - virtual_hub_spokes — Number of in-scope virtual networks recognised as hub spokes from their peering to a Microsoft-managed HV_<hub>_<guid> network
+    - virtual_hub_spokes_unresolved — Number of hub spokes whose hub was found in no readable subscription
+
+    Do the route tables and firewalls enforce the path?
+    - total_route_tables — Number of in-scope route tables
+    - unassociated_route_tables — Number of in-scope route tables that no in-scope subnet uses
+    - total_azure_firewalls — Number of in-scope Azure Firewalls
+    - azure_firewalls_by_effective_threat_intel_mode — Number of Azure Firewalls for each effective threat-intelligence mode, which is the strictest mode along the firewall's policy and its base policies when it has a policy, else its own mode; a firewall whose policy is in another subscription has none unless a policy read already says Deny, and is counted under none of these:
+      - Deny (blocks traffic to and from known malicious addresses)
+      - Alert (logs it but lets it through)
+      - Off (no threat intelligence filtering)
+    - azure_firewalls_with_no_routed_subnet — Number of in-scope Azure Firewalls that no in-scope workload subnet's default route resolves to
+
+    Where does each network interface's traffic go?
+    - total_network_interfaces — Number of in-scope network interfaces
+    - network_interfaces_by_egress_path — Number of network interfaces for each egress path, which is the subnet's path except that an interface with a public IP on a default_outbound or none subnet is public_ip, and mixed covers an interface in subnets with different paths; load balancers are not collected, so an interface behind a public load balancer with outbound rules still reads default_outbound or none:
+      - appliance (as for subnets)
+      - blackhole (as for subnets)
+      - gateway (as for subnets)
+      - nat_gateway (as for subnets)
+      - default_outbound (as for subnets)
+      - none (as for subnets)
+      - other (as for subnets)
+      - virtual_hub_unresolved (as for subnets)
+      - platform_managed (in a platform subnet)
+      - public_ip (its own public IP, on a default_outbound or none subnet)
+      - mixed (its subnets have different paths)
+    - network_interfaces_default_outbound_connectivity_enabled — Number of network interfaces whose default outbound connectivity flag is true

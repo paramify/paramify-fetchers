@@ -292,6 +292,16 @@ def test_sql_encryption_counts_only_in_scope_instances_and_their_databases(monke
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
 
 
+def test_sql_encryption_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, evidence = run_sql(monkeypatch, tmp_path, encryption, PATTERNS)
+    assert_summary_documented("azure/sql_managed_instance_encryption", evidence["summary"])
+
+
+def test_sql_backups_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, evidence = run_sql(monkeypatch, tmp_path, backups, PATTERNS)
+    assert_summary_documented("azure/sql_managed_instance_backups", evidence["summary"])
+
+
 def test_sql_backups_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path):
     code, evidence = run_sql(monkeypatch, tmp_path, backups, None)
     summary, results = evidence["summary"], evidence["results"]
@@ -460,6 +470,21 @@ def test_sql_failed_reads_on_excluded_instances_leave_the_run_ok(monkeypatch, tm
         assert evidence["summary"] == clean["summary"] and evidence["results"] == clean["results"]
 
 
+def test_sql_unread_instance_list_leaves_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
+    def refused():
+        raise DENIED
+
+    for module in (configuration, backups, encryption):
+        _common(monkeypatch, tmp_path, module, PATTERNS)
+        monkeypatch.setattr(module, "sql_client", lambda *a: ns(managed_instances=ns(list=refused)))
+        monkeypatch.setattr(module, "monitor_client", lambda *a: ns(activity_logs=ns(list=lambda filter: iter([]))), raising=False)
+        monkeypatch.setattr(module, "utc_now", lambda: NOW, raising=False)
+        assert module.main() == 1
+        summary = json.loads((tmp_path / f"{module.logger.name}_s1.json").read_text())["summary"]
+        assert summary["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
 def test_sql_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     for module in (configuration, backups, encryption):
         code, evidence = run_sql(monkeypatch, tmp_path, module, "rg-out")
@@ -473,7 +498,7 @@ WORKSPACES = (("rg-in", "law-in", "regioneast", 90, True), ("rg-in", "law-south"
               ("rg-out", "law-out", "regionwest", 30, True))
 
 
-def run_law_reads(monkeypatch, tmp_path, patterns, deny=()):
+def run_law_reads(monkeypatch, tmp_path, patterns, deny=(), list_error=None):
     """Per-workspace reads append (operation, workspace) to reads and raise DENIED for a workspace named in deny."""
     _common(monkeypatch, tmp_path, law, patterns)
     reads: list = []
@@ -488,10 +513,14 @@ def run_law_reads(monkeypatch, tmp_path, patterns, deny=()):
 
         return fn
 
+    def workspace_list():
+        if list_error:
+            raise list_error
+        return [ns(id=f"{SUB}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}", name=name,
+                   location=location, retention_in_days=retention) for rg, name, location, retention, _ in WORKSPACES]
+
     client = ns(
-        workspaces=ns(list=lambda: [
-            ns(id=f"{SUB}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}", name=name,
-               location=location, retention_in_days=retention) for rg, name, location, retention, _ in WORKSPACES]),
+        workspaces=ns(list=workspace_list),
         tables=ns(list_by_workspace=per_workspace("tables", lambda name: [])),
         data_exports=ns(list_by_workspace=per_workspace("data_exports", lambda name: [])),
         intelligence_packs=ns(list=per_workspace(
@@ -502,8 +531,8 @@ def run_law_reads(monkeypatch, tmp_path, patterns, deny=()):
     return code, json.loads((tmp_path / "azure_log_analytics_workspaces_s1.json").read_text()), reads
 
 
-def run_law(monkeypatch, tmp_path, patterns):
-    code, evidence, _ = run_law_reads(monkeypatch, tmp_path, patterns)
+def run_law(monkeypatch, tmp_path, patterns, list_error=None):
+    code, evidence, _ = run_law_reads(monkeypatch, tmp_path, patterns, list_error=list_error)
     return code, evidence
 
 
@@ -517,10 +546,17 @@ def test_log_analytics_without_patterns_adds_only_empty_exclusion_fields(monkeyp
         **law.summarize(results["workspaces"]), "provider_registration_status": "registered"}
 
 
-def test_log_analytics_excludes_by_group_and_region(monkeypatch, tmp_path):
+def test_log_analytics_unread_workspace_list_leaves_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
+    code, evidence = run_law(monkeypatch, tmp_path, PATTERNS, list_error=DENIED)
+    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
+def test_log_analytics_excludes_by_group_and_region(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_law(monkeypatch, tmp_path, PATTERNS)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0
+    assert_summary_documented("azure/log_analytics_workspaces", summary)
     assert [w["name"] for w in results["workspaces"]] == ["law-in"]
     assert _excluded(results) == [("workspace", "law-out", "rg:rg-out"),
                                   ("workspace", "law-south", "location:regionsouth")]
@@ -589,7 +625,7 @@ class _Rest:
                  "LastIngested": "2026-10-12T00:00:00Z"}]
 
 
-def run_rds(monkeypatch, tmp_path, patterns):
+def run_rds(monkeypatch, tmp_path, patterns, inventory=None):
     _common(monkeypatch, tmp_path, rds, patterns)
     category = ns(name="AuditEvent", category_type="Logs", category_groups=["audit", "allLogs"])
     setting = ns(id="ds", name="ds", storage_account_id=None, workspace_id=WORKSPACE_OUT, event_hub_name=None,
@@ -598,7 +634,7 @@ def run_rds(monkeypatch, tmp_path, patterns):
     read: list = []
     monitor = ns(diagnostic_settings_category=ns(list=lambda resource_uri: read.append(resource_uri) or [category]),
                  diagnostic_settings=ns(list=lambda resource_uri: [setting]))
-    monkeypatch.setattr(rds, "enumerate_resources", lambda *a: {"rows": INVENTORY, "total_records": 5, "pages": 1})
+    monkeypatch.setattr(rds, "enumerate_resources", lambda *a: inventory or {"rows": INVENTORY, "total_records": 5, "pages": 1})
     monkeypatch.setattr(rds, "monitor_client", lambda *a: monitor)
     monkeypatch.setattr(rds, "AzureRestClient", lambda cred: _Rest())
     for env in (rds.BASIC_LOOKBACK_ENV, rds.APPROVED_WORKSPACES_ENV, rds.INGESTION_LOOKBACK_ENV):
@@ -617,6 +653,12 @@ def test_diagnostic_settings_without_patterns_add_only_empty_exclusion_fields(mo
     assert _without_exclusion_fields(summary, ("resource",), ("resources",)) == {
         **rds.summarize(records, 5, 5, 1), "provider_registration_status": "registered",
         **rds.summarize_ingestion(records, destinations, 7, 0, [])}
+
+
+def test_diagnostic_settings_unread_inventory_leaves_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
+    code, evidence, _ = run_rds(monkeypatch, tmp_path, PATTERNS, inventory={"rows": [], "total_records": None, "pages": 0})
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
 
 
 def test_diagnostic_settings_exclude_and_skip_resources_but_still_read_an_excluded_destination(
@@ -649,3 +691,9 @@ def test_diagnostic_settings_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence, read = run_rds(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["results"]["excluded"] == [] and evidence["summary"]["in_scope_resources"] == 6 == len(read)
+
+
+def test_sql_backups_unread_failover_history_leaves_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
+    code, evidence = run_sql(monkeypatch, tmp_path, backups, PATTERNS, activity=DENIED)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text

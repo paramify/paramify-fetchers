@@ -187,6 +187,8 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
         kept, excluded = exclusions.split(raw_resources, "resource")
         resources = sorted((resource_record(raw, locks, protected) for raw in kept), key=lambda r: arm_id_key(r["id"]))
     exclusions.record_invalid(collector)
+    if resources is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     if resources is not None:
         for kind in protected:

@@ -1,5 +1,5 @@
 name: azure_app_service_deployments
-version: 0.3.0
+version: 0.3.1
 description: >-
   Shows how each App Service web app and slot is deployed: recorded deployments, slot swaps and publishing-credential retrievals with who and when, deployment source, and slot drift from production.
 category: azure
@@ -88,7 +88,7 @@ evidence_set:
     - web_apps.list_deployments() and list_deployments_slot() (per app and slot) — the deployments App Service (Kudu) records
     - web_apps.get_source_control() and get_source_control_slot() (per app and slot) — the repository and branch it deploys from
     - web_apps.list_slots() (per app) — its deployment slots
-    - web_apps.get_configuration() and get_configuration_slot() (per app with slots, and per slot) — the settings compared between each slot and production
+    - web_apps.get_configuration() and get_configuration_slot() (per app with slots, and per slot) — the settings compared between each slot and production: minimum TLS version and cipher suite, the SCM (deployment) site's minimum TLS version, FTPS state, HTTP/2, remote debugging, runtime versions, the main and SCM sites' access restrictions (rules in priority order, names ignored, and default actions), whether SCM uses the main site's rules, HTTPS-only, client certificates and public network access
     - activity_logs.list() (Microsoft.Web events over the last activity_log_days, 90 by default) — slot swaps, publishing-credential retrievals and package deployments, with who requested each
 
     Output: azure_app_service_deployments_<subscription>.json — each web app's and slot's recorded deployments and deployment events with who and when, its deployment source, how each slot differs from production, and what the evidence cannot attribute; each deployment event carries its Activity Log correlation id to trace it back; all times are ISO 8601 UTC. Web apps, function apps and deployment slots the resource_exclusions patterns take out are listed under excluded instead, and Activity Log requests whose requester's event is on one of them are not counted (results.activity_log.requests_on_excluded_sites counts them).
@@ -106,7 +106,7 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no web app, function app, deployment slot or site an Activity Log request was made on, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no web app, function app, deployment slot or site an Activity Log request was made on, such as a mistyped name; null when the app list could not be read
     - boundary_excluded_web_apps — Number of web apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, none of its deployments, source, slots or settings are read, Activity Log requests made on it or its slots are not counted, and no other count includes it
     - boundary_excluded_function_apps — Number of function apps and other sites that aren't web apps left out of scope the same way; excluded_function_apps leaves them out
     - boundary_excluded_deployment_slots — Number of deployment slots of in-scope web apps left out of scope because a pattern matched them (in practice an id: pattern naming the slot, since a slot shares its app's resource group and region); each is listed under excluded, gets no reads and is not compared with production. An excluded app's slots are never read, so they are not counted here
@@ -139,10 +139,7 @@ evidence_set:
     - apps_with_publishing_credential_reads — Number of web apps whose publishing credentials were read in the window, for the app or a slot; null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false
     - package_deployments — Number of MSDeploy, OneDeploy or ZipDeploy deployment requests made through Azure Resource Manager in the window on a listed web app or slot, one per correlation id; null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false
     - apps_with_package_deployments — Number of web apps with at least one package deployment through Azure Resource Manager in the window, on the app or a slot; null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false
-    - deployment_activity_by_caller_type — Number of slot swap, publish profile download, publishing credential read and package deployment requests on listed web apps and slots, for each kind of requester (null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false):
-      - user (a person: the token's identity type is user, or the caller is a user name containing @)
-      - app (a service principal or managed identity: the token's identity type is app)
-      - unknown (the log names neither)
+    - deployment_activity_by_caller_type — Number of slot swap, publish profile download, publishing credential read and package deployment requests on listed web apps and slots, for each kind of requester that appears, listed only when it has requests: user (a person: the token's identity type is user, or the caller is a user name containing @), app (a service principal or managed identity: the token's identity type is app) or unknown (the log names neither); null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false
     - deployment_activity_on_unlisted_sites — Number of slot swap, publish profile download, publishing credential read and package deployment requests on a site this run didn't list (a deleted app or slot, a function app or other site that isn't a web app, or a slot whose list couldn't be read), counted here instead of on an app; requests on a site a resource_exclusions pattern takes out are not counted here or anywhere else in the summary; null if the Activity Log couldn't be read, a lower bound if activity_log_complete is false
 
     Is there any trace of how each app is deployed?
@@ -151,6 +148,6 @@ evidence_set:
     - apps_deployment_evidence_unknown — Number of web apps with no deployment evidence found where it can't be ruled out: a slot list or Kudu read failed, or the Activity Log window wasn't read in full. With apps_with_deployment_evidence and apps_without_deployment_evidence it adds up to total_web_apps (counting a null as 0)
 
     Do the slots match production?
-    - slots_matching_production — Number of deployment slots whose compared settings all match production. Compared: minimum TLS version and cipher suite, the SCM (deployment) site's minimum TLS version, FTPS state, HTTP/2, remote debugging, runtime versions, the main and SCM sites' access restrictions (rules in priority order, names ignored, and default actions), whether SCM uses the main site's rules, HTTPS-only, client certificates and public network access. Microsoft lists runtime versions as swapped; HTTPS-only, TLS, client certificates and access restrictions stay with the slot, so a match is posture parity between slot and production, and a slot locked down differently on purpose reads as differing. An unset FTPS state reads as AllAllowed (Microsoft: "No configuration is necessary to enable FTP or FTPS app deployment", learn.microsoft.com/azure/app-service/deploy-ftp), and an unset default action as what App Service applies (Allow with no rules of the site's own, Deny with one), so neither differs from that value set explicitly. An unset public network access differs from an explicit Enabled, since with a private endpoint unset can mean disabled
+    - slots_matching_production — Number of deployment slots whose compared settings all match production. The settings compared are listed under get_configuration() above. HTTPS-only, TLS, client certificates and access restrictions stay with a slot when swapped, so a match is posture parity, and a slot locked down differently on purpose reads as differing. An unset FTPS state reads as AllAllowed and an unset default action as what App Service applies (Allow with no rules of the site's own, Deny with one), so neither differs from that value set explicitly; an unset public network access differs from an explicit Enabled, since with a private endpoint unset can mean disabled
     - slots_differing_from_production — Number of deployment slots with at least one compared setting that differs from production
     - slots_comparison_unknown — Number of deployment slots not compared because the slot's or production's settings couldn't be read

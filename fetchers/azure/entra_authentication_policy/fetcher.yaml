@@ -1,23 +1,7 @@
 name: azure_entra_authentication_policy
-version: 0.3.0
-description: >
-  Which sign-in methods the Microsoft Entra ID tenant allows: every method in the
-  authentication methods policy with its state, targets and settings, with SMS and
-  Voice flagged weak and FIDO2 (including passkeys) flagged phishing-resistant.
-  X.509 certificates are flagged phishing-resistant only when their default
-  authentication mode is multi-factor, since a single-factor certificate does not
-  satisfy MFA by itself. Also the registration campaign, the policy's migration
-  state, security defaults, and Entra password protection (custom
-  banned-password list and smart lockout) with the tenant's Entra ID licence tier,
-  since enforcing a custom banned-password list needs P1. It lists the
-  certificate authorities trusted for certificate-based sign-in, from both the
-  classic store and the PKI-based trust store (the latter needs the optional
-  PublicKeyInfrastructure.Read.All), flagging expired ones and ones with no
-  revocation list, and, when X.509 is enabled, each enabled
-  member account it targets, whether a username binding can match that user to a
-  certificate, and which weaker methods still apply to them. Windows Hello for
-  Business is configured through device management, not this policy, and is not
-  covered.
+version: 0.3.1
+description: >-
+  Shows which sign-in methods the tenant allows, flagging weak and phishing-resistant ones, which certificate authorities certificate sign-in trusts, and whether certificate users map to certificates.
 category: azure
 
 supports_targets: true
@@ -90,43 +74,86 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-ENTRA-AUTH-METHODS-POLICY
   name: Microsoft Entra ID Authentication Methods Policy
-  instructions: >
-    Script: azure/entra_authentication_policy/fetcher.py. Microsoft Graph calls: GET /policies/authenticationMethodsPolicy
-    and GET /policies/identitySecurityDefaultsEnforcementPolicy (Policy.Read.All);
-    GET /groupSettings and GET /groupSettingTemplates/5cf42378-d67d-4f36-ba46-e8b86229381d
-    (Password Rule Settings) and GET /subscribedSkus (Directory.Read.All);
-    GET /organization; GET /organization/{id}/certificateBasedAuthConfiguration
-    (the trusted certificate authorities: issuer, root or intermediate, revocation
-    list URLs, and the subject and expiry read from each certificate, which is not
-    copied into the evidence; optional Organization.Read.All: refused, it reads
-    not_authorized and null, names the missing grant in
-    classic_store_missing_permission, and doesn't fail the run), and GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations
-    with each one's /certificateAuthorities (the PKI-based trust store; optional
-    PublicKeyInfrastructure.Read.All: refused, it reads not_authorized and null, names
-    the missing grant in pki_store_missing_permission, and doesn't fail the run; a cloud
-    without the API (400 or 404) reads not_available the same way). Each CA records its
-    trust store; the CA counts take a CA listed in both stores (same thumbprint, or the
-    same key identifier when a certificate can't be read) once, and are null unless both
-    stores were read. The combined list, trusted_certificate_authorities, is null too
-    unless both stores were read; each store's own CAs are listed under
-    certificate_authority_stores, null when that store wasn't read. With the X.509 method enabled, also GET
-    /groups/{id}/transitiveMembers/microsoft.graph.user for each group an enabled
-    method includes or excludes, and GET /users only when X.509 targets all users or
-    a user directly (both $select id, userPrincipalName, userType, accountEnabled,
-    onPremisesUserPrincipalName, authorizationInfo). A targeted user is an enabled member account (not a
-    guest) the X.509 method includes and doesn't exclude. It counts as mapped when a
-    certificateUserIds binding's certificate field matches the type of one of the
-    user's certificate user ids (X509:<SKI>... for SubjectKeyIdentifier, and so on),
-    and with high affinity when that binding is high affinity. A userPrincipalName or
-    onPremisesUserPrincipalName binding depends on the name the certificate carries,
-    which only the certificate shows, so a user only such a binding (or one on a field
-    the fetcher doesn't know) could match reads unverified, never mapped; a user no
-    binding can match is unmapped. It has weaker methods when an enabled method other
-    than X.509, FIDO2 and email one-time passcodes (guests only) reaches it. Only the
-    count and the types of a user's certificateUserIds are kept. The counts cover every
-    targeted user; x509_certificate_users lists only those that fail a check (not
-    mapped by a certificate user id, without any, or reached or possibly reached by a
-    weaker method), at most 100, and x509_certificate_users_truncated says when more
-    failed. A failed read leaves the counts it feeds null; one unread group a target
-    depends on leaves the whole user list and its counts null.
-    Collections paged via @odata.nextLink.
+  instructions: |
+    Script: azure/entra_authentication_policy/fetcher.py
+
+    Access: Microsoft Graph application permissions Policy.Read.All and Directory.Read.All. Optional: Organization.Read.All and PublicKeyInfrastructure.Read.All; without either, the certificate authorities in its trust store (classic or PKI-based) and the certificate authority counts read null.
+
+    Commands Executed:
+    - GET /organization — the tenant's name and domain
+    - GET /policies/authenticationMethodsPolicy — each sign-in method's state, who it applies to and its settings, plus the registration campaign and migration state
+    - GET /policies/identitySecurityDefaultsEnforcementPolicy — whether security defaults are on
+    - GET /groupSettings and GET /groupSettingTemplates/{Password Rule Settings id} — the tenant's password protection settings, and Microsoft's defaults for any it never set
+    - GET /subscribedSkus — the tenant's licences, to tell Free, P1 and P2 apart
+    - GET /organization/{id}/certificateBasedAuthConfiguration — the certificate authorities trusted for certificate sign-in in the classic store, with each one's revocation list; subject and expiry are read from the certificate, which isn't copied into the evidence
+    - GET /directory/publicKeyInfrastructure/certificateBasedAuthConfigurations and GET …/{id}/certificateAuthorities (per configuration) — the certificate authorities in the PKI-based trust store, the newer place Entra keeps them
+    - GET /groups/{id}/transitiveMembers/microsoft.graph.user with authorizationInfo (per group an enabled method includes or excludes, only when X.509 is enabled) — which users each method reaches, with their sign-in names and the count and types of their certificate user ids
+    - GET /users with authorizationInfo (only when X.509 targets all users or a user directly) — the same for every user
+
+    Output: azure_entra_authentication_policy_<tenant>.json — each sign-in method in the authentication methods policy with its state, who it applies to, its settings and whether it's weak or phishing-resistant, the trusted certificate authorities (the combined list null unless both stores were read, each store's own list null when that store wasn't), up to 100 of the users certificate sign-in targets that fail a check, plus the registration campaign, security defaults, password protection settings and the tenant's licences; Windows Hello for Business is set through device management and isn't covered.
+
+    Summary fields:
+
+    What was checked?
+    - authentication_methods_policy_readable — True if the authentication methods policy was read; false if not, and every method field reads null
+    - total_methods — Number of sign-in methods in the policy, enabled or not; null if the policy couldn't be read
+    - enabled_methods — List of the methods whose state is enabled (as Graph spells them, for example Fido2, MicrosoftAuthenticator, Sms); null if the policy couldn't be read
+    - enabled_method_count — Number of enabled methods; null if the policy couldn't be read
+
+    Does the tenant still allow weak methods?
+    - sms_enabled — True if the SMS method is enabled for the users and groups it targets; false if it's disabled or not in the policy; null if the policy couldn't be read
+    - voice_enabled — True if the voice call method is enabled; false if it's disabled or not in the policy; null if the policy couldn't be read
+    - weak_methods_enabled — List of enabled weak methods: SMS and voice call, which send one-time codes over the phone network that can be intercepted or phished; null if the policy couldn't be read
+    - weak_method_enabled — True if SMS or voice call is enabled; false if neither is; null if the policy couldn't be read
+
+    Does the tenant allow a phishing-resistant method?
+    - fido2_enabled — True if the FIDO2 method (security keys and passkeys, which only work on the real site, so a look-alike can't relay them) is enabled; false if it's disabled or not in the policy; null if the policy couldn't be read
+    - x509_certificate_enabled — True if certificate-based sign-in (X.509) is enabled; false if it's disabled or not in the policy; null if the policy couldn't be read
+    - x509_certificate_multi_factor — True if certificate-based sign-in defaults to multi-factor, so a certificate alone satisfies MFA; false if it defaults to single-factor; null if the policy couldn't be read, has no X.509 entry or reports no default. Set whether or not the method is enabled
+    - phishing_resistant_methods_enabled — List of enabled phishing-resistant methods: FIDO2, and X.509 certificates only when x509_certificate_multi_factor is true (binding rules that raise particular certificates to multi-factor aren't evaluated); null if the policy couldn't be read
+    - phishing_resistant_method_enabled — True if at least one phishing-resistant method is enabled; false if none is; null if the policy couldn't be read
+
+    Does certificate sign-in trust only current certificate authorities that publish revocation lists?
+    - trusted_certificate_authorities — Number of root and intermediate certificate authorities trusted for certificate sign-in across the classic store and the PKI-based trust store, a certificate authority in both (same thumbprint, or the same key identifier when a certificate can't be read) counted once; null unless both stores were read
+    - expired_certificate_authorities — Number of trusted certificate authorities whose certificate has expired (by either store's entry); null unless both stores were read
+    - certificate_authorities_expiry_unknown — Number of trusted certificate authorities whose expiry date couldn't be read from the certificate or the service; null unless both stores were read
+    - certificate_authorities_without_crl — Number of trusted certificate authorities with no certificate revocation list (CRL) address in at least one store, so a revoked user certificate signed by them isn't rejected; null unless both stores were read
+    - classic_store_certificate_authorities — Number of certificate authorities in the classic store; null if it couldn't be read
+    - classic_store_status — Whether the classic trust store was read (null if Microsoft Graph couldn't be reached at all):
+      - read (its certificate authorities are counted)
+      - not_authorized (the optional Organization.Read.All isn't granted; the run still succeeds)
+      - failed (the read failed, and the run exits non-zero)
+    - classic_store_missing_permission — Whether the classic trust store read was refused for a missing grant: Organization.Read.All when it was; null when the store was read or failed for another reason
+    - pki_store_certificate_authorities — Number of certificate authorities in the PKI-based trust store; null if it couldn't be read
+    - pki_store_status — Whether the PKI-based trust store was read (null if Microsoft Graph couldn't be reached at all):
+      - read (its certificate authorities are counted)
+      - not_authorized (the optional PublicKeyInfrastructure.Read.All isn't granted; the run still succeeds)
+      - not_available (this cloud doesn't offer the store; the run still succeeds)
+      - failed (the read failed, and the run exits non-zero)
+    - pki_store_missing_permission — Whether the PKI-based trust store read was refused for a missing grant: PublicKeyInfrastructure.Read.All when it was; null when the store was read or failed for another reason
+
+    Can each user targeted for certificate sign-in be matched to a certificate?
+    - x509_targeted_users — Number of enabled member accounts (not guests) the X.509 method includes and doesn't exclude, directly, as all users or through a group; 0 when X.509 is off; null if the policy, the users or a group the method names couldn't be read
+    - x509_targeted_users_unmapped — Number of targeted users no username binding can match to a certificate: they hold no certificate user id of the type a certificate-user-id binding matches on (such as X509:<SKI>… for the subject key identifier), and lack the user principal name a name binding would compare; 0 when X.509 is off; null if x509_targeted_users is null or the policy reports no bindings
+    - x509_targeted_users_mapping_unverified — Number of targeted users only a binding the fetcher can't check could match: a name binding (user principal name or on-premises user principal name), which matches only if the user's certificate carries that name, or a binding on a certificate field it doesn't recognise; 0 when X.509 is off; null if x509_targeted_users is null or the policy reports no bindings
+    - x509_targeted_users_without_certificate_user_ids — Number of targeted users with no certificate user ids, which the high-trust bindings (subject key identifier, public key hash) match against; 0 when X.509 is off; null if x509_targeted_users is null
+    - x509_targeted_users_with_weaker_methods — Number of targeted users an enabled method that isn't phishing-resistant still reaches, such as Microsoft Authenticator, SMS or a temporary access pass (X.509 itself and email one-time passcodes, which only guests sign in with, aren't counted); 0 when X.509 is off; null if x509_targeted_users is null or a group such a method names couldn't be read
+    - x509_targeted_users_with_weak_methods — Number of targeted users SMS or voice call still reaches; 0 when X.509 is off; null if x509_targeted_users is null or a group SMS or voice call names couldn't be read
+    - x509_certificate_users_truncated — True if more than 100 targeted users fail a check (not matched by a certificate user id, holding none, or reached or possibly reached by a weaker method), so the evidence lists only the first 100; false if it lists them all; null if x509_targeted_users is null
+
+    Does this policy alone decide which methods work?
+    - policy_migration_state — Whether the move from the legacy per-user MFA and self-service password reset (SSPR) policies to this policy is finished: preMigration, migrationInProgress or migrationComplete; null if the policy couldn't be read
+    - legacy_method_policies_apply — True if the migration isn't complete, so the legacy MFA and SSPR policies can still allow a method this policy disables; false if it's complete; null if the migration state couldn't be read
+
+    Are users pushed to set up MFA?
+    - registration_campaign_state — Whether the registration campaign, which prompts users at sign-in to set up a stronger method, is on: enabled, disabled or default (Microsoft decides); null if the policy has no campaign or couldn't be read
+    - security_defaults_enabled — True if security defaults are on (Microsoft's baseline that has every user register for MFA, prompts admins for MFA and blocks legacy authentication); false if they're off; null if the setting couldn't be read
+
+    Are common passwords and password guessing blocked?
+    - entra_id_tier — Whether the tenant has Entra ID P2, P1 or neither: p2, p1 or free, from the service plans of its active subscriptions (a lapsed one doesn't count); null if the licences couldn't be read
+    - password_settings_source — Whether the password protection values come from a setting the tenant saved (directory_setting) or, when it never saved one, Microsoft's defaults (template_defaults); null if the tenant's settings couldn't be read (Microsoft's defaults are not used then, since the tenant may have saved other values), or if it saved none and Microsoft's defaults couldn't be read
+    - custom_banned_password_check_enabled — True if the custom banned-password check is switched on; false if it's off; null if the value couldn't be read, as always when the tenant's settings couldn't be read
+    - custom_banned_password_count — Number of words on the custom banned-password list (the words aren't recorded); null if the tenant's settings couldn't be read, or if it saved none and Microsoft's defaults couldn't be read
+    - custom_banned_password_list_enforced — True only if the custom check is on, the list has at least one word and the tenant has Entra ID P1 or P2; false if any of the three is missing; null if the check setting or the licence tier couldn't be read
+    - lockout_threshold — Number of failed sign-ins before smart lockout first locks an account; null if the value couldn't be read, as always when the tenant's settings couldn't be read
+    - lockout_duration_in_seconds — Number of seconds an account stays locked after its first smart lockout (later lockouts last longer); null if the value couldn't be read, as always when the tenant's settings couldn't be read
