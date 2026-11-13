@@ -86,7 +86,7 @@ def test_each_tab_focuses_a_widget_in_its_own_page(tmp_path, run_tui):
 
     async def body(app, pilot):
         landed = {}
-        for key, tab in zip("1234", app.screen.TAB_IDS):
+        for key, tab in zip("12345", app.screen.TAB_IDS):
             await pilot.press(key)
             await pilot.pause()
             assert app.screen.query_one(TabbedContent).active == tab
@@ -104,6 +104,7 @@ def test_each_tab_focuses_a_widget_in_its_own_page(tmp_path, run_tui):
         "tab-run": "btn-run",
         "tab-evidence": "evidence-runs",
         "tab-upload": "scripts-preview",
+        "tab-pipelines": "issues-summary",
     }
 
 

@@ -1,14 +1,11 @@
 """Paramify page — push to Paramify.
 
-Three write actions share this page because they share all their plumbing (token,
-base_url, overrides config, the event-stream shape), stacked as panels:
+Two write actions share this page because they share all their plumbing (token,
+base_url, overrides config, the event-stream shape), stacked as panels. Scan
+reports go to their assessments from the Pipelines page:
 
   * Evidence upload — attach a completed run's evidence to its evidence sets
     (run-scoped; follows Evidence in the tab flow).
-  * Issue-report intake — post a run's raw scan reports to their assessments
-    (run-scoped). A separate action because it is a separate endpoint: the same
-    run can hold both kinds, and uploading evidence leaves the reports unsent.
-    The panel stays empty for a run that collected none, which is most runs.
   * Scripts sync — push each fetcher's entry script and associate it to its
     evidence set (repo-scoped provisioning; independent of the selected run).
     Preview runs a read-only --dry-run and surfaces the per-fetcher plan
@@ -31,13 +28,10 @@ from framework.sync.render import render_plan
 from framework.tui import palette
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.components.table import DataTable
-from framework.tui.modals import ConfirmModal, PickerModal
+from framework.tui.modals import ConfirmModal
 from framework.tui.screens.paramify_events import (
-    COUNT_LABELS,
-    PipelineEvent,
     ScriptsSyncEvent,
     UploadEvent,
-    job_text,
     latest_run_scoped,
     output_dir,
     upload_event_lines,
@@ -45,19 +39,11 @@ from framework.tui.screens.paramify_events import (
 
 
 class UploadPage(ButtonRowNav, Vertical):
-    HINTS = [("ctrl+u", "upload"), ("i", "send reports"), ("j", "jobs"),
-             ("C", "close cycle"), ("p", "preview"), ("ctrl+s", "sync"),
+    HINTS = [("ctrl+u", "upload"), ("p", "preview"), ("ctrl+s", "sync"),
              ("ctrl+r", "refresh")]
 
     BINDINGS = [
         Binding("ctrl+u", "upload_run", "Upload"),
-        # Not ctrl+i: most terminals send the same byte for ctrl+i and Tab, so
-        # the binding never fired. This page has no Input to eat a bare letter.
-        Binding("i", "intake_issues", "Send reports"),
-        Binding("j", "pipeline_jobs", "Jobs"),
-        # Shifted on purpose: a close auto-closes every open issue the cycle
-        # never saw, and cannot be undone.
-        Binding("C", "close_cycle", "Close cycle"),
         # p mirrors the manifest list's preview key (this page has no Input to eat
         # it); ctrl+p stays as an alias, which needs App.ENABLE_COMMAND_PALETTE
         # off — Textual's palette claims ctrl+p as a priority binding.
@@ -73,11 +59,6 @@ class UploadPage(ButtonRowNav, Vertical):
             yield Static("", id="evidence-notes", classes="panel-notes")
             with Horizontal(id="evidence-actions"):
                 yield Button("Upload to Paramify", variant="primary", id="upload-submit", disabled=True)
-        with Vertical(id="issues-panel", classes="panel"):
-            yield DataTable(id="issues-summary")
-            yield Static("", id="issues-notes", classes="panel-notes")
-            with Horizontal(id="issues-actions"):
-                yield Button("Send to Pipeline", variant="primary", id="issues-submit", disabled=True)
         with Vertical(id="scripts-panel", classes="panel"):
             yield Static("", id="scripts-header")
             yield Static("", id="scripts-plan-summary")
@@ -91,9 +72,6 @@ class UploadPage(ButtonRowNav, Vertical):
             yield RichLog(id="upload-log", markup=False, wrap=True, highlight=False)
             yield Static(
                 f"progress streams here — [bold {palette.ACCENT}]ctrl+u[/] upload · "
-                f"[bold {palette.ACCENT}]i[/] send reports · "
-                f"[bold {palette.ACCENT}]j[/] jobs · "
-                f"[bold {palette.ACCENT}]C[/] close cycle · "
                 f"[bold {palette.ACCENT}]ctrl+p[/] preview · [bold {palette.ACCENT}]ctrl+s[/] sync",
                 classes="empty-hint",
             )
@@ -105,16 +83,13 @@ class UploadPage(ButtonRowNav, Vertical):
         self._busy_planning = False
         self._run_dir: str | None = None
         self._run_manifest = None  # see _rebuild_evidence
-        self._issues_run_dir: str | None = None
         self._preflight: dict | None = None
-        self._issues_preflight: dict | None = None
         self._scripts_preflight: dict | None = None
         self._plan_counts: dict[str, int] = {}
         # Which stage the shared log and banner are currently reporting on.
         self._upload_kind = "evidence"
 
         self.query_one("#evidence-panel", Vertical).border_title = "evidence upload"
-        self.query_one("#issues-panel", Vertical).border_title = "scan reports"
         self.query_one("#scripts-panel", Vertical).border_title = "scripts sync"
         log_panel = self.query_one("#upload-log-panel", Vertical)
         log_panel.border_title = "log"
@@ -125,11 +100,6 @@ class UploadPage(ButtonRowNav, Vertical):
         ev.zebra_stripes = True
         ev.add_columns("field", "value")
 
-        issues = self.query_one("#issues-summary", DataTable)
-        issues.cursor_type = "row"
-        issues.zebra_stripes = True
-        issues.add_columns("field", "value")
-
         plan = self.query_one("#scripts-plan", DataTable)
         plan.cursor_type = "row"
         plan.zebra_stripes = True
@@ -138,31 +108,27 @@ class UploadPage(ButtonRowNav, Vertical):
         self.rebuild()
 
     def focus_default(self) -> None:
-        """Focus the first action that can run, else a panel's table.
+        """Focus the first action that can run, else the evidence table.
 
-        Something inside the page must hold focus or none of its keys fire. A
-        pipeline manifest has no evidence to upload and no scripts to sync, so
-        falling back only to the scripts Preview button — disabled there too —
-        left focus nowhere and `i`, `j` and `C` dead on exactly the manifests
-        they exist for.
+        Something inside the page must hold focus or none of its keys fire.
         """
         self.rebuild()
         self._focus_first_action()
 
     def _focus_first_action(self) -> None:
-        for bid in ("#upload-submit", "#issues-submit", "#scripts-preview"):
+        for bid in ("#upload-submit", "#scripts-preview"):
             button = self.query_one(bid, Button)
             if not button.disabled:
                 button.focus()
                 return
-        self.query_one("#issues-summary", DataTable).focus()
+        self.query_one("#evidence-summary", DataTable).focus()
 
     def _refocus_if_lost(self) -> None:
         """Put focus back in this page after an operation, if it fell out.
 
         Starting a send disables every button, and the one that held focus
-        takes it with it, so focus drops to the tab strip, where `i`, `j` and `C`
-        (this page's keys) do nothing until the user presses 5 again. So when an
+        takes it with it, so focus drops to the tab strip, where this page's keys do
+        nothing until the user presses 4 again. So when an
         operation ends, return focus to the page. Left alone when the user has
         meanwhile moved to another tab or a modal is open, or when focus is
         still somewhere usable in the page.
@@ -193,17 +159,6 @@ class UploadPage(ButtonRowNav, Vertical):
         entries = (manifest.get("run") or {}).get("fetchers") or []
         return {e.get("use") for e in entries if e.get("use")}
 
-    def _latest(self, kind: str) -> dict | None:
-        """The run a panel acts on: the newest one holding this kind.
-
-        Evidence and pipeline manifests usually share an output dir, so each
-        panel looks for its own kind rather than taking the newest run. Scoped
-        to the active manifest's runs once it has any, so a pipeline manifest's
-        evidence panel does not offer another manifest's evidence; runs from
-        before run attribution existed are the fallback.
-        """
-        return self._latest_scoped(kind)[0]
-
     def _latest_scoped(self, kind: str) -> tuple[dict | None, bool]:
         """_latest, and whether the run came from the active manifest's own runs."""
         return latest_run_scoped(self.app, kind)
@@ -214,7 +169,6 @@ class UploadPage(ButtonRowNav, Vertical):
         if self._busy:
             return
         self._rebuild_evidence()
-        self._rebuild_issues()
         self._rebuild_scripts()
 
     def _rebuild_evidence(self) -> None:
@@ -272,71 +226,6 @@ class UploadPage(ButtonRowNav, Vertical):
             upload.disabled = False
         else:
             self._notes("evidence", [("preflight error", err, palette.FAIL) for err in preflight["errors"]])
-
-    def _rebuild_issues(self) -> None:
-        """Issue-report readiness for the newest run that collected any.
-
-        Its own run, not the evidence panel's: a pipeline manifest's scan run and
-        an evidence manifest's run usually sit side by side. With none, the panel
-        says so and the button stays disabled — not an error. Preflight is only
-        consulted when there is something to send.
-        """
-        self._issues_preflight = None
-        self._issues_run_dir = None
-        table = self.query_one("#issues-summary", DataTable)
-        table.clear()
-        self._notes("issues", [])
-        submit = self.query_one("#issues-submit", Button)
-        submit.disabled = True
-
-        try:
-            latest = self._latest("issue_report")
-        except Exception as exc:
-            self._notes("issues", [("status", f"cannot list runs: {exc}", palette.FAIL)])
-            return
-        if latest is None:
-            table.add_row("status", Text("no run collected scan reports", style="dim"))
-            return
-
-        self._issues_run_dir = latest["dir"]
-        table.add_row("selected run", latest["run_id"])
-        table.add_row("reports", str(latest.get("issue_reports", 0)))
-        try:
-            preflight = api.issues_upload_preflight(self._issues_run_dir, self.app.root_path)
-        except Exception as exc:
-            self._notes("issues", [("preflight", str(exc), palette.FAIL)])
-            return
-
-        self._issues_preflight = preflight
-        table.add_row("Paramify API", preflight["base_url"])
-        table.add_row(
-            "API token",
-            palette.pill("present", "ok") if preflight["token_present"]
-            else palette.pill("missing", "fail"),
-        )
-        # The plan: per assessment, what one upload will send. A close is the
-        # row to read before confirming, so it gets the warning colour.
-        for plan in preflight.get("assessments") or []:
-            label = plan.get("assessment_name") or plan["assessment_id"]
-            if plan.get("error"):
-                value = Text(plan["error"], style=palette.FAIL)
-            else:
-                op = plan.get("operation") or "?"
-                value = Text(
-                    f"{plan['files']} file(s) → {op}",
-                    style=palette.WARN if op == "PROCESS_CLOSE" else "",
-                )
-                if plan.get("close_skipped"):
-                    value.append(f"   {plan['close_skipped']}", style="dim")
-            table.add_row(label, value)
-        # Non-gating: a report with no assessment is skipped by the uploader, not
-        # a reason to refuse the batch. Shown so it is not a surprise afterwards.
-        notes = [("warning", warning, palette.WARN) for warning in preflight.get("warnings") or []]
-        if preflight["ok"]:
-            submit.disabled = False
-        else:
-            notes += [("preflight error", err, palette.FAIL) for err in preflight["errors"]]
-        self._notes("issues", notes)
 
     def _rebuild_scripts(self) -> None:
         """Scripts-sync readiness (repo-scoped). Preview/Sync enabled whenever
@@ -457,55 +346,6 @@ class UploadPage(ButtonRowNav, Vertical):
         try:
             api.upload_run(run_dir, root, on_event=lambda ev: self.post_message(UploadEvent(ev)),
                            manifest_path=manifest_path)
-        except Exception as exc:
-            self.post_message(UploadEvent({"event": "_upload_failed", "error": str(exc)}))
-
-    # -- actions: issue-report intake ------------------------------------- #
-
-    @on(Button.Pressed, "#issues-submit")
-    def _on_intake(self) -> None:
-        self.action_intake_issues()
-
-    def action_intake_issues(self) -> None:
-        if self._busy:
-            self.notify("A Paramify operation is already in progress.")
-            return
-        pf = self._issues_preflight
-        run_dir = self._issues_run_dir
-        if not run_dir or not pf or not pf.get("ok"):
-            self.notify("No scan reports ready to send.")
-            return
-
-        def go(ok: bool) -> None:
-            if ok:
-                self._start_intake(run_dir)
-
-        closing = [
-            p for p in pf.get("assessments") or [] if p.get("operation") == "PROCESS_CLOSE"
-        ]
-        question = (
-            f"Send {pf['file_count']} scan report(s) into their assessments' "
-            f"pipelines at {pf['base_url']} and process them?"
-        )
-        if closing:
-            question += (
-                f"\n\nThis also closes the cycle on {len(closing)} assessment(s). "
-                "Open issues not in these files will be auto-closed as resolved."
-            )
-        self.app.push_screen(ConfirmModal(question), go)
-
-    def _start_intake(self, run_dir: str) -> None:
-        self._uploading = True
-        self._upload_kind = "scan report"
-        self._begin_log(Text("sending scan reports...", style=palette.WARN))
-        self._issues_worker(run_dir, self.app.root_path)
-
-    @work(thread=True, exclusive=True)
-    def _issues_worker(self, run_dir: str, root) -> None:
-        try:
-            api.issues_upload_run(
-                run_dir, root, on_event=lambda ev: self.post_message(UploadEvent(ev))
-            )
         except Exception as exc:
             self.post_message(UploadEvent({"event": "_upload_failed", "error": str(exc)}))
 
@@ -649,190 +489,6 @@ class UploadPage(ButtonRowNav, Vertical):
             msg.append(f"   {ev['log_path']}", style="dim")
         self._set_banner(msg)
 
-    # -- pipeline jobs and cycle close ----------------------------------- #
-
-    def action_pipeline_jobs(self) -> None:
-        """List recent pipeline jobs; enter on one offers retry or cancel."""
-        self.notify("Loading pipeline jobs…")
-        self._jobs_worker(self.app.root_path)
-
-    @work(thread=True, exclusive=True, group="pipeline")
-    def _jobs_worker(self, root) -> None:
-        try:
-            jobs = api.issues_jobs(root, limit=30)
-        except Exception as exc:
-            self.post_message(PipelineEvent({"event": "failed", "what": "list jobs",
-                                             "error": str(exc)}))
-            return
-        self.post_message(PipelineEvent({"event": "jobs", "jobs": jobs}))
-
-    def _show_jobs(self, jobs: list) -> None:
-        if not jobs:
-            self.notify("No pipeline jobs visible to this API key.")
-            return
-        by_id = {j["job_id"]: j for j in jobs}
-        # The API names an assessment only by id; the manifest knows the names
-        # of the ones it feeds, which are the ones worth recognising here.
-        names = dict(self._manifest_assessments())
-        options = []
-        for j in jobs:
-            counts = j.get("counts") or {}
-            done = ", ".join(
-                f"{counts[k]} {label}" for k, label in COUNT_LABELS if counts.get(k) is not None
-            )
-            aid = j.get("assessment_id") or ""
-            detail = done
-            if j.get("blocked_by"):
-                detail = f"blocked by {j['blocked_by']}"
-            elif j.get("error"):
-                error = str(j["error"])
-                detail = error if len(error) <= 70 else error[:69] + "…"
-            options.append((j["job_id"], (
-                f"{(j.get('created_at') or '')[:16]}  {j.get('status') or '?':<11} "
-                f"{j.get('type') or '?':<13} {names.get(aid, aid)}"
-                f"{chr(10) + '    ' + detail if detail else ''}"
-            )))
-
-        def chosen(job_id):
-            if job_id is not None:
-                self._offer_job_actions(by_id[job_id])
-
-        self.app.push_screen(
-            PickerModal("Pipeline jobs", options,
-                        subtitle="newest first — enter on a failed or queued job to retry or cancel it"),
-            chosen,
-        )
-
-    def _offer_job_actions(self, job: dict) -> None:
-        status = job.get("status")
-        actions = []
-        if status == "FAILED":
-            actions.append(("retry", "retry — run it again; the jobs behind it follow"))
-        if status in ("FAILED", "QUEUED"):
-            actions.append((
-                "cancel", "cancel — also cancels every unfinished job queued behind it",
-            ))
-        if not actions:
-            self.app.push_screen(ConfirmModal(
-                f"Job {job['job_id']} is {status}; there is nothing to retry or cancel.\n\n"
-                f"{job_text(job).plain.strip()}"
-            ))
-            return
-
-        def picked(action):
-            if action is None:
-                return
-
-            def go(ok: bool) -> None:
-                if ok:
-                    self._job_action_worker(self.app.root_path, job["job_id"], action)
-
-            self.app.push_screen(
-                ConfirmModal(f"{action.capitalize()} pipeline job {job['job_id']}?"), go
-            )
-
-        self.app.push_screen(
-            PickerModal(f"Job {job['job_id']} — {status}", actions), picked
-        )
-
-    @work(thread=True, exclusive=True, group="pipeline")
-    def _job_action_worker(self, root, job_id: str, action: str) -> None:
-        try:
-            job = api.issues_job_action(root, job_id, action)
-        except Exception as exc:
-            self.post_message(PipelineEvent({"event": "failed", "what": f"{action} {job_id}",
-                                             "error": str(exc)}))
-            return
-        self.post_message(PipelineEvent({"event": "job_done", "action": action, "job": job}))
-
-    def _manifest_assessments(self) -> list:
-        """(id, label) for every assessment the active manifest's issue-report
-        entries point at, entry config first, then platform config."""
-        run = (getattr(self.app, "manifest", None) or {}).get("run") or {}
-        seen: dict = {}
-        for cfg in [e.get("config") or {} for e in run.get("fetchers") or []] + [
-            (p or {}).get("config") or {} for p in (run.get("platforms") or {}).values()
-        ]:
-            aid = cfg.get("assessment_id")
-            if aid and aid not in seen:
-                seen[aid] = cfg.get("assessment_name") or aid
-        return list(seen.items())
-
-    def action_close_cycle(self) -> None:
-        """Close the current cycle of one of the manifest's assessments."""
-        if self._busy:
-            self.notify("A Paramify operation is already in progress.")
-            return
-        choices = self._manifest_assessments()
-        if not choices:
-            self.notify("No scan report in this manifest points at an assessment.")
-            return
-
-        def chosen(aid):
-            if aid is None:
-                return
-            label = dict(choices)[aid]
-
-            def go(ok: bool) -> None:
-                if ok:
-                    self._uploading = True
-                    self._disable_actions()
-                    self._upload_kind = "cycle close"
-                    self._begin_log(Text(f"closing the current cycle of {label}...",
-                                         style=palette.WARN))
-                    self._close_worker(self.app.root_path, aid)
-
-            self.app.push_screen(ConfirmModal(
-                f"Close the current cycle of {label}?\n\n"
-                "Every open issue the cycle never saw will be auto-closed as resolved, "
-                "and the next upload opens a new cycle. This cannot be undone."
-            ), go)
-
-        self.app.push_screen(
-            PickerModal("Close which assessment's cycle?", choices,
-                        subtitle="for assessments filled by several runs (close_cycle: never)"),
-            chosen,
-        )
-
-    @work(thread=True, exclusive=True, group="pipeline")
-    def _close_worker(self, root, assessment_id: str) -> None:
-        try:
-            job = api.issues_close(root, assessment_id)
-        except Exception as exc:
-            self.post_message(PipelineEvent({"event": "failed", "what": "close",
-                                             "error": str(exc), "busy": True}))
-            return
-        self.post_message(PipelineEvent({"event": "closed", "job": job}))
-
-    def on_pipeline_event(self, message: PipelineEvent) -> None:
-        ev = message.ev
-        kind = ev.get("event")
-        log = self.query_one("#upload-log", RichLog)
-        if kind == "jobs":
-            self._show_jobs(ev["jobs"])
-        elif kind == "job_done":
-            self.query_one("#upload-log-panel", Vertical).set_class(False, "empty")
-            log.write(Text(f"{ev['action']}:", style="bold"))
-            log.write(job_text(ev["job"]))
-            self.notify(f"{ev['action']}: job {ev['job'].get('job_id')} is now "
-                        f"{ev['job'].get('status')}")
-        elif kind == "closed":
-            self._uploading = False
-            self._restore_actions()
-            job = ev["job"]
-            log.write(job_text(job))
-            ok = job.get("status") == "COMPLETED"
-            self._set_banner(Text(
-                f"cycle close {job.get('status')}", style=palette.OK if ok else palette.FAIL,
-            ))
-        elif kind == "failed":
-            self.query_one("#upload-log-panel", Vertical).set_class(False, "empty")
-            if ev.get("busy"):
-                self._uploading = False
-                self._restore_actions()
-            log.write(Text(f"{ev['what']} failed: {ev['error']}", style=f"bold {palette.FAIL}"))
-            self.notify(f"{ev['what']} failed: {ev['error']}", severity="error", timeout=12)
-
     # -- events: scripts sync -------------------------------------------- #
 
     def on_scripts_sync_event(self, message: ScriptsSyncEvent) -> None:
@@ -936,14 +592,11 @@ class UploadPage(ButtonRowNav, Vertical):
     # -- button state ----------------------------------------------------- #
 
     def _disable_actions(self) -> None:
-        for bid in ("#upload-submit", "#issues-submit", "#scripts-preview", "#scripts-submit"):
+        for bid in ("#upload-submit", "#scripts-preview", "#scripts-submit"):
             self.query_one(bid, Button).disabled = True
 
     def _restore_actions(self) -> None:
         self.query_one("#upload-submit", Button).disabled = not (self._preflight and self._preflight.get("ok"))
-        self.query_one("#issues-submit", Button).disabled = not (
-            self._issues_preflight and self._issues_preflight.get("ok")
-        )
         has_fetchers = bool(self._scripts_preflight and self._scripts_preflight.get("fetcher_count", 0) > 0)
         self.query_one("#scripts-preview", Button).disabled = not has_fetchers
         self.query_one("#scripts-submit", Button).disabled = not has_fetchers

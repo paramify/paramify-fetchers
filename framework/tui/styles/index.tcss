@@ -289,7 +289,7 @@ UploadPage {
 .panel-notes { height: auto; padding: 0 1; }
 #evidence-actions { height: auto; align: left middle; padding-top: 1; }
 
-/* Sized to content like the evidence panel: for a run with no issue reports it
+/* Pipelines send panel: sized to content, so a run with no scan reports
    collapses to a single "collected none" line instead of holding open space. */
 #issues-panel { height: auto; margin: 1 1 0 1; }
 #issues-summary { height: auto; }
@@ -325,6 +325,19 @@ UploadPage {
 #upload-log { height: 1fr; }
 
 #upload-banner {
+    height: auto;
+    padding: 0 1;
+}
+
+/* Pipelines: the scan-report fetchers, the send panel and its log. */
+PipelinesPage {
+    height: 1fr;
+}
+#pipelines-fetchers-panel { height: auto; max-height: 12; margin: 1 1 0 1; }
+#pipelines-fetchers { height: auto; max-height: 10; }
+#pipelines-log-panel { height: 1fr; min-height: 6; margin: 1 1 0 1; }
+#pipelines-log { height: 1fr; }
+#pipelines-banner {
     height: auto;
     padding: 0 1;
 }

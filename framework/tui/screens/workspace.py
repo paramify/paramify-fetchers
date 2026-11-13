@@ -1,7 +1,7 @@
 """WorkspaceScreen — the four-tab fetcher workspace.
 
 Hosts the shared chrome (AppHeader + HintFooter) and the Fetchers / Run /
-Evidence / Paramify tabs. Fetchers holds the catalog and the manifest on one
+Evidence / Paramify / Pipelines tabs. Fetchers holds the catalog and the manifest on one
 page. The App pushes this once a manifest is chosen
 (from the welcome front door, or directly via --manifest). The active manifest can be
 swapped in place with the quick-picker (`m`), which reloads the pages.
@@ -18,12 +18,13 @@ from framework.tui.components.chrome import AppHeader, HintFooter
 from framework.tui.screens.catalog import CatalogPanel
 from framework.tui.screens.evidence import EvidencePage
 from framework.tui.screens.fetchers import FetchersPage
+from framework.tui.screens.pipelines import PipelinesPage
 from framework.tui.screens.run import RunPage
 from framework.tui.screens.upload import UploadPage
 
 
 class WorkspaceScreen(Screen):
-    TAB_IDS = ["tab-fetchers", "tab-run", "tab-evidence", "tab-upload"]
+    TAB_IDS = ["tab-fetchers", "tab-run", "tab-evidence", "tab-upload", "tab-pipelines"]
 
     # A one-shot callable that overrides the default focus for the next pane
     # activation (used by the search shortcut to land on the filter box instead
@@ -35,13 +36,14 @@ class WorkspaceScreen(Screen):
     # esc is listed because it is the only way out of a focused text field back
     # to the shortcut keys: an Input consumes every printable key, so while one
     # holds focus none of the hints above it are live.
-    WORKSPACE_HINTS = [("1-4", "tabs"), ("m", "manifest"), ("esc", "leave field"), ("q", "quit")]
+    WORKSPACE_HINTS = [("1-5", "tabs"), ("m", "manifest"), ("esc", "leave field"), ("q", "quit")]
 
     BINDINGS = [
         Binding("1", "go_tab(0)", "Fetchers"),
         Binding("2", "go_tab(1)", "Run"),
         Binding("3", "go_tab(2)", "Evidence"),
         Binding("4", "go_tab(3)", "Paramify"),
+        Binding("5", "go_tab(4)", "Pipelines"),
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "unfocus", "Unfocus", show=False),
         Binding("m", "switch_manifest", "Manifest…"),
@@ -60,6 +62,8 @@ class WorkspaceScreen(Screen):
                 yield EvidencePage(id="evidence-page")
             with TabPane("Paramify", id="tab-upload"):
                 yield UploadPage(id="upload-page")
+            with TabPane("Pipelines", id="tab-pipelines"):
+                yield PipelinesPage(id="pipelines-page")
         yield HintFooter()
 
     def on_mount(self) -> None:
@@ -76,10 +80,11 @@ class WorkspaceScreen(Screen):
             self.query_one(EvidencePage).rebuild_runs()
         except Exception:
             pass
-        try:
-            self.query_one(UploadPage).rebuild()
-        except Exception:
-            pass
+        for page in (UploadPage, PipelinesPage):
+            try:
+                self.query_one(page).rebuild()
+            except Exception:
+                pass
         self.query_one(RunPage).reset_state()  # clear stale run state (no-op if running)
         self._update_chrome()
 

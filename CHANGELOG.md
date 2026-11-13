@@ -1662,6 +1662,12 @@ schemas and the `paramify` CLI — not the internal code.
   catalog keeps half the page, and the blank rows around the filter and the
   settings row are dropped. An empty manifest takes only the rows of its
   hint. The add-fetchers picker is removed.
+- **Scan reports are on their own Pipelines tab in the TUI.** The tabs are
+  Fetchers, Run, Evidence, Paramify and Pipelines (keys `1` to `5`). The
+  Pipelines tab lists the scan-report fetchers in the manifest, with the assessment
+  each one sends to and its close-cycle setting. `i` sends the reports, `j`
+  lists the pipeline jobs and `C` closes a cycle, as before. The Paramify tab
+  keeps the evidence upload and the scripts sync.
 - **Only the TUI panel that has focus has a color.** The other panels have a
   gray border, and the list in them has a gray cursor. The catalog's cursor
   stays bright while its filter has focus, because up, down and enter in the

@@ -109,7 +109,7 @@ def test_tabs_are_fetchers_run_evidence_paramify(tmp_path, run_tui):
         return labels, tabs.active, _focus_id(app)
 
     labels, active, focus = run_tui(body, _manifest_with(tmp_path))
-    assert labels == ["Fetchers", "Run", "Evidence", "Paramify"]
+    assert labels == ["Fetchers", "Run", "Evidence", "Paramify", "Pipelines"]
     assert active == "tab-fetchers" and focus == "catalog-tree"
 
 
@@ -329,7 +329,7 @@ def test_footer_hints_follow_focus(tmp_path, run_tui):
     assert "targets" in in_manifest and "validate" in in_manifest
     # `a` in the manifest moves to the catalog filter; the hint says so.
     assert "a find to add" in in_manifest and "a add" not in in_manifest
-    assert "1-4" in in_catalog and "1-4" in in_manifest  # the workspace keys stay
+    assert "1-5" in in_catalog and "1-5" in in_manifest  # the workspace keys stay
 
 
 def _sizes(path: Path, size: tuple) -> dict:

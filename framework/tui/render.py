@@ -91,7 +91,7 @@ _KIND_ABOUT = {
         "CSV, a STIG report — as the tool's own file, never rewritten.",
         "Sent to an assessment's pipeline, which turns it into issues. Each one "
         "needs an assessment, chosen per manifest with A on its entry on the Fetchers tab; "
-        "send with i on the Paramify tab. Usually kept in a manifest of its own.",
+        "send with i on the Pipelines tab. Usually kept in a manifest of its own.",
     ),
 }
 
@@ -127,7 +127,7 @@ def _close_label(policy: Optional[str]) -> Text:
     if policy == CLOSE_AFTER_RUN:
         return Text("after each complete run (after_run)", style=palette.FG)
     if policy == CLOSE_NEVER:
-        return Text("by hand — C on the Paramify tab (never)", style=palette.FG)
+        return Text("by hand — C on the Pipelines tab (never)", style=palette.FG)
     return Text("unset — press A", style=palette.WARN)
 
 
@@ -175,7 +175,7 @@ def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest:
             rows.append(("assessment", Text(f"a {atype} assessment, chosen per manifest", style=palette.FG)))
         fmt = ir.get("format")
         rows.append(("format", Text(f"{fmt + ' — ' if fmt else ''}the tool's own file, never enveloped", style="dim")))
-        rows.append(("send", Text("i on the Paramify tab, to the assessment's pipeline", style="dim")))
+        rows.append(("send", Text("i on the Pipelines tab, to the assessment's pipeline", style="dim")))
     else:
         es = f.get("evidence_set")
         if es:

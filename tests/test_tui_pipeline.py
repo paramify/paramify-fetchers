@@ -1,4 +1,4 @@
-"""TUI tests for the pipeline actions on the Paramify tab: jobs (`j`) and the
+"""TUI tests for the pipeline actions on the Pipelines tab: jobs (`j`) and the
 cycle close (`C`), plus the run console's hint that issue reports are waiting.
 
 The API is faked at the framework.api boundary; the app, its modals and its
@@ -19,6 +19,7 @@ from rich.text import Text  # noqa: E402
 from framework import api  # noqa: E402
 from framework.tui.modals import ConfirmModal, PickerModal  # noqa: E402
 from framework.tui.screens.run import RunPage  # noqa: E402
+from framework.tui.screens.pipelines import PipelinesPage  # noqa: E402
 from framework.tui.screens.upload import UploadPage  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -67,7 +68,7 @@ def test_j_lists_pipeline_jobs(tmp_path, monkeypatch, run_tui):
     monkeypatch.setattr(api, "issues_jobs", lambda root, **kw: jobs)
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         await pilot.press("j")
         await _settle(app, pilot)
@@ -90,7 +91,7 @@ def test_a_failed_job_offers_retry_and_cancel_behind_a_confirm(tmp_path, monkeyp
     )
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         await pilot.press("j")
         await _settle(app, pilot)
@@ -122,7 +123,7 @@ def test_shift_c_closes_a_manifest_assessment_after_a_warning(tmp_path, monkeypa
         app.manifest["run"]["fetchers"][0]["config"] = {
             "assessment_id": "A-1", "assessment_name": "Monthly Scan",
         }
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         await pilot.press("C")
         await pilot.pause()
@@ -141,7 +142,7 @@ def test_shift_c_closes_a_manifest_assessment_after_a_warning(tmp_path, monkeypa
 
 def test_shift_c_with_no_assessment_says_so(tmp_path, run_tui):
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         await pilot.press("C")
         await pilot.pause()
@@ -163,9 +164,9 @@ def test_run_console_points_at_waiting_issue_reports(tmp_path, run_tui):
     run_tui(body, _write_manifest(tmp_path))
 
 
-def test_each_panel_picks_the_newest_run_of_its_own_kind(tmp_path, run_tui):
+def test_each_page_picks_the_newest_run_of_its_own_kind(tmp_path, run_tui):
     """An evidence manifest and a pipeline manifest share the output dir; the
-    issue-report panel must not go blank because the evidence run is newer."""
+    Pipelines page must not go blank because the evidence run is newer."""
     out = tmp_path / "evidence"
     scans = issue_run(out, "2026-09-01T00-00-00Z")
     evidence = evidence_run(out, "2026-09-02T00-00-00Z")
@@ -173,9 +174,10 @@ def test_each_panel_picks_the_newest_run_of_its_own_kind(tmp_path, run_tui):
     async def body(app, pilot):
         await pilot.press("4")
         await pilot.pause()
-        page = app.screen.query_one(UploadPage)
-        assert page._run_dir == str(evidence)
-        assert page._issues_run_dir == str(scans)
+        assert app.screen.query_one(UploadPage)._run_dir == str(evidence)
+        await pilot.press("5")
+        await pilot.pause()
+        assert app.screen.query_one(PipelinesPage)._issues_run_dir == str(scans)
 
     run_tui(body, _write_manifest(tmp_path))
 
@@ -207,30 +209,41 @@ def test_enter_in_the_picker_filter_takes_the_highlighted_option(tmp_path, run_t
     assert picked == ["b", "b"]
 
 
-def test_paramify_tab_keys_work_on_a_pipeline_only_manifest(tmp_path, monkeypatch, run_tui):
-    """No evidence, no scripts: every button but Send is disabled. Focus still has
-    to land in the page, or `i` does nothing."""
+def test_pipelines_keys_work_on_a_pipeline_only_manifest(tmp_path, monkeypatch, run_tui):
+    """Focus has to land in the page, or `i` does nothing."""
     out = tmp_path / "evidence"
     issue_run(out, "2026-09-01T00-00-00Z")
-
-    def no_scripts(page):  # what a pipeline manifest sees: nothing to sync
-        from textual.widgets import Button
-        for bid in ("#scripts-preview", "#scripts-submit"):
-            page.query_one(bid, Button).disabled = True
-
-    monkeypatch.setattr(UploadPage, "_rebuild_scripts", no_scripts)
     monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "t")
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
-        page = app.screen.query_one(UploadPage)
+        page = app.screen.query_one(PipelinesPage)
         assert app.focused is not None and app.focused in page.walk_children()
         await pilot.press("i")
         await pilot.pause()
         assert isinstance(app.screen, ConfirmModal)
 
     run_tui(body, _write_manifest(tmp_path))
+
+
+def test_pipelines_tab_lists_the_scan_report_fetchers(tmp_path, run_tui):
+    manifest = api.init_manifest()
+    api.set_output_dir(manifest, str(tmp_path / "evidence"))
+    api.add_entry(manifest, "demo_hello")
+    api.add_entry(manifest, "qualys_vmdr_vulnerability_findings")
+    path = tmp_path / "scans.yaml"
+    api.dump_manifest(manifest, path, REPO_ROOT)
+
+    async def body(app, pilot):
+        from framework.tui.components.table import DataTable
+
+        await pilot.press("5")
+        await pilot.pause()
+        table = app.screen.query_one("#pipelines-fetchers", DataTable)
+        return [str(table.get_row_at(i)[0]) for i in range(table.row_count)]
+
+    assert run_tui(body, path) == ["qualys_vmdr_vulnerability_findings"]
 
 
 def test_a_on_an_empty_manifest_says_what_to_do(tmp_path, run_tui):
@@ -264,11 +277,9 @@ def _fake_send(monkeypatch):
     monkeypatch.setattr(api, "issues_upload_run", upload)
 
 
-def test_focus_returns_to_the_paramify_page_after_a_send(tmp_path, monkeypatch, run_tui):
+def test_focus_returns_to_the_pipelines_page_after_a_send(tmp_path, monkeypatch, run_tui):
     """Sending disables the page's buttons; the focused one going disabled used to
-    leave focus nowhere, so `j` and `C` did nothing until the user pressed 5."""
-    from textual.widgets import Button
-
+    leave focus nowhere, so `j` and `C` did nothing until the user pressed the tab key again."""
     out = tmp_path / "evidence"
     issue_run(out, "2026-09-01T00-00-00Z")
     monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "t")
@@ -277,16 +288,10 @@ def test_focus_returns_to_the_paramify_page_after_a_send(tmp_path, monkeypatch, 
         {"job_id": "job-1", "status": "COMPLETED", "type": "PROCESS", "assessment_id": "A-1",
          "created_at": "", "counts": None, "blocked_by": None}])
 
-    def no_scripts(page):
-        for bid in ("#scripts-preview", "#scripts-submit"):
-            page.query_one(bid, Button).disabled = True
-
-    monkeypatch.setattr(UploadPage, "_rebuild_scripts", no_scripts)
-
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
-        page = app.screen.query_one(UploadPage)
+        page = app.screen.query_one(PipelinesPage)
         await pilot.press("i")
         await pilot.pause()
         assert isinstance(app.screen, ConfirmModal)
@@ -303,9 +308,10 @@ def test_focus_returns_to_the_paramify_page_after_a_send(tmp_path, monkeypatch, 
     run_tui(body, _write_manifest(tmp_path))
 
 
-def test_finishing_a_send_does_not_pull_focus_off_another_tab(tmp_path, run_tui):
+@pytest.mark.parametrize("page_cls", [UploadPage, PipelinesPage])
+def test_finishing_a_send_does_not_pull_focus_off_another_tab(tmp_path, run_tui, page_cls):
     async def body(app, pilot):
-        page = app.screen.query_one(UploadPage)
+        page = app.screen.query_one(page_cls)
         await pilot.press("1")                     # the user is on Fetchers
         await pilot.pause()
         before = app.focused
