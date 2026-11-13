@@ -189,7 +189,9 @@ class FakeADO:
 @pytest.fixture(autouse=True)
 def env(monkeypatch, tmp_path):
     for name in (mod.TYPES_ENV, mod.TAGS_ENV, mod.LOOKBACK_ENV, mod.APPROVAL_STATES_ENV, mod.APPROVAL_PATTERN_ENV,
-                 mod.APPROVAL_TYPES_ENV, mod.APPROVAL_MENTIONS_ENV, "AZURE_DEVOPS_PROJECTS"):
+                 mod.APPROVAL_TYPES_ENV, mod.APPROVAL_MENTIONS_ENV, mod.APPROVAL_FIELD_ENV, mod.APPROVAL_SOURCE_ENV,
+                 mod.APPROVAL_FIELD_FROM_ENV, mod.APPROVAL_BEFORE_FIELD_ENV, mod.EMERGENCY_TYPES_ENV,
+                 "AZURE_DEVOPS_PROJECTS"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AZURE_DEVOPS_ORG_URL", ORG)
     monkeypatch.setenv("AZURE_DEVOPS_PAT", "pat-do-not-write")
@@ -226,14 +228,19 @@ def with_items(fake, extra, updates=None, comments=None):
 
 def test_fetcher_yaml_follows_the_shape():
     spec_ = yaml.safe_load((FETCHER_DIR / "fetcher.yaml").read_text())
-    assert spec_["name"] == mod.NAME and spec_["version"] == "0.2.0" and spec_["category"] == "azure"
+    assert spec_["name"] == mod.NAME and spec_["version"] == "0.3.0" and spec_["category"] == "azure"
     assert spec_["ksis"] == ["KSI-CMT-LMC", "KSI-PIY-RES"]
     assert spec_["evidence_set"]["reference_id"] == "EVD-AZURE-DEVOPS-WORK-ITEMS"
     config = spec_["config_schema"]
     assert {k: v["env"] for k, v in config.items()} == {
         "work_item_types": mod.TYPES_ENV, "work_item_tags": mod.TAGS_ENV, "lookback_days": mod.LOOKBACK_ENV,
         "approval_states": mod.APPROVAL_STATES_ENV, "approval_pattern": mod.APPROVAL_PATTERN_ENV,
-        "approval_types": mod.APPROVAL_TYPES_ENV, "approval_mentions": mod.APPROVAL_MENTIONS_ENV}
+        "approval_types": mod.APPROVAL_TYPES_ENV, "approval_mentions": mod.APPROVAL_MENTIONS_ENV,
+        "approval_field": mod.APPROVAL_FIELD_ENV, "approval_source": mod.APPROVAL_SOURCE_ENV,
+        "approval_field_from": mod.APPROVAL_FIELD_FROM_ENV, "approval_before_field": mod.APPROVAL_BEFORE_FIELD_ENV,
+        "emergency_types": mod.EMERGENCY_TYPES_ENV}
+    assert config["approval_source"]["default"] == mod.HISTORY == config["approval_before_field"]["default"]
+    assert "default" not in config["approval_field"] and "default" not in config["emergency_types"]
     assert config["approval_mentions"]["default"] is False and config["approval_mentions"]["type"] == "boolean"
     assert config["work_item_types"]["default"] == ",".join(mod.DEFAULT_TYPES)
     assert config["work_item_tags"]["default"] == ",".join(mod.DEFAULT_TAGS)
@@ -761,3 +768,253 @@ def test_a_refused_finished_item_is_left_out_of_the_percentage(tmp_path):
     assert s["finished_change_items_without_approval"] == [103, 104, 105, 106, 107]
     assert (s["finished_change_items_needing_approval"], s["finished_change_items_needing_approval_approved"]) == (3, 1)
     assert s["finished_change_items_approved_percentage"] == 33
+
+
+# The approval field: a person (identity) field holding the approver.
+FIELD = "Custom.ChangeApprover"
+GUID = "d291b0c4-a05c-4ea6-8df1-4b41d5f39eff"
+
+
+def identity(name, login):
+    """An identity field's value as workitemsbatch returns it."""
+    return {"displayName": name, "url": f"https://spsprodcus1.vssps.visualstudio.com/A0/_apis/Identities/{GUID}",
+            "_links": {"avatar": {"href": f"{ORG}/_apis/GraphProfile/MemberAvatars/aad.ZmFrZQ"}},
+            "id": GUID, "uniqueName": login, "imageUrl": f"{ORG}/_apis/GraphProfile/MemberAvatars/aad.ZmFrZQ",
+            "descriptor": "aad.ZmFrZQ"}
+
+
+FRANK = identity("Frank Approver", "frank@example.com")
+GRACE = identity("Grace Approver", "grace@example.com")
+
+
+def filled(n, at, value, old=None, by="bob@example.com"):
+    """An update that sets the approval field, or clears it when value is None."""
+    change = {**({"oldValue": old} if old else {}), **({"newValue": value} if value else {})}
+    return {"id": n, "rev": n, "revisedBy": who(by), "revisedDate": at,
+            "fields": {"System.ChangedDate": {"newValue": at}, FIELD: change}}
+
+
+def iso_ago(**kw):
+    return (NOW - timedelta(**kw)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def with_field_types(fake, missing=(), names=("Change Request", "Bug", "Task")):
+    """Type listings that name their fields, the approval field on every type but the missing ones."""
+    base = {t["name"]: t for t in TYPES}
+    types = [{**base.get(n, TYPES[0]), "name": n, "fields": [{"referenceName": "System.Id", "name": "ID"}] + (
+        [] if n in missing else [{"referenceName": FIELD, "name": "Change Approver"}])} for n in names]
+    fake.routes[("GET", f"/contoso/{P}/_apis/wit/workitemtypes")] = Resp(body={"value": types})
+    return fake
+
+
+def field_fake():
+    """104: approved only by the field, filled 8 days ago; 105: filled, emptied, filled again; 106: emptied since."""
+    fake = with_items(FakeADO(), {
+        104: item(104, "Change Request", "Closed", **{FIELD: FRANK}),
+        105: item(105, "Change Request", "Closed", **{FIELD: GRACE}),
+        106: item(106, "Change Request", "Closed")},
+        updates={104: [{"id": 1, "rev": 1, "revisedBy": who("alice@example.com"),
+                        "fields": {"System.Title": {"newValue": "x"}}},
+                       filled(2, ago(days=8), FRANK), update(3, "Proposed", "Closed", ago(days=1))],
+                 105: [filled(1, ago(days=10), FRANK), filled(2, ago(days=9), None, old=FRANK),
+                       filled(3, ago(days=6), FRANK), filled(4, ago(days=5), GRACE, old=FRANK)],
+                 106: [filled(1, ago(days=10), FRANK), filled(2, ago(days=9), None, old=FRANK)]})
+    return with_field_types(fake)
+
+
+@pytest.mark.parametrize("source", [None, "field", "both"])
+def test_the_approval_field_counts_by_approval_source(tmp_path, monkeypatch, source):
+    monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
+    if source:
+        monkeypatch.setenv(mod.APPROVAL_SOURCE_ENV, source)
+    code, evidence, _, _, text = run(tmp_path, field_fake())
+    assert code == 0
+    by_field = work_item(evidence, 104)
+    # Who it names now, from the first update that filled it; the rest of the identity isn't written.
+    assert by_field["field_approval"] == {"at": iso_ago(days=8), "by": {"display_name": "Frank Approver",
+                                          "login": "frank@example.com"}, "source": "field", "state": None}
+    assert "aad.ZmFrZQ" not in text and GUID not in text
+    # Emptied and filled again: the approval runs from the refill, and a change of person doesn't restart it.
+    assert work_item(evidence, 105)["field_approval"]["at"] == iso_ago(days=6)
+    assert work_item(evidence, 105)["field_approval"]["by"]["login"] == "grace@example.com"
+    # Emptied since: no approval.
+    assert work_item(evidence, 106)["field_approval"] is None
+    s = evidence["summary"]
+    assert s["approval_field"] == FIELD and s["approval_source"] == (source or "states_and_comments")
+    assert evidence["results"]["selection"]["approval_field"] == FIELD
+    if source is None:
+        # Read and recorded, but only states and comments count, as before.
+        assert by_field["approval"] is None and work_item(evidence, 101)["approval"]["source"] == "state"
+        assert (s["change_items_approved"], s["change_items_approved_by_field"]) == (2, 0)
+        assert s["finished_change_items_without_approval"] == [103, 104, 105, 106]
+    elif source == "field":
+        assert by_field["approval"] == by_field["field_approval"] and by_field["approval_route"] == "field"
+        # The state approval of 101 and the comment approval of 102 no longer count.
+        assert work_item(evidence, 101)["approval"] is None and work_item(evidence, 102)["approval"] is None
+        assert (s["change_items_approved"], s["change_items_approved_by_field"]) == (2, 2)
+        assert s["finished_change_items_without_approval"] == [101, 103, 106]
+        assert s["finished_change_items_approved_percentage"] == 40
+    else:
+        assert by_field["approval"]["source"] == "field" and work_item(evidence, 101)["approval"]["source"] == "state"
+        assert (s["change_items_approved"], s["change_items_approved_by_field"]) == (4, 2)
+        assert s["finished_change_items_without_approval"] == [103, 106]
+
+
+def test_with_both_the_earlier_approval_is_in_effect(tmp_path, monkeypatch):
+    monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, "custom.changeapprover")
+    monkeypatch.setenv(mod.APPROVAL_SOURCE_ENV, "both")
+    fake = with_items(FakeADO(), {104: item(104, "Change Request", "Closed", **{FIELD: FRANK}),
+                                  105: item(105, "Change Request", "Closed", **{FIELD: FRANK})},
+                      updates={104: [update(1, "Proposed", "Approved", ago(days=9)), filled(2, ago(days=5), FRANK)],
+                               105: [filled(1, ago(days=9), FRANK), update(2, "Proposed", "Approved", ago(days=5))]})
+    _, evidence, _, _, _ = run(tmp_path, with_field_types(fake))
+    assert work_item(evidence, 104)["approval"]["source"] == "state"
+    # The reference name matches without regard to case.
+    assert work_item(evidence, 105)["approval"] == {"at": iso_ago(days=9), "by": {
+        "display_name": "Frank Approver", "login": "frank@example.com"}, "source": "field", "state": None}
+
+
+@pytest.mark.parametrize("before, approved_105, left_out", [
+    (None, False, 0), ("states_and_comments", False, 0), ("both", True, 0), ("exclude", None, 4)])
+def test_items_created_before_the_field_follow_approval_before_field(tmp_path, monkeypatch, before, approved_105,
+                                                                     left_out):
+    monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
+    monkeypatch.setenv(mod.APPROVAL_SOURCE_ENV, "field")
+    monkeypatch.setenv(mod.APPROVAL_FIELD_FROM_ENV, (NOW - timedelta(days=30)).strftime("%Y-%m-%d"))
+    if before:
+        monkeypatch.setenv(mod.APPROVAL_BEFORE_FIELD_ENV, before)
+    # 104 is new and approved by the field; 105 is old (created 50 days ago) and approved by the field since.
+    fake = with_items(FakeADO(), {
+        104: item(104, "Change Request", "Closed", **{FIELD: FRANK, "System.CreatedDate": ago(days=5)}),
+        105: item(105, "Change Request", "Closed", **{FIELD: FRANK, "System.CreatedDate": ago(days=50)})},
+        updates={104: [filled(1, ago(days=4), FRANK)], 105: [filled(1, ago(days=3), FRANK)]})
+    code, evidence, _, _, _ = run(tmp_path, with_field_types(fake))
+    assert code == 0
+    old = work_item(evidence, 101)
+    assert work_item(evidence, 104)["approval_route"] == "field" and work_item(evidence, 104)["approval"]
+    assert old["approval_route"] == (before or "states_and_comments")
+    s = evidence["summary"]
+    assert s["approval_field_from"] == (NOW - timedelta(days=30)).strftime("%Y-%m-%dT00:00:00Z")
+    assert s["approval_before_field"] == (before or "states_and_comments")
+    assert s["change_items_left_out_of_approval"] == left_out
+    if before == "exclude":
+        # 101, 102, 103 and 105 were created 40 or 50 days ago, so only 104 is judged.
+        assert old["approval"] is None and work_item(evidence, 105)["approval"] is None
+        assert s["finished_change_items_without_approval"] == [] and s["change_items_approved"] == 1
+        assert (s["finished_change_items_needing_approval"], s["finished_change_items_approved_percentage"]) == (1, 100)
+    else:
+        # Old items keep their state and comment approvals.
+        assert old["approval"]["source"] == "state" and work_item(evidence, 102)["approval"]["source"] == "comment"
+        assert bool(work_item(evidence, 105)["approval"]) is approved_105
+        assert s["finished_change_items_without_approval"] == ([103] if approved_105 else [103, 105])
+
+
+def test_without_approval_field_from_every_item_follows_approval_source(tmp_path, monkeypatch):
+    monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
+    monkeypatch.setenv(mod.APPROVAL_SOURCE_ENV, "field")
+    monkeypatch.setenv(mod.APPROVAL_BEFORE_FIELD_ENV, "exclude")
+    _, evidence, _, _, _ = run(tmp_path, field_fake())
+    s = evidence["summary"]
+    assert s["approval_field_from"] is None and s["approval_before_field"] is None
+    assert s["change_items_left_out_of_approval"] == 0 and work_item(evidence, 101)["approval_route"] == "field"
+
+
+@pytest.mark.parametrize("emergency", [None, "emergency change", "none"])
+def test_an_emergency_type_approved_after_its_change_is_listed_apart(tmp_path, monkeypatch, emergency):
+    monkeypatch.setenv(mod.TYPES_ENV, "Change Request, Emergency Change")
+    if emergency:
+        monkeypatch.setenv(mod.EMERGENCY_TYPES_ENV, emergency)
+    fake = with_items(FakeADO(), {104: item(104, "Emergency Change", "Closed", relations=[
+        artifact("vstfs:///VersionControl/Changeset/503", "Fixed in Changeset")])},
+        updates={104: [update(1, "Proposed", "Approved", ago(days=3))]})
+    fake.routes[("GET", f"/contoso/{P}/_apis/wit/workitemtypes")] = Resp(body={
+        "value": TYPES + [{"name": "Emergency Change", "states": TYPES[0]["states"]}]})
+    fake.routes[("GET", "/contoso/_apis/tfvc/changesets/503")] = Resp(body={
+        "changesetId": 503, "author": who("dave@example.com"), "checkedInBy": who("dave@example.com"),
+        "createdDate": ago(days=6)})
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    on = emergency == "emergency change"
+    hot = work_item(evidence, 104)
+    assert code == 0 and hot["changed_before_approval"] is True and hot["emergency_type"] is on
+    assert work_item(evidence, 102)["emergency_type"] is False
+    s = evidence["summary"]
+    assert s["emergency_types"] == (["Emergency Change"] if on else [])
+    assert evidence["results"]["selection"]["emergency_types"] == s["emergency_types"]
+    assert s["change_items_changed_before_approval"] == ([102] if on else [102, 104])
+    assert s["emergency_items_approved_after_change"] == ([104] if on else [])
+    # Still a change item needing an approval.
+    assert s["finished_change_items_needing_approval_approved"] == 2
+
+
+def test_an_approval_type_without_the_field_is_named(tmp_path, monkeypatch):
+    monkeypatch.setenv(mod.TYPES_ENV, "Change Request, Bug")
+    monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
+    _, evidence, _, _, _ = run(tmp_path, with_field_types(FakeADO(), missing=("Bug",)))
+    assert evidence["summary"]["approval_field_types_missing"] == ["Bug"]
+    assert evidence["results"]["projects"][0]["approval_field_types_missing"] == ["Bug"]
+    monkeypatch.setenv(mod.APPROVAL_TYPES_ENV, "Change Request")
+    _, evidence, _, _, _ = run(tmp_path, with_field_types(FakeADO(), missing=("Bug",)))
+    assert evidence["summary"]["approval_field_types_missing"] == []
+
+
+def test_the_field_check_is_unknown_without_the_setting_or_a_field_listing(tmp_path, monkeypatch):
+    _, evidence, _, _, _ = run(tmp_path, with_field_types(FakeADO()))
+    assert evidence["summary"]["approval_field_types_missing"] is None
+    monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
+    # The default fake's type listing doesn't name fields.
+    _, evidence, _, _, _ = run(tmp_path)
+    assert evidence["summary"]["approval_field_types_missing"] is None
+
+
+def test_a_field_approval_of_unknown_time_leaves_the_change_order_unknown(tmp_path, monkeypatch):
+    monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
+    monkeypatch.setenv(mod.APPROVAL_SOURCE_ENV, "both")
+    # Filled, but no update read shows it being filled.
+    fake = with_items(FakeADO(), {104: item(104, "Change Request", "Closed", relations=[
+        artifact("vstfs:///VersionControl/Changeset/501", "Fixed in Changeset")], **{FIELD: FRANK})})
+    code, evidence, _, _, _ = run(tmp_path, with_field_types(fake))
+    unknown = work_item(evidence, 104)
+    assert code == 0 and unknown["approval"]["at"] is None and unknown["approval"]["source"] == "field"
+    assert unknown["changed_before_approval"] is None and unknown["approved_by_change_author"] is False
+    s = evidence["summary"]
+    assert s["change_items_linked_changes_checked"] == 2
+    assert s["change_items_changed_before_approval"] is None and s["emergency_items_approved_after_change"] is None
+
+
+def test_unread_updates_leave_the_field_approval_figures_unknown(tmp_path, monkeypatch):
+    monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
+    monkeypatch.setenv(mod.APPROVAL_SOURCE_ENV, "field")
+    fake = field_fake()
+    fake.routes[("GET", f"/contoso/{P}/_apis/wit/workItems/104/updates")] = err(500, "boom")
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    assert code == 1 and work_item(evidence, 104)["field_approval"]["at"] is None
+    s = evidence["summary"]
+    assert s["change_items_approved_by_field"] is None and s["finished_change_items_approved_percentage"] is None
+
+
+@pytest.mark.parametrize("settings", [
+    {mod.APPROVAL_SOURCE_ENV: "field"},
+    {mod.APPROVAL_SOURCE_ENV: "both"},
+    {mod.APPROVAL_SOURCE_ENV: "approvals", mod.APPROVAL_FIELD_ENV: FIELD},
+    {mod.APPROVAL_FIELD_ENV: "Change Approver"},
+    {mod.APPROVAL_FIELD_ENV: FIELD, mod.APPROVAL_SOURCE_ENV: "field", mod.APPROVAL_FIELD_FROM_ENV: "last week"},
+    {mod.APPROVAL_FIELD_ENV: FIELD, mod.APPROVAL_FIELD_FROM_ENV: "2026-01-31"},
+    {mod.APPROVAL_FIELD_ENV: FIELD, mod.APPROVAL_SOURCE_ENV: "field", mod.APPROVAL_BEFORE_FIELD_ENV: "skip"},
+    {mod.EMERGENCY_TYPES_ENV: "Emergency Change"},
+])
+def test_bad_approval_field_settings_fail_with_bad_config(tmp_path, monkeypatch, settings):
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value)
+    code, _, status, fake, _ = run(tmp_path)
+    assert code == 1 and status["code"] == "bad_config" and not any(p.endswith("/wiql") for _, p, _, _ in fake.calls)
+    assert any(name in status["error"] for name in settings)
+
+
+def test_by_default_no_field_is_read_and_approval_is_as_before(tmp_path):
+    _, evidence, _, _, _ = run(tmp_path, field_fake())
+    s = evidence["summary"]
+    assert (s["approval_source"], s["approval_field"], s["approval_field_from"]) == ("states_and_comments", None, None)
+    assert (s["approval_before_field"], s["emergency_types"], s["approval_field_types_missing"]) == (None, [], None)
+    assert work_item(evidence, 104)["field_approval"] is None and work_item(evidence, 104)["approval"] is None
+    assert work_item(evidence, 101)["approval_route"] == "states_and_comments"
+    assert (s["change_items_approved"], s["change_items_approved_by_field"]) == (2, 0)

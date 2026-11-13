@@ -47,6 +47,35 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_devops_work_items` 0.3.0: approval from a person field, and types approved after the change.**
+  No new API calls: the field comes from the work item batch, when it was filled
+  from the updates already read, and which types define it from the type listing.
+  With no new setting, approval is read exactly as in 0.2.0.
+  - **`approval_field`** (`AZURE_DEVOPS_APPROVAL_FIELD`) names a person field's
+    reference name, such as `Custom.ChangeApprover`. Each item records whom it names
+    and when it was filled (`field_approval`): from the first update that filled
+    it since it was last cleared. A display name is `bad_config`.
+  - **`approval_source`** (`AZURE_DEVOPS_APPROVAL_SOURCE`, `states_and_comments`
+    by default): `field` counts only a filled field as approval, `both` counts it
+    or a state or comment approval, whichever came first. Clearing the field
+    withdraws its approval; a move back or a rejection doesn't.
+  - **`approval_field_from`** (`AZURE_DEVOPS_APPROVAL_FIELD_FROM`, a date) and
+    **`approval_before_field`** (`AZURE_DEVOPS_APPROVAL_BEFORE_FIELD`,
+    `states_and_comments` by default): an item created before the date is judged
+    by states and comments, by `both`, or left out of every approval figure
+    (`exclude`). Each item records the route that judged it (`approval_route`).
+  - **`emergency_types`** (`AZURE_DEVOPS_EMERGENCY_TYPES`, none by default):
+    types whose approval may come after the change, as the comparator's
+    setting of the same name. Their items still need an approval, but a
+    changeset made before it moves from `change_items_changed_before_approval`
+    to the new `emergency_items_approved_after_change`. Each item gains
+    `emergency_type`.
+  - **Summary.** The five settings, plus `change_items_approved_by_field`,
+    `change_items_left_out_of_approval` and `approval_field_types_missing` (the
+    approval types a project defines without the field, as after a misspelt
+    reference name). An approval whose time is unknown leaves the change-order
+    lists `null`, as an unread changeset does.
+
 - **Optional selected-subscription reads for mixed Entra evidence.**
   `azure_entra_emergency_accounts` 0.2.0 and
   `azure_entra_dormant_identities` 0.3.0 accept `target_subscription_only`
