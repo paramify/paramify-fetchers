@@ -349,6 +349,8 @@ def _tui_api_calls() -> set[str]:
 # its own command. Keep this in sync with the TUI; the test below enforces it.
 API_TO_CLI = {
     "paramify_status": "status",
+    "sync_validators": "validators sync",
+    "list_artifacts": "artifacts list",
     "find_repo_root": "<implicit: every command>",
     "discover": "<implicit: one fetcher-tree scan shared across a redraw>",
     "catalog": "list / catalog / describe",
@@ -443,6 +445,8 @@ def test_parity_mapped_commands_actually_exist():
         "scripts": scripts,
         "assessments": _subcommands("assessments"),
         "issues": _subcommands("issues"),
+        "validators": _subcommands("validators"),
+        "artifacts": _subcommands("artifacts"),
     }
     for api_fn, where in API_TO_CLI.items():
         if where.startswith("<implicit"):
