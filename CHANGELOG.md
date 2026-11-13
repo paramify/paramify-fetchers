@@ -1648,19 +1648,20 @@ schemas and the `paramify` CLI — not the internal code.
   Fetchers, Run, Evidence and Paramify (keys `1` to `4`). The catalog and a
   detail pane are at the top, and the manifest is across the full width below
   them. The detail pane shows the item in the list that has focus. Press `a`, or enter, on a catalog
-  fetcher to add it to the manifest, and focus stays in the catalog. Each
-  fetcher that is in the manifest has a check mark. `a` on a fetcher that is
+  fetcher to add it to the manifest, and focus stays in the catalog. The
+  catalog shows `[x]` before each fetcher that is in the manifest and `[ ]`
+  before the rest, as the add-fetchers picker did. `a` on a fetcher that is
   already in the manifest moves the manifest cursor to it, and `a` on the
-  manifest list moves to the catalog filter. Enter in the filter moves to the
-  first fetcher it shows. Tab moves from the catalog to the manifest list,
-  the output dir, the stack, owner and Save row, and the detail pane. Escape
-  stays in the list you were in. The footer shows the keys of the list that
-  has focus. The manifest list shows at least twelve rows on a tall terminal
-  and at most 65% of the page. On a short terminal, such as 80×24, the
-  twelve-row floor gives way so the catalog keeps half the page, and the
-  blank rows around the filter and the settings row are dropped. An empty
-  manifest takes only the rows of its hint. The add-fetchers picker is
-  removed.
+  manifest list moves to the catalog filter (its footer hint reads "find to
+  add"). Enter in the filter moves to the first fetcher it shows. Tab moves
+  from the catalog to the manifest list, the output dir, the stack, owner and
+  Save row, and the detail pane. Escape stays in the list you were in. The
+  footer shows the keys of the list that has focus. The manifest list shows
+  at least twelve rows on a tall terminal and at most 65% of the page. On a
+  short terminal, such as 80×24, the twelve-row floor gives way so the
+  catalog keeps half the page, and the blank rows around the filter and the
+  settings row are dropped. An empty manifest takes only the rows of its
+  hint. The add-fetchers picker is removed.
 - **Each batch the upload creates is approved on submission by default.** The
   upload now sends the entry's `approval` (default `SUBMISSION`) when it creates
   a batch. Before, a batch took the evidence set's mode, so a set made `MANUAL`

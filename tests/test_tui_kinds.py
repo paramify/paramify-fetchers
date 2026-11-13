@@ -151,8 +151,8 @@ def test_catalog_tree_is_kind_then_platform(tmp_path, run_tui):
 
     assert run_tui(body, _manifest(root, [EVIDENCE]), root) == [
         # The manifest's fetcher is checked: it is already in the manifest.
-        ("Evidence  (2)", [("acme  (1)", [f"{EVIDENCE}  ✓"]), ("zeta  (1)", [OTHER])]),
-        ("Scan reports  (1)", [("acme  (1)", [SCAN])]),
+        ("Evidence  (2)", [("acme  (1)", [f"[x] {EVIDENCE}"]), ("zeta  (1)", [f"[ ] {OTHER}"])]),
+        ("Scan reports  (1)", [("acme  (1)", [f"[ ] {SCAN}"])]),
     ]
 
 
@@ -204,8 +204,8 @@ def test_catalog_groups_by_kind_and_marks_what_the_manifest_has(tmp_path, run_tu
 
     headings, leaves = run_tui(body, _manifest(root, [EVIDENCE]), root)
     assert headings == ["Evidence  (2)", "Scan reports  (1)"]
-    assert leaves[EVIDENCE].rstrip().endswith("✓"), "the manifest's fetcher is not marked"
-    assert not leaves[SCAN].rstrip().endswith("✓")
+    assert leaves[EVIDENCE] == f"[x] {EVIDENCE}", "the manifest's fetcher is not marked"
+    assert leaves[SCAN] == f"[ ] {SCAN}"
 
 
 # --------------------------------------------------------------------------- #

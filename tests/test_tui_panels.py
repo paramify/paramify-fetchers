@@ -180,7 +180,7 @@ def test_a_on_a_heading_requests_nothing():
     assert _host(CatalogPanel(detail=False), body) == []
 
 
-def test_set_marked_adds_a_check_and_keeps_filter_and_cursor():
+def test_set_marked_checks_the_box_and_keeps_filter_and_cursor():
     async def body(app, pilot):
         panel = app.query_one(CatalogPanel)
         search = panel.query_one("#catalog-search", Input)
@@ -197,7 +197,29 @@ def test_set_marked_adds_a_check_and_keeps_filter_and_cursor():
     value, name, label = _host(CatalogPanel(detail=False), body)
     assert value == "hello"
     assert name == "demo_hello"
-    assert label.rstrip().endswith("✓")
+    assert label == "[x] demo_hello"
+
+
+def test_leaf_labels_are_checkboxes():
+    """[x] for a fetcher in the manifest, [ ] for the rest, as the old add picker had.
+
+    The labels are Rich Text: as a markup string, "[x]" would be read as a tag
+    and vanish.
+    """
+    async def body(app, pilot):
+        panel = app.query_one(CatalogPanel)
+        panel._filter = "demo_"
+        panel.set_marked({"demo_hello"})
+        panel.rebuild()
+        await pilot.pause()
+        tree = panel.query_one("#catalog-tree", Tree)
+        return _leaf(tree, "demo_hello").label, _leaf(tree, "demo_policy_check").label
+
+    checked, unchecked = _host(CatalogPanel(detail=False), body)
+    assert checked.plain == "[x] demo_hello"
+    assert unchecked.plain == "[ ] demo_policy_check"
+    assert [(checked.plain[s.start:s.end], str(s.style)) for s in checked.spans] == [("[x] ", "green")]
+    assert [(unchecked.plain[s.start:s.end], str(s.style)) for s in unchecked.spans] == [("[ ] ", "dim")]
 
 
 def test_detail_says_add_or_in_manifest():
@@ -348,7 +370,7 @@ def test_add_fetchers_keeps_the_entry_when_autosave_fails(tmp_path, monkeypatch,
 
     uses, marked, notices, label = run_tui(body, path)
     assert uses == {"demo_hello"} and marked == {"demo_hello"}
-    assert label.rstrip().endswith("✓"), "the catalog does not mark a fetcher whose save failed"
+    assert label == "[x] demo_hello", "the catalog does not mark a fetcher whose save failed"
     assert any(sev == "error" and "not saved" in text for text, sev in notices), notices
     assert _uses(path) == set(), "the file changed although the save failed"
 

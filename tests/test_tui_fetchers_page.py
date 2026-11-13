@@ -124,7 +124,7 @@ def test_a_adds_in_place_and_keeps_focus_in_the_catalog(tmp_path, run_tui):
 
     label, cursor, focus, detail = run_tui(body, path)
     assert _uses(path) == {"demo_hello"}
-    assert label.rstrip().endswith("✓")
+    assert label == "[x] demo_hello"
     assert cursor == "demo_hello"
     assert focus == "catalog-tree"
     assert "✓ in manifest" in detail, "the catalog detail did not update after the add"
@@ -223,9 +223,9 @@ def test_switching_manifest_moves_the_marks(tmp_path, run_tui):
         return before, _leaf_label(app, "demo_hello"), _leaf_label(app, "demo_policy_check")
 
     before, hello, policy = run_tui(body, first)
-    assert before.rstrip().endswith("✓")
-    assert not hello.rstrip().endswith("✓"), "the old manifest's mark stayed after the switch"
-    assert policy.rstrip().endswith("✓")
+    assert before == "[x] demo_hello"
+    assert hello == "[ ] demo_hello", "the old manifest's mark stayed after the switch"
+    assert policy == "[x] demo_policy_check"
 
 
 def test_removing_an_entry_clears_its_mark(tmp_path, run_tui):
@@ -241,11 +241,13 @@ def test_removing_an_entry_clears_its_mark(tmp_path, run_tui):
         await pilot.pause()
         await pilot.press("y")
         await _settle(app, pilot)
-        return before, _leaf_label(app, "demo_hello")
+        hint_h = app.screen.query_one("#manifest-empty-hint").region.height
+        return before, _leaf_label(app, "demo_hello"), hint_h
 
-    before, after = run_tui(body, path)
-    assert before.rstrip().endswith("✓"), "the entry was never marked"
-    assert not after.rstrip().endswith("✓")
+    before, after, hint_h = run_tui(body, path)
+    assert 1 <= hint_h <= 3, "the emptied manifest did not shrink to its hint"
+    assert before == "[x] demo_hello", "the entry was never marked"
+    assert after == "[ ] demo_hello"
     assert _uses(path) == set()
 
 
@@ -280,6 +282,22 @@ def test_narrow_terminal_keeps_both_lists(tmp_path):
     assert table_h >= 5, f"the manifest table is squeezed to {table_h} rows"
 
 
+def test_reload_goes_through_the_fetchers_page(tmp_path, run_tui, monkeypatch):
+    from framework.tui.screens.fetchers import FetchersPage
+
+    calls: list = []
+    real = FetchersPage.rebuild
+    monkeypatch.setattr(FetchersPage, "rebuild", lambda self: (calls.append(self.id), real(self))[1])
+
+    async def body(app, pilot):
+        calls.clear()
+        app.screen.reload()
+        await _settle(app, pilot)
+        return calls
+
+    assert run_tui(body, _manifest_with(tmp_path, "demo_hello")) == ["fetchers-page"]
+
+
 def test_panels_are_hosted_without_their_own_detail(tmp_path, run_tui):
     async def body(app, pilot):
         return (
@@ -309,6 +327,8 @@ def test_footer_hints_follow_focus(tmp_path, run_tui):
     assert "add" in in_catalog and "filter" in in_catalog
     assert "targets" not in in_catalog, "the catalog's footer lists the manifest's keys"
     assert "targets" in in_manifest and "validate" in in_manifest
+    # `a` in the manifest moves to the catalog filter; the hint says so.
+    assert "a find to add" in in_manifest and "a add" not in in_manifest
     assert "1-4" in in_catalog and "1-4" in in_manifest  # the workspace keys stay
 
 

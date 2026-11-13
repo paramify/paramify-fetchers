@@ -96,7 +96,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
                 await pilot.pause()
             await pilot.press("a")
             await pilot.pause()
-            assert str(tree.cursor_node.label).rstrip().endswith("✓")
+            assert str(tree.cursor_node.label) == "[x] demo_hello"
             assert [row[0] for row in _rows(page.query_one("#manifest-entries", DataTable))] == ["demo_hello"]
             assert _text(page.query_one("#manifest-issues")) == "✓ manifest is runnable"
             shipped = yaml.safe_load((REPO_ROOT / "examples" / "demo.yaml").read_text())

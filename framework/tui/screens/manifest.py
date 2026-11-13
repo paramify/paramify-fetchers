@@ -68,13 +68,14 @@ class ManifestPanel(ButtonRowNav, Vertical):
     page that hosts the panel, which shows it in a shared pane.
     """
 
+    # `a` moves to the catalog filter: fetchers are added from the catalog.
     HINTS = [
-        ("a", "add"), ("e", "entry"), ("x", "remove"), ("t", "targets"),
+        ("a", "find to add"), ("e", "entry"), ("x", "remove"), ("t", "targets"),
         ("A", "assessment"), ("s", "save"), ("v", "validate"), ("p", "preview"),
     ]
 
     BINDINGS = [
-        Binding("a", "add_fetcher", "Add"),
+        Binding("a", "add_fetcher", "Find to add"),
         Binding("e", "edit_entry", "Entry"),
         Binding("x", "remove_entry", "Remove"),
         Binding("t", "edit_targets", "Targets"),

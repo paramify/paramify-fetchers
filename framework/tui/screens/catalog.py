@@ -14,6 +14,7 @@ for the page that hosts it to show in a shared pane.
 from __future__ import annotations
 
 from rich.console import RenderableType
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -64,7 +65,7 @@ class CatalogPanel(FilterListNav, Horizontal):
         super().__init__(**kwargs)
         self._has_detail = detail
         self._data = None  # what the highlighted node carries: a fetcher, a kind heading, or None
-        self._marked: set = set()  # fetchers in the manifest, shown with a check
+        self._marked: set = set()  # fetchers in the manifest, shown checked: [x]
 
     def compose(self) -> ComposeResult:
         with Vertical(id="catalog-left", classes="panel"):
@@ -126,7 +127,7 @@ class CatalogPanel(FilterListNav, Horizontal):
             node = _first_leaf(tree.root)
         tree.focus()
         if node is not None:
-            for parent in node.ancestors if hasattr(node, "ancestors") else _ancestors(node):
+            for parent in _ancestors(node):
                 parent.expand()
             self.call_after_refresh(tree.move_cursor, node)
 
@@ -199,12 +200,20 @@ class CatalogPanel(FilterListNav, Horizontal):
             return render.kind_detail(*data)
         return render.empty_detail()
 
-    def _leaf_label(self, fetcher: dict) -> str:
+    def _leaf_label(self, fetcher: dict) -> Text:
+        """`[x] name` for a fetcher in the manifest, `[ ] name` for the rest.
+
+        A Rich Text, not a markup string: "[x]" would be read as a markup tag.
+        """
         name = fetcher["name"]
-        return f"{name}  ✓" if name in self._marked else name
+        checked = name in self._marked
+        label = Text()
+        label.append("[x] " if checked else "[ ] ", style="green" if checked else "dim")
+        label.append(name)
+        return label
 
     def set_marked(self, names) -> None:
-        """Check the fetchers that are in the manifest.
+        """Check ([x]) the fetchers that are in the manifest, and uncheck the rest.
 
         Relabels the leaves in place: a rebuild would reset the cursor and the
         open branches, and throw the user back to the top of the tree.

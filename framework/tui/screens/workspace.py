@@ -18,7 +18,6 @@ from framework.tui.components.chrome import AppHeader, HintFooter
 from framework.tui.screens.catalog import CatalogPanel
 from framework.tui.screens.evidence import EvidencePage
 from framework.tui.screens.fetchers import FetchersPage
-from framework.tui.screens.manifest import ManifestPanel
 from framework.tui.screens.run import RunPage
 from framework.tui.screens.upload import UploadPage
 
@@ -72,7 +71,7 @@ class WorkspaceScreen(Screen):
 
     def reload(self) -> None:
         """Refresh the manifest-dependent pages + chrome (after load / switch)."""
-        self.query_one(ManifestPanel).rebuild()
+        self.query_one(FetchersPage).rebuild()
         try:
             self.query_one(EvidencePage).rebuild_runs()
         except Exception:
