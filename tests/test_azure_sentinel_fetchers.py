@@ -253,7 +253,8 @@ def azure(monkeypatch, tmp_path):
     monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", SUB)
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
     monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
-    for env in ("SENTINEL_WORKSPACES", "AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID", "SENTINEL_RULE_QUERY_TEXT"):
+    for env in ("SENTINEL_WORKSPACES", "AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID", "SENTINEL_RULE_QUERY_TEXT",
+                "SENTINEL_CONFIRMED_ALERT_CONNECTIONS"):
         monkeypatch.delenv(env, raising=False)
     return fake
 
