@@ -364,8 +364,14 @@ def arm_client_kwargs() -> Dict[str, Any]:
     commercial audience to the sovereign endpoint, which rejects it — so setting
     only the endpoint trades SubscriptionNotFound for an auth error.
     """
+    from read_boundaries import sdk_arm_boundary_options, target_subscription_scope
+
     endpoint = arm_endpoint()
-    return {"base_url": endpoint, "credential_scopes": [f"{endpoint}/.default"]}
+    options = {"base_url": endpoint, "credential_scopes": [f"{endpoint}/.default"]}
+    scope = target_subscription_scope()
+    if scope is not None:
+        options.update(sdk_arm_boundary_options(endpoint, scope))
+    return options
 
 
 def enabled_subscription_ids(cred) -> Iterator[str]:

@@ -201,7 +201,7 @@ class FakeAzure:
             {"id": "sp-la", "displayName": "la-automation", "appId": "app-1"}]})
         self.arm.update(EXTRA_ARM)
 
-    def get(self, url, params=None, headers=None, timeout=None):
+    def get(self, url, params=None, headers=None, timeout=None, allow_redirects=True):
         parsed = urlparse(url)
         query = dict(p.split("=", 1) for p in parsed.query.split("&") if p) if parsed.query else {}
         query.update(params or {})
@@ -219,7 +219,7 @@ class FakeAzure:
             return body
         return Resp(200, body)
 
-    def post(self, url, json=None, headers=None, timeout=None, params=None):
+    def post(self, url, json=None, headers=None, timeout=None, params=None, allow_redirects=True):
         if url.endswith("/directoryObjects/getByIds"):
             self.calls.append(("POST", url, ",".join(json["ids"])))
             return self.graph_post_response

@@ -639,7 +639,8 @@ def test_next_links_are_followed_before_skip():
             if request_configuration is None:  # the nextLink request
                 return ns(value=self.items[100:], odata_next_link=None)
             self.requests.append(request_configuration.query_parameters.skip)
-            return ns(value=self.items[:100], odata_next_link="https://graph.test/next")
+            from entra_graph import graph_host
+            return ns(value=self.items[:100], odata_next_link=graph_host()+"/next")
 
     builder = _Linked(items=[ns(id=f"d{n}") for n in range(150)])
     items, collector, _ = _read(builder)

@@ -68,7 +68,7 @@ class Builder:
         size = self.page_size or max(len(self.items), 1)
         start, self.page = self.page * size, self.page + 1
         more = start + size < len(self.items)
-        return ns(value=self.items[start:start + size], odata_next_link="next-page" if more else None)
+        return ns(value=self.items[start:start + size], odata_next_link=groups.graph_host()+"/next-page" if more else None)
 
     def with_url(self, url):
         self.urls.append(url)
