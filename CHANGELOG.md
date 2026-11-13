@@ -47,6 +47,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- Selected-subscription collection now avoids cross-subscription discovery in
+  VNet egress, Private DNS, WAF policies and alert action-group references when
+  `AZURE_TARGET_SUBSCRIPTION_ONLY=true`. Foreign relationships remain unknown
+  rather than deleted. Resource diagnostic settings report the selected scope.
+  Sentinel data sources retain service-supplied last-data KQL without executing
+  it in this mode when its workspace/function scope cannot be established.
+  Default broad discovery remains unchanged.
+
 - **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
   columns (unchanged, so existing intake presets keep mapping), the CSV adds the
   Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and
@@ -2388,6 +2396,9 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- Azure Service Health uses API `2025-04-01` for Azure Government event
+  lists, individual events and both detail actions. Other clouds retain
+  `2025-05-01`; evidence fields and collection scope are unchanged.
 - Key Vault key rotation derives a missing ARM `vault_uri` from the selected
   Azure cloud instead of defaulting sovereign-cloud reads to the public host.
   ARM-provided URIs and rotation-policy configured/readability semantics are

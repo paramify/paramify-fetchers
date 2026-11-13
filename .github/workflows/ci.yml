@@ -107,6 +107,7 @@ jobs:
           pytest -q tests/test_azure_sdk_surface.py tests/test_azure_entra_conditional_access_policies.py
           tests/test_azure_sdk_arm_read_boundary.py tests/test_entra_graph_source_boundary.py
           tests/test_azure_rest_read_boundary.py tests/test_azure_entra_mixed_strict_boundary.py
+          tests/test_azure_network_source_boundary.py
 
   oci-sdk:
     name: oci (fetchers + SDK surface)

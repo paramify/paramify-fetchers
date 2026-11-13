@@ -603,6 +603,8 @@ def main() -> int:
     # The azure-* SDKs log every request header at INFO; warnings still get through.
     logging.getLogger("azure").setLevel(logging.WARNING)
     load_dotenv()
+    from azure_rest import target_subscription_scope
+    read_scope = target_subscription_scope()
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
@@ -662,6 +664,7 @@ def main() -> int:
         collector=collector,
         results={
             "resources": records,
+            **({"read_scope": "target_subscription"} if read_scope else {}),
             "inventory_source": "azure_resource_graph",
             "query": INVENTORY_QUERY,
             "provider_registration_status": registration,

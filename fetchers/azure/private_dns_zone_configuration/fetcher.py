@@ -35,6 +35,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from private_dns import project_vnet_link, project_zone_group  # noqa: E402
+from azure_rest import target_subscription_scope
 from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import (  # noqa: E402
     lookup_by_ids,
@@ -685,10 +686,14 @@ def collect_zone_groups(cred, endpoint_ids, collector: Collector) -> tuple:
     for endpoint_id in endpoint_ids:
         if endpoint_id:
             by_id.setdefault(endpoint_id.lower(), endpoint_id)
+    read_scope = target_subscription_scope()
     clients: dict = {}
     groups, failed = {}, set()
     for key, endpoint_id in sorted(by_id.items()):
         sub, rg, name = subscription_of(endpoint_id), resource_group_from_id(endpoint_id), basename(endpoint_id)
+        if read_scope is not None and (sub or '').lower() != read_scope.lower():
+            failed.add(key)
+            continue
         if sub not in clients:
 
             def _client(sub=sub):
@@ -713,6 +718,8 @@ def collect_zone_groups(cred, endpoint_ids, collector: Collector) -> tuple:
 
 def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
     """(zone records, duplicate zone names, the scope duplicates were compared across)."""
+
+    strict = target_subscription_scope() is not None
 
     def _client():
         from azure.mgmt.privatedns import PrivateDnsManagementClient  # lazy
@@ -748,7 +755,7 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
         # Unscoped: endpoints, NICs and VNets in other readable subscriptions resolve too.
         if graph is None:
             return None
-        return collector.guard(f"resourcegraph.resources ({label})", lambda: query_all(graph, None, query)["rows"])
+        return collector.guard(f"resourcegraph.resources ({label})", lambda: query_all(graph, subscription_id if strict else None, query)["rows"])
 
     def _linked(privatelink_only: bool) -> set:
         return {
@@ -771,7 +778,7 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
     vnets, failed_vnets, spokes = None, set(), {}
     if graph is not None:
         linked = _linked(False)
-        rows, failed_vnets = lookup_by_ids(graph, linked, vnets_query, "linked virtual networks", collector)
+        rows, failed_vnets = lookup_by_ids(graph, linked, vnets_query, "linked virtual networks", collector, subscription_id=subscription_id if strict else None)
         read = vnet_index(list(rows.values()))
         privatelink_linked = _linked(True)
         peers = {p for v in privatelink_linked for p in (read.get(v) or {}).get("peers", ())}
@@ -779,15 +786,15 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
         unread = privatelink_linked - set(read) - failed_vnets
         # A failed query leaves those hubs' zones unknown (None in spokes) but their links as already read.
         spoke_rows, failed_unread = lookup_by_ids(
-            graph, unread, reverse_peers_query, "VNets peered with unreadable linked VNets", collector
+            graph, unread, reverse_peers_query, "VNets peered with unreadable linked VNets", collector, subscription_id=subscription_id if strict else None
         )
         spokes = spokes_by_hub(spoke_rows, unread, failed_unread)
         peer_rows, failed_peers = lookup_by_ids(
-            graph, (peers | set(spoke_rows)) - linked, vnets_query, "peered virtual networks", collector
+            graph, (peers | set(spoke_rows)) - linked, vnets_query, "peered virtual networks", collector, subscription_id=subscription_id if strict else None
         )
         vnets = vnet_index(list(rows.values()) + list(peer_rows.values()))
         failed_vnets |= failed_peers
-    scopes = readable_scopes(cred, collector)
+    scopes = None if strict else readable_scopes(cred, collector)
     # Zone groups of the endpoints whose NIC holds a privatelink A record's IP: proof that does not depend on topology.
     zone_groups = None
     if endpoints is not None:
@@ -822,7 +829,7 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
     )
     all_zones = _graph("private DNS zones", ZONES_QUERY)
     all_links = _graph("private DNS zone links", LINKS_QUERY)
-    scope = "target_subscription" if all_zones is None or all_links is None else "readable_subscriptions"
+    scope = "target_subscription" if strict or all_zones is None or all_links is None else "readable_subscriptions"
     return out, duplicate_zone_names(out, all_zones, all_links), scope
 
 
@@ -833,6 +840,7 @@ def main() -> int:
     )
     logging.getLogger("azure").setLevel(logging.WARNING)
     load_dotenv()
+    strict = target_subscription_scope() is not None
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
@@ -878,7 +886,7 @@ def main() -> int:
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"private_zones": zones, "provider_registration_status": registration, "excluded": excluded},
+        results={**({"read_scope": "target_subscription"} if strict else {}), "private_zones": zones, "provider_registration_status": registration, "excluded": excluded},
         summary={
             **summarize(zones, duplicates, duplicates_scope),
             "provider_registration_status": registration,

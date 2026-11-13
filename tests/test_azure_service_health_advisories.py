@@ -580,3 +580,31 @@ def test_the_by_id_start_tolerates_resource_graph_and_the_event_disagreeing(grap
     c = collector()
     events, _, _, _, not_found = sh.collect(client, "s1", NOW, 180, c)
     assert ([e["tracking_id"] for e in events], not_found, c.ok) == (["OLD-1"] if found else [], 0 if found else 1, True)
+
+
+@pytest.mark.parametrize("authority, expected", [
+    ("https://login.microsoftonline.us/", "2025-04-01"),
+    ("https://login.microsoftonline.com/", "2025-05-01"),
+    ("https://login.chinacloudapi.cn/", "2025-05-01"),
+])
+def test_cloud_api_version_applies_to_all_service_health_reads(monkeypatch, graph, authority, expected):
+    from unittest.mock import Mock
+
+    monkeypatch.setenv("AZURE_AUTHORITY_HOST", authority)
+    client = Mock()
+    client.list.return_value = []
+    client.post.return_value = {}
+    client.post_list.return_value = []
+    client.get.return_value = {}
+    base = "/subscriptions/synthetic/providers/Microsoft.ResourceHealth/events"
+    c = collector()
+    sh.collect(client, "synthetic", NOW, 180, c)
+    client.list.assert_called_once_with(base, expected, {"queryStartTime": "5/5/2026"})
+    sensitive = event("SYNTHETIC", event_type="SecurityAdvisory", isEventSensitive=True)
+    sh.read_details(client, base, sensitive, {}, c)
+    client.post.assert_called_once_with(base + "/SYNTHETIC/fetchEventDetails", expected)
+    sh.read_impacted(client, base, sensitive, {}, c)
+    client.post_list.assert_called_once_with(base + "/SYNTHETIC/listSecurityAdvisoryImpactedResources", expected)
+    sh.read_by_id(client, base, "SYNTHETIC", NOW, c)
+    assert client.get.call_args.args == (base + "/SYNTHETIC", expected, {"queryStartTime": "10/2/2026"})
+    assert c.ok
