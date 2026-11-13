@@ -1,5 +1,5 @@
 name: azure_activity_log_alerts
-version: 0.3.1
+version: 0.4.0
 description: >-
   Shows which security-relevant control-plane operations and App Service changes an enabled activity log alert covers, and whether those alerts reach a person.
 category: azure
@@ -89,12 +89,12 @@ evidence_set:
     - excluded_activity_log_alerts — Number of activity log alert rules left out of scope because a pattern matched their resource group, region (they carry the region global) or id; each is listed under excluded with the pattern, and no other count includes it; null when the rule list could not be read
     - excluded_action_groups — Number of action groups left out of scope because a pattern matched their resource group or id (they carry no region, so location: patterns never match them); routing is still worked out against them; null when the action group list could not be read
     - excluded_processing_rules — Number of alert processing rules left out of scope because a pattern matched their resource group or id (they carry no region); routing is still worked out against them; null when the processing rule list could not be read
-    - in_scope_activity_log_alerts — Number of activity log alert rules read and in scope; 0 means none was read or the patterns took out every rule, which a check can catch by requiring more than 0; null when the rule list could not be read
+    - in_scope_activity_log_alerts — Number of activity log alert rules read and in scope; 0 means the patterns took out every rule or none exists, which a check can catch by requiring more than 0; null when the rule list could not be read
     - in_scope_action_groups — Number of action groups read and in scope; null when the action group list could not be read
     - in_scope_processing_rules — Number of alert processing rules read and in scope; null when the processing rule list could not be read
 
     What activity log alerts exist?
-    - total_activity_log_alerts — Number of in-scope activity log alert rules
+    - total_activity_log_alerts — Number of in-scope activity log alert rules; null when the alert rule list could not be read, as is every count, coverage map and verdict in this section and the next two
     - enabled_alerts — Number of enabled alert rules
     - disabled_alerts — Number of disabled alert rules, which never fire; a rule Azure reports with no enabled value counts here
     - alerts_with_action_groups — Number of alert rules with at least one action group of their own

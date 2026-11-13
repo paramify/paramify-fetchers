@@ -2388,6 +2388,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Four Azure monitoring fetchers give null counts, not 0 or false, when a
+  list could not be read.** The run still exits 1 as `partial_failure`.
+  - `azure_activity_log_alerts` 0.4.0: when the alert rule list is not read,
+    every alert count, both coverage maps and every coverage verdict
+    (`all_monitored_operations_covered`, `service_health_alert_configured`,
+    `all_change_operations_covered`) are null. Before they read 0 and false.
+  - `azure_diagnostic_settings` 0.2.0: when the settings are not read,
+    `activity_log_exported`, the counts, the coverage map and the required
+    category verdicts are null. Before, `activity_log_exported` read false.
+  - `azure_resource_diagnostic_settings` 0.5.0: when Resource Graph is not
+    read, the resource, coverage and ingestion counts and verdicts, the
+    destination counts, `in_scope_resources` and `excluded_resources` are null.
+    Before they read 0.
+  - `azure_log_analytics_workspaces` 0.4.0: when the workspace list is not
+    read, every count, `in_scope_workspaces` and `excluded_workspaces` are
+    null. A workspace whose tables or data exports are not read makes
+    `total_tables`, `min_table_total_retention_in_days` and the data export
+    counts null. `sentinel_onboarded_workspaces` is null while any workspace's
+    solutions are unread, and `sentinel_onboarded` is null while any are unread
+    and none is known to have Sentinel; before, it read false.
+
 - **`azure_entra_authentication_policy` no longer shows Microsoft's password
   defaults when the tenant's settings could not be read.** Before, a failed
   `/groupSettings` read fell back to the template, so `password_settings_source`

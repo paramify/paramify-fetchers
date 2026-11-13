@@ -251,8 +251,25 @@ def with_routing(alert: dict, groups: dict, processing_rules: list[dict]) -> dic
     return {**alert, **route(alert["enabled"], alert["action_groups"], alert["scopes"], groups, processing_rules)}
 
 
-def summarize(alerts: list[dict]) -> dict:
-    """Coverage of the monitored operations is the headline, not the alert count."""
+ALERT_FIELDS = (
+    "total_activity_log_alerts", "enabled_alerts", "disabled_alerts", "alerts_with_action_groups",
+    "alerts_without_action_groups", "monitored_operation_coverage", "monitored_operations_covered",
+    "monitored_operations_total", "monitored_operation_percentage", "all_monitored_operations_covered",
+    "uncovered_monitored_operations", "service_health_alert_configured",
+    "alerts_routing_to_enabled_receiver", "alerts_routing_unknown", "alerts_suppressed",
+    "alerts_possibly_suppressed", "alerts_reaching_human", "alerts_reaching_human_unknown",
+    "monitored_operation_coverage_reaching_human", "change_operation_coverage",
+    "change_operations_covered", "change_operations_possibly_covered", "change_operations_total",
+    "all_change_operations_covered", "uncovered_change_operations",
+)
+
+
+def summarize(alerts: list[dict] | None) -> dict:
+    """Coverage of the monitored operations is the headline, not the alert count.
+
+    None (the alert list was not read) gives null for every count, coverage map and verdict built from it."""
+    if alerts is None:
+        return dict.fromkeys(ALERT_FIELDS)
     coverage = operation_coverage(alerts)
     covered = sum(1 for is_covered in coverage.values() if is_covered)
     total_monitored = len(MONITORED_OPERATIONS)
@@ -347,6 +364,7 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     alerts: list[dict] = []
+    alerts_read = False
     group_records: list[dict] = []
     processing_rules: list[dict] = []
     exclusions = ResourceExclusions.from_env()
@@ -367,7 +385,7 @@ def main() -> int:
                 subscription_id,
             )
         listed = collect_activity_log_alerts(subscription_id, cred, collector)
-        read["activity_log_alerts"] = listed is not None
+        read["activity_log_alerts"] = alerts_read = listed is not None
         alerts, excluded = exclusions.split(listed or [], "activity_log_alert")
         alerts_mgmt = provider_registration_status(collector, subscription_id, cred, "Microsoft.AlertsManagement")
         rest = collector.guard("arm_rest.ARMPipelineClient (init)", lambda: arm_rest_client(cred))
@@ -440,7 +458,7 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(alerts),
+            **summarize(alerts if alerts_read else None),
             "provider_registration_status": registration,
             **counts,
         },

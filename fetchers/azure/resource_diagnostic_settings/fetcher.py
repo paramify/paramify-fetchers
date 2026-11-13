@@ -221,7 +221,27 @@ def resource_record(base: dict, status: str, categories=None, settings=None) -> 
     }
 
 
-def summarize(records: list[dict], enumerated: int, total_reported, pages: int) -> dict:
+RESOURCE_FIELDS = (
+    "resources_enumerated", "child_services_synthesized", "resources_evaluated", "resources_assessed",
+    "resources_unsupported", "resources_not_found", "resources_errored", "resources_emitting_logs",
+    "resources_with_enabled_log_setting", "resources_emitting_logs_without_setting",
+    "log_setting_coverage_percentage", "resources_sending_to_log_analytics", "log_analytics_coverage_percentage",
+    "resources_with_audit_categories", "resources_capturing_all_audit_categories", "uncovered_by_type",
+    "all_log_emitting_resources_covered",
+)
+INGESTION_FIELDS = (
+    "resources_with_recent_ingestion", "resources_without_recent_ingestion", "resources_ingestion_unknown",
+    "recent_ingestion_percentage", "no_recent_ingestion_by_type", "all_log_analytics_resources_ingesting",
+    "settings_exporting_to_unapproved_workspace", "resources_sending_to_approved_workspace",
+    "resources_exporting_to_unapproved_workspace",
+)
+
+
+def summarize(records: list[dict], enumerated: int, total_reported, pages: int, read: bool = True) -> dict:
+    """read=False (the resource inventory was not read) gives null for every count built from it."""
+    if not read:
+        return {**dict.fromkeys(RESOURCE_FIELDS), "resource_graph_total_records": total_reported,
+                "resource_graph_pages": pages}
     status = Counter(r["status"] for r in records)
     emitting = [r for r in records if r["emits_resource_logs"]]
     covered = [r for r in emitting if r["has_enabled_log_setting"]]
@@ -446,13 +466,22 @@ def destination_records(workspaces: dict, records: list[dict], approved: list[st
 
 
 def summarize_ingestion(
-    records: list[dict], destinations: list[dict], days: int, hours: int, approved: list[str]
+    records: list[dict], destinations: list[dict], days: int, hours: int, approved: list[str], read: bool = True
 ) -> dict:
+    """read=False (the resource inventory was not read) gives null for every count built from the records."""
     sending = [r for r in records if r["emits_resource_logs"] and r["sends_to_log_analytics"]]
     recent = [r for r in sending if r["ingested_in_window"] is True]
     stale = [r for r in sending if r["ingested_in_window"] is False]
     status = Counter(d["status"] for d in destinations)
     emitting = [r for r in records if r["emits_resource_logs"]]
+    if not read:
+        return {
+            "ingestion_lookback_days": days, "basic_logs_lookback_hours": hours,
+            "log_analytics_destinations": None, "log_analytics_destinations_queried": None,
+            "log_analytics_destinations_not_authorized": None, "log_analytics_destinations_not_found": None,
+            "log_analytics_destinations_errored": None, "log_analytics_destinations_with_unqueried_tables": None,
+            **dict.fromkeys(INGESTION_FIELDS), "approved_workspaces_configured": bool(approved),
+        }
     exporting = [s for r in records for s in r["diagnostic_settings"] if s["exports_logs"] and s.get("workspace_id")]
     return {
         "ingestion_lookback_days": days,
@@ -651,7 +680,8 @@ def main() -> int:
             ),
         )
 
-    if inventory["total_records"] is None:
+    inventory_read = inventory["total_records"] is not None
+    if not inventory_read:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     records = sorted((with_ingestion(r, workspaces, approved) for r in records), key=lambda r: (r["id"] or "").lower())
@@ -672,10 +702,11 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(records, len(inventory["rows"]), inventory["total_records"], inventory["pages"]),
+            **summarize(records, len(inventory["rows"]), inventory["total_records"], inventory["pages"],
+                      inventory_read),
             "provider_registration_status": registration,
-            **summarize_ingestion(records, destinations, days, hours, approved),
-            **exclusions.summary(excluded, ("resource",), {"resources": len(records)}),
+            **summarize_ingestion(records, destinations, days, hours, approved, inventory_read),
+            **exclusions.summary(excluded, ("resource",), {"resources": len(records) if inventory_read else None}),
         },
     )
 
