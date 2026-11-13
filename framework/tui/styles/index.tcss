@@ -147,6 +147,9 @@ CatalogPanel { height: 1fr; padding: 1 1 0 1; }
 }
 #catalog-tree > .tree--cursor { background: $primary; color: $background; text-style: bold; }
 #catalog-tree:blur > .tree--cursor { background: $panel; color: $text; text-style: none; }
+/* While the filter has focus, up/down and enter drive the tree cursor, so it
+   stays bright as long as focus is anywhere in the catalog. */
+#catalog-left:focus-within #catalog-tree > .tree--cursor { background: $primary; color: $background; text-style: bold; }
 #catalog-tree > .tree--guides { color: $panel; }
 
 #catalog-detail-scroll { width: 1fr; margin-left: 1; }

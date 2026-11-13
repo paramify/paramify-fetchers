@@ -548,3 +548,26 @@ def test_a_list_without_focus_has_a_dim_cursor(tmp_path, run_tui):
     assert _rgb(table_blurred) != _rgb(primary), "the manifest cursor stays bright without focus"
     assert _rgb(tree_blurred) != _rgb(primary), "the catalog cursor stays bright without focus"
     assert _rgb(table_focused) != _rgb(table_blurred), "focus does not change the cursor"
+
+
+def test_the_catalog_cursor_stays_bright_while_the_filter_drives_it(tmp_path, run_tui):
+    """Up/down in the filter move the tree cursor and enter picks its row, so
+    the cursor keeps the accent while the filter has focus."""
+    from textual.color import Color
+
+    async def body(app, pilot):
+        await pilot.press("1")
+        await pilot.pause()
+        app.screen.query_one("#catalog-search", Input).focus()
+        await pilot.pause()
+        tree = app.screen.query_one("#catalog-tree", Tree)
+        in_filter = tree.get_component_styles("tree--cursor").background
+        app.screen.query_one("#manifest-entries", DataTable).focus()
+        await pilot.pause()
+        elsewhere = tree.get_component_styles("tree--cursor").background
+        return _focus_id(app), in_filter, elsewhere, Color.parse(app.current_theme.primary)
+
+    focus, in_filter, elsewhere, primary = run_tui(body, _manifest_with(tmp_path, "demo_hello"))
+    assert focus == "manifest-entries"
+    assert _rgb(in_filter) == _rgb(primary), "the catalog cursor is gray while the filter drives it"
+    assert _rgb(elsewhere) != _rgb(primary), "the catalog cursor stays bright with focus in the manifest"
