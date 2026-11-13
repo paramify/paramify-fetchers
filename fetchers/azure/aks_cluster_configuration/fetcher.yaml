@@ -1,5 +1,5 @@
 name: azure_aks_cluster_configuration
-version: 0.3.0
+version: 0.3.1
 description: >
   For every AKS managed cluster in the subscription, reports the control-plane
   configuration: the public and private API server FQDNs, whether it is a private
@@ -88,7 +88,7 @@ evidence_set:
     Clusters the resource_exclusions patterns take out are listed under results.excluded
     instead, each with the pattern that matched; the summary gives resource_exclusion_patterns
     (the configured patterns, empty when none are set), resource_exclusion_patterns_unmatched
-    (patterns that matched no cluster, such as a mistyped name), excluded_clusters (how many the
+    (patterns that matched no cluster, such as a mistyped name, or null when the cluster list could not be read), excluded_clusters (how many the
     patterns took out, null if the list couldn't be read; no other count includes them, and the agent pool counts leave with their
     cluster) and in_scope_clusters (how many stayed; null if the list couldn't be read, and 0 means there are none or the patterns took
     out every cluster).

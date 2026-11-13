@@ -37,12 +37,12 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     sorted_counts,
     write_evidence,
-    report_failure,
 )
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
@@ -948,6 +948,14 @@ def collect_certificates(vault: dict, cred, collector: Collector, now: datetime)
     vault["certificates"] = sorted(records, key=lambda r: r.get("name") or "")
 
 
+# Failures of these calls mean a vault or certificate list was not read, so unmatched patterns are unknown.
+UNREAD_LIST_OPERATIONS = {
+    "keyvault.KeyVaultManagementClient (init)", "keyvault.vaults.list_by_subscription",
+    "web.WebSiteManagementClient (init)", "web.certificates.list",
+    "keyvault.keys.list", "keyvault.secrets.list",
+}
+
+
 def collect_key_vaults(subscription_id, cred, collector: Collector, now: datetime | None = None) -> list[dict]:
     """Both planes: the management-plane inventory, then per-vault rotation policies and certificates."""
     now = now or datetime.now(timezone.utc)
@@ -1081,6 +1089,11 @@ def main() -> int:
     app_service_certificates, excluded_certificates = exclusions.split(
         app_service_certificates, "app_service_certificate")
     excluded += excluded_certificates
+    lists_read = bool(subscription_id and cred is not None) and not any(
+        f["operation"] in UNREAD_LIST_OPERATIONS or f["operation"].split(" (")[0] in UNREAD_LIST_OPERATIONS
+        for f in collector.failures)
+    if not lists_read:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     results, summary = evidence_sections(vaults, registration, app_service_certificates, web_registration)

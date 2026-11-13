@@ -1,5 +1,5 @@
 name: azure_sql_managed_instance_backups
-version: 0.4.0
+version: 0.4.1
 description: >
   For each Azure SQL Managed Instance in the subscription, reports how its databases
   are backed up and how the instance survives a zone or region loss: the instance
@@ -175,7 +175,7 @@ evidence_set:
     warning: it doesn't fail the run or null `total_instance_failover_groups` and
     `failover_groups_manual_policy`. The summary echoes
     `resource_exclusion_patterns`, lists `resource_exclusion_patterns_unmatched`
-    (patterns that matched no instance or failover group, such as a mistyped name),
+    (patterns that matched no instance or failover group, such as a mistyped name, or null when the instance list could not be read),
     and counts `excluded_managed_instances` and `excluded_instance_failover_groups`
     (a group excluded with its instances names the instance in `matched_id`),
     `excluded_failovers` (failovers of an excluded group or instance; null when

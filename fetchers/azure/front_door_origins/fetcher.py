@@ -1315,6 +1315,8 @@ def main() -> int:
         sites_by_key, subscription_id, production_tag, groups + outside_groups, app_origins + outside_app_origins,
         plans_by_key), "production_app")
     boundary += boundary_apps
+    if not (listed and apps_listed):
+        resources.mark_unread()
     resources.warn_unmatched(logger)
     apps, excluded_apps = exclude_apps(apps, all_app_origins, app_origins + outside_app_origins)
     excluded = boundary + excluded + excluded_apps

@@ -1,5 +1,5 @@
 name: azure_sql_managed_instance_encryption
-version: 0.3.0
+version: 0.3.1
 description: >
   For each Azure SQL Managed Instance in the subscription, reports how its data is
   encrypted at rest: the instance's TDE encryption protector (a service-managed key
@@ -90,6 +90,6 @@ evidence_set:
     instead, each with the pattern that matched, and every count covers only the
     instances in scope. The summary echoes `resource_exclusion_patterns`, lists
     `resource_exclusion_patterns_unmatched` (patterns that matched no instance, such
-    as a mistyped name), and counts `excluded_managed_instances` and
+    as a mistyped name, or null when the instance list could not be read), and counts `excluded_managed_instances` and
     `in_scope_managed_instances` (0 when none was read or the patterns took out
     every instance, which a check can catch by requiring more than 0).

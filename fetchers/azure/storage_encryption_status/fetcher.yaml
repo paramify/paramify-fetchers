@@ -1,5 +1,5 @@
 name: azure_storage_encryption_status
-version: 0.4.0
+version: 0.4.1
 description: >-
   Shows how each storage account is encrypted and exposed, how old its access keys are, whether it replicates to a healthy second region, which containers are public, and its owner.
 category: azure
@@ -106,10 +106,10 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no storage account or blob container, such as a mistyped name
-    - excluded_storage_accounts — Number of storage accounts left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, no other count includes them, and their containers are never read
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no storage account or blob container, such as a mistyped name, or null when the storage account list could not be read
+    - excluded_storage_accounts — Number of storage accounts left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, no other count includes them, and their containers are never read; null when the storage account list could not be read
     - excluded_containers — Number of blob containers an id: pattern took out of an in-scope account; each is listed under excluded. An excluded account's containers are never read, so they are not counted here
-    - in_scope_storage_accounts — Number of storage accounts read and in scope; 0 means none was read or the patterns took out every account, which a check can catch by requiring more than 0
+    - in_scope_storage_accounts — Number of storage accounts in scope; null when the storage account list could not be read, 0 means none, or the patterns took out every account, which a check can catch by requiring more than 0
     - in_scope_containers — Number of blob containers listed and in scope
 
     Who holds the encryption keys?

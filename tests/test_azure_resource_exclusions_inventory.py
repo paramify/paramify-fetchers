@@ -516,12 +516,16 @@ def _policy_client(calls, refuse=(), fail=()):
 
     def at_resource_group(rg, name):
         calls.append(("deployments", name))
+        if name == "t-in":
+            raise RuntimeError("403 Forbidden")
         return [_deployment(VM_OUT, "regionwest")]
 
     def tasks():
         if "tasks" in fail:
             raise RuntimeError("403 Forbidden")
-        return [_task(SUB, "t-sub", failed=1, total=3), _task(OUT_RG, "t-out")]
+        # "later_deployments" adds an in-scope task, after one with rows, whose deployment list fails.
+        return [_task(SUB, "t-sub", failed=1, total=3), _task(OUT_RG, "t-out")] + (
+            [_task(IN_RG, "t-in")] if "later_deployments" in fail else [])
 
     return NS(policy_states=NS(summarize_for_subscription=summarize_for_subscription,
                                list_query_results_for_subscription=for_subscription,
@@ -710,6 +714,8 @@ def test_policy_recounts_are_null_when_the_latest_pairs_are_not_read_in_full(mon
         if fail == "latest_over_cap":
             # The count is over the cap, so the groups aren't read at all.
             assert len([c for c in calls if c[0] == "latest"]) == 1
+        if status in ("truncated", "uncounted"):
+            assert summary["resource_exclusion_patterns_unmatched"] is None, fail
         for key in ("non_compliant_resources", "non_compliant_policies", "compliant_resources", "resources_evaluated",
                     "resource_compliance_percentage", "non_compliant_assignments", "compliant_assignments"):
             assert summary[key] is None, (fail, key)
@@ -797,3 +803,85 @@ def test_policy_deployment_limit_counts_only_in_scope_deployments(monkeypatch):
     rows, truncated, excluded = pc.collect_remediation_deployments(client, "s1", tasks, 1, collector)
     assert [d["remediated_resource_id"] for d in rows] == [VM_EAST2] and truncated is True
     assert excluded == [] and listed == ["t1"]
+
+
+# --- an unread list leaves the unmatched patterns null ---
+
+def test_inventory_unmatched_patterns_are_null_when_the_inventory_was_not_read(monkeypatch, tmp_path, caplog):
+    _env(monkeypatch, tmp_path, inv, PATTERNS)
+    monkeypatch.setattr(inv, "credential", lambda: object())
+    monkeypatch.setattr(inv, "resource_graph_client", lambda cred: object())
+    monkeypatch.setattr(inv, "query_all", lambda client, sub, query: None)
+    with caplog.at_level(logging.WARNING):
+        inv.main()
+    evidence = json.loads((tmp_path / "azure_resource_inventory_s1.json").read_text())
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+    assert run_inventory(monkeypatch, tmp_path, PATTERNS)[1]["summary"]["resource_exclusion_patterns_unmatched"] == [
+        "rg:typo"]
+
+
+def _inventory_with_failed_query(monkeypatch, tmp_path, failed):
+    _env(monkeypatch, tmp_path, inv, PATTERNS)
+    monkeypatch.setattr(inv, "credential", lambda: object())
+    monkeypatch.setattr(inv, "resource_graph_client", lambda cred: object())
+
+    def query_all(client, sub, query):
+        table = query.split(" ", 1)[0]
+        if table == failed:
+            raise RuntimeError("request timed out")
+        return {"rows": INVENTORY_TABLES[table], "total_records": 0, "pages": 1}
+
+    monkeypatch.setattr(inv, "query_all", query_all)
+    code = inv.main()
+    return code, json.loads((tmp_path / "azure_resource_inventory_s1.json").read_text())["summary"]
+
+
+def test_inventory_unmatched_patterns_are_null_when_the_assessments_query_fails(monkeypatch, tmp_path):
+    code, summary = _inventory_with_failed_query(monkeypatch, tmp_path, "SecurityResources")
+    assert code == 1 and summary["resource_exclusion_patterns_unmatched"] is None
+
+
+def test_inventory_unmatched_patterns_are_null_when_the_policy_states_query_fails(monkeypatch, tmp_path):
+    code, summary = _inventory_with_failed_query(monkeypatch, tmp_path, "PolicyResources")
+    assert code == 1 and summary["resource_exclusion_patterns_unmatched"] is None
+
+
+def test_residual_unmatched_patterns_are_null_when_a_query_was_not_read(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path, rr, PATTERNS)
+    _residual_fakes(monkeypatch)
+    read = rr.query_all
+    monkeypatch.setattr(rr, "query_all", lambda client, sub, query: None if query == rr.ASSIGNMENTS_QUERY
+                        else read(client, sub, query))
+    rr.main()
+    evidence = json.loads((tmp_path / "azure_residual_resources_s1.json").read_text())
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+
+
+def test_defender_unmatched_patterns_are_null_when_the_list_was_not_read(monkeypatch, tmp_path, caplog):
+    _env(monkeypatch, tmp_path, da, PATTERNS)
+    monkeypatch.setattr(da, "credential", lambda: object())
+    monkeypatch.setattr(da, "collect_assessments", lambda sub, cred, collector: ([], da.UNKNOWN))
+    with caplog.at_level(logging.WARNING):
+        da.main()
+    evidence = json.loads((tmp_path / "azure_defender_assessments_s1.json").read_text())
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
+def test_policy_unmatched_patterns_are_null_when_a_list_was_not_read(monkeypatch, tmp_path):
+    for fail in ("deployments", "tasks"):
+        evidence = run_policy(monkeypatch, tmp_path, PATTERNS, fail=(fail,))[1]
+        assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None, fail
+
+
+def test_policy_later_task_with_unread_deployments_leaves_them_incomplete(monkeypatch, tmp_path):
+    collected = []
+    collect = pc.collect_compliance
+    monkeypatch.setattr(pc, "collect_compliance", lambda *a: collected.append(collect(*a)) or collected[-1])
+    code, evidence, calls = run_policy(monkeypatch, tmp_path, PATTERNS, fail=("later_deployments",))
+    assert [c for c in calls if c[0] == "deployments"] == [("deployments", "t-sub"), ("deployments", "t-in")]
+    assert code == 1 and collected[0]["deployments_complete"] is False
+    summary = evidence["summary"]
+    assert (summary["remediation_failed_deployments"], summary["remediation_successful_deployments"]) == (None, None)
+    assert summary["resource_exclusion_patterns_unmatched"] is None

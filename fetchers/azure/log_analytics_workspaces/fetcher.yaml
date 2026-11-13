@@ -1,5 +1,5 @@
 name: azure_log_analytics_workspaces
-version: 0.3.0
+version: 0.3.1
 description: >
   Every Log Analytics workspace in the subscription with the configuration that
   decides how long log data is kept and who can read it: the pricing SKU, the
@@ -84,6 +84,6 @@ evidence_set:
     workspaces in scope, so excluding the workspace Microsoft Sentinel is onboarded
     to makes `sentinel_onboarded` false. The summary echoes `resource_exclusion_patterns`, lists
     `resource_exclusion_patterns_unmatched` (patterns that matched no workspace,
-    such as a mistyped name), and counts `excluded_workspaces` and
+    such as a mistyped name, or null when the workspace list could not be read), and counts `excluded_workspaces` and
     `in_scope_workspaces` (0 when none was read or the patterns took out every
     workspace, which a check can catch by requiring more than 0).

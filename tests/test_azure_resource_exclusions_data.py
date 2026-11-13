@@ -71,6 +71,14 @@ def _run(module, monkeypatch, tmp_path, patterns, filename, **collectors):
     return code, json.loads((tmp_path / f"{filename}_s1.json").read_text())
 
 
+def _lister(items, fail):
+    """A list call that raises when the run asks for a refused vault/account list."""
+    def call():
+        _refuse("list", fail)
+        return iter(items)
+    return call
+
+
 def _no_exclusions(**in_scope):
     return {"resource_exclusion_patterns": [], "resource_exclusion_patterns_unmatched": [],
             **{f"excluded_{kind}s": 0 for kind in in_scope}, **{f"in_scope_{kind}s": n for kind, n in in_scope.items()}}
@@ -100,7 +108,7 @@ def run_config(monkeypatch, tmp_path, patterns, fail=()):
 
     vaults = [ns(id=_vault_id(rg, name), name=name, location=location, properties=ns(enable_rbac_authorization=True))
               for rg, name, location in KEY_VAULTS]
-    keyvault = ns(vaults=ns(list_by_subscription=lambda: iter(vaults)))
+    keyvault = ns(vaults=ns(list_by_subscription=_lister(vaults, fail)))
     monitor = ns(diagnostic_settings=ns(list=diagnostic_settings))
     monkeypatch.setitem(sys.modules, "azure.mgmt.keyvault", ns(KeyVaultManagementClient=lambda **_: keyvault))
     monkeypatch.setitem(sys.modules, "azure.mgmt.monitor", ns(MonitorManagementClient=lambda **_: monitor))
@@ -168,9 +176,19 @@ def _app_certificates(subscription_id, cred, collector, vaults, now):
     return [rotation.app_service_certificate_record(c, now, index) for c in APP_CERTIFICATES]
 
 
-def run_rotation(monkeypatch, tmp_path, patterns):
+def run_rotation(monkeypatch, tmp_path, patterns, fail=()):
+    def collect_vaults(subscription_id, cred, collector, now):
+        if "list" in fail:
+            collector.record("keyvault.vaults.list_by_subscription", RuntimeError("(AuthorizationFailed) 403"))
+            return []
+        vaults = copy.deepcopy(ROTATION_VAULTS)
+        for op in ("keys", "secrets"):
+            if op in fail:
+                collector.record(f"keyvault.{op}.list ({vaults[0]['name']})", RuntimeError("(AuthorizationFailed) 403"))
+        return vaults
+
     return _run(rotation, monkeypatch, tmp_path, patterns, "azure_key_vault_key_rotation",
-                collect_key_vaults=lambda *a: copy.deepcopy(ROTATION_VAULTS),
+                collect_key_vaults=collect_vaults,
                 collect_app_service_certificates=_app_certificates)
 
 
@@ -263,7 +281,7 @@ def run_storage(monkeypatch, tmp_path, patterns, fail=()):
     accounts = [ns(id=_account_id(rg, name), name=name, location=location, sku=ns(name=sku),
                    encryption=ns(key_source="Microsoft.Storage")) for rg, name, location, sku, _ in STORAGE_ACCOUNTS]
     client = ns(
-        storage_accounts=ns(list=lambda: iter(accounts),
+        storage_accounts=ns(list=_lister(accounts, fail),
                             get_properties=reader("geo_replication_stats", lambda name: ns(geo_replication_stats=None))),
         blob_services=ns(get_service_properties=reader("blob_properties", lambda name: ns())),
         file_services=ns(get_service_properties=reader("file_service_properties", lambda name: ns())),
@@ -332,6 +350,7 @@ def run_backup(monkeypatch, tmp_path, patterns, fail=()):
         def call(vault_name, resource_group_name, **_):
             read.append((operation, vault_name))
             _refuse(vault_name, fail)
+            _refuse(f"{operation}:{vault_name}", fail)
             return answer(vault_ids[vault_name], protects[vault_name])
         return call
 
@@ -360,7 +379,7 @@ def run_backup(monkeypatch, tmp_path, patterns, fail=()):
     vaults = [ns(id=vault_ids[name], name=name, location=location,
                  properties=ns(security_settings=ns(soft_delete_settings=ns(soft_delete_state="Enabled"))))
               for _, name, location, _ in RECOVERY_VAULTS]
-    recovery = ns(vaults=ns(list_by_subscription_id=lambda: iter(vaults)))
+    recovery = ns(vaults=ns(list_by_subscription_id=_lister(vaults, fail)))
     client = ns(backup_policies=ns(list=reader("backup_policies", policies)),
                 backup_protected_items=ns(list=reader("protected_items", items)),
                 backup_jobs=ns(list=reader("restore_jobs", restore_jobs)), job_details=ns(get=job_details))
@@ -471,3 +490,26 @@ def test_a_refused_read_on_an_excluded_resource_leaves_the_run_passing(monkeypat
     assert run(monkeypatch, tmp_path, None, fail=refused)[0] == 1
     code, evidence, _ = run(monkeypatch, tmp_path, PATTERNS, fail=refused)
     assert code == 0 and evidence["metadata"]["api_failures"] == []
+
+
+@pytest.mark.parametrize("run", [run_config, run_rotation, run_storage, run_backup])
+def test_a_refused_list_leaves_the_unmatched_patterns_null(monkeypatch, tmp_path, caplog, run):
+    code, evidence = run(monkeypatch, tmp_path, PATTERNS, fail=("list",))[:2]
+    assert code == 1
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
+@pytest.mark.parametrize("fail", ["keys", "secrets"])
+def test_rotation_a_refused_per_vault_list_leaves_unmatched_patterns_null(fail, monkeypatch, tmp_path, caplog):
+    code, evidence = run_rotation(monkeypatch, tmp_path, PATTERNS, fail=(fail,))
+    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
+def test_backup_a_refused_protected_item_list_leaves_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
+    code, evidence, _ = run_backup(monkeypatch, tmp_path, PATTERNS, fail=("protected_items:rsv-in",))
+    summary = evidence["summary"]
+    assert code == 1 and summary["resource_exclusion_patterns_unmatched"] is None
+    assert isinstance(summary["in_scope_restore_jobs"], int) and isinstance(summary["excluded_restore_jobs"], int)
+    assert "matched nothing" not in caplog.text

@@ -158,6 +158,7 @@ def test_activity_alerts_counts_are_null_when_their_list_was_refused(monkeypatch
     counts = {k: v for k, v in evidence["summary"].items() if k.startswith(("in_scope_", "excluded_"))}
     assert code == 1
     assert {k for k, v in counts.items() if v is None} == {f"in_scope_{unknown}", f"excluded_{unknown}"}
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
 
 
 def test_activity_alerts_exclude_by_group_and_id_but_keep_routing_through_excluded_records(monkeypatch, tmp_path):
@@ -552,6 +553,7 @@ def test_incidents_workspace_counts_are_null_when_the_workspace_list_was_refused
     assert code == 1 and _status(tmp_path) == "not_authorized"
     assert (summary["in_scope_workspaces"], summary["excluded_workspaces"]) == (None, None)
     assert summary["incidents_in_scope"] is None
+    assert summary["resource_exclusion_patterns_unmatched"] is None
 
 
 # --- log_storage_immutability ---
@@ -756,6 +758,7 @@ def test_workspace_counts_are_null_when_the_workspace_list_was_refused(monkeypat
     summary = _evidence(tmp_path, m.NAME)["summary"]
     assert code == 1 and _status(tmp_path) == "not_authorized"
     assert (summary["in_scope_workspaces"], summary["excluded_workspaces"]) == (None, None)
+    assert summary["resource_exclusion_patterns_unmatched"] is None
 
 
 def test_immutability_counts_are_null_when_the_account_list_was_refused(monkeypatch, tmp_path):
@@ -766,7 +769,7 @@ def test_immutability_counts_are_null_when_the_account_list_was_refused(monkeypa
     summary = _evidence(tmp_path, immutability.NAME)["summary"]
     assert code == 1 and _status(tmp_path) == "not_authorized"
     assert summary == {
-        "resource_exclusion_patterns": ["rg:rg-out"], "resource_exclusion_patterns_unmatched": ["rg:rg-out"],
+        "resource_exclusion_patterns": ["rg:rg-out"], "resource_exclusion_patterns_unmatched": None,
         "excluded_storage_accounts": None, "excluded_containers": None,
         "in_scope_storage_accounts": None, "in_scope_containers": None,
     }
@@ -785,4 +788,16 @@ def test_service_log_counts_are_null_when_their_list_was_refused(monkeypatch, tm
     summary = _evidence(tmp_path, service_logs.NAME)["summary"]
     assert code == 1 and _status(tmp_path) == "not_authorized"
     assert (summary[f"in_scope_{unknown}"], summary[f"excluded_{unknown}"]) == (None, None)
+    assert summary["resource_exclusion_patterns_unmatched"] is None
     assert {k: summary[k] for k in known} == known
+
+
+def test_immutability_a_refused_container_list_leaves_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
+    good = _storage_client()
+    refused = RefusedClient(good.lists, good.gets, refused=[f"{ST_IN}/blobServices/default/containers"])
+    _rest_env(monkeypatch, tmp_path, "id:*/containers/insights-logs-audit", refused)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    code = immutability.main()
+    assert code == 1
+    assert _evidence(tmp_path, immutability.NAME)["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text

@@ -454,8 +454,9 @@ def collect_subscription(client, subscription_id: str, collector: Collector) -> 
     events, excluded = apply_scope(scope, events)
     # A pattern may match a resource that wasn't read, so "matched nothing" is known only once every list was read.
     resources_known = events_read and older_read and all(e["impacted_resources"] is not None for e in events)
-    if resources_known:
-        scope.warn_unmatched(logger)
+    if not resources_known:
+        scope.mark_unread()
+    scope.warn_unmatched(logger)
     events.sort(key=lambda e: (e["tracking_id"] or ""))
     if events_read:
         logger.info("%d Service Health events in the last %d days or still in Resource Graph", len(events),
@@ -475,7 +476,7 @@ def collect_subscription(client, subscription_id: str, collector: Collector) -> 
     boundary["excluded_impacted_resources"] = len({arm_id_key(x["id"]) or _lower(x["name"])
                                                    for x in excluded if x["kind"] == RESOURCE_KIND})
     if not resources_known:
-        boundary.update({"resource_exclusion_patterns_unmatched": None, "excluded_impacted_resources": None})
+        boundary["excluded_impacted_resources"] = None
     if not (events_read and older_read):
         boundary["excluded_events"] = None
     summary = {

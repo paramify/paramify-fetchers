@@ -313,6 +313,8 @@ def build(raw_gateways: list | None, collector: Collector, subscription_id, cred
     policy_list, excluded_policies = exclusions.split(
         sorted(policies.values(), key=lambda p: arm_id_key(p["id"])), "waf_policy")
     excluded += excluded_policies
+    if not listed or listed_policies is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     results = {"application_gateways": gateways, "listeners": listeners, "waf_policies": policy_list,
                "excluded": excluded}

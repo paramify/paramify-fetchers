@@ -406,6 +406,10 @@ def main() -> int:
     assignments, excluded_assignments = exclusions.split(
         assignments, "role_assignment", name=lambda a: _guid(a["id"]) or None)
     excluded += excluded_assignments
+    listed = {*ORPHAN_QUERIES, "resource_groups", "occupied_resource_groups", "deployment_slots", "role_assignments",
+              "user_assigned_identities", "identity_references"}
+    if not listed <= set(sources):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

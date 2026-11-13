@@ -1,5 +1,5 @@
 name: azure_app_gateway_waf
-version: 0.2.0
+version: 0.2.1
 description: >
   Web application firewall enforcement on every Azure Application Gateway in the
   subscription: for each HTTP(S) listener, the WAF that actually applies to it
@@ -118,7 +118,7 @@ evidence_set:
     gateway list with Resource Graph. Summary fields:
     resource_exclusion_patterns (the configured patterns, empty when none
     are set), resource_exclusion_patterns_unmatched (patterns that matched
-    nothing, such as a mistyped name), excluded_application_gateways,
+    nothing, such as a mistyped name, or null when the gateway or policy list couldn't be read), excluded_application_gateways,
     excluded_waf_policies (how many the patterns took out) and
     in_scope_application_gateways, in_scope_listeners,
     in_scope_waf_policies (how many stayed). The gateway and listener

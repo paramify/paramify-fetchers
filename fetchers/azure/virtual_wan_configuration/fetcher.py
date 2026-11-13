@@ -358,6 +358,8 @@ def main() -> int:
             ),
         )
 
+    if any(rows is None for rows in results.values()):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     listed = {key for key, rows in results.items() if rows is not None}
     results = {key: rows or [] for key, rows in results.items()}

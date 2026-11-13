@@ -1,5 +1,5 @@
 name: azure_ddos_protection
-version: 0.2.0
+version: 0.2.1
 description: >
   Whether every public IP address — the subscription's Internet entry points — is
   covered by Azure DDoS Protection, either through a DDoS protection plan on its
@@ -106,7 +106,7 @@ evidence_set:
     attached-IP counts cover only in-scope IPs. Summary fields:
     resource_exclusion_patterns (the configured patterns, empty when none
     are set), resource_exclusion_patterns_unmatched (patterns that matched
-    nothing, such as a mistyped name), excluded_ddos_protection_plans,
+    nothing, such as a mistyped name, or null when a resource list couldn't be read), excluded_ddos_protection_plans,
     excluded_virtual_networks, excluded_public_ips (how many the patterns
     took out) and in_scope_ddos_protection_plans,
     in_scope_virtual_networks, in_scope_public_ips (how many stayed); a

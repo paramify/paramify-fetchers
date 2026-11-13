@@ -1,5 +1,5 @@
 name: azure_vnet_egress_routing
-version: 0.3.0
+version: 0.3.1
 description: >
   Where each subnet's Internet-bound traffic goes: through a firewall or network
   virtual appliance, into a black hole, to a VPN/ExpressRoute gateway, out a NAT
@@ -186,7 +186,7 @@ evidence_set:
 
     Which resources are left out of scope?
       - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no virtual network, subnet, route table, network interface, Azure Firewall or Virtual WAN hub, such as a mistyped name
+      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no virtual network, subnet, route table, network interface, Azure Firewall or Virtual WAN hub, such as a mistyped name, or null when a list could not be read
       - excluded_virtual_networks — Number of virtual networks left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
       - excluded_subnets — Number of subnets left out of scope the same way, which takes every subnet of an excluded virtual network
       - excluded_route_tables — Number of route tables left out of scope the same way

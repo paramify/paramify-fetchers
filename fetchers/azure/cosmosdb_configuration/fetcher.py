@@ -301,6 +301,8 @@ def main() -> int:
     exclusions.record_invalid(collector)
     listed = accounts is not None
     accounts, excluded = exclusions.split(accounts or [], "cosmosdb_account")
+    if not listed:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

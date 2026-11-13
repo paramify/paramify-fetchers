@@ -1,5 +1,5 @@
 name: azure_app_gateway_tls_listeners
-version: 0.2.0
+version: 0.2.1
 description: >
   Every Azure Application Gateway in the subscription and each of its listeners,
   layer 7 (HTTP/HTTPS) and layer 4 (TCP/TLS): the listener protocol, port, and
@@ -128,7 +128,7 @@ evidence_set:
     the full list with Resource Graph. Summary fields:
     resource_exclusion_patterns (the configured patterns, empty when none
     are set), resource_exclusion_patterns_unmatched (patterns that matched
-    nothing, such as a mistyped name), excluded_application_gateways (how
+    nothing, such as a mistyped name, or null when the gateway list couldn't be read), excluded_application_gateways (how
     many the patterns took out) and in_scope_application_gateways,
     in_scope_listeners (how many stayed); all three are null when the
     gateway list couldn't be read. results.excluded is always present,

@@ -1,5 +1,5 @@
 name: azure_function_app_configuration
-version: 0.2.0
+version: 0.2.1
 description: >
   For each function app in the subscription, reports network exposure (public
   network access, VNet integration), transport posture (HTTPS-only, FTP/FTPS state,
@@ -82,6 +82,6 @@ evidence_set:
     Function apps the resource_exclusions patterns take out are listed under results.excluded
     instead, each with the pattern that matched; the summary gives resource_exclusion_patterns
     (the configured patterns, empty when none are set), resource_exclusion_patterns_unmatched
-    (patterns that matched no function app, such as a mistyped name), excluded_function_apps
+    (patterns that matched no function app, such as a mistyped name, or null when the function app list could not be read), excluded_function_apps
     (how many the patterns took out, null if the list couldn't be read; no other count includes them) and in_scope_function_apps
     (how many stayed; null if the list couldn't be read, and 0 means there are none or the patterns took out every app).
