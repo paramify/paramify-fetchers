@@ -1483,6 +1483,93 @@ def stacks_cmd(
         typer.echo(f"{s['name']:<{width}}  {style.dim(s['id'])}")
 
 
+_SCRIPT_LABELS = {"in_sync": "ok", "update": "update", "create": "create", "drift": "drift", "error": "error"}
+
+
+def _status_cells(row: dict, online: bool) -> List[str]:
+    """One status row as text cells: fetcher, set, script, validators, capabilities, artifacts, ready."""
+    validators = row["validators"]
+    paired = sum(v["paired"] for v in validators)
+    if not validators:
+        val = "none"
+    elif online:
+        val = f"{paired}/{len(validators)}"
+    else:
+        val = f"{len(validators)} in registry"
+    caps = len({p["capability_id"] for p in row["pairs"]})
+    return [
+        row["name"],
+        ("ok" if row["evidence_set"]["id"] else "create") if online else "-",
+        _SCRIPT_LABELS.get(row["script"] or "", "-"),
+        val,
+        str(caps) if caps else "-",
+        str(row["evidence_set"]["artifact_count"]) if online else "-",
+        "READY" if row["ready"] else "",
+    ]
+
+
+def status_totals(status: dict) -> str:
+    """The grid's totals line: how far each setup step has come, across the fetchers."""
+    rows = status["fetchers"]
+    n = len(rows)
+    sets = sum(r["evidence_set"]["id"] is not None for r in rows)
+    scripts = sum(r["script"] == "in_sync" for r in rows)
+    validators = sum(all(v["paired"] for v in r["validators"]) for r in rows)
+    links = sum(len(r["pairs"]) for r in rows)
+    uploaded = sum(r["evidence_set"]["artifact_count"] > 0 for r in rows)
+    return (f"evidence sets {sets}/{n}  scripts {scripts}/{n}  validators {validators}/{n}  "
+            f"capabilities {links} links  uploaded {uploaded}/{n}")
+
+
+@app.command("status")
+def status_cmd(
+    manifest: str = typer.Argument(..., help="Manifest whose fetchers to check (path or bare name)"),
+    config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
+    json_out: bool = typer.Option(False, "--json", help="Emit the status as JSON"),
+):
+    """What each manifest fetcher has in Paramify: evidence set, script,
+    validators, capabilities, artifacts. Read-only.
+
+    Exit 0 when every fetcher is ready, 1 when some are not, 2 on a setup error.
+    """
+    root = api.find_repo_root()
+    path = _resolve_manifest_arg(root, manifest, json_out)
+    try:
+        status = api.paramify_status(root, path, Path(config).resolve() if config else None)
+    except Exception as e:  # noqa: BLE001 — a setup error, reported as one line
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
+        else:
+            _err(str(e))
+        raise typer.Exit(2)
+    ready = all(r["ready"] for r in status["fetchers"])
+    if json_out:
+        typer.echo(json.dumps(status, indent=2))
+        raise typer.Exit(0 if ready else 1)
+
+    ws = status["workspace"]
+    online = ws["token"]
+    typer.echo(f"{ws['base_url']}  " + (style.ok("token set") if online else style.warn("no API token")))
+    header = ["fetcher", "evidence set", "script", "validators", "capabilities", "artifacts", "ready"]
+    table = [header] + [_status_cells(r, online) for r in status["fetchers"]]
+    widths = [max(len(row[i]) for row in table) for i in range(len(header))]
+    for i, cells in enumerate(table):
+        line = "  ".join(c.ljust(w) for c, w in zip(cells, widths)).rstrip()
+        typer.echo(style.head(line) if i == 0 else line)
+    if status["fetchers"]:
+        typer.echo("")
+        typer.echo(status_totals(status))
+    if status["pipelines_count"]:
+        typer.echo(style.dim(f"{status['pipelines_count']} scan-report fetcher(s): see `paramify issues`"))
+    for name in status["skipped"]:
+        typer.echo(style.warn(f"skipped {name}: no such fetcher"))
+    for part, message in status["errors"].items():
+        typer.echo(style.warn(f"could not read {part.replace('_', ' ')}: {message}"))
+    if not online:
+        typer.echo(style.warn("Set PARAMIFY_UPLOAD_API_TOKEN (or PARAMIFY_API_TOKEN) to read the workspace."))
+    raise typer.Exit(0 if ready else 1)
+
+
 @validators_app.command("check")
 def validators_check_cmd(
     select: Optional[str] = typer.Option(None, "-s", "--select", help="Only this validator key or evidence-set reference_id"),

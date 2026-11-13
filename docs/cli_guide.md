@@ -58,6 +58,7 @@ paramify runs                  # past runs under an output dir (newest first)
 paramify evidence <file>       # read one evidence file, or an issue-report sidecar
 paramify upload   [run-dir]    # push a run's evidence to Paramify (default: latest run)
 paramify stacks                # list the workspace's stacks (name, id)
+paramify status   <manifest>   # what each fetcher has in Paramify; exit 1 until all are ready
 paramify issues   <sub>        # send a run's issue reports into assessment pipelines; list/close their jobs
 paramify programs <sub>        # list workspace programs; turn them into targets
 paramify assessments <sub>     # list workspace assessments; point issue reports at one
@@ -287,6 +288,32 @@ entries that need attention. Each item has `entry_key` and `fetcher`:
 - `setup_errors`: the setup failed before the fetcher started. `error` tells why.
 - `notes`: the run changed something for the entry, for example it dropped an
   optional secret. `note` tells what.
+
+## Check the setup in Paramify
+
+`paramify status` reads the workspace and reports, for each evidence fetcher in
+a manifest, what Paramify has for it. It changes nothing.
+
+```bash
+paramify status manifests/acme.yaml
+```
+
+| Column | Meaning |
+|---|---|
+| evidence set | `ok` when the set exists. `create` when the first scripts sync makes it. |
+| script | The state that `paramify scripts sync --dry-run` reports: `ok`, `update`, `create`, `drift` or `error`. |
+| validators | The registry validators that Paramify pairs with the set, out of all of them. `none` when the registry has none for the set. |
+| capabilities | The solution capabilities that hold a pair from this set. |
+| artifacts | The artifacts on the set. |
+| ready | The set exists, its script is in sync, it has each registry validator, and it has an artifact. |
+
+A line under the table counts each column across the fetchers. Scan-report
+fetchers go to an assessment, not to an evidence set, so the table leaves them out.
+
+The command exits 0 when every fetcher is ready and 1 when some are not. A
+deployment can use it as a check before it runs headless. It exits 2 on a setup
+error. `--json` prints the full status. Without an API token, it reads nothing
+from the workspace and shows only what the manifest and the registry hold.
 
 ## Scan results, not evidence
 

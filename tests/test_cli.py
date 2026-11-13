@@ -348,6 +348,7 @@ def _tui_api_calls() -> set[str]:
 # by every command (repo discovery / manifest read+write plumbing) rather than
 # its own command. Keep this in sync with the TUI; the test below enforces it.
 API_TO_CLI = {
+    "paramify_status": "status",
     "find_repo_root": "<implicit: every command>",
     "discover": "<implicit: one fetcher-tree scan shared across a redraw>",
     "catalog": "list / catalog / describe",
@@ -1931,3 +1932,55 @@ def test_no_tags_flag_on_every_tagging_command(path):
         cmd = cmd.commands[part]
     opts = {opt for param in cmd.params for opt in getattr(param, "opts", [])}
     assert "--no-tags" in opts
+
+
+# ---- paramify status ------------------------------------------------------- #
+
+def _status_fixture(second_ready: bool = False) -> dict:
+    def row(name, ref, set_id, arts, script, validators, ready):
+        return {"name": name, "kind": "evidence",
+                "evidence_set": {"reference_id": ref, "name": name, "id": set_id, "artifact_count": arts},
+                "script": script, "validators": validators, "pairs": [], "ready": ready}
+    return {
+        "workspace": {"base_url": "https://app.paramify.com/api/v0", "base_url_source": "default", "token": True},
+        "fetchers": [
+            row("demo_hello", "EVD-DEMO-HELLO", "ev-1", 2, "in_sync",
+                [{"key": "k", "role": "completeness", "name": "K", "paired": True}], True),
+            row("demo_policy_check", "EVD-DEMO-POLICY-CHECK", None, 0, "create", [], second_ready),
+        ],
+        "capabilities": [], "pipelines_count": 0, "skipped": [], "errors": {},
+    }
+
+
+@pytest.fixture
+def status_manifest(tmp_path):
+    path = tmp_path / "status.yaml"
+    path.write_text("run:\n  fetchers:\n    - use: demo_hello\n")
+    return str(path)
+
+
+def test_status_json_prints_the_status(monkeypatch, status_manifest):
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _status_fixture())
+    result = runner.invoke(app, ["status", status_manifest, "--json"])
+    assert json.loads(result.output) == _status_fixture()
+
+
+def test_status_exit_codes(monkeypatch, status_manifest):
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _status_fixture(second_ready=True))
+    assert runner.invoke(app, ["status", status_manifest]).exit_code == 0
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _status_fixture())
+    assert runner.invoke(app, ["status", status_manifest]).exit_code == 1
+
+    def broken(*a, **k):
+        raise ValueError("validators/x/y.yaml: schema validation failed")
+
+    monkeypatch.setattr(api, "paramify_status", broken)
+    result = runner.invoke(app, ["status", status_manifest])
+    assert result.exit_code == 2 and "schema validation failed" in result.output
+
+
+def test_status_table_has_the_totals_line(monkeypatch, status_manifest):
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _status_fixture())
+    out = runner.invoke(app, ["status", status_manifest]).output
+    assert "demo_policy_check" in out
+    assert "scripts 1/2" in out and "uploaded 1/2" in out

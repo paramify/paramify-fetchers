@@ -72,6 +72,12 @@ schemas and the `paramify` CLI — not the internal code.
   Graph remains tenant-wide. Missing reads, licensing limits and unsupported APIs
   remain recorded failures or unknown values. No source access is changed.
 
+- **`paramify status <manifest>` shows what each fetcher has in Paramify.** For
+  each evidence fetcher in the manifest, it shows the evidence set, the script
+  state, the paired validators, the solution capabilities, the artifacts, and
+  whether the fetcher is ready. It changes nothing in the workspace. It exits 1
+  until every fetcher is ready, so a deployment can use it as a check. The
+  evidence-set and capability reads now keep each validator pair.
 - **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
   one record per VPC in the region with its Route 53 Resolver DNSSEC validation
   status (`NOT_CONFIGURED` when the VPC has no DNSSEC config), its DNS Firewall
