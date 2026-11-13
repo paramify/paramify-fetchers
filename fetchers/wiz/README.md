@@ -50,7 +50,7 @@ config and the `close_cycle` warning are in
 |---|---|---|---|
 | [`wiz_stig_compliance_report`](stig_compliance_report/README.md) | CONFIGURATION | STIG control pass/fail per rule and resource, for one enabled framework | `read:security_frameworks`, `read:cloud_configuration`, `read:host_configuration` |
 | `wiz_issues_report` | CONFIGURATION | The last completed run of a Wiz Issues report, as Wiz's own CSV. The report is created and scheduled once in Wiz; the fetcher only downloads it | `read:reports` |
-| `wiz_vulnerability_findings` | VULNERABILITY | Every vulnerability finding, in the legacy Paramify column layout | `read:vulnerabilities` |
+| [`wiz_vulnerability_findings`](vulnerability_findings/README.md) | VULNERABILITY | Every vulnerability finding, in the legacy Paramify column layout, plus SLA columns (internet reachability, CISA SSVC, exploitability) | `read:vulnerabilities` |
 
 ## Service account
 

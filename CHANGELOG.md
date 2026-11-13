@@ -47,6 +47,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
+  columns (unchanged, so existing intake presets keep mapping), the CSV adds the
+  Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and
+  `Internet Reachable Reason` (Wiz's finding-level classification, closer to
+  FedRAMP's Internet-Reachable Vulnerability than the asset-level `Asset Has Wide
+  Internet Exposure`), `Asset Has Limited Internet Exposure`, the BOD 26-04 KEV
+  inputs `CISA SSVC Automatable` and `CISA SSVC Technical Impact` plus `CISA KEV
+  Due Date`, and four signals toward Likely Exploitable (`Exploitability
+  Validation Status`, `Has Initial Access Potential`, `Code Reachability`,
+  `Attack Vector`). None of the four is a Likely Exploitable verdict. Each field
+  is selected only when the tenant's schema has it (read-only introspection); a
+  missing one leaves its column blank and is logged, and if the schema cannot be
+  read the legacy query is sent unchanged. The columns are listed in
+  [the fetcher's README](fetchers/wiz/vulnerability_findings/README.md#columns).
+
 - **Optional selected-subscription reads for mixed Entra evidence.**
   `azure_entra_emergency_accounts` 0.2.0 and
   `azure_entra_dormant_identities` 0.3.0 accept `target_subscription_only`
