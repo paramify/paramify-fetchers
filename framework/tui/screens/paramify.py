@@ -273,7 +273,12 @@ class ParamifyPage(ParamifyWriter, Vertical):
         activity = self.query_one("#pf-activity-panel", Vertical)
         activity.border_title = "activity"
         activity.display = False
-        self.query_one("#pf-lens-tabs", Tabs).can_focus = False
+        lens_tabs = self.query_one("#pf-lens-tabs", Tabs)
+        lens_tabs.can_focus = False
+        # Only the by-fetcher view works yet: a bar with a tab that opens an
+        # empty view would only be a dead click, so it stays hidden until the
+        # by-capability view is filled in.
+        lens_tabs.display = False
         # The empty-manifest hint takes focus, so the page keys still work.
         self.query_one("#pf-grid-empty", Static).can_focus = True
         grid = self.query_one("#pf-grid", DataTable)
