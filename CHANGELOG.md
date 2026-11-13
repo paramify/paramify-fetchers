@@ -1674,8 +1674,10 @@ schemas and the `paramify` CLI — not the internal code.
   hint. The add-fetchers picker is removed.
 - **The Paramify tab in the TUI can show the solution capabilities.** `[` and `]`
   switch between the view by fetcher and the view by capability. The view by
-  capability lists each capability in the workspace with its pairs and the
-  fetchers they come from. Under it, the highlighted capability shows each
+  capability lists each capability in the workspace with its validator
+  pairs and the fetchers they come from. The count includes pairs whose
+  evidence sets are not in the manifest, and the row says how many come from
+  other evidence sets. Under it, the highlighted capability shows each
   pair: the fetcher, the function, and the validators in the pair. `/`
   filters by capability id or name. If the token cannot read the
   capabilities, the view tells you. The view by fetcher still works.

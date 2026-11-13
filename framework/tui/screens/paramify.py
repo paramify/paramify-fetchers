@@ -140,6 +140,15 @@ def _unknown() -> Text:
     return Text("?", style=palette.WARN)
 
 
+def _pair_groups(row: dict) -> dict:
+    """{(capability id, function): [validator keys]}: one fetcher's pairs, grouped
+    by what they prove. Each key is one validator-evidence pair."""
+    groups: dict = {}
+    for pair in row["pairs"]:
+        groups.setdefault((pair["capability_id"], pair["function"]), []).append(pair["validator_key"])
+    return groups
+
+
 def _capability_ids(row: dict) -> set:
     return {p["capability_id"] for p in row["pairs"]}
 
@@ -667,6 +676,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
             return
         self._cap_view_parts(True)
         self._cap_pairs = self._pairs_by_capability(status)
+        self._cap_others = self._other_pairs(status)
+        sets_known = "evidence_sets" not in (status.get("errors") or {})
         keep = None
         if grid.row_count:
             try:
@@ -675,17 +686,29 @@ class ParamifyPage(ParamifyWriter, Vertical):
                 keep = None
         grid.clear()
         text = self._cap_filter
+        covered = 0
         for cap in status["capabilities"]:
+            groups = self._cap_pairs.get(cap["id"], [])
+            other = self._cap_others.get(cap["id"], 0)
+            total = sum(len(validators) for _, _, validators in groups) + other
+            covered += bool(total)
             ref = cap.get("reference_id") or cap["id"]
             if text and text not in ref.lower() and text not in (cap.get("name") or "").lower():
                 continue
-            pairs = self._cap_pairs.get(cap["id"], [])
-            names = sorted({p[0] for p in pairs})
-            shown = ", ".join(names[:2]) + (f"  +{len(names) - 2} more" if len(names) > 2 else "")
+            if not sets_known:
+                # The manifest's own pairs come from the evidence-set read; the
+                # capability read still counts every pair, so the total is known.
+                source = Text("? the evidence sets were not read", style=palette.WARN)
+            else:
+                names = sorted({fetcher for fetcher, _, _ in groups})
+                source = Text(", ".join(names[:2]) + (f"  +{len(names) - 2} more" if len(names) > 2 else ""))
+                if other:
+                    source.append(("  " if source.plain else "") + f"+{other} from other evidence sets",
+                                  style=palette.MUTED)
+                if not source.plain:
+                    source = _dim("no pairs yet")
             grid.add_row(Text(ref, style=palette.INFO), cap.get("name") or "",
-                         Text(str(len(pairs))) if pairs else _dim("—"),
-                         Text(shown) if shown else _dim("no pairs yet"), key=cap["id"])
-        covered = sum(1 for cap in status["capabilities"] if self._cap_pairs.get(cap["id"]))
+                         Text(str(total)) if total else _dim("—"), source, key=cap["id"])
         panel.border_title = f"capabilities ({len(status['capabilities'])})  ·  {covered} with pairs"
         if keep is not None and keep in {c["id"] for c in status["capabilities"]}:
             try:
@@ -703,16 +726,30 @@ class ParamifyPage(ParamifyWriter, Vertical):
     @staticmethod
     def _pairs_by_capability(status: dict) -> dict:
         """{capability id: [(fetcher, function, validator names)]}, one entry per
-        fetcher and function: the set plus the validators that prove it."""
+        fetcher and function: the set plus the validators that prove it. Only
+        the manifest's fetchers: their pairs come from their evidence sets."""
         out: dict = {}
         for row in status["fetchers"]:
             names = {v["key"]: v["name"] for v in row["validators"]}
-            groups: dict = {}
-            for pair in row["pairs"]:
-                key = (pair["capability_id"], pair["function"])
-                groups.setdefault(key, []).append(names.get(pair["validator_key"] or "", "(not in the registry)"))
-            for (cap_id, function), validators in groups.items():
+            for (cap_id, function), keys in _pair_groups(row).items():
+                validators = [names.get(k or "", "(not in the registry)") for k in keys]
                 out.setdefault(cap_id, []).append((row["name"], function, validators))
+        return out
+
+    @staticmethod
+    def _other_pairs(status: dict) -> dict:
+        """{capability id: pairs that prove it with evidence outside this manifest}.
+
+        The capabilities read lists every pair of every capability; the ones not
+        among the manifest's fetchers' pairs prove it with other evidence sets.
+        """
+        mine = {p["pair_id"] for row in status["fetchers"] for p in row["pairs"]}
+        out: dict = {}
+        for cap in status.get("capabilities") or []:
+            ids = {p.get("pair_id") for fn in cap.get("functions") or [] for p in fn.get("pairs") or []}
+            ids.discard(None)
+            if ids - mine:
+                out[cap["id"]] = len(ids - mine)
         return out
 
     def _cap_cursor(self) -> str | None:
@@ -729,6 +766,13 @@ class ParamifyPage(ParamifyWriter, Vertical):
         table.clear()
         for fetcher, function, validators in getattr(self, "_cap_pairs", {}).get(cap_id, []):
             table.add_row(fetcher, _dim(function.lower().replace("_", " ")), " + ".join(validators))
+        other = getattr(self, "_cap_others", {}).get(cap_id, 0)
+        if other and "evidence_sets" in ((self._status or {}).get("errors") or {}):
+            # Unread, the manifest's own pairs look like other sets' pairs.
+            table.add_row(Text("?", style=palette.WARN), _dim("—"),
+                          Text(f"{other} pair(s); the evidence sets were not read", style=palette.WARN))
+        elif other:
+            table.add_row(_dim("other evidence sets"), _dim("—"), _dim(f"{other} pair(s), not in this manifest"))
 
     def action_hide_ready(self) -> None:
         """Hide the fetchers that are ready, so the grid lists what needs work;
@@ -863,9 +907,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         caps = {c["id"]: c for c in status.get("capabilities") or []}
         validators = row["validators"]
         index = {v["key"]: i for i, v in enumerate(validators)}
-        groups: dict = {}
-        for pair in row["pairs"]:
-            groups.setdefault((pair["capability_id"], pair["function"]), []).append(pair["validator_key"])
+        groups = _pair_groups(row)
         by_name = len(validators) > MAX_V_COLUMNS or any(k not in index for ks in groups.values() for k in ks)
         if by_name:
             table.add_columns("capability", "function", "validators in the pair")

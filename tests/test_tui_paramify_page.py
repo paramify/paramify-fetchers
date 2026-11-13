@@ -610,7 +610,8 @@ def test_capability_rows_and_title(tmp_path, monkeypatch, run_tui):
 
     title, rows = run_tui(body, _manifest(tmp_path))
     assert title == "capabilities (2)  ·  1 with pairs"
-    assert rows["SC-AC-06"][1:] == ["Least privilege", "3", "alpha, bravo  +1 more"]
+    # pairs, not fetcher-and-function groups: alpha has two, bravo and charlie one each
+    assert rows["SC-AC-06"][1:] == ["Least privilege", "4", "alpha, bravo  +1 more"]
     assert rows["SC-AU-02"][2:] == ["—", "no pairs yet"]
 
 
@@ -945,3 +946,59 @@ def test_the_capability_view_without_a_grid_keeps_the_keys(tmp_path, monkeypatch
     assert after_escape == "pf-cap-error"
     assert back == "pf-by-fetcher", "[ did not switch the view back"
     assert tab == "tab-fetchers", "1 did not switch the tab"
+
+
+def _other_set_status(**kw) -> dict:
+    """c1 has alpha's pair and one from an evidence set outside the manifest; c2
+    has only two from outside it."""
+    def fn(*ids):
+        return [{"type": "PROVIDER", "pairs": [{"pair_id": i, "validator_id": "v", "evidence_id": "e"} for i in ids]}]
+
+    return _status(
+        [_linked("alpha", "k0"), _row("delta")],
+        capabilities=[{"id": "c1", "reference_id": "SC-AC-06", "name": "Least privilege",
+                       "functions": fn("alpha-k0", "elsewhere-1")},
+                      {"id": "c2", "reference_id": "SC-AU-02", "name": "Audit logging",
+                       "functions": fn("elsewhere-2", "elsewhere-3")},
+                      {"id": "c3", "reference_id": "SC-CM-02", "name": "Baseline", "functions": []}],
+        **kw)
+
+
+def test_pairs_from_outside_the_manifest_count(tmp_path, monkeypatch, run_tui):
+    """A capability proven by evidence outside this manifest has pairs: the rows
+    and the title count them, and say where they come from."""
+    _stub(monkeypatch, _other_set_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        await pilot.press("down")
+        await pilot.pause()
+        pairs = page.query_one("#pf-pairs", DataTable)
+        return (str(page.query_one("#pf-cap-panel").border_title), _cap_rows(page),
+                [[_text(c).strip() for c in pairs.get_row_at(i)] for i in range(pairs.row_count)])
+
+    title, rows, pairs = run_tui(body, _manifest(tmp_path))
+    assert title == "capabilities (3)  ·  2 with pairs"
+    assert rows["SC-AC-06"][2:] == ["2", "alpha  +1 from other evidence sets"]
+    assert rows["SC-AU-02"][2:] == ["2", "+2 from other evidence sets"]
+    assert rows["SC-CM-02"][2:] == ["—", "no pairs yet"]
+    assert pairs == [["other evidence sets", "—", "2 pair(s), not in this manifest"]]
+
+
+def test_unread_evidence_sets_leave_the_pair_sources_unknown(tmp_path, monkeypatch, run_tui):
+    """The manifest's pairs come from the evidence-set read. Without it the count
+    still comes from the capability read, but where the pairs come from is unknown."""
+    status = _other_set_status(errors={"evidence_sets": "HTTP 500"})
+    for row in status["fetchers"]:
+        row["pairs"] = []
+    _stub(monkeypatch, status)
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        pairs = page.query_one("#pf-pairs", DataTable)
+        return _cap_rows(page), [_text(c).strip() for c in pairs.get_row_at(0)]
+
+    rows, pair_row = run_tui(body, _manifest(tmp_path))
+    assert rows["SC-AC-06"][2:] == ["2", "? the evidence sets were not read"]
+    assert rows["SC-AU-02"][2] == "2"
+    assert pair_row == ["?", "—", "2 pair(s); the evidence sets were not read"]
