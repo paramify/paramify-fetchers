@@ -88,8 +88,6 @@ class UploadPage(ParamifyWriter, ButtonRowNav, Vertical):
         self._preflight: dict | None = None
         self._scripts_preflight: dict | None = None
         self._plan_counts: dict[str, int] = {}
-        # Which stage the shared log and banner are currently reporting on.
-        self._upload_kind = "evidence"
 
         self.query_one("#evidence-panel", Vertical).border_title = "evidence upload"
         self.query_one("#scripts-panel", Vertical).border_title = "scripts sync"
@@ -339,7 +337,6 @@ class UploadPage(ParamifyWriter, ButtonRowNav, Vertical):
 
     def _start_upload(self, run_dir: str) -> None:
         self._uploading = True
-        self._upload_kind = "evidence"
         self._begin_log(Text("uploading to Paramify...", style=palette.WARN))
         self._upload_worker(run_dir, self.app.root_path, self._run_manifest)
 
@@ -444,22 +441,11 @@ class UploadPage(ParamifyWriter, ButtonRowNav, Vertical):
     def _handle_upload_event(self, ev: dict) -> None:
         etype = ev.get("event")
         log = self.query_one("#upload-log", RichLog)
-        noun = self._upload_kind
-        for line in upload_event_lines(ev, noun):
+        for line in upload_event_lines(ev, "evidence"):
             log.write(line)
         if etype == "upload_start":
             mode = " (dry-run)" if ev.get("dry_run") else ""
-            self._set_banner(Text(f"uploading {ev.get('files', 0)} {noun}(s) to {ev.get('base_url', '')}{mode}", style=palette.WARN))
-        elif etype == "job_queued":
-            self._set_banner(Text(
-                f"processing on {ev.get('assessment_id')} — job {ev.get('job_id')} queued",
-                style=palette.WARN,
-            ))
-        elif etype == "job_status":
-            self._set_banner(Text(
-                f"job {ev.get('job_id')} {ev.get('status')} on {ev.get('assessment_id')}",
-                style=palette.WARN,
-            ))
+            self._set_banner(Text(f"uploading {ev.get('files', 0)} evidence(s) to {ev.get('base_url', '')}{mode}", style=palette.WARN))
         elif etype == "upload_complete":
             self._finalize_upload(ev)
         elif etype == "_upload_failed":
@@ -470,19 +456,18 @@ class UploadPage(ParamifyWriter, ButtonRowNav, Vertical):
 
     def _finalize_upload(self, ev: dict) -> None:
         self._uploading = False
-        # An intake changes what the panel should say (those reports are now
+        # An upload changes what the panel should say (those files are now
         # duplicates), so re-read readiness rather than only re-enabling buttons.
         self.rebuild()
         self._restore_actions()
         ok = ev.get("ok")
         style = palette.OK if ok else palette.FAIL
         msg = Text(
-            f"{self._upload_kind} upload complete — "
+            "evidence upload complete — "
             f"uploaded={ev.get('uploaded', 0)} "
             f"duplicates={ev.get('skipped_duplicate', 0)} "
             f"errors={ev.get('errors', 0)}"
-            + (f" dropped={ev['dropped']}" if ev.get("dropped") else "")
-            + (f" jobs_failed={ev['jobs_failed']}" if ev.get("jobs_failed") else ""),
+            + (f" dropped={ev['dropped']}" if ev.get("dropped") else ""),
             style=style,
         )
         if ev.get("halted"):

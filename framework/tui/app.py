@@ -2,7 +2,7 @@
 
 Owns the shared state every screen reads (repo root, cached catalog, the active
 manifest dict + path) and routes between two screens: a WelcomeScreen front door
-(pick a manifest) and the WorkspaceScreen (the four tabs). `--manifest PATH`
+(pick a manifest) and the WorkspaceScreen (the five tabs). `--manifest PATH`
 skips the front door and enters the workspace directly.
 
 Like the other front-ends, this talks only to framework.api.

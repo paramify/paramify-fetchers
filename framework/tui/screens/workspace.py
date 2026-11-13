@@ -1,4 +1,4 @@
-"""WorkspaceScreen — the four-tab fetcher workspace.
+"""WorkspaceScreen — the five-tab fetcher workspace.
 
 Hosts the shared chrome (AppHeader + HintFooter) and the Fetchers / Run /
 Evidence / Paramify / Pipelines tabs. Fetchers holds the catalog and the manifest on one

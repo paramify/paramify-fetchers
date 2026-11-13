@@ -282,7 +282,7 @@ UploadPage {
     height: 1fr;
 }
 
-/* Paramify tab: evidence + issue-report + scripts panels over a shared log. */
+/* Paramify tab: evidence and scripts panels over a shared log. */
 #evidence-panel { height: auto; margin: 1 1 0 1; }
 #evidence-summary { height: auto; }
 /* Preflight errors and warnings: prose that wraps, under the summary table. */
@@ -296,7 +296,7 @@ UploadPage {
 #issues-actions { height: auto; align: left middle; padding-top: 1; }
 #issues-actions Button { width: 24; }
 
-/* Scripts and log split what the two auto-height panels leave. Each keeps a
+/* Scripts and log split what the auto-height evidence panel leaves. Each keeps a
    floor, so neither collapses to its border on a 50-row terminal: the scripts
    panel needs header, summary, a plan row and the action row (8 with border). */
 #scripts-panel { height: 1fr; min-height: 8; margin: 1 1 0 1; }

@@ -109,7 +109,7 @@ paramify issues upload -f manifests/pipelines.yaml
 ```
 </details>
 
-In the TUI, press `i` on the **Paramify** tab ([recording](demo/pipeline-send.gif)).
+In the TUI, press `i` on the **Pipelines** tab ([recording](demo/pipeline-send.gif)).
 
 ## 5. Watch jobs, and close cycles
 
@@ -125,7 +125,7 @@ paramify issues close <assessment-id>
 ```
 </details>
 
-The TUI's keys are `j` and `C` on the **Paramify** tab ([recording](demo/pipeline-jobs.gif)).
+The TUI's keys are `j` and `C` on the **Pipelines** tab ([recording](demo/pipeline-jobs.gif)).
 
 ## 6. Verify in Paramify
 
