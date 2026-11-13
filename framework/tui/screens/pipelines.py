@@ -29,7 +29,9 @@ from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal, PickerModal
 from framework.tui.screens.paramify_events import (
+    BUSY_NOTICE,
     COUNT_LABELS,
+    ParamifyWriter,
     PipelineEvent,
     UploadEvent,
     job_text,
@@ -38,7 +40,7 @@ from framework.tui.screens.paramify_events import (
 )
 
 
-class PipelinesPage(ButtonRowNav, Vertical):
+class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
     HINTS = [("i", "send reports"), ("j", "jobs"), ("C", "close cycle"), ("ctrl+r", "refresh")]
 
     BINDINGS = [
@@ -123,14 +125,14 @@ class PipelinesPage(ButtonRowNav, Vertical):
         self._focus_first_action()
 
     @property
-    def _busy(self) -> bool:
+    def _own_busy(self) -> bool:
         return self._uploading
 
     # -- data ------------------------------------------------------------- #
 
     def rebuild(self) -> None:
         """Refresh the fetcher list and the send readiness (cheap; no network)."""
-        if self._busy:
+        if self._own_busy:
             return
         self._rebuild_fetchers()
         self._rebuild_issues()
@@ -255,7 +257,7 @@ class PipelinesPage(ButtonRowNav, Vertical):
 
     def action_intake_issues(self) -> None:
         if self._busy:
-            self.notify("A Paramify operation is already in progress.")
+            self.notify(BUSY_NOTICE)
             return
         pf = self._issues_preflight
         run_dir = self._issues_run_dir
@@ -465,7 +467,7 @@ class PipelinesPage(ButtonRowNav, Vertical):
     def action_close_cycle(self) -> None:
         """Close the current cycle of one of the manifest's assessments."""
         if self._busy:
-            self.notify("A Paramify operation is already in progress.")
+            self.notify(BUSY_NOTICE)
             return
         choices = self._manifest_assessments()
         if not choices:

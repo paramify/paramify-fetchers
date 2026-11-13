@@ -1669,7 +1669,9 @@ schemas and the `paramify` CLI — not the internal code.
   reads them: an assessment set for the whole platform counts, and a close
   policy that is not set reads "close unset". `i` sends the reports, `j`
   lists the pipeline jobs and `C` closes a cycle, as before. The Paramify tab
-  keeps the evidence upload and the scripts sync.
+  keeps the evidence upload and the scripts sync. One Paramify operation
+  still runs at a time across both tabs: while an upload, sync, send or cycle
+  close runs, the other tab refuses to start another and says so.
 - **Only the TUI panel that has focus has a color.** The other panels have a
   gray border, and the list in them has a gray cursor. The catalog's cursor
   stays bright while its filter has focus, because up, down and enter in the

@@ -438,3 +438,42 @@ def test_a_broken_catalog_does_not_stop_the_tui(tmp_path, monkeypatch, run_tui):
     assert rows == 0
     assert any("Could not load catalog" in n for n in notices), notices
 
+
+@pytest.mark.parametrize(
+    "busy_page, busy_flag, tab, keys",
+    [
+        (UploadPage, "_uploading", "5", ("i",)),         # evidence upload running: no scan send
+        (UploadPage, "_uploading", "5", ("C",)),         # ... and no cycle close
+        (UploadPage, "_syncing", "5", ("i",)),           # scripts sync running: no scan send
+        (PipelinesPage, "_uploading", "4", ("ctrl+u",)),  # scan send running: no evidence upload
+        (PipelinesPage, "_uploading", "4", ("p",)),       # ... and no scripts preview
+    ],
+    ids=["upload-blocks-send", "upload-blocks-close", "sync-blocks-send",
+         "send-blocks-upload", "send-blocks-preview"],
+)
+def test_one_paramify_write_runs_at_a_time_across_pages(
+    tmp_path, monkeypatch, run_tui, busy_page, busy_flag, tab, keys
+):
+    """The Paramify and Pipelines pages share one busy guard, as they did on one page:
+    while either runs a write, the other refuses to start one and says why."""
+    out = tmp_path / "evidence"
+    issue_run(out, "2026-09-01T00-00-00Z")
+    evidence_run(out, "2026-09-02T00-00-00Z")
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "t")
+    started = []
+    for name in ("issues_upload_run", "upload_run", "plan_upload", "scripts_sync", "issues_close"):
+        monkeypatch.setattr(api, name, lambda *a, _n=name, **k: started.append(_n))
+
+    async def body(app, pilot):
+        app.manifest["run"]["fetchers"][0]["config"] = {"assessment_id": "A-1"}
+        setattr(app.screen.query_one(busy_page), busy_flag, True)
+        await pilot.press(tab)
+        await pilot.pause()
+        await pilot.press(*keys)
+        await _settle(app, pilot)
+        return type(app.screen).__name__, [str(n.message) for n in app._notifications]
+
+    screen, notices = run_tui(body, _write_manifest(tmp_path))
+    assert screen == "WorkspaceScreen", "a second Paramify write got as far as its confirm or picker"
+    assert "A Paramify operation is already in progress." in notices, notices
+    assert started == []

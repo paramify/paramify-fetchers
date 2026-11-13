@@ -30,6 +30,8 @@ from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal
 from framework.tui.screens.paramify_events import (
+    BUSY_NOTICE,
+    ParamifyWriter,
     ScriptsSyncEvent,
     UploadEvent,
     latest_run_scoped,
@@ -38,7 +40,7 @@ from framework.tui.screens.paramify_events import (
 )
 
 
-class UploadPage(ButtonRowNav, Vertical):
+class UploadPage(ParamifyWriter, ButtonRowNav, Vertical):
     HINTS = [("ctrl+u", "upload"), ("p", "preview"), ("ctrl+s", "sync"),
              ("ctrl+r", "refresh")]
 
@@ -143,7 +145,7 @@ class UploadPage(ButtonRowNav, Vertical):
         self._focus_first_action()
 
     @property
-    def _busy(self) -> bool:
+    def _own_busy(self) -> bool:
         return self._uploading or self._syncing or self._busy_planning
 
     # -- data ------------------------------------------------------------- #
@@ -166,7 +168,7 @@ class UploadPage(ButtonRowNav, Vertical):
     def rebuild(self) -> None:
         """Refresh readiness for both panels (cheap; no network). The scripts
         plan itself is populated on demand by Preview / Sync, not here."""
-        if self._busy:
+        if self._own_busy:
             return
         self._rebuild_evidence()
         self._rebuild_scripts()
@@ -301,7 +303,7 @@ class UploadPage(ButtonRowNav, Vertical):
 
     def action_upload_run(self) -> None:
         if self._busy:
-            self.notify("A Paramify operation is already in progress.")
+            self.notify(BUSY_NOTICE)
             return
         if not self._run_dir or not self._preflight or not self._preflight.get("ok"):
             self.notify("No upload-ready run selected.")
@@ -369,7 +371,7 @@ class UploadPage(ButtonRowNav, Vertical):
         """Read-only dry-run: compute and surface the plan. No token required,
         no confirmation (it makes no writes)."""
         if self._busy:
-            self.notify("A Paramify operation is already in progress.")
+            self.notify(BUSY_NOTICE)
             return
         pf = self._scripts_preflight
         if not pf or pf.get("fetcher_count", 0) == 0:
@@ -379,7 +381,7 @@ class UploadPage(ButtonRowNav, Vertical):
 
     def action_sync_scripts(self) -> None:
         if self._busy:
-            self.notify("A Paramify operation is already in progress.")
+            self.notify(BUSY_NOTICE)
             return
         pf = self._scripts_preflight
         if not pf or pf.get("fetcher_count", 0) == 0:

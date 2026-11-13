@@ -1,5 +1,6 @@
 """What the Paramify-facing pages share: the worker messages, how an upload or
-pipeline event reads as a log line, and which run a page acts on.
+pipeline event reads as a log line, which run a page acts on, and the busy guard
+that lets one Paramify write run at a time.
 
 The Paramify page (evidence upload, scripts) and the Pipelines page (scan
 reports) both stream ``api.upload_run``-shaped events, so the log line for each
@@ -38,6 +39,31 @@ class ScriptsSyncEvent(Message):
     def __init__(self, ev: dict) -> None:
         self.ev = ev
         super().__init__()
+
+
+BUSY_NOTICE = "A Paramify operation is already in progress."
+
+
+class ParamifyWriter:
+    """A page that writes to Paramify. Only one write runs at a time, across pages.
+
+    The evidence upload and scripts sync (Paramify page) and the scan-report send
+    and cycle close (Pipelines page) shared one page, and one busy guard, before
+    scan reports moved to their own tab: a second operation was refused while one
+    ran. `_busy` keeps that guard across both pages; each page reports its own
+    work through `_own_busy`.
+    """
+
+    @property
+    def _own_busy(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def _busy(self) -> bool:
+        """Whether any Paramify write is running, on this page or another."""
+        return any(
+            page._own_busy for page in self.screen.walk_children() if isinstance(page, ParamifyWriter)
+        )
 
 
 COUNT_LABELS = (
