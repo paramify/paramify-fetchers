@@ -17,6 +17,7 @@ Administrator by display name.
 import asyncio
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -62,6 +63,9 @@ _MEMBER_TYPES = {
     "#microsoft.graph.device": "Device",
     "#microsoft.graph.orgContact": "OrgContact",
 }
+
+APPROVED_ENV = "AZURE_ENTRA_APPROVED_PRINCIPAL_IDS"
+_OBJECT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 # --- projections: the only code here that touches a Graph model ---
@@ -241,6 +245,37 @@ def summarize(roles: list[dict], roles_read: bool = True) -> dict:
     }
 
 
+def parse_approved_ids(raw: str | None) -> tuple[list[str] | None, int]:
+    """The approved object ids, lower-cased and sorted (None when there is no entry), and how many aren't object ids."""
+    ids = sorted({part.lower() for part in re.split(r"[,\s]+", raw or "") if part})
+    if not ids:
+        return None, 0
+    return ids, sum(1 for i in ids if not _OBJECT_ID.fullmatch(i))
+
+
+def approval(roles: list[dict], roles_read: bool, approved: list[str] | None, invalid: int = 0) -> tuple[dict, dict]:
+    """Privileged-role holders whose object id isn't on the approved list: summary figures and results entries."""
+    privileged = [r for r in roles if r["is_privileged"]]
+    readable = roles_read and all(r["members_read"] and r["service_principal_members_read"] for r in privileged)
+    unapproved = None
+    if approved is not None and not invalid and readable:
+        allowed, holders = set(approved), {}
+        for role in privileged:
+            for member in role["members"]:
+                if (member.get("id") or "").lower() not in allowed:
+                    holders.setdefault(member.get("id"), {**member, "privileged_roles": set()})[
+                        "privileged_roles"].add(role.get("display_name") or "")
+        unapproved = sorted(
+            ({**h, "privileged_roles": sorted(h["privileged_roles"])} for h in holders.values()),
+            key=lambda h: ((h.get("user_principal_name") or h.get("display_name") or "").lower(), h.get("id") or ""),
+        )
+    summary = {
+        "approved_principals_configured": approved is not None,
+        "unapproved_privileged_principals": None if unapproved is None else len(unapproved),
+    }
+    return summary, {"approved_principal_ids": approved, "unapproved_principals": unapproved}
+
+
 # --- collection (lazy msgraph imports) ---
 
 async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, bool]:
@@ -329,6 +364,10 @@ def main() -> int:
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
+    approved, invalid = parse_approved_ids(os.environ.get(APPROVED_ENV))
+    if invalid:
+        collector.record(f"config {APPROVED_ENV}", ValueError(
+            f"invalid setting {APPROVED_ENV}: {invalid} entry(ies) are not object ids (GUIDs)"))
 
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
     if cred is None:
@@ -342,6 +381,7 @@ def main() -> int:
     # resource provider, and the "empty vs. not in use" ambiguity it resolves cannot
     # arise here — /directoryRoles returns only ACTIVATED roles.
     scoping = tenant_scoping()
+    approval_summary, approval_results = approval(roles, roles_read, approved, invalid)
     evidence = tenant_payload(
         build_payload,
         tenant=tenant,
@@ -351,8 +391,9 @@ def main() -> int:
         results={
             "directory_roles": roles,
             "privileged_role_names_checked": sorted(PRIVILEGED_ROLE_NAMES),
+            **approval_results,
         },
-        summary=summarize(roles, roles_read),
+        summary={**summarize(roles, roles_read), **approval_summary},
     )
 
     filename = f"azure_entra_privileged_roles_{tenant_filename_key(tenant)}.json"

@@ -47,6 +47,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_privileged_roles` 0.3.0: an approved principals setting.** The
+  optional `approved_principal_ids` setting (`AZURE_ENTRA_APPROVED_PRINCIPAL_IDS`)
+  lists the object ids of the users, groups and service principals approved to
+  hold a privileged directory role, separated by commas, spaces or newlines.
+  `summary.approved_principals_configured` says whether a list is set, and
+  `summary.unapproved_privileged_principals` counts the distinct holders of a
+  privileged role whose object id isn't on it. Only active holders are read, and
+  a group is matched by its own id, not its members. The count is null with no
+  list, when an entry isn't an object id (the run then fails as `bad_config`), or
+  when the role list or a privileged role's members or service principals can't
+  be read. `results.unapproved_principals` lists those holders with the
+  privileged roles each holds, and `results.approved_principal_ids` the list they
+  were compared with. Without the setting the evidence is unchanged apart from
+  these four keys (false or null).
+
 - **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
   columns (unchanged, so existing intake presets keep mapping), the CSV adds the
   Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and
