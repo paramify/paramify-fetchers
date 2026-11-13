@@ -22,9 +22,10 @@ organization, each with its own token and API host.
 | `github_access_review` | Owners, members, outside collaborators, invitations, teams and their repository grants, repository admins | IAM-ELP, IAM-AAM |
 | `github_non_user_credentials` | Deploy keys, installed apps, fine-grained tokens, Actions secrets by age, webhook TLS and signing | IAM-SNU, SVC-ASM |
 | `github_repository_inventory` | **Inventory** (`kind: inventory`): one record per repository with visibility, state, security features and custom property values; all or nothing | PIY-GIV |
-| `github_actions_security` | Allowed actions and SHA pinning policy, the workflow token's default, fork PR approval, self-hosted runners, and what each workflow file does (unpinned actions, permissions blocks, privileged triggers checking out PR code, untrusted input in scripts, OIDC) | SCR-MIT, CMT-VTD, IAM-SNU, CNA-MAT |
+| `github_actions_security` | Allowed actions and SHA pinning policy, the workflow token's default, fork PR approval, self-hosted runners and runner groups, OIDC subject claims, and what each workflow file does (unpinned actions, permissions blocks, privileged triggers checking out PR code, untrusted input in scripts, OIDC) | SCR-MIT, CMT-VTD, IAM-SNU, CNA-MAT |
 | `github_release_integrity` | Build provenance on each release asset (by digest), immutable releases, release tags locked by tag rulesets | SVC-VRI, SCR-MIT |
-| `github_deployment_controls` | Environments' reviewers, self-review, wait timers, branch policies and admin bypass; production deployments in a window with commit, creator and whether Actions made them | CMT-RMV, CMT-VTD, CMT-LMC |
+| `github_deployment_controls` | Environments' reviewers, self-review, wait timers, branch policies and admin bypass; production deployments in a window with commit, creator, whether Actions made them and who approved them | CMT-RMV, CMT-VTD, CMT-LMC |
+| `github_workflow_runs` | Every workflow run in a window with its trigger, branch, commit, actor and result, and the artifacts each run kept (metadata only) | CMT-VTD, CMT-RMV |
 | `github_vulnerability_disclosure` | Private vulnerability reporting, security policy, repository security advisories with state and age | PIY-RVD |
 | `github_significant_change_notifications` | FedRAMP SCN objects from pull requests flagged as significant changes, schema-validated and checked against SCN-CSO-INF | CMT-LMC |
 | `github_audit_log` | Audit log event counts and every access, protection and control change in a window (**Enterprise Cloud only**) | MLA-LET, MLA-OSM, IAM-SUS |
@@ -62,7 +63,7 @@ a missing grant is reported as e.g. `(needs: administration=read)`.
 | Administration (repository) | `administration` | branch_protection (also rule-suite bypasses), pull_request_checks (required checks), dependabot_alerts (security updates), code_scanning_alerts (default setup), secret_scanning (settings), non_user_credentials (deploy keys), actions_security (Actions policy, runners), release_integrity (immutable releases) |
 | Contents (repository) | `contents` | pull_request_checks (commits), dependabot_alerts (dependency graph), actions_security (workflow files), branch_protection (CODEOWNERS errors) |
 | Pull requests (repository) | `pull_requests` | pull_request_checks, significant_change_notifications |
-| Actions (repository) | `actions` | deployment_controls (environments) |
+| Actions (repository) | `actions` | deployment_controls (environments, run approvals), workflow_runs, actions_security (OIDC subject, only in repositories with a workflow that uses OIDC) |
 | Deployments (repository) | `deployments` | deployment_controls |
 | Attestations (repository) | `attestations` | release_integrity |
 | Repository security advisories (repository) | `repository_advisories` | vulnerability_disclosure. **Without it GitHub lists published advisories only, with no error**: drafts and private reports disappear and nothing says so |
@@ -72,24 +73,29 @@ a missing grant is reported as e.g. `(needs: administration=read)`.
 | Secret scanning alerts (repository) | `secret_scanning_alerts` | secret_scanning |
 | Secrets (repository) | `secrets` | non_user_credentials |
 | Webhooks (repository) | `repository_hooks` | non_user_credentials |
-| Administration (organization) | `organization_administration` | org_security_settings, non_user_credentials (installations), actions_security (Actions policy), release_integrity (immutable releases), audit_log |
+| Administration (organization) | `organization_administration` | org_security_settings, non_user_credentials (installations), actions_security (Actions policy, OIDC subject template), release_integrity (immutable releases), audit_log |
 | Members (organization) | `members` | access_review, org_security_settings |
 | Secrets (organization) | `organization_secrets` | non_user_credentials |
 | Webhooks (organization) | `organization_hooks` | non_user_credentials |
 | Personal access tokens (organization) | `organization_personal_access_tokens` | non_user_credentials, **GitHub App tokens only**: the token page offers no such permission, and GitHub answers a personal token with 403 whatever it holds. Run with a personal token, `fine_grained_tokens` is `null` and the metadata says why |
 | Custom properties (organization) | `organization_custom_properties` | repository_inventory (or set `include_custom_properties: false`) |
-| Self-hosted runners (organization) | `organization_self_hosted_runners` | actions_security (or set `include_self_hosted_runners: false`) |
+| Self-hosted runners (organization) | `organization_self_hosted_runners` | actions_security, runners and runner groups (or set `include_self_hosted_runners: false`) |
 | Custom organization roles (organization) | `organization_custom_org_roles` | access_review (or set `include_organization_roles: false`) |
 
 Measured: a token holding exactly these permissions, read-only, produced
-the same evidence as one holding every permission, for all fifteen fetchers.
+the same evidence as one holding every permission, for the first fifteen
+fetchers at version 0.1.0. That measurement does not include
+`workflow_runs`, the run approvals in `deployment_controls` 0.2.0, or the
+runner groups and OIDC subjects in `actions_security` 0.2.0. Their rows in
+the table above are not yet measured with a minimal token. If one is wrong,
+the failure names the permission that GitHub wants.
 
 Two settings are visible only to an **organization owner**: the two-factor
 requirement and the list of members without two-factor. Collected by a
 non-owner they are `null`, never `false`.
 
 A **GitHub App installation token** holding the same read-only permissions
-produced the same evidence as a personal token for all fifteen, with two
+produced the same evidence as a personal token for those fifteen, with two
 differences, both measured: it can list the organization's fine-grained
 tokens, and GitHub does not show it who may bypass a ruleset, so those
 rulesets appear in `bypass_actors_unreadable` rather than as bypass-free.
@@ -197,6 +203,38 @@ repositories; each returns well-formed, misleading data without an error.
   commit is in the default branch's history, by commit rather than ref: a
   deployment may name a bare commit (Vercel does), and a squash-merged pull
   request's own commits never reach the default branch.
+- **A date filter on workflow runs stops at 1,000 results, with no error.**
+  With `created=`, the page after the thousandth run is empty and
+  `total_count` is 0 (measured on cli/cli). That looks like a quiet window.
+  `workflow_runs` does not filter. It reads the newest runs first and stops at
+  the first run older than the window.
+- **A fork's branch can have the default branch's name.** A pull request from
+  a fork's `trunk` runs with `head_branch: trunk` (measured on cli/cli). So
+  `workflow_runs` counts a run as on the default branch only when its head
+  repository is the repository itself.
+- **A run's approvals do not say which deployment they released.** Each entry
+  is one review. It releases or rejects all the jobs that wait on the
+  environment at that time, and it names the environment once for each job
+  (measured on cli/cli). An entry has no job and no time. One run can make
+  many deployments, so `deployment_controls` reports approval only for a
+  deployment that got past the gate (its status went from `waiting` to
+  `queued`). A reviewer approves a job only once. So if one person, not the
+  creator and not a bot, approved as many jobs as the run made deployments,
+  each deployment had an independent approver. If no such person approved,
+  none did. Other cases are listed as ambiguous. cli/cli has a person and a
+  bot approve each release, and every deployment there reads as independent.
+  A deployment that is still waiting, or that was
+  rejected or cancelled at the gate, is listed as held: the gate did its job.
+- **An approval can be unknown.** `deployment_controls` finds the run from the
+  link in the oldest status, which Actions writes. If Actions did not make
+  the deployment, the status has no link, or GitHub deleted the run, the
+  result is `approvals: null` with a reason in
+  `approvals_unknown`. It is not "approved by nobody". A bot can approve for
+  a person (cli/cli uses one), so the summary lists bot approvals apart.
+- **`use_default: true` ignores the organization's OIDC template.** For a
+  repository, `true` gives GitHub's own subject (`repo`, `context`). `false`
+  with no claim keys uses the organization's template, and `false` with keys
+  uses the repository's own template.
 - **GitHub's commit comparison calls a commit that does not exist identical.**
   Each comparison is paired with an object lookup; a missing commit is unknown.
 - **Draft advisories vanish without the permission.** See the permission table;
@@ -256,9 +294,14 @@ truncated, never partial, beyond `max_pull_requests` or `max_commits`.
 false` where `cisa.gov` is unreachable.
 `actions_security` reads workflow files ten repositories to a GraphQL query and
 makes two to four REST calls per repository. `release_integrity` makes one call
-per release asset, `deployment_controls` one per production deployment plus a
-GraphQL query per twenty deployed commits, and `audit_log` one per hundred
-events.
+per release asset, `deployment_controls` one per production deployment and
+one per workflow run that made them, plus a GraphQL query per twenty deployed
+commits, and
+`audit_log` one per hundred events. `workflow_runs` makes one call per hundred
+runs and one per hundred artifacts in each repository. It fails as truncated
+beyond `max_runs` or `max_artifacts`. `actions_security` adds one call per
+runner group, one more for a group limited to selected repositories, and one
+per repository with an OIDC workflow.
 
 ## Significant change notifications
 
